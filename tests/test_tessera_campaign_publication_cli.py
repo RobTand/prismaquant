@@ -13,6 +13,7 @@ failure stops the action instead of being absorbed by it.
 """
 from __future__ import annotations
 
+import hashlib
 import pickle
 import sys
 import time
@@ -109,32 +110,44 @@ def _batched(monkeypatch, campaign, render, seen):
     monkeypatch.setattr(render, "encode_tessera_units", encode)
 
 
-@pytest.mark.parametrize("batch_size", [1, 2])
-def test_overlap_publishes_the_same_bytes_and_prices_as_the_default_path(
-        monkeypatch, tmp_path, batch_size):
+def _file_digests(root):
+    """The completed run's exact file bytes, without path relocation."""
+    return {path.relative_to(root): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.fixture(scope="module")
+def _scalar_staged_campaign(tmp_path_factory):
+    """One real scalar staged campaign shared by two read-only consumers.
+
+    The scalar overlap A/B and the checkpoint inspection executed the
+    identical staged invocation of ``campaign.main``; one real run carries
+    both assertion sets, so eleven campaign runs in this module become ten.
+    Built inside a MonkeyPatch context that is undone before any consumer
+    sees it, so only completed files and their byte digests survive setup
+    (the resume-fixture pattern).
+    """
+    root = tmp_path_factory.mktemp("scalar-staged-campaign")
+    with pytest.MonkeyPatch.context() as patch:
+        campaign, _render = _fixture(patch, root)
+        assert campaign.main([
+            *_argv(root), "--publication-overlap-bytes", str(1 << 20)]) == 0
+    return root, _file_digests(root)
+
+
+@pytest.fixture
+def scalar_staged_campaign(_scalar_staged_campaign):
+    """Hand out the shared run only while its bytes are still what main wrote."""
+    root, digests = _scalar_staged_campaign
+    assert _file_digests(root) == digests, "the staged baseline was mutated"
+    yield root
+    assert _file_digests(root) == digests, "a consumer mutated the staged baseline"
+
+
+def _assert_staged_publication_matches_the_default(plain, staged):
+    """The overlap A/B: same artifacts byte for byte, same prices, live stats."""
     from prismaquant.tessera_publication import SCHEMA
 
-    seen: list[int] = []
-    plain = tmp_path / "plain"
-    campaign, render = _fixture(monkeypatch, plain)
-    extra = []
-    if batch_size > 1:
-        _batched(monkeypatch, campaign, render, seen)
-        extra = ["--anchor-batch-size", "2"]
-    assert campaign.main([*_argv(plain), *extra]) == 0
-    assert _payload(plain)["provenance"]["publication_overlap"] is None, (
-        "the default path must not report a publisher it did not build")
-
-    staged = tmp_path / "staged"
-    campaign, render = _fixture(monkeypatch, staged)
-    if batch_size > 1:
-        _batched(monkeypatch, campaign, render, seen)
-    assert campaign.main([
-        *_argv(staged), *extra, "--publication-overlap-bytes", str(1 << 20)]) == 0
-
-    if batch_size > 1:
-        assert seen and max(seen) == 2, (
-            f"the batched adapter never saw a real batch: {seen}")
     stats = _payload(staged)["provenance"]["publication_overlap"]
     assert stats["schema"] == SCHEMA
     assert stats["budget_bytes"] == 1 << 20
@@ -158,14 +171,53 @@ def test_overlap_publishes_the_same_bytes_and_prices_as_the_default_path(
         assert rows[0] == rows[1]
 
 
-def test_the_checkpoint_carries_every_unit_with_its_wire_receipt(
+def test_the_scalar_staged_path_publishes_the_same_bytes_and_prices_as_the_default_path(
+        monkeypatch, tmp_path, scalar_staged_campaign):
+    plain = tmp_path / "plain"
+    campaign, _render = _fixture(monkeypatch, plain)
+    assert campaign.main(_argv(plain)) == 0
+    assert _payload(plain)["provenance"]["publication_overlap"] is None, (
+        "the default path must not report a publisher it did not build")
+
+    # The staged arm is the module's one real scalar staged run, built in
+    # ``_scalar_staged_campaign`` with the same fixture and argv this test
+    # used to run itself; the digest guard keeps every consumer honest.
+    _assert_staged_publication_matches_the_default(plain, scalar_staged_campaign)
+
+
+def test_the_batched_staged_path_publishes_the_same_bytes_and_prices_as_the_default_path(
         monkeypatch, tmp_path):
-    campaign, _render = _fixture(monkeypatch, tmp_path)
+    seen: list[int] = []
+    plain = tmp_path / "plain"
+    campaign, render = _fixture(monkeypatch, plain)
+    _batched(monkeypatch, campaign, render, seen)
+    extra = ["--anchor-batch-size", "2"]
+    assert campaign.main([*_argv(plain), *extra]) == 0
+    assert _payload(plain)["provenance"]["publication_overlap"] is None, (
+        "the default path must not report a publisher it did not build")
+
+    staged = tmp_path / "staged"
+    campaign, render = _fixture(monkeypatch, staged)
+    _batched(monkeypatch, campaign, render, seen)
     assert campaign.main([
-        *_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)]) == 0
+        *_argv(staged), *extra, "--publication-overlap-bytes", str(1 << 20)]) == 0
+
+    assert seen and max(seen) == 2, (
+        f"the batched adapter never saw a real batch: {seen}")
+    _assert_staged_publication_matches_the_default(plain, staged)
+
+
+def test_the_checkpoint_carries_every_unit_with_its_wire_receipt(
+        scalar_staged_campaign):
+    """The journal of the module's one real scalar staged run.
+
+    This test used to execute the identical staged invocation the scalar
+    overlap A/B runs; inspecting the shared run's journal covers the same
+    assertions against the same real producer output.
+    """
     from prismaquant.cost_stage_checkpoint import unit_path
 
-    root = tmp_path / "campaign.anchors.json.parts"
+    root = scalar_staged_campaign / "campaign.anchors.json.parts"
     for unit in UNITS:
         envelope = pickle.loads(unit_path(root, unit).read_bytes())
         state = pickle.loads(envelope["payload"])
@@ -174,7 +226,7 @@ def test_the_checkpoint_carries_every_unit_with_its_wire_receipt(
             state["wire_records"]), (
             f"{unit} has an anchor row whose bytes nothing witnessed")
         for record in state["wire_records"].values():
-            wire = tmp_path / "cache" / "wire" / record["file"]
+            wire = scalar_staged_campaign / "cache" / "wire" / record["file"]
             assert wire.exists(), (
                 f"{unit} carries a receipt for a file that does not exist")
             assert wire.stat().st_size == record["blob_bytes"]

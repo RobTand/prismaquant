@@ -12,6 +12,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch
 
+from container_inspection_fixture import inspection
+
 
 def spec():
     return {
@@ -256,9 +258,7 @@ def test_checkout_commit_is_read_on_the_host_and_refuses_changed_package_bytes(t
 def test_main_hands_the_checkout_commit_to_the_container(monkeypatch, tmp_path, capsys):
     runner = _runner()
     launched = {}
-    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [
-        {'Id': 'sha256:' + 'c' * 64, 'RepoDigests': [], 'RootFS': {'Layers': []}}])
-    monkeypatch.setattr(runner, 'image_content_sha256', lambda inspected: 'd' * 64)
+    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [inspection()])
     monkeypatch.setattr(runner, 'verify_pinned_import', lambda *args, **kwargs: {})
     monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
@@ -357,9 +357,7 @@ def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch, tm
 
     runner = _runner()
     launched = {}
-    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [
-        {'Id': 'sha256:' + 'c' * 64, 'RepoDigests': [], 'RootFS': {'Layers': []}}])
-    monkeypatch.setattr(runner, 'image_content_sha256', lambda inspected: 'd' * 64)
+    monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [inspection()])
     monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
     data = spec()

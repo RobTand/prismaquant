@@ -22,7 +22,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
 
-import container_runtime_identity as cri  # noqa: E402
+from prismaquant import container_runtime_identity as cri  # noqa: E402
 import dsv4_wikitext_inputs as wiki  # noqa: E402
 import prismaquant_runtime_snapshot as snap  # noqa: E402
 import serve_fingerprint as sf  # noqa: E402

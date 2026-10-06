@@ -464,3 +464,51 @@ def test_streaming_cli_requires_scope_specific_inputs_and_cache_dirs():
     base3 = dict(base2, render_layer_config="/nonexistent/lc.json")
     assert _run_streaming(
         argparse.Namespace(**base3), ["NVFP4"], {}, torch.bfloat16) == 2
+
+
+# ---------------------------------------------------------------------------
+# #2231: the streaming dense fill bypasses the resident fill's render-identity
+# build, so its own open refuses a colliding dense qname pair -- before the
+# first layer renders and before the cache directory is even created --
+# naming both qnames and the shared shard filename.
+# ---------------------------------------------------------------------------
+
+
+def test_streaming_render_refuses_a_colliding_dense_pair_before_any_write(
+    tmp_path,
+):
+    from prismaquant.measure_quant_cost import ActivationIndex
+    from prismaquant.streaming_production_cache import run_streaming_render
+
+    model = nn.Module()
+    model.block = nn.Module()
+    model.block.a = nn.Linear(32, 32, bias=False)
+    model.block_a = nn.Linear(32, 32, bias=False)
+    act_dir = tmp_path / "act"
+    act_dir.mkdir()
+    out_dir = tmp_path / "stream"
+
+    with pytest.raises(ValueError) as exc_info:
+        run_streaming_render(
+            model,
+            layers_prefix="model.layers.",
+            num_layers=1,
+            render_assignment={"block.a": "FP8_E4M3", "block_a": "FP8_E4M3"},
+            act_index=ActivationIndex(act_dir, []),
+            formats=["FP8_E4M3"],
+            levers={"gptq": False},
+            cache_dir_path=out_dir,
+            profile=None,
+            skip_tokens=[],
+            device=torch.device("cpu"),
+            expert_render_mode="batched",
+            progress=False,
+        )
+
+    message = str(exc_info.value)
+    assert "block.a" in message
+    assert "block_a" in message
+    assert "block_a__FP8_E4M3.pt" in message
+    # The refusal precedes the first layer render: the cache directory was
+    # never created.
+    assert not out_dir.exists()

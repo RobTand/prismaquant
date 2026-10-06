@@ -14,8 +14,12 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from tools.container_runtime_identity import (
-    image_content_sha256, prismaquant_source_sha256)
+import runpy
+
+# Authenticate before importing PQ: its initializer needs the producer stack,
+# which the small host interpreter deliberately does not install (#601).
+_runtime_identity = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 from tools.tessera_campaign_namespace import (
     establish_namespace_temporaries, namespace_adapter_request,
     refuse_path_symlinks as _refuse_scratch_symlinks,
@@ -1061,7 +1065,7 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     guarded = guarded_import_root(spec, cwd=cwd)
     unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
     shadow_sha = (None if unguarded is None
-                  else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
+                  else _runtime_identity["prismaquant_source_sha256"](unguarded[1] / "prismaquant"))
     if guarded is None:
         return {"pinned_source_entry": None, "pinned_source_root": None,
                 "pinned_source_sha256": None,
@@ -1071,8 +1075,8 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
                 "working_directory_source_sha256": shadow_sha,
                 "safe_path_guard_is_load_bearing": shadow_sha is not None}
     entry, pinned, by_default = pinned_source_root(spec, cwd=cwd)
-    pinned_sha = prismaquant_source_sha256(pinned / "prismaquant")
-    resolved_sha = prismaquant_source_sha256(guarded[1] / "prismaquant")
+    pinned_sha = _runtime_identity["prismaquant_source_sha256"](pinned / "prismaquant")
+    resolved_sha = _runtime_identity["prismaquant_source_sha256"](guarded[1] / "prismaquant")
     if resolved_sha != pinned_sha:
         raise RuntimeError(
             "the launched environment imports PrismaQuant from "
@@ -1269,7 +1273,7 @@ def main(argv=None) -> int:
     image_id = inspected[0].get("Id")
     if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
         raise RuntimeError("Docker returned no immutable image ID")
-    content_digest = image_content_sha256(inspected[0])
+    content_digest = _runtime_identity["image_content_sha256"](inspected[0])
     declared = spec["container"].get("content_sha256")
     if declared is not None and declared != content_digest:
         raise RuntimeError(f"Docker image content differs for {requested!r}: "

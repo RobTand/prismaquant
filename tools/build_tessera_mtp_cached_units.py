@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+
 from prismaquant.glm_mtp_selection import (WIRE_BINDING_SCHEMA,
                                            backfill_mtp_selection_wires)
 from prismaquant.layer_config import (canonicalize_assignment,

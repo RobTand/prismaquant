@@ -76,6 +76,7 @@ MODULES = (
     "prismaquant/stage_a_chain_split.py",
     "prismaquant/stage_inputs.py",
     "prismaquant/tessera_joint_aura.py",
+    "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
     "tools/dispatch_tessera_campaign.py",
     "tools/tessera_campaign_container.py",
@@ -106,9 +107,13 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed._record_joint_operator"): (
         1, INTEGRITY, "the operator measured is the render the cache holds, within one run"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind"): (
-        1, WALL, "the bind identity digest covers calibration; a dev resume compares key "
-        "by key first and rebinds the stored identity"),
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session"): (
+        3, WALL, "the bind digest covers calibration/data and reproduces the selected "
+        "generation's session; a dev resume first checks fields and adopts the stored "
+        "bind identity (wall). Pending-only exact policy equality authenticates the "
+        "issued empty namespace, including byte ceilings; the requested completed "
+        "metadata owner's session, policy, label and bound fields agree (structure). "
+        "Ordinary resume byte-ceiling differences still go through seal_check"),
     ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
         1, STRUCTURE, "a resumed boundary entry belongs to this generation"),
     ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.attach"): (
@@ -138,6 +143,14 @@ ALLOWLIST = {
     ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
+    ("prismaquant/joint_dispatch_pilot.py", "_authenticated_quantum_record"): (
+        2, INTEGRITY, "the PB producer original quantum bytes against the bound argv digest "
+        "and declared length, then decoded bytes against their digest; no running identity"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_completion"): (
+        1, INTEGRITY, "supplied counters bytes against the authenticated PB producer reference"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_source_contract"): (
+        1, STRUCTURE, "the independently reviewed pilot implementation names the proposed "
+        "code; this is the explicitly overridable fanout qualification gate, not a resume seal"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
         3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
@@ -169,6 +182,10 @@ ALLOWLIST = {
         "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
+    ("prismaquant/joint_layer_quanta.py", "check_checkpoint_incoming_readset"): (
+        1, AMBIGUOUS, "the authenticated incoming readset and its quantum record bind "
+        "the same Stage A slice, as in bind_quantum_executable; the existing slice "
+        "binding remains a refusal in both modes (#1147), not a running-code seal"),
     ("prismaquant/joint_layer_quanta.py", "bind_quantum_boundary_readset"): (
         2, AMBIGUOUS, "the readset wire against its digest (integrity); the Stage A slice "
         "binding (ambiguous, #1147 report)"),
@@ -230,8 +247,11 @@ ALLOWLIST = {
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("tools/dispatch_joint_quanta.py", "_admit_dispatch_pilots"): (
-        1, INTEGRITY, "pilot counters bytes against the operator's bound receipt digest "
-        "(#1293); source/regime/shape admission is the explicitly overridable pilot gate"),
+        2, INTEGRITY, "pilot counters and independently reviewed source-contract bytes against "
+        "their operator-bound digests (#1293); source/regime/shape admission is explicitly overridable"),
+    ("tools/dispatch_joint_quanta.py", "_verify_pilot_result"): (
+        1, STRUCTURE, "authenticated PB counters and original quantum record name the same "
+        "producer identity; neither is compared with the running campaign"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
         5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
         "payload, its render prerequisite, the bound prepared contract and the Stage A "
@@ -291,12 +311,23 @@ ALLOWLIST = {
         1, INTEGRITY, "production cache bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "main"): (
         1, STRUCTURE, "a path and its digest are supplied together"),
+    ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture"): (
+        3, STRUCTURE, "the independently issued original-diagnostic admission tuple "
+        "binds the current producer-package digest, live full-model identity and "
+        "resolved source-dispatch selectors. These source/authority refusals stay "
+        "in both modes; they are not resumable-run seals or CUDA qualification"),
     # Found by the _require call form, loop fields and resource ceilings.
     ("prismaquant/joint_cost_stage_a.py", "bind_stage_a_produced_output"): (
         1, RESOURCE, "the produced-output template's durable payload maximum against the "
         "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
     ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
+    ("prismaquant/tessera_joint_aura.py", "seed_source_identity_cache"): (
+        2, INTEGRITY, "the existing or copied cache file's bytes against that file's own checksum"),
+    ("prismaquant/tessera_joint_aura.py", "load_measured_anchor_input.verify_files"): (
+        1, INTEGRITY, "wire bytes against the encoded blob's own checksum"),
+    ("prismaquant/tessera_joint_eval_panel.py", "load_eval_draw"): (
+        1, INTEGRITY, "loaded int64 token bytes against the draw artifact's own token digest"),
     # Moved unchanged from tessera_expert_projection.py, which this lint never
     # scanned, when stage_inputs.py joined the campaign path (PQ #1555).
     ("prismaquant/stage_inputs.py", "require_source_identity"): (
@@ -484,6 +515,28 @@ def test_every_campaign_seal_goes_through_seal_check():
     assert violations(_campaign_sources()) == []
 
 
+def test_d32_consumers_add_no_run_identity_refusals():
+    # Reuse the campaign ratchet at the newly repaired consumers. These counts
+    # admit own-byte digests, complete numeric structure and same-vector probe
+    # coordinates, never recorded-versus-running provenance refusal.
+    scopes = {
+        'prismaquant/tessera_calibration_cache.py': {
+            'CaptureMetadataOwner.__init__': 1,
+            'CaptureMetadataOwner._assert_unchanged': 0,
+            'prefetch_capture': 3,  # manifest bytes, owned manifest binding, entry bytes
+        },
+        'prismaquant/joint_aura.py': {
+            'paired_assignment_difference': 0,
+            '_validated_assignment': 1,  # operator coordinate against the row's own unit
+            '_require_probe_alignment': 1,  # same mathematical probe coordinates
+        },
+    }
+    for path, expected in scopes.items():
+        counts = Counter(scope for scope, _line in seal_sites((ROOT/path).read_text()))
+        assert {scope: counts[scope] for scope in expected} == expected
+
+
+
 def test_allowlist_keys_are_unique():
     tree = ast.parse(Path(__file__).read_text())
     assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
@@ -595,3 +648,43 @@ def test_converting_a_site_requires_lowering_its_entry():
     problems = violations(sources)
     assert problems == [f"{path} main: the allowlist names 1 site(s), 0 remain; "
                         "lower the entry"]
+
+
+def test_incoming_readset_classification_allows_only_its_existing_slice_check():
+    sources = _campaign_sources()
+    path = "prismaquant/joint_layer_quanta.py"
+    existing = (
+        '    if annotations.get("slice_sha256") != record["adjoint"].get("slice_sha256"):\n')
+    assert existing in sources[path]
+    extra = ("    if running_plan_sha256 != recorded_plan_sha256:\n"
+             "        raise ValueError('new run seal')\n")
+    sources[path] = sources[path].replace(existing, extra + existing, 1)
+    problems = violations(sources)
+    assert len(problems) == 1
+    assert ("check_checkpoint_incoming_readset: 2 identity check site(s), 1 allowed"
+            in problems[0])
+
+
+@pytest.mark.parametrize("path,scope,existing,indent,allowed", [
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session",
+     '        directory = Path(self.config["directory"]) / str(session["generation"])\n',
+     "        ", 3),
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind",
+     '        session, directory = self.inspect_published_session(session, identity=identity)\n',
+     "        ", 0),
+    ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture",
+     '    if prepared_context["implementation_sha256"] != _aura_source_sha256():\n',
+     "    ", 3),
+], ids=["published-session", "rebind", "original-diagnostic-capture"])
+def test_original_classifications_do_not_admit_another_run_seal(
+        path, scope, existing, indent, allowed):
+    """Exact classification counts leave no room for a new run-identity refusal."""
+    sources = _campaign_sources()
+    assert sources[path].count(existing) == 1
+    extra = (f"{indent}if running_plan_sha256 != recorded_plan_sha256:\n"
+             f"{indent}    raise RuntimeError('new run seal')\n")
+    sources[path] = sources[path].replace(existing, extra + existing, 1)
+    problems = violations(sources)
+    assert len(problems) == 1
+    assert (f"{scope}: {allowed + 1} identity check site(s), {allowed} allowed"
+            in problems[0])

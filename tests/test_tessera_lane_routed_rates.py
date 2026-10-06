@@ -10,12 +10,11 @@ learns the NAME, holds it to a subset of ``column_rates`` as Tessera's
 validator does, and states the unit's STRUCTURE as a plan fact, taken from
 the decision unit's cell and never inferred from bytes.
 
-Since PQ #1702 the installed pin is v45, so every leg here runs Tessera's
-real, unpatched decision core on the real pinned table.  The refusal legs
-narrow the routed E4M3 decode cell to its fused launch alone, so a refusal is
-the cell's refusal, and pin the planned rate set, because every rung the
-routed cells list plans rates inside [1..6].  The v44 leg rewinds the fused
-lanes to v44's predicate and checks that the v45 core decides it as v44 did.
+The installed v56 pin publishes routed rates1..8 and the MMA extension.
+Every leg runs the real unpatched decision core. Historical refusal legs
+use an explicit v45 six-rate predicate and a v44 predicate without the
+routed field; neither is relabelled as the current publisher answer.
+The v56 widening is separately asserted for rates7/8.
 """
 import copy
 import dataclasses
@@ -32,7 +31,7 @@ from tests.test_tessera_lane_requires import (
 
 FIELD = "column_rates_routed_moe"
 FUSED_LANE = FUSED_LANES[0]
-ROUTED_RATES = [1, 2, 3, 4, 5, 6]
+ROUTED_RATES = [1, 2, 3, 4, 5, 6, 7, 8]
 ALL_RATES = [1, 2, 3, 4, 5, 6, 7, 8]
 
 
@@ -60,6 +59,13 @@ def _v44(payload):
         requires = _row(moved, name)["lane"]["requires"]
         requires.pop(FIELD)
         requires["column_rates"] = [4]
+    # The MMA extension did not exist at v44; it is not a historical launch.
+    moved["native_extensions"] = [
+        row for row in moved["native_extensions"]
+        if row["module_name_prefix"] != "tessera_routed_fused_mma_e4m3"]
+    for cell in moved["lane_eligibility"]["cells"]:
+        cell["executes"] = [launch for launch in cell["executes"]
+                            if launch["decoder"] != "native_routed_fused_window_e4m3mma"]
     return moved
 
 
@@ -89,7 +95,8 @@ def test_the_pinned_fused_lanes_publish_the_field(payload):
     for name in FUSED_LANES:
         claim = next(c for c in table.lanes if c.extension == name)
         assert claim.requires[FIELD] == tuple(ROUTED_RATES)
-        assert claim.requires["column_rates"] == tuple(ALL_RATES)
+        expected = _row(payload, name)["lane"]["requires"]["column_rates"]
+        assert claim.requires["column_rates"] == tuple(expected)
 
 
 @pytest.mark.parametrize("routed,base,needle", [
@@ -108,9 +115,23 @@ def test_the_field_is_held_to_a_subset_of_column_rates(payload, routed, base, ne
     assert FIELD in str(info.value) or needle == "ascending"
 
 
+def _v45_routed_limit(payload):
+    """Retain the original structure-only refusal on an explicit v45 predicate."""
+    moved = copy.deepcopy(payload)
+    _row(moved, FUSED_LANE)["lane"]["requires"][FIELD] = [1, 2, 3, 4, 5, 6]
+    return moved
+
+
+@pytest.mark.parametrize("rate", [7, 8])
+def test_current_v56_routed_rate_widening_is_explicit(payload, monkeypatch, rate):
+    _plan_at_rate(monkeypatch, rate)
+    cell, lanes = _fused_only_cell_and_lanes(payload)
+    assert lane.cell_lane_admits(cell, E4M3_RATE, lanes) == (True, "")
+
+
 def test_a_routed_unit_at_rate_7_is_refused_with_the_field_named(payload, monkeypatch):
     _plan_at_rate(monkeypatch, 7)
-    cell, lanes = _fused_only_cell_and_lanes(payload)
+    cell, lanes = _fused_only_cell_and_lanes(_v45_routed_limit(payload))
     assert cell.structure == "routed_moe"
     admits, why = lane.cell_lane_admits(cell, E4M3_RATE, lanes)
     assert not admits
@@ -119,7 +140,7 @@ def test_a_routed_unit_at_rate_7_is_refused_with_the_field_named(payload, monkey
 
 def test_the_same_rung_as_a_dense_unit_passes(payload, monkeypatch):
     _plan_at_rate(monkeypatch, 7)
-    cell, lanes = _fused_only_cell_and_lanes(payload)
+    cell, lanes = _fused_only_cell_and_lanes(_v45_routed_limit(payload))
     dense = dataclasses.replace(cell, structure="dense")
     assert lane.cell_lane_admits(dense, E4M3_RATE, lanes) == (True, "")
     # ... and a routed unit inside the routed set passes too: the refusal is

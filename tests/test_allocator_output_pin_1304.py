@@ -97,6 +97,15 @@ outputs. Exactly two fields change, both inside
 ``__prismaquant__.tessera_dev_pin``: ``contract_version`` (44 to 45) and
 ``reviewed_contract_sha256`` (47b01355 to 0869f326). The allocation, the
 applicability file and the Pareto outputs are byte-identical.
+
+Re-taken for PQ #2264's v56 pin (Tessera 2dbac191). Batch38 observed the new
+normalised ``layer.json`` digest while its three companion digests remained
+unchanged. Source comparison infers three provenance changes inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (45 to 56),
+``reviewed_contract_sha256`` (0869f326 to 47f180ef), and ``native_extensions``
+gaining the E4M3 MMA row. This is not a captured raw before/after metadata
+diff. The digest check and explicit assignment below retain the unchanged
+three-unit E2M1 allocation independently of that provenance inference.
 """
 from __future__ import annotations
 
@@ -141,7 +150,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "d576cf5ac75fc8489f300df6c09c7a8cbb444e4bfa04478e39182bb6937bffb9"
+        "d1ff5c1209b0c8b117a6638da9e02ba51238e73a00063ebf442de853ffa24252"
     ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
@@ -237,10 +246,11 @@ def test_stock_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
 def test_tessera_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
     pytest.importorskip("torch")
     from test_tessera_scope_endpoints import (
-        _allocator_inputs, _cli_scope, _v5_contract,
+        DENSE, EXPERT, SHARED, _allocator_inputs, _cli_scope, _v5_contract,
     )
 
     from prismaquant import allocator
+    from prismaquant.layer_config import load_assignment
 
     _v5_contract(monkeypatch)
     argv = _allocator_inputs(tmp_path, "TESSERA_E2M1_K2_R896")
@@ -248,5 +258,8 @@ def test_tessera_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
         "allocator", *argv, "--no-fused-aggregation",
         "--no-packed-aggregation", *_cli_scope()])
     allocator.main()
+    assert load_assignment(tmp_path / "layer.json") == {
+        unit: "TESSERA_E2M1_K2_R896" for unit in (DENSE, EXPERT, SHARED)
+    }
     got = _digests(tmp_path)
     assert got == TESSERA_DIGESTS, json.dumps(got, indent=1, sort_keys=True)

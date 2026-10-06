@@ -7,14 +7,14 @@ separate Tessera producer; fixed/full-model resources remain unknown here.
 """
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
 import math
 from pathlib import Path
 import re
 
-from .joint_aura import identity_sha256, validate_joint_aura_entry
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
+from .joint_aura import identity_sha256, require_native_source_execution, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
 from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
                                     RUNTIME_OPTIONAL_FIELDS, _admit, _bytes, _equal, _executed,
@@ -767,7 +767,209 @@ def _streamed_routing_capture(capture):
     }
 
 
-def _validate_prefix_capture(capture, source_model_identity=None):
+ORIGINAL_ACQUISITION_SCHEMA = "prismaquant.original_source_acquisition.v1"
+FIRST_SEQUENCE_ORIGINAL_SCHEMA = "prismaquant.first_sequence_original_capture.v1"
+ORIGINAL_BOUNDARY_TENSORS = ("inputs", "top_k_index", "top_k_weights", "coordinates", "expert_bias")
+_ORIGINAL_ENTRY_FIELDS = ("schema", "unit", "layer", "sample", "positions", "profile_role_order",
+                          "raw_boundary_schema", "tensors")
+_ORIGINAL_TENSOR_SHAPES = {"inputs": [512, 4096], "top_k_index": [512, 8],
+                           "top_k_weights": [512, 8], "coordinates": [512, 2], "expert_bias": [288]}
+_ORIGINAL_TENSOR_DTYPES = {"inputs": {"torch.bfloat16"},
+                           "top_k_index": {"torch.int32", "torch.int64"},
+                           "top_k_weights": {"torch.bfloat16", "torch.float32"},
+                           "coordinates": {"torch.int64"}, "expert_bias": {"torch.float32"}}
+
+
+def _original_closed(value, fields, where):
+    from .schemas import Contract
+
+    return Contract(ValueError).exact_mapping(value, keys=frozenset(fields), where=where)
+
+
+def original_capture_entry(metadata):
+    """Bind source tensor identities, never normalized transport identities."""
+    unit = metadata.get("unit")
+    if not isinstance(unit, str) or _GLM_UNIT.fullmatch(unit) is None:
+        raise ValueError("original capture entry requires its exact GLM source unit")
+    layer = int(unit.split(".")[3])
+    if not 3 <= layer <= 44:
+        raise ValueError("original capture entry is outside the routed text body")
+    tensors = metadata.get("tensors")
+    _original_closed(tensors, ORIGINAL_BOUNDARY_TENSORS, "original capture tensors")
+    itemsize = {"torch.bfloat16": 2, "torch.int32": 4, "torch.int64": 8, "torch.float32": 4}
+    for name in ORIGINAL_BOUNDARY_TENSORS:
+        record = _original_closed(tensors[name], ("shape", "dtype", "logical_bytes", "content_sha256"),
+                                  f"original {name} identity")
+        if (not isinstance(record["shape"], list)
+                or any(type(dimension) is not int for dimension in record["shape"])):
+            raise ValueError(f"original {name} requires integer source dimensions")
+        _equal(record["shape"], _ORIGINAL_TENSOR_SHAPES[name], f"original {name} geometry")
+        if not isinstance(record["dtype"], str) or record["dtype"] not in _ORIGINAL_TENSOR_DTYPES[name]:
+            raise ValueError(f"original {name} source dtype differs")
+        expected_bytes = math.prod(record["shape"]) * itemsize[record["dtype"]]
+        if type(record["logical_bytes"]) is not int or record["logical_bytes"] != expected_bytes:
+            raise ValueError(f"original {name} byte length differs")
+        _sha(record["content_sha256"], f"original {name} content")
+    _equal(metadata.get("profile_role_order"), list(ROLES), "original profile role order")
+    return json.loads(DIRECT_ASCII_SPACED_STRICT.text({
+        "schema": "prismaquant.original_routed_capture_entry.v1", "unit": unit, "layer": layer,
+        "sample": 0, "positions": list(range(512)), "profile_role_order": list(ROLES),
+        "raw_boundary_schema": "prismaquant.native_moe_raw_boundary.v1", "tensors": tensors,
+    }))
+
+
+def _validate_original_capture_entry(entry, metadata):
+    _original_closed(entry, _ORIGINAL_ENTRY_FIELDS, "original capture entry")
+    if type(entry["layer"]) is not int or type(entry["sample"]) is not int:
+        raise ValueError("original capture entry requires integer layer/sample coordinates")
+    if (not isinstance(entry["positions"], list)
+            or any(type(position) is not int for position in entry["positions"])):
+        raise ValueError("original capture entry requires ordered integer token positions")
+    _equal(entry, original_capture_entry(metadata), "original raw entry identity")
+    return entry
+
+
+def _validate_original_capture_runtime(runtime, capture, authority):
+    from .source_generation import validate_original_source_runtime
+
+    _original_closed(runtime, ("schema", "source_runtime", "device", "source_tensor_dtypes", "source_tensor_devices",
+                               "expert_class", "router_class", "router_source_sha256"),
+                     "original boundary runtime")
+    _equal(runtime["schema"], "prismaquant.original_routed_capture_runtime.v1", "original boundary runtime schema")
+    observed = validate_original_source_runtime(runtime["source_runtime"], authority["runtime"])
+    _equal(runtime["device"], capture["routing"]["device"], "observed original boundary device")
+    if runtime["device"] != "cuda:0":
+        raise ValueError("original boundary must retain its observed indexed CUDA device")
+    _original_closed(runtime["source_tensor_dtypes"], ORIGINAL_BOUNDARY_TENSORS, "original live tensor dtypes")
+    _equal(runtime["source_tensor_dtypes"],
+           {name: capture["tensors"][name]["dtype"] for name in ORIGINAL_BOUNDARY_TENSORS},
+           "observed original source tensor dtypes")
+    _original_closed(runtime["source_tensor_devices"], ORIGINAL_BOUNDARY_TENSORS, "original tensor device origins")
+    _equal(runtime["source_tensor_devices"],
+           {name: ("cpu" if name == "coordinates" else runtime["device"]) for name in ORIGINAL_BOUNDARY_TENSORS},
+           "observed original source devices and CPU coordinate bookkeeping")
+    namespace = observed["model_class"].rsplit(".", 1)[0]
+    _equal(runtime["expert_class"], namespace + ".Glm5NextTextExperts", "original expert class")
+    _equal(runtime["router_class"], namespace + ".Glm5NextTextTopkRouter", "original router class")
+    protocol = capture["routing"]["source_protocol"]
+    _equal(runtime["router_class"], protocol["router_class"], "observed original router class")
+    _equal(runtime["router_source_sha256"], protocol["router_source_sha256"], "observed original router source")
+    _equal(protocol["normalization_epsilon"], 1e-20, "original source router normalization")
+    _equal(observed["model_class"], capture["model_load_contract"]["model_class"], "original initialized model class")
+    _equal(observed["material_pipeline"]["target_dtype"], capture["model_load_contract"]["dtype"],
+           "original observed loader target dtype")
+    _equal(observed["profile"], "glm5_next", "original routed source profile")
+    _equal(observed["config"], capture["runtime_config"], "original observed runtime config")
+    _equal(capture["capture_runtime"],
+           {name: observed["versions"][name] for name in ("torch", "cuda", "transformers")},
+           "original capture runtime versions")
+    _equal(observed["versions"]["transformers"], capture["model_load_contract"]["transformers_version"],
+           "original initialization runtime version")
+    return runtime
+
+
+def _validate_original_source_acquisition(capture, *, source_model_identity,
+                                          expected_original_authority,
+                                          expected_original_session,
+                                          original_source_authority,
+                                          calibration_receipt):
+    """Validate a retained protocol against independent expectations, not admission.
+
+    Only the existing source owner's public authority helper can authorize a
+    launch. This metadata join cannot turn its normalized CPU controls into
+    original CUDA, full-draw quality, complete capture or native qualification.
+    """
+    from .cost_streaming import validate_streamed_model_identity, canonical_streamed_model_semantic_config
+    from .source_generation import (_control, _session, _full_calibration, _binding,
+        ORIGINAL_AUTHORITY_KEYS, ORIGINAL_STATIC_AUTHORITY_KEYS, normalize_original_source_static_authority)
+    from .stage_inputs import require_source_identity
+    from .tessera_calibration_cache import validate_original_source_material_receipt
+
+    if (expected_original_authority is None or expected_original_session is None
+            or original_source_authority is None or source_model_identity is None
+            or calibration_receipt is None):
+        raise ValueError("original prefix requires independent authority/session/source/full calibration")
+    if any(key in capture for key in ("dev_uncertified", "dev_mode", "source_cache_reuse")):
+        raise ValueError("original and DEV/cache source acquisition are mutually exclusive")
+    acquisition = _original_closed(capture.get("source_acquisition"),
+        ("schema", "authority", "session", "source_material", "source_initialization",
+         "source_execution", "runtime", "entry"), "original source acquisition")
+    _equal(acquisition["schema"], ORIGINAL_ACQUISITION_SCHEMA, "original acquisition schema")
+    _equal(capture["scope"], "first calibration sequence; decode uses its first row, not autoregressive generation",
+           "original first-sequence-only capture scope")
+    _equal(capture["attention_implementation"], "eager", "original source attention implementation")
+    _sha(capture["capture_source_sha256"], "original capture source file")
+    _, authority = _control(expected_original_authority, "independently expected original authority")
+    _equal(authority, original_source_authority, "independently bound original authority bytes")
+    _original_closed(authority, ORIGINAL_AUTHORITY_KEYS, "independently expected original authority")
+    normalize_original_source_static_authority({key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS})
+    if authority["root_admission"] is not None:
+        _binding(authority["root_admission"], "original root admission binding")
+    _equal(acquisition["authority"], expected_original_authority, "original acquisition authority")
+    _session(expected_original_session)
+    _equal(acquisition["session"], expected_original_session, "original acquisition session")
+    _equal(acquisition["session"], authority["session"], "original authority session")
+    _full_calibration(calibration_receipt)
+    _equal(calibration_receipt, authority["calibration"], "original full calibration receipt")
+    for field, key in (("calibration_sha256", "calibration_sha256"),
+                       ("calibration_shape", "shape"), ("calibration_dtype", "dtype")):
+        _equal(capture[field], calibration_receipt[key], f"original capture {field}")
+    source = validate_streamed_model_identity(source_model_identity, where="original routed source")
+    _equal(source, authority["source_model_identity"], "original complete expected source identity")
+    _, producer = _control(authority["producer"], "original expected producer")
+    _equal(require_source_identity(capture["producer_source"]), require_source_identity(producer),
+           "original complete producer source")
+    _equal(producer["tensors"], source["checkpoint_weight_map"], "original checkpoint source map")
+    _equal(canonical_streamed_model_semantic_config(capture["runtime_config"]),
+           canonical_streamed_model_semantic_config(source["config"]), "original resolved source config")
+    _equal(acquisition["source_initialization"], capture["model_load_contract"], "actual original initialization")
+    execution = acquisition["source_execution"]
+    _original_closed(execution, ("schema", "modules"), "original source execution")
+    _equal(execution["schema"], "prismaquant.joint_aura.source_execution.v1", "original source execution schema")
+    _equal(execution, authority["source_execution"], "original source execution expectation")
+    _equal(execution, capture["source_execution"], "original observed execution")
+    _validate_original_capture_entry(acquisition["entry"], capture)
+    _validate_original_capture_runtime(acquisition["runtime"], capture, authority)
+    material = validate_original_source_material_receipt(acquisition["source_material"], authority)
+    layer = acquisition["entry"]["layer"]
+    heads = {"lm_head.weight", "model.language_model.embed_tokens.weight", "model.language_model.norm.weight"}
+    mapping = source["weight_map"]
+    if not heads <= set(mapping):
+        raise ValueError("original source identity lacks its actual GLM head mapping")
+    prefixes = tuple(f"model.language_model.layers.{index}." for index in range(layer + 1))
+    required = heads | {name for name in mapping if name.startswith(prefixes)}
+    if any(not any(name.startswith(prefix) for name in mapping) for prefix in prefixes):
+        raise ValueError("original source identity omits an initialized prefix layer")
+    contract = capture["model_load_contract"]
+    if layer < 44:
+        checkpoint_state = {name for name, record in contract["state"].items() if record["kind"] == "checkpoint"}
+        if checkpoint_state != required:
+            raise ValueError("native panel actual original prefix checkpoint coverage differs from independently frozen input")
+    else:
+        _equal(contract["persistent_tensors"], len(required), "actual original full text checkpoint coverage")
+    required_files = {Path(source["checkpoint_weight_map"][mapping[name]]).name for name in required}
+    delivered = {record["name"] for record in material["verified_files"]}
+    if not required_files <= delivered:
+        raise ValueError("original source material lacks a required head/prefix delivery")
+    completed = set()
+    generations = {(row["name"], row["delivery_index"]): row for row in material["deliveries"]}
+    for witness in material["copy_completions"]:
+        if (witness["device"] == acquisition["runtime"]["device"] and witness["failed"] is False
+                and witness["host_aliases_at_fence"] > 0):
+            # The owner validator joins each copy to its exact historical
+            # native delivery generation/digest, not merely the newest read.
+            completed.update(name for name, index in witness["files"].items()
+                             if generations[(name, index)]["payload_reads"] > 0)
+    if not required_files <= completed:
+        raise ValueError("original initialized head/prefix lacks actual successful source copy completion")
+    # Keep ALL actual delivery/pinning/copy debt in the receipt, including a
+    # legitimate one-ahead source file. Initialization is the separate witness.
+    return acquisition
+
+
+def _validate_prefix_capture(capture, source_model_identity=None, *, expected_original_authority=None,
+                             expected_original_session=None, original_source_authority=None,
+                             calibration_receipt=None):
     """Bind a routed layer to exactly its observed source traversal.
 
     Layers 3..43 need a proper prefix. Layer 44 uses the existing completed
@@ -803,6 +1005,18 @@ def _validate_prefix_capture(capture, source_model_identity=None):
             or replay.get('stop')!='before_original_packed_experts_forward'):
         raise ValueError('fresh routing prefix lacks its exact original replay coordinates')
     provenance=capture.get('source_acquisition',capture)
+    if isinstance(provenance, dict) and provenance.get("schema") == ORIGINAL_ACQUISITION_SCHEMA:
+        _validate_original_source_acquisition(capture, source_model_identity=source_model_identity,
+            expected_original_authority=expected_original_authority,
+            expected_original_session=expected_original_session, original_source_authority=original_source_authority,
+            calibration_receipt=calibration_receipt)
+        mapping = {name: {"tensor": key, "file": Path(source_model_identity["checkpoint_weight_map"][key]).name}
+                   for name, key in source_model_identity["weight_map"].items()}
+        _equal(contract["source_map_sha256"], identity_sha256(mapping), "original prefix live source map")
+        return contract
+    if any(value is not None for value in (expected_original_authority, expected_original_session,
+                                           original_source_authority)):
+        raise ValueError("original expectations cannot be consumed by legacy DEV/cache acquisition")
     reuse=provenance.get('source_cache_reuse',{})
     if (provenance.get('dev_uncertified') is not True
             or provenance.get('dev_mode',{}).get('PRISMAQUANT_DEV_MODE')!='1'
@@ -823,7 +1037,9 @@ def _validate_prefix_capture(capture, source_model_identity=None):
     return contract
 
 
-def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
+def _calibration_and_capture(calibration, capture, *, unit, shape, routing, source_model_identity=None,
+                             expected_original_authority=None, expected_original_session=None,
+                             original_source_authority=None):
     if calibration.get("schema") != "prismaquant.calibration_input.v1":
         raise ValueError("native MoE needs the exact calibration receipt")
     _sha(calibration["calibration_sha256"], "calibration")
@@ -845,12 +1061,20 @@ def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
     _sha(capture["capture_source_sha256"], "capture producer")
     from . import validate_pretrained_initialization_contract
     if _streamed_routing_capture(capture):
-        _validate_prefix_capture(capture)
+        _validate_prefix_capture(capture, source_model_identity,
+            expected_original_authority=expected_original_authority,
+            expected_original_session=expected_original_session, original_source_authority=original_source_authority,
+            calibration_receipt=calibration)
     else:
         validate_pretrained_initialization_contract(capture["model_load_contract"])
     if capture["attention_implementation"] != "eager":
         raise ValueError("native MoE capture must record the actual eager source backend")
     runtime = capture["capture_runtime"]
+    acquisition = capture.get("source_acquisition")
+    if isinstance(acquisition, dict) and acquisition.get("schema") == ORIGINAL_ACQUISITION_SCHEMA:
+        # The original runtime validator already joins nullable CUDA-version
+        # metadata to its bound runtime. CPU controls never qualify CUDA.
+        return
     if (not isinstance(runtime, dict) or set(runtime) != {"torch", "cuda", "transformers"}
             or any(not isinstance(value, str) or not value for value in runtime.values())
             or runtime["transformers"] != capture["model_load_contract"]["transformers_version"]):
@@ -1023,7 +1247,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             raise ValueError("native A4 reference requires executed static scales")
         actual_members.append({**member, "source_weight": _cb_cache_tensor_identity(source),
             "rendered_weight": _cb_cache_tensor_identity(render), "activation": activation,
-            "wire": {"blob_sha256": hashlib.sha256(wire_blobs[name]).hexdigest(),
+            "wire": {"blob_sha256": bytes_sha256hex(wire_blobs[name]),
                      "blob_bytes": len(wire_blobs[name]), "record": wire_records[name]}})
         if rank_local:
             actual_members[-1]["quality_rendered_weight"] = _cb_cache_tensor_identity(full_render)
@@ -1090,7 +1314,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             "numerics": dict(numerics), "runtime_image": runtime_image, "serving_config_sha256": serving_config_sha256, "probe_request": probe_request,
             "reference": {"operation": "prismaquant.measure_quant_cost._packed_experts_forward_with_weights",
                           "module_class": f"{type(experts_module).__module__}.{type(experts_module).__qualname__}",
-                          "module_source_sha256": hashlib.sha256(reference_file.read_bytes()).hexdigest(),
+                          "module_source_sha256": bytes_sha256hex(reference_file.read_bytes()),
                           "profile": profile.name, "temporary_pack_bytes": packed_bytes,
                           "activation_preclip": False, "format": format_name},
             "prefetch": prefetch, "phases": phases}, tensors
@@ -1204,28 +1428,11 @@ def _native_member_identity(member):
             "wire_record_sha256": identity_sha256(member["wire"]["record"])}
 
 
-def _source_execution(value, *, unit):
-    if (not isinstance(value, dict) or set(value) != {"schema", "modules"}
-            or value["schema"] != "prismaquant.joint_aura.source_execution.v1"
-            or not isinstance(value["modules"], dict) or not value["modules"]):
-        raise ValueError("native MoE requires explicit source execution identity")
-    for name, selectors in value["modules"].items():
-        if (not isinstance(name, str) or not isinstance(selectors, dict) or not selectors
-                or not set(selectors) <= {"attention", "experts"}):
-            raise ValueError("native MoE source execution selectors are malformed")
-    for name in ("", unit):
-        selectors = value["modules"].get(name, {})
-        if selectors.get("attention") != "eager" or not isinstance(selectors.get("experts"), str) or not selectors["experts"]:
-            raise ValueError("native MoE source execution lacks resolved root/target backends")
-    json.dumps(value, allow_nan=False)
-    return value
-
-
 def _qualified_source_execution(inputs, probe, path, expected_sha256):
     """Verify a fresh source replay of a retained boundary, never rewrite it."""
     import struct
     raw = Path(path).read_bytes()
-    _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "source qualification"), "source qualification file")
+    _equal(bytes_sha256hex(raw), _sha(expected_sha256, "source qualification"), "source qualification file")
     result = json.loads(raw)
     if (result.get("schema") != "prismaquant.packed_joint_screen.v1" or result.get("mode") != "source"
             or result.get("passed") is not True):
@@ -1251,12 +1458,18 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
         _equal(subset[key], expected, f"qualified calibration {key}")
     prefill = inputs["phases"]["prefill"]
     count = prefill["m"]
+    protocol = inputs["routing"]["source_protocol"]
+    if geometry_family(inputs["shape"]) == "glm53_next_routed_stack_v1":
+        expert_bias = {**protocol["correction_bias"],
+                       "shape": [_shape_for_roster(inputs["shape"])["experts"]]}
+    else:
+        expert_bias = protocol["selection_bias"]
     expected_tensors = {"inputs": prefill["input"],
         "top_k_index": prefill["transport"]["topk_ids"]["source"],
         "top_k_weights": prefill["transport"]["topk_weights"]["source"],
-        "expert_bias": inputs["routing"]["source_protocol"]["selection_bias"],
+        "expert_bias": expert_bias,
         "coordinates": {"shape": [count, 2], "dtype": "torch.int64",
-            "content_sha256": hashlib.sha256(b"".join(struct.pack("<qq", 0, row) for row in range(count))).hexdigest()}}
+            "content_sha256": bytes_sha256hex(b"".join(struct.pack("<qq", 0, row) for row in range(count)))}}
     comparisons = proof["tensor_comparisons"]
     _equal(sorted(comparisons), sorted(expected_tensors), "qualified boundary tensor roster")
     for name, expected in expected_tensors.items():
@@ -1269,7 +1482,7 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
         for key in ("actual_sha256", "captured_sha256"):
             _equal(compared[key], expected["content_sha256"], f"qualified boundary {name} {key}")
         _equal(metadata["tensors"][name]["content_sha256"], expected["content_sha256"], f"qualified original {name} bytes")
-    execution = _source_execution(proof["source_execution_identity"], unit=inputs["unit"])
+    execution = require_native_source_execution(proof["source_execution_identity"], unit=inputs["unit"])
     _equal(execution, proof["streamed_source_execution_identity"], "qualified reference/streamed source execution")
     return execution
 
@@ -1339,8 +1552,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         if captured_execution is not None:
             _equal(captured_execution, qualified, "captured/qualified source execution")
         captured_execution = qualified
-    execution = _source_execution(captured_execution, unit=inputs["unit"])
-    _equal(execution, _source_execution(probe.get("source_execution"), unit=inputs["unit"]),
+    execution = require_native_source_execution(captured_execution, unit=inputs["unit"])
+    _equal(execution, require_native_source_execution(probe.get("source_execution"), unit=inputs["unit"]),
            "capture/probe source execution")
     for key in ("n_probes", "seed_base", "token_scope", "temperature", "distribution", "normalization"):
         _equal(probe[key], request[key], f"predeclared probe {key}")
@@ -1536,7 +1749,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
         "topk_ids_dtype": str(ids.dtype), "device": str(x.device),
         "weights_contract": "post_renormalization_and_routed_scaling",
         "source_protocol": {"router_class": f"{type(router).__module__}.{type(router).__qualname__}",
-            "router_source_sha256": hashlib.sha256(Path(inspect.getfile(type(router))).read_bytes()).hexdigest(),
+            "router_source_sha256": bytes_sha256hex(Path(inspect.getfile(type(router))).read_bytes()),
             "selection_bias": _cb_cache_tensor_identity(bias), "normalization_epsilon": 1e-6,
             "expert_bias_affects": "selection_only"}}
     validate_routing(routing)
@@ -1555,7 +1768,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
         "attention_implementation": source_model.config._attn_implementation,
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},
-        "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "capture_source_sha256": bytes_sha256hex(Path(__file__).read_bytes()),
         "tensors": {name: _cb_cache_tensor_identity(value) for name, value in tensors.items()}}}
 
 
@@ -1570,7 +1783,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     from .native_operator_panel import (native_operator_measurement, native_operator_scratch,
                                         validate_native_numerics)
     raw = Path(path).read_bytes()
-    _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "receipt"), "receipt file")
+    _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_moe_late_binding.v1":
         from .native_moe_execution_binding import resolve_execution_binding
@@ -1667,13 +1880,15 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
                        + ([] if complete else ["native_operator_scratch"])}
 
 
-def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, device, source_model_identity=None):
+def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, device, source_model_identity=None,
+                           expected_original_authority=None, expected_original_session=None,
+                           original_source_authority=None):
     """Transport an independently hashed PAC boundary into the native protocol.
 
     Storage may be on CPU, but metadata describes the original CUDA invocation.
     Only lossless int32/FP32 transport and the declared first-row decode subset
-    are introduced. Canonical capture provenance and every original tensor are
-    checked before forming either phase.
+    are introduced. Complete-v2 legacy authority and independently bound scoped
+    original authority are exclusive; neither inherits full-draw quality.
     """
     import copy
     import torch
@@ -1681,22 +1896,44 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     metadata = payload.get("boundary_metadata") or {}
     if (payload.get("source") != "routed_boundary_capture"
             or metadata.get("schema") != "prismaquant.native_moe_raw_boundary.v1"
-            or capture_manifest.get("schema") != "prismaquant.tessera_calibration_cache.v2"
-            or capture_manifest.get("status") != "complete"):
+            or not isinstance(capture_manifest, dict)):
+        raise ValueError("native MoE requires an original PAC boundary and explicit capture authority")
+    acquisition = metadata.get("source_acquisition", {})
+    current_original = (capture_manifest.get("schema") == FIRST_SEQUENCE_ORIGINAL_SCHEMA
+        or (isinstance(acquisition, dict) and acquisition.get("schema") == ORIGINAL_ACQUISITION_SCHEMA)
+        or any(value is not None for value in
+               (expected_original_authority, expected_original_session, original_source_authority)))
+    if current_original:
+        _original_closed(capture_manifest, ("schema", "scope", "authority", "session", "calibration"),
+                         "first-sequence original capture")
+        if (capture_manifest["schema"] != FIRST_SEQUENCE_ORIGINAL_SCHEMA
+                or capture_manifest["scope"] != "first_sequence_original_capture"
+                or not isinstance(acquisition, dict) or acquisition.get("schema") != ORIGINAL_ACQUISITION_SCHEMA
+                or not _streamed_routing_capture(metadata)):
+            raise ValueError("original scoped capture cannot reuse legacy DEV/cache/canonical authority")
+        _equal(capture_manifest["authority"], expected_original_authority, "independently expected capture authority")
+        _equal(capture_manifest["session"], expected_original_session, "independently expected capture session")
+        _equal(capture_manifest["calibration"], calibration_receipt, "scoped original full calibration")
+    elif (capture_manifest.get("schema") != "prismaquant.tessera_calibration_cache.v2"
+          or capture_manifest.get("status") != "complete"):
         raise ValueError("native MoE requires an original PAC boundary and canonical capture v2")
     shape, unit = metadata["shape"], metadata["unit"]
     validate_geometry(shape)
     validate_routing(metadata["routing"])
     _equal(metadata["profile_role_order"], list(ROLES), "captured profile role order")
-    identity = capture_manifest["identity"]
+    identity = None if current_original else capture_manifest["identity"]
     prefix = _streamed_routing_capture(metadata)
     if prefix:
         if source_model_identity is None:
             raise ValueError('fresh prefix intake requires independently bound original source identity')
-        _validate_prefix_capture(metadata,source_model_identity)
-    for key in (("attention_implementation", "capture_runtime") if prefix else
-                ("model_load_contract", "attention_implementation", "capture_runtime")):
-        _equal(metadata[key], identity[key], f"boundary/capture {key}")
+        _validate_prefix_capture(metadata, source_model_identity,
+            expected_original_authority=expected_original_authority,
+            expected_original_session=expected_original_session, original_source_authority=original_source_authority,
+            calibration_receipt=calibration_receipt)
+    if not current_original:
+        for key in (("attention_implementation", "capture_runtime") if prefix else
+                    ("model_load_contract", "attention_implementation", "capture_runtime")):
+            _equal(metadata[key], identity[key], f"boundary/capture {key}")
     original = {}
     for key in ("inputs", "top_k_index", "top_k_weights", "coordinates", "expert_bias"):
         value = payload[key]
@@ -1707,6 +1944,8 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     x, ids, weights = (original[key] for key in ("inputs", "top_k_index", "top_k_weights"))
     _validate_phase_tensors(x, ids, weights, shape, cuda=False)
     coords = original["coordinates"]
+    if current_original and coords.device.type != "cpu":
+        raise ValueError("original calibration coordinates must retain their CPU bookkeeping origin")
     if (coords.dtype != torch.int64 or list(coords.shape) != [x.shape[0], 2]
             or x.shape[0] != calibration_receipt["shape"][1]
             or not torch.equal(coords[:, 0], torch.zeros(x.shape[0], dtype=torch.int64, device=coords.device))
@@ -1745,19 +1984,26 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     if 'replay' in metadata:capture['replay']=copy.deepcopy(metadata['replay'])
     if "source_execution" in metadata:
         capture["source_execution"] = copy.deepcopy(metadata["source_execution"])
+    if current_original:
+        capture["source_acquisition"] = copy.deepcopy(acquisition)
+        capture["tensors"] = copy.deepcopy(metadata["tensors"])
+        capture["profile_role_order"] = copy.deepcopy(metadata["profile_role_order"])
     if metadata.get("dev_uncertified") is not None:
         if metadata["dev_uncertified"] is not True:
             raise ValueError("source acquisition must retain its uncertified DEV declaration")
         capture["source_acquisition"]={key:copy.deepcopy(metadata[key]) for key in
             ("dev_uncertified","dev_mode","source_cache_reuse","capture_device_envelope",
              "model_load_contract","replay","capture_source_sha256","capture_runtime","scope") if key in metadata}
-    _calibration_and_capture(calibration_receipt, capture, unit=unit, shape=shape, routing=routing)
+    _calibration_and_capture(calibration_receipt, capture, unit=unit, shape=shape, routing=routing,
+        source_model_identity=source_model_identity, expected_original_authority=expected_original_authority,
+        expected_original_session=expected_original_session, original_source_authority=original_source_authority)
     source = capture["producer_source"]
-    for name, digest in {**source["files"], **source["auxiliary_sha256"], "config.json": source["config_sha256"]}.items():
-        # Auxiliary files outside the ordinary capture glob still remain sealed
-        # by the canonical census producer; files present in both must agree.
-        if name in identity["source_files"]:
-            _equal(digest, identity["source_files"][name], f"boundary/capture source {name}")
+    if identity is not None:
+        for name, digest in {**source["files"], **source["auxiliary_sha256"], "config.json": source["config_sha256"]}.items():
+            # Auxiliary files outside the ordinary capture glob still remain sealed
+            # by the canonical census producer; files present in both must agree.
+            if name in identity["source_files"]:
+                _equal(digest, identity["source_files"][name], f"boundary/capture source {name}")
     return capture, values, bias.to(device)
 
 

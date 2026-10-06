@@ -10,7 +10,7 @@ import sys
 
 
 REPO = Path(__file__).resolve().parents[1]
-TOOL = REPO / "tools" / "container_runtime_identity.py"
+TOOL = REPO / "prismaquant" / "container_runtime_identity.py"
 IMAGE_REF = (
     "vllm-node@sha256:"
     "f7dad9260fea6f4207bd894acc9ebc034d91c599a70489a89ab1938a75db9c47"

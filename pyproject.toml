@@ -69,9 +69,11 @@ include = ["prismaquant*"]
 [tool.setuptools.package-data]
 prismaquant = [
     "*.sh",
+    "kernels/cuda_allocator_state.cpp",
     "data/*.pt",
     "model_profiles/specs/*.json",
     "serving_profile_specs/*.json",
     "serve_dispatch_tables/*.json",
     "lane_specs/*.json",
+    "tessera_runtime/shape_time_checker_config.json",
 ]

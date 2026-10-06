@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 import pickle
@@ -18,7 +17,13 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .dev_mode import dev_mode_enabled, dev_warning, seal_check
-from .digests import bytes_sha256hex, file_digest_sha256hex, indent2_json_file_bytes
+from .digests import (
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+    file_digest_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
+)
 from .file_identity import file_stat_signature
 from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
 from .schemas import Contract
@@ -816,7 +821,7 @@ def _check_capture(header, inputs, original):
         from .joint_layer_quanta import roster_digest
         expected = roster_digest(names)
     else:
-        expected = hashlib.sha256("".join(name + "\n" for name in names).encode()).hexdigest()
+        expected = text_sha256hex("".join(name + "\n" for name in names))
     _same(identity.get("unit_roster_sha256"), expected, "capture qname roster")
     plan = _json(inputs["original_plan"], "original plan")
     for key in ("n_probes", "seed_base"):
@@ -1352,8 +1357,9 @@ def main(argv=None):
     if args.check_catalog_only:
         if args.adjoint_capture or args.adjoint_capture_sha256 or args.out:
             parser.error("catalog-only validation takes no capture or publication path")
-        print(json.dumps({"status": "proposed_catalog_validated", "capture_reuse_authority": False,
-                          "evidence": verify_catalog_pair(inputs)}, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text(
+            {"status": "proposed_catalog_validated", "capture_reuse_authority": False,
+             "evidence": verify_catalog_pair(inputs)}))
         return 0
     if not args.adjoint_capture or not args.adjoint_capture_sha256 or not args.out:
         parser.error("capture path, SHA256 and fresh output path are required to create an extension")
@@ -1362,7 +1368,7 @@ def main(argv=None):
     result = create_extension(inputs=inputs,
         adjoint_capture={"path": args.adjoint_capture, "sha256": args.adjoint_capture_sha256},
         output=args.out, campaign_identity=identity)
-    print(json.dumps(result, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0
 
 

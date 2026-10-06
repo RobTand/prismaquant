@@ -1,0 +1,15 @@
+{
+  "schema": "prismaquant.test_projection_producer.v1",
+  "source_repo": "RobTand/tessera",
+  "source_commit": "b770727c50eef822132518bdc4fd6efe84359c9e",
+  "source_archive_sha256": "e79e592b1366ffdb9f00c542ece5934dd69a50b60a8b8664537387e4e8dd5ca5",
+  "wheel_sha256": "bf3be0ae18ef7c40ccf2edf513a0abfed35a0603c9d8421fd78d780196c326ee",
+  "provision_action": "e329d0982b6012cf10a380b27f4f0c2a93b0c2ef246655d073e58aea391cf8cf",
+  "interpreter": "/home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python",
+  "required_host": "dl380g10",
+  "executable_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41",
+  "module": "tessera.producer_plan",
+  "module_sha256": "cdc709e7c1145265a2ed0092135a0bf4b3c0d38747a71d1e41027fceb3211eaf",
+  "package_payload_sha256": "015afb1e4ca892d62b51d91ff9ba05284cfeba63ef5aed5e7ecfae61fad2dd16",
+  "output_schema": "tessera.expert_projection.v1"
+}

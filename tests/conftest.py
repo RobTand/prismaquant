@@ -40,6 +40,19 @@ def _installed_contract() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
 
 
+def set_cell_census(payload: dict, cell: dict, rungs: list[int]) -> None:
+    """Change a valid fixture census and its v11 derived run-table metadata."""
+    from prismaquant.lane_eligibility import _allowable_rung_tables
+
+    cell["rungs_q256"] = list(rungs)
+    if "run_tables" in cell:
+        row = next(r for r in payload["formats"] if r["family"] == cell["family"])
+        tables = _allowable_rung_tables(row, "fixture.formats")
+        cell["run_tables"] = [list(t) for t in sorted(
+            {tables[r] for r in rungs})] if tables else []
+
+
+
 def down_convert_lane_table(payload: dict, schema: str) -> dict:
     """The installed contract, expressed in an OLDER lane grammar.
 
@@ -259,6 +272,15 @@ def installed_client_sdk(monkeypatch):
         yield module
 
 
+@pytest.fixture
+def pinned_pb_source():
+    """Explicit, non-autouse ownership of the reviewed PB source graph."""
+    from fullstack_pb_generation import source_bound
+
+    with source_bound():
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.
@@ -387,6 +409,27 @@ def _no_staged_tier_policy_carried_between_tests():
     deactivate_staged_tier_policy_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _no_activation_scale_policy_carried_between_tests():
+    """No test inherits another test's ``PRISMAQUANT_PROD_ACT_SCALES``.
+
+    ``run_adjoint_capture`` writes the sealed ``production_act_scales`` of its
+    config into the process environment, and the in-process stage-A tests feed
+    it ``"0"``. The variable changes what the joint lease does (it skips the
+    calibrated clamp), so a test that compares against a clamping oracle failed
+    whenever ``--dist worksteal`` put it on a worker after such a test (PQ
+    #2230's dense sidecar oracle failed on a Spark this way). Restore the
+    incoming value, or its absence, after every test.
+    """
+    from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
+    incoming = os.environ.get(ACTIVATION_SCALE_ENV)
+    yield
+    if incoming is None:
+        os.environ.pop(ACTIVATION_SCALE_ENV, None)
+    else:
+        os.environ[ACTIVATION_SCALE_ENV] = incoming
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _no_prismabuild_import_carried_between_modules():
     """No module inherits another module's ``prismabuild`` imports (PQ #1281).
@@ -397,10 +440,17 @@ def _no_prismabuild_import_carried_between_modules():
     ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back.
+    teardown puts the imports back. This module explicitly owns a detached,
+    initially unbound graph: collection or a public pytest plugin may have
+    imported the installed package before setup. Clearing only those cached
+    entries lets each resolver choose and authenticate its own source; it
+    neither pins a default nor weakens an origin assertion. Installed-build
+    tests still import from their original paths, and teardown restores the
+    exact pre-existing module objects and parent edges. Test imports themselves
+    must remain inside a test or fixture (PQ #2265).
     """
     from fleet_sdk import prismabuild_imports_restored
-    with prismabuild_imports_restored():
+    with prismabuild_imports_restored(detach=True):
         yield
 
 

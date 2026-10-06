@@ -35,6 +35,7 @@ from .io_spans import mem_available_bytes
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
+    safetensors_prefix_length,
     select_source_tensors,
 )
 
@@ -189,6 +190,24 @@ def _safe_open_kwargs(device: torch.device) -> dict:
     return {"framework": "pt"}
 
 
+def _checkpoint_weight_map(model_path, *, source_authentication=None, source_reads=None):
+    """Checkpoint names from the loader's indexed or single-file source owner."""
+    index = os.path.join(model_path, "model.safetensors.index.json")
+    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index):
+        if source_reads is not None:
+            return json.loads(source_reads.whole(index, where="checkpoint index"))["weight_map"]
+        return _source_json(index, source_authentication)["weight_map"]
+    single = os.path.join(model_path, "model.safetensors")
+    if not os.path.exists(single):
+        raise FileNotFoundError(f"no safetensors under {model_path}")
+    if source_reads is not None:
+        from .source_read_plan import read_safetensors_header
+        header, _base, _size = read_safetensors_header(single, source_reads=source_reads)
+        return {name: single for name in header if name != "__metadata__"}
+    with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as handle:
+        return {name: single for name in handle.keys()}
+
+
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
                       live_name=None, profile=None,
@@ -224,15 +243,7 @@ def _build_weight_map(model_path: str, *,
     if profile is None:
         profile = _source_profile(model_path, source_authentication)
 
-    index_file = os.path.join(model_path, "model.safetensors.index.json")
-    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index_file):
-        raw = _source_json(index_file, source_authentication)["weight_map"]
-    else:
-        single = os.path.join(model_path, "model.safetensors")
-        if not os.path.exists(single):
-            raise FileNotFoundError(f"no safetensors under {model_path}")
-        with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
-            raw = {k: single for k in f.keys()}
+    raw = _checkpoint_weight_map(model_path, source_authentication=source_authentication)
     return live_weight_map(
         raw, model_path,
         live_name if live_name is not None else
@@ -258,7 +269,7 @@ def _live_tree_head_extras(profile) -> bool:
 
 
 def streaming_source_plan(model_path: str, *, layers_prefix: str,
-                          layers, source_reads=None) -> dict:
+                          layers, source_reads=None, root=None) -> dict:
     """The streaming loader's source reads, enumerated without a GPU (PQ #1095).
 
     The same selection the loader reads: the checkpoint index mapped to live
@@ -295,9 +306,9 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     (profile detection opens it), the index whole, then each shard's length
     prefix and header.
 
-    A profile whose head extras come from the live module tree (its
-    ``head_resident_extra_prefixes`` reads ``root``) cannot be enumerated
-    without a skeleton, and refuses.
+    Profiles with live-tree head extras use the caller's actual meta skeleton
+    in root, or construct the loader's meta skeleton when it is omitted.
+    Indexed and unindexed sources share the loader's checkpoint-map owner.
     """
     from .model_profiles import detect_profile
     from .source_read_plan import (
@@ -313,29 +324,24 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         profile = detect_profile(model_path, config=staged_config)
     else:
         profile = detect_profile(model_path)
-    if _live_tree_head_extras(profile):
-        raise ValueError(
-            f"profile {profile.name} derives its resident head from the live "
-            "module tree; its source reads cannot be enumerated without a "
-            "skeleton: refusing")
+    if root is None and _live_tree_head_extras(profile):
+        from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+        config = load_streaming_auto_config(model_path, model_path, local_files_only=True)
+        root = build_streaming_skeleton(config,
+            multimodal=construction_multimodal(profile, False))
     multimodal = construction_multimodal(profile, False)
     index_path = os.path.normpath(
         os.path.join(model_path, "model.safetensors.index.json"))
-    if source_reads is None:
-        with open(index_path, "rb") as handle:
-            index_raw = handle.read()
-    else:
-        index_raw = source_reads.whole(index_path, where="checkpoint index")
-    raw = json.loads(index_raw.decode("utf-8"))["weight_map"]
+    raw = _checkpoint_weight_map(model_path, source_reads=source_reads)
     model_to_shard, model_to_ckpt = live_weight_map(
         raw, model_path,
         lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
     fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
                                    raw_weight_map=raw, profile=profile,
                                    config=staged_config)
-    head_prefixes = resident_head_prefixes(
-        base_prefix_of_layers(layers_prefix),
-        profile.head_resident_extra_prefixes(None))
+    base_prefix = base_prefix_of_layers(layers_prefix)
+    head_prefixes = (_head_prefixes(root, base_prefix) if root is not None
+                     else resident_head_prefixes(base_prefix))
     selections = {"head": select_source_tensors(
         model_to_shard, model_to_ckpt, head_prefixes)}
     for layer in layers:
@@ -375,7 +381,8 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
                    for layer, selection in selections.items() if layer != "head"}
     metadata_reads = ([(config_path, 0, os.path.getsize(config_path))]
                       if os.path.isfile(config_path) else [])
-    metadata_reads.append((index_path, 0, len(index_raw)))
+    if os.path.exists(index_path):
+        metadata_reads.append((index_path, 0, os.path.getsize(index_path)))
     header_reads = [*metadata_reads,
                     *((path, 0, base) for path, (_h, base, _s)
                       in sorted(headers.items()))]
@@ -879,8 +886,18 @@ def _apply_fp8_dequant_inplace(
     buckets — which is what the prefetch thread's CPU cost scales on,
     since each kernel launch has fixed Python + CUDA dispatch overhead.
     """
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
+    with _SourceCopyCompletion(device, enabled=original,
+                               source_owner=source_authentication if original else None) as copies:
+        return _apply_source_scale_values(
+            out, fp8_scale_inv_map, device, source_authentication=source_authentication,
+            copies=copies)
+
+
+def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authentication, copies):
+    """Existing block/packed scale arithmetic inside the caller's completion scope."""
     if not fp8_scale_inv_map:
         return 0
     # Collect (name, scale_key) per shard so we can open each shard
@@ -901,6 +918,11 @@ def _apply_fp8_dequant_inplace(
         with _source_safe_open(shard, framework="pt", source_authentication=source_authentication) as f:
             for model_name, scale_key in reads:
                 loaded_scales[model_name] = f.get_tensor(scale_key)
+                copies.retain(loaded_scales[model_name])
+    # Head callers can still hold native CPU weights here; retaining only the
+    # stacked copy would retire their whole serialized charge prematurely.
+    for value in out.values():
+        copies.retain(value)
 
     # Step 2: Group matched weights by (out_dim, in_dim) shape. We only
     # batch along exact-block-multiple shapes; odd-shaped tensors (rare)
@@ -951,15 +973,17 @@ def _apply_fp8_dequant_inplace(
         out_blocks = out_dim // block_r
         in_blocks = in_dim // block_c
         E = len(names)
+        # Original-owned H2D copies stay queued on this completion stream;
+        # disabled/legacy scopes retain their blocking transfer policy.
         # Stack weights: (E, out, in) bf16 on the execution device.
         # Native FP8 source tensors stay compressed until this point so
         # CPU-side reads and H2D/UMA traffic remain 1 byte/element.
-        w_stack = torch.stack([out[n] for n in names], dim=0).to(
-            device=device, dtype=torch.bfloat16)
+        w_stack = copies.copy(torch.stack([out[n] for n in names], dim=0),
+                              dtype=torch.bfloat16, non_blocking=copies.enabled)
         # Stack scales: (E, out_blocks, in_blocks) bf16 on device
-        s_stack = torch.stack(
+        s_stack = copies.copy(torch.stack(
             [loaded_scales[n] for n in names], dim=0
-        ).to(device=device, dtype=torch.bfloat16)
+        ), dtype=torch.bfloat16, non_blocking=copies.enabled)
         # Reshape to block-tile form:
         #   w: (E, out_blocks, block_r, in_blocks, block_c)
         #   s: (E, out_blocks, 1, in_blocks, 1)
@@ -1008,16 +1032,16 @@ def _apply_fp8_dequant_inplace(
             for i0 in range(0, len(names), _MXFP4_DECODE_CHUNK):
                 chunk = names[i0:i0 + _MXFP4_DECODE_CHUNK]
                 E = len(chunk)
-                wp = torch.stack([out[n] for n in chunk], dim=0).to(
-                    device=device).view(torch.uint8)
+                wp = copies.copy(torch.stack([out[n] for n in chunk], dim=0),
+                                 non_blocking=copies.enabled).view(torch.uint8)
                 # int32 gather indices: the index *values* are byte codes
                 # (0..255), so int32 is exact here and halves the index
                 # transient vs long (8 -> 4 B per packed byte).
                 deq = pair_lut[wp.to(torch.int32)].reshape(
                     E, rows, logical_in // 32, 32)
-                sb = torch.stack(
+                sb = copies.copy(torch.stack(
                     [loaded_scales[n] for n in chunk], dim=0
-                ).to(device=device).view(torch.uint8)
+                ), non_blocking=copies.enabled).view(torch.uint8)
                 scale = torch.exp2((sb.to(torch.float32) - 127.0))
                 # E8M0 0xFF is NaN per the OCP MX v1.0 spec, not 2^128:
                 # exp2(128) yields +inf, which turned a 0xFF block into a
@@ -1038,7 +1062,7 @@ def _apply_fp8_dequant_inplace(
     # Step 4: Fallback path for any shapes we didn't batch.
     for name in fallback:
         w = out[name]
-        scale_fp = loaded_scales[name].to(device=device)
+        scale_fp = copies.copy(loaded_scales[name], non_blocking=copies.enabled)
         out[name] = _dequant_fp8_block_weight(
             w, scale_fp, block=(block_r, block_c), name=name)
         dequanted += 1
@@ -1095,33 +1119,45 @@ def _materialize(model: nn.Module, prefixes: list[str],
     cast to bf16. See `_dequant_fp8_block_weight`.
 
     Returns count of tensors loaded."""
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
     buffer_dtypes = _model_tensor_dtypes(model, dtype)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, prefixes)
     # Collect loaded tensors first so we can batch the scale-read pass.
     out: dict[str, torch.Tensor] = {}
-    open_kwargs = _safe_open_kwargs(device)
-    for shard, pairs in by_shard.items():
-        try:
-            f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
-        except (TypeError, RuntimeError):
-            # Older safetensors / unsupported device combos: drop the
-            # device kwarg and fall back to the host-stage path.
-            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
-        with f_ctx as f:
-            for model_name, ckpt_name in pairs:
-                t = f.get_tensor(ckpt_name)
-                _require_fp8_scale(model_name, t, fp8_scale_inv_map)
-                if (t.is_floating_point()
-                        and not _is_fp8_scaled_tensor(
-                            model_name, fp8_scale_inv_map)):
-                    t = t.to(buffer_dtypes.get(model_name, dtype))
-                out[model_name] = t
-    if fp8_scale_inv_map:
-        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
-            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+    open_kwargs = {"framework": "pt"} if original else _safe_open_kwargs(device)
+    with _SourceCopyCompletion(device, enabled=original,
+                               source_owner=source_authentication if original else None) as copies:
+        for shard, pairs in by_shard.items():
+            if original:
+                f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+            else:
+                try:
+                    f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+                except (TypeError, RuntimeError):
+                    f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
+            with f_ctx as f:
+                for model_name, ckpt_name in pairs:
+                    t = f.get_tensor(ckpt_name)
+                    copies.retain(t)
+                    _require_fp8_scale(model_name, t, fp8_scale_inv_map)
+                    if (t.is_floating_point()
+                            and not _is_fp8_scaled_tensor(
+                                model_name, fp8_scale_inv_map)):
+                        t = t.to(buffer_dtypes.get(model_name, dtype))
+                    copies.retain(t)
+                    out[model_name] = t
+        if fp8_scale_inv_map:
+            _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
+                **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+        if original and device.type == 'cuda':
+            # Complete every original host transfer before the first head
+            # slot installs. A later copy failure exposes no partial head.
+            for model_name, value in out.items():
+                if value.device != device:
+                    out[model_name] = copies.copy(value, non_blocking=True)
     loaded = 0
     for model_name, t in out.items():
         install_dtype = t.dtype if t.is_floating_point() else None
@@ -1700,9 +1736,10 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
             if any(getattr(source_stat, k) != getattr(expected_stat, k) for k in fields):
                 raise RuntimeError('source changed before consumed-page release')
         raw_size = os.pread(fd, 8, 0)
-        header_size = int.from_bytes(raw_size, 'little')
-        if len(raw_size) != 8 or not 0 < header_size <= min(100_000_000, source_stat.st_size - 8):
-            raise ValueError('invalid safetensors header for consumed-page release')
+        header_size = safetensors_prefix_length(
+            raw_size, source_stat.st_size, max_bytes=100_000_000,
+            short_error='invalid safetensors header for consumed-page release',
+            range_error='invalid safetensors header for consumed-page release')
         header = json.loads(os.pread(fd, header_size, 8))
         base = 8 + header_size
         page = os.sysconf('SC_PAGE_SIZE')
@@ -1858,6 +1895,88 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
               "the read below decides", flush=True)
 
 
+class _SourceCopyCompletion:
+    """One existing reader's host aliases through its copy-stream event.
+
+    This is completion bookkeeping, not a source owner or residency cache.
+    Failed original fences remain owned by the source, not an exception frame.
+    """
+
+    def __init__(self, device, *, enabled, source_owner=None):
+        self.device = torch.device(device)
+        self.enabled = bool(enabled) and self.device.type == 'cuda'
+        self.source_owner = source_owner
+        self.host_staging = []
+        self.cuda_copied = False
+        self.stream = None
+        self.failed = False
+        self._original_sources = {}
+        self._original_fence = None
+        self._original_retained_aliases = 0
+
+    def retain(self, tensor):
+        if self.enabled and tensor.device.type == 'cpu':
+            if self.source_owner is None:
+                self.host_staging.append(tensor)
+            else:
+                self.source_owner._retain_original_host_staging(self, tensor)
+
+    def observed(self, tensor):
+        self.cuda_copied |= tensor.device.type == 'cuda'
+
+    def copy(self, tensor, **kwargs):
+        self.retain(tensor)
+        if self.enabled and tensor.device.type == 'cpu':
+            stream = torch.cuda.current_stream(self.device)
+            if self.stream is not None and self.stream != stream:
+                raise RuntimeError('source copy completion spans different CUDA streams')
+            if self.stream is None and self.source_owner is not None:
+                self.source_owner._retain_original_copy_completion(self, stream)
+            else:
+                self.stream = stream
+            # An exception from the copy API does not prove nothing was
+            # enqueued; the owning stream must drain in that case too.
+            self.cuda_copied = True
+        result = tensor.to(self.device, **kwargs)
+        self.observed(result)
+        return result
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.enabled and self.cuda_copied:
+            try:
+                event = torch.cuda.Event()
+                event.record(self.stream if self.stream is not None
+                             else torch.cuda.current_stream(self.device))
+                event.synchronize()
+            except BaseException:
+                if self.source_owner is not None and self.stream is not None:
+                    try:
+                        self.drain_failed_copy()
+                    except BaseException:
+                        # Even loss of every caller/error-frame reference must
+                        # not retire storage while completion is unproved.
+                        self.source_owner._root_failed_original_copy(self)
+                    else:
+                        self.source_owner._release_original_copy_completion(self,
+                            fence='cuda_stream_synchronize_after_event_failure')
+                # Preserve the failed event proof, even after a safe drain.
+                raise
+        if self.source_owner is not None and self.stream is not None:
+            self.source_owner._release_original_copy_completion(self, fence='cuda_event_synchronize')
+        else:
+            self.host_staging.clear()
+
+    def drain_failed_copy(self):
+        # No event proof survived. The exact owning stream is the fence;
+        # failed synchronization must leave every host alias held.
+        self.stream.synchronize()
+        if self.source_owner is None:
+            self.host_staging.clear()
+
+
 def _read_layer_to_device(prefix: str,
                           model_to_shard: dict[str, str],
                           model_to_ckpt: dict[str, str],
@@ -1900,15 +2019,16 @@ def _read_layer_to_device(prefix: str,
     """
     if cancel is not None and cancel.is_set():
         raise CancelledError("layer read cancelled before its staged wait")
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, (prefix,))
     out: dict[str, torch.Tensor] = {}
-    open_kwargs = _safe_open_kwargs(device)
+    open_kwargs = {"framework": "pt"} if original else _safe_open_kwargs(device)
     direct = "device" in open_kwargs
     release_pages = (os.environ.get('PRISMAQUANT_RELEASE_SOURCE_PAGES') == '1'
-                     and device.type == 'cuda')
+                     and device.type == 'cuda' and not original)
     source_stats = {shard: (os.stat(shard) if source_authentication is None else
         source_authentication.file_stat(shard)) for shard in by_shard} if release_pages else {}
     def _read_chunk(shard: str,
@@ -1916,47 +2036,40 @@ def _read_layer_to_device(prefix: str,
         local: dict[str, torch.Tensor] = {}
         if not pairs:
             return local
-        try:
+        if original:
             f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
-            used_direct = direct
-        except (TypeError, RuntimeError):
-            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
             used_direct = False
+        else:
+            try:
+                f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+                used_direct = direct
+            except (TypeError, RuntimeError):
+                f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
+                used_direct = False
         # This existing read chunk owns its mmap-backed/converted staging
         # through one stream event, rather than retaining it for the layer.
-        host_staging = []
-        cuda_copied = False
-        try:
+        with _SourceCopyCompletion(device, enabled=release_pages or original,
+                                   source_owner=source_authentication if original else None) as copies:
             with f_ctx as f:
                 for model_name, ckpt_name in pairs:
                     t = f.get_tensor(ckpt_name)
-                    cuda_copied |= t.device.type == 'cuda'
-                    if release_pages and t.device.type == 'cpu':
-                        host_staging.append(t)
+                    copies.observed(t)
+                    copies.retain(t)
                     _require_fp8_scale(model_name, t, fp8_scale_inv_map)
                     if (t.is_floating_point()
                             and not _is_fp8_scaled_tensor(
                                 model_name, fp8_scale_inv_map)):
                         t = t.to((buffer_dtypes or {}).get(model_name, dtype))
                     if not used_direct:
-                        if release_pages and t.device.type == 'cpu':
-                            host_staging.append(t)
-                        t = t.to(device, non_blocking=True)
-                        cuda_copied |= t.device.type == 'cuda'
+                        if original:
+                            t = copies.copy(t, non_blocking=True)
+                        else:
+                            copies.retain(t)
+                            t = t.to(device, non_blocking=True)
+                            copies.observed(t)
                     if not t.is_contiguous():
                         t = t.contiguous()
                     local[model_name] = t
-        finally:
-            if release_pages and cuda_copied:
-                # Fence this chunk's stream through its final transfer, even
-                # when a later source read fails. Do not fence the device or
-                # wait for unrelated work queued after this event.
-                # If record/sync fails, the propagated traceback retains
-                # this chunk's staging; completion has not been proven.
-                event = torch.cuda.Event()
-                event.record(torch.cuda.current_stream(device))
-                event.synchronize()
-            host_staging.clear()
         if release_pages and local and all(t.device.type == 'cuda' for t in local.values()):
             # Reached only on a successful chunk: its map is closed, copies
             # completed and CPU views released. Other readers may still run.
@@ -1995,6 +2108,10 @@ def _read_layer_to_device(prefix: str,
     else:
         for shard, pairs in by_shard.items():
             out.update(_read_chunk(shard, pairs))
+    if original and cancel is not None and cancel.is_set():
+        # Every launched reader above has drained its own copy stream. No
+        # cancelled original gather is returned for installation.
+        raise CancelledError("original layer read cancelled after reader completion")
     if len(out) != total_tensors:
         missing = total_tensors - len(out)
         raise RuntimeError(

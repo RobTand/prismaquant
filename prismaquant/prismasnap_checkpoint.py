@@ -51,7 +51,13 @@ from .prismasnap import (
     search_diagonal_scale,
 )
 from .schemas import strict_json_loads
-from .digests import SHA256_HEX, bytes_sha256hex, file_sha256hex, is_sha256hex
+from .digests import (
+    DIRECT_UTF8_INDENT2_STRICT,
+    SHA256_HEX,
+    bytes_sha256hex,
+    file_sha256hex,
+    is_sha256hex,
+)
 from .tensor_digests import tensor_host_bytes
 
 
@@ -318,13 +324,7 @@ def _sha256_file(path: Path, chunk_bytes: int = 16 << 20) -> str:
 
 
 def _atomic_json(path: Path, payload: object) -> None:
-    data = json.dumps(
-        payload,
-        sort_keys=True,
-        indent=2,
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    data = DIRECT_UTF8_INDENT2_STRICT.encoded(payload)
     tmp = path.with_name(f".{path.name}.tmp")
     if os.path.lexists(tmp):
         raise RuntimeError(f"refusing stale PrismaSnap temporary file {tmp}")

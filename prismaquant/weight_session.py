@@ -34,6 +34,7 @@ from prismaquant import decision_units as du
 from prismaquant import format_registry as fr
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.memory_management import env_truthy as _env_truthy
+from prismaquant.production_weight_cache import _cache_weight_leaf
 
 
 @dataclass
@@ -110,6 +111,7 @@ class WeightSession:
         self._bf16_originals: dict[str, torch.Tensor] = {}
         self._snapshot_dir = None
         if snapshot_dir is not None:
+            _require_injective_snapshot_filenames(self._linear_by_qname)
             from pathlib import Path as _P
             self._snapshot_dir = _P(snapshot_dir)
             self._snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -191,8 +193,7 @@ class WeightSession:
             # live param is a valid reference even mid-polish.
             self._validate_spill_shape(qname, tuple(snap.shape))
             return snap
-        safe = qname.replace("/", "__").replace(".", "_")
-        fname = f"{safe}__bf16src.pt"
+        fname = _bf16_snapshot_filename(qname)
         if self._snapshot_dir is not None:
             existing = self._snapshot_dir / fname
             if existing.is_file():
@@ -240,8 +241,7 @@ class WeightSession:
         if qname in self._bf16_originals or qname in self._spilled:
             return True
         if self._snapshot_dir is not None:
-            safe = qname.replace("/", "__").replace(".", "_")
-            fname = f"{safe}__bf16src.pt"
+            fname = _bf16_snapshot_filename(qname)
             existing = self._snapshot_dir / fname
             if existing.is_file():
                 # Trusting a pre-existing spill without a shape check
@@ -533,6 +533,23 @@ def _spilled_tensor_shape(path) -> tuple[int, ...]:
     except (TypeError, RuntimeError):
         snap = torch.load(path, map_location="cpu", weights_only=True)
     return tuple(snap.shape)
+
+
+def _bf16_snapshot_filename(qname: str) -> str:
+    return f"{_cache_weight_leaf(qname)}__bf16src.pt"
+
+
+def _require_injective_snapshot_filenames(qnames) -> None:
+    """Check the session roster before capture or adoption of source spills."""
+    owners = {}
+    for qname in sorted(set(qnames)):
+        filename = _bf16_snapshot_filename(qname)
+        previous = owners.setdefault(filename, qname)
+        if previous != qname:
+            raise ValueError(
+                f"BF16 source snapshots: coordinates {previous!r} and "
+                f"{qname!r} map to one snapshot destination {filename!r}; "
+                "the source snapshots would silently overwrite each other")
 
 
 def _qname_aliases(qname: str) -> set[str]:

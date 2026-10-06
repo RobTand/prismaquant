@@ -483,12 +483,8 @@ def _glm_conv_kernel_is_cuda_only():
 def _glm_source(tmp_path, monkeypatch, *, device):
     from test_capture_layer_chain_glm import _three_layer_config, _write_sharded_checkpoint
     from test_glm5_next_streamed_forward_parity import _build_model
-    pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
-    producer = Path(os.environ.get('TESSERA_REPO') or pinned)
-    if not producer.is_dir():
-        pytest.skip('TESSERA_REPO must name the pinned producer checkout '
-                    f'(unset, and {pinned} is absent)')
-    monkeypatch.setenv('TESSERA_REPO', str(producer))
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
     monkeypatch.setenv('PRISMAQUANT_TMPDIR', str(tmp_path / 'staging'))
     if device == 'cpu':
         # The campaign places its model on CUDA whenever CUDA is available.

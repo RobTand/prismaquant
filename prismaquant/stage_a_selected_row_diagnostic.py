@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import publish_new_bytes
 from .dev_mode import dev_mode_enabled
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import Contract, strict_json_loads
 from .stage_inputs import read_bound
 
@@ -119,3 +119,199 @@ def write_diagnostic_receipt(space, receipt) -> dict:
     raw = indent2_json_file_bytes(receipt)
     _contract.require(publish_new_bytes(path, raw), "diagnostic receipt already exists")
     return {"path": str(path), "sha256": bytes_sha256hex(raw)}
+
+
+SESSION_PREPARATION_SCHEMA = "prismaquant.original_diagnostic_session_preparation.v1"
+SESSION_PREPARATION_NAME = "original-diagnostic-session-preparation.json"
+SESSION_PREPARATION_OWNER = "original-diagnostic-prep"
+
+
+
+
+def load_original_diagnostic_context(base_plan_input, static_authority_input):
+    """Bind the render-free controls; this grants no source or CUDA admission."""
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .joint_adjoint_checkpoints import adjoint_space, boundary_entry_directory
+    from .source_generation import (
+        _control, _resources, normalize_original_diagnostic_base_plan,
+        normalize_original_diagnostic_execution,
+        normalize_original_diagnostic_preparation,
+        normalize_original_source_static_authority,
+        original_diagnostic_session_identity,
+    )
+
+    _, static = _control(static_authority_input, "original diagnostic static authority")
+    static = normalize_original_source_static_authority(static)
+    _, base = _control(base_plan_input, "original diagnostic base plan")
+    base = normalize_original_diagnostic_base_plan(base)
+    _, prepared = _control(base["prepared"], "original diagnostic preparation")
+    prepared = normalize_original_diagnostic_preparation(prepared)
+    static_sha256 = canonical_json_sha256(static, where="original static authority")
+    _contract.require(base["static_authority_sha256"] == static_sha256,
+                      "diagnostic base static authority differs")
+    _contract.require(base["read_manifest"] == static["readset"],
+                      "diagnostic static source manifest differs")
+    _contract.require(prepared["resources"] == static["resources"],
+                      "diagnostic prepared resource binding differs")
+    for key in ("source_model_identity", "source_execution", "calibration"):
+        _contract.require(prepared[key] == static[key], f"diagnostic prepared {key} differs")
+    _contract.require(prepared["source_model_identity"]["source"] == base["model"],
+                      "diagnostic source root differs")
+    _, document = _control(base["execution"], "original diagnostic execution")
+    document = normalize_original_diagnostic_execution(document)
+    policy = document["boundary_storage"]
+    _contract.require(policy["directory"] == str(boundary_entry_directory(adjoint_space(base["output_root"]))),
+                      "original diagnostic boundary directory differs from its issued root")
+    _, resources = _control(static["resources"], "original diagnostic resources")
+    resources = _resources(resources)
+    _contract.require(policy["max_artifact_bytes"] <= resources["artifact_bytes"],
+                      "diagnostic artifact policy exceeds its bound envelope")
+    _contract.require(policy["max_resident_bytes"] + policy["max_auxiliary_bytes"]
+                      <= resources["cpu_bytes"],
+                      "diagnostic resident and auxiliary policy exceeds CPU envelope")
+    identity = original_diagnostic_session_identity(
+        base_plan=base, base_plan_sha256=base_plan_input["sha256"], prepared=prepared,
+        execution_sha256=base["execution"]["sha256"])
+    return {"base_plan": base, "prepared": prepared, "static_authority": static,
+            "execution": document, "resources": resources, "session_identity": identity,
+            "base_plan_input": dict(base_plan_input),
+            "static_authority_input": dict(static_authority_input)}
+
+
+def load_original_diagnostic_issued_context(binding, *, base_plan_input, authority):
+    """Join the issuer's bound static input to this independently selected authority."""
+    from .source_generation import (
+        _control, ORIGINAL_STATIC_AUTHORITY_KEYS, normalize_original_source_static_authority,
+    )
+
+    _, issued = _control(binding, "original diagnostic issued context")
+    _contract.require(isinstance(issued, dict) and isinstance(issued.get("static_authority"), dict),
+                      "diagnostic preparation lacks its independently bound static input")
+    context = load_original_diagnostic_context(base_plan_input, issued["static_authority"])
+    expected = normalize_original_source_static_authority(
+        {key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS})
+    _contract.require(context["static_authority"] == expected,
+                      "issued diagnostic static tuple differs from selected full authority")
+    receipt = read_original_diagnostic_session_preparation(
+        binding, context=context, expected_session=authority["session"])
+    return {**context, "session_preparation_input": dict(binding), "session_preparation": receipt}
+
+
+def read_original_diagnostic_session_preparation(binding, *, context, expected_session):
+    """Check this issued pending generation, never a foreign or resumed capture."""
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .cost_streaming import StreamedBoundaryArtifacts
+    from .source_generation import _control, _session
+
+    _, receipt = _control(binding, "original diagnostic session preparation")
+    _contract.exact_mapping(receipt, keys={
+        "schema", "status", "source_computation", "cuda_computation", "capture_complete",
+        "source_admitted", "base_plan", "static_authority", "prepared", "execution",
+        "session_identity", "session", "boundary_policy", "owner"},
+        where="original diagnostic session preparation")
+    _contract.require(receipt["schema"] == SESSION_PREPARATION_SCHEMA
+                      and receipt["status"] == "session_prepared",
+                      "diagnostic requires its actual control-preparation receipt")
+    for key in ("source_computation", "cuda_computation", "capture_complete", "source_admitted"):
+        _contract.require(receipt[key] is False, f"session preparation cannot claim {key}")
+    base = context["base_plan"]
+    for key, expected in (("base_plan", context["base_plan_input"]),
+                          ("static_authority", context["static_authority_input"]),
+                          ("prepared", base["prepared"]), ("execution", base["execution"]),
+                          ("session_identity", context["session_identity"])):
+        _contract.require(receipt[key] == expected, f"issued diagnostic {key} differs")
+    session = _session(receipt["session"])
+    _contract.require(session == _session(expected_session), "issued diagnostic session differs")
+    _contract.require(session["run_identity_sha256"] == canonical_json_sha256(
+        context["session_identity"], where="exact boundary source"),
+        "issued diagnostic session identity differs")
+    policy = context["execution"]["boundary_storage"]
+    expected_policy = {key: value for key, value in policy.items() if key != "directory"}
+    _contract.require(receipt["boundary_policy"] == expected_policy,
+                      "issued diagnostic policy differs")
+    directory = Path(policy["directory"]) / session["generation"]
+    expected_owner = {"label": SESSION_PREPARATION_OWNER,
+                      "path": str(directory / "owners" / (SESSION_PREPARATION_OWNER + ".json"))}
+    _contract.require(receipt["owner"] == expected_owner, "issued diagnostic owner differs")
+    owner_fields = {
+        "phase": "original_diagnostic_session_preparation",
+        "source_computation": False, "cuda_computation": False,
+        "capture_complete": False, "source_admitted": False,
+        "session_identity": context["session_identity"],
+        "base_plan": context["base_plan_input"],
+        "static_authority": context["static_authority_input"],
+    }
+    StreamedBoundaryArtifacts(policy).inspect_published_session(
+        session, identity=context["session_identity"], pending=True,
+        owner_label=SESSION_PREPARATION_OWNER, owner_fields=owner_fields)
+    return receipt
+
+
+def prepare_original_diagnostic_session(base_plan_input, static_authority_input):
+    """Issue an actual pending artifact session, never a source/capture receipt."""
+    from .aura_cost import _aura_source_sha256
+    from .calibration_data import load_calibration_input
+    from .cost_streaming import StreamedBoundaryArtifacts
+    from .joint_adjoint_checkpoints import adjoint_space
+
+    context = load_original_diagnostic_context(base_plan_input, static_authority_input)
+    base, prepared = context["base_plan"], context["prepared"]
+    _contract.require(prepared["implementation_sha256"] == _aura_source_sha256(),
+                      "diagnostic preparation implementation differs from current capture code")
+    ids, calibration = load_calibration_input(base["calibration_input"]["path"],
+        expected_sha256=base["calibration_input"]["sha256"], n_samples=512, seqlen=512)
+    _contract.require(calibration == prepared["calibration"],
+                      "diagnostic decoded full calibration differs from prepared context")
+    del ids
+    space = adjoint_space(base["output_root"])
+    receipt_path = space / SESSION_PREPARATION_NAME
+    _contract.require(not space.exists(), "diagnostic session root already exists")
+    policy = context["execution"]["boundary_storage"]
+    with StreamedBoundaryArtifacts(policy) as storage:
+        storage.bind(context["session_identity"], n_probes=1, published=True,
+                     owner_label=SESSION_PREPARATION_OWNER)
+        storage.stamp_owner(phase="original_diagnostic_session_preparation",
+            source_computation=False, cuda_computation=False, capture_complete=False,
+            source_admitted=False, session_identity=context["session_identity"],
+            base_plan=base_plan_input, static_authority=static_authority_input)
+        receipt = {
+            "schema": SESSION_PREPARATION_SCHEMA, "status": "session_prepared",
+            "source_computation": False, "cuda_computation": False,
+            "capture_complete": False, "source_admitted": False,
+            "base_plan": dict(base_plan_input), "static_authority": dict(static_authority_input),
+            "prepared": base["prepared"], "execution": base["execution"],
+            "session_identity": context["session_identity"], "session": dict(storage.session),
+            "boundary_policy": storage.identity,
+            "owner": {"label": SESSION_PREPARATION_OWNER, "path": str(storage.status_path())},
+        }
+        raw = indent2_json_file_bytes(receipt)
+        _contract.require(publish_new_bytes(receipt_path, raw),
+                          "diagnostic session preparation receipt already exists")
+    return {"path": str(receipt_path), "sha256": bytes_sha256hex(raw), "receipt": receipt}
+
+
+def main(argv=None):
+    """The explicit PB CPU metadata issuance command; it never runs a model."""
+    import argparse
+    from .stage_b_prep_io import bind_staged_reads
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prepare-original-session", action="store_true", required=True)
+    parser.add_argument("--base-plan", required=True)
+    parser.add_argument("--base-plan-sha256", required=True)
+    parser.add_argument("--static-authority", required=True)
+    parser.add_argument("--static-authority-sha256", required=True)
+    parser.add_argument("--data-manifest-sha256", required=True)
+    parser.add_argument("--allowed-tiers", choices=("ram", "ssd", "ram,ssd"), required=True)
+    args = parser.parse_args(argv)
+    bind_staged_reads(manifest_sha256=args.data_manifest_sha256,
+                      allowed_tiers=args.allowed_tiers)
+    result = prepare_original_diagnostic_session(
+        {"path": args.base_plan, "sha256": args.base_plan_sha256},
+        {"path": args.static_authority, "sha256": args.static_authority_sha256})
+    print(DIRECT_ASCII_SPACED_STRICT.text(result))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

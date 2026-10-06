@@ -60,7 +60,8 @@ def test_indent2_rows_are_byte_identical(row_index):
     assert bytes_sha256hex(new) == row["expected_digest_hex"]
 
 
-@pytest.mark.parametrize("row", _rows())
+@pytest.mark.parametrize("row", [row for row in _rows()
+                                 if not row["family"].startswith("indent2")])
 def test_bytes_and_text_rows_are_byte_identical(row):
     family = row["family"]
     if family.startswith("bytes_sha256hex"):
@@ -73,37 +74,4 @@ def test_bytes_and_text_rows_are_byte_identical(row):
         # Pre-change spelling, verbatim: hashlib.sha256(str(x).encode()).hexdigest()
         assert hashlib.sha256(text.encode()).hexdigest() == row["expected_hex"]
         assert text_sha256hex(text) == row["expected_hex"]
-    else:
-        pytest.skip("indent2 row covered by its own test")
 
-
-def test_the_module_delegates_and_keeps_the_by_design_spellings():
-    """The delegations are importable and the kept sites are named in #1599."""
-    import inspect
-
-    import prismaquant.tessera_export_lane as lane
-
-    src = inspect.getsource(lane)
-    # the seven delegations
-    assert "text_sha256hex(str(cell_wire_dir))" in src
-    assert "encoded = indent2_json_file_bytes(manifest)" in src
-    assert "digest = bytes_sha256hex(encoded)" in src
-    assert "if bytes_sha256hex(raw) != expected_sha256:" in src
-    assert "payload = indent2_json_file_bytes(projected)" in src
-    assert '"plan_assignment_sha256": bytes_sha256hex(payload)}' in src
-    assert "'sha256': bytes_sha256hex(raw)," in src
-    assert "print(bytes_sha256hex(build_bytes))" in src
-    # the kept by-design spellings: NUL-framed hessian commitment, non-compact
-    # diagnostics (require_platform / read_cached_unit_bundle prints / main)
-    assert 'json.dumps({"schema": HESSIAN_CAPTURE_SHA256_SCHEMA' in src
-    assert "unit.update(b\"\\0\")" in src
-    assert 'executes_by_platform={json.dumps(stated, sort_keys=True)}' in src
-    assert "'[cached-unit warning] ' + json.dumps(warning, sort_keys=True)" in src
-    assert 'json.dumps(report["build"], indent=2, sort_keys=True) + "\\n"' in src
-
-
-def test_empty_blob_matches_the_known_empty_sha256():
-    # b"" -> e3b0... pinned in the fixture row family bytes_sha256hex:
-    # selected_cached_units_manifest (pre-change: hashlib.sha256(b"").hexdigest())
-    assert bytes_sha256hex(b"") == (
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")

@@ -12,6 +12,7 @@ from contextlib import nullcontext
 import hashlib
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -365,10 +366,11 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
         adjoint_sha256=identity_files["adjoint"][1],
         output_root=identity_files["output_root"])
 
-    verified, _slice = verify_quantum_identity(**kwargs)
+    verified, _slice, _record_bytes = verify_quantum_identity(**kwargs)
     assert verified["identity_sha256"] == original["identity_sha256"]
     assert "names" not in verified["windows"][0]
     assert len(consumed) == 1
+    assert _record_bytes == original_bytes
 
     # The live file has changed; the old digest must now refuse.
     monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
@@ -404,7 +406,7 @@ def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeyp
         output_root=identity_files["output_root"])
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     capsys.readouterr()
-    verified, _slice = verify_quantum_identity(**kwargs)
+    verified, _slice, _record_bytes = verify_quantum_identity(**kwargs)
     assert verified == json.loads(json.dumps(record))
     assert "[DEV-MODE] seal quantum record plan differs" in capsys.readouterr().out
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
@@ -602,6 +604,8 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
         num_layers = 2
         device = "cpu"
         model = object()
+        # Offline legacy fixture: explicitly no qualified original material owner.
+        context = SimpleNamespace(source_authentication=None)
 
         def observe_source_waits(self, sink):
             # The envelope/identity fixture creates no delivery Futures.
@@ -979,7 +983,7 @@ def _windows_records(windows):
 
 def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
                  progress_env=None, plan_sha="p", prepared_sha="r", adjoint_slice=None,
-                 adjoint_handoff=None, handoff_emitter=None):
+                 adjoint_handoff=None, handoff_emitter=None, joint_eval=None):
     """One layer quantum on its stage-A slice (the receipt's, unless given).
 
     ``adjoint_handoff``/``handoff_emitter`` run it band-serial (PQ #996); an
@@ -1032,6 +1036,8 @@ def _run_quantum(tmp_path, monkeypatch, *, single, layer, receipt, output_root,
         where="record")
 
     execution = _execution(tmp_path)
+    if joint_eval is not None:
+        execution["joint_eval"] = joint_eval
     retained = quantum_retained_state(execution)
     roster = quantum_layer_roster(
         runner, {name: list(FORMATS) for name in
@@ -1757,3 +1763,49 @@ def test_resolve_handshake_refuses_stale_records(tmp_path, monkeypatch):
             operator_windows=retained.operator_windows,
             retained_budget=retained.retained_budget,
             source_bytes=retained.source_bytes)
+
+
+def test_independent_draw_quantum_records_actual_observations(tmp_path, monkeypatch):
+    single_root = tmp_path / "single"
+    single = _single_run(single_root, monkeypatch, checkpoint=single_root / "checkpoints")
+    output_root = tmp_path / "campaign"
+    runner_a, _cache = _stage_a(tmp_path, monkeypatch)
+    runner_a.context.settle_prefetch_layers = lambda layers: None
+    receipt = run_adjoint_capture_core(
+        runner_a, draw(), execution=_execution(tmp_path), output_root=output_root, stride=2,
+        source_model_identity=_model_identity("joint-source"), unit_roster_sha256=_hex("a"),
+        plan_sha256=_hex("d"), prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+        implementation_sha256=aura._aura_source_sha256())
+    panel = {"status": "diagnostic_pilot", "draw": "independent-context-fixture"}
+    payload, _record, _counters = _run_quantum(
+        tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,
+        output_root=output_root, plan_sha=_hex("d"), prepared_sha=_hex("e"), joint_eval=panel)
+    assert payload["provenance"]["joint_eval"] == panel
+    name = "model.layers.1.proj"
+    count = payload["stats"][name]["joint_eval_observations"]
+    assert count["n_probes"] == 4 and count["count_scope"] == "summed_over_probes"
+    assert count["tokens"] > 0 and count["calls"] > 0
+    for key in ("tokens", "calls"):
+        assert count[key] == sum(part[key] for part in count["per_probe"])
+    for row in payload["costs"][name].values():
+        assert row["joint_eval_status"] == "observed"
+        assert row["joint_eval_observations"] == count
+    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
+    with pytest.raises(CostCurrencyError, match="separate sampled-proposal path"):
+        require_run_currency(payload)
+
+
+def test_observation_bookkeeping_never_invents_an_unobserved_expert():
+    from prismaquant.joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    counts = new_observation_counts(["observed", "unobserved"], 8)
+    observe_probe(counts, "observed", 3, {"observed_tokens": 7, "observed_calls": 1})
+    payload = {"costs": {name: {"rate": {}} for name in counts},
+               "stats": {name: {} for name in counts}, "provenance": {}}
+    panel = {"status": "diagnostic_pilot"}
+    stamp_observations(payload, counts, panel)
+    assert payload["costs"]["observed"]["rate"]["joint_eval_status"] == "observed"
+    assert payload["costs"]["unobserved"]["rate"]["joint_eval_status"] == "unknown_unobserved"
+    assert counts["unobserved"]["tokens"] == counts["unobserved"]["calls"] == 0
+    assert counts["observed"]["per_probe"][3] == {"tokens": 7, "calls": 1}
+    with pytest.raises(ValueError, match="probe index"):
+        observe_probe(counts, "observed", 8, {"observed_tokens": 7, "observed_calls": 1})

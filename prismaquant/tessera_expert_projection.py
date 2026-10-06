@@ -6,7 +6,7 @@ estimated from sampled experts. The source units
 declared packed split (``lfm2_moe.json`` ``projection_splits``). Tessera, the
 producer, executes those units as ONE stack per MoE block (``<block>.experts``),
 and publishes exactly which source tensor, which expert, which role and which
-geometry each executed unit is through ``experiments/tessera_producer_plan.py``
+geometry each executed unit is through ``python -m tessera.producer_plan``
 (schema ``tessera.expert_projection.v1``, ``tessera.serving_parts.source_identity``
 for the checkpoint binding).
 
@@ -29,7 +29,7 @@ What flows through here, in order:
 * the allocator carries the projection block and the priced-wire receipts of
   the selected rungs into ``__prismaquant__`` unchanged;
 * the export lane re-binds every selected routed unit to that projection
-  (:func:`require_stack_uniform_assignment`, :func:`verify_expert_wire_record`)
+  (:func:`require_unit_assignment`, :func:`verify_expert_wire_record`)
   and writes the producer's ``tessera.cached_units.v1`` manifest
   (:func:`cached_units_manifest`) so the exporter packs the priced bytes
   unchanged (``--cached-expert-units``): priced == written.
@@ -38,7 +38,6 @@ RobTand/prismaquant#183.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -51,8 +50,9 @@ from typing import Any, Mapping, Sequence
 from .stage_inputs import (
     SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
 )
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
-#: The producer's projection schema (``export_tessera_serving.project_expert_plan``).
+#: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
 #: tensor per unit.  Pinned to ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` by
@@ -64,7 +64,9 @@ WHOLE_SELECTOR = "whole"
 #: The producer tool this bridge shells out to, as declared in
 #: ``lane_specs/tessera.json`` ``campaign_tools`` (#1587: a campaign
 #: dependency, not an export-arm call).
-PRODUCER_PLAN_TOOL = "experiments/tessera_producer_plan.py"
+PRODUCER_PLAN_TOOL = "tessera.producer_plan"
+#: Optional public producer interpreter; never the serving-runtime package pin.
+PRODUCER_PYTHON_ENV = "TESSERA_PRODUCER_PYTHON"
 #: The keys of a producer unit record that ``tessera.cached_unit.unit_input_identity``
 #: seals into the priced-wire receipt.  Pinned against the producer by test.
 UNIT_IDENTITY_KEYS = ("cols", "expert", "group", "projection", "rows",
@@ -81,41 +83,61 @@ POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v2"
 LEGACY_POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v1"
 #: The projection block's own envelope schema inside PrismaQuant artifacts.
 CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
+#: The producer CLI option that hands the projection a stat-bound cache of
+#: shard digests, so a repeated projection of unchanged checkpoint bytes does
+#: not re-hash the whole source (tessera#790; PQ #2229).
+SOURCE_DIGEST_CACHE_OPTION = "--source-digest-cache"
+#: What the bridge writes into the returned projection at
+#: ``source_digest_cache_use`` on EVERY call: the caller-side statement of
+#: whether ``SOURCE_DIGEST_CACHE_OPTION`` was passed and why, so a consumer
+#: never branches on the producer receipt's schema.  The producer's own
+#: ``source_digest_cache`` receipt key stays the producer's (PQ #2229).
+SOURCE_DIGEST_CACHE_USE_SCHEMA = "prismaquant.source_digest_cache_use.v1"
 
 
 # ---------------------------------------------------------------------------
 # Asking the producer
 # ---------------------------------------------------------------------------
-def producer_plan_tool(env: Mapping[str, str] | None = None) -> Path:
-    """The declared producer projection tool, located through the lane spec.
+def _producer_python(env: Mapping[str, str] | None, python: str | None) -> str:
+    supplied = os.environ if env is None else env
+    return python or supplied.get(PRODUCER_PYTHON_ENV) or sys.executable
 
-    The lane spec's ``campaign_tools`` roster (#1587) is the list of Tessera
-    files the campaign shells out to that the export arm does not call; a
-    tool absent from it is one nobody can check for.  ``TESSERA_REPO``
-    locates the pinned checkout, as it does for the plan writer and the
-    exporter.  Only the campaign roster is scanned: the export roster
-    refuses Tessera trees from before #687 (no
-    ``src/tessera/export_serving.py``), and the projection tool is a
-    campaign dependency that those trees still carry -- the recorded GLM
-    campaign spec mounts tessera-382a1a97, and a campaign re-run or resume
-    must not break at projection.
+
+def _probe_producer_plan_tool(env: Mapping[str, str] | None,
+                              python: str | None) -> tuple[str, str]:
+    """Run the declared public CLI's ``--help`` once; return ``(module, help)``.
+
+    CLI availability is checked in the producer interpreter, not by importing
+    a serving runtime into PrismaQuant or locating a sibling checkout.  The
+    one probe answers both callers: :func:`producer_plan_tool` needs the
+    module, and :func:`request_expert_projection` also reads the help text to
+    learn which options this installed producer carries (PQ #2229).
     """
-    from .tessera_export_lane import (
-        TesseraExportLaneError,
-        require_campaign_tools,
-    )
+    from .lane_spec import load_lane_spec
 
-    try:
-        resolved = require_campaign_tools(env=env)
-    except TesseraExportLaneError as exc:
-        raise ExpertProjectionError(str(exc)) from exc
-    for path in resolved:
-        if path.endswith("/" + PRODUCER_PLAN_TOOL):
-            return Path(path)
+    for tool in load_lane_spec("tessera").campaign_tools:
+        if tool.module == PRODUCER_PLAN_TOOL and tool.output_schema == PROJECTION_SCHEMA:
+            completed = subprocess.run(
+                [_producer_python(env, python), "-m", tool.module, "--help"],
+                env=None if env is None else dict(env), capture_output=True, text=True)
+            if completed.returncode:
+                tail = "\n".join(completed.stderr.strip().splitlines()[-12:])
+                raise ExpertProjectionError(
+                    f"public producer {tool.module} unavailable (exit {completed.returncode}): {tail}")
+            return tool.module, completed.stdout
     raise ExpertProjectionError(
-        f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL}; "
-        "the packed-expert bridge needs the producer's explicit projection and "
-        "will not derive one from tensor names")
+        f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL} "
+        f"with {PROJECTION_SCHEMA}; the bridge needs the producer's explicit projection")
+
+
+def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | None = None) -> str:
+    """Require the declared public CLI before an expensive packed capture.
+
+    An explicit ``python=`` wins over ``TESSERA_PRODUCER_PYTHON``; absent both,
+    the caller's interpreter remains the standalone-install default.
+    """
+    tool, _ = _probe_producer_plan_tool(env, python)
+    return tool
 
 
 def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
@@ -138,32 +160,102 @@ def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
     return plan
 
 
+def _refuse_inside_source(path: Path, root: Path, *, what: str, remedy: str) -> None:
+    """Refuse, by name, a path that would write inside the model source it seals."""
+    resolved = path.resolve()
+    if resolved == root or root in resolved.parents:
+        raise ExpertProjectionError(
+            f"{resolved}: {what} lies inside the checkpoint {root} it would seal; {remedy}")
+
+
+def _source_digest_cache_directory(override: str | Path | None, out: Path) -> Path:
+    """The cache directory this projection hands the producer, not yet created.
+
+    Defaults beside the projection output -- a campaign-owned directory,
+    outside the model source tree -- and an explicit caller path wins.  The
+    producer's ``SourceDigestCache`` refuses to live inside the source it
+    seals; the bridge refuses that before any write, by name, so a bad
+    directory is a named caller error instead of a producer traceback
+    (PQ #2229, #2243).
+    """
+    return Path(override) if override is not None else out.parent / "source-digest-cache"
+
+
+def _prepare_source_digest_cache(cache: Path) -> Path:
+    """Create the cache directory, refusing an existing file, after the refusals."""
+    if cache.exists() and not cache.is_dir():
+        raise ExpertProjectionError(
+            f"{cache.resolve()}: source digest cache is an existing file, not a directory; "
+            "pass a directory the producer's SourceDigestCache can write entries into")
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
 def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple[str, int]],
                               *, out_path: str | Path, env: Mapping[str, str] | None = None,
-                              python: str | None = None) -> dict:
+                              python: str | None = None,
+                              source_digest_cache: str | Path | None = None) -> dict:
     """Run the producer's projection tool ONCE for every requested stack.
 
     ``source_identity`` hashes every checkpoint file, so this is one subprocess
     per campaign (all stacks in scope), not one per stack.  The request is
-    written beside the answer so a reader can see what was asked.
+    written beside the answer so a reader can see what was asked.  Both
+    inside-source refusals -- the projection output's parent and the digest
+    cache directory -- run before any write, so a refused call leaves the
+    model source untouched (#2243).
+
+    When the producer's ``--help`` advertises ``SOURCE_DIGEST_CACHE_OPTION``
+    (tessera#790), the command carries it with a stat-bound shard-digest cache
+    directory -- beside the projection output by default, or exactly the
+    caller's ``source_digest_cache`` -- so unchanged checkpoint bytes are not
+    re-hashed on the next call and the producer's ``source_digest_cache``
+    receipt in the answer says how every shard digest was established.  The
+    producer keeps invalidating on changed bytes; nothing here weakens that.
+
+    Every returned projection also carries the caller's own statement at its
+    own ``source_digest_cache_use`` key -- whether the option was passed, and
+    why or why not -- so a consumer never branches on the producer receipt's
+    schema.  That key is PrismaQuant's, not the producer's, and because
+    ``carried_projection`` embeds this returned answer verbatim under
+    ``producer``, the carried block's producer entry carries it too (#2243);
+    nothing else in the answer is PrismaQuant's.  A producer without the
+    option runs as before and is named, never silent.  A cache the caller
+    asked for is never dropped silently either: an explicit
+    ``source_digest_cache`` with a producer that lacks the option is refused
+    by name, as is an override that is an existing file.
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
-    tool = producer_plan_tool(env=env)
+    child_env = dict(os.environ if env is None else env)
+    producer_python = _producer_python(child_env, python)
+    tool, help_text = _probe_producer_plan_tool(env=child_env, python=producer_python)
+    carries_cache = SOURCE_DIGEST_CACHE_OPTION in help_text
+    if not carries_cache and source_digest_cache is not None:
+        raise ExpertProjectionError(
+            f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; refusing "
+            f"to drop the caller's source digest cache {source_digest_cache} silently (PQ #2229)")
     out = Path(out_path)
+    # Both inside-source refusals run before any write (#2243): an out path
+    # or cache directory inside the checkpoint must not leave the refused
+    # call's request file behind in the tree every later source identity
+    # hashes.
+    root = Path(model_path).resolve()
+    _refuse_inside_source(out.parent, root, what="projection output",
+                          remedy="pass an --out path outside the model source")
+    cache = None
+    if carries_cache:
+        cache = _source_digest_cache_directory(source_digest_cache, out)
+        _refuse_inside_source(
+            cache, root, what="source digest cache",
+            remedy=f"pass a {SOURCE_DIGEST_CACHE_OPTION} directory outside the model source")
     out.parent.mkdir(parents=True, exist_ok=True)
     request = out.with_name(out.name + ".request.json")
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
-    command = [python or sys.executable, str(tool), str(model_path),
+    command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
-    child_env = dict(os.environ if env is None else env)
-    # The tool is a script that imports its sibling ``export_tessera_serving``
-    # from its own directory. Python's safe-path mode drops that directory
-    # from ``sys.path``, and the campaign container sets PYTHONSAFEPATH=1 for
-    # its ``python -m`` entry point, where ``sys.path[0]`` would be the sealed
-    # checkout. A script's ``sys.path[0]`` is its own directory, never the
-    # working directory, so the child runs without the guard.
-    child_env.pop("PYTHONSAFEPATH", None)
+    if carries_cache:
+        cache = _prepare_source_digest_cache(cache)
+        command += [SOURCE_DIGEST_CACHE_OPTION, str(cache)]
     completed = subprocess.run(
         command, env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -176,6 +268,17 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
         projection = json.loads(out.read_text())
     except (OSError, ValueError) as exc:
         raise ExpertProjectionError(f"producer projection unreadable at {out}: {exc}") from exc
+    # The producer's answer is kept verbatim: its ``source_digest_cache``
+    # receipt key stays the producer's.  The caller's statement rides under
+    # its own key on EVERY call, so a consumer never branches on the
+    # receipt's schema to learn whether a cache was used.
+    projection["source_digest_cache_use"] = {
+        "schema": SOURCE_DIGEST_CACHE_USE_SCHEMA, "used": carries_cache,
+        "reason": (f"producer tool {tool} advertises {SOURCE_DIGEST_CACHE_OPTION}; handed {cache}"
+                   if carries_cache else
+                   f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; "
+                   "every checkpoint file was hashed"),
+    }
     return projection
 
 
@@ -308,15 +411,19 @@ def carried_projection(projection: Mapping[str, Any], bound: Mapping[str, Mappin
                        *, request: Mapping[str, Any], tool: str) -> dict:
     """The block the campaign payload and the allocation carry.
 
-    The producer's answer is kept verbatim under ``producer`` (it is the
-    producer's statement, not PrismaQuant's), beside the exact binding that
-    was priced and the request that produced it.
+    The producer's answer is kept verbatim under ``producer`` -- verbatim
+    except for the one caller-side key ``request_expert_projection`` adds to
+    the returned answer at ``source_digest_cache_use``, which therefore rides
+    inside this block (#2243).  The entry is otherwise the producer's
+    statement, not PrismaQuant's, and the block is not restructured: beside
+    the producer entry sit the exact binding that was priced and the request
+    that produced it.
     """
     return {
         "schema": CARRIED_PROJECTION_SCHEMA,
         "tool": str(tool),
         "request": {stack: dict(entry) for stack, entry in sorted(request.items())},
-        "producer": json.loads(json.dumps(projection, sort_keys=True)),
+        "producer": json.loads(DIRECT_ASCII_SPACED_LAX.text(projection)),
         "stacks": {stack: {name: dict(unit) for name, unit in sorted(units.items())}
                    for stack, units in sorted(bound.items())},
     }
@@ -400,17 +507,55 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
 
 
 # ---------------------------------------------------------------------------
-# The export side: selected units, stack-uniform rungs, priced-wire receipts
+# The export side: selected units, per-unit rungs, priced-wire receipts
 # ---------------------------------------------------------------------------
-def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapping[str, str],
-                                     units: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-    """One rung per executed stack, or refuse by name.
+#: Where the allocation and the export lane carry the per-unit rungs of MIXED
+#: routed stacks -- the sibling of :data:`STACK_FORMATS_KEY`.  A stack-uniform
+#: world emits no such block: its artifacts and config spellings are the
+#: stack-uniform ones, byte for byte (PrismaQuant #2319).
+UNIT_RUNGS_KEY = "tessera_expert_unit_rungs"
+UNIT_RUNGS_SCHEMA = "prismaquant.tessera_expert_unit_rungs.v1"
 
-    The producer's stack plan carries ONE ``(grid, q256)`` per stack, and the
-    profile's ``format_groups`` make the allocator broadcast one format over
-    the stack's members; a stack whose selected members disagree, or that is
-    only partly selected, is one the producer cannot execute as planned.
-    Returns ``{stack: format}`` for every stack with a selected member.
+#: Sentinel default for ``require_unit_assignment``'s ``capability``: resolve
+#: the installed Tessera runtime's per-unit capability only when a stack is
+#: actually mixed, so a stack-uniform world never imports the producer
+#: package and never changes behavior.
+_RESOLVE_INSTALLED_CAPABILITY = object()
+
+
+def _routed_unit_capability_refusal(stack: str, distinct: list[str],
+                                    first_unit: str) -> str:
+    return (
+        f"{stack}: first mixed unit {first_unit}; selected rungs differ "
+        f"across the stack {distinct}; planning per-unit rungs requires the Tessera "
+        "runtime contract v57 with producer_interface.routed_units "
+        "(tessera.routed-unit-assignment.v1)")
+
+
+def require_unit_assignment(selected: Mapping[str, str], stack_of: Mapping[str, str],
+                            units: Mapping[str, Mapping[str, Any]], *,
+                            capability: Any = _RESOLVE_INSTALLED_CAPABILITY,
+                            ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """The complete per-unit assignment of the selected routed units, or refuse by name.
+
+    The producer executes a stack whole: every projected unit of an executed
+    stack must be selected (a partly selected stack refuses, exactly as
+    before, and a selected unit outside the carried projection refuses).  What
+    changes with the v57 per-unit contract (PrismaQuant #2319) is the rate
+    axis: a stack whose selected units share one rung keeps the stack-uniform
+    stamps -- ``{stack: format}``, byte for byte the spellings
+    ``require_stack_uniform_assignment`` emitted -- while a stack whose units
+    carry different rungs of the producer's served E4M3 grid is returned per
+    unit, and only when the installed Tessera runtime publishes the per-unit
+    capability (``producer_interface.routed_units``, contract v57).  A mixed
+    stack on any other grid refuses by name: v57 serves per-unit rungs on
+    E4M3 and BF16 only.  Without the capability the mixed stack refuses by
+    unit, stack and required contract version.
+
+    Returns ``(stack_formats, unit_rungs)``: ``stack_formats`` holds one
+    format per stack-uniform executed stack; ``unit_rungs`` holds, for each
+    MIXED stack, the complete ``{unit: format}`` member map.  A stack-uniform
+    world returns an empty ``unit_rungs`` and never consults the capability.
     """
     by_stack: dict[str, dict[str, str]] = {}
     for name, fmt in selected.items():
@@ -419,7 +564,8 @@ def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapp
             raise ExpertProjectionError(
                 f"{name}: selected routed expert unit is not in the carried producer projection")
         by_stack.setdefault(stack, {})[name] = fmt
-    formats: dict[str, str] = {}
+    stack_formats: dict[str, str] = {}
+    unit_rungs: dict[str, dict[str, str]] = {}
     for stack, members in sorted(by_stack.items()):
         planned = sorted(n for n, s in stack_of.items() if s == stack)
         unselected = sorted(set(planned) - set(members))
@@ -429,12 +575,51 @@ def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapp
                 f"{len(unselected)} of its {len(planned)} projected units are not "
                 f"selected for Tessera (first: {unselected[0]})")
         distinct = sorted(set(members.values()))
-        if len(distinct) != 1:
+        if len(distinct) == 1:
+            stack_formats[stack] = distinct[0]
+            continue
+        ordered = sorted(members)
+        reference = members[ordered[0]]
+        first_unit = next((name for name in ordered if members[name] != reference), ordered[0])
+        refusal = _routed_unit_capability_refusal(stack, distinct, first_unit)
+        if capability is _RESOLVE_INSTALLED_CAPABILITY:
+            from .tessera_runtime_contract import packaged_routed_unit_capability
+            try:
+                _sha, capability = packaged_routed_unit_capability()
+            except Exception as exc:  # absent/stale/malformed: refuse by name
+                raise ExpertProjectionError(
+                    f"{refusal}; the installed Tessera runtime does not "
+                    f"publish it: {exc}") from exc
+        if not capability:
+            raise ExpertProjectionError(refusal)
+        from .tessera_formats import parse_tessera_format_name
+
+        def _grid(fmt: str) -> str | None:
+            parsed = parse_tessera_format_name(fmt)
+            if parsed is None:
+                return None
+            spec, _rung = parsed
+            return spec.base + ("" if spec.arity == 1 else f"x{spec.arity}")
+
+        grids = sorted({grid for grid in (_grid(fmt) for fmt in distinct)
+                        if grid is not None})
+        spellings = sorted(fmt for fmt in distinct if _grid(fmt) is None)
+        if spellings:
             raise ExpertProjectionError(
-                f"{stack}: selected rungs differ across the stack {distinct}; the producer "
-                "plans one rung per stack (no role split of a projected stack)")
-        formats[stack] = distinct[0]
-    return formats
+                f"{stack}: a mixed per-unit stack must carry Tessera wire "
+                f"formats for every member; non-Tessera spellings "
+                f"{spellings} cannot be planned beside them (first: {first_unit})")
+        if len(grids) != 1:
+            raise ExpertProjectionError(
+                f"{stack}: per-unit rungs share one grid/family/body/plane and "
+                f"differ only in rung; this stack mixes grids {grids} "
+                f"(first: {first_unit})")
+        if grids[0] not in {"E4M3", "BF16"}:
+            raise ExpertProjectionError(
+                f"{stack}: this stack carries {grids}; per-unit rungs are "
+                "served on the producer's E4M3 and BF16 families only (v57)")
+        unit_rungs[stack] = {name: members[name] for name in sorted(members)}
+    return stack_formats, unit_rungs
 
 
 def check_expert_wire_receipt(record: Any, *, name: str, unit: Mapping[str, Any],
@@ -483,7 +668,7 @@ def verify_expert_wire_record(record: Any, *, name: str, unit: Mapping[str, Any]
     record = check_expert_wire_receipt(record, name=name, unit=unit, q256=q256, grid=grid)
     path = locate_expert_wire(record, name=name, wire_dir=wire_dir)
     blob = path.read_bytes()
-    if len(blob) != record["blob_bytes"] or hashlib.sha256(blob).hexdigest() != record["blob_sha256"]:
+    if len(blob) != record["blob_bytes"] or bytes_sha256hex(blob) != record["blob_sha256"]:
         raise ExpertProjectionError(f"{name}: priced wire {path} does not match its receipt")
     return record
 
@@ -525,6 +710,174 @@ def cached_units_manifest(source: Mapping[str, Any], records: Mapping[str, Mappi
 #: Layer-config metadata keys the allocator adds beside the three carried blocks.
 STACK_FORMATS_KEY = "tessera_expert_stack_formats"
 WIRE_DIR_KEY = "tessera_expert_wire_dir"
+
+
+def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
+    """One cost row's ``(predicted_dloss, wire_bytes)``, or refuse by name.
+
+    Exact fields or nothing: a row that carries neither a float-able
+    ``predicted_dloss`` nor an integer ``wire_bytes`` is not a price this
+    allocator may spend, and guessing one would spend the byte budget on a
+    number nobody measured.
+    """
+    if not isinstance(row, Mapping):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: cost row is not an object; the per-unit upgrade "
+            "allocator prices exact campaign rows only")
+    try:
+        dloss = row["predicted_dloss"]
+        wire = row["wire_bytes"]
+    except KeyError as exc:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row publishes no {exc.args[0]!r}; the "
+            "per-unit upgrade allocator prices exact campaign rows only") from exc
+    if dloss is None or isinstance(dloss, bool) or not isinstance(dloss, (int, float)):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not a number")
+    if type(wire) is not int:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row wire_bytes {wire!r} is not an integer")
+    return float(dloss), int(wire)
+
+
+def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
+                                assignment: Mapping[str, str], *, byte_budget: int,
+                                reserve_bytes: int = 0) -> tuple[dict[str, str], dict]:
+    """Spend a hard serialized-byte budget at per-unit routed granularity.
+
+    This is the allocator the D36 ruling asked for (PrismaQuant #2319): the
+    price surface is per unit -- one expert projection's own campaign rows --
+    and the export path used to express picks only whole per layer stack, so
+    a 188,331,767 B headroom bought nothing.  The rule is the corrected
+    derivation's, at unit granularity: repeatedly buy the best priced
+    single-unit upgrade that fits, ordered by ascending ``predicted_dloss``
+    delta per added wire byte (ties by unit name, then format spelling --
+    a total order, so the picks never depend on row insertion order), and
+    stop at the fixed point where no eligible single-unit upgrade fits the
+    remaining headroom.  Nothing here invents an objective, a default rung or
+    a stop-at-zero cutoff: the rows are the menu, the cap is hard.
+
+    ``costs`` is the campaign table ``{unit: {format: row}}``; a unit counts
+    as an upgrade candidate only when its CURRENT format's row and the
+    candidate row both carry exact ``predicted_dloss`` and ``wire_bytes`` and
+    both spellings parse to ONE Tessera grid (same family/body/plane; only
+    the rung differs), with a strictly positive byte delta -- a downgrade or
+    a same-bytes move is not an upgrade.  Units priced only at stack
+    granularity, units whose rows carry no exact price fields, and BF16 or
+    non-Tessera baselines stay grouped exactly where they were.
+    ``byte_budget`` is that hard cap, in PRICE-ROW WIRE DELTA bytes --
+    NOT a whole-artifact claim; ``reserve_bytes`` is an explicit fixed
+    reserve taken off the cap before any pick (metadata/sidecar allowances
+    the caller already owes), refused when it exceeds the budget.
+
+    Returns ``(picks, record)``: ``picks`` maps unit -> new format in pick
+    order, and ``record`` is the spend leg's own receipt -- budget, reserve,
+    spend cap, spent and remaining wire-delta bytes, and the rule -- with
+    ``whole_artifact_bytes_claimed`` false, because the whole-artifact
+    accounting is the export's own exact owner and this record does not
+    speak for it.
+    """
+    if type(byte_budget) is not int:
+        raise ExpertProjectionError(
+            f"byte_budget {byte_budget!r} is not an integer wire-delta byte cap")
+    if byte_budget < 0:
+        raise ExpertProjectionError(f"byte_budget {byte_budget} is negative")
+    if type(reserve_bytes) is not int:
+        raise ExpertProjectionError(
+            f"reserve_bytes {reserve_bytes!r} is not an integer wire-delta reserve")
+    if reserve_bytes < 0:
+        raise ExpertProjectionError(f"reserve_bytes {reserve_bytes} is negative")
+    if reserve_bytes > byte_budget:
+        raise ExpertProjectionError(
+            f"reserve_bytes {reserve_bytes} exceeds the byte_budget {byte_budget} "
+            "it is reserved from")
+    spend_cap = byte_budget - reserve_bytes
+
+    from .tessera_formats import parse_tessera_format_name
+
+    def _grid_rung(fmt: str):
+        parsed = parse_tessera_format_name(fmt)
+        if parsed is None:
+            return None
+        spec, rung = parsed
+        return (spec.base + ("" if spec.arity == 1 else f"x{spec.arity}"), int(rung))
+
+    current: dict[str, tuple[float, int]] = {}
+    for unit, fmt in assignment.items():
+        rows = costs.get(unit)
+        if not isinstance(rows, Mapping) or fmt not in rows:
+            continue  # not priced at unit granularity: stays grouped
+        baseline = rows.get(fmt)
+        if not isinstance(baseline, Mapping) or "wire_bytes" not in baseline \
+                or "predicted_dloss" not in baseline:
+            continue  # stack-only / sampled rows: stay grouped, never guessed
+        shape = _grid_rung(fmt)
+        if shape is None:
+            continue  # a non-Tessera baseline has no wire rows to climb
+        current[unit] = _priced_row(baseline, unit=unit, fmt=fmt)
+
+    current_fmt = {unit: assignment[unit] for unit in current}
+    spent = 0
+    picks: dict[str, str] = {}
+    eligible_rows = 0
+    first_scan = True
+    while True:
+        # Exactly one marginal per recompute: after every pick the margins
+        # move (a unit's second step prices from its new rung, and the
+        # remaining headroom shrinks), so a sorted snapshot from before the
+        # pick cannot price the next one.  The single best fitting marginal
+        # wins each round; the loop stops when no eligible priced upgrade
+        # fits -- the fixed point the rule names.
+        best_key = None
+        best_pick = None
+        for unit, (base_dloss, base_wire) in current.items():
+            base_grid, base_rung = _grid_rung(current_fmt[unit])
+            for fmt, row in costs[unit].items():
+                shape = _grid_rung(fmt) if isinstance(fmt, str) else None
+                if shape is None or shape[0] != base_grid or shape[1] == base_rung:
+                    continue  # another grid, or the rung the unit already runs
+                if not isinstance(row, Mapping):
+                    raise ExpertProjectionError(
+                        f"{unit}@{fmt}: cost row is not an object; the per-unit "
+                        "upgrade allocator prices exact campaign rows only")
+                if "predicted_dloss" not in row or "wire_bytes" not in row:
+                    continue  # an aggregated/sampled cell is not an exact price
+                dloss, wire = _priced_row(row, unit=unit, fmt=fmt)
+                delta = wire - base_wire
+                if delta <= 0:
+                    continue  # only upgrades spend the headroom
+                if first_scan:
+                    eligible_rows += 1
+                key = ((dloss - base_dloss) / delta, unit, fmt)
+                if delta <= spend_cap - spent and (
+                        best_key is None or key < best_key):
+                    best_key = key
+                    best_pick = (unit, fmt, delta, dloss, wire)
+        first_scan = False
+        if best_pick is None:
+            break
+        unit, fmt, delta, dloss, wire = best_pick
+        picks[unit] = fmt
+        spent += delta
+        current[unit] = (dloss, wire)
+        current_fmt[unit] = fmt
+
+    record = {
+        "schema": "prismaquant.priced_unit_upgrades.v1",
+        "currency": "price_row_wire_delta_bytes",
+        "byte_budget": byte_budget,
+        "reserve_bytes": reserve_bytes,
+        "spend_cap_bytes": spend_cap,
+        "spent_wire_delta_bytes": spent,
+        "remaining_wire_delta_bytes": spend_cap - spent,
+        "upgrades": len(picks),
+        "eligible_rows": eligible_rows,
+        "whole_artifact_bytes_claimed": False,
+        "rule": ("ascending predicted_dloss delta per wire-delta byte, ties by "
+                 "unit then format; single best eligible upgrade at a time; "
+                 "stops when no eligible priced upgrade fits the cap"),
+    }
+    return picks, record
 
 
 def expand_stack_decision_assignment(assignment: Mapping[str, Any], population: Any,
@@ -608,8 +961,12 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
     producer's projection, every projected unit must be placed by the
     assignment or an explicit population ``stack_decisions`` member map. A
     packed decision expands only for these receipt checks; members do not
-    acquire separate prices. Each executed stack must be assigned one format (the producer
-    plans one rung per stack), and every Tessera rung selected for a projected
+    acquire separate prices. Each executed stack whose units share one rung is
+    assigned that one format (``tessera_expert_stack_formats``, the
+    stack-uniform spelling); a stack whose units carry different rungs of one
+    grid is carried per unit under ``tessera_expert_unit_rungs`` and only
+    when the installed Tessera runtime publishes the v57 per-unit capability
+    (PrismaQuant #2319).  Every Tessera rung selected for a projected
     unit must have a receipt sealed under that unit's projection and that rung
     -- refused by name otherwise.  The receipts of exactly the selected rungs
     travel with the allocation (``tessera_expert_wires``), with the campaign's
@@ -634,7 +991,7 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
             raise ExpertProjectionError(
                 f"cost table population block is not {POPULATION_SCHEMA}; the allocation "
                 "cannot say which population was priced")
-        block[POPULATION_KEY] = json.loads(json.dumps(population, sort_keys=True))
+        block[POPULATION_KEY] = json.loads(DIRECT_ASCII_SPACED_LAX.text(population))
         if population.get("schema") == POPULATION_SCHEMA:
             unpriced = population.get("unpriced")
             if not isinstance(unpriced, Mapping) or set(unpriced) != {"dense", "routed_experts"}:
@@ -699,7 +1056,7 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
     projected_assignment, _owners = expand_stack_decision_assignment(
         assignment, population, units=units, stack_of=stack_of, costs=payload.get("costs", {}))
     selected = {name: str(projected_assignment[name]) for name in units}
-    stack_formats = require_stack_uniform_assignment(selected, stack_of, units)
+    stack_formats, unit_rungs = require_unit_assignment(selected, stack_of, units)
     wire_dir = provenance.get("wire_dir")
     if not isinstance(wire_dir, str) or not wire_dir:
         raise ExpertProjectionError(
@@ -726,9 +1083,11 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
         receipts[name] = check_expert_wire_receipt(
             record, name=name, unit=units[name], q256=int(q256),
             grid=family.payload_grid().name)
-    block[PROJECTION_KEY] = json.loads(json.dumps(carried, sort_keys=True))
+    block[PROJECTION_KEY] = json.loads(DIRECT_ASCII_SPACED_LAX.text(carried))
     block[EXPERT_WIRES_KEY] = receipts
     block[STACK_FORMATS_KEY] = dict(stack_formats)
+    if unit_rungs:
+        block[UNIT_RUNGS_KEY] = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
     block[WIRE_DIR_KEY] = wire_dir
     return block
 
@@ -773,7 +1132,8 @@ __all__ = [
     "declared_stacks_from_members",
     "producer_plan_tool",
     "request_expert_projection",
-    "require_stack_uniform_assignment",
+    "require_unit_assignment",
+    "select_priced_unit_upgrades",
     "source_unit_weight",
     "stack_plan_request",
     "unit_name_of",

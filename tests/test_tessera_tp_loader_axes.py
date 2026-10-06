@@ -286,10 +286,13 @@ def test_the_reviewed_answer_carries_the_axis_statuses():
     answer = trc.TESSERA_DEV_PIN_ANSWER
     for family in (E2M1, FP8, BF16):
         entry = answer["families"][family]
-        assert set(entry) == {
+        expected = {
             "reader_rate_range_q256", "attested_rungs_q256", "max_world_size",
             "loader_axes",
         }
+        if family in {FP8, BF16}:
+            expected.add("allowable_rungs")
+        assert set(entry) == expected
         assert set(entry["loader_axes"]) == {"row", "column"}
         assert set(entry["loader_axes"].values()) <= {"sharded", "refused"}
     assert answer["families"][E2M1]["loader_axes"]["row"] == "sharded"

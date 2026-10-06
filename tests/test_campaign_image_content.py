@@ -1,19 +1,15 @@
 """A portable tag may resolve differently, but its executable content is fixed."""
 from copy import deepcopy
+import hashlib
 from pathlib import Path
 from subprocess import CompletedProcess
 import json
 
 import pytest
 
-from tools import container_runtime_identity as identity
+from container_inspection_fixture import inspection
+from prismaquant import container_runtime_identity as identity
 from tools import tessera_campaign_container as runner
-
-
-def inspection():
-    return {"Id": "sha256:" + "1" * 64, "Os": "linux", "Architecture": "arm64",
-            "RootFS": {"Type": "layers", "Layers": ["sha256:" + "2" * 64]},
-            "Config": {"Env": ["PATH=/bin"], "Entrypoint": ["/entry"], "Cmd": []}}
 
 
 def test_content_identity_survives_backend_ids_and_local_tags():
@@ -96,3 +92,40 @@ def test_changed_portable_tag_refuses_before_container_launch(monkeypatch):
 def test_malformed_declared_seal_refuses(value):
     with pytest.raises(RuntimeError, match="content_sha256"):
         runner.validate_container({"container": {"image": "qualified:portable", "content_sha256": value}})
+
+
+@pytest.fixture
+def actual_derivative_build():
+    """The retained, audited real Docker build, not a fabricated inspection."""
+    path = (Path(__file__).resolve().parents[1] / "experiments/measurements"
+            / "glm-derivative-contract-20260908/image-build-result.json")
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == (
+        "e8426d3554180219a0fff421149118a9e0a17ef7a2091c5a03e21834dd1744c5")
+    return json.loads(raw)
+
+
+def test_actual_original_and_corrected_images_keep_their_content_identity(actual_derivative_build):
+    from prismaquant.glm_source_derivative import validate_image_build
+
+    build = actual_derivative_build
+    assert identity.image_content_sha256(build["original_image"]) == build["original_image_content_sha256"]
+    assert identity.image_content_sha256(build["corrected_image"]) == build["corrected_image_content_sha256"]
+    assert validate_image_build(build) is build
+
+
+def test_actual_build_refuses_changed_runtime_configuration(actual_derivative_build):
+    from prismaquant.glm_source_derivative import validate_image_build
+
+    build = actual_derivative_build
+    build["corrected_image"]["Config"]["Env"].append("PRISMAQUANT_WRONG_RUNTIME=1")
+    assert identity.image_content_sha256(build["corrected_image"]) != build["corrected_image_content_sha256"]
+    with pytest.raises(ValueError, match="image build config or layer content differs"):
+        validate_image_build(build)
+
+
+def test_actual_image_refuses_missing_runtime_configuration(actual_derivative_build):
+    image = actual_derivative_build["original_image"]
+    del image["Config"]
+    with pytest.raises(identity.RuntimeIdentityError, match="Docker image has no runtime Config"):
+        identity.image_content_sha256(image)

@@ -17,7 +17,7 @@ import pickle
 import tempfile
 from typing import Any
 
-from .digests import is_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, is_sha256hex
 
 
 REPORT_SCHEMA = "prismaquant.prepriced_cost_input.v1"
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_sha256=args.expected_sha256)
             if args.report:
                 _write_report(Path(args.report), report)
-        print(json.dumps(report, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text(report))
     except (OSError, ValueError) as exc:
         parser.exit(2, f"[prepriced-cost] ERROR: {exc}\n")
     return 0

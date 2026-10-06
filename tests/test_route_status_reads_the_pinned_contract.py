@@ -151,13 +151,15 @@ def test_the_published_formats_come_off_the_same_pinned_file():
     ``rung_not_listed`` (the family resolved, the rate is not in a cell), and
     ``no_cell`` there would mean the formats table was never read.
     """
+    from prismaquant.lane_eligibility import load_eligibility_table
+    table = load_eligibility_table(contract_path=contract_path())
     for (platform, family, structure, _rung), cells in sorted(
             _cell_groups().items()):
         if platform != "sm_121":
             continue
-        attested = {
-            int(r) for c in _cells() if c["family"] == family
-            for r in (c.get("rungs_q256") or c.get("rungs") or ())}
+        attested = {r for c in table.cells
+                    if c.platform == platform and c.family == family
+                    and c.structure == structure for r in c.covered_rates}
         lo, hi = (int(v) for v in _format_row(family)["reader_rate_range_q256"])
         spare = next((r for r in range(lo, hi + 1) if r not in attested), None)
         if spare is None:  # a family the runtime reads at exactly one rate

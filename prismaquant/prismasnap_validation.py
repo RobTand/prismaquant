@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import fcntl
-import hashlib
 import io
 import json
 import math
@@ -49,7 +48,13 @@ from .prismasnap_checkpoint import (
     _derivation_digest,
 )
 from .schemas import strict_json_loads
-from .digests import SHA256_HEX, file_sha256hex, is_sha256hex
+from .digests import (
+    DIRECT_UTF8_INDENT2_STRICT,
+    SHA256_HEX,
+    bytes_sha256hex,
+    file_sha256hex,
+    is_sha256hex,
+)
 
 
 PROVENANCE_SCHEMA = "prismaquant.prismasnap.provenance.v1"
@@ -1127,7 +1132,7 @@ def _validated_source_identity_binding(
     portable = portable_streamed_model_content_identity(
         identity, where="PrismaSnap attested portable source identity"
     )
-    return identity, portable, hashlib.sha256(identity_bytes).hexdigest()
+    return identity, portable, bytes_sha256hex(identity_bytes)
 
 
 def _argv_flag(argv: Sequence[object], flag: str, *, where: str) -> str:
@@ -1305,7 +1310,7 @@ def _calibration_tensor_sha256(value: torch.Tensor) -> str:
         {
             "shape": list(contiguous.shape),
             "dtype": str(contiguous.dtype),
-            "bytes_sha256": hashlib.sha256(raw).hexdigest(),
+            "bytes_sha256": bytes_sha256hex(raw),
         },
         where="PrismaSnap fold calibration ids",
     )
@@ -1544,7 +1549,7 @@ def attest_fold_fidelity(
         teacher_payload_bytes = _read_regular_bytes(
             requested_payload, where="PrismaSnap teacher payload"
         )
-        teacher_payload_sha256 = hashlib.sha256(teacher_payload_bytes).hexdigest()
+        teacher_payload_sha256 = bytes_sha256hex(teacher_payload_bytes)
         if student.get("teacher_payload_sha256") != teacher_payload_sha256:
             raise RuntimeError(
                 "PrismaSnap student result names different teacher payload bytes"
@@ -1634,7 +1639,7 @@ def attest_fold_fidelity(
                 "plan_threshold": float(limit),
                 "null_floor_kl_mean": floor,
                 "multiplier": ATTEST_NULL_FLOOR_MULTIPLIER,
-                "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+                "receipt_sha256": bytes_sha256hex(receipt_bytes),
                 "arms": [dict(arm) for arm in arms],
             }
         if (
@@ -1664,8 +1669,8 @@ def attest_fold_fidelity(
             "n_samples": student["n_samples"],
             "seqlen": student["seqlen"],
             "vocab_size": student["vocab_size"],
-            "student_result_sha256": hashlib.sha256(student_bytes).hexdigest(),
-            "teacher_meta_sha256": hashlib.sha256(teacher_meta_bytes).hexdigest(),
+            "student_result_sha256": bytes_sha256hex(student_bytes),
+            "teacher_meta_sha256": bytes_sha256hex(teacher_meta_bytes),
             "teacher_payload_sha256": teacher_payload_sha256,
             "source_identity_sha256": source_identity_sha256,
             "source_portable_content_sha256": provenance[
@@ -1703,9 +1708,7 @@ def attest_fold_fidelity(
         temporary = root / f".{PROVENANCE_JSON}.verification.tmp"
         if os.path.lexists(temporary):
             raise RuntimeError(f"stale PrismaSnap verification temporary: {temporary}")
-        data = json.dumps(
-            provenance, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
-        ).encode("utf-8")
+        data = DIRECT_UTF8_INDENT2_STRICT.encoded(provenance)
         with temporary.open("xb") as handle:
             handle.write(data)
             handle.flush()

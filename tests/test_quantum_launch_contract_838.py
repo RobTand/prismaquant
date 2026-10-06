@@ -264,7 +264,7 @@ def test_consumer_verify_accepts_valid_pretty_receipt(tmp_path):
     bound = _produce(campaign, receipt=receipt)
     record, record_path, _ = _publish_layer_000(tmp_path, bound)
     slice_path = Path(record["adjoint"]["slice_path"])
-    found, loaded = quantum.verify_quantum_identity(
+    found, loaded, _record_bytes = quantum.verify_quantum_identity(
         quantum_path=record_path, quantum_sha256=_sha(record_path),
         plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],
         prepared_path=campaign["prepared_path"],
@@ -295,7 +295,7 @@ def test_consumer_parser_and_verify_drive_the_dispatched_row(tmp_path, portable_
         record, record_path=record_path, output_root=campaign["root"]))
     args = quantum.build_parser().parse_args(inner[3:])
     assert args.data_manifest_sha256 == record["read_set"]["manifest_sha256"]
-    found, loaded = quantum.verify_quantum_identity(
+    found, loaded, _record_bytes = quantum.verify_quantum_identity(
         quantum_path=Path(args.quantum), quantum_sha256=args.quantum_sha256,
         plan_path=Path(args.plan), plan_sha256=args.plan_sha256,
         prepared_path=Path(args.prepared), prepared_sha256=args.prepared_sha256,

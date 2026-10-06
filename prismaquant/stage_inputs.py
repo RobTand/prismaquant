@@ -24,8 +24,17 @@ from .schemas import Contract
 require = Contract(ValueError).require
 
 
-def same(actual, expected, label):
-    require(actual == expected, f"{label}: identity mismatch")
+def same(actual, expected, label, *, contract: Contract | None = None):
+    """Actual two-thing comparability with the caller's refusal vocabulary."""
+    check = require if contract is None else contract.require
+    check(actual == expected, f"{label}: identity mismatch")
+
+
+def recorded_same(actual, expected, label):
+    """Recorded-versus-running provenance, stamped in default dev mode."""
+    from .dev_mode import seal_check
+    seal_check(label, expected, actual, where="Stage A/B recorded versus running provenance",
+               refusal=lambda: ValueError(f"{label}: identity mismatch"))
 
 
 def bound(record, label):

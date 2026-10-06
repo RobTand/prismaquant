@@ -80,9 +80,11 @@ def test_cap_refuses_before_opening_or_allocating(capture, monkeypatch):
     path = capture[0]/'inputs/a.pt'
     def refuse(*args, **kwargs):
         pytest.fail('oversized input was opened')
-    monkeypatch.setattr(px.os, 'open', refuse)
-    with pytest.raises(RuntimeError, match='buffer budget'):
-        load(path, policy=policy(buffer=1))
+    # os is shared with pytest; restore the sentinel before temporary cleanup.
+    with monkeypatch.context() as patch:
+        patch.setattr(px.os, 'open', refuse)
+        with pytest.raises(RuntimeError, match='buffer budget'):
+            load(path, policy=policy(buffer=1))
 
 
 def test_selected_roster_preflight_refuses_before_any_load(capture, monkeypatch):

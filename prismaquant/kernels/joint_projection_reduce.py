@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import torch
+from prismaquant.digests import bytes_sha256hex
 
 
 CUDA_FLAGS = ['-O3', '--fmad=false', '--ftz=false', '--prec-div=true', '--prec-sqrt=true', '-lineinfo']
@@ -69,11 +70,11 @@ def build_identity():
              'ATen/native/cuda/thread_constants.h', 'ATen/cuda/DeviceUtils.cuh',
              'ATen/TensorIterator.h']
     return {'source_sha256': _source_digest(),
-            'python_source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'python_source_sha256': bytes_sha256hex(Path(__file__).read_bytes()),
             'torch': str(torch.__version__),
             'torch_git': torch.version.git_version, 'cuda': torch.version.cuda,
             'arch_list': os.environ.get('TORCH_CUDA_ARCH_LIST'),
             'cpp_flags': CPP_FLAGS, 'cuda_flags': CUDA_FLAGS,
             'binary_path': module.__file__,
-            'binary_sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest(),
-            'headers': {name: hashlib.sha256((include / name).read_bytes()).hexdigest() for name in names}}
+            'binary_sha256': bytes_sha256hex(Path(module.__file__).read_bytes()),
+            'headers': {name: bytes_sha256hex((include / name).read_bytes()) for name in names}}

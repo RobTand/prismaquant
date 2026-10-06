@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
-from prismaquant.digests import file_sha256hex
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
 from prismaquant.tessera_export_lane import read_cached_unit_bundle
 from tessera.cached_unit import (CACHE_SCHEMA, COMPOSED_CACHE_SCHEMA,
                                  CachedUnitBundle, read_manifest)
@@ -72,15 +72,14 @@ def main(argv=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     if not publish_new_bytes(output, raw):
         raise FileExistsError(f'cached composition output exists: {output}')
-    print(json.dumps({'schema': 'prismaquant.cached_unit_composition_handoff.v1',
+    print(DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.cached_unit_composition_handoff.v1',
                       'manifest': str(output.resolve()),
                       'manifest_sha256': hashlib.sha256(raw).hexdigest(),
                       'children': bundle.child_manifests,
                       'units': len(bundle.units),
                       'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
                       'warnings': bundle.warnings,
-                      'export_qualified': False, 'serving_qualified': False},
-                     sort_keys=True))
+                      'export_qualified': False, 'serving_qualified': False}))
     return 0
 
 

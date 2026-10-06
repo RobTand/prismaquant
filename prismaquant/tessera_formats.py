@@ -1791,7 +1791,8 @@ class TesseraRateSurface:
 
     def identity(self) -> str:
         """Canonical JSON of the surface, for provenance stamping."""
-        return json.dumps(
+        from .digests import DIRECT_ASCII_LAX
+        return DIRECT_ASCII_LAX.text(
             {
                 "family": self.family,
                 "mode": self.mode,
@@ -1800,9 +1801,7 @@ class TesseraRateSurface:
                 "anchor_q256": list(self.anchor_q256),
                 "proposed_q256": list(self.proposed_q256),
                 "source_identity_sha256": self.source_identity_sha256,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+            }
         )
 
 

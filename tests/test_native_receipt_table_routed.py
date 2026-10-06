@@ -891,9 +891,34 @@ _QUALITY_MUTATIONS = {
     "cache_bytes": "owned bytes",
 }
 
+@pytest.fixture(scope="module")
+def _glm_quality_template(tmp_path_factory):
+    """Build the expensive real 864-member baseline once, in consumer context."""
+    baseline = []
+
+    def prepare():
+        if not baseline:
+            root = tmp_path_factory.mktemp("glm-quality-template")
+            cell = _glm_cell(root)
+            completion = json.loads((root / "qualified-completion.json").read_text())
+            baseline.append((cell, completion))
+        return baseline[0]
+
+    return prepare
+
+
+@pytest.fixture
+def glm_quality_cell(tmp_path, _glm_quality_template):
+    """Private object graph and freshly bound private files for every mutation."""
+    template, completion = _glm_quality_template()
+    inputs, preflight, rows = copy.deepcopy(template)
+    _bind_glm_quality_fixture(tmp_path, inputs, completion["source_model_identity"],
+                              completion["calibration_input"])
+    return inputs, preflight, rows
+
 
 @pytest.mark.parametrize("mutation", sorted(_QUALITY_MUTATIONS))
-def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
+def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation, glm_quality_cell):
     """One forged field per run, each refused by the gate that owns it.
 
     The quality identity is the whole container's render and the cut proof is
@@ -902,7 +927,7 @@ def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
     refusal must name the thing that was forged.
     """
     from prismaquant import native_moe_panel as native
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     member = inputs["members"][0]
     joint = rows[member["unit"]]["joint_operator_identity"]
     if mutation == "full_hash":
@@ -930,10 +955,10 @@ def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
         native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
 
 
-def test_a_rank_local_panel_refuses_an_unbound_quality_preparation(tmp_path):
+def test_a_rank_local_panel_refuses_an_unbound_quality_preparation(tmp_path, glm_quality_cell):
     """No bound historical preparation, no rank-local panel -- refused by name."""
     from prismaquant import native_moe_panel as native
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     del inputs["quality_preparation"]
     with pytest.raises(ValueError, match="requires independently bound full-quality preparation"):
         native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
@@ -960,7 +985,7 @@ def test_a_rank_local_preparation_refuses_an_unbound_quality_preparation(monkeyp
             probe_request={})
 
 
-def test_the_frozen_joint_names_the_container_render_not_the_rank_cut(tmp_path):
+def test_the_frozen_joint_names_the_container_render_not_the_rank_cut(tmp_path, glm_quality_cell):
     """The positive half: the quality identity is the WHOLE module's render.
 
     The panel keeps both readings and they are different objects -- the joint
@@ -968,7 +993,7 @@ def test_the_frozen_joint_names_the_container_render_not_the_rank_cut(tmp_path):
     binding name this rank's cut.
     """
     from prismaquant import native_moe_panel as native
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     expected = copy.deepcopy(inputs["quality_preparation"])
     frozen = native.freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
     member = frozen["members"][0]
@@ -987,10 +1012,10 @@ def test_the_frozen_joint_names_the_container_render_not_the_rank_cut(tmp_path):
 
 
 @pytest.mark.parametrize("rank", [0, 1])
-def test_the_rank_render_proof_moves_its_window_with_the_rank(tmp_path, rank):
+def test_the_rank_render_proof_moves_its_window_with_the_rank(tmp_path, rank, glm_quality_cell):
     """Each rank's proof names its own window of one unchanged container."""
     from prismaquant import native_moe_panel as native
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     inputs["shape"]["tensor_parallel_rank"] = rank
     inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
     preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
@@ -1005,7 +1030,7 @@ def test_the_rank_render_proof_moves_its_window_with_the_rank(tmp_path, rank):
     assert member["quality_rendered_weight"]["shape"] == [GLM_INTERMEDIATE, GLM_HIDDEN]
 
 
-def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
+def test_a_glm_288_owner_prices_two_ranks_end_to_end(tmp_path, glm_quality_cell):
     """The main objective's geometry: 288 experts, top-8, TP2, one atomic row.
 
     Nothing here is a measurement -- the receipts are synthetic CPU fixtures --
@@ -1014,7 +1039,7 @@ def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
     the rank-local shapes the served route reads (1024x4096, not 2048x4096), and
     the loader's own gate re-deriving every rank's bytes.
     """
-    cell = _glm_cell(tmp_path)
+    cell = glm_quality_cell
     phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
     item, context, relation, panel, _receipts = _routed_gate(
         cell, tmp_path, world_size=GLM_TP, samples=[FAST, SLOW], phases=phases,
@@ -1036,19 +1061,13 @@ def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
     assert isinstance(admitted.resources, RuntimeRankResources)
     assert admitted.resources.world_size == GLM_TP and len(admitted.resources.ranks) == GLM_TP
     assert panel["execution"]["tensor_parallel"] == GLM_TP
-
-
-def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined, tmp_path):
-    """288 experts do not change the rule: one rank's bound is not the world's."""
-    cell = _glm_cell(tmp_path)
-    phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
-    item, _context, _relation, _panel, receipts = _routed_gate(
-        cell, tmp_path, world_size=GLM_TP, phases=phases, route_shape=GLM_ROUTE_SHAPE)
-    collapsed = copy.deepcopy(item["row"]["resources"])
+    # Reuse the same genuine world row for its single-rank-vector refusal.
+    # The parse mutates no file or row; only the private copy is truncated.
+    collapsed = copy.deepcopy(resources)
     collapsed["ranks"] = collapsed["ranks"][:1]
     with pytest.raises(RuntimePriceError, match="exactly one record per rank"):
         parse_row_resources(collapsed, tensor_parallel=GLM_TP, where="glm row")
-    assert len(receipts) == GLM_TP
+    assert len(_receipts) == GLM_TP
 
 
 # --------------------------------------------------------------------------
@@ -1058,7 +1077,7 @@ def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined
 GLM_CLI_BUDGETS = (10 ** 9, 10 ** 9)
 
 
-def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
+def _glm_cli_fixture(tmp_path, glm_quality_cell, *, budgets=GLM_CLI_BUDGETS):
     """A GLM-288 cost model, its measured owner row, and a sealed per-rank charge.
 
     The row is the emitter's own: one atomic whole-owner row whose members are
@@ -1076,7 +1095,7 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
     from prismaquant.measured_runtime_prices import CONTEXT_SCHEMA, SCHEMA
     from test_runtime_rank_resources import _sealed_per_rank_partition
 
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     # The owner's canonical wire extent is what the DP's aggregated candidate
     # prices, so the fixture's wire records carry each member's real serialized
     # extent rather than a placeholder. Without that the two sides of one
@@ -1175,7 +1194,8 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
     return argv, partition_path, panel
 
 
-def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_path, monkeypatch):
+def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(
+        tmp_path, monkeypatch, glm_quality_cell):
     """The main objective's own geometry, end to end through ``allocator.main``.
 
     A whole routed owner is one DP item named by the allocator's aggregation
@@ -1185,7 +1205,7 @@ def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_p
     GPU ran: every receipt and cost row here is a synthetic CPU fixture.
     """
     admit_synthetic_table(monkeypatch)
-    argv, _partition, _panel = _glm_cli_fixture(tmp_path)
+    argv, _partition, _panel = _glm_cli_fixture(tmp_path, glm_quality_cell)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
     monkeypatch.setattr(sys, "argv", argv)
     from prismaquant import allocator
@@ -1209,14 +1229,14 @@ def test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members(tmp_p
     assert len(ranked["ranks"]) == GLM_TP
 
 
-def test_the_cli_refuses_a_forged_or_changed_rank_report(tmp_path, monkeypatch):
+def test_the_cli_refuses_a_forged_or_changed_rank_report(tmp_path, monkeypatch, glm_quality_cell):
     """The admitted budget is only as good as the per-rank evidence behind it.
 
     Two defects a scalar world total cannot see: the partition redistributes
     one world's numbers between its ranks, and a rank row points at its peer's
     capture. Both refuse by name, before any solve runs.
     """
-    argv, partition_path, _panel = _glm_cli_fixture(tmp_path)
+    argv, partition_path, _panel = _glm_cli_fixture(tmp_path, glm_quality_cell)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
     partition = json.loads(partition_path.read_text())
     redistributed = copy.deepcopy(partition)

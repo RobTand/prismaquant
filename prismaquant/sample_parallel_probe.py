@@ -39,7 +39,13 @@ from prismaquant.sample_parallel_probe_contract import (
 )
 from prismaquant.sensitivity_probe import load_calibration
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_STRICT, DIRECT_UTF8_STRICT, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_STRICT,
+    DIRECT_UTF8_STRICT,
+    bytes_sha256hex,
+    file_sha256hex,
+)
 
 
 CALIBRATION_SCHEMA = "prismaquant.sample_parallel_probe.calibration.v1"
@@ -168,7 +174,7 @@ def _canonical_sha256(value: object, *, where: str) -> str:
         raise SampleParallelProbeError(
             f"{where} is not canonical JSON data"
         ) from exc
-    return hashlib.sha256(encoded).hexdigest()
+    return bytes_sha256hex(encoded)
 
 
 def _fsync_directory(path: Path) -> None:
@@ -757,9 +763,7 @@ def prepare_global_calibration(
         "partition_contracts": partition_contracts,
     }
     manifest = validate_calibration_manifest(manifest)
-    manifest_bytes = (
-        json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
-    )
+    manifest_bytes = DIRECT_ASCII_INDENT2_LAX.encoded(manifest) + b"\n"
     if manifest_path.exists():
         try:
             existing_manifest = _strict_json_loads(
@@ -1032,7 +1036,7 @@ def write_local_importance_stats(
     }
     _atomic_write_bytes_no_clobber(
         Path(path),
-        json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n",
+        DIRECT_ASCII_INDENT2_LAX.encoded(payload) + b"\n",
     )
     return payload
 
@@ -1225,7 +1229,7 @@ def merge_importance_stats(
     }
     _atomic_write_bytes_no_clobber(
         Path(output_path),
-        json.dumps(receipt, indent=2, sort_keys=True).encode("utf-8") + b"\n",
+        DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b"\n",
     )
     return receipt
 
@@ -2706,7 +2710,7 @@ def publish_sample_parallel_merge_bundle(
             "probe": {
                 "path": MERGE_BUNDLE_PROBE,
                 "bytes": len(probe_bytes),
-                "sha256": hashlib.sha256(probe_bytes).hexdigest(),
+                "sha256": bytes_sha256hex(probe_bytes),
             },
             "activation_cache": {
                 "path": MERGE_BUNDLE_ACTIVATIONS,
@@ -2725,7 +2729,7 @@ def publish_sample_parallel_merge_bundle(
         )
         _atomic_write_bytes_no_clobber(
             temporary / MERGE_BUNDLE_COMMIT,
-            json.dumps(commit, sort_keys=True, indent=2).encode("utf-8")
+            DIRECT_ASCII_INDENT2_LAX.encoded(commit)
             + b"\n",
         )
         _fsync_directory(temporary)

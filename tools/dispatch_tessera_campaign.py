@@ -255,7 +255,7 @@ WEIGHTS_ONLY_FORBIDDEN_MODULES = frozenset({"prismaquant.tessera_campaign"})
 
 
 def load_fleet_interpreters(path=None) -> dict:
-    """The placement attestation table, checked for shape before it is trusted."""
+    """Validate active placement attestations and separately retained history."""
 
     source = Path(path) if path is not None else FLEET_INTERPRETERS
     table = json.loads(source.read_text())
@@ -271,16 +271,22 @@ def load_fleet_interpreters(path=None) -> dict:
         for field in ("isa", "gpu_runtime"):
             if not isinstance(shape.get(field), str) or not shape[field]:
                 raise RowClassRefused(f"{source}: tag {tag!r} declares no {field}")
-        interpreters = shape.get("interpreters")
-        if not isinstance(interpreters, dict):
-            raise RowClassRefused(
-                f"{source}: tag {tag!r} declares no interpreters mapping")
-        for interpreter, record in interpreters.items():
-            if not isinstance(record, dict) or not isinstance(
-                    record.get("attested_by"), str) or not record["attested_by"]:
+        for field in ("interpreters", "retired_interpreters"):
+            interpreters = shape.get(field, {} if field == "retired_interpreters" else None)
+            if not isinstance(interpreters, dict):
                 raise RowClassRefused(
-                    f"{source}: interpreter {interpreter} on tag {tag!r} names no "
-                    "PrismaBuild action key that ran it")
+                    f"{source}: tag {tag!r} declares no {field} mapping")
+            for interpreter, record in interpreters.items():
+                if not isinstance(record, dict) or not isinstance(
+                        record.get("attested_by"), str) or not record["attested_by"]:
+                    raise RowClassRefused(
+                        f"{source}: interpreter {interpreter} on tag {tag!r} names no "
+                        "PrismaBuild action key that ran it")
+        overlap = shape["interpreters"].keys() & shape.get("retired_interpreters", {}).keys()
+        if overlap:
+            raise RowClassRefused(
+                f"{source}: tag {tag!r} lists interpreters as both active and retired: "
+                f"{sorted(overlap)}")
     return table
 
 
@@ -362,7 +368,7 @@ def _class_isa(resolved: dict, fleet: dict) -> str:
 
 
 def _attest_placement(resolved: dict, fleet: dict) -> None:
-    """Refuse a class this fleet cannot actually run where it is sent."""
+    """Check device capability; stamp or refuse recorded host attestation."""
 
     tags = fleet["tags"]
     container = resolved.get("container")
@@ -378,13 +384,22 @@ def _attest_placement(resolved: dict, fleet: dict) -> None:
                     "without the device it was admitted for")
             continue
         if resolved["python"] not in shape["interpreters"]:
+            from prismaquant.dev_mode import seal_check
+
             attested = sorted(shape["interpreters"])
-            raise RowClassRefused(
-                f"row class {resolved['name']!r} runs {resolved['python']}, "
-                f"which is not attested on tag {tag!r}; that tag attests "
-                f"{attested or 'no host interpreter'}. Run it there once and "
-                f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                "action key, or give the class a container")
+            history = (" This interpreter is retired; its retained receipt is history, "
+                       "not placement admission."
+                       if resolved["python"] in shape.get("retired_interpreters", {})
+                       else "")
+            seal_check(
+                "host interpreter placement attestation", attested, resolved["python"],
+                where=f"row class {resolved['name']!r} on tag {tag!r}", same=False,
+                refusal=lambda: RowClassRefused(
+                    f"row class {resolved['name']!r} runs {resolved['python']}, "
+                    f"which is not attested on tag {tag!r}; that tag attests "
+                    f"{attested or 'no host interpreter'}. Run it there once and "
+                    f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
+                    f"action key, or give the class a container.{history}"))
 
 
 def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
@@ -1630,6 +1645,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     the first row kind that is built for another one records it in its own
     plan entry when it lands.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
     if resolved["weights_only"]:
         if module in WEIGHTS_ONLY_FORBIDDEN_MODULES:
@@ -1661,7 +1677,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
             container_spec["container_admission_reference"] = resolved["container_admission_reference"]
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   json.dumps(container_spec, sort_keys=True), "--", *command]
+                   DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
         # The class owns the image: whatever container this row resolved runs
         # is what PrismaBuild must find on the claiming box before the claim
         # (RobTand/prismabuild#714). Without an explicit portable override,
@@ -2842,12 +2858,13 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     declares nothing because its launcher loads and verifies the image inside
     the action (RobTand/prismabuild#714).
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     if container_spec is None:
         spec = Path(args.spec).read_text()
         parsed_spec = json.loads(spec)
     else:
         parsed_spec = container_spec
-        spec = json.dumps(container_spec, sort_keys=True)
+        spec = DIRECT_ASCII_SPACED_LAX.text(container_spec)
     container_image = admission_image_reference(parsed_spec)
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
     if gpu_memory_gb is not None:

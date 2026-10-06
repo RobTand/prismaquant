@@ -14,6 +14,10 @@ from test_layer_streaming_mxfp4_isolation import native_dsv4_session
         "../test_model_walk.py::test_dsv4_walk_fails_without_the_profile_rules",
     ), id="model-walk-1957-1958"),
     pytest.param((
+        "../test_model_walk_export_gate.py::"
+        "test_dsv4_real_topology_passes_the_gate_end_to_end",
+    ), id="model-walk-export-gate-2276"),
+    pytest.param((
         "../test_grouped_linear_fisher.py::test_real_dsv4_wo_a_gets_a_priced_probe_row",
     ), id="grouped-fisher-1959"),
     pytest.param((

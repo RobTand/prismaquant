@@ -198,9 +198,40 @@ references to another repository do not satisfy this check.
     **Severity rubric.** `P0` -- can ship or serve a wrong artifact. `P1` -- a
     gate that cannot catch its own defect, or a wrong or underived number that
     a decision reads. `P2` -- provenance, observability, or a claim beyond its
-    evidence. `P3` -- cleanup with no decision riding on it. Two orthogonal
-    labels: `measurement-needed` when a GPU or served A/B decides it, and
-    `needs-decision` when the answer is a trade only Rob prices.
+    evidence. `P2+` -- an important `P2` with a documented objective urgency
+    trigger: it blocks a named, already required near-term acceptance or
+    handoff from obtaining trustworthy evidence, irreplaceable evidence sits
+    at a concrete retention/deletion deadline, or measured recurring resource
+    waste threatens an approved campaign's admitted resource window. Name the
+    milestone/deadline or measurement and its causal effect; a generic
+    blocker, annoyance, or assertion of importance is not a trigger, and
+    `P2+` is never a `P1` downgrade -- if missing provenance defeats a safety
+    gate or changes a decision number, file `P1` or `P0`. `P3` -- cleanup with
+    no decision riding on it. Two orthogonal labels: `measurement-needed` when
+    a GPU or served A/B decides it, and `needs-decision` when the answer is a
+    trade only Rob prices.
+
+    **One visible canonical priority.** Every newly filed, reopened, or
+    materially triaged owned issue carries exactly one leading title prefix --
+    `[P0]`, `[P1]`, `[P2+]`, `[P2]`, or `[P3]` -- before handoff; body prose,
+    a local ledger, or a status label alone does not satisfy this. Where the
+    matching repository priority label exists (`P0`, `P1`, `P2`, `P2+`, `P3`
+    all do), apply exactly that one priority label and remove other priority
+    labels; the orthogonal labels above may coexist. If the matching label is
+    absent, the leading prefix supplies the canonical priority until an
+    authorized maintainer adds it: never substitute `P2` for `P2+` and never
+    create labels without authority. A missing prefix, multiple priority
+    labels, or a title/label mismatch blocks handoff and closure until the
+    owner encodes one evidence-backed classification, and the issue routes at
+    the highest displayed tier meanwhile. The review parent reviews severity,
+    disposition and acceptance within its authority; urgent safe action need
+    not wait for that review. Severity stays orthogonal to status: a GPU
+    hold, missing owner, or user decision neither lowers it nor by itself
+    promotes `P2` to `P2+`. A material reprioritization leaves an audit
+    comment (old -> new priority, changed evidence, reason, reviewer), title
+    and label updated together. No mass relabel or retrospective
+    reprioritization of historical issues; a demonstrated `P0` path stays
+    `P0`.
 
     **One exception, narrower than it was.** A finding in prose -- a doc, a
     comment, a docstring -- is *fixed on sight* and never filed: reading the

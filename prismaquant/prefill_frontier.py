@@ -70,7 +70,6 @@ select a non-hull assignment. Neither lane qualifies served latency or quality.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -78,7 +77,12 @@ from pathlib import Path
 from typing import Sequence
 
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    bytes_sha256hex,
+    file_digest_sha256hex,
+    file_sha256hex,
+)
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import (
     BOOTSTRAP_CONFIDENCE, BOOTSTRAP_DRAWS, BOOTSTRAP_SEED, identity_sha256)
@@ -398,7 +402,7 @@ def _publish_assignment(assignments_dir: Path, *, assignment: dict, digest: str,
     """
     path = assignments_dir / f"{digest}.json"
     payload = _assignment_payload(assignment, digest, provenance_stub)
-    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    encoded = DIRECT_ASCII_INDENT2_LAX.encoded(payload) + b"\n"
     if publish_new_bytes(path, encoded):
         return path, {key: str(value) for key, value in provenance_stub.items()}
     return path, _verify_reusable_assignment(path, assignment=assignment, digest=digest,
@@ -615,7 +619,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
     from .aura_cost import _git_commit
     cost_path = Path(ctx.cost_path)
     with cost_path.open("rb") as stream:
-        cost_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+        cost_sha256 = file_digest_sha256hex(stream)
     provenance = {
         "git_commit": _git_commit(),
         "table_identity": dict(ctx.table_identity),
@@ -1168,7 +1172,7 @@ def replay(frontier: Path, digest: str, output: Path) -> None:
             raise PrefillFrontierError("replay point target_bits differs from sweep")
         stamp = {
             "schema": REPLAY_SCHEMA,
-            "frontier_sha256": hashlib.sha256(raw).hexdigest(),
+            "frontier_sha256": bytes_sha256hex(raw),
             "assignment_sha256": digest,
             "slo_ms": point["slo_ms"], "target_bits": point["target_bits"],
             "table_identity": ctx.table_identity,

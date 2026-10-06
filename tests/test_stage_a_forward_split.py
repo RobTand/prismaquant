@@ -405,3 +405,56 @@ def test_the_join_command_refuses_with_exit_2_and_joins_a_whole_plane(
     receipt = json.loads(receipt_path.read_text())
     assert receipt["chain_state"]["sha256"] == _sha(chain_state_path(adjoint_space(root)))
     assert receipt["tail_checkpoint"]["cotangents"] == N_PROBES * N_BATCHES
+
+
+def test_forward_quantum_accepts_producer_seal_drift_without_rekeying(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    root = tmp_path / "run"
+    _forward_prep(root, monkeypatch, implementation="a" * 64)
+    prep_path = _forward().prep_record_path(adjoint_space(root))
+    original_prep = prep_path.read_bytes()
+    session = _forward().read_prep_record(adjoint_space(root))["session"]
+    for samples in RANGES:
+        _forward_quantum(root, monkeypatch, samples, implementation="b" * 64)
+    joined = _forward().join_forward_split(adjoint_space(root))
+    assert joined["tail_checkpoint"]["cotangents"] == N_PROBES * N_BATCHES
+    assert prep_path.read_bytes() == original_prep
+    assert _forward().read_prep_record(adjoint_space(root))["session"] == session
+    assert "[DEV-MODE]" in capsys.readouterr().out
+
+
+def test_unknown_null_bind_field_is_a_comparability_wall():
+    from prismaquant.stage_a_chain_resume import _chain_wall
+    recorded = {"producer_source_sha256": "a" * 64, "n_probes": 5}
+    running = {**recorded, "future_comparability_field": None}
+    assert _chain_wall("bind_identity", recorded, running)
+
+
+
+@pytest.mark.parametrize("field, value", [
+    ("calibration_sha256", "f" * 64), ("calibration_shape", [1, 9]),
+    ("calibration_dtype", "torch.int32"), ("n_probes", 99),
+    ("seed_base", 99), ("token_scope", "last"), ("temperature", 2),
+    ("execution_partition", {"future": None}), ("campaign_stage", "other"),
+    ("unknown_field", None), ("selected_row_diagnostic", {"through": 0}),
+])
+def test_forward_bind_drift_preserves_every_comparability_wall(
+        tmp_path, monkeypatch, field, value):
+    _forward_prep(tmp_path / "run", monkeypatch)
+    prep = _forward().read_prep_record(adjoint_space(tmp_path / "run"))
+    running = {**prep["chain_state"]["bind_identity"], field: value,
+               "producer_source_sha256": "b" * 64}
+    with pytest.raises(_forward().ForwardSplitRefused, match="bind_identity"):
+        _forward().adopt_forward_bind_identity(prep, running)
+
+
+def test_forward_producer_drift_remains_refused_in_certified_mode(tmp_path, monkeypatch):
+    _forward_prep(tmp_path / "run", monkeypatch)
+    prep = _forward().read_prep_record(adjoint_space(tmp_path / "run"))
+    running = {**prep["chain_state"]["bind_identity"],
+               "producer_source_sha256": "b" * 64}
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(_forward().ForwardSplitRefused, match="bind_identity"):
+        _forward().adopt_forward_bind_identity(prep, running)
+

@@ -14,6 +14,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Collection, Mapping
 
+from .digests import DIRECT_ASCII_LAX
+
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
 
@@ -580,11 +582,7 @@ class ResolvedServingLane:
         }
         if self.serving_context is not None:
             payload["serving_context"] = self.serving_context.as_dict()
-        return json.dumps(
-            payload,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        return DIRECT_ASCII_LAX.text(payload)
 
 
 @dataclass(frozen=True)
@@ -733,7 +731,7 @@ class ServingLaneSpec:
         covering = [
             cell for cell in cells
             if rung is not None
-            and rung in (cell.rungs_q256 if cell.is_trellis else cell.rungs)
+            and (cell.covers_rate(rung) if cell.is_trellis else rung in cell.rungs)
         ]
         if not covering:
             # The rung this lane would serve is not in any cell's list. A rung

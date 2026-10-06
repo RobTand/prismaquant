@@ -31,8 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256  # noqa: E402
-
-DEFAULT_LAYER_PATTERN = re.compile(r"\.layers\.(\d+)\.")
+from prismaquant.qnames import DOTTED_LAYER_QNAME  # noqa: E402
 
 
 def _journal_identity(checkpoint_dir: Path) -> dict:
@@ -102,7 +101,7 @@ def select_qnames(units: set[str], *, layer: int | None, qname_filter) -> set[st
         selected = {name for name in selected if qname_filter.search(name)}
     if layer is not None:
         selected = {name for name in selected
-                    if (m := DEFAULT_LAYER_PATTERN.search(name))
+                    if (m := DOTTED_LAYER_QNAME.search(name))
                     and int(m.group(1)) == layer}
     return selected
 
@@ -163,7 +162,7 @@ def main(argv=None) -> int:
     quantum = _journal_identity(args.quantum)
     if args.layers is None:
         def layer_of(name):
-            match = DEFAULT_LAYER_PATTERN.search(name)
+            match = DOTTED_LAYER_QNAME.search(name)
             return int(match.group(1)) if match else None
         layers = sorted({layer for layer in
                          (layer_of(n) for n in single["units"] & quantum["units"])

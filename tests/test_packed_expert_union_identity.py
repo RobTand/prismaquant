@@ -375,3 +375,47 @@ def test_union_refuses_a_dropped_packed_render_gate(tmp_path):
             assignment=FULL_ASSIGNMENT,
             output_bundle=tmp_path / "union-bad",
         )
+
+
+# ---------------------------------------------------------------------------
+# #2231: the packed fill's in-scope open refuses a colliding expert full-name
+# pair at the directory open -- before the append sidecar is read, before any
+# shard is probed or written -- naming both qnames and the shared filename.
+# ---------------------------------------------------------------------------
+
+
+def test_packed_fill_refuses_a_colliding_expert_pair_before_any_write(
+    tmp_path,
+):
+    # A second packed-experts container named ``mlp_experts`` aliases the
+    # leaf of ``mlp.experts``: both full names mangle to
+    # ``mlp_experts_gate_up_proj``. The refusal fires at the in-scope open,
+    # before any activation is collected or written.
+    torch.manual_seed(11)
+    model = TinyLM().eval()
+    model.mlp_experts = TinyLM().mlp.experts
+    calib = torch.randint(0, 32, (2, 64))
+    cache_dir = tmp_path / "weights"
+    cache = _packed_only_cache(cache_dir)
+    colliding = {**ASSIGNMENT, "mlp_experts.gate_up_proj": "NVFP4"}
+
+    with pytest.raises(ValueError) as exc_info:
+        fill_packed_expert_cache_entries(
+            cache,
+            model,
+            calib,
+            render_assignment=colliding,
+            levers={"gptq": True},
+            profile=None,
+            module_token_budget=4096,
+            eval_rows_per_expert=8,
+            cache_dir=cache_dir,
+            progress=False,
+        )
+
+    message = str(exc_info.value)
+    assert "mlp.experts.gate_up_proj" in message
+    assert "mlp_experts.gate_up_proj" in message
+    assert "mlp_experts_gate_up_proj__NVFP4.pt" in message
+    # No sidecar and no shard landed in the append directory.
+    assert not any(cache_dir.iterdir())

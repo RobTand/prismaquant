@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
+from container_inspection_fixture import inspection
 from prismaquant import aura_cost as aura
 from prismaquant import dev_mode
 from prismaquant import joint_aura_run_transition as transition
@@ -396,8 +397,7 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
 
 def _launch_container(monkeypatch, launcher_args):
     from tools import tessera_campaign_container as launcher
-    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{"Id": "sha256:" + "a" * 64}])
-    monkeypatch.setattr(launcher, "image_content_sha256", lambda _: "b" * 64)
+    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [inspection()])
     monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))

@@ -171,6 +171,7 @@ def main(argv=None) -> int:
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
+
     from prismaquant.io_spans import read_proc_io, read_proc_status
     from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 

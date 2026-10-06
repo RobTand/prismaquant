@@ -23,7 +23,8 @@ from prismaquant.perturbed_x_cache import (
 )
 from prismaquant.memory_management import env_truthy
 from prismaquant.routed_experts import PackedExpertProjection
-from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, bytes_sha256hex
+from .dev_mode import dev_mode_enabled, dev_stamp, seal_check
 
 
 JOINT_CURRENCY = "joint_aura_predicted_dloss"
@@ -31,6 +32,17 @@ JOINT_AURA_COST_CURRENCY = JOINT_CURRENCY
 JOINT_AURA_COST_SOURCE = "joint_aura"
 PROBE_UNCERTAINTY_SCOPE = "probe_sampling_conditional_on_fixed_calibration"
 ASSIGNMENT_OBJECTIVES = ("additive", "joint_quadratic")
+# The #1962 descriptive per-sequence/per-block sidecar. Its arithmetic is a
+# separate reconstruction scope: the authoritative whole-draw fields stay
+# bitwise authoritative, and the sidecar's residual against them is reported,
+# gated and never distributed onto the price.
+SEQUENCE_ATTRIBUTION_SCHEMA = "prismaquant.joint_aura.sequence_attribution.v1"
+SEQUENCE_ATTRIBUTION_GATE_METHOD = (
+    "residual_per_probe_leq_gate_relative_times_norm_per_probe"
+    "_norm_is_fsum_abs_weight_activation_mixed_over_blocks"
+    "_zero_norm_requires_exact_zero_residual")
+SEQUENCE_LEAVEOUT_SCOPE = "descriptive_conditional_fixed_probes"
+_ROW_UNCERTAINTY_SCOPES = frozenset({PROBE_UNCERTAINTY_SCOPE})
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -191,6 +203,38 @@ def activation_identity(spec, activation_max_abs: Mapping, qname: str) -> dict:
     }
 
 
+SOURCE_EXECUTION_SCHEMA = "prismaquant.joint_aura.source_execution.v1"
+SOURCE_EXECUTION_KEYS = frozenset({"schema", "modules"})
+SOURCE_EXECUTION_SELECTOR_KEYS = frozenset({"attention", "experts"})
+
+
+def _source_execution_selectors(selectors):
+    """The source identity's nonempty module-selector envelope, not its backends."""
+    return (isinstance(selectors, dict) and bool(selectors)
+            and set(selectors) <= SOURCE_EXECUTION_SELECTOR_KEYS)
+
+
+def require_native_source_execution(value, *, unit):
+    """Native panels require resolved eager/root/target backends and strict JSON.
+
+    Unlike Original controls, native identities retain isinstance string checks
+    and their direct unsorted JSON refusal; these are distinct caller policies.
+    """
+    if (not isinstance(value, dict) or set(value) != SOURCE_EXECUTION_KEYS
+            or value["schema"] != SOURCE_EXECUTION_SCHEMA
+            or not isinstance(value["modules"], dict) or not value["modules"]):
+        raise ValueError("native MoE requires explicit source execution identity")
+    for name, selectors in value["modules"].items():
+        if not isinstance(name, str) or not _source_execution_selectors(selectors):
+            raise ValueError("native MoE source execution selectors are malformed")
+    for name in ("", unit):
+        selectors = value["modules"].get(name, {})
+        if selectors.get("attention") != "eager" or not isinstance(selectors.get("experts"), str) or not selectors["experts"]:
+            raise ValueError("native MoE source execution lacks resolved root/target backends")
+    json.dumps(value, allow_nan=False)
+    return value
+
+
 def source_execution_identity(model) -> dict:
     """Bind resolved dispatch selectors omitted by Transformers config dumps.
 
@@ -206,8 +250,8 @@ def source_execution_identity(model) -> dict:
             if config is not None and hasattr(config, field):
                 # Take an independent JSON value, so later config mutation
                 # cannot mutate the sealed identity through a shared dict.
-                selectors[label] = json.loads(json.dumps(
-                    getattr(config, field), sort_keys=True, allow_nan=False))
+                selectors[label] = json.loads(DIRECT_ASCII_SPACED_STRICT.text(
+                    getattr(config, field)))
         if selectors:
             modules[name] = selectors
     from .glm_source_derivative import source_derivative_identity
@@ -215,7 +259,7 @@ def source_execution_identity(model) -> dict:
     if derivative is not None:
         return {"schema": "prismaquant.joint_aura.source_execution.v2", "modules": modules,
                 "source_derivative": derivative}
-    return {"schema": "prismaquant.joint_aura.source_execution.v1", "modules": modules}
+    return {"schema": SOURCE_EXECUTION_SCHEMA, "modules": modules}
 
 
 def arithmetic_identity(measurement_dtype, projection_backend=None) -> dict:
@@ -345,8 +389,9 @@ def _joint_projection_requirements(modules, specs_by_qname, *, activation_max_ab
             else:
                 callable_key = id(spec.activation_quantize_dequantize)
             group = (identity_sha256(receipt), callable_key)
-            grouped.setdefault(group, (spec, [], json.dumps(receipt, sort_keys=True,
-                separators=(",", ":"), allow_nan=False)))[1].append(fmt)
+            grouped.setdefault(
+                group, (spec, [], DIRECT_ASCII_STRICT.text(receipt)),
+            )[1].append(fmt)
         groups = tuple(_JointActivationGroup(spec, tuple(formats), receipt)
                        for spec, formats, receipt in grouped.values())
         requirements[name] = _JointTargetRequirements(tuple(weight.shape), groups,
@@ -363,7 +408,14 @@ class SignedJointProjectionLease:
     """
 
     def __init__(self, modules, specs_by_qname, delta_weights, *, activation_max_abs=None,
-                 projection_backend=None):
+                 projection_backend=None, attribution=False, attribution_keys=None):
+        if type(attribution) is not bool:
+            raise TypeError("joint AURA block attribution flag must be boolean")
+        self.attribution_enabled = attribution
+        self._attribution_keys = attribution_keys
+        self._attribution_blocks = []
+        self._attribution_components = {}
+        self._attribution_block = None
         self.modules = dict(modules)
         self.projection_backend, requirements = _joint_projection_requirements(
             self.modules, specs_by_qname, activation_max_abs=activation_max_abs,
@@ -413,6 +465,9 @@ class SignedJointProjectionLease:
     def __exit__(self, *_args):
         self._remove_observers()
         self.terms.clear()
+        self._attribution_blocks = []
+        self._attribution_components = {}
+        self._attribution_block = None
         self.active = False
 
     def _remove_observers(self):
@@ -504,6 +559,62 @@ class SignedJointProjectionLease:
         self.forward_originals.append((module, original))
         module.forward = forward
 
+    def note_block(self, block_index, *, first_sequence, sequences):
+        """Note the caller-owned block every following invocation belongs to.
+
+        Blocks are whole caller-owned units of the calibration draw, proven by
+        the caller's own geometry — never derived by splitting flattened rows.
+        A block of exactly one complete calibration sequence may publish
+        per-sequence scope; anything coarser publishes capture-batch scope
+        with no sequence-level draw error. Routed flattened invocations take
+        the noted block as a whole; the instrument never invents coordinates
+        inside them.
+        """
+        if not self.attribution_enabled:
+            raise RuntimeError("joint AURA block attribution was not enabled")
+        if (type(block_index) is not int or block_index != len(self._attribution_blocks)
+                or type(first_sequence) is not int or first_sequence < 0
+                or type(sequences) is not int or sequences < 1):
+            raise ValueError(
+                "joint AURA attribution blocks must be noted once, in order, nonempty")
+        self._attribution_blocks.append({"block_index": block_index,
+                                         "first_sequence": first_sequence,
+                                         "sequences": sequences})
+        # Components lists may predate this block (an earlier probe of the
+        # same lease); every new block extends them with an exact zero.
+        for per_block in self._attribution_components.values():
+            per_block.append({"weight": 0.0, "activation": 0.0, "mixed": 0.0,
+                              "total": 0.0})
+        self._attribution_block = block_index
+
+    def finish_attribution(self):
+        """The descriptive per-block sidecar captured for one probe.
+
+        Per-invocation contractions of the resident deltas — a different
+        arithmetic from the authoritative accumulate-then-contract total,
+        which stays bitwise unchanged. A block with no observed invocation is
+        an exact zero, the same honest identity the row already records for a
+        never-routed expert.
+        """
+        if not self.attribution_enabled:
+            raise RuntimeError("joint AURA block attribution was not enabled")
+        blocks = [dict(block) for block in self._attribution_blocks]
+
+        def zero():
+            return {"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0}
+
+        components = {}
+        for key in self.deltas:
+            if self._attribution_keys is not None and key not in self._attribution_keys:
+                continue
+            per_block = self._attribution_components.get(key)
+            components[key] = ([dict(value) for value in per_block] if per_block is not None
+                               else [zero() for _ in blocks])
+        self._attribution_blocks = []
+        self._attribution_components = {}
+        self._attribution_block = None
+        return {"blocks": blocks, "components": components}
+
     def begin_probe(self):
         if self.active:
             raise RuntimeError("joint AURA probe already active")
@@ -555,6 +666,22 @@ class SignedJointProjectionLease:
                              else torch.zeros((), device=x.device))
                     components = torch.stack((weight, activation, mixed))
                     key = (name, fmt)
+                    if (self.attribution_enabled and (self._attribution_keys is None
+                            or key in self._attribution_keys)):
+                        if self._attribution_block is None:
+                            raise RuntimeError(
+                                "joint AURA attribution invocation outside a noted block")
+                        per_block = self._attribution_components.get(key)
+                        if per_block is None:
+                            per_block = self._attribution_components[key] = [
+                                {"weight": 0.0, "activation": 0.0, "mixed": 0.0,
+                                 "total": 0.0} for _ in self._attribution_blocks]
+                        block = per_block[self._attribution_block]
+                        scalar = [float(value) for value in components.tolist()]
+                        block["weight"] += scalar[0]
+                        block["activation"] += scalar[1]
+                        block["mixed"] += scalar[2]
+                        block["total"] += scalar[0] + scalar[1] + scalar[2]
                     self.terms[key] = self.terms.get(key, 0) + components
             return gradient
 
@@ -929,6 +1056,92 @@ class JointOperatorStatisticsLease(SignedJointProjectionLease):
         self._phase = 'closed'
 
 
+class JointBlockAttributionLease:
+    """The #1962 sidecar's per-invocation contraction for ONE resident candidate.
+
+    Consumes the same captured X/G rows the authoritative statistics lease
+    replayed, contracts them per invocation against the candidate's rendered
+    delta and the source weight, and accumulates the three signed components
+    into the caller-owned capture blocks. A descriptive reconstruction with
+    its own arithmetic scope — per-invocation contractions against the
+    resident delta, while the authoritative total stays the statistics
+    lease's accumulate-then-contract result. The row reports the residual
+    between the two, gated against a stated denominator; nothing here ever
+    reconciles the residual onto the price or holds a second candidate.
+    """
+
+    def __init__(self, *, name, source_weight, delta, spec, activation_max_abs,
+                 projection_backend, blocks):
+        if not isinstance(blocks, list) or not blocks or any(
+                not isinstance(block, Mapping)
+                or type(block.get("first_sequence")) is not int
+                or block["first_sequence"] < 0
+                or type(block.get("sequences")) is not int or block["sequences"] < 1
+                for block in blocks):
+            raise ValueError("joint block attribution needs caller-owned whole blocks")
+        if (not isinstance(source_weight, torch.Tensor)
+                or not isinstance(delta, torch.Tensor) or not delta.is_floating_point()
+                or delta.shape != source_weight.shape
+                or delta.device != source_weight.device):
+            raise ValueError("joint block attribution candidate differs from its source")
+        self.name = name
+        self._weight_ref = source_weight.detach()
+        self._delta_ref = delta.detach()
+        self.spec = spec
+        self.activation_max_abs = activation_max_abs
+        if projection_backend is None:
+            # The statistics leases resolve the default backend the same way.
+            from .joint_projection_backend import prewarm_projection_backend
+            projection_backend = prewarm_projection_backend(
+                None, device=source_weight.device)
+        self._product_sum = projection_backend.product_sum
+        self._blocks = [dict(block) for block in blocks]
+        self.components = [{"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0}
+                           for _ in self._blocks]
+
+    @property
+    def blocks(self):
+        return [dict(block) for block in self._blocks]
+
+    @torch.no_grad()
+    def observe_invocation(self, name, source_weight, x, gradient, capture_batch):
+        """One captured invocation's signed contraction into its block."""
+        if name != self.name:
+            raise RuntimeError("joint block attribution observed a foreign target")
+        if (source_weight.shape != self._weight_ref.shape
+                or source_weight.device != self._weight_ref.device
+                or source_weight.data_ptr() != self._weight_ref.data_ptr()):
+            raise RuntimeError("joint block attribution source weight differs")
+        if not isinstance(x, torch.Tensor) or not isinstance(gradient, torch.Tensor):
+            raise TypeError("joint block attribution needs Tensor input/gradient")
+        if type(capture_batch) is not int or not 0 <= capture_batch < len(self._blocks):
+            raise RuntimeError("joint block attribution invocation outside its blocks")
+        if (x.device != self._weight_ref.device or x.shape[-1] != self._weight_ref.shape[1]
+                or gradient.shape[-1] != self._weight_ref.shape[0]
+                or gradient.shape[:-1] != x.shape[:-1]):
+            raise RuntimeError(f"joint block attribution geometry differs for {name}")
+        x2 = x.reshape(-1, x.shape[-1]).float()
+        g2 = gradient.reshape(-1, gradient.shape[-1]).float()
+        gw = g2.T @ x2
+        weight_value = float(self._product_sum(gw, self._delta_ref))
+        activation_value = mixed_value = 0.0
+        if self.spec.act_quant_changes_input:
+            quantized = _activation_qdq(x, self.spec, self.activation_max_abs, name)
+            if (not isinstance(quantized, torch.Tensor) or quantized.shape != x.shape
+                    or quantized.device != x.device or quantized.dtype != x.dtype):
+                raise RuntimeError(
+                    f"joint block attribution QDQ changed residency/dtype/shape for {name}")
+            dx = quantized.reshape_as(x2).float() - x2
+            ga = g2.T @ dx
+            activation_value = float(self._product_sum(ga, self._weight_ref.float()))
+            mixed_value = float(self._product_sum(ga, self._delta_ref))
+        block = self.components[capture_batch]
+        block["weight"] += weight_value
+        block["activation"] += activation_value
+        block["mixed"] += mixed_value
+        block["total"] += weight_value + activation_value + mixed_value
+
+
 def validate_joint_aura_entry(entry: Mapping) -> bool:
     """Recognize joint claims and fail closed before any scalar cost branch."""
     claims = (entry.get("cost_source") == "joint_aura" or
@@ -948,6 +1161,16 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
     for key, value in expected.items():
         if entry.get(key) != value or type(entry.get(key)) is not type(value):
             raise ValueError(f"joint AURA invalid {key}")
+    scope = entry.get("uncertainty_scope")
+    if scope is not None and scope not in _ROW_UNCERTAINTY_SCOPES:
+        # A row published under any other label claims an uncertainty the
+        # probe stderr cannot support. Legacy rows without the field keep
+        # their historical conditional reading; present foreign or
+        # generalization claims refuse.
+        raise ValueError(
+            f"joint AURA refuses foreign uncertainty_scope {scope!r}: the published "
+            "stderr is probe sampling conditional on fixed calibration, never a "
+            "draw-level or generalization error")
     if any(key in entry for key in ("act_dloss", "act_dloss_applied", "aqua_activation_dloss", "activation_pricing_applied", "output_mse")):
         raise ValueError("joint AURA refuses a second activation/Fisher application")
     operator = entry.get("joint_operator_identity")
@@ -968,8 +1191,8 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
                 raise ValueError(f"invalid {field}")
         if type(probe["n_probes"]) is not int or probe["n_probes"] < 1 or type(probe["seed_base"]) is not int:
             raise ValueError("invalid probe indices")
-        if probe["distribution"] != "rademacher" or probe["normalization"] != "global_kl_fisher":
-            raise ValueError("invalid probe distribution/normalization")
+        if probe['distribution'] != 'rademacher' or probe['normalization'] != 'global_kl_fisher':
+            raise ValueError('invalid probe distribution/normalization')
         if not math.isfinite(float(probe["temperature"])) or probe["temperature"] <= 0:
             raise ValueError("invalid probe temperature")
         if not isinstance(operator["qname"], str) or not operator["qname"] or not isinstance(operator["format"], str) or not operator["format"]:
@@ -1027,7 +1250,75 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
             raise ValueError("joint AURA invalid signed components")
         if not all(math.isfinite(float(x)) for x in value.values()) or value["total"] != total or not math.isclose(value["weight"] + value["activation"] + value["mixed"], total, rel_tol=1e-12, abs_tol=1e-30):
             raise ValueError("joint AURA component/signed sample mismatch")
+    sidecar = entry.get("sequence_attribution")
+    if sidecar is not None:
+        _validate_sequence_attribution(sidecar, entry)
     return True
+
+
+def _validate_sequence_attribution(sidecar, entry):
+    """Rebuild the sidecar from its own parts and refuse any divergence.
+
+    The reader recomputes residual, norms, attribution, leaveout and scope
+    through the builder's one code path; a hand-edited field — including a
+    foreign uncertainty label, an unproven per-sequence scope, a zero
+    standard error that was not recomputed, or a hidden gate denominator —
+    stops matching its own recomputation and refuses.
+    """
+    if not isinstance(sidecar, Mapping):
+        raise ValueError("joint AURA sequence attribution must be a mapping")
+    if sidecar.get("schema") != SEQUENCE_ATTRIBUTION_SCHEMA:
+        raise ValueError("joint AURA sequence attribution schema mismatch")
+    geometry = sidecar.get("block_geometry")
+    reconciliation = sidecar.get("reconciliation")
+    if not isinstance(geometry, Mapping) or not isinstance(reconciliation, Mapping):
+        raise ValueError("joint AURA sequence attribution needs geometry and reconciliation")
+    gate_relative = reconciliation.get("gate_relative", 1e-3)
+    recalculated = sequence_attribution_sidecar(
+        blocks=geometry.get("blocks"),
+        components_per_probe=sidecar.get("components_per_probe"),
+        authoritative_totals=entry["signed_per_probe"],
+        gate_relative=gate_relative,
+        arithmetic_scope=sidecar.get("arithmetic_scope"),
+        sequence_length=geometry.get("sequence_length"),
+        selected_tokens_per_row=geometry.get("selected_tokens_per_row"),
+        n_sequences=geometry.get("n_sequences"),
+        calibration_sha256=geometry.get("calibration_sha256"),
+        with_leaveout=("leaveout" in sidecar),
+    )
+    if recalculated != sidecar:
+        raise ValueError(
+            "joint AURA sequence attribution differs from its own recomputation")
+    binding = geometry.get("calibration_sha256")
+    if binding is not None and binding != entry["probe_identity"]["calibration_sha256"]:
+        raise ValueError("joint AURA sequence attribution binds a foreign calibration")
+    blocks = geometry["blocks"]
+    next_sequence = 0
+    for block in blocks:
+        if block["first_sequence"] != next_sequence:
+            raise ValueError("joint AURA sequence attribution must cover the complete calibration draw")
+        next_sequence += block["sequences"]
+    if next_sequence != geometry["n_sequences"]:
+        raise ValueError("joint AURA sequence attribution must cover the complete calibration draw")
+    probe = entry["probe_identity"]
+    shape = probe.get("calibration_shape")
+    if shape is not None:
+        if (len(shape) != 2 or geometry["n_sequences"] != shape[0]
+                or geometry["sequence_length"] != shape[1]):
+            raise ValueError("joint AURA sequence attribution geometry differs from priced calibration")
+        selected_tokens = {"all": shape[1], "last": 1, "causal": shape[1] - 1}.get(
+            probe.get("token_scope"))
+        if geometry["selected_tokens_per_row"] != selected_tokens:
+            raise ValueError("joint AURA sequence attribution token scope differs from priced calibration")
+    for blocks_per_probe, authority in zip(
+            sidecar["components_per_probe"], entry["signed_components_per_probe"]):
+        for component in ("weight", "activation", "mixed"):
+            reconstructed = math.fsum(block[component] for block in blocks_per_probe)
+            norm = math.fsum(abs(block[component]) for block in blocks_per_probe)
+            residual = reconstructed - authority[component]
+            if (residual != 0.0 if norm == 0.0
+                    else abs(residual) > gate_relative * norm):
+                raise ValueError(f"joint AURA sequence attribution {component} component does not reconcile")
 
 
 def squared_signed(total) -> float:
@@ -1043,7 +1334,296 @@ def squared_signed(total) -> float:
     return total * total
 
 
-def make_joint_aura_entry(*, operator_identity, probe_identity, signed_components) -> dict:
+def _attribution_reconciliation_residuals(components, authoritative_totals):
+    """One home for the sidecar's reconstruction residual, builder and reader."""
+    return [math.fsum(value["total"] for value in probe) - float(total)
+            for probe, total in zip(components, authoritative_totals)]
+
+
+def _attribution_reconciliation_norms(components):
+    """The cancellation-aware denominator: fsum of absolute component mass."""
+    return [math.fsum(abs(value["weight"]) + abs(value["activation"]) + abs(value["mixed"])
+                      for value in probe) for probe in components]
+
+
+def _attribution_value(components_per_probe, block_index, authoritative_totals):
+    """c_i = .5 mean_p a_{p,i} * total_p against the AUTHORITATIVE totals.
+
+    The sum over i reconciles the signed components algebraically: it equals
+    the price when the reconstructed totals equal the authoritative ones, and
+    otherwise carries the published residual — the row never claims the sum
+    is the price.
+    """
+    n = len(authoritative_totals)
+    return 0.5 * math.fsum(
+        components_per_probe[p][block_index]["total"] * float(authoritative_totals[p])
+        for p in range(n)) / n
+
+
+def _leaveout_value(components_per_probe, block_index, authoritative_totals):
+    """One delete-one price 0.5 mean_p (total_p - a_{p,i})**2; descriptive."""
+    n = len(authoritative_totals)
+    return 0.5 * math.fsum(
+        squared_signed(float(authoritative_totals[p])
+                       - components_per_probe[p][block_index]["total"])
+        for p in range(n)) / n
+
+
+def sequence_attribution_sidecar(*, blocks, components_per_probe,
+                                 authoritative_totals, gate_relative=1e-3,
+                                 arithmetic_scope, sequence_length=None,
+                                 selected_tokens_per_row=None,
+                                 n_sequences=None, calibration_sha256=None,
+                                 with_leaveout=None):
+    """Build the #1962 descriptive per-block signed sidecar for one cost row.
+
+    ``blocks`` are whole caller-owned units of the calibration draw (capture
+    batches or invocations; per-sequence only when every block is exactly one
+    complete sequence). The authoritative whole-draw fields are not touched:
+    the sidecar reports its own per-block components, the residual against
+    the authoritative totals with the gate it must satisfy and the method
+    that states its denominator, the attribution c_i = .5 mean_p a_pi*total_p
+    computed against those authoritative totals, and — for genuine equal
+    whole single-sequence blocks — the delete-one leaveout prices with their
+    jackknife standard error. All of it is conditional on the fixed
+    calibration: no generalization or draw-sampling error is claimed.
+    """
+    if (type(gate_relative) is not int and type(gate_relative) is not float) \
+            or not 0.0 < float(gate_relative) < 1.0:
+        raise ValueError("sequence attribution gate must be a fraction in (0, 1)")
+    gate_relative = float(gate_relative)
+    blocks = [dict(block) for block in blocks]
+    if not blocks:
+        raise ValueError("sequence attribution needs at least one caller-noted block")
+    expected = None
+    for index, block in enumerate(blocks):
+        if (not isinstance(block, Mapping)
+                or set(block) != {"block_index", "first_sequence", "sequences"}
+                or type(block["block_index"]) is not int
+                or block["block_index"] != index
+                or type(block["first_sequence"]) is not int or block["first_sequence"] < 0
+                or type(block["sequences"]) is not int or block["sequences"] < 1):
+            raise ValueError(
+                "sequence attribution blocks must be noted once, in order, nonempty")
+        if expected is not None and block["first_sequence"] < expected:
+            raise ValueError("sequence attribution blocks must not overlap or reorder")
+        expected = block["first_sequence"] + block["sequences"]
+    noted = sum(block["sequences"] for block in blocks)
+    if n_sequences is None:
+        if blocks[0]["first_sequence"] != 0:
+            raise ValueError(
+                "sequence attribution needs n_sequences when blocks do not start the draw")
+        n_sequences = noted
+    if type(n_sequences) is not int or n_sequences < noted:
+        raise ValueError("sequence attribution n_sequences must cover the noted blocks")
+    if expected > n_sequences:
+        raise ValueError("sequence attribution block extends outside the calibration draw")
+    for label, value in (("sequence_length", sequence_length),
+                         ("selected_tokens_per_row", selected_tokens_per_row)):
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError(f"sequence attribution {label} must be a positive integer")
+    if (sequence_length is not None and selected_tokens_per_row is not None
+            and selected_tokens_per_row > sequence_length):
+        raise ValueError("sequence attribution selected tokens exceed the sequence length")
+    per_sequence = all(block["sequences"] == 1 for block in blocks)
+    if arithmetic_scope is None or not isinstance(arithmetic_scope, str) \
+            or not arithmetic_scope:
+        raise ValueError("sequence attribution needs the collector's arithmetic scope")
+    components = [
+        [{key: float(value[key]) for key in ("weight", "activation", "mixed", "total")}
+         for value in probe]
+        for probe in components_per_probe]
+    totals = [float(value) for value in authoritative_totals]
+    if len(components) != len(totals) \
+            or any(len(probe) != len(blocks) for probe in components):
+        raise ValueError("sequence attribution components must cover every probe and block")
+    for probe in components:
+        for value in probe:
+            if not all(math.isfinite(x) for x in value.values()):
+                raise ValueError("sequence attribution components must be finite")
+            if not math.isclose(value["weight"] + value["activation"] + value["mixed"],
+                                value["total"], rel_tol=1e-12, abs_tol=1e-30):
+                raise ValueError(
+                    "sequence attribution block components must sum to the block total")
+    residual = _attribution_reconciliation_residuals(components, totals)
+    norms = _attribution_reconciliation_norms(components)
+    for value, norm in zip(residual, norms):
+        if not math.isfinite(value) or not math.isfinite(norm):
+            raise ValueError("sequence attribution reconciliation must be finite")
+        if norm == 0.0:
+            if value != 0.0:
+                raise ValueError(
+                    "sequence attribution zero-scale blocks must reconcile exactly")
+        elif abs(value) > gate_relative * norm:
+            raise ValueError(
+                f"sequence attribution residual {value!r} exceeds the reported gate "
+                f"{gate_relative!r} on this probe's block scale {norm!r}")
+    attribution = [_attribution_value(components, index, totals)
+                   for index in range(len(blocks))]
+    if calibration_sha256 is not None \
+            and (not isinstance(calibration_sha256, str)
+                 or re.fullmatch(r"[a-f0-9]{64}", calibration_sha256) is None):
+        raise ValueError("sequence attribution calibration binding must be a sha256")
+    sidecar = {
+        "schema": SEQUENCE_ATTRIBUTION_SCHEMA,
+        "scope": "per_sequence" if per_sequence else "capture_batch_block",
+        "block_geometry": {
+            "sequence_length": (int(sequence_length)
+                                if sequence_length is not None else None),
+            "selected_tokens_per_row": (int(selected_tokens_per_row)
+                                        if selected_tokens_per_row is not None else None),
+            "n_sequences": int(n_sequences),
+            "blocks": blocks,
+            "calibration_sha256": calibration_sha256,
+        },
+        "arithmetic_scope": arithmetic_scope,
+        "components_per_probe": components,
+        "reconciliation": {
+            "residual_per_probe": residual, "norm_per_probe": norms,
+            "gate_relative": gate_relative,
+            "gate_method": SEQUENCE_ATTRIBUTION_GATE_METHOD,
+        },
+        "attribution_per_block": attribution,
+    }
+    if with_leaveout is True and not (len(blocks) >= 2
+                                      and len({block["sequences"] for block in blocks}) == 1
+                                      and blocks[0]["first_sequence"] == 0
+                                      and noted == n_sequences):
+        raise ValueError(
+            "sequence leaveout needs at least two equal whole blocks covering the draw")
+    if (with_leaveout is True
+            or (with_leaveout is None and len(blocks) >= 2
+                and len({block["sequences"] for block in blocks}) == 1
+                and blocks[0]["first_sequence"] == 0 and noted == n_sequences)):
+        # Delete-one over equal whole blocks, descriptive and conditional on
+        # the fixed draw: leaveblock_i = Nseq/(Nseq-k) * .5 mean_p(t_p-a_pi)^2
+        # for uniform k-sequence blocks (per-sequence is k=1). A one-block or
+        # unequal-block scope publishes no standard error rather than a fake
+        # one; the exchangeability assumption is stated, never implied.
+        k = blocks[0]["sequences"]
+        scale = int(n_sequences) / (int(n_sequences) - k)
+        count = len(blocks)
+        prices = [scale * _leaveout_value(components, index, totals)
+                  for index in range(count)]
+        mean = math.fsum(prices) / count
+        standard_error = math.sqrt(
+            (count - 1) / count * math.fsum((price - mean) ** 2 for price in prices))
+        if not math.isfinite(standard_error):
+            raise ValueError("sequence leaveout standard error must be finite")
+        sidecar["leaveout"] = {
+            "price_per_block": prices, "jackknife_standard_error": standard_error,
+            "delete_one_scale": scale, "sequences_per_block": k,
+            "assumption": ("exchangeable equal whole blocks of the fixed "
+                           "calibration draw; conditional fixed probes, no "
+                           "generalization claim"),
+            "uncertainty_scope": SEQUENCE_LEAVEOUT_SCOPE,
+        }
+    return sidecar
+
+
+def sequence_cohort_summary(sidecar, *, first_block_index, block_count):
+    """Descriptive restricted-price summary over WHOLE noted blocks.
+
+    A cohort can never cut a coarse block. The N/m renormalization is stated
+    with the selected-token geometry of the row's token scope so the scaled
+    estimate is not read as a different position window. This is a
+    conditional fixed-probe diagnostic; it publishes no cost row and no
+    generalization claim.
+    """
+    if not isinstance(sidecar, Mapping) \
+            or sidecar.get("schema") != SEQUENCE_ATTRIBUTION_SCHEMA:
+        raise ValueError("sequence cohort needs a sequence attribution sidecar")
+    geometry = sidecar["block_geometry"]
+    blocks = geometry["blocks"]
+    if (type(first_block_index) is not int or type(block_count) is not int
+            or first_block_index < 0 or block_count < 1
+            or first_block_index + block_count > len(blocks)):
+        raise ValueError("sequence cohort must select whole noted blocks in range")
+    selected = blocks[first_block_index:first_block_index + block_count]
+    components = sidecar["components_per_probe"]
+    cohort_sequences = sum(block["sequences"] for block in selected)
+    restricted = 0.5 * math.fsum(
+        squared_signed(math.fsum(value["total"] for value in probe[first_block_index:
+                                                               first_block_index + block_count]))
+        for probe in components) / len(components)
+    scale = geometry["n_sequences"] / cohort_sequences
+    return {
+        "schema": "prismaquant.joint_aura.sequence_cohort.v1",
+        "first_block_index": first_block_index, "block_count": block_count,
+        "first_sequence": selected[0]["first_sequence"],
+        "sequences": cohort_sequences,
+        "restricted_price": restricted,
+        "renormalized_scale": scale,
+        "renormalized_full_draw_estimate": restricted * scale,
+        "selected_tokens_per_row": geometry.get("selected_tokens_per_row"),
+        "binding": (f"whole blocks [{first_block_index}, "
+                    f"{first_block_index + block_count}) of calibration "
+                    f"{geometry.get('calibration_sha256')}"),
+    }
+
+
+def normalize_sequence_attribution(config):
+    """The #1962 opt-in selector, normalized once for callers and identity.
+
+    ``None`` keeps every legacy path byte-identical. The normalized mapping is
+    what the run identity binds, so a resume across an attribution boundary
+    sees different identities instead of silently claiming the instrument.
+    """
+    if config is None:
+        return None
+    if not isinstance(config, Mapping):
+        raise ValueError("sequence_attribution config must be a mapping or None")
+    candidates = config.get("candidates", "all")
+    if candidates == "all":
+        normalized_candidates = "all"
+    else:
+        try:
+            pairs = sorted((str(name), str(fmt)) for name, fmt in candidates)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "sequence_attribution candidates must be 'all' or a "
+                "(qname, format) roster") from exc
+        if not pairs or any(not name or not fmt for name, fmt in pairs):
+            raise ValueError(
+                "sequence_attribution candidates must be a nonempty (qname, format) roster")
+        normalized_candidates = [list(pair) for pair in pairs]
+    gate_relative = config.get("gate_relative", 1e-3)
+    if (type(gate_relative) is not int and type(gate_relative) is not float) \
+            or not 0.0 < float(gate_relative) < 1.0:
+        raise ValueError("sequence_attribution gate_relative must be a fraction in (0, 1)")
+    return {"candidates": normalized_candidates,
+            "gate_relative": float(gate_relative)}
+
+
+def sequence_attribution_candidates(normalized, render_formats):
+    """Resolve an enabled selector against the caller's exact measured roster."""
+    if normalized is None or normalized["candidates"] == "all":
+        return None
+    requested = {tuple(pair) for pair in normalized["candidates"]}
+    unknown = requested - {(name, fmt) for name, formats in render_formats.items()
+                           for fmt in formats}
+    if unknown:
+        raise ValueError(
+            f"sequence_attribution candidate outside measured roster: {sorted(unknown)}")
+    return requested
+
+
+def sequence_attribution_run_identity(normalized):
+    """The run-identity block for an enabled instrument, or None.
+
+    Bound into the run identity — never the priced probe identity — so the
+    normalized selector travels with the run while the currency's Fisher and
+    probe fields stay untouched. Probe identity separately binds draw geometry.
+    """
+    if normalized is None:
+        return None
+    return {"schema": "prismaquant.joint_aura.sequence_attribution_run.v1",
+            "selector": normalized,
+            "selector_sha256": identity_sha256(normalized)}
+
+
+def make_joint_aura_entry(*, operator_identity, probe_identity, signed_components,
+                          sequence_attribution=None):
     """Publish one complete, aligned cost row, also used by checkpoint replay."""
     signed = [float(value["total"]) for value in signed_components]
     squared = [squared_signed(value) for value in signed]
@@ -1067,6 +1647,8 @@ def make_joint_aura_entry(*, operator_identity, probe_identity, signed_component
         "measurement_status": "research",
         "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration",
     }
+    if sequence_attribution is not None:
+        row["sequence_attribution"] = sequence_attribution
     validate_joint_aura_entry(row)
     return row
 
@@ -1075,12 +1657,13 @@ def paired_candidate_difference(entry_a: Mapping, entry_b: Mapping) -> dict:
     """A minus B with common-probe covariance retained, conditional on calibration."""
     if not validate_joint_aura_entry(entry_a) or not validate_joint_aura_entry(entry_b):
         raise ValueError("paired joint AURA requires joint rows")
-    if not _same_probe_identity(entry_a, entry_b):
-        raise ValueError("paired joint AURA probe alignment mismatch")
+    _require_probe_alignment(entry_a, entry_b, where='paired candidate',
+        message='paired joint AURA probe alignment mismatch')
     summary = paired_squared_probe_summary(entry_a["x2_per_probe"], entry_b["x2_per_probe"])
     return {**summary, "probe_ids": list(entry_a["probe_ids"]),
             "probe_identity_sha256": entry_a["probe_identity_sha256"],
-            "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration"}
+            "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration",
+            **(dev_stamp(timestamped=False) if dev_mode_enabled() else {})}
 
 
 def paired_squared_probe_summary(squared_a, squared_b) -> dict:
@@ -1111,11 +1694,17 @@ def paired_squared_probe_summary(squared_a, squared_b) -> dict:
             "difference_per_probe": values}
 
 
-def _same_probe_identity(left: Mapping, right: Mapping) -> bool:
-    # Hashes have already been checked against canonical JSON by the row
-    # validator. Python equality would conflate distinct JSON true/1/1.0.
-    return (left["probe_identity_sha256"] == right["probe_identity_sha256"]
-            and identity_sha256(left["probe_ids"]) == identity_sha256(right["probe_ids"]))
+def _require_probe_alignment(left: Mapping, right: Mapping, *, where: str, message: str) -> None:
+    """Separate usable sample dimensions from recorded probe metadata (D32)."""
+    from .cost_currency import probe_identity_seals, probe_identity_walls_differ
+    if (identity_sha256(left['probe_ids']) != identity_sha256(right['probe_ids'])
+            or probe_identity_walls_differ(left['probe_identity'], right['probe_identity'])):
+        raise ValueError(message)
+    seal_check('probe identity', probe_identity_seals(left['probe_identity']),
+               probe_identity_seals(right['probe_identity']), where=where,
+               same=left['probe_identity_sha256'] == right['probe_identity_sha256'],
+               refusal=lambda: ValueError(message))
+
 
 
 def _validated_assignment(rows: Mapping, objective: str) -> dict:
@@ -1134,8 +1723,9 @@ def _validated_assignment(rows: Mapping, objective: str) -> dict:
             raise ValueError(f"joint AURA assignment operator coordinate mismatch: {name}")
         if reference is None:
             reference = row
-        elif not _same_probe_identity(row, reference):
-            raise ValueError("joint AURA assignment probe alignment mismatch")
+        else:
+            _require_probe_alignment(row, reference, where=f'assignment {name}',
+                message='joint AURA assignment probe alignment mismatch')
     return ordered
 
 
@@ -1164,6 +1754,7 @@ def _assignment_metadata(rows: Mapping, objective: str) -> dict:
         "assignment_identity_sha256": identity_sha256(identities),
         "uncertainty_scope": PROBE_UNCERTAINTY_SCOPE,
         "measurement_status": "research",
+        **(dev_stamp(timestamped=False) if dev_mode_enabled() else {}),
     }
 
 
@@ -1206,14 +1797,15 @@ def assignment_probe_summary(rows: Mapping, *, objective: str = "additive") -> d
 
 def paired_assignment_difference(
     rows_a: Mapping, rows_b: Mapping, *, objective: str = "additive",
+    attribution_groups: Mapping | None = None,
 ) -> dict:
     """A minus B, retaining common-probe covariance conditional on calibration.
 
     Both arms must name the complete same unit roster, including unchanged
     units (which still contribute cross terms to ``joint_quadratic``). Each
-    candidate binds its own actual render/activation operator. Different
-    formats may differ there, but the same candidate cannot silently change
-    operator identity, and each unit must retain the same source weight.
+    candidate binds its own stored render/activation operator. Certified mode
+    requires matching probe/source metadata; dev mode stamps differences and
+    uses those samples unchanged. Numeric dimensions stay mandatory.
     """
     a, b = _validated_assignment(rows_a, objective), _validated_assignment(rows_b, objective)
     if a.keys() != b.keys():
@@ -1222,32 +1814,36 @@ def paired_assignment_difference(
     for name in a:
         left, right = a[name], b[name]
         operator_a, operator_b = left["joint_operator_identity"], right["joint_operator_identity"]
-        if not _same_probe_identity(left, right):
-            raise ValueError("paired joint AURA assignment probe alignment mismatch")
-        if identity_sha256(operator_a["source_weight"]) != identity_sha256(operator_b["source_weight"]):
-            raise ValueError(f"paired joint AURA source weight identity mismatch: {name}")
-        if (operator_a["format"] == operator_b["format"]
-                and left["joint_operator_identity_sha256"] != right["joint_operator_identity_sha256"]):
-            raise ValueError(f"paired joint AURA changed operator identity for the same candidate: {name}")
+        _require_probe_alignment(left, right, where=f'paired assignment {name}',
+            message='paired joint AURA assignment probe alignment mismatch')
+        for field in ('shape', 'dtype', 'logical_bytes'):
+            if operator_a['source_weight'][field] != operator_b['source_weight'][field]:
+                raise ValueError(f'paired joint AURA source weight geometry mismatch: {name}')
+        seal_check('source weight identity', operator_a['source_weight'], operator_b['source_weight'],
+            where=f'paired assignment {name}',
+            same=identity_sha256(operator_a['source_weight']) == identity_sha256(operator_b['source_weight']),
+            refusal=lambda: ValueError(f'paired joint AURA source weight identity mismatch: {name}'))
+        if operator_a['format'] == operator_b['format']:
+            seal_check('operator identity', left['joint_operator_identity_sha256'],
+                right['joint_operator_identity_sha256'], where=f'paired assignment {name}',
+                refusal=lambda: ValueError(f'paired joint AURA changed operator identity for the same candidate: {name}'))
         pairs.append((left, right))
-    if objective == "additive":
-        # The candidate-difference algebra, with every signed squared term
-        # retained until fsum: neither rounded assignment totals nor rounded
-        # per-unit differences may erase a small residual across unit changes.
-        values = [math.fsum(sign * 0.5 * row["x2_per_probe"][k]
-                            for pair in pairs for sign, row in zip((1, -1), pair))
-                  for k in range(len(pairs[0][0]["probe_ids"]))]
-    else:
-        values = []
-        for k in range(len(pairs[0][0]["probe_ids"])):
-            # Difference of squares, factored before summing the background.
-            delta = math.fsum(sign * row["signed_per_probe"][k]
-                              for pair in pairs for sign, row in zip((1, -1), pair))
-            total = math.fsum(row["signed_per_probe"][k]
-                              for pair in pairs for row in pair)
-            values.append(0.5 * delta * total)
+    values = _paired_probe_values(pairs, objective)
     mean, stderr = _probe_moments(values)
     metadata_a, metadata_b = _assignment_metadata(a, objective), _assignment_metadata(b, objective)
+    grouped = {}
+    if attribution_groups is not None:
+        if objective != "additive":
+            raise ValueError("paired attribution groups require the additive allocator currency")
+        for group, names in sorted(attribution_groups.items()):
+            names = sorted(names)
+            if not names or len(names) != len(set(names)) or any(name not in a for name in names):
+                raise ValueError(f"paired attribution group has invalid unit roster: {group}")
+            samples = _paired_probe_values([(a[name], b[name]) for name in names], objective)
+            group_mean, group_stderr = _probe_moments(samples)
+            grouped[group] = {"members": names, "mean_difference": group_mean,
+                              "paired_standard_error": group_stderr,
+                              "difference_per_probe": samples}
     return {
         "schema": "prismaquant.joint_aura.paired_assignment_difference.v1",
         "objective": objective, "cost_currency": JOINT_CURRENCY,
@@ -1256,4 +1852,23 @@ def paired_assignment_difference(
         "probe_identity_sha256": metadata_a["probe_identity_sha256"],
         "assignment_a": metadata_a, "assignment_b": metadata_b,
         "uncertainty_scope": PROBE_UNCERTAINTY_SCOPE, "measurement_status": "research",
+        **({"group_differences": grouped} if attribution_groups is not None else {}),
+        **(dev_stamp(timestamped=False) if dev_mode_enabled() else {}),
     }
+
+
+def _paired_probe_values(pairs, objective):
+    """The single paired-difference arithmetic, also for named subgroups."""
+    if objective == "additive":
+        # Retain raw signed squared terms until fsum, not rounded unit totals.
+        return [math.fsum(sign * 0.5 * row["x2_per_probe"][k]
+                          for pair in pairs for sign, row in zip((1, -1), pair))
+                for k in range(len(pairs[0][0]["probe_ids"]))]
+    values = []
+    for k in range(len(pairs[0][0]["probe_ids"])):
+        delta = math.fsum(sign * row["signed_per_probe"][k]
+                          for pair in pairs for sign, row in zip((1, -1), pair))
+        total = math.fsum(row["signed_per_probe"][k]
+                          for pair in pairs for row in pair)
+        values.append(0.5 * delta * total)
+    return values

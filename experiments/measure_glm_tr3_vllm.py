@@ -40,12 +40,13 @@ import numpy as np
 import torch
 
 from experiments.glm_tr3_full_vocab import (
-    CONTEXT_LENGTH, LOGITS_LAYOUTS, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE,
+    CONTEXT_LENGTH, LOGITS_LAYOUTS, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE, WINDOW_COUNT,
     PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, collect_tp_result2, load_panel, sha256, summarize_panel,
 )
 from experiments.build_glm_tr3_teacher import producer_identity
 from tools.full_kl_teacher_payload import atomic_json_write, canonical_sha256, tokenizer_identity
 from tools.gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs
+from tools.gold_measurement_fidelity import tr3_kl_fidelity
 from tools.serve_fingerprint import self_manifest
 from tools.spec_decode_guard import refuse_if_spec_decode
 
@@ -543,7 +544,59 @@ def scorer_engine_kwargs(args, *, model, topology):
     return kwargs
 
 
+def _tr3_gold_record(result, *, model_sha, model, spec_decode_detected):
+    """Called only by the completed measurement, never by a saved-result importer."""
+    from prismaquant.shipcard import make_record
+
+    fidelity = tr3_kl_fidelity(vocab_size=VOCAB_SIZE, n_windows=WINDOW_COUNT,
+                              seqlen=CONTEXT_LENGTH)
+    if (result.get("schema") != "prismaquant.glm_tr3_full_vocabulary_kl/1"
+            or result.get("passed") is not True
+            or result.get("measurement_fidelity") != fidelity):
+        raise ValueError("gold record requires a new complete full-panel measurement")
+    if spec_decode_detected is not False:
+        raise ValueError("gold record requires actually observed no-spec execution")
+    windows = result["summary"]["windows"]
+    if (len(windows) != WINDOW_COUNT or any(
+            row["window_id"] != f"final-{index:04d}"
+            or row["positions"] != CONTEXT_LENGTH - 1
+            for index, row in enumerate(windows))):
+        raise ValueError("gold record requires every ordered panel prediction position")
+    binding = result["runtime_binding"]
+    producer = binding["producer_identity"]["gold_source"]["tools"]
+    manifest = result["serve_manifest"]
+    if producer["git_dirty"] is not False:
+        raise ValueError("gold producer must be an independently frozen clean source")
+    return make_record(
+        slot="gold.kl", tool="experiments/measure_glm_tr3_vllm.py", passed=True,
+        model_sha=model_sha, spec_decode_detected=spec_decode_detected,
+        serve_fingerprint=manifest["serve_fingerprint"], git_commit=producer["git_commit"],
+        metrics={"kl_mean": result["summary"]["mean"],
+                 "n_samples": WINDOW_COUNT, "n_positions": fidelity["n_positions"],
+                 "seqlen": CONTEXT_LENGTH, "score_positions": "all",
+                 "vocab_size": VOCAB_SIZE, "measurement_fidelity": fidelity,
+                 "calibration_contract": result["calibration_contract"],
+                 "calibration_contract_sha256": result["calibration_contract_sha256"],
+                 "teacher_evidence": {"teacher_sha256": binding["teacher_sha256"],
+                                      "source_execution": result["teacher_source_execution"]},
+                 "serve_manifest": manifest},
+        detail="Measured sealed TR3 final panel; no-spec full-vocabulary FP64 KL",
+        extra={"measured_model": str(model), "runtime_binding": binding,
+               "measurement_schema": "prismaquant.glm_tr3_gold_record.v1"})
+
+
 def measure(args):
+    gold_output = getattr(args, "gold_record_out", None)
+    if gold_output is not None and args.qualify_hook:
+        raise ValueError("--gold-record-out requires the full panel, not --qualify-hook")
+    if gold_output is not None and Path(gold_output).resolve() == Path(args.output).resolve():
+        raise ValueError("gold record and full measurement need distinct output paths")
+    if gold_output is not None:
+        if Path(gold_output).exists():
+            raise ValueError("gold record output already exists; retain the original evidence")
+        qualification_output = getattr(args, "qualify_then_score", None)
+        if qualification_output is not None and Path(gold_output).resolve() == Path(qualification_output).resolve():
+            raise ValueError("gold record and qualification need distinct output paths")
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
     t2_path = getattr(args, "teacher2", None)  # absent on legacy single-teacher callers
@@ -558,6 +611,9 @@ def measure(args):
     if teacher2 is not None and token_identity != teacher2["tokenizer_identity"]:
         raise ValueError("candidate tokenizer files differ from teacher2")
     candidate_identity = cached_checkpoint_identity(model, args.candidate_digest_cache)
+    if gold_output is not None:
+        from prismaquant.shipcard import compute_model_sha
+        gold_model_sha = compute_model_sha(model)
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
     compilation = declared_compilation(args)
@@ -578,7 +634,8 @@ def measure(args):
     llm = LLM(**kwargs)
     installed = False
     try:
-        if refuse_if_spec_decode(llm=llm, context="TR3 full-vocabulary") is not False:
+        spec_decode_detected = refuse_if_spec_decode(llm=llm, context="TR3 full-vocabulary")
+        if spec_decode_detected is not False:
             raise ValueError("speculative decoding must be observed disabled")
         observed_configuration = observed_engine_configuration(
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
@@ -606,6 +663,8 @@ def measure(args):
                            "candidate_identity": candidate_identity,
                            "teacher_sha256": args.teacher_sha256, "panel_sha256": PANEL_SHA256,
                            "logits_layout": args.logits_layout}
+        if gold_output is not None:
+            runtime_binding["shipcard_model_sha"] = gold_model_sha
         diagnostics_before = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
         if teacher2 is not None:
@@ -632,6 +691,10 @@ def measure(args):
                 raise ValueError("teacher/tokenizer/producer changed while scoring")
             if teacher2 is not None and bound_json(t2_path, t2_sha) != teacher2:
                 raise ValueError("teacher2 changed while scoring")
+            if gold_output is not None and compute_model_sha(model) != gold_model_sha:
+                raise ValueError("shipcard artifact identity changed while scoring")
+            if refuse_if_spec_decode(llm=llm, context="TR3 full-vocabulary") is not False:
+                raise ValueError("speculative decoding changed while scoring")
             load_panel(args.panel, arrays_root=args.arrays_root)
             after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
             if args.require_exl3_diag:
@@ -645,11 +708,30 @@ def measure(args):
             return after
 
         def build_result(schema, scored, diagnostics_after):
-            manifest = self_manifest(image=args.serve_image,
-                                     extra={"measurement_tool": "experimental_glm_tr3_full_vocabulary",
-                                            "runtime_binding": runtime_binding})
+            manifest_kwargs = {"image": args.serve_image,
+                               "extra": {"measurement_tool": "experimental_glm_tr3_full_vocabulary",
+                                         "runtime_binding": runtime_binding}}
+            if gold_output is not None:
+                manifest_kwargs["require_engine_descendant"] = True
+            manifest = self_manifest(**manifest_kwargs)
+            fidelity = tr3_kl_fidelity(vocab_size=VOCAB_SIZE, n_windows=scored,
+                                      seqlen=CONTEXT_LENGTH)
+            calibration = {"schema": "prismaquant.glm_tr3_gold_calibration.v1",
+                           "panel_sha256": PANEL_SHA256,
+                           "teacher_sha256": args.teacher_sha256,
+                           "dataset_revision": panel["dataset_revision"],
+                           "reference_model": panel["reference_model"],
+                           "reference_revision": panel["reference_revision"],
+                           "tokenizer_sha256": panel["tokenizer_sha256"],
+                           "windows": [{key: window[key] for key in
+                                        ("window_id", "document_id", "domain", "tokens_sha256",
+                                         "attention_mask_sha256", "prediction_positions")}
+                                       for window in panel["windows"][:scored]],
+                           "measurement_fidelity": fidelity}
             result = {"schema": schema,
                     "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
+                    "measurement_fidelity": fidelity, "calibration_contract": calibration,
+                    "calibration_contract_sha256": canonical_sha256(calibration),
                     "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
                     "per_position_kl": vectors[:scored], "prompt_alignment": alignment[:scored],
                     "rank_calls": rank_calls[:scored],
@@ -712,6 +794,10 @@ def measure(args):
         if qualification_record is not None:
             result["qualification"] = qualification_record
         atomic_json_write(result, args.output)
+        if gold_output is not None:
+            atomic_json_write(_tr3_gold_record(
+                result, model_sha=gold_model_sha, model=model,
+                spec_decode_detected=spec_decode_detected), gold_output)
         return result
     finally:
         if installed:
@@ -748,6 +834,8 @@ def main():
     p.add_argument("--logits-layout", choices=LOGITS_LAYOUTS, default="legacy_single",
                    help="explicit native logits-call layout; scheduler chunked prefill stays disabled")
     p.add_argument("--qualify-hook", action="store_true")
+    p.add_argument("--gold-record-out", default=None,
+                   help="publish an identity-bound gold.kl slot record after a full measured panel")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
     p.add_argument("--qualify-then-score", metavar="QUALIFICATION_OUTPUT",
@@ -755,6 +843,8 @@ def main():
                         "then score the whole panel in the same engine")
     add_gold_engine_arguments(p)
     args = p.parse_args()
+    if args.gold_record_out is not None and args.qualify_hook:
+        p.error("--gold-record-out requires the full panel, not --qualify-hook")
     if (args.teacher2 is None) != (args.teacher2_sha256 is None):
         p.error("--teacher2 and --teacher2-sha256 go together")
     if args.teacher2_sha256 is not None and args.teacher2_sha256 == args.teacher_sha256:

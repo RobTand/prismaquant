@@ -22,14 +22,19 @@ from typing import Any, Iterator, Protocol, runtime_checkable
 import torch
 
 from prismaquant.memory_management import reserve_allocation
-from prismaquant.dev_mode import dev_mode_enabled, dev_warning, seal_check
+from prismaquant.dev_mode import dev_mode_enabled, dev_stamp, dev_warning, seal_check
 from prismaquant.layer_streaming import (
     _call_layer,
     _compute_attention_mask,
     _compute_position_embeddings,
     _get_final_norm,
 )
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_LAX,
+    DIRECT_UTF8_INDENT2_STRICT,
+    bytes_sha256hex,
+    file_sha256hex,
+)
 from .joint_stageb_resources import cotangent_scratch
 
 
@@ -561,6 +566,60 @@ class StreamedBoundaryArtifacts:
             (self.directory / "entries").mkdir(exist_ok=True)
             self._publish_status()
 
+    def inspect_published_session(self, session, *, identity, pending=False,
+                                  owner_label=None, owner_fields=None):
+        """Read this existing generation without attaching, rebinding or writing it."""
+        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+        from .schemas import strict_json_loads
+
+        if not isinstance(session, dict) or set(session) != {"generation", "run_identity_sha256"}:
+            raise RuntimeError("a chain resume names no exact boundary session")
+        session = canonical_json(dict(session), where="resumed exact boundary session")
+        if canonical_json_sha256(identity, where="exact boundary source") != session["run_identity_sha256"]:
+            raise RuntimeError("the relaunch's bind identity is not the one the resumed session sealed")
+        directory = Path(self.config["directory"]) / str(session["generation"])
+        status_path = directory / "generation.json"
+
+        def read_status(path):
+            raw = path.read_bytes()
+            if not pending:
+                return json.loads(raw)
+            return strict_json_loads(raw,
+                duplicate=lambda key: RuntimeError(f"session duplicate key {key}"),
+                constant=lambda key: RuntimeError(f"session invalid constant {key}"))
+
+        try:
+            status = read_status(status_path)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"the resumed generation has no readable status file at {status_path}") from exc
+        if status.get("session") != session:
+            raise RuntimeError(f"{status_path} names another session than the chain resume")
+        policy_refusal = RuntimeError(f"{status_path} was written under another boundary storage policy")
+        if boundary_storage_layout_differs(status.get("policy"), self.identity):
+            raise policy_refusal
+        if pending:
+            if status.get("policy") != self.identity:
+                raise policy_refusal
+        else:
+            seal_check("boundary storage policy", status.get("policy"), self.identity,
+                       where=str(status_path), refusal=policy_refusal)
+        if status.get("status") not in (("running",) if pending else ("running", "failed")):
+            raise RuntimeError(f"the resumed generation's status is {status.get('status')!r}; "
+                               "only an interrupted run (running or failed) resumes")
+        entries = directory / "entries"
+        if not entries.is_dir():
+            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        if pending and any(entries.iterdir()):
+            raise RuntimeError("diagnostic pending generation already contains source entries")
+        if owner_label is not None:
+            label = _checked_owner_label(owner_label)
+            owner_status = read_status(directory / "owners" / (label + ".json"))
+            if (owner_status.get("session") != session or owner_status.get("status") != "complete"
+                    or owner_status.get("policy") != self.identity
+                    or owner_status.get("owner") != {"label": label, **(owner_fields or {})}):
+                raise RuntimeError("diagnostic session was not issued by its actual metadata owner")
+        return session, directory
+
     def rebind(self, session, *, identity, n_probes, check_memory=None,
                owner_label=None):
         """Adopt this run's own published generation again (PQ #1001).
@@ -593,43 +652,9 @@ class StreamedBoundaryArtifacts:
         ``owners/<owner_label>.json`` beside ``generation.json``, which this
         owner never rewrites.
         """
-        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
         if self.session is not None:
             raise RuntimeError("exact boundary generation is already bound")
-        if (not isinstance(session, dict)
-                or set(session) != {"generation", "run_identity_sha256"}):
-            raise RuntimeError("a chain resume names no exact boundary session")
-        session = canonical_json(dict(session), where="resumed exact boundary session")
-        # A wall in dev mode too (PQ #1147): the digest covers the calibration
-        # draw as well as the run seals. A dev chain resume compares the bind
-        # identity key by key first and then rebinds the stored one.
-        if canonical_json_sha256(identity, where="exact boundary source") != session[
-                "run_identity_sha256"]:
-            raise RuntimeError(
-                "the relaunch's bind identity is not the one the resumed session sealed")
-        directory = Path(self.config["directory"]) / str(session["generation"])
-        status_path = directory / "generation.json"
-        try:
-            status = json.loads(status_path.read_bytes())
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(
-                f"the resumed generation has no readable status file at {status_path}"
-            ) from exc
-        if status.get("session") != session:
-            raise RuntimeError(
-                f"{status_path} names another session than the chain resume")
-        policy_refusal = RuntimeError(
-            f"{status_path} was written under another boundary storage policy")
-        if boundary_storage_layout_differs(status.get("policy"), self.identity):
-            raise policy_refusal
-        seal_check("boundary storage policy", status.get("policy"), self.identity,
-                   where=str(status_path), refusal=policy_refusal)
-        if status.get("status") not in ("running", "failed"):
-            raise RuntimeError(
-                f"the resumed generation's status is {status.get('status')!r}; "
-                "only an interrupted run (running or failed) resumes")
-        if not (directory / "entries").is_dir():
-            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        session, directory = self.inspect_published_session(session, identity=identity)
         if owner_label is not None:
             self._owner_label = _checked_owner_label(owner_label)
         self._n_probes = n_probes
@@ -6268,32 +6293,24 @@ def _well_formed_fingerprint(value: object) -> bool:
 
 
 def stat_fingerprint_reuse(live: object, cached: object) -> str | None:
-    """How a recorded shard digest may be reused without rereading, or ``None``.
+    """Strict own-byte/cache publication reuse; provenance callers may stamp drift.
 
-    Both sides must carry the exact six-field shape first; malformed rows
-    never match, in either mode. Then:
-
-    - ``"exact"``: all six fields are equal.
-    - ``"mount"``: only ``device`` differs, and the live file is on a
-      filesystem whose device number is client-local (NFS). Inode, size,
-      mtime, ctime and path still bind the object, so this is certified.
-    - ``"dev"``: only ``device`` differs on any other filesystem, accepted
-      in dev mode only.
-
-    Anything else -- a moved, resized, retouched or replaced file -- refuses
-    in both modes. One predicate for every seed/validate/build/adopt
-    comparison, so they cannot disagree about what reuse means.
+    Inode, path, size and both times must match. Only the existing client-local
+    NFS device rule and explicit dev device-only portability remain exceptions.
+    This predicate never rebinds an old digest to a drifted object.
     """
     if not (_well_formed_fingerprint(live) and _well_formed_fingerprint(cached)):
         return None
     if live == cached:
-        return "exact"
+        return 'exact'
     assert isinstance(live, dict) and isinstance(cached, dict)
     if not all(live[key] == cached[key] for key in _REUSE_FINGERPRINT_FIELDS):
         return None
-    if device_number_is_client_local(live["path"]):
-        return "mount"
-    return "dev" if dev_mode_enabled() else None
+    if device_number_is_client_local(live['path']):
+        return 'mount'
+    return 'dev' if dev_mode_enabled() else None
+
+
 
 
 def stat_fingerprint_reusable(live: object, cached: object) -> bool:
@@ -6369,53 +6386,52 @@ def _hash_source_shards(
         pool.shutdown(wait=True, cancel_futures=True)
 
 
-def _digest_cache_digests(
+def _digest_cache_entries(
     reusable: dict[str, dict[str, object]],
     fingerprints: list[dict[str, object]],
-) -> list[str | None]:
-    """The recorded digest for each live fingerprint, or ``None`` where none is admitted.
+) -> list[dict[str, object] | None]:
+    """Stored source metadata, including the original fence as well as its digest.
 
-    ``reusable`` is a parsed source digest cache
-    (:func:`_read_source_checkpoint_digest_cache`). It is the one lookup for
-    both of its readers: :func:`build_source_checkpoint_identity`, and the
-    seed of :func:`build_streamed_model_identity` (PQ #1374).
+    A dev provenance mismatch reuses the record, never republishes its digest
+    under the running object's fingerprint. Both publishing callers retain the
+    returned original fence; byte-proof consumers use strict stat reuse.
     """
-    # A digest cache written on another mount of the same export keys every
-    # entry under that host's device number. Re-index by the portable key
-    # without touching the file format; two entries that agree on everything
-    # but bytes taint the key instead of reusing. Malformed stored rows are
-    # skipped outright: without the exact six-field shape a row must never
-    # match, or a cache missing `device` would reuse against every host.
-    # Whether a portable match is admitted is ``stat_fingerprint_reuse``'s
-    # decision (PQ #1363), not this index's.
-    portable_index: dict[str, dict[str, object]] = {}
+    dev = dev_mode_enabled()
+    key_for = (lambda fp: fp['path']) if dev else portable_fingerprint_key
+    index: dict[str, dict[str, object]] = {}
     tainted: set[str] = set()
     for entry in reusable.values():
-        stored = entry.get("fingerprint") if isinstance(entry, dict) else None
+        stored = entry.get('fingerprint') if isinstance(entry, dict) else None
         if not _well_formed_fingerprint(stored):
             continue
-        try:
-            key = portable_fingerprint_key(stored)
-        except (TypeError, ValueError):
-            continue
+        key = key_for(stored)
         if key in tainted:
             continue
-        prior = portable_index.get(key)
+        prior = index.get(key)
         if prior is None:
-            portable_index[key] = entry
-        elif prior.get("sha256") != entry.get("sha256"):
+            index[key] = entry
+        elif prior.get('sha256') != entry.get('sha256'):
             tainted.add(key)
-            portable_index.pop(key, None)
-    digests: list[str | None] = []
-    for fingerprint in fingerprints:
-        cached = reusable.get(canonical_fingerprint_key(fingerprint))
-        if cached is None and _well_formed_fingerprint(fingerprint):
-            candidate = portable_index.get(portable_fingerprint_key(fingerprint))
-            if candidate is not None and stat_fingerprint_reusable(
-                    fingerprint, candidate.get("fingerprint")):
-                cached = candidate
-        digests.append(str(cached["sha256"]) if cached is not None else None)
-    return digests
+            index.pop(key, None)
+    found = []
+    drifted = []
+    for live in fingerprints:
+        entry = reusable.get(canonical_fingerprint_key(live))
+        if entry is None and _well_formed_fingerprint(live):
+            candidate = index.get(key_for(live))
+            if candidate is not None:
+                stored = candidate['fingerprint']
+                if stat_fingerprint_reusable(live, stored):
+                    entry = candidate
+                elif dev:
+                    entry = candidate
+                    drifted.append({'recorded': stored, 'running': live})
+        found.append(entry)
+    if drifted:
+        seal_check('source cache stat metadata', [row['recorded'] for row in drifted],
+            [row['running'] for row in drifted], where='source digest cache')
+    return found
+
 
 
 def build_source_checkpoint_identity(
@@ -6423,6 +6439,7 @@ def build_source_checkpoint_identity(
     *,
     extra_shard_paths: object = (),
     digest_cache_path: str | Path | None = None,
+    source_authentication=None,
 ) -> dict[str, object]:
     """Content identity of the exact safetensors byte set a run consumes.
 
@@ -6453,9 +6470,30 @@ def build_source_checkpoint_identity(
     digest instead of rereading that shard. Discovery, metadata hashing,
     digest-cache JSON handling and identity construction still run. Without
     this cache, every call hashes every shard.
+
+    An explicit qualified original ``source_authentication`` owner supplies
+    independently bound expected whole-file descriptors instead. Config/index
+    interpretation is authenticated by that owner; each actual tensor delivery
+    still verifies its held bytes and reports them separately. This keeps the
+    same identity schema/content meaning and accepts no legacy stat cache or
+    extra shard roster. It does not qualify original device/capture admission.
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 
+    if source_authentication is not None:
+        if digest_cache_path is not None or extra_shard_paths:
+            raise RuntimeError('original checkpoint identity accepts no stat cache or extra roster')
+        from .source_generation import original_checkpoint_description
+
+        descriptor = original_checkpoint_description(source_model, source_authentication)
+        shards = [{key: row[key] for key in ('name', 'size', 'sha256')}
+                  for row in descriptor['shards']]
+        metadata = [row for row in descriptor['metadata']
+                    if row['name'] in SOURCE_CHECKPOINT_METADATA_FILES or row['name'].endswith('.py')]
+        value = {'schema': SOURCE_CHECKPOINT_IDENTITY_SCHEMA,
+                 'shards': shards, 'metadata': sorted(metadata, key=lambda row: row['name'])}
+        return {**value, 'content_sha256': canonical_json_sha256(
+            value, where='source checkpoint content identity')}
     root = Path(source_model)
     _, indexed_shards = _local_checkpoint_shards(source_model)
     shard_paths = {Path(path).resolve() for path in (indexed_shards or ())}
@@ -6496,7 +6534,11 @@ def build_source_checkpoint_identity(
     )
 
     fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
-    digests = _digest_cache_digests(reusable, fingerprints)
+    cached_entries = _digest_cache_entries(reusable, fingerprints)
+    digests = [str(entry['sha256']) if entry is not None else None for entry in cached_entries]
+    recorded_fingerprints = [entry['fingerprint'] if entry is not None and
+        not stat_fingerprint_reusable(live, entry['fingerprint']) else live
+        for live, entry in zip(fingerprints, cached_entries, strict=True)]
     misses = [index for index, digest in enumerate(digests) if digest is None]
     if misses and dev_mode_enabled():
         # The digests key every cache, so a miss is hashed in both modes
@@ -6519,7 +6561,7 @@ def build_source_checkpoint_identity(
 
     entries: list[dict[str, object]] = []
     shards: list[dict[str, object]] = []
-    for path, fingerprint, digest in zip(ordered, fingerprints, digests):
+    for path, fingerprint, digest in zip(ordered, recorded_fingerprints, digests):
         assert digest is not None
         entries.append({"fingerprint": fingerprint, "sha256": digest})
         # Relocating a checkpoint does not change its bytes, so the identity
@@ -6586,16 +6628,12 @@ def build_source_checkpoint_identity(
         try:
             atomic_write_bytes(
                 Path(digest_cache_path),
-                json.dumps(
+                DIRECT_UTF8_INDENT2_STRICT.encoded(
                     {
                         "schema": SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA,
                         "entries": entries,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8"),
+                    }
+                ),
             )
         except OSError:
             # The digest cache is an optimization. A read-only or full cache
@@ -6618,19 +6656,82 @@ def _read_streamed_model_identity_cache(
             f"streamed model identity cache {cache_path} is corrupt; "
             "refusing identity reuse"
         ) from exc
-    if (
-        not isinstance(cached, dict)
-        or cached.get("schema") != STREAMED_MODEL_IDENTITY_CACHE_SCHEMA
-        or cached.get("source") != str(source_model)
-    ):
-        raise RuntimeError(
-            f"streamed model identity cache {cache_path} does not bind source "
-            f"{source_model!r}"
-        )
+    refusal = lambda: RuntimeError(
+        f"streamed model identity cache {cache_path} does not bind source {source_model!r}")
+    if not isinstance(cached, dict) or cached.get('schema') != STREAMED_MODEL_IDENTITY_CACHE_SCHEMA:
+        raise refusal()
+    seal_check('source cache path', cached.get('source'), str(source_model),
+               where=str(cache_path), refusal=refusal)
     identity = validate_streamed_model_identity(
         cached.get("identity"), where="streamed model identity cache"
     )
     return cached, identity
+
+
+def _streamed_identity_record(*, config_dict, mapping, shards, checkpoint_weight_map,
+                              source_model, resolved_commit):
+    """The existing v1 identity serialization, shared by admitted source intake."""
+    from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+
+    value_bearing = {
+        "config": canonical_json(config_dict, where="streamed model config"),
+        "weight_map": mapping,
+        "shards": shards,
+    }
+    if checkpoint_weight_map is not None:
+        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
+    return {
+        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
+        "source": str(source_model),
+        "resolved_commit": resolved_commit,
+        "content_sha256": canonical_json_sha256(
+            value_bearing, where="streamed model content identity"),
+        **value_bearing,
+    }
+
+
+
+
+def _original_streamed_identity(runner, source_model, config_dict, mapping, owner):
+    """Existing v1 identity from admitted expected descriptors and owned resolution."""
+    from .digests import indent2_json_file_bytes
+    from .layer_streaming import construction_multimodal
+    from .model_profiles import detect_profile
+    from .sensitivity_probe import text_only_stage_config
+    from .source_read_plan import live_weight_map
+    from .streaming_model import _streaming_auto_config_from_bytes, _skeleton_config_and_class
+
+    context = runner.context
+    if context.source_snapshot_only or context.source_scope is not None:
+        raise RuntimeError('original identity requires a complete body resolution')
+    from .source_generation import original_checkpoint_description
+
+    descriptor = original_checkpoint_description(source_model, owner)
+    original = descriptor['config']
+    profile = detect_profile(source_model, config=original)
+    profile._declare_checkpoint_index(descriptor['index'])
+    construction = construction_multimodal(profile, False)
+    derived = original if construction else text_only_stage_config(original, profile=profile)
+    derived = original if derived is None else derived
+    expected_config = _streaming_auto_config_from_bytes(
+        source_model, indent2_json_file_bytes(derived), resource_check=owner.resource_check)
+    expected_config, _ = _skeleton_config_and_class(
+        expected_config, multimodal=construction, log_prefix='[original-identity]')
+    if canonical_streamed_model_semantic_config(config_dict) != canonical_streamed_model_semantic_config(
+            expected_config.to_dict()):
+        raise RuntimeError('original identity resolved config differs from authenticated bootstrap')
+    expected_shards, expected_mapping = live_weight_map(
+        descriptor['index']['weight_map'], source_model,
+        lambda key: profile.checkpoint_to_live_name(key, multimodal=construction))
+    if (mapping != dict(sorted(expected_mapping.items()))
+            or dict(context.weight_shard) != expected_shards):
+        raise RuntimeError('original identity live/config/index/shard roster differs')
+    shards = [{key: row[key] for key in ('path', 'size', 'sha256')}
+              for row in descriptor['shards']]
+    return _streamed_identity_record(
+        config_dict=config_dict, mapping=mapping, shards=shards,
+        checkpoint_weight_map=descriptor['index']['weight_map'], source_model=source_model,
+        resolved_commit=getattr(runner.model.config, '_commit_hash', None))
 
 
 def build_streamed_model_identity(
@@ -6662,6 +6763,14 @@ def build_streamed_model_identity(
     admits it. ``refuse_uncovered`` turns any shard still uncovered after
     both caches into a refusal before a byte is hashed; its text names the
     quantum that should have produced the proof.
+
+    With an explicitly selected qualified original owner on the context,
+    owned config/index resolution and the complete live/checkpoint shard roster
+    must agree with its independently authenticated publisher descriptors.
+    The existing v1 serializer binds those expected whole-file facts without
+    pool discovery, stat/cache reuse or redundant bulk hashing. Actual decoder
+    deliveries remain independently verified and separately receipted; legacy
+    identity/cache inputs refuse and original CUDA admission remains closed.
     """
     from prismaquant.cost_stage_checkpoint import (
         canonical_json,
@@ -6686,6 +6795,11 @@ def build_streamed_model_identity(
         str(live): str(checkpoint)
         for live, checkpoint in sorted(runner.context.weight_ckpt.items())
     }
+    owner = getattr(runner.context, 'source_authentication', None)
+    if getattr(owner, 'is_qualified_original_material', False):
+        if any(value is not None for value in (identity_cache_path, identity_cache_bytes, digest_cache_path)):
+            raise RuntimeError('original model identity accepts no legacy stat identity/cache inputs')
+        return _original_streamed_identity(runner, str(source_model), config_dict, mapping, owner)
     runner_shard_paths = {
         Path(path).resolve()
         for path in runner.context.weight_shard.values()
@@ -6722,30 +6836,35 @@ def build_streamed_model_identity(
             else [None]
         )
         reusable = None not in reuse
-        if reusable and "dev" in reuse:
-            dev_warning(
-                "source identity reuses "
-                f"{len(fingerprints)} recorded shard digests across a "
-                "client device-number difference (dev-only portable reuse; "
-                "certified mode would rehash): uncertified")
-        if reusable:
-            if (
-                cached_identity.get("config") == canonical_json(
-                    config_dict, where="streamed model config"
-                )
-                and cached_identity.get("weight_map") == mapping
-                and cached_identity.get("checkpoint_weight_map")
-                == checkpoint_weight_map
-            ):
-                return cached_identity
+        dev = dev_mode_enabled()
+        metadata_reusable = (dev and isinstance(stored, list)
+            and len(stored) == len(fingerprints)
+            and all(_well_formed_fingerprint(row) for row in stored)
+            and {row['path'] for row in stored} == {row['path'] for row in cached_identity['shards']}
+            and {Path(row['path']).name for row in cached_identity['shards']}
+                == {path.name for path in shard_paths})
+        if reusable or metadata_reusable:
+            running_raw = canonical_json(config_dict, where='streamed model config')
+            raw_matches = cached_identity.get('config') == running_raw
+            semantic_matches = (canonical_streamed_model_semantic_config(cached_identity.get('config'))
+                                == canonical_streamed_model_semantic_config(config_dict))
+            if ((raw_matches or dev and semantic_matches)
+                    and cached_identity.get('weight_map') == mapping
+                    and cached_identity.get('checkpoint_weight_map') == checkpoint_weight_map):
+                seal_check('source stat metadata', stored, fingerprints,
+                    where='streamed model identity', same=(stored == fingerprints) if dev else reusable)
+                seal_check('source config provenance', cached_identity.get('config'), running_raw,
+                           where='streamed model identity')
+                return {**cached_identity, **dev_stamp(timestamped=False)} if dev else cached_identity
 
     # A schema-valid old cache may cover only the executable decoder shards.
-    # Reuse each digest whose complete stat fingerprint still matches, and
-    # hash only newly covered files (for DSv4 this upgrades 45 cached body
-    # shards by reading the three MTP shards, rather than rereading 156 GB).
+    # Certified reuse requires the original stat match. Dev reuse retains
+    # recorded digests across metadata drift and hashes only genuinely new
+    # source shards not covered by either existing cache.
     reusable_sha: dict[str, str] = {}
     mutated_paths: list[str] = []
-    portable_paths: list[str] = []
+    recorded_by_path = {str(fp['path']): fp for fp in fingerprints}
+    stat_drift = []
     if cached is not None and cached_identity is not None:
         cached_fingerprints = cached.get("fingerprints")
         cached_shards = cached_identity.get("shards")
@@ -6769,37 +6888,31 @@ def build_streamed_model_identity(
                 if prior_fp is None or prior_shard is None:
                     continue
                 reuse = stat_fingerprint_reuse(fingerprint, prior_fp)
-                if reuse is None:
+                if reuse is None and not (dev_mode_enabled() and _well_formed_fingerprint(prior_fp)):
                     mutated_paths.append(path_key)
                     continue
-                if (
-                    isinstance(prior_shard, dict)
-                    and prior_shard.get("size") == fingerprint["size"]
-                    and re.fullmatch(
-                        r"[0-9a-f]{64}",
-                        str(prior_shard.get("sha256", "")).lower(),
-                    )
-                ):
-                    reusable_sha[path_key] = str(
-                        prior_shard["sha256"]
-                    ).lower()
-                    if reuse == "dev":
-                        portable_paths.append(path_key)
-    if portable_paths:
-        dev_warning(
-            "source identity reuses "
-            f"{len(portable_paths)} recorded shard digests across a "
-            "client device-number difference (dev-only portable reuse; "
-            "certified mode would rehash): uncertified")
+                if (isinstance(prior_shard, dict)
+                        and prior_shard.get('size') == prior_fp.get('size')
+                        and re.fullmatch(r'[0-9a-f]{64}', str(prior_shard.get('sha256', '')).lower())):
+                    reusable_sha[path_key] = str(prior_shard['sha256']).lower()
+                    if reuse is None:
+                        recorded_by_path[path_key] = prior_fp
+                        stat_drift.append({'recorded': prior_fp, 'running': fingerprint})
+        if stat_drift:
+            seal_check('source stat metadata', [row['recorded'] for row in stat_drift],
+                [row['running'] for row in stat_drift], where='partial streamed model identity')
     seeded = 0
     if digest_cache_path is not None:
         pending = [fingerprint for fingerprint in fingerprints
                    if str(fingerprint["path"]) not in reusable_sha]
         seed = _read_source_checkpoint_digest_cache(Path(digest_cache_path))
-        for fingerprint, digest in zip(
-                pending, _digest_cache_digests(seed, pending), strict=True):
-            if digest is not None:
-                reusable_sha[str(fingerprint["path"])] = digest
+        for fingerprint, entry in zip(
+                pending, _digest_cache_entries(seed, pending), strict=True):
+            if entry is not None:
+                path_key = str(fingerprint['path'])
+                reusable_sha[path_key] = str(entry['sha256'])
+                if not stat_fingerprint_reusable(fingerprint, entry['fingerprint']):
+                    recorded_by_path[path_key] = entry['fingerprint']
                 seeded += 1
     uncovered = [
         (str(fingerprint["path"]), int(fingerprint["size"]))
@@ -6843,49 +6956,34 @@ def build_streamed_model_identity(
     for (path, _), digest in zip(misses, _hash_source_shards(misses), strict=True):
         reusable_sha[str(path.resolve())] = digest
     shards: list[dict[str, object]] = []
-    for path, fingerprint in zip(shard_paths, fingerprints, strict=True):
+    for path in shard_paths:
         path_key = str(path.resolve())
+        fingerprint = recorded_by_path[path_key]
         digest = reusable_sha[path_key]
         shards.append({
             "path": path_key,
             "size": int(fingerprint["size"]),
             "sha256": digest,
         })
-    value_bearing = {
-        "config": canonical_json(config_dict, where="streamed model config"),
-        "weight_map": mapping,
-        "shards": shards,
-    }
-    if checkpoint_weight_map is not None:
-        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
-    identity = {
-        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
-        "source": str(source_model),
-        "resolved_commit": getattr(config, "_commit_hash", None),
-        "content_sha256": canonical_json_sha256(
-            value_bearing, where="streamed model content identity"
-        ),
-        **value_bearing,
-    }
+    identity = _streamed_identity_record(
+        config_dict=config_dict, mapping=mapping, shards=shards,
+        checkpoint_weight_map=checkpoint_weight_map, source_model=source_model,
+        resolved_commit=getattr(config, "_commit_hash", None))
     if cache_path is not None:
         from prismaquant.cost_stage_checkpoint import atomic_write_bytes
 
         atomic_write_bytes(
             cache_path,
-            json.dumps(
+            DIRECT_UTF8_INDENT2_STRICT.encoded(
                 {
                     "schema": STREAMED_MODEL_IDENTITY_CACHE_SCHEMA,
                     "source": str(source_model),
-                    "fingerprints": fingerprints,
+                    "fingerprints": [recorded_by_path[str(path.resolve())] for path in shard_paths],
                     "identity": identity,
-                },
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8"),
+                }
+            ),
         )
-    return identity
+    return {**identity, **dev_stamp(timestamped=False)} if dev_mode_enabled() else identity
 
 
 def validate_streamed_model_identity(
@@ -7257,6 +7355,8 @@ def validate_cached_streamed_model_identity(
         raise RuntimeError(
             "streamed model identity cannot validate the live source config"
         ) from exc
+    # The config bytes were just read to derive the live semantic identity; a
+    # change during that read is a torn snapshot (partial data), not a seal.
     if config_before != config_after:
         raise RuntimeError(
             "streamed model identity source config changed while validating"
@@ -7271,7 +7371,6 @@ def validate_cached_streamed_model_identity(
             f"content identity: changed={changed[:12]}"
         )
 
-    portable = 0
     for path_key, expected in fingerprint_by_path.items():
         path = Path(path_key)
         if not path.is_file():
@@ -7279,23 +7378,13 @@ def validate_cached_streamed_model_identity(
                 f"streamed model identity source shard is missing: {path}"
             )
         observed = _streamed_identity_stat_fingerprint(path)
-        reuse = stat_fingerprint_reuse(observed, expected)
-        if reuse is None:
-            raise RuntimeError(
-                "streamed model identity source shard stat drifted; refusing "
-                f"cached content SHA for {path}"
-            )
-        if reuse == "dev":
-            portable += 1
         shard = shard_by_path[path_key]
-        if shard.get("size") != observed["size"]:
-            raise RuntimeError(
-                f"streamed model identity shard size disagrees for {path}"
-            )
-    if portable:
-        dev_warning(
-            f"streamed model identity reuses {portable} recorded shard "
-            "digests across a client device-number difference (dev-only "
-            "portable reuse; certified mode would rehash): uncertified"
-        )
+        # Internal recorded byte length is data consistency, not run provenance.
+        if shard.get('size') != expected.get('size'):
+            raise RuntimeError(f'streamed model identity shard size disagrees for {path}')
+        reuse = stat_fingerprint_reuse(observed, expected)
+        seal_check('source shard stat metadata', expected, observed, where=str(path),
+            same=reuse is not None,
+            refusal=lambda: RuntimeError('streamed model identity source shard stat drifted; refusing '
+                                         f'cached content SHA for {path}'))
     return identity

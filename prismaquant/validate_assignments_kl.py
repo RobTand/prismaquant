@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import atexit
 import json
 import math
@@ -75,6 +74,7 @@ from prismaquant.source_prefetch import (
     _available_memory_bytes,
     prefetch_safetensors_checkpoint,
 )
+from .digests import DIRECT_UTF8_STRICT, text_sha256hex
 
 
 def _load_json(path: str | Path):
@@ -329,9 +329,7 @@ def _calibration_provenance(calib_repeats: Sequence[torch.Tensor]) -> dict[str, 
     elif len(repeat_hashes) == 1:
         combined = repeat_hashes[0]
     else:
-        combined = hashlib.sha256(
-            "\n".join(repeat_hashes).encode("utf-8")
-        ).hexdigest()
+        combined = text_sha256hex("\n".join(repeat_hashes))
     return {
         "calib_hash": combined,
         "calib_repeat_hashes": repeat_hashes,
@@ -1741,15 +1739,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 } if candidate_budget is not None else {}),
             }
             result["resolved_assignment_payload"] = resolved_assignment_payload
-            result["resolved_assignment_payload_sha256"] = hashlib.sha256(
-                json.dumps(
-                    resolved_assignment_payload,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8")
-            ).hexdigest()
+            result["resolved_assignment_payload_sha256"] = DIRECT_UTF8_STRICT.sha256(
+                    resolved_assignment_payload)
             if candidate_budget is not None:
                 result["whole_artifact_upper_bound_bytes"] = int(
                     candidate_budget[

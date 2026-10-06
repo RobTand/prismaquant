@@ -439,13 +439,17 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         # because that schedule declares `cost_setup`/`cost_head` instead and
         # the worker refuses a name the submission did not seal. The walk
         # banks its verified units under the command's own root and reuses
-        # them only when the submission said --resume (#754).
+        # them only when the submission said --resume (#754). The intake pool
+        # width is the plan's resolved default (#1382): absent from the call
+        # exactly when it is 1, as execute passes it.
+        width = bridge.resolve_file_hash_workers({})
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
                           "progress_phase": "head",
                           "head_checkpoint": tmp_path / command / "head-walk",
                           "head_resume": False,
                           **({"verify_payloads": False} if command == "prepare" else
-                             {"verify_payloads": False, "require_existing_renders": True})}
+                             {"verify_payloads": False, "require_existing_renders": True}),
+                          **({} if width == 1 else {"file_hash_workers": width})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             progress_committed=0, encoder_source_reuse=None,
@@ -1264,3 +1268,218 @@ def test_a_pure_refusal_precedes_the_allocator_touch(tmp_path, monkeypatch):
                             "calib_seqlen": 512}}
     with pytest.raises(ValueError, match="checked profiler launcher"):
         bridge.execute("prepare", config, plan_sha256="b" * 64)
+
+
+# ---------------------------------------------------------------------------
+# #2231: the joint aura walk reads each unit's renders from its owner row's
+# cache directory under the mangled leaf, and nothing sits behind that read,
+# so the per-owner refusal must group the roster by the RESOLVED owner root.
+# Two rows naming one directory through different spellings are one cache.
+# ---------------------------------------------------------------------------
+
+
+def colliding_two_owner_fixture(tmp_path, formats=None):
+    """A two-row campaign whose rows name ONE cache directory through two
+    spellings (row-0001 spells it through a symlinked parent), with a roster
+    pair that aliases one render shard leaf. ``formats`` spells each name's
+    measured format; the default measures both at one format, which is the
+    colliding case.
+    """
+    name_a = "model.layers.0.self_attn.q_proj"
+    name_b = "model.layers.0_self_attn.q_proj"
+    names = [name_a, name_b]
+    fmt = "TESSERA_E4M3_K1_R1024"
+    fmt_a, fmt_b = formats or (fmt, fmt)
+    rungs = {"TESSERA_E4M3_K1_R1024": 1024, "TESSERA_E4M3_K1_R896": 896,
+             "TESSERA_E4M3_K1_R1000": 1000}
+    root = tmp_path / "campaign"
+    rowdir = root / "rows/row-0000"
+    aliasdir = root / "rows-link/row-0000"
+    cache = rowdir / "cache"
+    cache.mkdir(parents=True)
+    (root / "rows-link").symlink_to(root / "rows", target_is_directory=True)
+    wire = tmp_path / "merged/cache/wire"
+    wire.mkdir(parents=True)
+    from prismaquant.production_weight_cache import _cache_weight_filename
+    source = {"shape": [4, 4], "dtype": "bfloat16", "sha256": "a" * 64}
+    encoder_seal = installed_encoder_source_sha256()
+    identity = {"campaign_schema": "prismaquant.tessera_campaign_cost.v1",
+                "currency": "output_mse_under_route_activation_contract",
+                "prismaquant_source_sha256": "b" * 64, "encoder_source_sha256": encoder_seal,
+                "calibration": {"fit_ids_sha256": "d" * 64},
+                "units": {n: {"weight": source, "hessian": None,
+                               "input_global_scale": None,
+                               "menu": [fmt_a if n == name_a else fmt_b],
+                               "scoring_rows": {"shape": [2, 4], "sha256": "e" * 64}}
+                          for n in names}}
+    checkpoint = tmp_path / "merged/cost.anchors.json"
+    parts = checkpoint.with_name(checkpoint.name + ".parts")
+    seal = canonical_json_sha256(identity, where="fixture")
+    manifest = {"schema": MANIFEST_SCHEMA, "stage": "Tessera campaign",
+                "identity": identity, "identity_sha256": seal,
+                "units": [{"qname": n, "file": str(unit_path(parts, n).relative_to(parts))}
+                          for n in names]}
+    checkpoint.write_text(json.dumps(manifest))
+    costs, states = {}, {}
+    for n in names:
+        n_fmt = fmt_a if n == name_a else fmt_b
+        # Both names alias one shard leaf; at one format the fixture writes
+        # that one file twice with identical bytes.
+        (cache / _cache_weight_filename(n, n_fmt)).write_bytes(b"inert render")
+        blob = ("inert " + n).encode()
+        (wire / (n + ".tessera")).write_bytes(blob)
+        anchor = {"qname": n, "format_name": n_fmt, "family": "TESSERA_E4M3_K1",
+                  "body_rate_q256": rungs[n_fmt], "dloss": 0.25, "dloss_stderr": 0.0,
+                  "memory_bytes": 16, "bits_per_param": 8.0,
+                  "activation_contract": "fp8_e4m3", "activation_quantized": True,
+                  "wire_bytes": len(blob), "seconds": 0.1, "hessian_applied": False,
+                  "input_global_scale": None}
+        record = {"file": n + ".tessera", "blob_bytes": len(blob),
+                  "blob_sha256": hashlib.sha256(blob).hexdigest(),
+                  "identity": {"unit": n, "source": source, "calibration": None,
+                               "encoder_source_sha256": encoder_seal,
+                               "recipe": {"grid": "E4M3", "q256": rungs[n_fmt]}}}
+        states[n] = {"anchors": [anchor], "wire_records": {n_fmt: record}}
+        write_unit(parts, stage="Tessera campaign", qname=n,
+                   identity_sha256=seal, state=states[n])
+        costs[n] = {n_fmt: {"output_mse": 0.25, "output_mse_measured": True,
+                         "cost_source": "tessera_campaign_measured", "tessera_provenance": "measured",
+                         "currency": identity["currency"], "tessera_family": anchor["family"],
+                         "tessera_body_rate_q256": rungs[n_fmt], "activation_contract": "fp8_e4m3",
+                         "activation_quantized": True, "wire_bytes": len(blob),
+                         "hessian_identity": {"applied": False, "supplied": False}}}
+    census = {"model": "/fixture/model", "unit_shapes": {n: [4, 4] for n in names},
+              "anchor_groups": {"g:q": [name_a], "g:k": [name_b]},
+              "max_abs": {name_a: 1.0, name_b: 2.0}}
+    census_path = root / "census.json"
+    census_path.write_text(json.dumps(census))
+    rows = [{"row_id": "row-0000", "members": [name_a], "groups": ["g:q"],
+             "dir": str(rowdir)},
+            {"row_id": "row-0001", "members": [name_b], "groups": ["g:k"],
+             "dir": str(aliasdir)}]
+    plan = {"schema": "prismaquant.tessera_campaign_plan.v1", "model": census["model"],
+            "census": str(census_path), "rows": rows}
+    plan_path = root / "plan.json"
+    plan_path.write_text(json.dumps(plan))
+    receipts = root / "receipts.json"
+    receipts.write_text(json.dumps({"returncode": 0, "rows": [
+        {"key": "f" * 64, "rc": 0, "status": "executed", "host": "fixture"},
+        {"key": "0" * 64, "rc": 0, "status": "executed", "host": "fixture"},
+    ]}))
+    payload = {"schema": identity["campaign_schema"], "currency": identity["currency"],
+               "costs": costs, "provenance": {"model": census["model"],
+               "cost_mode": "production-render-score", "wire_dir": str(wire),
+               "hessian": {"supplied": False}, "stopped_early": False,
+               "campaign_fanout": {"schema": plan["schema"],
+                                   "rows": {"row-0000": ["g:q"], "row-0001": ["g:k"]}},
+               "activation_static_scales": {"units": {}, "policy": "fixture"}}}
+    cost_path = tmp_path / "merged/cost.pkl"
+    cost_path.write_bytes(pickle.dumps(payload))
+    config = {"campaign_plan": bind(plan_path), "census": bind(census_path),
+              "campaign_receipts": bind(receipts), "merged_cost": bind(cost_path),
+              "merged_checkpoint": bind(checkpoint), "required_source_units": 2,
+              "required_campaign_groups": 2}
+    return config, names, fmt_a, fmt_b
+
+
+def test_joint_aura_refuses_a_colliding_pair_across_two_spellings_of_one_owner(
+    tmp_path,
+):
+    # Both rows resolve to the same cache directory, so the walk's per-owner
+    # refusal must see one group holding both names and refuse before the
+    # walk reads anything: no residency check sits behind this read.
+    config, names, fmt, _ = colliding_two_owner_fixture(tmp_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        load(config)
+
+    message = str(exc_info.value)
+    assert names[0] in message
+    assert names[1] in message
+    assert "model_layers_0_self_attn_q_proj__" in message
+    assert fmt in message
+
+
+def test_joint_aura_admits_a_cross_format_alias_pair_across_one_owner(
+    tmp_path,
+):
+    # Injectivity is filename-level over (qname, canonical format)
+    # coordinates (#2219): the alias pair measured at two formats names two
+    # different render files, so the grouped per-owner check admits them and
+    # the walk reads exactly the two measured formats, one per unit; BF16
+    # is only a terminal menu entry, not another render read.
+    config, names, fmt_a, fmt_b = colliding_two_owner_fixture(
+        tmp_path, formats=("TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"),
+    )
+
+    data = load(config)
+
+    assert data.formats_by_qname == {
+        names[0]: (fmt_a, "BF16"),
+        names[1]: (fmt_b, "BF16"),
+    }
+
+
+def test_joint_aura_admits_a_cross_format_alias_with_an_unmeasured_cost(
+    tmp_path, monkeypatch,
+):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, fmt_a, fmt_b = colliding_two_owner_fixture(
+        tmp_path, formats=("TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"),
+    )
+    cost_path = Path(config["merged_cost"]["path"])
+    payload = pickle.loads(cost_path.read_bytes())
+    payload["costs"][names[0]][fmt_b] = {
+        "output_mse_measured": False,
+        "cost_source": "tessera_campaign_interpolated",
+        "output_mse": 0.3,
+    }
+    cost_path.write_bytes(pickle.dumps(payload))
+    config["merged_cost"] = bind(cost_path)
+
+    plan = json.loads(Path(config["campaign_plan"]["path"]).read_text())
+    cache = Path(plan["rows"][0]["dir"]).resolve() / "cache"
+    expected = {
+        cache / _cache_weight_filename(names[0], fmt_a),
+        cache / _cache_weight_filename(names[1], fmt_b),
+    }
+    assert len(expected) == 2
+    assert (cache / _cache_weight_filename(names[0], fmt_b)
+            == cache / _cache_weight_filename(names[1], fmt_b))
+    reads = []
+    resolve_origin = bridge._resolve_render_origin
+
+    def record_read(render, **kwargs):
+        reads.append(Path(render))
+        return resolve_origin(render, **kwargs)
+
+    monkeypatch.setattr(bridge, "_resolve_render_origin", record_read)
+    data = load(config)
+
+    assert set(data.cells) == {(names[0], fmt_a), (names[1], fmt_b)}
+    assert len(reads) == 2
+    assert set(reads) == expected
+
+
+@pytest.mark.parametrize("fmt", ["TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"])
+def test_joint_aura_refuses_measured_aliases_before_the_walk(
+    tmp_path, monkeypatch, fmt,
+):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, _, _ = colliding_two_owner_fixture(tmp_path, formats=(fmt, fmt))
+
+    def refuse_walk(*args, **kwargs):
+        pytest.fail("a measured filename collision reached the per-unit walk")
+
+    monkeypatch.setattr(bridge, "_load_unit", refuse_walk)
+    with pytest.raises(ValueError) as exc_info:
+        load(config)
+
+    message = str(exc_info.value)
+    assert all(name in message for name in names)
+    assert fmt in message
+    assert _cache_weight_filename(names[0], fmt) in message

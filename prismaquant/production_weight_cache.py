@@ -69,6 +69,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
+from itertools import chain
 import hashlib
 import io
 import json
@@ -88,6 +89,7 @@ from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 from prismaquant.digests import (
+    DIRECT_ASCII_INDENT2_LAX,
     DIRECT_UTF8_STRICT,
     LengthFramedSourceSha256,
     bytes_sha256hex,
@@ -178,9 +180,57 @@ def _render_base_format(fmt: str) -> str:
     return str(fmt).strip().upper()
 
 
+def _cache_weight_leaf(qname: str) -> str:
+    """The mangled, filesystem-safe leaf body of a qualified name.
+
+    One home for the mangling (#2219): ``_cache_weight_filename`` spells the
+    shard leaf with it and ``require_injective_cache_filenames`` tests
+    injectivity against it, so the two can never disagree.
+    """
+    return str(qname).replace("/", "__").replace(".", "_")
+
+
 def _cache_weight_filename(qname: str, fmt: str) -> str:
-    safe = qname.replace("/", "__").replace(".", "_")
-    return f"{safe}__{fmt}.pt"
+    return f"{_cache_weight_leaf(qname)}__{fmt}.pt"
+
+
+def require_injective_cache_filenames(
+    coordinates: Iterable[tuple[str, str]],
+    *,
+    where: str,
+) -> None:
+    """Refuse two render coordinates that share one cache filename (#2219).
+
+    The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
+    filesystem-safe, so distinct qualified names can share one shard leaf
+    (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
+    the bare tensor -- nothing in the file names the Linear it belongs to --
+    so two coordinates that land on one file would silently read and
+    overwrite each other's shard. The mangled spelling itself is load-bearing
+    (archive names, existing caches), so instead of changing it this fails
+    closed on the whole SET: call it where a cache directory is opened for a
+    model's rendered coordinate set, before any shard is written or read --
+    that is what covers resumes, pre-existing caches and concurrent
+    producers. Injectivity is filename-level over ``(qname, canonical
+    format)`` coordinates: ``layer.a`` and ``layer_a`` at two different
+    formats name two different files and are admitted -- the layout #1859
+    deliberately admits -- while the same pair at one format refuses.
+    Callers pass canonical formats; ``_check_rendered_cache_destinations``
+    canonicalizes the identity's ``"qname|FMT"`` pairs before delegating.
+    """
+    owners: dict[str, tuple[str, str]] = {}
+    for coordinate in sorted(
+        {(str(qname), str(fmt)) for qname, fmt in coordinates}
+    ):
+        filename = _cache_weight_filename(*coordinate)
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
+            raise ValueError(
+                f"{where}: coordinates {previous!r} and {coordinate!r} map "
+                f"to one rendered cache destination {filename!r}; the "
+                f"mangled leaf is not injective and the rendered shards "
+                f"would silently overwrite each other"
+            )
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -344,6 +394,10 @@ class ProductionWeightCache:
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
     _expected_file_sha256: dict[tuple[str, str], str] | None = None
+    # Key count at the last successful cache-filename injectivity check
+    # (#2219); None until the first residency open. The class attribute backs
+    # caches unpickled from older pickles that predate the field.
+    _injectivity_checked_keys: int | None = None
 
     def __post_init__(self) -> None:
         # Normalize to ``activation_max_abs`` if a caller used the legacy
@@ -1307,6 +1361,11 @@ class ProductionWeightCache:
         the bounded branch requires the caller's digest binding.
         """
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+        # #2219: the lazy get() -> _resolve_to_tensor -> here path runs the
+        # whole-manifest check behind the count memo (per-file O(n) would
+        # cost too much); the prefetch open rechecks unconditionally, so a
+        # same-size pop/add swap is caught there.
+        self._require_injective_filenames()
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
         window_files = getattr(self, '_resident_window_files', None)
@@ -1463,6 +1522,43 @@ class ProductionWeightCache:
             raise RuntimeError("PWC file receipt tensor or source file changed")
         return dict(receipt)
 
+    def _check_injective_filenames(self) -> None:
+        """Run the whole-manifest filename check and arm the size memo."""
+        count = len(self.weights)
+        require_injective_cache_filenames(
+            self.weights.keys(),
+            where="production cache residency",
+        )
+        self._injectivity_checked_keys = count
+
+    def _require_injective_filenames(self) -> None:
+        """Refuse a colliding manifest before a lazy file-backed load (#2219).
+
+        Whole-manifest: the check runs over ALL of ``self.weights`` — not
+        just the keys one call asked for — so a colliding pair is refused no
+        matter which subset a prefetch names or whether the pair is read
+        through ``get()`` alone.
+
+        Keys can be POPPED from the manifest after fill
+        (``export_native_compressed.py`` export stream,
+        ``mtp_production_cache.py`` stripe pruning,
+        ``streaming_production_cache.py`` per-layer pop), so a size memo can
+        miss a same-size pop/add swap. The two residency paths therefore
+        differ: ``prefetch`` calls :meth:`_check_injective_filenames` on
+        every call that has something to load (the ``if not keys: return 0``
+        early return skips the check when every key it names is already
+        resident), so a same-size swap is caught at the next prefetch that
+        loads anything, while this lazy per-file path keeps the
+        count memo — it can miss a same-size swap until the next ``prefetch``
+        or key-set growth. No method of this class pops from
+        ``self.weights`` (they only swap values between tensors and paths),
+        so the memo's own blind spot is exactly the external pop sites above.
+        """
+        count = len(self.weights)
+        if getattr(self, "_injectivity_checked_keys", None) == count:
+            return
+        self._check_injective_filenames()
+
     def prefetch(self, keys: Sequence[tuple[str, str]] | None = None,
                  max_workers: int = 4, *, executor=None) -> int:
         """Eagerly load (a subset of) cache entries via a thread pool.
@@ -1497,6 +1593,14 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
+        # #2219: the reader/residency open — whole-manifest, on every call
+        # that has something to load (the ``if not keys: return 0`` early
+        # return above skips it when every key is already resident): keys
+        # can be popped elsewhere (export stream, MTP stripe pruning,
+        # streaming per-layer pop), so a size memo could miss a same-size
+        # swap; O(n) next to the loads this precedes. Also arms the
+        # memo the lazy _load_file_tensor path relies on.
+        self._check_injective_filenames()
 
         def _load_one(key):
             value = self.weights.get(key)
@@ -2525,14 +2629,13 @@ def _write_render_score_sidecar(
 ) -> None:
     if path is None:
         return
-    import json as _json
 
     payload = {
         "schema": "prismaquant.production_render_scores.v1",
         "records": dict(sorted((str(k), dict(v)) for k, v in records.items())),
     }
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(_json.dumps(payload, indent=2, sort_keys=True))
+    tmp.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload))
     os.replace(tmp, path)
 
 
@@ -2984,6 +3087,34 @@ def _production_cache_git_commit() -> str:
     return commit
 
 
+def _production_cache_source_root(package_root: Path | None) -> Path:
+    root = (
+        Path(package_root)
+        if package_root is not None
+        else Path(__file__).resolve().parent
+    )
+    if not root.is_dir():
+        raise RuntimeError(
+            f"production source identity cannot read package root {root}"
+        )
+    return root
+
+
+def _production_cache_identity_paths(root: Path) -> list[Path]:
+    """Every file the package-tree digest hashes, in digest order.
+
+    One home for the filter: the digest, and any diagnosis of a digest
+    mismatch, must agree on what counts as a package input (PQ #2218).
+    """
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.relative_to(root).parts
+        and path.suffix not in {".pyc", ".pyo"}
+    )
+
+
 def _production_cache_source_sha256(
     package_root: Path | None = None,
 ) -> str:
@@ -2995,27 +3126,28 @@ def _production_cache_source_sha256(
     package tree instead, excluding only interpreter bytecode caches.  This
     also binds packaged lattice/codebook data and model-profile JSON.
     """
-    root = (
-        Path(package_root)
-        if package_root is not None
-        else Path(__file__).resolve().parent
-    )
-    if not root.is_dir():
-        raise RuntimeError(
-            f"production source identity cannot read package root {root}"
-        )
-    identity_paths = sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.relative_to(root).parts
-        and path.suffix not in {".pyc", ".pyo"}
-    )
+    return _production_cache_source_profile(package_root)[0]
+
+
+def _production_cache_source_profile(
+    package_root: Path | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Aggregate digest and per-file digests from one read of the source tree.
+
+    The aggregate is byte-identical to ``_production_cache_source_sha256``'s
+    framing; the per-file map is what a checkpoint manifest stores beside it
+    so a later mismatch can name the first file whose bytes moved (#2218).
+    One walk, one read per file, so the map and its aggregate always describe
+    the same pass over the tree.
+    """
+    root = _production_cache_source_root(package_root)
+    identity_paths = _production_cache_identity_paths(root)
     if not identity_paths:
         raise RuntimeError(
             f"production source identity found no files under {root}"
         )
     digest = LengthFramedSourceSha256()
+    digests: dict[str, str] = {}
     for path in identity_paths:
         relative = path.relative_to(root).as_posix()
         try:
@@ -3025,7 +3157,44 @@ def _production_cache_source_sha256(
                 f"production source identity cannot read {relative}"
             ) from exc
         digest.update(relative, payload)
-    return digest.hexdigest()
+        digests[relative] = bytes_sha256hex(payload)
+    return digest.hexdigest(), digests
+
+
+def _production_cache_recent_writes(
+    package_root: Path | None = None,
+    *,
+    limit: int = 8,
+) -> str:
+    """A digest-mismatch diagnosis: the newest hashed inputs, by name.
+
+    ``_production_cache_source_sha256`` collapses the whole tree into one
+    opaque string, so a refusal that prints only the two digests cannot say
+    which file moved (PQ #2218: a one-off ``producer_source_sha256``
+    mismatch stayed anonymous).  The stored side is unrecoverable, but the
+    writer is usually still present: the newest-modified files under the
+    same filter name it while its mtime is fresh.  Reads stat only, and
+    only runs when a seal already refused.
+    """
+    root = (
+        Path(package_root)
+        if package_root is not None
+        else Path(__file__).resolve().parent
+    )
+    stamped = []
+    for path in _production_cache_identity_paths(root):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        stamped.append((stat.st_mtime_ns, stat.st_size,
+                        path.relative_to(root).as_posix()))
+    stamped.sort(reverse=True)
+    newest = "; ".join(
+        f"{name} ({size}B, mtime {mtime_ns / 1_000_000_000:.3f})"
+        for mtime_ns, size, name in stamped[:limit]
+    )
+    return f"{len(stamped)} hashed files under {root}; newest: {newest}"
 
 
 #: Feed width for host-tensor digests. ``hashlib`` releases the GIL for
@@ -4194,20 +4363,20 @@ def validate_pre_guard_admission(
 def _check_rendered_cache_destinations(
     rendered_pairs: Iterable[str], *, where: str
 ) -> None:
-    """Refuse distinct coordinates that share one legacy archive leaf."""
+    """Refuse distinct coordinates that share one legacy archive leaf (#2219).
+
+    The render-identity sidecars spell coordinates as ``"qname|FMT"`` pair
+    strings; this is the pair-shaped entry into the one shared check next to
+    ``_cache_weight_filename``, which owns the rule.
+    """
     from prismaquant import format_registry as fr
 
-    owners: dict[str, tuple[str, str]] = {}
-    for pair in rendered_pairs:
-        qname, fmt = pair.rsplit("|", 1)
-        coordinate = (qname, fr.canonical_format_name(fmt.strip().upper()))
-        filename = _cache_weight_filename(*coordinate)
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"{where}.rendered_pairs aliases rendered cache destination "
-                f"{filename!r}: {previous!r} and {coordinate!r}"
-            )
+    coordinates = [
+        (pair.rsplit("|", 1)[0],
+         fr.canonical_format_name(pair.rsplit("|", 1)[1].strip().upper()))
+        for pair in rendered_pairs
+    ]
+    require_injective_cache_filenames(coordinates, where=where)
 
 
 def build_production_cache_render_identity(
@@ -5140,7 +5309,7 @@ def _merge_packed_pair_map_or_refuse(
     merged[section_key] = merged_section
     atomic_write_bytes(
         sidecar_path,
-        json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+        DIRECT_ASCII_INDENT2_LAX.encoded(merged),
     )
 
 
@@ -5208,7 +5377,7 @@ def _merge_streaming_layer_map_or_refuse(
     merged[section_key] = merged_section
     atomic_write_bytes(
         sidecar_path,
-        json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+        DIRECT_ASCII_INDENT2_LAX.encoded(merged),
     )
 
 
@@ -5295,7 +5464,7 @@ def _check_and_record_append_identity(
             )
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(payload),
         )
         return
     try:
@@ -5332,7 +5501,7 @@ def _check_and_record_append_identity(
         merged[section_key] = current
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(merged),
         )
         return
     try:
@@ -5467,9 +5636,7 @@ def _check_production_cache_render_identity(
             }
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(
-                current_identity, indent=2, sort_keys=True
-            ).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(current_identity),
         )
         return
     try:
@@ -5543,7 +5710,7 @@ def _check_production_cache_render_identity(
             )
             atomic_write_bytes(
                 sidecar_path,
-                json.dumps(adopted, indent=2, sort_keys=True).encode("utf-8"),
+                DIRECT_ASCII_INDENT2_LAX.encoded(adopted),
             )
             return
         raise ValueError(
@@ -7280,6 +7447,13 @@ def fill_packed_expert_cache_entries(
             print("[prod-cache/experts] no non-BF16 packed experts in scope",
                   flush=True)
         return coverage
+    # Refuse the union before the append writes any sidecar or shard: a dense
+    # entry already in the manifest can alias a packed entry in this scope.
+    require_injective_cache_filenames(
+        chain(cache.weights,
+              ((full, fmt) for (_q, _m, _p, _pn, full, fmt) in in_scope)),
+        where="packed expert production cache",
+    )
     if cache_dir_path is not None:
         from prismaquant.perturbed_x_cache import calibration_data_hash
 

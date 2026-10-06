@@ -72,6 +72,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 import torch
 import torch.nn as nn
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
+from .digests import DIRECT_ASCII_SPACED_LAX
 try:
     from accelerate import init_empty_weights
 except ModuleNotFoundError:
@@ -102,7 +103,6 @@ from .layer_config import (
     canonicalize_assignment as _canonicalize_assignment,
     canonicalize_format,
 )
-from .model_profiles.qwen3_5 import Qwen3_5Profile
 from .layer_config import (
     is_layer_config_meta_key as _is_layer_config_meta_key,
     layer_config_metadata as _layer_config_metadata,
@@ -133,7 +133,6 @@ from .render_score import (
 # library's package __init__ pulls in transformers internals that are not
 # stable across the transformers 4.x -> 5.x break.
 # ---------------------------------------------------------------------------
-FLOAT_TO_E2M1 = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
 NVFP4_MAX = _nvfp4_activation_contract.FP4_E2M1_MAX
 FP8_E4M3_MAX = _nvfp4_activation_contract.FP8_E4M3_MAX
 NVFP4_SCALE_RULE_ENV = "PRISMAQUANT_NVFP4_SCALE_RULE"
@@ -174,36 +173,6 @@ def _record_do_no_harm_failure(fmt: str, linear_name: str | None, exc: Exception
         flush=True,
     )
 
-# Back-compat exports for unit tests that validate the Qwen3.5 naming
-# and per-expert catch-all contract via the historical helper symbols.
-_COMPAT_QWEN_PROFILE = Qwen3_5Profile()
-PER_EXPERT_MOE_REGEX = _COMPAT_QWEN_PROFILE.per_expert_moe_regex()
-
-
-def _to_vllm_internal_name(checkpoint_name: str) -> str:
-    """Compatibility helper kept for unit tests.
-
-    The production path is profile-driven via `profile.to_vllm_internal_name`;
-    this helper preserves the historical Qwen3.5/3.6 mapping semantics
-    without depending on a local vLLM install.
-    """
-    name = checkpoint_name
-    if name.startswith("mtp."):
-        return name
-    if name == "lm_head":
-        return "language_model.lm_head"
-    if name.startswith("model.visual."):
-        return name[len("model."):]
-    if name.startswith("model.language_model."):
-        return "language_model.model." + name[len("model.language_model."):]
-    if (name.startswith("model.layers.")
-            or name.startswith("model.embed_tokens")
-            or name.startswith("model.norm")
-            or name == "model"):
-        return "language_model.model." + name[len("model."):]
-    return name
-
-
 # The NVFP4 codebook is a CONSTANT -- the eight positive E2M1 levels -- but it
 # was being rebuilt from a Python list on every call, and the GPTQ render calls
 # it once per column-quantize. Measured on one 5120x5120 Linear with
@@ -230,7 +199,7 @@ def _nvfp4_codebook(device, dtype=torch.float32) -> torch.Tensor:
     key = (str(device), dtype)
     cb = _NVFP4_CODEBOOK_CACHE.get(key)
     if cb is None:
-        cb = torch.tensor(FLOAT_TO_E2M1, device=device, dtype=dtype)
+        cb = torch.tensor(_nvfp4_activation_contract._E2M1_POSITIVE, device=device, dtype=dtype)
         _NVFP4_CODEBOOK_CACHE[key] = cb
     return cb
 
@@ -3326,7 +3295,6 @@ def _gptq_obs_rounding_nvfp4_swept(
             best_w = w_q
             best_damp = damp
     if log_path:
-        import hashlib
         import json as _json
         entry = {
             "linear_name": linear_name,
@@ -3449,7 +3417,7 @@ def _scale_sweep_nvfp4(
     # Target per-chunk intermediate budget: ~2 GB max on the biggest
     # tensor `d = [chunk, n_g, grid, gs, len(cb)]` (float32).
     n_g = cols // group_size
-    bytes_per_row = n_g * grid * group_size * (2 * len(FLOAT_TO_E2M1) - 1) * 4
+    bytes_per_row = n_g * grid * group_size * (2 * len(_nvfp4_activation_contract._E2M1_POSITIVE) - 1) * 4
     chunk_target = max(1, (2 * 1024 * 1024 * 1024) // max(1, bytes_per_row))
     row_chunk = min(rows, int(chunk_target))
 
@@ -8438,14 +8406,11 @@ def _export_resume_fingerprint(
     equality, and ``None == None`` admits. A source that cannot be identified
     raises instead.
     """
-    import hashlib
 
     from prismaquant.cost_streaming import build_source_checkpoint_identity
 
     fp_state = _render_lever_provenance()
-    fp_state["assignment_hash"] = hashlib.sha256(
-        json.dumps(assignment, sort_keys=True).encode()
-    ).hexdigest()[:16]
+    fp_state["assignment_hash"] = DIRECT_ASCII_SPACED_LAX.sha256(assignment)[:16]
     fp_state["source_identity"] = build_source_checkpoint_identity(
         model_path,
         extra_shard_paths=extra_shard_paths,
@@ -8595,16 +8560,13 @@ def _write_shipcard(
     serve-lane verdicts are still missing, so "we never ran the ship gate"
     becomes a refusal (`python -m prismaquant.shipcard_cli verify`) instead of an omission.
     """
-    import hashlib
 
     from . import read_traffic as _read_traffic
     from . import shipcard as _shipcard
 
     def _hash(payload) -> str | None:
         try:
-            return hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode()
-            ).hexdigest()[:16]
+            return DIRECT_ASCII_SPACED_LAX.sha256(payload)[:16]
         except Exception:
             return None
 

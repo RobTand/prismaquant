@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+)
 
 
 def write_selected_scales(assignment_binding, output_dir):
@@ -62,12 +66,12 @@ def write_selected_scales(assignment_binding, output_dir):
     _, path, _ = write_export_inputs(out, hessians=None, hessian_rows={}, hessian_identity={},
         static_scales=scales, static_scale_policy=formula)
     result = {'schema': 'prismaquant.selected_priced_scales.v1', 'assignment': dict(assignment_binding),
-        'input_scales': {'path': str(path.resolve()), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()},
+        'input_scales': {'path': str(path.resolve()), 'sha256': bytes_sha256hex(path.read_bytes())},
         'units': len(scales), 'input_global_scale_policy': formula,
         'served_activation_policy': block.get('served_activation_policy'),
         'activation_scale_grouping_declaration': block.get('activation_scale_grouping'),
         'serving_qualified': False, **report}
-    if not publish_new_bytes(out/'receipt.json', (json.dumps(result, sort_keys=True, indent=2)+'\n').encode()):
+    if not publish_new_bytes(out/'receipt.json', DIRECT_ASCII_INDENT2_LAX.encoded(result)+b'\n'):
         raise ValueError('selected scale receipt already exists')
     return result
 
@@ -79,7 +83,7 @@ def main(argv=None):
     parser.add_argument('--out-dir', required=True)
     args = parser.parse_args(argv)
     result = write_selected_scales({'path': args.assignment, 'sha256': args.assignment_sha256}, args.out_dir)
-    print(json.dumps(result, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0
 
 

@@ -1,0 +1,237 @@
+# PQ #2097: CPU qualification of two-bank chain-roll host reuse
+
+Source: `ee93f9655e6ddff8cbc6ed6bb33dc65fe08ef883`, based on main
+`693a38f3ae3467ac3234cd9a7d756e41b69c3242`. PR #2105 closes the scoped CPU
+child #2097 and references parent #1250. Public callers keep the allocating
+path. Parent #1366's executable incoming-plane integration is separate.
+
+## Measured result and its limits
+
+On dl380g10, four interleaved arms of the same CPU allocation corpus gave:
+
+| Arm | Groups / rows | Host allocation calls | Aggregate allocated bytes |
+|---|---:|---:|---:|
+| Allocating, first and second repeats | 32 / 128 | 128 | 134,217,728 (128 MiB) |
+| Reuse, first and second repeats | 32 / 128 | 8 | 8,388,608 (8 MiB) |
+
+Each group has four individually compact 1 MiB rows. The two held banks
+allocate once each; subsequent groups allocate no host row tensors.
+The explicit allocation counter and torch profiler's `aten::empty` events
+agree exactly. Every arm's ordered output digest is
+`8a69f06c4895e874b8abe9285c12fbceb710afe7e82a7c7b7d3142b905fdc8b2`.
+
+These are real CPU allocations and copies through `_RollPipeline`, with
+pageable replacements for pinned allocation and simulated CUDA events.
+They establish allocation traffic, not live memory, pinned residency,
+CUDA stream safety, GPU speed, energy or end-to-end campaign gain. No GPU
+work ran. The cProfile and torch traces are retained per arm. Sixteen
+complete before/after Netdata snapshots cover both Sparks, eight per host,
+without missing required charts; the corpus spans about 1.7 seconds, so
+these snapshots do not establish independent per-arm power/clock means.
+PB's box window records the executing x86 host separately.
+
+## PrismaBuild evidence
+
+The published PB generation was `d028dfee920b-1790960385-1d815cff72d1`.
+All runs were CPU-only, priority -10, with explicit 600-second deadlines,
+1 native thread per worker and PB affinity preserved. The interpreter was
+`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`:
+Python 3.14.4, torch 2.11.0+cpu, transformers 5.16.1. Pin guards verified
+44 PB files at `95a59051d48cda82eea7927f31870c6c862d7174` and 102 Tessera
+files at `b40c93cb73745097e57a1ba4cf5b9eee166c759a`.
+
+| Check | Full action key | Result |
+|---|---|---|
+| Original allocating core, constructor signature adapter only | `db44d90ab084f3c9a084ed4340584cccdd8be0a89f379cee839b1d3abe9d14ff` | Genuine RED: 15 allocations, oracle requires 4; rc 1 |
+| Final lifetime/alias/bytes regressions | `17dfbc6ab441d8c7c1dfc314961895e769cdbc8571629b0536430c0791cc2207` | 20 passed, no skips |
+| Final existing chain regressions | `c7e4cf2eb08d4fa8fb601448d6dcfd7eeff11bc6b93c611fce3240739ef633b5` | 31 passed, 6 CUDA skips |
+| Checkpoint incoming adapter | `3d15364cc68054de094deb9fc83d12ed6b1011f542dfc19ffb80f08ebfb3d85a` | 17 passed |
+| Referenced checkpoint | `a1b928760cd5b98af5797da1295bc616d4294c89c3e2d8cd1c390dddd05f008e` | 9 passed |
+| Architecture mechanics | `ea762822fd5c0f1fa05833c1f74287acb0b168ac595ae511dc72951bb58e8959` | 13 passed |
+| Documentation staleness | `a38ed1e8ace42e05dc554eb38613eae72cc2ad1e84dc0ab1b494df14ce5c415d` | 6 passed |
+| Final compile and exact-pin guard | `d1e1f83ccca3cf0e236f897edd3fb33adb11fa1b8120082d68800d6c2f0c8d3d` | 4 modules compiled; rc 0 |
+| Final paired CPU allocation profiles | `cc772c08144b6e59d965de3282241c3097c3c6eedddd10610f3bf3c83d0d6476` | rc 0; both repeats agree |
+
+The selected coverage is 96 passed / 6 skipped / 0 failed, 102 collected,
+with no missing collection or reconciliation problems. The final head's
+changed lifetime code and new test were rerun with the existing chain suite;
+the 45 disjoint checkpoint/documentation checks reuse their earlier receipts.
+All Python outside `_RollPipeline` has an identical AST between those
+checkpoint qualification snapshots and the final delivered module. The
+extra architecture sentence describes the final callback fence only.
+All 20 new cases pass without a CUDA skip. The six existing skips are the
+pinned serialization case, four pinned-row regimes, and CUDA default/pre-997
+bitwise equivalence. They supply no device qualification.
+
+Every successful terminal record was checked: done / rc 0, complete,
+untimed-out and unambiguous, with actual CAS result bytes hash/size checked.
+Final lifetime, chain, compile and profile source bundles match all five
+qualified delivered files. The allocation profile used an exact archived
+source checkout, submitted natively on dl380g10 under `--measurement`,
+CPU 1 / memory 4 GiB. Tests use PB-owned fanout, CPU 2 / memory 6 GiB per
+shard, two pytest workers, native threads one.
+
+Final profile receipt:
+`ae46a2f910ee8076015dd61f15d7ddc72702f074ab0446db25eb4de4cb256134`;
+CAS result:
+`a5efaadff9bfae7e75d1aacba6d70a229b4e9e6fb8db341fbffea0c2d3516bc3`.
+Artifact directory: `/mnt/shared/astra-pq-roll-host-2097-final-20261002/`,
+four `.pstats`, four Chrome `.trace.json`, per-arm reports and `netdata.jsonl`.
+All 13 artifacts were independently hash/size checked against that result.
+Netdata SHA-256:
+`25133f9b35175b29ce6bbe22b984f9960c95c607b827aef364b0ab796034b32a`.
+
+Local detailed receipts and attribution:
+`/home/rob/tmp/astra-resume-20261002/pq_stageb_io/EVIDENCE.json`,
+`VERIFIED.json`, `profile-manifest.json`, `final-tests.json` and
+`final-lifetime-tests.json`. The first selected run (95 passed / 6 skips)
+and earlier profile at `7e3885b652d7` are superseded for changed lifetime
+code by the final runs above, retained as bounded development evidence.
+The original-core RED worktree is retained at `pq_stageb_io/red-wt`.
+
+Two non-qualification failures are retained: the initial unprovisioned
+`pb-cpu` interpreter missed compressed-tensors (no behavioral test ran),
+and the first cross-class measurement refused the submitting GB10's
+accelerator identity on x86 before workload execution. Current PB source
+explicitly binds submitter platform/device facts; that refusal was correct.
+The measurement was resubmitted from its actual x86 class with isolation
+preserved. A lifetime submission also refused a concurrent commit during
+snapshotting before creating an action; its frozen-head resubmission passed.
+
+## Reproduction
+
+CPU allocation evidence, submitted from the x86 measurement class against an
+exact source archive, with a fresh output directory:
+
+```bash
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd /mnt/shared/astra-pq-roll-host-2097-source-20261002 \
+  --measurement --cpus 1 --demand mem_gb=4 --priority -10 --timeout-s 600 \
+  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
+  --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONPATH=. --env CUDA_VISIBLE_DEVICES= \
+  -- /home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python \
+  -m experiments.roll_host_reuse_profile --out /path/to/fresh/owned/evidence
+```
+
+Final changed-code regression gate:
+
+```bash
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout /home/rob/tmp/astra-resume-20261002/pq_stageb_io/wt \
+  --python /home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python --tag x86 \
+  --workers-per-shard 2 --threads-per-shard 1 --cpus-per-shard 2 --mem-gb 6 \
+  --priority -10 --timeout-s 600 --test-timeout-s 90 \
+  tests/test_roll_host_reuse_2097.py tests/test_chain_roll_overlap.py
+```
+
+## Remaining production acceptance
+
+Astra owns critical review, any GPU window and production selection. Before
+integration, fund both banks in the existing owner/guard and PB host-memory
+reservation; do not add another residency owner. Capacity is exactly twice
+the first group's sum of compact row bytes. At a four-row BF16 group with
+2048 tokens and width 4096, this is 128 MiB; this sizing example is not a
+measurement of a campaign's current geometry or spare memory. Banks remain
+held across window drains, so admission must include that residency while
+boundary inputs and write buffers are live.
+
+First qualify real pinned copies/events and exact serialized output at the
+same batch/fusion regime and shape, including short tails and failure paths,
+in the known-good container through PB. Then profile the existing real
+chain-roll workload with allocating/reuse arms interleaved, the same source,
+calibration, grouping, output ownership and whole-row phase boundaries.
+Use in-process traces and both-Spark Netdata; report allocation/page-fault
+counts and measured peak memory. GPU speed/energy claims require qualified
+power/clock evidence and useful work per joule. No GPU command is authorized
+or launched by this CPU prerequisite.
+
+## Root review correction: failed-copy ownership
+
+The source above was not accepted by root QA. A partial copy whose cleanup
+Event could not be created, recorded or synchronized had no proven fence;
+`abandon` then fenced only the previous step and cleared both banks. This
+finding was fixed in a separate commit,
+`ee2d874b292271d9ba983936e72489fa10d45d0e`, without selecting the mode in
+production or changing its ordinary row allocations.
+
+The existing `_RollPipeline` now records each bank's exact submitting
+stream before any copy. If an Event fence fails, it retains the actual bank
+references and `held_host_bytes`, strongly holds the failed owner after
+exception/traceback GC, and refuses CUDA roll construction/submission/drain
+in this process. Only the original owner can `abandon` it. Recovery fences
+all captured outstanding streams, including the previous step; one failed
+stream fence retains every bank and its credit. A later current stream
+cannot prove completion. Missing stream-fence capability refuses before a
+copy. A poisoned context stays retained until process containment or exit;
+there is no polling thread, alternate cache or memory-limit change.
+
+Causal RED `5e342619ddcbe61db96b7388027b3e7f850dfbbd3962b452a77bb2553db80b32`
+ran the prior real core and failed all five partial/full-copy Event
+creation/record/synchronization cases at the absent abandonment refusal;
+20 other cases were deselected. It is not an API/import RED.
+
+| Final correction gate | Full PB action key | Result |
+|---|---|---|
+| Copy ownership, alias lifetime and exact files | `e49cd2fc6d72a44719817b76e32283f2e22d9e41c8a99d4a33f2db1f3d852987` | 29 passed, no skips |
+| Existing chain behavior | `7e6723725e6c505830a040bf5fd6f201ba77419ea31eedc57fe3f518a1e4df1f` | 31 passed, 6 existing CUDA skips |
+| Updated architecture mechanics | `0b7380d30cf78ac4bd06cfb181e3cf481e9e6f0cd071ee17fa7f9b89cdbcbd6d` | 13 passed |
+| Compile and exact dependency pins | `f692bc0d9047302603c59194fdba1dcbefc36118165b3a8f004d01956a11f8e8` | 4 modules, rc 0 |
+
+These three shards collected and reconciled all 79 cases. With the 32
+unchanged checkpoint/documentation cases already recorded, selected
+coverage is now **105 passed / 6 skipped / 0 failed**, 111 collected.
+New controls cover exact original stream identity after current-stream
+replacement, both banks on distinct streams, blocked-stream recovery,
+previous-step Event failure, held credit after GC and refusal of new CUDA
+owners until recovery. Every final terminal and actual CAS payload was
+checked; their qualified five source files match the correction commit.
+Detailed records are in `FAILURE-OWNERSHIP-EVIDENCE.json` and
+`FAILURE-OWNERSHIP-VERIFIED.json` beside the earlier evidence manifest.
+
+The earlier CPU allocation measurements remain attributable to their
+recorded source. Their metric is reused: the two-bank allocation requests,
+row shapes, copies and serialized output arithmetic are unchanged, and the
+final controls recheck allocation counts and exact entry files. The
+experimental fake stream now supplies the same synchronization interface
+required before a real copy. No new speed/peak-memory claim is inferred
+from this failure-state fix, and the old profiles are not relabeled as
+profiles of the correction commit. Real CUDA/pinned-page and production
+admission acceptance remain open in parent #1250.
+
+## Root review correction: drain callback failure
+
+Root QA found that preserving `_waiting` through `_deliver` allowed a
+second drain to retry consumed rows after a roll/durable callback failed
+mid-step. Separate commit `3ce42de9404ffde8a93105fceb4bdaea1d6d6312` restores
+baseline detachment **before** delivery. The failed DMA owner and captured
+stream ledger independently retain unproven banks; `_waiting` is no longer
+used as a retry queue for a possibly durable prefix.
+
+Causal RED `f7b26e63574a9e851a20e479e9f04a86165b01e8c766ab2ee4e14138407d9c2b`
+failed four cases on real prior code: default/reuse paths, each with either
+roll or durable callback failure on the second row, followed by drain.
+The failure was attempted delivery of a consumed `None` row; 29 other
+cases were deselected. The correction checks subsequent drain/abandon
+cannot duplicate callbacks or deliver a consumed row.
+
+| Corrected source gate | Full action key | Result |
+|---|---|---|
+| All owner/lifetime/callback/bytes cases | `bca54a56949c464bf459f8e589e509644a10c66c648ace286bcf33c049418bf3` | 33 passed, no skips |
+| Existing chain behavior | `2a03408fff1025e7800ad8107919efb3315befe5ca1c380c48b4ca11ef0f9202` | 31 passed, 6 existing CUDA skips |
+| Architecture mechanics | `85472c63f6deaa21150756694f8d9e43227232f10e056d052a73380568bfc3cf` | 13 passed |
+| Compile / exact pins | `04c916f72a19c52ae05f87150e7b6b7be2401d3f686a350d4eca6287f02e9ff5` | 4 modules compiled, rc 0 |
+
+All 83 cases reconcile without missing collection. The selected total,
+including the 32 unchanged disjoint cases, is now 109 passed / 6 skipped /
+0 failed, 115 collected. Negative Event/stream-fence, previous-step, two
+original streams, GC retention, closed new-owner, alias, and exact entry
+file controls remain green after detachment. The drain Event-failure
+control now expects `_waiting=None` while the actual banks/credit and
+original stream proof remain retained; failed `abandon` still preserves
+its step until completion is proven.
+
+All four final successful terminals/CAS payloads and their five delivered
+qualified source files were independently checked in `DRAIN-EVIDENCE.json`
+and `DRAIN-VERIFIED.json`. Measurement attribution and remaining real
+CUDA/admission/profile gates above are unchanged; this correction adds no
+new performance or GPU assumption.

@@ -30,6 +30,11 @@ def cost_fixture(scratch, shared_mount, monkeypatch):
     census["unit_shapes"] = {name: [1024, 1024] for name in fixture["names"]}
     census["max_abs"] = {name: 1.0 for name in fixture["names"]}
     census_path.write_text(json.dumps(census))
+    # The builder seals the plan's declared probe count; the fixture plan
+    # names the historical four explicitly instead of relying on a default.
+    plan = json.loads(fixture["plan"].read_text())
+    plan["execution"]["n_probes"] = 4
+    fixture["plan"].write_text(json.dumps(plan))
 
     production_cache = scratch / "production.pkl"
     production_cache.write_bytes(b"p" * 5000)
@@ -63,11 +68,11 @@ def cost_fixture(scratch, shared_mount, monkeypatch):
     return fixture, prepared, budget
 
 
-def _build(fixture, prepared, budget, *, completed=None):
+def _build(fixture, prepared, budget, *, completed=None, n_probes=4):
     return producer.build_joint_cost_v2_manifest(
         str(fixture["plan"]), prepared=str(prepared),
         produced_by=existing.PRODUCED_BY, retained_budget=budget,
-        source_bytes=31 << 30, n_probes=4,
+        source_bytes=31 << 30, n_probes=n_probes,
         validated_completed_units=completed)
 
 
@@ -205,3 +210,137 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     fixture["plan"].write_text(json.dumps(changed))
     with pytest.raises(SystemExit, match="source lookahead one"):
         _build(fixture, prepared, budget)
+
+
+def _declare_plan_probes(fixture, count):
+    plan = json.loads(fixture["plan"].read_text())
+    if count is None:
+        del plan["execution"]["n_probes"]
+    else:
+        plan["execution"]["n_probes"] = count
+    fixture["plan"].write_text(json.dumps(plan))
+
+
+def test_cost_v2_seals_the_plan_declared_probe_count(cost_fixture):
+    """A plan declaring sixteen probes is sealed with sixteen, not four.
+
+    Pre-fix the builder refused any count but four ("COST V2 currently
+    declares exactly four joint probes") and its default invented four
+    regardless of the plan.
+    """
+    fixture, prepared, budget = cost_fixture
+    _declare_plan_probes(fixture, 16)
+    manifest = _build(fixture, prepared, budget, n_probes=16)
+    assert manifest["annotations"]["probes_per_window"] == 16
+    assert manifest == _build(fixture, prepared, budget, n_probes=16)
+
+
+def test_cost_v2_refuses_probe_count_disagreement_with_the_plan(cost_fixture):
+    """Pre-fix this silently stamped the four-probe default into a
+    sixteen-probe plan's manifest; now the build refuses by name."""
+    fixture, prepared, budget = cost_fixture
+    _declare_plan_probes(fixture, 16)
+    with pytest.raises(SystemExit, match="disagrees with the plan"):
+        _build(fixture, prepared, budget)
+
+
+def test_cost_v2_refuses_a_plan_without_a_declared_probe_count(cost_fixture):
+    fixture, prepared, budget = cost_fixture
+    _declare_plan_probes(fixture, None)
+    with pytest.raises(SystemExit, match="execution.n_probes"):
+        _build(fixture, prepared, budget)
+
+
+@pytest.mark.parametrize("bad", [True, 4.0, "4", None, 1])
+def test_cost_v2_refuses_non_integer_or_below_two_probe_argument(
+        cost_fixture, bad):
+    fixture, prepared, budget = cost_fixture
+    with pytest.raises(SystemExit, match="at least two"):
+        _build(fixture, prepared, budget, n_probes=bad)
+
+
+def test_cost_v2_stages_eval_draw_calibration_beside_encoding_input(cost_fixture):
+    """A top-level joint_eval_draw descriptor's calibration input is read
+    beside the unchanged encoding calibration input, in the head, before any
+    forward-cost phase; nothing else in the read set moves."""
+    fixture, prepared, budget = cost_fixture
+    plain = _build(fixture, prepared, budget)
+    plain_setup = [plain["entries"][index]["path"]
+                   for index in _phases(plain)["cost_setup"]["entry_indices"]]
+    eval_calibration = fixture["workspace"] / "eval-draw-calibration.bin"
+    eval_calibration.write_bytes(b"v" * 4096)
+    plan = json.loads(fixture["plan"].read_text())
+    plan["joint_eval_draw"] = {"calibration_input": {
+        "path": str(eval_calibration),
+        "sha256": hashlib.sha256(eval_calibration.read_bytes()).hexdigest()}}
+    fixture["plan"].write_text(json.dumps(plan))
+    manifest = _build(fixture, prepared, budget)
+    setup = [manifest["entries"][index]["path"]
+             for index in _phases(manifest)["cost_setup"]["entry_indices"]]
+    encoding = json.loads(fixture["plan"].read_text())["calibration_input"]["path"]
+    assert str(eval_calibration) in setup
+    assert setup.index(str(eval_calibration)) > setup.index(encoding)
+    # The descriptor adds exactly one staged read and moves no other entry.
+    assert len(setup) == len(plain_setup) + 1
+    without_eval = [path for path in setup if path != str(eval_calibration)]
+    assert without_eval == plain_setup
+
+
+def test_cost_v2_refuses_an_incomplete_eval_draw_descriptor(cost_fixture):
+    fixture, prepared, budget = cost_fixture
+    plan = json.loads(fixture["plan"].read_text())
+    plan["joint_eval_draw"] = {}
+    fixture["plan"].write_text(json.dumps(plan))
+    with pytest.raises(SystemExit, match="joint_eval_draw.calibration_input"):
+        _build(fixture, prepared, budget)
+
+
+def test_cost_v2_prices_only_the_eval_target_roster(cost_fixture):
+    """Two units are repriced at the eval draw's rate; every source layer's
+    forward read set stays complete.
+
+    The selected roster (and with it the eval draw's own calibration) is
+    sealed by the plan binding the manifest carries, so the read set prices
+    the diagnostic subset without widening it to the completion's whole
+    historical roster.
+    """
+    fixture, prepared, budget = cost_fixture
+    plain = _build(fixture, prepared, budget)
+    eval_calibration = fixture["workspace"] / "eval-draw-calibration.bin"
+    eval_calibration.write_bytes(b"v" * 4096)
+    plan = json.loads(fixture["plan"].read_text())
+    plan["joint_eval_draw"] = {"calibration_input": {
+        "path": str(eval_calibration),
+        "sha256": hashlib.sha256(eval_calibration.read_bytes()).hexdigest()}}
+    selected = fixture["names"][:2]
+    plan["joint_eval_targets"] = {name: list(existing.MEASURED)
+                                  for name in selected}
+    fixture["plan"].write_text(json.dumps(plan))
+    manifest = _build(fixture, prepared, budget)
+
+    windows = manifest["annotations"]["windows"]
+    assert sorted(window["original_full_target_names"][0]
+                  for window in windows) == sorted(selected)
+    assert all(window["layer"] == 0 for window in windows)
+
+    def paths(build, phase):
+        return [build["entries"][index]["path"]
+                for index in _phases(build)[phase]["entry_indices"]]
+    # Complete source: head, every layer's forward capture and the tail read
+    # exactly what the unscoped build reads.
+    assert paths(manifest, "cost_head") == paths(plain, "cost_head")
+    for layer in range(3):
+        assert paths(manifest, f"cost_capture_{layer:03d}") == paths(
+            plain, f"cost_capture_{layer:03d}")
+        assert paths(manifest, f"cost_reverse_{layer:03d}_source") == paths(
+            plain, f"cost_reverse_{layer:03d}_source")
+    assert paths(manifest, "cost_tail") == paths(plain, "cost_tail")
+    # Pricing scope: renders exist for the two selected units only.
+    render_refs = [index for phase in _phases(manifest).values()
+                   if "_window_" in phase["name"]
+                   for index in phase["entry_indices"]]
+    assert len(render_refs) == len(selected) * len(existing.MEASURED)
+    declared = {entry["path"] for entry in manifest["entries"]}
+    for name in set(fixture["names"]) - set(selected):
+        assert not any(producer._cache_weight_filename(name, fmt) in path
+                       for path in declared for fmt in existing.MEASURED)

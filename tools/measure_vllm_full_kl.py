@@ -698,8 +698,9 @@ def _student(args) -> int:
     )
     llm = _load_llm(args, max_model_len=int(payload["seqlen"]) + 16)
     student = _measure_logprobs(llm, prompts, vocab_size=vocab_size)
-    teacher_probs = teacher.exp()
-    per_sample = (teacher_probs * (teacher - student)).sum(dim=-1)
+    from prismaquant.kl_fisher import forward_kl_per_token
+
+    per_sample = forward_kl_per_token(student, teacher)
     if not torch.isfinite(per_sample).all():
         raise RuntimeError(f"non-finite KL values: {per_sample.tolist()}")
     result = {

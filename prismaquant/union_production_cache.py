@@ -54,7 +54,11 @@ from prismaquant.production_weight_cache import (
     packed_activation_hook_scope_of,
     validate_activation_hook_scope,
 )
-from .digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_INDENT2_STRICT,
+    file_sha256hex,
+)
 
 
 CAMPAIGN_IDENTITY_SCHEMA = (
@@ -850,13 +854,9 @@ def create_shard_manifest(
     )
     atomic_write_bytes(
         manifest_path,
-        json.dumps(
+        DIRECT_UTF8_INDENT2_STRICT.encoded(
             envelope,
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8"),
+        ),
     )
     return envelope
 
@@ -1691,13 +1691,9 @@ def union_shard_manifests(
         manifest_path = temporary_root / "union_manifest.json"
         atomic_write_bytes(
             manifest_path,
-            json.dumps(
+            DIRECT_UTF8_INDENT2_STRICT.encoded(
                 envelope,
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8"),
+            ),
         )
         verify_union_manifest(
             manifest_path,

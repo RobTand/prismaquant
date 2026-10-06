@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .lane_spec import LaneSpec, lane_gate_report, lane_spec_for_container
+from .digests import DIRECT_ASCII_INDENT2_LAX
 from .model_profiles.structure import canonical_export_lane
 from .shipcard import (
     SHIPCARD_FILENAME,
@@ -269,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = preflight_lane_shipcard(
                 args.artifact, args.lane, build=build,
                 shipcard_path=args.shipcard)
-            print(json.dumps(report, indent=2, sort_keys=True))
+            print(DIRECT_ASCII_INDENT2_LAX.text(report))
             return 1 if report["problems"] else 0
         path = open_lane_shipcard(
             args.artifact, args.lane, build=build,

@@ -5,8 +5,10 @@ per-expert units; Tessera executes them as one stack per MoE block.  The bridge
 module is the one reader of the producer's ``tessera.expert_projection.v1``
 answer.  These tests pin its vocabulary to the producer's, exercise the exact
 binding (schema, layout, selector, geometry, coverage), the carried block's
-round trip, the stack-uniform selection rule the export lane applies, and the
-priced-wire receipt check that precedes the producer's own verification.
+round trip, the per-unit selection rule the export lane applies (stack-uniform
+worlds keep their stamps; mixed rungs need the v57 per-unit capability,
+PrismaQuant #2319), and the priced-wire receipt check that precedes the
+producer's own verification.
 """
 from __future__ import annotations
 
@@ -24,9 +26,7 @@ from prismaquant.tessera_expert_projection import (
     cached_units_manifest,
     carried_projection,
     carried_units,
-    producer_plan_tool,
     request_expert_projection,
-    require_stack_uniform_assignment,
     stack_plan_request,
     verify_expert_wire_record,
 )
@@ -122,84 +122,305 @@ def test_source_identity_keys_are_what_the_producer_publishes(tmp_path):
 # ---------------------------------------------------------------------------
 # The declared tool
 # ---------------------------------------------------------------------------
-def test_lane_spec_declares_the_producer_projection_tool(tmp_path):
-    from prismaquant.lane_spec import load_lane_spec
+@pytest.mark.parametrize("selection", ["env", "explicit"])
+def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path, monkeypatch, selection):
+    from projection_producer_fixture import require_projection_producer
+    producer_python = require_projection_producer(monkeypatch)
+    import torch
+    from safetensors.torch import save_file
 
-    spec = load_lane_spec("tessera")
-    # #1587: the projection tool is a campaign dependency, declared on the
-    # campaign_tools roster, not an export producer tool
-    declared = {tool.path for tool in spec.campaign_tools}
-    assert tep.PRODUCER_PLAN_TOOL in declared, (
-        "the packed-expert bridge shells out to the producer's projection tool; "
-        "an undeclared external dependency is one nobody can check for")
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (tmp_path / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / tool.path).write_text("# stub\n")
-    assert producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)}) == (
-        tmp_path / tep.PRODUCER_PLAN_TOOL)
-    (tmp_path / tep.PRODUCER_PLAN_TOOL).unlink()
-    with pytest.raises(ExpertProjectionError, match="tessera_producer_plan.py"):
-        producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)})
-
-
-def test_request_runs_the_declared_tool_once_and_keeps_the_request(tmp_path):
-    from prismaquant.lane_spec import load_lane_spec
-
-    repo = tmp_path / "repo"
-    spec = load_lane_spec("tessera")
-    # the campaign's projection tool lives on the campaign_tools roster
-    # (#1587); stub every declared tool on both rosters so the resolver
-    # finds what it needs either way
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / tool.path).write_text("# stub\n")
-    tool = repo / tep.PRODUCER_PLAN_TOOL
-    tool.write_text(
-        "import json, sys\n"
-        "args = sys.argv[1:]\n"
-        "plan = json.load(open(args[args.index('--stack-plan') + 1]))\n"
-        "out = args[args.index('--out') + 1]\n"
-        "json.dump({'echo': plan, 'src': args[0]}, open(out, 'w'))\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text(json.dumps({
+        "num_experts": 2, "hidden_size": 32, "moe_intermediate_size": 32}))
+    tensors = {f"{STACK}.{expert}.{role}.weight": torch.zeros(32, 32, dtype=torch.bfloat16)
+               for expert in range(2) for role in ("w1", "w2", "w3")}
+    save_file(tensors, str(source / SHARD))
+    env = {key: value for key, value in os.environ.items() if key != "TESSERA_REPO"}
+    env["PYTHONSAFEPATH"] = "1"
+    producer_args = {}
+    if selection == "explicit":
+        env[tep.PRODUCER_PYTHON_ENV] = "/bin/false"
+        producer_args["python"] = producer_python
+    output = tmp_path / "projection.json"
     answer = request_expert_projection(
-        "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj.json",
-        env={**os.environ, "TESSERA_REPO": str(repo)})
-    request = json.loads((tmp_path / "proj.json.request.json").read_text())
-    assert request == {STACK: {"grid": "E4M3", "q256": 1024,
-                               "source_layout": tep.SOURCE_LAYOUT_UNPACKED}}
-    assert answer == {"echo": request, "src": "/model"}
-    tool.write_text("import sys\nprint('stack refused: not a route', file=sys.stderr)\nsys.exit(3)\n")
-    with pytest.raises(ExpertProjectionError, match=r"(?s)exit 3.*stack refused") as error:
+        source, {STACK: ("E4M3", 1024)}, out_path=output, env=env, **producer_args)
+    request = json.loads(output.with_name(output.name + ".request.json").read_text())
+    assert request == stack_plan_request({STACK: ("E4M3", 1024)})
+    assert answer["schema"] == tep.PROJECTION_SCHEMA
+    assert answer["source"]["files"][SHARD] == hashlib.sha256((source / SHARD).read_bytes()).hexdigest()
+    bound = bind_expert_projection(answer, declared=_declared(n=32, k=32))
+    assert set(bound[STACK]) == set(_declared(n=32, k=32)[STACK])
+    assert [unit["projection"] for unit in answer["stacks"][STACK]["units"]] == [
+        "gate_proj", "up_proj", "down_proj"] * 2
+    tensors.pop(f"{STACK}.1.w3.weight")
+    save_file(tensors, str(source / SHARD))
+    with pytest.raises(ExpertProjectionError, match=r"(?s)exit .*missing"):
         request_expert_projection(
-            "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj2.json",
-            env={**os.environ, "TESSERA_REPO": str(repo)})
-    assert "tessera_producer_plan.py" in str(error.value)
+            source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "refused.json", env=env, **producer_args)
 
 
-def test_request_runs_the_tool_as_a_script_under_the_container_safe_path(tmp_path):
-    """The campaign container runs with ``PYTHONSAFEPATH=1``. The producer's
-    plan tool is a script that imports its sibling ``export_tessera_serving``
-    from its own directory, so the request still answers under that guard."""
-    from prismaquant.lane_spec import load_lane_spec
+# ---------------------------------------------------------------------------
+# The stat-bound source digest cache the caller hands the producer (#2229)
+# ---------------------------------------------------------------------------
+FAKE_PRODUCER_PLAN = '''
+"""Standalone fake of the producer CLI: records argv, answers the projection."""
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
 
-    repo = tmp_path / "repo"
-    spec = load_lane_spec("tessera")
-    # the campaign's projection tool lives on the campaign_tools roster
-    # (#1587); stub every declared tool on both rosters so the resolver
-    # finds what it needs either way
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / tool.path).write_text("# stub\n")
-    tool = repo / tep.PRODUCER_PLAN_TOOL
-    (tool.parent / "export_tessera_serving.py").write_text("ANSWER = 'the sibling'\n")
-    tool.write_text(
-        "import json, sys\n"
-        "from export_tessera_serving import ANSWER\n"
-        "args = sys.argv[1:]\n"
-        "json.dump({'answer': ANSWER}, open(args[args.index('--out') + 1], 'w'))\n")
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="tessera.producer_plan",
+                                     description="fake producer plan stub")
+    parser.add_argument("src", type=Path)
+    parser.add_argument("--stack-plan", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    if os.environ.get("FAKE_PRODUCER_ADVERTISES_CACHE"):
+        parser.add_argument("--source-digest-cache", type=Path,
+                            help="existing trusted shard-digest directory; record reuse in output")
+    args = parser.parse_args(argv)
+    dump = os.environ.get("FAKE_PRODUCER_ARGV_DUMP")
+    if dump:
+        Path(dump).write_text(json.dumps(list(sys.argv[1:])))
+    args.out.write_text(json.dumps(
+        {"schema": "tessera.expert_projection.v1", "stacks": {}, "source": {}}) + "\\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def _fake_producer_env(monkeypatch, root: Path, *, advertises: bool, dump: Path) -> None:
+    """Run the bridge against a fake producer interpreter under the test python."""
+    package = root / "producer_lib" / "tessera"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "producer_plan.py").write_text(FAKE_PRODUCER_PLAN)
+    monkeypatch.setenv("PYTHONPATH", str(package.parent))
+    monkeypatch.delenv(tep.PRODUCER_PYTHON_ENV, raising=False)
+    if advertises:
+        monkeypatch.setenv("FAKE_PRODUCER_ADVERTISES_CACHE", "1")
+    else:
+        monkeypatch.delenv("FAKE_PRODUCER_ADVERTISES_CACHE", raising=False)
+    monkeypatch.setenv("FAKE_PRODUCER_ARGV_DUMP", str(dump))
+
+
+def _real_producer_env() -> dict:
+    env = {key: value for key, value in os.environ.items() if key != "TESSERA_REPO"}
+    env["PYTHONSAFEPATH"] = "1"
+    return env
+
+
+def _synthetic_checkpoint(source: Path) -> dict:
+    import torch
+    from safetensors.torch import save_file
+
+    source.mkdir(parents=True)
+    (source / "config.json").write_text(json.dumps({
+        "num_experts": 2, "hidden_size": 32, "moe_intermediate_size": 32}))
+    tensors = {f"{STACK}.{expert}.{role}.weight": torch.zeros(32, 32, dtype=torch.bfloat16)
+               for expert in range(2) for role in ("w1", "w2", "w3")}
+    save_file(tensors, str(source / SHARD))
+    return tensors
+
+
+def _seed_digest_entry(cache_dir: Path, shard: Path, digest: str) -> None:
+    """The entry a quiescent first read records, seeded for a fresh fixture shard.
+
+    The producer subprocess owns the 300 s quiescence clock, so a shard the
+    fixture wrote just now cannot be recorded by an earlier real call; this
+    writes the recorded-entry shape for the shard's current stat identity.
+    The producer validates that shape when it serves the entry, and the
+    changed-shard assertion below proves the seed is never served across a
+    moved stat identity, so a wrong replica cannot fake a pass.
+    """
+    with open(shard, "rb") as handle:
+        st = os.fstat(handle.fileno())
+    key = {"leaf": shard.name, "ino": int(st.st_ino), "size": int(st.st_size),
+           "mtime_ns": int(st.st_mtime_ns), "ctime_ns": int(st.st_ctime_ns)}
+    name = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
+    entry = {"schema": "tessera.source-digest-cache.v1", "algorithm": "sha256",
+             "key": key, "digest": digest,
+             "writer": {"kind": "prismaquant-2229-fixture-full-read"}}
+    (cache_dir / f"{name}.json").write_text(json.dumps(entry, indent=2, sort_keys=True))
+
+
+def test_projection_request_passes_the_default_digest_cache(tmp_path, monkeypatch):
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
+    source = tmp_path / "source"
+    _synthetic_checkpoint(source)
+    output = tmp_path / "projection.json"
     answer = request_expert_projection(
-        "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj.json",
-        env={**os.environ, "TESSERA_REPO": str(repo), "PYTHONSAFEPATH": "1"})
-    assert answer == {"answer": "the sibling"}
+        source, {STACK: ("E4M3", 1024)}, out_path=output, env=_real_producer_env())
+    cache_dir = tmp_path / "source-digest-cache"
+    assert cache_dir.is_dir()
+    receipt = answer["source_digest_cache"]
+    assert receipt["schema"] == "tessera.source-digest-receipt.v1"
+    assert Path(receipt["cache"]) == cache_dir.resolve()
+    # Only shard bodies go through the cache; config and auxiliaries are
+    # always hashed and carry no receipt row.
+    assert [row["shard"] for row in receipt["shards"]] == [SHARD]
+    assert all(row["how"] == "hashed" for row in receipt["shards"])
+    # The caller-side statement rides under its own key on every call.
+    use = answer["source_digest_cache_use"]
+    assert use["schema"] == tep.SOURCE_DIGEST_CACHE_USE_SCHEMA
+    assert use["used"] is True
+    assert tep.SOURCE_DIGEST_CACHE_OPTION in use["reason"]
+
+
+def test_projection_request_command_carries_the_digest_cache_option(tmp_path, monkeypatch):
+    dump = tmp_path / "argv.json"
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=dump)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    request = request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                        out_path=tmp_path / "projection.json")
+    argv = json.loads(dump.read_text())
+    index = argv.index(tep.SOURCE_DIGEST_CACHE_OPTION)
+    assert argv[index + 1] == str(tmp_path / "source-digest-cache")
+    assert (tmp_path / "source-digest-cache").is_dir()
+    assert request["source_digest_cache_use"]["used"] is True
+
+
+def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path, monkeypatch):
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
+    import torch
+    from safetensors.torch import save_file
+
+    source = tmp_path / "source"
+    tensors = _synthetic_checkpoint(source)
+    cache_dir = tmp_path / "digest-cache"
+    cache_dir.mkdir()
+    shard = source / SHARD
+    _seed_digest_entry(cache_dir, shard, hashlib.sha256(shard.read_bytes()).hexdigest())
+    first = request_expert_projection(
+        source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "first.json",
+        env=_real_producer_env(), source_digest_cache=cache_dir)
+    receipt = first["source_digest_cache"]
+    assert receipt["mode"] == "stat-bound"
+    assert receipt["cached_shards"] == 1
+    assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "cached"}
+    assert first["source_digest_cache_use"]["used"] is True
+    assert first["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
+    # A changed shard moves its stat identity: the record is not served and
+    # the whole-source seal answers with the new bytes' digest.
+    tensors[f"{STACK}.0.w1.weight"] = torch.ones(32, 32, dtype=torch.bfloat16)
+    save_file(tensors, str(shard))
+    second = request_expert_projection(
+        source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "second.json",
+        env=_real_producer_env(), source_digest_cache=cache_dir)
+    receipt = second["source_digest_cache"]
+    assert receipt["cached_shards"] == 0
+    assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "hashed"}
+    assert second["source_digest_cache_use"]["used"] is True
+    assert second["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
+    assert second["source"]["files"][SHARD] != first["source"]["files"][SHARD]
+
+
+def test_projection_request_names_a_producer_without_the_option(tmp_path, monkeypatch):
+    dump = tmp_path / "argv.json"
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=dump)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    answer = request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                       out_path=tmp_path / "projection.json")
+    assert tep.SOURCE_DIGEST_CACHE_OPTION not in json.loads(dump.read_text())
+    record = answer["source_digest_cache_use"]
+    assert record["schema"] == tep.SOURCE_DIGEST_CACHE_USE_SCHEMA
+    assert record["used"] is False
+    assert tep.SOURCE_DIGEST_CACHE_OPTION in record["reason"]
+    # The producer's receipt key belongs to the producer; without the option
+    # no producer receipt exists and PrismaQuant must not write one.
+    assert "source_digest_cache" not in answer
+    assert not (tmp_path / "source-digest-cache").exists()
+
+
+def test_projection_request_refuses_an_explicit_cache_the_producer_lacks(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    with pytest.raises(ExpertProjectionError, match="does not advertise"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=tmp_path / "elsewhere")
+
+
+def test_projection_request_refuses_an_override_that_is_an_existing_file(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    not_a_dir = tmp_path / "not-a-directory"
+    not_a_dir.write_text("occupied")
+    with pytest.raises(ExpertProjectionError, match="existing file"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=not_a_dir)
+    assert not (tmp_path / "source-digest-cache").exists()
+
+
+def test_projection_request_refuses_a_cache_inside_the_model_source(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=source / "digest-cache")
+    # The default directory beside an output placed inside the source is
+    # refused too: the cache must stay outside the tree it seals.
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "projection.json")
+
+
+def test_projection_request_refuses_an_output_inside_the_model_source(tmp_path, monkeypatch):
+    """#2243: a refused call leaves the model source tree exactly as it was.
+
+    With an out path inside the checkpoint the call is refused -- and the
+    refusal must precede every write, so no request file, output directory
+    or digest cache is left behind in the tree every later source identity
+    hashes.
+    """
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    before = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "projection.json")
+    after = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    assert before == after == ["config.json"]
+
+
+def test_projection_request_refuses_an_output_inside_the_source_without_the_cache(tmp_path, monkeypatch):
+    """#2243: the out parent is refused inside the source with no cache at all.
+
+    A producer without ``--source-digest-cache`` takes no cache directory, so
+    the output path itself must carry the inside-source refusal.
+    """
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    before = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "nested" / "projection.json")
+    after = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    assert before == after == ["config.json"]
 
 
 def test_stack_plan_request_is_the_producers_exact_shape():
@@ -292,25 +513,38 @@ def test_carried_projection_round_trips_and_refuses_edits():
 # ---------------------------------------------------------------------------
 # The export side
 # ---------------------------------------------------------------------------
-def test_stack_uniform_assignment_refuses_role_split_partial_and_unprojected():
+def test_unit_assignment_uniform_mixed_partial_and_unprojected():
+    """One home for the selection rule the export lane applies.
+
+    A stack-uniform world keeps the exact stack-uniform stamps (PrismaQuant
+    #183); a mixed stack is expressible only under the installed Tessera v57
+    per-unit capability, and is refused by unit, stack and required contract
+    version without it (PrismaQuant #2319).  The producer still executes a
+    stack whole: a partly selected stack and an unprojected unit refuse.
+    """
     _source, units, stack_of = carried_units(carried_projection(
         _projection(), bind_expert_projection(_projection(), declared=_declared()),
         request=stack_plan_request({STACK: ("E4M3", 1024)}), tool="t"))
     uniform = {name: "TESSERA_E4M3_K1_R1024" for name in units}
-    assert require_stack_uniform_assignment(uniform, stack_of, units) == {
-        STACK: "TESSERA_E4M3_K1_R1024"}
+    grant = {"schema": "tessera.routed-unit-assignment.v1"}
+    assert tep.require_unit_assignment(uniform, stack_of, units, capability=grant) == (
+        {STACK: "TESSERA_E4M3_K1_R1024"}, {})
     split = dict(uniform)
     split[f"{STACK}.0.w2"] = "TESSERA_E4M3_K1_R768"
-    with pytest.raises(ExpertProjectionError, match="rungs differ across the stack"):
-        require_stack_uniform_assignment(split, stack_of, units)
+    stack_formats, unit_rungs = tep.require_unit_assignment(
+        split, stack_of, units, capability=grant)
+    assert stack_formats == {}
+    assert unit_rungs == {STACK: {name: split[name] for name in units}}
+    with pytest.raises(ExpertProjectionError, match=rf"{STACK}.*0\.w2.*v57"):
+        tep.require_unit_assignment(split, stack_of, units, capability=None)
     partial = dict(uniform)
     partial.pop(f"{STACK}.1.w3")
     with pytest.raises(ExpertProjectionError, match=r"executes the stack whole.*1\.w3"):
-        require_stack_uniform_assignment(partial, stack_of, units)
+        tep.require_unit_assignment(partial, stack_of, units, capability=None)
     with pytest.raises(ExpertProjectionError, match="not in the carried producer projection"):
-        require_stack_uniform_assignment(
+        tep.require_unit_assignment(
             {**uniform, "model.layers.6.feed_forward.experts.0.w1": "TESSERA_E4M3_K1_R1024"},
-            stack_of, units)
+            stack_of, units, capability=None)
 
 
 def _record(tmp_path: Path, name: str, unit: dict, *, q256=1024, grid="E4M3") -> dict:

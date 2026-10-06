@@ -19,6 +19,8 @@ from .shipcard import (
     _strict_json_object,
     safetensors_header_spans,
 )
+from .digests import DIRECT_ASCII_SPACED_LAX
+from .source_read_plan import safetensors_prefix_length
 
 
 def _regular_stat(path: Path) -> os.stat_result:
@@ -38,12 +40,12 @@ def _read_metadata(path: Path, *, shard: bool) -> tuple[bytes, int, dict]:
         prefix = 0
         if shard:
             raw_length = handle.read(8)
-            if len(raw_length) != 8:
-                raise ValueError(f"{path}: truncated header length")
-            length = int.from_bytes(raw_length, "little")
+            length = safetensors_prefix_length(
+                raw_length, before["bytes"], max_bytes=_MAX_SAFETENSORS_HEADER_BYTES,
+                short_error=f"{path}: truncated header length",
+                range_error=lambda length: f"{path}: invalid or truncated metadata length {length}")
             prefix = 8
-        # Use the same bounded metadata allowance as the content verifier.
-        if not 0 < length <= _MAX_SAFETENSORS_HEADER_BYTES or length + prefix > before["bytes"]:
+        elif not 0 < length <= _MAX_SAFETENSORS_HEADER_BYTES:
             raise ValueError(f"{path}: invalid or truncated metadata length {length}")
         raw = handle.read(length)
         if len(raw) != length:
@@ -157,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(json.dumps({"status": "structure_error", "error": str(exc)}))
         return 1
-    print(json.dumps(result, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0
 
 

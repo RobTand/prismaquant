@@ -49,6 +49,7 @@ from prismaquant.gguf_formats import GGUF_BLOCK_BYTES, gguf_pack
 from prismaquant.layer_config import load_assignment
 from prismaquant.moe_imatrix import build_imatrix_from_act_cache as build_direct_imatrix
 from prismaquant.model_profiles import detect_profile
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.prismasnap_contract import refuse_prismasnap_for_unvalidated_lane
 
 _EXPERT_RE = re.compile(
@@ -299,7 +300,7 @@ def export_gguf_direct(
             tensor_formats[out_name] = "F16"
 
     writer.add_key_value("prismaquant.tensor_formats",
-                         json.dumps(tensor_formats, sort_keys=True),
+                         DIRECT_ASCII_SPACED_LAX.text(tensor_formats),
                          gguf.GGUFValueType.STRING)
     writer.write_header_to_file()
     writer.write_kv_data_to_file()

@@ -219,6 +219,7 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     reason. ``adjoint.receipt_sha256`` may differ only when this run binds
     a receipt; otherwise it must be equal.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     old_root = old_root.rstrip("/")
@@ -271,7 +272,7 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     if not bound and old_receipt != new_receipt:
         raise ValueError(f"Gate 1 {where}: {qid} stage-A binding moved with "
                          f"no stage-A proof bound")
-    if json.dumps(old_body, sort_keys=True) != json.dumps(new_body, sort_keys=True):
+    if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the moved "
                          f"paths")
     body = {key: value for key, value in new.items()
@@ -445,6 +446,7 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
     argv inside) -- plus the receipt seal when binding. The data fields
     (``output_space``, ``adjoint.boundary_artifacts``) and every scientific
     field stay byte-equal; the new identity must recompute."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     original_root = original_root.rstrip("/")
@@ -496,8 +498,7 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
                 if k not in ("identity_sha256", "read_set", "adjoint")}
     new_body = {k: v for k, v in new.items()
                 if k not in ("identity_sha256", "read_set", "adjoint")}
-    if json.dumps(old_body, sort_keys=True) != json.dumps(new_body,
-                                                         sort_keys=True):
+    if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the "
                          "relocated control metadata")
     body = {key: value for key, value in new.items()
@@ -539,6 +540,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
     band-granular binding, PQ #993) the produced generation may cover a
     subset of the prior quanta; every produced quantum still compares.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     prior_paths = sorted(prior_dir.glob("layer-*.json"))
     if not prior_paths:
         raise ValueError(f"no prior layer-*.json records under {prior_dir}")
@@ -600,8 +602,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
                     if k not in _CONTROL_BLOCKS}
         new_body = {k: v for k, v in new_record.items()
                     if k not in _CONTROL_BLOCKS}
-        if json.dumps(old_body, sort_keys=True) != json.dumps(
-                new_body, sort_keys=True):
+        if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
             raise ValueError(
                 f"{where}: scientific fields differ (campaign identity, "
                 f"membership, extents, output_space or another non-control "
@@ -757,7 +758,8 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     from prismaquant.joint_layer_quanta import qname_layer
     from prismaquant.joint_stage_b_head import (
         HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
-    from prismaquant.tessera_joint_aura import load_measured_anchor_input
+    from prismaquant.tessera_joint_aura import (
+        load_measured_anchor_input, resolve_file_hash_workers)
     from prismaquant.tessera_reader import load_declared_reader
 
     started = time.monotonic()
@@ -766,7 +768,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
         synthesis_device="cpu", progress_phase=None,
         require_existing_renders=True, verify_payloads=False,
         historical_encoder_reuse=plan.get("historical_encoder_reuse"),
-        file_hash_workers=plan.get("file_hash_workers", 1))
+        file_hash_workers=resolve_file_hash_workers(plan))
     slices = build_head_slices(
         config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
         completion=prepared, production_cache=production_cache, data=data,
@@ -787,6 +789,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
 
 
 def main(argv=None) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
     ap.add_argument("--plan-sha256", required=True)
@@ -886,6 +889,9 @@ def main(argv=None) -> int:
                          "the own boundary run once per probe for the "
                          "one-pass spill; the quantum refuses a launch in "
                          "the other mode. Default %(default)s")
+    ap.add_argument("--checkpoint-incoming-mode", choices=("stream_once_staged",),
+                    default=None, help="with --executable-readsets: seal checkpoint cotangents "
+                    "in their first consuming phases; no default change (PQ #1366)")
     ap.add_argument("--replay-regime", default=None,
                     help="with --replay-mode spill: the campaign spec's "
                          "PRISMAQUANT_STAGE_B_REPLAY_REGIME (unset: the "
@@ -911,6 +917,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.head_slices and not args.executable_readsets:
         return _fail("--head-slices needs --executable-readsets")
+    if args.checkpoint_incoming_mode is not None and not args.executable_readsets:
+        return _fail("--checkpoint-incoming-mode needs --executable-readsets")
     if args.replay_mode != "windowed" and not args.executable_readsets:
         return _fail("--replay-mode needs --executable-readsets")
     if args.replay_mode != "spill" and (args.replay_regime is not None
@@ -1049,8 +1057,7 @@ def main(argv=None) -> int:
                 stored = json.loads(on_disk.read_bytes().decode("utf-8"))
             except (OSError, ValueError) as exc:
                 return _fail(f"Gate 1 cannot read {on_disk}: {exc}")
-            if json.dumps(stored, sort_keys=True) != json.dumps(
-                    record, sort_keys=True):
+            if DIRECT_ASCII_SPACED_LAX.text(stored) != DIRECT_ASCII_SPACED_LAX.text(record):
                 return _fail(f"Gate 1: {record['quantum_id']} differs from "
                               f"the sealed inputs under receipt-less "
                               f"regeneration at the original root; "
@@ -1129,7 +1136,8 @@ def main(argv=None) -> int:
         # (no writes); the probe count comes from the sealed plan, never a
         # knob. Refusal writes nothing.
         try:
-            execution = plan.get("execution", {})
+            from prismaquant.tessera_joint_eval_panel import evaluation_execution, evaluation_formats
+            execution = evaluation_execution(plan)
             n_probes = execution.get("n_probes") \
                 if isinstance(execution, dict) else None
             if type(n_probes) is not int or isinstance(n_probes, bool) \
@@ -1151,21 +1159,45 @@ def main(argv=None) -> int:
                 bound_manifests = [(row["manifest_path"], row["manifest"],
                                     row["manifest_sha256"]) for row in emitted]
             if args.executable_readsets:
-                calib_input = plan.get("calibration_input", {})
-                calib_path = calib_input.get("path") \
-                    if isinstance(calib_input, dict) else None
-                calib_sha256 = calib_input.get("sha256") \
-                    if isinstance(calib_input, dict) else None
-                if type(calib_path) is not str or not calib_path:
+                # The run reads the ENCODING calibration first (the plan's
+                # own input), then the Fisher draw's tokens: stage both, in
+                # that order, or a staged run stops readset-not-staged at the
+                # first read and wastes the GPU slot it holds.
+                calib_refs = []
+                encoding = plan.get("calibration_input")
+                if isinstance(encoding, dict):
+                    calib_refs.append(("encoding calibration input", encoding))
+                draw = (plan.get("joint_eval_draw") or {}).get("calibration_input")
+                if isinstance(draw, dict):
+                    calib_refs.append(("joint eval draw calibration input", draw))
+                if not calib_refs:
                     raise ValueError(
                         "the sealed plan names no calibration input path: "
                         "refusing")
-                try:
-                    calib_bytes = Path(calib_path).stat().st_size
-                except OSError as exc:
-                    raise ValueError(
-                        f"calibration input unreadable at {calib_path}: "
-                        f"{exc}") from exc
+                staged_calib = []
+                for label, calib_input in calib_refs:
+                    calib_path = calib_input.get("path")
+                    calib_sha256 = calib_input.get("sha256")
+                    if type(calib_path) is not str or not calib_path:
+                        raise ValueError(
+                            f"the sealed plan names no {label} path: refusing")
+                    try:
+                        calib_bytes = Path(calib_path).stat().st_size
+                    except OSError as exc:
+                        raise ValueError(
+                            f"{label} unreadable at {calib_path}: {exc}") from exc
+                    staged_calib.append({"label": label, "path": calib_path,
+                                         "sha256": calib_sha256, "bytes": calib_bytes})
+                # The encoding calibration is the head's first read; the
+                # draw's tokens follow it, before any forward phase.
+                calib_path = staged_calib[0]["path"]
+                calib_sha256 = staged_calib[0]["sha256"]
+                calib_bytes = staged_calib[0]["bytes"]
+                extra_head_reads = [
+                    {"path": row["path"], "bytes": row["bytes"],
+                     "sha256": row["sha256"],
+                     "where": f'{row["label"]} intake'}
+                    for row in staged_calib[1:]]
                 production = prepared.get("production_cache", {})
                 production_sha = production.get("sha256") \
                     if isinstance(production, dict) else None
@@ -1236,11 +1268,16 @@ def main(argv=None) -> int:
                     raise ValueError(
                         "the prepared completion names no unit roster: "
                         "refusing")
+                formats_by_qname = evaluation_formats(plan, formats_by_qname)
                 from prismaquant.joint_cost_quantum import (
                     derive_layer_prepared_inputs,
                 )
                 by_layer: dict[int, list] = {}
+                from prismaquant.joint_layer_quanta import qname_layer
+                measurement_layers = {qname_layer(name) for name in formats_by_qname}
                 for record in produced["records"]:
+                    if record.get("layer") not in measurement_layers:
+                        continue
                     by_layer.setdefault(record.get("layer"), []).append(
                         record)
                 # PQ #1022: every layer's retained admission is settled
@@ -1254,7 +1291,7 @@ def main(argv=None) -> int:
                     try:
                         prepared_by_layer[layer] = derive_layer_prepared_inputs(
                             layer_records[0],
-                            execution=plan.get("execution", {}),
+                            execution=execution,
                             formats_by_qname=formats_by_qname,
                             production_cache=production_cache,
                             prepared_sha256=args.prepared_sha256,
@@ -1302,7 +1339,7 @@ def main(argv=None) -> int:
                     for layer in sorted(by_layer):
                         bound = derive_layer_spill_bound(
                             prepared_by_layer[layer],
-                            execution=plan.get("execution", {}),
+                            execution=execution,
                             production_cache=production_cache,
                             profile=profile, model_config=model_config,
                             replay_regime=args.replay_regime, block=block)
@@ -1339,6 +1376,7 @@ def main(argv=None) -> int:
                             calib={"path": calib_path,
                                    "bytes": calib_bytes,
                                    "sha256": calib_sha256},
+                            extra_head_reads=extra_head_reads,
                             render_prerequisite={
                                 "scope": "pb732",
                                 "production_pkl_sha256": production_sha,
@@ -1351,6 +1389,7 @@ def main(argv=None) -> int:
                             head_slice=(head_slices[layer]["binding"]
                                         if head_slices else None),
                             replay_mode=args.replay_mode,
+                            checkpoint_incoming_mode=args.checkpoint_incoming_mode,
                             head_source=head_source,
                             spill_bound=spill_by_layer.get(layer)):
                         emitted.append(row)

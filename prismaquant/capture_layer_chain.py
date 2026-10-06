@@ -182,24 +182,22 @@ def source_fingerprints(source_root) -> dict:
 
 
 def require_source_fingerprints(recorded, source_root, *, where) -> None:
-    """Refuse a source file that is no longer the object the prep stat.
+    """Compare recorded prep/source metadata, never authenticate payload bytes.
 
-    A fence, never a digest's stand-in: it only refuses. The quanta record digests from what
-    they read, comparing any census producer digests; the join holds consumed
-    files to the prep's stat record and hashes only unconsumed source files. The
-    NFS device number is client-local, so another box compares with
-    :func:`~prismaquant.cost_streaming.stat_fingerprint_reusable`: the inode,
-    size, times and path still bind the object.
+    Each quantum records digests from its own reads under same-descriptor
+    integrity checks. D32 prep-vs-running stat or roster drift stamps and
+    continues; certified mode retains the original refusal.
     """
     from .cost_streaming import stat_fingerprint_reusable
+    from .dev_mode import seal_check
     live = source_fingerprints(source_root)
-    if set(live) != set(recorded):
-        raise CaptureChainRefused(f"{where}: the source file roster changed since the prep")
+    seal_check('capture prep source roster', set(recorded), set(live), where=where,
+        refusal=lambda: CaptureChainRefused(f'{where}: the source file roster changed since the prep'))
     changed = sorted(name for name, value in live.items()
-                     if not stat_fingerprint_reusable(value, recorded[name]))
-    if changed:
-        raise CaptureChainRefused(
-            f"{where}: source files changed since the prep hashed them: {changed[:8]}")
+                     if name not in recorded or not stat_fingerprint_reusable(value, recorded[name]))
+    seal_check('capture prep source stat', recorded, live, where=where, same=not changed,
+        refusal=lambda: CaptureChainRefused(
+            f'{where}: source files changed since the prep hashed them: {changed[:8]}'))
 
 
 # -- the prep record -----------------------------------------------------------

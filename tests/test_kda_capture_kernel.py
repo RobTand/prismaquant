@@ -280,6 +280,47 @@ def test_a_dev_mode_mismatch_records_that_the_runtime_is_not_the_qualified_one(
     assert admitted.record()["qualification_matched"] is True
 
 
+# ---- the packaged qualification binds this tree's source ---------------------
+
+@needs_triton
+def test_the_packaged_qualification_admits_this_trees_source_and_refuses_a_changed_source(
+        monkeypatch):
+    """File-to-packaged admission of the KDA capture kernel (PQ #1301).
+
+    Three-way equality: the bytes of the executing ``kda_chunk`` file, what
+    ``kda_chunk.source_sha256`` digests, and the packaged qualification's
+    ``identity.source_sha256`` are one value, so any edit to the kernel
+    source fails here loudly (review of 6d34e81: a helper route invalidated
+    the packaged source admission). The identity handed to the
+    real gate then takes every other field from the packaged identity,
+    isolating source-field admission: certified mode accepts this tree and
+    refuses a changed source digest. Nothing is stubbed.
+    """
+    import hashlib
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    qualification, _ = capture._qualification()
+    assert qualification["schema"] == capture.QUALIFICATION_SCHEMA
+    assert qualification["status"] == "qualified"
+    independent = hashlib.sha256(
+        Path(kda_chunk.__file__).read_bytes()).hexdigest()
+    assert kda_chunk.source_sha256() == independent
+    assert kda_chunk.source_sha256() == qualification["identity"]["source_sha256"]
+
+    identity = {field: qualification["identity"][field]
+                for field in capture.QUALIFIED_FIELDS if field != "source_sha256"}
+    identity["source_sha256"] = kda_chunk.source_sha256()
+    digest, matched = capture._require_qualified(identity)
+    assert matched is True
+    assert digest == hashlib.sha256(
+        capture.QUALIFICATION_PATH.read_bytes()).hexdigest()
+
+    changed = dict(identity,
+                   source_sha256=hashlib.sha256(b"changed kda_chunk.py").hexdigest())
+    with pytest.raises(capture.KdaCaptureKernelRefused, match="source_sha256"):
+        capture._require_qualified(changed)
+
+
 # ---- the layer pass ---------------------------------------------------------
 
 class CountingDispatch:

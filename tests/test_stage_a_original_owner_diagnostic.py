@@ -56,7 +56,7 @@ def test_actual_original_owner_still_refuses_cuda_before_reads(material, monkeyp
 
 def test_enclosing_api_threads_same_owner_and_owned_profile(material, monkeypatch):
     """Only wiring is tested: CUDA admission/backend/model calls are CPU stubs."""
-    from prismaquant import cost_streaming, layer_streaming, model_profiles
+    from prismaquant import cost_streaming, layer_streaming, model_profiles, tessera_joint_aura
     owner = _owner(material)
     try:
         campaign = _campaign(material["tmp"] / "campaign", implementation=ONE)
@@ -76,10 +76,16 @@ def test_enclosing_api_threads_same_owner_and_owned_profile(material, monkeypatc
         monkeypatch.setattr(layer_streaming, "_source_profile", owned_profile)
         monkeypatch.setattr(model_profiles, "detect_profile",
                             lambda *a, **kw: pytest.fail("mutable path profile discovery used"))
+        monkeypatch.setattr(tessera_joint_aura, "seed_source_identity_cache",
+                            lambda *a: pytest.fail("legacy identity cache seeded"))
+        monkeypatch.setattr(tessera_joint_aura, "source_identity_proof_kwargs",
+                            lambda *a: pytest.fail("legacy stat proof entered"))
         def build(model, **kw):
             assert kw["source_authentication"] is owner
             assert kw["profile"] is profile
-            return _dense_runner()
+            runner = _dense_runner()
+            runner.context.source_authentication = owner
+            return runner
         monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build)
         result = stage_a.run_adjoint_capture(
             config, plan_sha256="b" * 64, prepared=campaign.prepared,
@@ -91,5 +97,25 @@ def test_enclosing_api_threads_same_owner_and_owned_profile(material, monkeypatc
         assert (adjoint_space(root) / RECEIPT_NAME).is_file()
         assert not adjoint_receipt_path(adjoint_space(root)).exists()
         assert result["diagnostic_receipt"]["sha256"]
+        assert result["original_source_material"]["automatic_capture_qualified"] is False
+        import json
+        receipt = json.loads((adjoint_space(root) / RECEIPT_NAME).read_text())
+        assert receipt["original_source_material"] == result["original_source_material"]
     finally:
         owner.close()
+
+
+@pytest.mark.parametrize('cache', ['source_identity_cache', 'source_digest_cache'])
+def test_original_config_cache_refuses_before_device_work(material, monkeypatch, cache):
+    from prismaquant import gpu_guard
+    with _owner(material) as owner:
+        monkeypatch.setattr(owner, 'require_material_device', lambda device: None)
+        monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path',
+                            lambda *a: pytest.fail('device work entered before cache refusal'))
+        with pytest.raises(stage_a.AdjointIdentityRefused, match='original.*cache'):
+            stage_a.run_adjoint_capture(
+                {'model': str(owner.root), cache: {}}, plan_sha256='1' * 64,
+                prepared={}, output_root=material['tmp'] / 'uncreated',
+                source_authentication=owner,
+                selected_row_diagnostic=_spec(draw(), {'seed_base': 7000}))
+        assert not (material['tmp'] / 'uncreated').exists()

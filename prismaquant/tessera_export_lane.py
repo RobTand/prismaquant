@@ -87,7 +87,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .digests import (
-    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
 )
 
 
@@ -306,9 +309,9 @@ def require_platform_executes_derived_from_contract(declared=None) -> dict:
     if stated != derived:
         raise TesseraExportLaneError(
             "PRINCIPLE 14: lane_specs/tessera.json declares "
-            f"executes_by_platform={json.dumps(stated, sort_keys=True)} but the "
+            f"executes_by_platform={DIRECT_ASCII_SPACED_LAX.text(stated)} but the "
             "pinned runtime's packaged contract publishes "
-            f"{json.dumps(derived, sort_keys=True)}.\n"
+            f"{DIRECT_ASCII_SPACED_LAX.text(derived)}.\n"
             "  What a platform executes is a claim about another runtime, so "
             "it is DERIVED from that runtime's own table or it is refused. "
             "Re-read the table; never edit the map to silence this."
@@ -437,8 +440,8 @@ def require_producer_tools(
     Since #1587 that roster holds only the supported package entry point
     ``src/tessera/export_serving.py`` (RobTand/tessera#687): the plan
     translation moved in-tree (``prismaquant.tessera_plan_writer``) and the
-    campaign-side projection tool moved to the ``campaign_tools`` roster,
-    resolved by :func:`require_campaign_tools`.  A tool declared
+    campaign-side projection tool moved to the public installed-package
+    ``campaign_tools`` roster. A tool declared
     ``unsupported_experiments`` is not refused, but it must name a tracking
     issue, which ``LaneProducerTool.from_dict`` enforces, and it is echoed
     on every run so the debt is visible where it is being incurred
@@ -480,54 +483,6 @@ def require_producer_tools(
     return tuple(resolved)
 
 
-def require_campaign_tools(
-    env: Mapping[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Refuse unless every tool on the lane's ``campaign_tools`` roster exists.
-
-    The same existence check as :func:`require_producer_tools`, over the
-    second roster (PrismaQuant #1587): dependencies the campaign shells out
-    to that the export arm does not call.  Today that is only the
-    producer's expert projection (``experiments/tessera_producer_plan.py``,
-    tracked by #183), resolved for ``tessera_expert_projection``.  A
-    separate gate rather than a flag on the first one, so the export arm's
-    ``unsupported`` report -- which reads ``producer_tools`` only -- stays a
-    statement about what the arm calls, while the campaign dependency stays
-    named and checked instead of becoming a bare path again.
-    """
-    import os
-
-    from .lane_spec import load_lane_spec
-
-    env = os.environ if env is None else env
-    spec = load_lane_spec("tessera")
-    if not spec.campaign_tools:
-        raise TesseraExportLaneError(
-            "lane_specs/tessera.json declares no `campaign_tools`, but the "
-            "campaign shells out to the producer's expert projection. An "
-            "undeclared external dependency is one nobody can check for"
-        )
-    resolved: list[str] = []
-    for tool in spec.campaign_tools:
-        root = str(env.get(tool.repo_env, "") or "").strip()
-        if not root:
-            raise TesseraExportLaneError(
-                f"{tool.repo_env} is unset, so {tool.path} cannot be located. "
-                "This repository NAMES Tessera's tools instead of vendoring "
-                f"them; point {tool.repo_env} at the checkout of the pinned "
-                "release."
-            )
-        path = Path(root.rstrip("/")) / tool.path
-        if not path.is_file():
-            raise TesseraExportLaneError(
-                f"{path} does not exist. It is declared in "
-                f"lane_specs/tessera.json's campaign_tools as "
-                f"stability={tool.stability!r}"
-                + (f" ({tool.tracking_issue})" if tool.tracking_issue else "")
-                + f": {tool.description}"
-            )
-        resolved.append(str(path))
-    return tuple(resolved)
 
 
 def unsupported_producer_tool_lines(spec) -> list[str]:
@@ -752,13 +707,17 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     When a projection IS carried, the producer's record is the only
     attestation of the executed unit: every selected routed unit must be a
     projected unit whose source tensor the producer hashed in the shard it
-    actually lives in, each executed stack must be selected whole at one rung
-    (the stamp the allocator wrote must agree), and every selected rung's
-    priced blob must sit in the campaign's wire directory at its receipt's
-    size.  The bytes are not read here: the bundle that comes back is what the
-    exporter's ``--cached-expert-units`` intake consumes, and that intake
-    hashes every blob against its receipt before framing it
-    (``locate_expert_wire``'s contract, PrismaQuant #1378).
+    actually lives in, each executed stack must be selected whole (every
+    projected unit placed), and the selected rungs must agree with the
+    allocation's stamps -- stack-uniform stacks against the allocator's
+    ``tessera_expert_stack_formats`` stamp, and a mixed per-unit stack against
+    the ``tessera_expert_unit_rungs`` stamp the v57 capability makes
+    expressible (PrismaQuant #2319).  Every selected rung's priced blob must
+    sit in the campaign's wire directory at its receipt's size.  The bytes are
+    not read here: the bundle that comes back is what the exporter's
+    ``--cached-expert-units`` intake consumes, and that intake hashes every
+    blob against its receipt before framing it (``locate_expert_wire``'s
+    contract, PrismaQuant #1378).
 
     Returned WITH the bundle, and not derived from it by the caller, is which
     of the two paths this run took (PrismaQuant #222).  The unlock is one
@@ -769,9 +728,10 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     one question, and would read a dense export as a re-encode.
     """
     from .tessera_expert_projection import (
-        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
+        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, UNIT_RUNGS_KEY,
+        UNIT_RUNGS_SCHEMA, WIRE_DIR_KEY,
         ExpertProjectionError, carried_units, check_expert_wire_receipt,
-        locate_expert_wire, require_stack_uniform_assignment,
+        locate_expert_wire, require_unit_assignment,
     )
     from .tessera_formats import parse_tessera_format_name
 
@@ -814,13 +774,25 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
                 raise ExpertProjectionError(
                     f"{name}: the producer hashed {tensor} in shard {hashed!r}, the source "
                     f"checkpoint holds it in {shards.get(tensor)!r}")
-        stack_formats = require_stack_uniform_assignment(selected_routed, stack_of, units)
+        stack_formats, unit_rungs = require_unit_assignment(selected_routed, stack_of, units)
         stamped = meta.get(keys["stack_formats"])
         if stamped is not None and {k: v for k, v in stamped.items()
                 if k in stack_formats} != stack_formats:
             raise ExpertProjectionError(
                 f"the allocation's {keys['stack_formats']} stamp {stamped} disagrees with the "
                 f"selected stack formats {stack_formats}")
+        stamped_units = meta.get(UNIT_RUNGS_KEY)
+        expected_units = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
+        if unit_rungs and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation carries mixed per-unit rungs but its "
+                f"{UNIT_RUNGS_KEY} stamp "
+                f"{stamped_units if stamped_units is not None else '<absent>'} "
+                "does not name them for the selected units")
+        if not unit_rungs and stamped_units is not None and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation's {UNIT_RUNGS_KEY} stamp {stamped_units} "
+                "names mixed per-unit rungs the selection does not carry")
         wire_dir = meta.get(keys["wire_dir"])
         roots = meta.get(roots_key) if roots_key is not None else None
         if roots_key is not None and (not isinstance(roots, Mapping) or
@@ -860,6 +832,7 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     # so ``fallback`` (``no_routed_units``) is the honest answer.
     return (ROUTED_EXPERT_BYTES_PRICED_WIRES if selected_routed else fallback), {
         "source": source, "units": records, "stacks": stack_formats,
+        **({"unit_rungs": unit_rungs} if unit_rungs else {}),
         "wire_dir": wire_dir,
         **({"wire_roots_by_unit": dict(roots)} if roots is not None else {}),
         "geometry": {name: (units[name]["rows"], units[name]["cols"])
@@ -2427,7 +2400,7 @@ def read_cached_unit_bundle(manifest, directory, expected_units, source):
         encoder_source_proof_mode=cached_unit_encoder_source_proof_mode(),
         authority=PRODUCER_AUTHORITY)
     for warning in bundle.warnings:
-        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+        print('[cached-unit warning] ' + DIRECT_ASCII_SPACED_LAX.text(warning),
               file=sys.stderr)
     return bundle
 

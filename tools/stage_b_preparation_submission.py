@@ -56,6 +56,7 @@ from prismaquant.joint_layer_quanta import seal_manifest_bytes  # noqa: E402
 from prismaquant.stage_b_prep_io import (  # noqa: E402
     build_preparation_template, head_phase_entries, preparation_payload_ceiling,
     preparation_read_entries, preparation_read_manifest)
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 SUBMISSION_SCHEMA = "prismaquant.stage_b_preparation_submission.v1"
 
@@ -270,7 +271,7 @@ def main(argv=None) -> int:
     except (ValueError, OSError, KeyError) as exc:
         print(f"Stage B preparation submission refused: {exc}", file=sys.stderr)
         return 3
-    print(json.dumps(submission, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(submission))
     return 0
 
 

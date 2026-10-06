@@ -77,7 +77,7 @@ from .measured_runtime_prices import (
 )
 from . import record_fields
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
 
 EMISSION_SCHEMA = "prismaquant.native_receipt_table_emission.v1"
 #: The CLI's three answers; see the module docstring for what each one means.
@@ -776,8 +776,9 @@ def main(argv=None) -> int:
         manifest_dir=args.receipts.resolve().parent, fixed_assignment=fixed_assignment,
         valid_hours=args.valid_hours, now=now)
     admission = emission["admission"]
-    print(json.dumps({"table": emission["table_path"], "table_sha256": emission["table_sha256"],
-                      "rows": len(emission["rows"]), "admission": admission}, sort_keys=True), flush=True)
+    print(DIRECT_ASCII_SPACED_LAX.text(
+        {"table": emission["table_path"], "table_sha256": emission["table_sha256"],
+         "rows": len(emission["rows"]), "admission": admission}), flush=True)
     return EXIT_CODES[admission["status"]]
 
 

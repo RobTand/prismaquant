@@ -600,7 +600,8 @@ def test_merge_refuses_two_rows_that_disagree_about_one_unservable_row():
             capture_sha256="merged-digest")
 
 
-def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
+@pytest.mark.parametrize("malformed", [False, True])
+def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path, malformed):
     """The export intake reads the wire directory, so evidence stays out of it.
 
     An adopted row outside this run's menu is a measurement, not a price. Its
@@ -613,7 +614,9 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
 
     seed = tmp_path / "seed"
     (seed / "cache" / "wire").mkdir(parents=True)
-    for name in ("priced.wire", "evidence.wire"):
+    priced_filename = campaign._wire_path(seed / "cache" / "wire", "a", "ON").name
+    receipt_filename = "other-coordinate.tessera" if malformed else priced_filename
+    for name in (receipt_filename, "evidence.wire"):
         (seed / "cache" / "wire" / name).write_bytes(b"x")
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     seed_inputs = {'currency': 'output_mse', 'calibration': {},
@@ -627,7 +630,7 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
             {"qname": "a", "format_name": "ON", "family": "f", "dloss": 1.0},
             {"qname": "a", "format_name": "OFF", "family": "g", "dloss": 2.0},
         ],
-        "wire_records": {"ON": {"file": "priced.wire"},
+        "wire_records": {"ON": {"file": receipt_filename},
                          "OFF": {"file": "evidence.wire"}},
     }
     write_unit(parts, stage="Tessera campaign", qname="a",
@@ -637,13 +640,23 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path):
     wire_dir = tmp_path / "run-wire"
     wire_dir.mkdir()
     seen = {}
-    campaign._adopt_seed_checkpoint(
-        seed / "cost.anchors.json", None, targets=["a"], wire_dir=wire_dir,
-        adopt=lambda name, state, where: seen.update({name: state}),
-        admits=lambda name, fmt: fmt == "ON",
-        identity_sha256="run-identity", expected_identity=seed_inputs)
+    def adopt_seed():
+        return campaign._adopt_seed_checkpoint(
+            seed / "cost.anchors.json", None, targets=["a"], wire_dir=wire_dir,
+            adopt=lambda name, state, where: seen.update({name: state}),
+            admits=lambda name, fmt: fmt == "ON",
+            identity_sha256="run-identity", expected_identity=seed_inputs)
 
-    assert sorted(p.name for p in wire_dir.iterdir()) == ["priced.wire"]
+    if malformed:
+        with pytest.raises(RuntimeError, match="wire filename differs"):
+            adopt_seed()
+        assert list(wire_dir.iterdir()) == []
+        assert seen == {}
+        assert (seed / "cache" / "wire" / receipt_filename).read_bytes() == b"x"
+        return
+    adopt_seed()
+
+    assert sorted(p.name for p in wire_dir.iterdir()) == [priced_filename]
     # The adopter still gets the whole state: deciding what to do with the
     # row it will not price is the adopter's job, not the linker's.
     assert sorted(record["format_name"] for record in seen["a"]["anchors"]) == \

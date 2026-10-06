@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -26,6 +25,7 @@ from .tessera_joint_aura import (
     HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA,
     cell_render_census, render_origin_census,
 )
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
 
 HANDOFF_SCHEMA = 'prismaquant.tessera_joint_allocation.v1'
 ROW_FIELDS = ('hessian_identity', 'tessera_family', 'tessera_body_rate_q256',
@@ -295,11 +295,11 @@ def handoff(*, joint_binding, plan_binding, output_path):
     raw = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
     receipt = {'schema': HANDOFF_SCHEMA, 'original_joint_cost': joint_binding, 'plan': plan_binding,
                'prepared': prepared_binding, 'prepared_cache': prepared['production_cache'],
-               'output': {'path': str(output.resolve()), 'sha256': hashlib.sha256(raw).hexdigest()},
+               'output': {'path': str(output.resolve()), 'sha256': bytes_sha256hex(raw)},
                'units': len(result['costs']), 'joint_fields_unchanged': True, 'research_only': True}
     atomic_write_bytes(output, raw)
     atomic_write_bytes(receipt_path,
-                       (json.dumps(receipt, indent=2, sort_keys=True) + '\n').encode())
+                       DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b'\n')
     return receipt
 
 

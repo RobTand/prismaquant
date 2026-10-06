@@ -25,6 +25,7 @@ def main():
     from prismaquant.io_spans import nfs_read_bytes
     from prismaquant.layer_streaming import _source_safe_open
     from prismaquant.residency_map import residency_resolver, bind_residency_manifest
+    from prismaquant.source_read_plan import read_safetensors_header
 
     m = json.load(open(MAP))
     entries = m["entries"]
@@ -56,9 +57,7 @@ def main():
     ranges = present
 
     with safe_open(declared, framework="pt") as f:
-        header = json.loads(open(declared, "rb").read(8 + int.from_bytes(
-            open(declared, "rb").read(8), "little"))[8:])
-    base = 8 + int.from_bytes(open(declared, "rb").read(8), "little")
+        header, base, _size = read_safetensors_header(declared)
     rows = {k: v for k, v in header.items() if k != "__metadata__"}
 
     def covered(v):

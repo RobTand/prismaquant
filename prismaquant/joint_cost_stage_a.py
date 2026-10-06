@@ -48,7 +48,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .stage_a_selected_row_diagnostic import (
     RECEIPT_SCHEMA as DIAGNOSTIC_RECEIPT_SCHEMA,
     SelectedRowDiagnosticRefused, bind_diagnostic_draw, diagnostic_marker_path,
@@ -89,6 +89,7 @@ from .joint_layer_quanta import (
 )
 from .produced_output_spool import plane_partitions, sealed_spool_root
 from .source_read_plan import chain_opening_window, chain_prefetch_window
+from .tessera_joint_aura import restores_activation_scale_env
 
 
 def stage_a_forward_observer(progress):
@@ -1045,6 +1046,38 @@ def _chain_at_checkpoint(runner, storage, *, rows, plane, shared_adjoint, shared
     return batches, cotangents, grad_outs
 
 
+def build_adjoint_bind_identity(calib_ids, *, source_model_identity,
+                                implementation_sha256, n_probes, seed_base,
+                                token_scope, temperature, execution_partition,
+                                diagnostic=None, defer_source=False):
+    """One CPU/GPU construction owner for the capture session identity."""
+    from .cost_streaming import validate_streamed_model_identity
+    return {
+        "source_model": (NOT_COMPUTED if defer_source and source_model_identity == NOT_COMPUTED
+                         else validate_streamed_model_identity(
+                             source_model_identity, where="adjoint capture")),
+        "producer_source_sha256": implementation_sha256,
+        "calibration_sha256": bytes_sha256hex(
+            calib_ids.detach().cpu().contiguous().numpy().tobytes()),
+        "calibration_shape": list(calib_ids.shape),
+        "calibration_dtype": str(calib_ids.dtype),
+        "n_probes": n_probes, "seed_base": seed_base,
+        "token_scope": token_scope, "temperature": temperature,
+        "execution_partition": execution_partition,
+        "campaign_stage": "joint_adjoint_capture",
+        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
+    }
+
+def build_adjoint_execution_partition(*, probe_microbatch, batch_rows, partition_count):
+    """The capture/CPU-preflight partition grammar, independent of the device."""
+    if not probe_microbatch:
+        return None
+    return {"schema": "prismaquant.aura.streamed_microbatch.v1",
+            "requested_rows": probe_microbatch, "effective_rows": batch_rows,
+            "partition_count": partition_count,
+            "row_order": "contiguous_complete_sequences",
+            "gradient_diagnostics": "sum_output_operators_fp32_before_norm"}
+
 def run_adjoint_capture_core(
     runner, calib_ids, *, execution, output_root, stride,
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
@@ -1053,7 +1086,7 @@ def run_adjoint_capture_core(
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
     arithmetic_extra=None, chain_seed=None, chain_split=None, forward_split=None,
-    selected_row_diagnostic=None,
+    selected_row_diagnostic=None, original_diagnostic_context=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -1149,7 +1182,6 @@ def run_adjoint_capture_core(
         StreamedBoundaryArtifacts,
         normalize_boundary_storage,
         prefetched_boundary_batches,
-        validate_streamed_model_identity,
     )
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
     from .matmul_arithmetic import bf16_reduction_stamp
@@ -1179,6 +1211,55 @@ def run_adjoint_capture_core(
     )
 
     diagnostic = None
+    original_context = None
+    original_resource_check = None
+    if original_diagnostic_context is not None:
+        if selected_row_diagnostic is None:
+            raise AdjointIdentityRefused("original context is only a fresh selected-row diagnostic")
+        from .source_generation import (
+            _control, observe_original_source_execution, original_source_runtime,
+            validate_original_source_runtime,
+        )
+        from .stage_a_selected_row_diagnostic import load_original_diagnostic_issued_context
+        from .tessera_calibration_cache import require_original_source_authority
+
+        required = {"authority_input", "plan_input", "session_preparation_input"}
+        if (not isinstance(original_diagnostic_context, dict)
+                or set(original_diagnostic_context) != required):
+            raise AdjointIdentityRefused("original diagnostic requires its independently bound context inputs")
+        owner = getattr(runner.context, "source_authentication", None)
+        require_diagnostic_original_owner(owner, device=runner.device)
+        authority_input = original_diagnostic_context["authority_input"]
+        plan_input = original_diagnostic_context["plan_input"]
+        observed = observe_original_source_execution(authority_input, plan_input,
+                                                    resource_check=owner.resource_check)
+        authority = require_original_source_authority(owner, authority_input, plan_input, observed)
+        validate_original_source_runtime(original_source_runtime(runner, owner), authority["runtime"])
+        _, final_plan = _control(plan_input, "original diagnostic final plan")
+        session_input = original_diagnostic_context["session_preparation_input"]
+        if final_plan.get("original_session_preparation") != session_input:
+            raise AdjointIdentityRefused("original diagnostic session preparation is not independently selected")
+        bindings = final_plan["original_source"]
+        original_context = load_original_diagnostic_issued_context(
+            session_input, base_plan_input=bindings["base_plan"], authority=authority)
+        base, prepared_context = original_context["base_plan"], original_context["prepared"]
+        matches = (
+            prepared_sha256 == base["prepared"]["sha256"],
+            plan_sha256 == bindings["base_plan"]["sha256"],
+            read_manifest_sha256 == base["read_manifest"]["sha256"],
+            implementation_sha256 == prepared_context["implementation_sha256"],
+            source_model_identity == prepared_context["source_model_identity"],
+            selected_row_diagnostic == base["selected_row_diagnostic"],
+            execution == original_context["execution"],
+            Path(output_root) == Path(base["output_root"]),
+            stride == execution["stride"], runner.num_layers == 45,
+            chain_batch_size == 1, chain_probe_fusion is False,
+            boundary_artifact_bytes == execution["boundary_storage"]["max_artifact_bytes"],
+            artifact_budget_stamp is None,
+        )
+        if not all(matches):
+            raise AdjointIdentityRefused("original diagnostic core differs from its issued render-free context")
+        original_resource_check = owner.resource_check
     if selected_row_diagnostic is not None:
         if any(value is not None for value in (
                 chain_resume, chain_seed, chain_split, forward_split, forward_recovery)):
@@ -1291,14 +1372,9 @@ def run_adjoint_capture_core(
             "token_scope": token_scope,
             "global_token_count": len(calib_ids) * sequence_length,
         }
-        execution_partition = {
-            "schema": "prismaquant.aura.streamed_microbatch.v1",
-            "requested_rows": probe_microbatch,
-            "effective_rows": batch_rows,
-            "partition_count": len(row_offsets),
-            "row_order": "contiguous_complete_sequences",
-            "gradient_diagnostics": "sum_output_operators_fp32_before_norm",
-        }
+        execution_partition = build_adjoint_execution_partition(
+            probe_microbatch=probe_microbatch, batch_rows=batch_rows,
+            partition_count=len(row_offsets))
 
     # Under a chain resume the run header keeps the implementation the chain
     # state sealed; the running one is only compared (PQ #1001).
@@ -1321,24 +1397,14 @@ def run_adjoint_capture_core(
                 "that run with --resume-chain-state-sha256, or rename them aside")
     header_implementation = (implementation_sha256 if chain_state is None
                              else chain_state["run_identity"]["implementation_sha256"])
-    bind_identity = {
-        # A dev-mode chain resume does not compute the source identity it
-        # would only compare (PQ #1147); the stored one is adopted below.
-        "source_model": (
-            NOT_COMPUTED if chain_state is not None and source_model_identity == NOT_COMPUTED
-            else validate_streamed_model_identity(
-                source_model_identity, where="adjoint capture")),
-        "producer_source_sha256": header_implementation,
-        "calibration_sha256": bytes_sha256hex(
-            calib_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": list(calib_ids.shape),
-        "calibration_dtype": str(calib_ids.dtype),
-        "n_probes": n_probes, "seed_base": seed_base,
-        "token_scope": token_scope, "temperature": temperature,
-        "execution_partition": execution_partition,
-        "campaign_stage": "joint_adjoint_capture",
-        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
-    }
+    bind_identity = build_adjoint_bind_identity(
+        calib_ids, source_model_identity=source_model_identity,
+        implementation_sha256=header_implementation, n_probes=n_probes,
+        seed_base=seed_base, token_scope=token_scope, temperature=temperature,
+        execution_partition=execution_partition, diagnostic=diagnostic,
+        defer_source=chain_state is not None)
+    if original_context is not None:
+        bind_identity = original_context["session_identity"]
     run_identity = {
         "plan_sha256": str(plan_sha256),
         "prepared_sha256": str(prepared_sha256),
@@ -1357,6 +1423,13 @@ def run_adjoint_capture_core(
         # bytes (PQ #1028).
         **bf16_reduction_stamp(),
     }
+    if original_context is not None:
+        run_identity["original_diagnostic_context"] = {
+            "schema": original_context["prepared"]["schema"],
+            "scope": original_context["prepared"]["scope"],
+            "static_authority_sha256": original_context["base_plan"]["static_authority_sha256"],
+            "session_preparation": original_context["session_preparation_input"],
+        }
     stride_block = {"value": int(stride), "boundaries": [int(b) for b in boundaries],
                     "max_chain_layers": int(stride) - 1}
     arithmetic = chain_arithmetic_stamp(runner, arithmetic_extra)
@@ -1433,9 +1506,11 @@ def run_adjoint_capture_core(
         except ChainSplitRefused as exc:
             raise AdjointIdentityRefused(f"forward split refused: {exc}") from exc
         if forward_quantum:
-            from .stage_a_forward_split import ForwardSplitRefused, read_prep_record
+            from .stage_a_forward_split import (
+                ForwardSplitRefused, read_prep_record, adopt_forward_bind_identity)
             try:
                 forward_prep = read_prep_record(space)
+                bind_identity = adopt_forward_bind_identity(forward_prep, bind_identity)
             except ForwardSplitRefused as exc:
                 raise AdjointIdentityRefused(f"forward split refused: {exc}") from exc
             if list(samples) not in forward_prep["ranges"]:
@@ -1512,6 +1587,10 @@ def run_adjoint_capture_core(
             from .stage_a_forward_split import PREP_OWNER_LABEL
             storage.bind(bind_identity, n_probes=n_probes, published=True,
                          owner_label=PREP_OWNER_LABEL)
+        elif original_context is not None:
+            storage.rebind(original_context["session_preparation"]["session"],
+                           identity=bind_identity, n_probes=n_probes,
+                           check_memory=original_resource_check)
         elif resume_plan is None:
             storage.bind(bind_identity, n_probes=n_probes, published=True)
         else:
@@ -2175,8 +2254,7 @@ def _write_split_digests(space, label, samples, block) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {"schema": SPLIT_DIGESTS_SCHEMA, "label": label,
                 "samples": list(samples), **block}
-    atomic_write_bytes(path, (json.dumps(document, sort_keys=True, indent=2)
-                              + "\n").encode())
+    atomic_write_bytes(path, DIRECT_ASCII_INDENT2_LAX.encoded(document) + b"\n")
     return path
 
 
@@ -2435,22 +2513,175 @@ def _stage_a_device_envelope(config, *, environ=None):
             "requested_bytes": requested, "plan_max_gpu_bytes": limit}
 
 
+def _refuse_original_identity_caches(config, identity_cache_path=None):
+    if identity_cache_path is not None or any(config.get(key) is not None for key in (
+            'source_identity_cache', 'source_digest_cache')):
+        raise RuntimeError('original source identity accepts no legacy stat identity/cache inputs')
+
+
 def _stage_a_source_identity(runner, config, identity_cache_path):
     """Build the Stage A source identity behind the #1374 identity proof.
 
     A GPU row that lacks the identity quantum's proof for a shard refuses
     before it hashes a byte (PQ #1392); the proof arguments come from the one
     shared helper, not a second mechanism.
+
+    An explicitly selected qualified original context uses that same identity
+    mechanism's owned descriptor intake and refuses legacy stat-cache inputs.
     """
     from .cost_streaming import build_streamed_model_identity
     from .tessera_joint_aura import source_identity_proof_kwargs
 
+    if getattr(getattr(runner.context, 'source_authentication', None),
+               'is_qualified_original_material', False):
+        _refuse_original_identity_caches(config, identity_cache_path)
+        return build_streamed_model_identity(runner, config['model'])
     return build_streamed_model_identity(
         runner, config["model"], identity_cache_path=identity_cache_path,
         **source_identity_proof_kwargs(
             config["model"], config.get("source_digest_cache")))
 
 
+def run_original_diagnostic_capture(authority_input, plan_input, session_preparation_input, *,
+                                    source_authentication):
+    """Run the current source's own row/tail without any pricing PREPARED join.
+
+    The caller owns this existing material owner and its final close. Actual
+    original CUDA admission still fails through that owner's unchanged gate.
+    """
+    from .aura_cost import _aura_source_sha256
+    from .calibration_data import load_calibration_input
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from .gpu_guard import require_cuda_hot_path
+    from .joint_aura import source_execution_identity
+    from .layer_streaming import _source_profile
+    from .matmul_arithmetic import pin_matmul_arithmetic
+    from .memory_management import enforce_device_envelope
+    from .residency_map import bind_residency_manifest, residency_report
+    from .source_generation import (
+        _control, observe_original_source_execution, original_source_runtime,
+        validate_original_source_runtime,
+    )
+    from .stage_a_selected_row_diagnostic import load_original_diagnostic_issued_context
+    from .tessera_calibration_cache import require_original_source_authority
+
+    owner = source_authentication
+    require_diagnostic_original_owner(owner, device="cuda")
+    observed = observe_original_source_execution(authority_input, plan_input,
+                                                resource_check=owner.resource_check)
+    authority = require_original_source_authority(owner, authority_input, plan_input, observed)
+    _, final_plan = _control(plan_input, "original diagnostic final plan")
+    if final_plan.get("original_session_preparation") != session_preparation_input:
+        raise AdjointIdentityRefused("original diagnostic preparation is not independently selected")
+    bindings = final_plan["original_source"]
+    context = load_original_diagnostic_issued_context(
+        session_preparation_input, base_plan_input=bindings["base_plan"], authority=authority)
+    base, prepared_context = context["base_plan"], context["prepared"]
+    execution, resources = context["execution"], context["resources"]
+    require_diagnostic_original_owner(owner, model=base["model"], device="cuda")
+    if prepared_context["implementation_sha256"] != _aura_source_sha256():
+        raise AdjointIdentityRefused("original diagnostic current implementation differs")
+    require_cuda_hot_path("original selected-row diagnostic", "cuda")
+    bind_residency_manifest(bindings["read_manifest"]["sha256"])
+    ids, calibration = load_calibration_input(base["calibration_input"]["path"],
+        expected_sha256=base["calibration_input"]["sha256"], n_samples=512, seqlen=512)
+    if calibration != prepared_context["calibration"]:
+        raise AdjointIdentityRefused("original diagnostic full calibration differs")
+    pin_matmul_arithmetic()
+    torch.set_num_threads(1)
+    envelope = enforce_device_envelope("cuda", resources["gpu_bytes"],
+                                       where="original selected-row diagnostic")
+    owner.resource_check("before_original_diagnostic_model")
+    started, before_io = time.time(), _io_counters()
+    sampler = GpuPowerSampler().start()
+    kernel = _stage_a_kernel_profiler()
+    runner = None
+    source_waits = ExposedWaitLedger()
+    observations = ExitStack()
+    result = {"schema": "prismaquant.original_diagnostic_execution.v1", "passed": False,
+              "authority": authority_input, "plan": plan_input,
+              "session_preparation": session_preparation_input, "device_envelope": envelope,
+              "calibration": calibration, "started_epoch": started}
+    try:
+        runner = build_streamed_causal_lm(base["model"], device=torch.device("cuda"),
+            dtype=torch.bfloat16, offload_folder=str(adjoint_space(base["output_root"]) / "offload"),
+            profile=_source_profile(base["model"], owner), attn_implementation="eager",
+            source_authentication=owner, sealed_head_tensors=prepared_context["head_source"]["tensors"],
+            planned_source_window_bytes=resources["source_cache_bytes"],
+            **resources["source_prefetch"])
+        source = build_streamed_model_identity(runner, base["model"])
+        if source != prepared_context["source_model_identity"]:
+            raise AdjointIdentityRefused("original diagnostic live source identity differs")
+        if source_execution_identity(runner.model) != prepared_context["source_execution"]:
+            raise AdjointIdentityRefused("original diagnostic actual source execution differs")
+        validate_original_source_runtime(original_source_runtime(runner, owner), authority["runtime"])
+        runner.model.eval()
+        runner.context.begin_source_initialization_audit()
+        observations.enter_context(runner.observe_source_waits(source_waits.sink))
+        kernel.__enter__()
+        receipt = run_adjoint_capture_core(runner, ids.to(runner.device), execution=execution,
+            output_root=base["output_root"], stride=execution["stride"],
+            source_model_identity=source,
+            unit_roster_sha256=canonical_json_sha256(prepared_context["head_source"]["tensors"],
+                                                    where="diagnostic head source roster"),
+            plan_sha256=bindings["base_plan"]["sha256"], prepared_sha256=base["prepared"]["sha256"],
+            read_manifest_sha256=base["read_manifest"]["sha256"],
+            implementation_sha256=prepared_context["implementation_sha256"],
+            campaign_scope={"schema": "prismaquant.original_diagnostic_scope.v1",
+                            "scope": "fresh_original_global_row", "priced": False},
+            boundary_artifact_bytes=execution["boundary_storage"]["max_artifact_bytes"],
+            selected_row_diagnostic=base["selected_row_diagnostic"],
+            original_diagnostic_context={"authority_input": authority_input, "plan_input": plan_input,
+                                         "session_preparation_input": session_preparation_input})
+        receipt["source_initialization"] = runner.context.source_initialization_contract()
+        receipt["original_source_material"] = owner.receipt()
+        receipt["device_envelope"] = envelope
+        owner.resource_check("after_original_diagnostic_capture")
+        torch.cuda.synchronize()
+        result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
+        result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
+        if result["peak_gpu_reserved_bytes"] > resources["gpu_bytes"]:
+            raise AdjointIdentityRefused("original diagnostic exceeded its device envelope")
+        result["diagnostic_receipt"] = write_diagnostic_receipt(adjoint_space(base["output_root"]), receipt)
+        result["passed"] = True
+    finally:
+        observations.close()
+        kernel.__exit__(None, None, None)
+        if runner is not None:
+            runner.shutdown()
+        result["finished_epoch"] = time.time()
+        result["gpu"] = sampler.stop()
+        result["io_before"], result["io_after"] = before_io, _io_counters()
+        result["kernel_active_s"] = kernel.block()["kernel_active_s"]
+        result["kernel_profiler_error"] = kernel.error
+        result["source_waits"] = source_waits.snapshot()
+        result["residency"] = residency_report()
+        atomic_write_bytes(adjoint_space(base["output_root"]) / "original-diagnostic-results.json",
+                           indent2_json_file_bytes(result))
+    return result
+
+
+def load_stage_a_calibration(config):
+    """The capture and CPU input preflight share the actual draw reader."""
+    from .calibration_data import load_calibration_input
+    execution = config["execution"]
+    return load_calibration_input(
+        config["calibration_input"]["path"],
+        expected_sha256=config["calibration_input"]["sha256"],
+        n_samples=execution["n_calib_samples"], seqlen=execution["calib_seqlen"])
+
+
+def stage_a_source_profile(config, source_authentication=None):
+    """Use the same source profile owner before either kind of startup."""
+    if source_authentication is None:
+        from .model_profiles import detect_profile
+        return detect_profile(config["model"])
+    from .layer_streaming import _source_profile
+    return _source_profile(config["model"], source_authentication)
+
+
+@restores_activation_scale_env
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
@@ -2496,13 +2727,11 @@ def run_adjoint_capture(
     work; the caller keeps close responsibility. No authority is constructed.
     """
     from .aura_cost import _aura_source_sha256
-    from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .glm_capture_compatibility import require_capture_compatibility
     from .gpu_guard import require_cuda_hot_path
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .joint_run_progress import JointRunProgress
-    from .model_profiles import detect_profile
     from .residency_map import bind_residency_manifest, residency_report
     from .stage_a_head import prepared_head, stage_a_roster, walked_head
     from .prismabuild_progress import commit as _pb_commit
@@ -2526,6 +2755,7 @@ def run_adjoint_capture(
             # additional original-source or device authority.
             require_diagnostic_original_owner(
                 source_authentication, model=config["model"], device="cuda")
+            _refuse_original_identity_caches(config)
         except (SelectedRowDiagnosticRefused, RuntimeError) as exc:
             raise AdjointIdentityRefused(str(exc)) from exc
     if diagnostic_marker_path(adjoint_space(output_root)).exists():
@@ -2654,10 +2884,8 @@ def run_adjoint_capture(
         completion = _preflight_run_prepared(
             prepared, plan_sha256=plan_sha256, implementation_sha256=implementation,
             reader_identity=reader_identity, projection_backend=projection_backend.identity)
-        # A wall in dev mode too, where the preflight only records a plan
-        # mismatch: the completion's roster is this plan's only because the
-        # prepare ran under it (PQ #1051).
-        _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
+        from .stage_inputs import recorded_same
+        recorded_same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
         data = None
         if head_walk:
             data = load_measured_anchor_input(
@@ -2670,11 +2898,7 @@ def run_adjoint_capture(
             _same(config["model"], data.census["model"], "requested source model")
             _same(data.census["attention_implementation"], "eager",
                   "qualified source attention")
-        ids, calibration = load_calibration_input(
-            config["calibration_input"]["path"],
-            expected_sha256=config["calibration_input"]["sha256"],
-            n_samples=execution["n_calib_samples"],
-            seqlen=execution["calib_seqlen"])
+        ids, calibration = load_stage_a_calibration(config)
         if data is not None:
             original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
             for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
@@ -2689,10 +2913,17 @@ def run_adjoint_capture(
             # reached, as the Stage B head slice does (PQ #1010).
             from .joint_run_progress import HEAD_PHASE
             _pb_commit(head.progress_units, HEAD_PHASE)
+        from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+        result["encoding_calibration_input"] = calibration
+        ids, calibration, eval_panel = select_evaluation(ids, calibration, config)
+        execution = evaluation_execution(config)
         result["calibration_input"] = calibration
+        if eval_panel is not None:
+            result["joint_eval"] = eval_panel
         result["head"] = head.record
 
-        identity_cache_path = seed_source_identity_cache(config, space / "run")
+        identity_cache_path = (seed_source_identity_cache(config, space / "run")
+                               if source_authentication is None else None)
         # The single-run path threads the plan's derivative binding and its
         # source-prefetch budget into the model build (tessera_joint_aura's
         # execute()); stage A builds the same model and threads the same two
@@ -2701,11 +2932,7 @@ def run_adjoint_capture(
         # own answer to #737's single-worker pin. An explicitly recorded
         # override (#819) replaces the budget for this run only; the plan's
         # block is what the deviation stamp names as sealed.
-        if source_authentication is None:
-            source_profile = detect_profile(config["model"])
-        else:
-            from .layer_streaming import _source_profile
-            source_profile = _source_profile(config["model"], source_authentication)
+        source_profile = stage_a_source_profile(config, source_authentication)
         runner = build_streamed_causal_lm(
             config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
             offload_folder=str(space / "run" / "offload"),
@@ -2781,6 +3008,12 @@ def run_adjoint_capture(
         # Outside the run identity and the chain state: which arm read the
         # head is a fact about this launch, not about the science.
         receipt["head"] = head.record
+        if source_authentication is not None:
+            # Expected whole-file model identity does not establish actual
+            # delivery or complete-source capture. Retain the owner's actual
+            # held-decoder/readset evidence separately, outside chain identity.
+            result['original_source_material'] = source_authentication.receipt()
+            receipt['original_source_material'] = result['original_source_material']
         split_files = None
         if chain_split is not None or forward_split is not None:
             split_files = _write_split_receipt(space, receipt)
@@ -2982,6 +3215,149 @@ def _chain_seed_argument(args):
         raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
 
 
+def stage_a_loader_source_phases(num_layers, *, capture_layers=None, chain_top=None,
+                                chain_bottom=0, prep=False):
+    """The job's source schedule, independent of its manifest's claims."""
+    phases = {"head": None}
+    if prep:
+        return phases
+    if capture_layers is None:
+        capture_layers = range(num_layers)
+    phases.update((f"forward-{layer:03d}", layer) for layer in capture_layers)
+    top = num_layers if chain_top is None else chain_top
+    phases.update((f"chain-{layer:03d}", layer)
+                  for layer in range(top - 1, chain_bottom - 1, -1))
+    return phases
+
+
+def _preflight_job_source_phases(num_layers, *, output_root, forward_split=None,
+        chain_split=None, chain_resume=None, chain_seed=None, forward_recovery=None,
+        diagnostic=None):
+    if any(split is not None and split["role"] == "prep"
+           for split in (forward_split, chain_split)):
+        return stage_a_loader_source_phases(num_layers, prep=True)
+    capture_layers = range(num_layers)
+    top, bottom = num_layers, 0
+    if chain_resume is not None:
+        from .stage_a_chain_resume import _sealed_checkpoints, load_chain_state
+        space = adjoint_space(output_root)
+        state = load_chain_state(space, chain_resume["chain_state_sha256"])
+        checkpoints, _partials = _sealed_checkpoints(
+            space, {**state["boundary_storage"]["session"], "kind": "adjoint_checkpoint"},
+            state["stride"]["boundaries"])
+        top = min(checkpoints)
+        capture_layers = ()
+    if chain_seed is not None:
+        from .stage_a_chain_seed import load_pinned_checkpoint
+        top = int(load_pinned_checkpoint(chain_seed["checkpoint"])["boundary"])
+        bottom = chain_seed["through"]
+        capture_layers = ()
+    if chain_split is not None:
+        bottom = chain_split["through"]
+    if forward_split is not None:
+        bottom = num_layers
+    if forward_recovery is not None:
+        from .joint_forward_resume import _read
+        capsule, _digest = _read(forward_recovery["path"], forward_recovery["sha256"])
+        if chain_resume is None and chain_seed is None:
+            capture_layers = range(capsule["frontier"], num_layers)
+    if diagnostic is not None:
+        bottom = diagnostic["through"]
+    return stage_a_loader_source_phases(num_layers, capture_layers=capture_layers,
+                                       chain_top=top, chain_bottom=bottom)
+
+
+def audit_stage_a_source_spans(config, manifest, *, profile=None,
+                              source_model=None, source_phases=None):
+    """Compare the actual loader schedule and spans against the claimed readset."""
+    from .layer_streaming import (
+        _get_layer_list, _resolve_base_prefix, construction_multimodal, streaming_source_plan)
+    from .source_read_plan import uncovered_spans
+    if source_model is None:
+        from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+        profile = stage_a_source_profile(config) if profile is None else profile
+        auto_config = load_streaming_auto_config(
+            config["model"], config["model"], local_files_only=True)
+        source_model = build_streaming_skeleton(auto_config,
+            multimodal=construction_multimodal(profile, False))
+    base, layers = _get_layer_list(source_model)
+    prefix = _resolve_base_prefix(source_model, base)
+    layers_prefix = f"{prefix}.layers." if prefix else "layers."
+    if source_phases is None:
+        source_phases = stage_a_loader_source_phases(len(layers))
+    selected_layers = sorted({layer for layer in source_phases.values() if layer is not None})
+    source = streaming_source_plan(config["model"], layers_prefix=layers_prefix,
+                                   layers=selected_layers, root=source_model)
+    declared = {phase["name"]: phase for phase in manifest["read_plan"]["phases"]}
+    checked = 0
+    for name, layer in source_phases.items():
+        if name not in declared:
+            raise AdjointIdentityRefused(f"CPU input preflight missing source phase {name}")
+        spans = source["head_spans"] if layer is None else source["layer_spans"][layer]
+        entries = [manifest["entries"][index] for index in declared[name]["entry_indices"]]
+        missing = uncovered_spans(entries, spans)
+        if missing:
+            path, start, stop = missing[0]
+            tensor = source["span_tensors"].get(missing[0])
+            raise AdjointIdentityRefused(
+                f"CPU input preflight loader span not declared in {name}: "
+                f"{tensor} {path} [{start},{stop}); "
+                f"{len(missing)} spans uncovered in this phase; "
+                f"uncovered paths: {', '.join(sorted({row[0] for row in missing}))}")
+        checked += len(spans)
+    return {"loader_selected_spans_checked": checked,
+            "source_phases_checked": len(source_phases), "uncovered_spans": 0}
+
+
+def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None,
+                             output_root=None, capture_options=None):
+    """Read the capture's CPU startup inputs without CUDA/model or output."""
+    from .layer_streaming import _build_weight_map, construction_multimodal
+    from .residency_map import bind_residency_manifest
+    from .stage_inputs import bound
+    from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+    from .tessera_joint_eval_panel import select_evaluation
+
+    bind_residency_manifest(data_manifest_sha256)
+    bound(prepared, "prepared anchors")
+    ids, calibration = load_stage_a_calibration(config)
+    encoding_shape = list(ids.shape)
+    encoding_calibration = calibration
+    ids, calibration, _evaluation = select_evaluation(ids, calibration, config)
+    profile = stage_a_source_profile(config)
+    auto_config = load_streaming_auto_config(
+        config["model"], config["model"], local_files_only=True)
+    weight_map, _names = _build_weight_map(
+        config["model"], profile=profile,
+        multimodal=construction_multimodal(profile, False))
+    coverage = {}
+    if data_manifest_sha256 is not None:
+        from .staged_lease import load_sealed_manifest
+        from .layer_streaming import _get_layer_list
+        skeleton = build_streaming_skeleton(auto_config,
+            multimodal=construction_multimodal(profile, False),
+            attn_implementation=config.get("attn_implementation"))
+        _base, layers = _get_layer_list(skeleton)
+        if capture_options is not None and capture_options.get("diagnostic") is not None:
+            from .tessera_joint_eval_panel import evaluation_execution
+            bind_diagnostic_draw(capture_options["diagnostic"], ids,
+                execution=evaluation_execution(config), num_layers=len(layers))
+        source_phases = _preflight_job_source_phases(
+            len(layers), output_root=output_root, **(capture_options or {}))
+        coverage = audit_stage_a_source_spans(
+            config, load_sealed_manifest(data_manifest_sha256),
+            source_model=skeleton, source_phases=source_phases)
+    return {"schema": "prismaquant.joint_adjoint_capture.cpu_input_preflight.v1",
+            "command": "cpu-input-preflight", "passed": True,
+            "capture_executed": False, "price_measured": False,
+            "calibration_shape": list(ids.shape),
+            "encoding_calibration_shape": encoding_shape,
+            "encoding_calibration_input": encoding_calibration,
+            "calibration_input": calibration, "source_profile": profile.name,
+            "config_class": type(auto_config).__name__,
+            "source_tensors_named": len(weight_map), **coverage}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Run stage A of the distributed joint-AURA cost campaign: "
@@ -2992,6 +3368,10 @@ def main(argv=None) -> int:
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--prepared-sha256", required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--cpu-input-preflight", action="store_true",
+                        help="default-off CPU input/readset checks through the "
+                             "capture startup owners; no CUDA allocation, "
+                             "capture, checkpoint or price result")
     parser.add_argument("--stride", type=int, default=None,
                         help="cotangent checkpoint stride when the plan does "
                              "not declare distributed_campaign (S is a plan "
@@ -3117,7 +3497,9 @@ def main(argv=None) -> int:
         require_dev_mode("joint_cost_stage_a")
         from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
-        config = _load_plan(args.plan, args.plan_sha256)
+        config = _load_plan(args.plan, args.plan_sha256,
+                            **({"projection_runtime": False}
+                               if args.cpu_input_preflight else {}))
         from .staged_tier_policy import activate_staged_tier_policy
         try:
             allowed = activate_staged_tier_policy(args.allowed_tiers)
@@ -3125,6 +3507,21 @@ def main(argv=None) -> int:
             parser.error(str(exc))
         print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
               f"pool/HDD bulk opens refuse", flush=True)
+        if args.cpu_input_preflight:
+            report = preflight_adjoint_inputs(
+                config, prepared={"path": str(args.prepared),
+                                  "sha256": args.prepared_sha256},
+                data_manifest_sha256=args.data_manifest_sha256, output_root=args.output_root,
+                capture_options={"forward_split": forward_split, "chain_split": chain_split,
+                    "chain_resume": _chain_resume_argument(args),
+                    "chain_seed": _chain_seed_argument(args),
+                    "forward_recovery": (None if args.forward_recovery is None else
+                        {"path": str(args.forward_recovery), "sha256": args.forward_recovery_sha256}),
+                    "diagnostic": (None if args.selected_row_diagnostic is None else
+                        load_diagnostic_spec(args.selected_row_diagnostic,
+                                             args.selected_row_diagnostic_sha256))})
+            print(json.dumps(report))
+            return EXIT_OK
         result = run_adjoint_capture(
             config, plan_sha256=args.plan_sha256,
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},

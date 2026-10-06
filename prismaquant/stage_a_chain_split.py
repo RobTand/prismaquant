@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import argparse
 from functools import partial
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,7 +43,7 @@ import re
 import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
 SPLIT_SCHEMA = "prismaquant.stage_a.chain_split.v1"
 PREP_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_prep.v1"
@@ -429,7 +428,7 @@ def join_split_checkpoint(space, boundary: int, *, n_probes: int, n_batches: int
         raise ChainSplitRefused(
             f"the partials at boundary {boundary} cover samples 0:{expected}, "
             f"not 0:{n_batches}")
-    sessions = {json.dumps(record["session"], sort_keys=True) for record in records}
+    sessions = {DIRECT_ASCII_SPACED_LAX.text(record["session"]) for record in records}
     if len(sessions) != 1:
         # Not an identity gate: a checkpoint record carries one session and
         # every reader holds each row to it (checkpoint_cotangent_plane), so
@@ -470,7 +469,7 @@ def join_split_checkpoint(space, boundary: int, *, n_probes: int, n_batches: int
     index, offset = [], 0
     for name, member in members:
         index.append({"name": name, "offset": offset, "bytes": member.nbytes,
-                      "sha256": hashlib.sha256(member).hexdigest()})
+                      "sha256": bytes_sha256hex(member)})
         offset += member.nbytes
     encoded = _shared_state_pack_index(index)
     trailer = _shared_state_pack_trailer(len(encoded))

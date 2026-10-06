@@ -44,6 +44,21 @@ def _resolve_once() -> Path:
 
 
 @contextmanager
+def source_bound():
+    """Own a fresh canonical import graph for the authenticated source pin.
+
+    Fixtures construct all PB objects inside this scope and finish their work
+    before it exits. The installed SDK graph is restored, not substituted or
+    accepted as this source tree.
+    """
+    from fleet_sdk import prismabuild_imports_restored
+
+    root = _resolve_once()  # Authenticate every declared byte before detaching.
+    with prismabuild_imports_restored(source_root=root):
+        yield
+
+
+@contextmanager
 def reader_sdk_bound():
     """Bind PQ's existing explicit SDK owner to this fixture's one source root."""
     from prismaquant.staged_lease import set_lease_helper_root

@@ -51,7 +51,7 @@ from prismaquant.joint_layer_quanta import (
     quantum_id,
     roster_digest,
 )
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
@@ -826,12 +826,9 @@ def _preserve_allocation_payload(joined, payloads, records):
             raise JoinRefused(f"allocation {quantum}: complete joint currency required")
         probe = first_joint_probe_identity(payload["costs"])
         if shared is not None:
-            # schema, n_probes and token_scope are the measurement's shape,
-            # and the probe identity's calibration draw and probes are what
-            # was measured: both stay a wall. The rest of the probe identity
-            # (producer source, arithmetic) and the two policies are run
-            # seals (PQ #1147): dev mode prints them and joins the rows.
-            shape = ("schema", "n_probes", "token_scope")
+            # Row-to-row vectors, tokens and KL units are mathematical data.
+            # Only source/producer/arithmetic provenance is a D32 stamp.
+            shape = ('schema', 'n_probes', 'token_scope')
             if (any(identity[key] != shared[key] for key in shape)
                     or probe_identity_walls_differ(shared_probe, probe)):
                 raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")
@@ -966,12 +963,12 @@ def main(argv: list[str] | None = None) -> int:
     except JoinRefused as exc:
         print(f"joint_quanta_join: refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED
-    print(json.dumps({"status": result["status"],
-                      "gaps": result["gaps"],
-                      "coverage_sha256": result["coverage_sha256"],
-                      "joint_cost_path": result["joint_cost_path"],
-                      "results_path": result["results_path"]},
-                     sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(
+        {"status": result["status"],
+         "gaps": result["gaps"],
+         "coverage_sha256": result["coverage_sha256"],
+         "joint_cost_path": result["joint_cost_path"],
+         "results_path": result["results_path"]}))
     return 0
 
 
