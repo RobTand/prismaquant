@@ -249,9 +249,10 @@
   the canonical capture binding; the anchor intake names its missing chain
   keys in one refusal; the standalone synthesis census read refuses a missing
   binding by name. A Stage B quantum plan that binds a subset (#1024) still
-  loads in both modes. No gate weakened, no wire, codec, numerical or GPU
-  claim; the named refusal moves the run-01 S3 failure from minutes into a
-  GPU action to a plan-load ValueError naming the absent key.
+  loads in both modes; its test explicitly sets the empty subset instead of
+  depending on the imported fixture default. No gate weakened, no wire, codec,
+  numerical or GPU claim; the named refusal moves the run-01 S3 failure from
+  minutes into a GPU action to a plan-load ValueError naming the absent key.
   Policy-refusal tests start from the canonical shape-only plan and name each
   probe, token-scope, temperature and activation-clipping refusal, so an
   earlier missing-input error cannot hide those guards. The standalone

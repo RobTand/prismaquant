@@ -125,10 +125,8 @@ def _pool_plan(tmp_path):
     pool = tmp_path / "pool"
     (pool / "boundaries").mkdir(parents=True)
     config = _plan(tmp_path / "run")
-    # The subset shape under test IS the empty binding: the fixture literal
-    # carries ``inputs: {}``. Pinned here so a fixture edit that populates
-    # ``inputs`` cannot silently turn this into a non-subset plan.
-    assert config["inputs"] == {}
+    # Exercise the empty subset independently of the imported fixture default.
+    config["inputs"] = {}
     config["execution"]["boundary_storage"] = {
         "schema": "prismaquant.aura.boundary_storage.v1",
         "directory": str(pool / "boundaries"),
