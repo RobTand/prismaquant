@@ -200,3 +200,75 @@ def test_build_diagnostics_do_not_become_new_identity_seals(publication):
     _mutate(publication, lambda t: t["kernel_build"].update(
         source_commit="another producer stamp", metadata={"note": "diagnostic only"}))
     assert _load(publication).allows(896)
+
+
+def _drift_on_second_index_read(publication, monkeypatch, change):
+    from prismaquant import rung_allowability as reader
+    original = reader.read_allowability_json
+    reads = 0
+
+    def read(path):
+        nonlocal reads
+        path = Path(path)
+        if path == publication / "index.json":
+            reads += 1
+            if reads == 2:
+                index = original(path)
+                change(index)
+                path.write_text(json.dumps(index))
+        return original(path)
+
+    monkeypatch.setattr(reader, "read_allowability_json", read)
+
+
+def test_publication_drift_stamps_but_unavailable_evidence_refuses_in_both_modes(
+        publication, monkeypatch, capsys):
+    original_index = (publication / "index.json").read_text()
+    change = lambda index: index["formats"].update(OTHER={"kernel_builds": {}})
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    _drift_on_second_index_read(publication, monkeypatch, change)
+    assert _load(publication).allows(896)
+    captured = capsys.readouterr()
+    assert "[DEV-MODE]" in captured.out + captured.err
+    assert "D41 publication identity" in captured.out + captured.err
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    (publication / "index.json").write_text(original_index)
+    _drift_on_second_index_read(publication, monkeypatch, change)
+    with pytest.raises(ValueError, match="D41 publication identity"):
+        _load(publication)
+    (publication / "index.json").unlink()
+    for mode in ("0", "1"):
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+        with pytest.raises(ValueError, match="cannot read"):
+            _load(publication)
+    (publication / "index.json").write_text(original_index)
+    (publication / FAMILY / "fixture-t8" / "v0001.json").unlink()
+    for mode in ("0", "1"):
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+        with pytest.raises(ValueError, match="cannot read"):
+            _load(publication)
+
+
+def test_current_version_drift_keeps_the_stored_measured_selection(
+        publication, monkeypatch, capsys):
+    path = publication / FAMILY / "fixture-t8" / "v0001.json"
+    newer = json.loads(path.read_text())
+    newer["table_version"] = 2
+    newer["rungs"][0].update(measurement_status="pending", supported=None,
+                             measurements=[], quality={})
+    (path.parent / "v0002.json").write_text(json.dumps(newer))
+
+    def publish(index):
+        build = index["formats"][FAMILY]["kernel_builds"][BUILD["id"]]
+        build["current_version"] = 2
+        build["versions"]["2"] = {"path": f"{FAMILY}/fixture-t8/v0002.json",
+                                  "table_schema": newer["schema"], "table_status": "partial"}
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    _drift_on_second_index_read(publication, monkeypatch, publish)
+    stored = _load(publication)
+    assert stored.table_version == 1
+    assert stored.allows(896)
+    captured = capsys.readouterr()
+    assert "[DEV-MODE]" in captured.out + captured.err
+    assert "D41 publication identity" in captured.out + captured.err
