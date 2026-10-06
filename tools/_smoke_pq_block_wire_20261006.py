@@ -223,7 +223,7 @@ def single_round_trip():
 # ----------------------------------------------- 4 mixed-parent exact stitch
 def mixed_round_trip():
     per_element = torch.from_numpy(
-        MIX.repeat_interleave(BR, axis=0).repeat_interleave(BC, axis=1)
+        MIX.repeat(BR, axis=0).repeat(BC, axis=1)
     )
     expected = torch.where(per_element == 0, REF0, REF1)
     decoded = W.decode_projection(BLOBM)
@@ -379,7 +379,7 @@ def alternative_geometries():
             raise SystemExit(f"body total broke at {abr}x{abc}")
         if abc == 2:
             per_element = torch.from_numpy(
-                sel.repeat_interleave(abr, axis=0).repeat_interleave(abc, axis=1)
+                sel.repeat(abr, axis=0).repeat(abc, axis=1)
             )
             expected = torch.where(per_element == 0, REF0, REF1)
             if not torch.equal(W.decode_projection(blob), expected):
