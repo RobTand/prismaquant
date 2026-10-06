@@ -174,3 +174,16 @@ def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
     from prismaquant.layer_config import load_assignment
     assert set(load_assignment(tmp_path / "layer.json").values()) == {names[0]}
     assert layer["__prismaquant__"]["tessera_menu"]["rung_allowability"][FAMILY]["table_version"] == 1
+
+
+def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
+    from prismaquant import allocator, format_registry as registry
+    table = _load(publication)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
+    monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
+    eligible = allocator._mtp_rung_attestation(
+        None, None, rung_allowability={FAMILY: table}, target_profile="research")
+    assert eligible("mtp.unit", f"{FAMILY}_R896")
+    assert not eligible("mtp.unit", f"{FAMILY}_R897")
+    assert not eligible("mtp.unit", f"{FAMILY}_R898")
+    assert not eligible("mtp.unit", f"{FAMILY}_R899")
