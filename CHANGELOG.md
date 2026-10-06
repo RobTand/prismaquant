@@ -61,6 +61,18 @@
 
 ### Changed
 
+- **Allocator partition and cost byte digests reuse the shared bytes owner**
+  (#2355, Refs #1301). The rank-partition manifest reference and the
+  measured-runtime cost payload integrity comparison in `allocator.main` call
+  `digests.bytes_sha256hex` instead of inlining
+  `hashlib.sha256(...).hexdigest()`. Bytes, digest values, comparison order,
+  refusal messages and ownership are unchanged: the partition reference still
+  authenticates the exact rank manifest bytes the recomputation consumes, and
+  the cost comparison still runs on the owned bytes before `pickle.loads`,
+  ahead of any parse or publication. The remaining `hashlib` use in
+  `allocator.main` is the assignment-payload dedupe digest, which hashes a
+  canonical JSON string, not artifact bytes.
+
 - **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
   Refs #1303). The final `_student` scoring path of
   `tools/measure_vllm_full_kl.py` now calls
