@@ -312,9 +312,14 @@ def _check_receipt(receipt: dict, role_key: str) -> None:
         _fail(f"{role_key} receipt hessian_shape {shape} is not [K,K]")
     inputs_shape = receipt.get("inputs_shape")
     ids_shape = receipt.get("prefix_sample_ids_shape")
-    if (inputs_shape is None) != (ids_shape is None):
-        _fail(f"{role_key} receipt inputs/prefix ids shapes disagree")
-    if inputs_shape is not None:
+    # The publisher's finish always emits an int64 prefix id tensor; with
+    # max_prefix_rows=0 (or nothing retained) that tensor is empty while the
+    # inputs are None. An empty-prefix receipt is valid.
+    if inputs_shape is None:
+        if ids_shape is not None and ids_shape != [0]:
+            _fail(f"{role_key} receipt has no inputs but prefix ids shape "
+                  f"{ids_shape}")
+    else:
         if not isinstance(inputs_shape, list) or len(inputs_shape) != 2 \
                 or inputs_shape[1] != shape[1]:
             _fail(f"{role_key} receipt inputs_shape {inputs_shape} "
@@ -384,9 +389,16 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
         _fail(f"{path}: max_abs {max_abs!r} is not finite and nonnegative")
     inputs = payload["inputs"]
     ids = payload["prefix_sample_ids"]
-    if (inputs is None) != (ids is None):
-        _fail(f"{path}: retained inputs and prefix sample ids disagree")
-    if inputs is not None:
+    # The publisher's finish() always materializes an int64 id tensor; with
+    # no retained prefix rows the inputs are None and the id tensor is
+    # empty. An empty prefix is a valid role; counts stay the full actual
+    # moment counts and are never inferred from prefix ids.
+    empty_prefix = (isinstance(ids, torch.Tensor) and ids.dtype == torch.int64
+                    and ids.ndim == 1 and ids.numel() == 0)
+    if inputs is None:
+        if ids is not None and not empty_prefix:
+            _fail(f"{path}: prefix sample ids present without retained rows")
+    else:
         if not isinstance(inputs, torch.Tensor) \
                 or inputs.device.type != "cpu" \
                 or inputs.dtype != torch.float32 or inputs.ndim != 2:
@@ -397,8 +409,9 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
         if inputs.shape[1] != dimension:
             _fail(f"{path}: inputs do not span the {dimension}-column basis")
         if not isinstance(ids, torch.Tensor) or ids.dtype != torch.int64 \
-                or ids.ndim != 1:
-            _fail(f"{path}: prefix sample ids are not a 1-D int64 tensor")
+                or ids.ndim != 1 or ids.numel() == 0:
+            _fail(f"{path}: retained inputs need nonempty 1-D int64 prefix "
+                  "sample ids")
         if list(ids.shape) != [int(v)
                                for v in receipt["prefix_sample_ids_shape"]]:
             _fail(f"{path}: prefix ids {list(ids.shape)} disagree with "
@@ -516,6 +529,13 @@ def load_source_weight(source_root: Path, qname: str) -> dict:
     }
 
 
+#: The scientific FIT identity the score actually depends on; anything else
+#: in the recorded provenance (model paths, prose sources) may drift and is
+#: stamped, never a re-encode wall.
+FIT_IDENTITY_FIELDS = ("hessian_role", "fit_ids_sha256", "text_sha256",
+                       "fit_tokens", "nsamples", "seqlen", "seed")
+
+
 def load_parent_bank(output: Path, intake: dict) -> dict:
     """Score-side bank verification against the caller's own output files."""
     bank_path = output / "parent-bank.json"
@@ -532,9 +552,18 @@ def load_parent_bank(output: Path, intake: dict) -> dict:
     if bank.get("fit_count") != intake["census"]["fit_count"]:
         _fail(f"{bank_path}: bank fit_count {bank.get('fit_count')} is not "
               f"the actual {intake['census']['fit_count']}")
-    if bank.get("fit_identity") != intake["split"]["fit_identity"]:
-        _fail(f"{bank_path}: bank fit identity is not the verified FIT "
-              "provenance")
+    recorded_identity = bank.get("fit_identity") or {}
+    current_identity = intake["split"]["fit_identity"]
+    mismatch = [field for field in FIT_IDENTITY_FIELDS
+                if recorded_identity.get(field) != current_identity.get(field)]
+    if mismatch:
+        _fail(f"{bank_path}: bank FIT identity fields {mismatch} differ from "
+              "the verified split; the bank was not encoded from this FIT")
+    fit_identity_drift = {
+        field: {"recorded": recorded_identity.get(field),
+                "current": current_identity.get(field)}
+        for field in sorted(set(recorded_identity) | set(current_identity))
+        if recorded_identity.get(field) != current_identity.get(field)}
     if bank.get("heldout_consumed") is not False:
         _fail(f"{bank_path}: bank claims heldout consumption")
     if bank.get("uniform_control_rung") != CONTROL_RUNG:
@@ -561,7 +590,8 @@ def load_parent_bank(output: Path, intake: dict) -> dict:
         parents[rung] = {"entry": entry, "blob": blob, "path": str(path),
                          "bytes": len(blob), "sha256": digest}
     return {"bank": bank, "bank_path": str(bank_path),
-            "bank_sha256": file_sha256(bank_path), "parents": parents}
+            "bank_sha256": file_sha256(bank_path), "parents": parents,
+            "fit_identity_drift": fit_identity_drift}
 
 
 def parse_and_render(parents: dict, source_shape: list[int]) -> dict:
@@ -752,7 +782,8 @@ def strict_intake(args, heldout_tensors: bool) -> dict:
             _fail("the HELDOUT moment basis differs from the FIT basis")
         fit_ids = layer["roles"]["fit"]["prefix_sample_ids"]
         held_ids = held["prefix_sample_ids"]
-        if fit_ids is not None and held_ids is not None:
+        if fit_ids is not None and held_ids is not None \
+                and fit_ids.numel() > 0 and held_ids.numel() > 0:
             validate_sample_split(fit_ids.numpy(), held_ids.numpy())
     source_tensor = source.pop("tensor")
     return {
@@ -937,10 +968,21 @@ def run_score(args) -> int:
     output = Path(args.output)
     bank_record = load_parent_bank(output, intake)
     bank = bank_record["bank"]
+    # The actual D41 gate is the CURRENT canonical admission; a mere table
+    # version move with every bank rung still allowed is stamped and
+    # tolerated, while a rung that now refuses forces a re-encode.
     stamped = {str(int(p["rung"])): p["admission"] for p in bank["parents"]}
-    if admission["decisions"] != stamped:
-        _fail(f"the published rung table moved since encoding: now "
-              f"{admission['decisions']}, bank stamped {stamped}; re-encode")
+    admission_drift = {}
+    for rung in BANK_RUNGS:
+        key = str(rung)
+        recorded, current = stamped[key], admission["decisions"][key]
+        if recorded != current:
+            if current.get("status") != "allow":
+                _fail(f"rung {rung} is no longer admitted by the current "
+                      f"table: {current} (bank recorded {recorded}); "
+                      "re-encode")
+            admission_drift[key] = {"recorded": recorded,
+                                    "current": current}
     parsed_record = parse_and_render(bank_record["parents"],
                                      intake["source"]["shape"])
     parsed, rendered = parsed_record["parsed"], parsed_record["rendered"]
@@ -1127,8 +1169,9 @@ def run_score(args) -> int:
             "path": bank_record["bank_path"],
             "sha256": bank_record["bank_sha256"],
             "rungs": order,
-            "admissions": {str(r): bank["parents"][r]["entry"]["admission"]
-                           for r in order},
+            "admissions": {
+                str(r): bank_record["parents"][r]["entry"]["admission"]
+                for r in order},
         },
         "solver": {
             "shrinkage": SHRINKAGE,
@@ -1163,6 +1206,14 @@ def run_score(args) -> int:
             "rung_reader": intake["reader_stamp"],
             "rung_index_sha256": admission["index_sha256"],
             "table_version": admission["table_version"],
+            "admission_drift": admission_drift,
+            "admission_drift_policy": "current canonical admission is the "
+                                      "gate; allowed-rung differences are "
+                                      "stamped, refusing rungs re-encode",
+            "fit_identity_drift": bank_record["fit_identity_drift"],
+            "fit_identity_drift_policy": "scientific FIT fields gate; other "
+                                         "recorded provenance drift is "
+                                         "stamped, never a re-encode wall",
             "split_manifest_sha256": intake["split"]["sha256"],
             "split_sha256": intake["split"]["split_sha256"],
             "layer_manifest_sha256": intake["layer"]["sha256"],
@@ -1226,8 +1277,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="e.g. e4m3mma-sm_121-d12fba61b3467f3e")
     parser.add_argument("--rung-reader-source", type=Path, required=True,
                         help="unchanged public producer rung_allowability.py")
-    parser.add_argument("--device", choices=("cpu",), default="cpu",
-                        help="this research trial is CPU-only for workers")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu",
+                        help="cpu everywhere by default; cuda is encode-only "
+                             "for the parent's Blackwell entry, while "
+                             "preflight and score stay CPU research entries")
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--extra-geometry", action="append", default=None,
                         metavar="ROWSxCOLS",
@@ -1240,6 +1293,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.threads < 1:
         _fail("--threads must be positive")
+    if args.device == "cuda" and (args.preflight or args.mode == "score"):
+        _fail("--device cuda is encode-only; preflight and score are CPU "
+              "research entries and never allocate a GPU")
     if args.preflight:
         return run_preflight(args)
     if args.mode == "encode":
