@@ -158,9 +158,10 @@ def _validate_parents(parents: Sequence[Any]) -> List[Dict[str, Any]]:
         rows, cols = (int(s) for s in unit.body_bits.shape)
         if len(rates) != cols:
             _fail(f"parent {index} carries {len(rates)} rates for {cols} columns")
-        bad = [r for r in rates if not 1 <= r <= window_bits]
+        rate_limit = min(window_bits, 8)  # scalar 256-code byte-grid payload
+        bad = [r for r in rates if not 1 <= r <= rate_limit]
         if bad:
-            _fail(f"parent {index} has rates {sorted(set(bad))} outside 1..{window_bits}")
+            _fail(f"parent {index} has rates {sorted(set(bad))} outside 1..{rate_limit}")
         scale_rows = getattr(unit, "scale_rows", None)
         if scale_rows is None or scale_rows.numel() != rows:
             _fail(f"parent {index} CHANNEL plane needs {rows} fp16 row scales")
@@ -678,8 +679,9 @@ def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
         _fail("meta plane truncated inside the rate vectors")
     for p_index in range(num_parents):
         rates = np.frombuffer(data, dtype=np.uint8, count=cols, offset=cursor + p_index * cols)
-        if rates.size and (int(rates.min()) < 1 or int(rates.max()) > window_bits):
-            _fail(f"parent {p_index} declares rates outside 1..{window_bits}")
+        rate_limit = min(window_bits, 8)
+        if rates.size and (int(rates.min()) < 1 or int(rates.max()) > rate_limit):
+            _fail(f"parent {p_index} declares rates outside 1..{rate_limit}")
         parents.append({
             "table": tables[indices[p_index]],
             "scale_global": globals_[p_index],
