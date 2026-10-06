@@ -63,6 +63,7 @@ from .cost_stage_checkpoint import (
     publish_new_bytes,
 )
 from .digests import bytes_sha256hex, canonical_json_bytes, indent2_json_file_bytes
+from .qnames import DOTTED_LAYER_QNAME
 
 #: v2 (PQ #1896): the prep seals the traversal identity, which binds no
 #: source digests; the join binds the digests the quanta recorded. A v1 prep
@@ -360,6 +361,34 @@ class _BoundaryFrontier:
                     yield self.storage.get(window, reference)
 
 
+def quantum_range_requires_units(identity: Mapping, start: int, stop: int) -> bool:
+    """Whether layers ``[start, stop)`` hold units this capture must record.
+
+    A **full-scope** capture (no declared unit scope) tiles every source
+    layer, so every range must verify units. A selected capture's quanta
+    still tile every source layer, but a range none of its declared units
+    live in verifies an empty unit map and that is its complete record --
+    only when every declared unit names exactly one decoder layer; a
+    selected unit whose layer cannot be read back is never assumed absent,
+    and any declared unit inside the range demands its record.
+    """
+    selected = identity.get("unit_scope") == "selected"
+    requires = False
+    for name in identity.get("units", {}):
+        match = DOTTED_LAYER_QNAME.search(name)
+        if match is None:
+            if selected:
+                raise CaptureChainRefused(
+                    f"selected unit {name!r} names no decoder layer; the "
+                    "chain cannot tell which quantum records it")
+            requires = True
+        elif start <= int(match.group(1)) < stop:
+            requires = True
+    if not selected and identity.get("units"):
+        requires = True
+    return requires
+
+
 class ChainQuantum:
     """One layer range's owner of the chain's boundary generation.
 
@@ -481,18 +510,9 @@ class ChainQuantum:
                 f"entries for {self.prep['n_batches']} batches")
         if witness.get("observed_layers") != list(range(self.start, self.stop)):
             raise CaptureChainRefused("a quantum's witness names other layers than its range")
-        if not verified:
-            # A selected capture's quanta still tile every source layer; a
-            # range none of the identity's selected units live in verifies no
-            # unit and that is its complete record. A range that does hold a
-            # selected unit verifies nothing only if the traversal is broken.
-            from .qnames import DOTTED_LAYER_QNAME
-
-            def _in_range(name):
-                match = DOTTED_LAYER_QNAME.search(name)
-                return match is not None and self.start <= int(match.group(1)) < self.stop
-            if any(_in_range(name) for name in self.prep["identity"]["units"]):
-                raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
+        if not verified and quantum_range_requires_units(
+                self.prep["identity"], self.start, self.stop):
+            raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
         document = _seal({"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
                           "session": self.prep["session"], "layers": [self.start, self.stop],
                           "num_layers": self.num_layers, "n_batches": self.prep["n_batches"],
