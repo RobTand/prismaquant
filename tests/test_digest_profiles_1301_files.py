@@ -10,6 +10,12 @@ every call goes through the old site's name.
 File inputs straddle each block size a site reads with (1, 4, 8 and 16 MiB,
 and ``hashlib.file_digest``'s 256 KiB buffer). ``str`` paths are checked only
 for sites whose old signature took them.
+
+The pytest dispatch surface is grouped per input (PQ #2349): one node per
+input iterates the original ordered site lists and makes every original call
+-- same Path or ``str`` argument, same extra keywords, same call order -- so
+each frozen outcome keeps its own fixture row under the node's own call
+ordinal. Fewer dispatch nodes, not fewer asserted outcomes.
 """
 from __future__ import annotations
 
@@ -71,22 +77,22 @@ _FILE_INPUTS = [f"b{size}" for size in _SIZES] + ["missing", "directory", "link"
 
 
 @pytest.mark.parametrize("name", _FILE_INPUTS)
-@pytest.mark.parametrize("ref,takes_str,kwargs", FILE_SITES, ids=[row[0] for row in FILE_SITES])
-def test_file_digest_site(files, ref, takes_str, kwargs, name):
-    site = _site(ref)
+def test_file_digest_site(files, name):
     path = files / name
-    GOLDEN.call(lambda: site(path, **kwargs), tmp=files)
-    if takes_str:
-        GOLDEN.call(lambda: site(str(path), **kwargs), tmp=files)
+    for ref, takes_str, kwargs in FILE_SITES:  # original site order
+        site = _site(ref)
+        GOLDEN.call(lambda: site(path, **kwargs), tmp=files)
+        if takes_str:
+            GOLDEN.call(lambda: site(str(path), **kwargs), tmp=files)
 
 
 @pytest.mark.parametrize("chunk", [1, 7, _MIB])
-@pytest.mark.parametrize("ref", ["prismaquant.prismasnap_checkpoint._sha256_file",
-                                 "prismaquant.prismasnap_validation._sha256_file"])
-def test_prismasnap_file_digest_keeps_its_chunk_argument(files, ref, chunk):
-    site = _site(ref)
-    GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk), tmp=files)
-    GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk_bytes=chunk), tmp=files)
+def test_prismasnap_file_digest_keeps_its_chunk_argument(files, chunk):
+    for ref in ["prismaquant.prismasnap_checkpoint._sha256_file",
+                "prismaquant.prismasnap_validation._sha256_file"]:
+        site = _site(ref)
+        GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk), tmp=files)
+        GOLDEN.call(lambda: site(files / f"b{_MIB + 1}", chunk_bytes=chunk), tmp=files)
 
 
 BYTES_SITES = [
@@ -107,10 +113,10 @@ _BYTES_INPUTS = {
 
 
 @pytest.mark.parametrize("name", list(_BYTES_INPUTS))
-@pytest.mark.parametrize("ref", BYTES_SITES)
-def test_bytes_digest_site(ref, name):
-    site = _site(ref)
-    GOLDEN.call(lambda: site(_BYTES_INPUTS[name]))
+def test_bytes_digest_site(name):
+    for ref in BYTES_SITES:  # original site order
+        site = _site(ref)
+        GOLDEN.call(lambda: site(_BYTES_INPUTS[name]))
 
 
 _TEXT_INPUTS = {
@@ -130,11 +136,11 @@ def test_text_digest_site(name):
 
 
 @pytest.mark.parametrize("name", list(_TEXT_INPUTS))
-@pytest.mark.parametrize("ref", ["prismaquant.cost_stage_checkpoint.unit_path",
-                                 "prismaquant.aura_cost._aura_unit_checkpoint_path"])
-def test_unit_path_site(ref, name):
-    site = _site(ref)
-    GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
+def test_unit_path_site(name):
+    for ref in ["prismaquant.cost_stage_checkpoint.unit_path",
+                "prismaquant.aura_cost._aura_unit_checkpoint_path"]:
+        site = _site(ref)
+        GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
 
 
 # --- the owners ---------------------------------------------------------------
