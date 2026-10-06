@@ -40,7 +40,7 @@ from pathlib import Path
 import torch
 
 from . import glm_mtp
-from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, indent2_json_file_bytes
 
 FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"
@@ -259,7 +259,7 @@ def publish_final_hidden(out_dir, *, session, records, layer, inputs, source_wit
     path = Path(out_dir) / "manifest.json"
     if path.exists():
         raise RuntimeError(f"{path} exists; phase 1 publishes once")
-    raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(manifest)
     atomic_write_bytes(path, raw)
     return {"schema": FINAL_HIDDEN_SCHEMA, "path": str(path),
             "sha256": bytes_sha256hex(raw)}
@@ -450,7 +450,7 @@ def publish_mtp_capture(root, *, census, census_path, source_authentication, cal
     from . import tessera_calibration_cache as cc
     from .cost_stage_checkpoint import atomic_write_bytes
 
-    raw = (json.dumps(census, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(census)
     atomic_write_bytes(Path(census_path), raw)
     census_sha256 = bytes_sha256hex(raw)
     admitted = source_authentication.admit_derived_census(census_path)
