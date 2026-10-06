@@ -529,7 +529,7 @@ def persist_split_records(capture_root, census, census_path, records, seen,
                     _canonical_sha256(census["model_load_contract"]),
                 "census_sha256": _sha256_file(census_path)},
             "full_counts": {}, "units": {}}
-        for qname in sorted(by_layer[layer]):
+        for qname in sorted(by_layer[layer], key=lambda name: (name not in PRIORITY_UNITS, name)):
             census_count = int(counts[qname])
             layer_manifest["full_counts"][qname] = census_count
             observed = int(seen.get(qname, 0))
@@ -562,7 +562,14 @@ def persist_split_records(capture_root, census, census_path, records, seen,
                 FIT: units_entry[FIT], HELDOUT: units_entry[HELDOUT],
                 "census_count": census_count, "observed_rows": observed,
                 "max_abs": unit_maximum}
+            campaign.census_max_abs(census, {qname: unit_maximum})
             layer_manifest["units"][qname] = units_entry
+            if qname in PRIORITY_UNITS:
+                guard(f"research priority unit {qname}")
+                _write_atomic_json(directory / "manifest.json", layer_manifest)
+                print(json.dumps({"research_priority_unit": {
+                    "name": qname, "manifest": str(directory / "manifest.json"),
+                    "roles": units_entry}}), flush=True)
         guard(f"research layer manifest {layer}")
         _write_atomic_json(directory / "manifest.json", layer_manifest)
     campaign.census_max_abs(census, maxima_observed)
@@ -705,8 +712,80 @@ def _run_prepared_quantum(args, guard) -> dict:
     return {"fragment": str(fragment), "units": len(verified)}
 
 
+PRIORITY_UNITS = frozenset((
+    "model.language_model.layers.3.mlp.experts.0.up_proj",
+    "model.language_model.layers.28.mlp.shared_experts.up_proj",
+    "model.language_model.layers.44.mlp.experts.0.up_proj",
+))
+
+
+def _verified_layer_publication(root, manifest_path, manifest, verified, census, split_sha256):
+    """Accept role metadata only as the completed quantum verified its bytes."""
+    if manifest.get("schema") != LAYER_MANIFEST_SCHEMA:
+        raise ResearchRefused(f"{manifest_path}: invalid verified layer schema")
+    layer = manifest["layer"]
+    if manifest_path.parent.name != f"L{layer:03d}" or manifest["split_sha256"] != split_sha256:
+        raise ResearchRefused(f"{manifest_path}: verified layer or split differs")
+    expected = {name: row for name, row in verified.items() if row["layer"] == layer}
+    if set(manifest["units"]) != set(expected) or set(manifest["full_counts"]) != set(expected):
+        raise ResearchRefused(f"{manifest_path}: verified unit coverage differs")
+    for name, roles in manifest["units"].items():
+        receipt = expected[name]
+        count = int(census["counts"][name])
+        if (manifest["full_counts"][name] != count or receipt["census_count"] != count
+                or receipt["observed_rows"] != count or set(roles) != {FIT, HELDOUT}):
+            raise ResearchRefused(f"{name}: verified census counts or roles differ")
+        for role in (FIT, HELDOUT):
+            if roles[role] != receipt[role]:
+                raise ResearchRefused(f"{name}.{role}: published data differs from verified receipt")
+            path = root / receipt[role]["file"]
+            if path.stat().st_size != receipt[role]["bytes"]:
+                raise ResearchRefused(f"{path}: verified role length differs")
+            if _sha256_file(path) != receipt[role]["sha256"]:
+                raise ResearchRefused(f"{path}: own bytes differ from verified digest")
+        if sum(receipt[role]["count"] for role in (FIT, HELDOUT)) != count:
+            raise ResearchRefused(f"{name}: verified role counts do not cover census")
+    return set(expected)
+
+
 def mode_quantum(args, guard) -> dict:
-    return _run_prepared_quantum(args, guard)
+    """Run adjacent prepared quanta in one action; each layer stays bounded and durable."""
+    root = Path(args.capture_root).resolve()
+    prep = chain.read_prep(root)
+    start, stop = chain.parse_layer_range(args.capture_layer_range)
+    ranges = [tuple(pair) for pair in prep["ranges"] if start <= pair[0] and pair[1] <= stop]
+    if not ranges or ranges[0][0] != start or ranges[-1][1] != stop:
+        raise ResearchRefused("batch range must cover whole adjacent prepared quanta")
+    chain.require_layer_tiling([(lo-start, hi-start) for lo, hi in ranges], num_layers=stop-start)
+    _, census, _ = load_census(args, root)
+    ids, tokens, _ = load_draw(args, census)
+    require_split_geometry(args, tokens, census)
+    split_sha256 = require_persisted_split(root, args, census, ids)
+    results = []
+    from prismaquant.prismabuild_progress import commit
+    for completed, (lo, hi) in enumerate(ranges, 1):
+        guard(f"research prepared quantum {lo}:{hi}")
+        owner = chain._owner_status(prep, lo, hi)
+        if owner is not None and owner.get("status") == "complete":
+            chain.require_owner_complete(prep, lo, hi)
+            fragment = chain.read_fragment(root, prep, lo, hi)
+            for layer in range(lo, hi):
+                names = {name for name, row in fragment["units"].items() if row["layer"] == layer}
+                if names:
+                    path = root / "layers" / f"L{layer:03d}" / "manifest.json"
+                    _verified_layer_publication(root, path, json.loads(path.read_text()),
+                                                fragment["units"], census, split_sha256)
+            result = {"fragment": str(chain.fragment_path(root, lo, hi)),
+                      "units": len(fragment["units"])}
+        else:
+            options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
+            result = _run_prepared_quantum(options, guard)
+        results.append(result)
+        commit(completed, chain.range_label(lo, hi), "prepared_quanta")
+    summary = {"layers": [start, stop], "fragments": [row["fragment"] for row in results],
+               "units": sum(row["units"] for row in results)}
+    print(json.dumps({"research_quantum_batch": summary}), flush=True)
+    return summary
 
 
 # -- join ------------------------------------------------------------------------
@@ -755,25 +834,11 @@ def mode_join(args, guard) -> dict:
     covered = {}
     for manifest_path in sorted((research_dir(capture_root) / "layers").glob("L*/manifest.json")):
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") != LAYER_MANIFEST_SCHEMA:
-            raise ResearchRefused(f"{manifest_path}: not a {LAYER_MANIFEST_SCHEMA} manifest")
-        if manifest["split_sha256"] != split_sha256:
-            raise ResearchRefused(f"{manifest_path}: stamps another split")
-        for qname, roles in manifest["units"].items():
+        names = _verified_layer_publication(research_dir(capture_root), manifest_path,
+                                            manifest, verified, census, split_sha256)
+        for qname in names:
             if qname in covered:
-                raise ResearchRefused(f"{qname}: two layer manifests record one unit")
-            total = 0
-            for role in (FIT, HELDOUT):
-                receipt = roles[role]
-                path = research_dir(capture_root) / receipt["file"]
-                if _sha256_file(path) != receipt["sha256"]:
-                    raise ResearchRefused(f"{path}: role file bytes differ from the receipt")
-                if path.stat().st_size != receipt["bytes"]:
-                    raise ResearchRefused(f"{path}: role file length differs from the receipt")
-                total += int(receipt["count"])
-            if total != int(counts[qname]):
-                raise ResearchRefused(
-                    f"{qname}: role union {total} != census {counts[qname]}")
+                raise ResearchRefused(f"{qname}: two layer manifests record one verified unit")
             covered[qname] = manifest_path.parent.name
     if set(covered) != set(identity["units"]):
         missing = sorted(set(identity["units"]) - set(covered))
@@ -978,7 +1043,7 @@ def mode_preflight(args, guard) -> dict:
         print(json.dumps({"research_preflight_metadata":
                               "skipped: not all real inputs were given"}), flush=True)
     with tempfile.TemporaryDirectory(prefix="indomain-split-preflight-") as tmp:
-        result["toy"] = _toy_control_preflight(Path(tmp), guard)
+        result["toy"] = _toy_control_preflight(Path(tmp), guard, layers=2)
     print(json.dumps({"research_preflight": result}), flush=True)
     return result
 

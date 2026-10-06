@@ -22,6 +22,12 @@
   row-count sum against the saved full-draw census. It does not publish an
   ordinary production capture or qualify immutable source delivery.
 
+- **Receipt-bound shared research publication and multi-layer actions**. Joins
+  bind role counts, paths, digests, lengths and geometry to completed quantum
+  receipts, preventing count redistribution or payload substitution. Adjacent
+  prepared layers run in one GPU action with bounded per-layer moments and
+  durable progress; explicit priority units publish first in the same capture.
+
 - **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
   version metadata does not reapply an identity seal after source admission.
   Chain writers keep the canonical prep identity; completed initialization

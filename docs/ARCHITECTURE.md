@@ -23731,7 +23731,18 @@ boundary against the persisted manifest before model load; these are data
 comparability refusals even in dev mode. Their per-unit counts must sum to the
 full-draw census. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
-files relative to the capture root. This research publication is not an
+files relative to the capture root. The research join compares each role
+record (path, own digest, length, count, Hessian/input/prefix geometry) with
+the completed quantum's verified receipt before checking its actual file.
+Count redistribution or a substituted payload cannot be accepted merely
+because the layer totals still match. A single GPU action may run adjacent
+prepared quanta; each layer publishes and verifies its own files, frees its
+moments, and commits durable progress before the next layer. Completed
+quanta are adopted only after their publications match the verified receipts,
+so retries do not duplicate source forwards. The three explicitly prioritized
+L3 expert0 up, L28 shared up and L44 expert0 up units publish their verified
+role pairs before the remainder of their layer is serialized. This research
+publication is not an
 ordinary production capture manifest and confers no immutable-provider
 qualification. The automatic admission guard remains unchanged. Chain quanta
 retain the canonical prep identity after the existing dev-mode runtime stamp:
