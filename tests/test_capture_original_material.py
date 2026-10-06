@@ -156,15 +156,14 @@ def test_same_sealed_object_serves_header_json_and_tensors_despite_pool_mutation
 
 def test_kernel_seals_refuse_write_grow_and_shrink(material):
     import errno
-    import fcntl
-    from prismaquant.io_engine import _SEALS
+    from prismaquant.io_engine import _SEALS, kernel_seal_bits
     m = material
     with _owner(m) as owner:
         with owner.material_window([m['root'] / 'one.safetensors']):
             path = owner.descriptor_path(m['root'] / 'one.safetensors')
             fd = os.open(path, os.O_RDWR)
             try:
-                assert fcntl.fcntl(fd, fcntl.F_GET_SEALS) & _SEALS == _SEALS
+                assert kernel_seal_bits(fd) & _SEALS == _SEALS
                 for mutate in (lambda: os.pwrite(fd, b'x', 0),
                                lambda: os.ftruncate(fd, 1),
                                lambda: os.ftruncate(fd, len(m['raws']['one.safetensors']) + 1)):

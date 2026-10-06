@@ -315,6 +315,108 @@ def test_the_engine_pool_spans_the_whole_affinity():
     assert io_engine.IOEngine().width == max(1, len(os.sched_getaffinity(0)))
 
 
+def test_seal_constants_resolve_without_cpython_build_time_names():
+    """The engine imports, seals and verifies where this fcntl lacks the names.
+
+    CPython defines ``fcntl``'s ``F_SEAL_*``/``F_ADD_SEALS``/``F_GET_SEALS``
+    only when its build headers had them. Portable interpreters built against
+    pre-glibc-2.27 headers lack the names, and the io engine import — the
+    capture seal's ``authenticate_complete_source`` and the #1887 engine hash
+    with it — crashed on them: PB ``be3dd1332259`` on main f085c4abd20,
+    ``AttributeError: module 'fcntl' has no attribute 'F_SEAL_SEAL'`` under
+    the qualified CPU venv's cpython-3.12.11. The numbers are Linux UAPI since
+    3.11 and ABI-fixed; the kernel stays the authority, because the seal is
+    attempted through ``fcntl`` and read back with ``F_GET_SEALS``.
+
+    The deleted-name scenarios run in a subprocess (D5 review of b601b76b9b5):
+    reloading this module in the pytest process left the previous module
+    object's ``ENGINE`` singleton and exception classes referenced by later
+    tests, so their identity checks and exception handlers could bind to stale
+    objects. This test process never reloads; it only asserts the drift guard
+    and spawns the scenario.
+    """
+    import fcntl
+    import subprocess
+    import sys
+    import textwrap
+
+    # Drift guard, no reload: whatever this interpreter exposed, the engine's
+    # module constants are the pinned UAPI numbers and nothing else.
+    assert io_engine._SEALS == 0b1111
+    assert io_engine._F_ADD_SEALS == 1033
+    assert io_engine._F_GET_SEALS == 1034
+    for name, value in (('F_SEAL_SEAL', 0x0001), ('F_SEAL_SHRINK', 0x0002),
+                        ('F_SEAL_GROW', 0x0004), ('F_SEAL_WRITE', 0x0008)):
+        if hasattr(fcntl, name):
+            assert getattr(fcntl, name) == value
+
+    # The whole scenario in a fresh interpreter: every exposed fcntl name and
+    # the os memfd surface deleted, then import, seal and verify for real.
+    # The kernel does the sealing either way, so this exercises the actual
+    # syscall numbers, not the attribute names. PB ded8698fa4d6 (pq-cpu312,
+    # cpython 3.12.11) is the case where os.memfd_create is genuinely absent
+    # rather than deleted: every stream entry died with ``AttributeError:
+    # module 'os' has no attribute 'memfd_create'`` there.
+    scenario = textwrap.dedent('''
+        import fcntl
+        import os
+        import sys
+
+        names = ['F_SEAL_SEAL', 'F_SEAL_SHRINK', 'F_SEAL_GROW', 'F_SEAL_WRITE',
+                 'F_ADD_SEALS', 'F_GET_SEALS']
+        for name in names:
+            if hasattr(fcntl, name):
+                delattr(fcntl, name)
+        for name in ('memfd_create', 'MFD_CLOEXEC', 'MFD_ALLOW_SEALING'):
+            if hasattr(os, name):
+                delattr(os, name)
+
+        import prismaquant.io_engine as io_engine
+
+        assert io_engine._SEALS == 0b1111
+        assert io_engine._F_ADD_SEALS == 1033
+        assert io_engine._F_GET_SEALS == 1034
+        buffer = io_engine.SealedBuffer(16)
+        buffer.fill_bytes(b'pq-io-sealed' + b'x' * 4)
+        assert len(buffer.seal()) == 64
+        buffer.require_sealed()
+        with buffer.readonly() as view:
+            assert bytes(view) == b'pq-io-sealed' + b'x' * 4
+        buffer.close()
+
+        # CPU smoke through the actual sealed stream: one real file read,
+        # hashed, sealed and decoded by a ReadStream while os.memfd_create is
+        # absent, so the portable buffer carries a real delivery.
+        import hashlib
+        import tempfile
+        from pathlib import Path
+
+        payload = b'pq-stream-smoke' + b'z' * 17
+        root = Path(tempfile.mkdtemp())
+        (root / 'one.bin').write_bytes(payload)
+        entry = io_engine.ReadEntry(
+            key='one', path=str(root / 'one.bin'), size=len(payload),
+            limit=len(payload), held_bytes=len(payload),
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            decoder=lambda raw, receipt, staged: (bytes(raw), 'smoke'),
+            group=0)
+        with io_engine.read_stream([entry],
+                                   budget=io_engine.FixedBudget(
+                                       buffer_bytes=len(payload),
+                                       headroom=0)) as stream:
+            delivered = stream.take(0)
+            assert delivered[0].value == payload
+            stream.release()
+        print('subprocess-seal-ok')
+    ''')
+    result = subprocess.run(
+        [sys.executable, '-c', scenario],
+        capture_output=True, text=True, timeout=120,
+        env={**os.environ, 'OMP_NUM_THREADS': '1'})
+    assert result.returncode == 0, result.stderr
+    assert 'subprocess-seal-ok' in result.stdout
+
+
 def test_a_closed_stream_refuses_and_holds_nothing(tmp_path):
     entries, _contents = _stream_files(tmp_path)
     stream = io_engine.read_stream(
