@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-06 (PQ #2342): forward-split quanta compare the full
+retained and running bind identities through the chain-resume owner. Only
+its declared producer/source seals stamp in dev mode; all calibration,
+draw, probe, seed, token-scope, temperature, execution-partition and unknown
+fields remain comparability walls (key presence matters even for null).
+After that comparison, the original bind identity is reused so the unchanged
+exact-session hash check remains enforced. No prep, hash, entry or checkpoint
+is re-keyed or overwritten. The CPU exact-session preflight uses the same
+capture bind-construction owner and verifies the original retained hash.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 uses PB's authoritative same-generation `reader_lease.launch_queue_root`
 through the existing sealed-generation bridge. It prefers the launcher's
