@@ -34,6 +34,22 @@ R1024, R832, E4M3_SHARED = "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R832", "TES
 PARAMS = 64 * 128
 
 
+def _allocator_attestation_fixture(monkeypatch):
+    """Control native attestation; real publication refusal still composes."""
+    from dataclasses import replace
+    from prismaquant import tessera_menu as menu
+
+    original = menu.route_admission
+
+    def admission(name, **scope):
+        return replace(original(name, **scope),
+                       route_status="unattested" if name == R832 else "backed",
+                       source="synthetic_mtp_attestation")
+
+    monkeypatch.setattr(menu, "route_admission", admission)
+    monkeypatch.setattr(fr, "format_is_producer_eligible", lambda name, **_: name != R832)
+
+
 def _probe(*, objective=True, seed_base=7000):
     source_content = {
         "config": {"fixture": "mtp selection"},
@@ -257,8 +273,7 @@ def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypat
 
     from prismaquant import format_registry
 
-    monkeypatch.setattr(format_registry, "format_is_producer_eligible",
-                        lambda name, **_: name != R832)
+    _allocator_attestation_fixture(monkeypatch)
     argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     monkeypatch.setattr(sys, "argv", ["allocator", *argv])
     allocator.main()

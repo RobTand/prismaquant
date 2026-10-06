@@ -230,8 +230,8 @@ def test_v5_unmatched_context_masks_only_the_attested_candidate(monkeypatch, mod
     costs["unit.a"]["BF16"] = {"weight_mse": 0.0, "predicted_dloss": 0.0}
     observed = []
 
-    def admit(name, *, serving_context=None, allowability=None):
-        assert allowability is None  # Explicit emulation-only context fixture.
+    def admit(name, *, serving_context=None, allowability=None, require_allowability=False):
+        assert allowability is None and not require_allowability
         assert name == _FORMAT
         observed.append(serving_context)
         return SimpleNamespace(

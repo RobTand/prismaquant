@@ -21,7 +21,7 @@ pytest.importorskip("torch")
 
 from tests.test_glm_mtp_selection import (  # noqa: E402
     CONSTANTS, E4M3_SHARED, R832, R1024, ROUTED, SHARED, _bytes, _payload, _row,
-    _write_payload)
+    _allocator_attestation_fixture, _write_payload)
 from test_rung_allowability import allowability_cli_args, publication  # noqa: E402
 
 BF16_WIRE = "TESSERA_BF16_K1_R1024"
@@ -121,8 +121,7 @@ def _allocator_argv(tmp_path, monkeypatch, publication, *extra):
 
     from prismaquant import format_registry
 
-    monkeypatch.setattr(format_registry, "format_is_producer_eligible",
-                        lambda name, **_: name != R832)
+    _allocator_attestation_fixture(monkeypatch)
     argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     payload, constants = _write_payload(tmp_path, _payload())
     out = tmp_path / "with-mtp.json"
