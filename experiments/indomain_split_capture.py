@@ -576,6 +576,13 @@ def persist_split_records(capture_root, census, census_path, records, seen,
     return verified
 
 
+def _new_layer_moments(args, census, guard):
+    return DisjointRowMoments(
+        fit_stop=int(args.fit_stop), total_samples=int(args.total_samples),
+        tokens_per_sample=int(census["seqlen"]),
+        max_prefix_rows=int(args.max_prefix_rows), resource_check=guard)
+
+
 def _run_prepared_quantum(args, guard) -> dict:
     """One layer-range quantum: same-pass split moments over the chain owner."""
     guard("research quantum startup")
@@ -591,10 +598,7 @@ def _run_prepared_quantum(args, guard) -> dict:
     if num_layers <= 0:
         raise ResearchRefused("the census names no source layer depth")
 
-    moments = DisjointRowMoments(
-        fit_stop=int(args.fit_stop), total_samples=int(args.total_samples),
-        tokens_per_sample=int(census["seqlen"]),
-        max_prefix_rows=int(args.max_prefix_rows), resource_check=guard)
+    moments = _new_layer_moments(args, census, guard)
     with ExitStack() as scope:
         scope.callback(moments.close)
         source = scope.enter_context(chain.authenticate_quantum_source(
@@ -898,7 +902,7 @@ def verified_roles_carry_counts(fragment) -> bool:
         for record in units.values())
 
 
-def _toy_control_preflight(directory: Path, guard, *, layers=1) -> dict:
+def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1) -> dict:
     """The actual tiny one-layer GLM CPU control: census, prep, quantum, join."""
     import pytest
     tests = ROOT / "tests"
@@ -992,7 +996,8 @@ def _toy_control_preflight(directory: Path, guard, *, layers=1) -> dict:
                 streaming_cache_slots=2, streaming_prefetch_workers=1,
                 streaming_cache_headroom_gb=0.0, **extra)
 
-        mode_prep(toy_args(capture_chain_ranges=",".join(f"{i}:{i+1}" for i in range(layers)),
+        mode_prep(toy_args(capture_chain_ranges=",".join(
+            f"{i}:{min(i+quantum_layers, layers)}" for i in range(0, layers, quantum_layers)),
                            boundary_storage=json.dumps(storage)), guard)
         mode_quantum(toy_args(capture_layer_range=f"0:{layers}"), guard)
         document = mode_join(toy_args(), guard)
