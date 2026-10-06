@@ -482,7 +482,17 @@ class ChainQuantum:
         if witness.get("observed_layers") != list(range(self.start, self.stop)):
             raise CaptureChainRefused("a quantum's witness names other layers than its range")
         if not verified:
-            raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
+            # A selected capture's quanta still tile every source layer; a
+            # range none of the identity's selected units live in verifies no
+            # unit and that is its complete record. A range that does hold a
+            # selected unit verifies nothing only if the traversal is broken.
+            from .qnames import DOTTED_LAYER_QNAME
+
+            def _in_range(name):
+                match = DOTTED_LAYER_QNAME.search(name)
+                return match is not None and self.start <= int(match.group(1)) < self.stop
+            if any(_in_range(name) for name in self.prep["identity"]["units"]):
+                raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
         document = _seal({"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
                           "session": self.prep["session"], "layers": [self.start, self.stop],
                           "num_layers": self.num_layers, "n_batches": self.prep["n_batches"],

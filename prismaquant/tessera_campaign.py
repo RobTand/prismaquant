@@ -4568,6 +4568,54 @@ def select_anchor_groups(selection: Mapping, resolved: Mapping[str, list[str]],
     return keys
 
 
+def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
+    """The exact unit scope one full-group ``--units`` fresh capture may take.
+
+    A streamed capture prices whole anchor groups: a sampled, audited,
+    partitioned or exact-member selection estimates rather than measures, and
+    a capture that recorded only its sampled units while claiming the group's
+    identity would be neither. This is the one authority for what a selected
+    capture covers; the prep (which has no model, so it resolves against the
+    census's ``anchor_groups``) and the model rows (which resolve against the
+    scope they loaded) both call it, and :func:`select_anchor_groups` holds
+    the selection to the resolved grouping member for member before a unit
+    name is derived. ``args`` supplies only the campaign's model and layer
+    stride, which the selection file itself must declare.
+    """
+    where = f"--units {getattr(args, 'units', None)}"
+    if (selection.get("model", args.model) != args.model
+            or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
+        raise StackSampleError("--units model/layer_stride disagrees with this campaign")
+    if getattr(args, "research_exact_member", None) is not None:
+        raise RuntimeError(
+            f"{where}: --research-exact-member is an estimator, not a capture "
+            "scope; a streamed capture prices whole groups")
+    for entry in selection["groups"]:
+        if entry.get("sampled") or entry.get("audit") or entry.get("inclusion_probability"):
+            raise RuntimeError(
+                f"{where}: group {entry['key']!r} samples or audits; a fresh "
+                "capture prices whole groups, not an estimate of one")
+        if entry.get("partition") is not None or entry.get("stack_samples"):
+            raise RuntimeError(
+                f"{where}: group {entry['key']!r} is an expert partition or "
+                "stack draw; a fresh capture prices whole groups")
+        if entry["key"].startswith("s:") or selection.get("schema") == UNITS_SCHEMA_V3:
+            raise RuntimeError(
+                f"{where}: expert partition selections ({UNITS_SCHEMA_V3}) do "
+                "not take captures")
+    selected_groups = select_anchor_groups(selection, resolved, where=where)
+    priced, _audit, _pi = selection_priced_units(selection)
+    unit_names = sorted({name for key in selected_groups for name in resolved[key]})
+    if priced != set(unit_names):
+        raise RuntimeError(
+            f"{where}: the selection prices {len(priced)} of the "
+            f"{len(unit_names)} units of its groups; a fresh capture takes a "
+            "whole group or none of it")
+    if not unit_names:
+        raise RuntimeError(f"{where}: the selection names no unit")
+    return unit_names
+
+
 def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], *,
                        args, groups: Mapping, dense_targets: Sequence[str],
                        expert_targets: Sequence[str], shapes: Mapping,
@@ -6109,12 +6157,16 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 
 
 def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_implementation,
-                               guard=None, release_read_pages=None, source_authentication=None):
+                               guard=None, release_read_pages=None, source_authentication=None,
+                               unit_names=None):
     """The canonical capture identity of this draw over the census's source.
 
     Through a streamed capture's recording owner (PQ #1896) this is the
     traversal identity: nothing is hashed here, and the capture binds the
-    digests of the bytes it read at its seal.
+    digests of the bytes it read at its seal. A full-scope capture passes no
+    ``unit_names`` and takes the unchanged full identity; a selected capture
+    passes its explicit full-group unit scope, and the identity carries
+    ``unit_scope="selected"`` with exactly those units' shape map.
     """
     from . import tessera_calibration_cache as store
     if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
@@ -6129,6 +6181,7 @@ def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_i
     return store.capture_identity(args.calibration_census, calibration=calibration,
         max_act_rows=args.max_act_rows, model_load_contract=census['model_load_contract'],
         attention_implementation=attention_implementation,
+        **({} if unit_names is None else {'unit_names': unit_names}),
         resource_check=None if guard is None else guard.check,
         release_read_pages=guard is not None if release_read_pages is None else release_read_pages,
         source_authentication=source_authentication)
@@ -6156,6 +6209,15 @@ def _run_capture_chain_bookends(args, saved_calibration):
         return 0
     from . import tessera_calibration_cache as store
     census = load_calibration_census(args.calibration_census, args=args)
+    # The prep has no model: the selected scope is derived from the census's
+    # own anchor groups, through the same helper the model rows confirm with.
+    unit_names = None
+    if args.units:
+        unit_names = selected_capture_unit_names(
+            load_unit_selection(args.units), args=args,
+            resolved=census["anchor_groups"])
+        print(f"[campaign] --units full-group capture takes {len(unit_names)} "
+              "units of the census scope", flush=True)
     tokens, corpus_text = (saved_calibration if saved_calibration is not None else
                            _calibration_tokens(args.model, args.nsamples, args.seqlen, args.seed))
     # The prep reads no payload (PQ #1896): it seals the traversal identity,
@@ -6166,7 +6228,7 @@ def _run_capture_chain_bookends(args, saved_calibration):
             boundary_storage=args.capture_chain_boundary_storage,
             identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
                 attention_implementation=args.attention_implementation,
-                source_authentication=source))
+                source_authentication=source, unit_names=unit_names))
     print(f"[campaign] prepped streamed calibration capture chain: {record['path']}", flush=True)
     return 0
 
@@ -6205,9 +6267,19 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     modules = dict(runner.model.named_modules())
     # Meta views are used only for shape/menu/projection planning. Live views
     # are refreshed from the shared loader at each layer's consumption.
+    # A selected capture narrows ``targets`` but not ``population.members``:
+    # only the selected units' meta views are bound, so shapes, menus, the
+    # resource plan and the producer check stay at the selected scope, while
+    # the full population still binds the census's producer projection.
+    selected_members = [member for member in population.members
+                        if member.qname in set(expert_targets)]
     weights = {name: modules[name].weight for name in dense_targets}
-    weights.update({member.qname: member.weight for member in population.members})
+    weights.update({member.qname: member.weight for member in selected_members})
     shapes = {name: list(weight.shape) for name, weight in weights.items()}
+    # The capture's unit scope is the whole selection's, before a quantum
+    # narrows ``targets`` to its own layer range: the prep sealed exactly
+    # this identity, and every quantum must re-derive the same one.
+    capture_unit_names = sorted(targets) if getattr(args, 'units', None) else None
     names_by_layer = {}
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
@@ -6256,7 +6328,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         if not getattr(source, 'is_recording', False):
             raise RuntimeError('a streamed capture reads its source through its recording owner')
         identity = _streamed_capture_identity(args, census, tokens, corpus_text,
-            attention_implementation=attention_implementation, source_authentication=source)
+            attention_implementation=attention_implementation, source_authentication=source,
+            unit_names=capture_unit_names)
         if quantum is not None:
             quantum.require_identity(identity, n_batches=len(tokens))
         writer = store.CaptureWriter(args.capture_calibration_out,
@@ -6781,8 +6854,8 @@ def _main(argv, *, source_scope, waits) -> int:
     if args.capture_calibration_out or args.calibration_cache:
         if not args.calibration_census or args.census_out or args.hessian != "require":
             ap.error("capture/reuse requires --calibration-census and --hessian require")
-        if args.capture_calibration_out and (args.units or args.calibration_cache):
-            ap.error("--capture-calibration-out requires the full scope and cannot also reuse")
+        if args.capture_calibration_out and args.calibration_cache:
+            ap.error("--capture-calibration-out cannot also reuse; a fresh capture and a reuse read are different rows")
         if args.max_act_rows < 1:
             ap.error("capture/reuse requires positive --max-act-rows")
     if args.capture_chain is not None:
@@ -6908,6 +6981,25 @@ def _main(argv, *, source_scope, waits) -> int:
             # under this GPU reservation (PQ #1497).
             source_authentication.adopt_identity_proof_or_hash(
                 args.source_identity_cache, args.source_identity_cache_sha256)
+
+    # A selected fresh capture is held to the census's own anchor groups
+    # before the model loads: the selection file's model/layer_stride and the
+    # exact group memberships are checked against the census here, so a plan
+    # written against another scope refuses before any source is opened. The
+    # prep row (no model) makes the same call through the same helper, and the
+    # model rows confirm it against the grouping they loaded.
+    selected_capture_census = None
+    capture_unit_names = None
+    if args.capture_calibration_out and args.units:
+        if acquisition is not None:
+            ap.error("--acquisition-request narrows the run's priced scope; a "
+                     "--units fresh capture takes exactly the selection's whole groups")
+        selected_capture_census = load_calibration_census(args.calibration_census, args=args)
+        capture_unit_names = selected_capture_unit_names(
+            load_unit_selection(args.units), args=args,
+            resolved=selected_capture_census["anchor_groups"])
+        print(f"[campaign] --units full-group capture takes {len(capture_unit_names)} "
+              "units of the census scope", flush=True)
 
     capture_guard = None
     if args.streaming and args.capture_calibration_out:
@@ -7052,8 +7144,9 @@ def _main(argv, *, source_scope, waits) -> int:
     partition_menu_targets = None
     partition_unit_records = {}
     full_expert_members = expert_members
-    census = (None if not args.calibration_census
-              else load_calibration_census(args.calibration_census, args=args))
+    census = (selected_capture_census if selected_capture_census is not None else
+              (None if not args.calibration_census
+               else load_calibration_census(args.calibration_census, args=args)))
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -7089,6 +7182,16 @@ def _main(argv, *, source_scope, waits) -> int:
             priced = {exact_member_scope["member"]}
             audit_units = set()
             inclusion_probability = {}
+        if args.capture_calibration_out:
+            # The census-derived scope the pre-model check derived; the run's
+            # own grouping must resolve the selection to exactly that set.
+            confirmed = selected_capture_unit_names(selection, args=args,
+                                                    resolved=scope_groups)
+            if confirmed != capture_unit_names:
+                raise RuntimeError(
+                    f"--units {args.units}: this run's grouping resolves the "
+                    f"selection to {confirmed} but its census to "
+                    f"{capture_unit_names}; the scope is not exact")
         # The group's membership was already checked whole; what the sample
         # narrows is only which of those members this run encodes. Keeping the
         # two separate is what lets a sampled run stay identity-honest: the
@@ -7259,16 +7362,42 @@ def _main(argv, *, source_scope, waits) -> int:
             corpus_text, tokens, fit_tokens=hi,
             **_campaign_calibration_parameters(args), fit_tokens_min=lo)
         require_census_draw(census, bound_calibration, where="calibration capture")
-        capture_identity = calibration_store.capture_identity(
-            args.calibration_census, calibration=bound_calibration,
-            max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,
-            **({'source_authentication': source_authentication} if source_authentication is not None else {}),
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_read_pages=True) if selected_source else {}))
+
+        def _capture_identity(unit_names=None):
+            return calibration_store.capture_identity(
+                args.calibration_census, calibration=bound_calibration,
+                max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
+                attention_implementation=attention_implementation,
+                **({} if unit_names is None else {'unit_names': unit_names}),
+                **({'source_authentication': source_authentication} if source_authentication is not None else {}),
+                **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                        release_read_pages=True) if selected_source else {}))
+        # Reuse takes the stored capture's own scope: only when its manifest
+        # declares a selected scope does the expected identity carry one; a
+        # full capture keeps the full identity, selected run or not.
+        capture_identity = None
+        capture_manifest = None
+        completed_capture = (Path(args.capture_calibration_out) / "capture_manifest.json"
+                             if args.capture_calibration_out else None)
+        if completed_capture is not None and completed_capture.exists():
+            capture_manifest = calibration_store.require_capture_contract(completed_capture)
+        elif args.units and args.calibration_cache:
+            capture_manifest = calibration_store.require_capture_contract(
+                args.calibration_cache, expected_sha256=args.calibration_cache_sha256)
+        if capture_manifest is not None and \
+                capture_manifest['identity'].get('unit_scope') == 'selected':
+            stored = sorted(capture_manifest['identity']['units'])
+            if not stored:
+                raise RuntimeError('selected capture manifest declares no unit scope')
+            capture_identity = _capture_identity(stored)
+        elif capture_manifest is None:
+            capture_identity = _capture_identity()
+        else:
+            capture_identity = _capture_identity()
     if selected_source:
-        manifest = calibration_store.require_capture_contract(args.calibration_cache,
-            expected_sha256=args.calibration_cache_sha256)
+        manifest = (capture_manifest if capture_manifest is not None else
+                    calibration_store.require_capture_contract(args.calibration_cache,
+                        expected_sha256=args.calibration_cache_sha256))
         if manifest['identity'] != capture_identity:
             raise RuntimeError('selected source capture identity differs from the canonical census')
         try:
@@ -7313,7 +7442,7 @@ def _main(argv, *, source_scope, waits) -> int:
         if completed_capture.exists():
             _values, record = calibration_store.prefetch_capture(
                 completed_capture, expected_identity=capture_identity,
-                census=census, names=census_targets, device="cpu")
+                census=census, names=sorted(capture_identity['units']), device="cpu")
             print(f"[campaign] complete calibration capture reused: {record}", flush=True)
             return 0
     if args.calibration_cache:
