@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.tessera_fleet import common, dispatch_ladder, dispatch_model, dispatch_shards
+from tools.tessera_fleet import common, dispatch_ladder, dispatch_model
 from tools.tessera_fleet import model_worker as model
 from tools.tessera_fleet import status
 
@@ -29,7 +29,7 @@ PRODUCER = SimpleNamespace(
     BODY_LAYER=re.compile(r'^model\.layers\.(\d+)\.'),
     partition_owner=lambda name, count: int(name.split('.')[2]) % count if '.layers.' in name else 0)
 
-DISPATCHERS = (dispatch_shards, dispatch_ladder)
+DISPATCHERS = (dispatch_ladder,)
 
 
 # --- the worker adapter, unchanged by the move --------------------------------
@@ -37,7 +37,7 @@ DISPATCHERS = (dispatch_shards, dispatch_ladder)
 def test_single_source_file_still_yields_24_layer_actions():
     tensors = {f'model.layers.{i}.weight': 'model.safetensors' for i in range(24)}
     tensors['model.embed_tokens.weight'] = 'model.safetensors'
-    assert model.partitions(tensors, PRODUCER) == 24
+    assert len(model.whole_layer_partitions(tensors, PRODUCER)) == 24
     spec = dict(cpus=1, mem_gb=16, assembly_mem_gb=4, tags=['gb10'])
     rows = [dispatch_model.campaign_row('/checkout', spec, 'encode', index=i) for i in range(24)]
     assert len({tuple(row['argv']) for row in rows}) == 24
@@ -47,7 +47,7 @@ def test_single_source_file_still_yields_24_layer_actions():
 
 def test_sparse_layers_never_generate_empty_partitions():
     names = ['model.layers.0.weight', 'model.layers.2.weight']
-    count = model.partitions(names, PRODUCER)
+    count = len(model.whole_layer_partitions(dict.fromkeys(names, 'weights'), PRODUCER))
     assert {PRODUCER.partition_owner(n, count) for n in names} == set(range(count))
 
 
@@ -126,7 +126,7 @@ def test_prepare_records_its_identity_under_the_host_it_was_pinned_to(tmp_path, 
     parts = SimpleNamespace(source_identity=lambda path: {'tensors': {'model.layers.0.w': 'weights'}})
     monkeypatch.setattr(model, 'verify_image', lambda image: 'id')
     monkeypatch.setattr(model, 'producer_parts', lambda root: parts)
-    monkeypatch.setattr(model, 'partitions', lambda tensors, producer: 1)
+    monkeypatch.setattr(model, 'whole_layer_partitions', lambda tensors, producer: [{}])
     with pytest.raises(ValueError, match='needs --host'):
         model.main(['prepare'])
     assert model.main(['prepare', '--host', 'sparky']) == 0
@@ -236,7 +236,7 @@ def _checkout(tmp_path):
     checkout = tmp_path / 'checkout'
     (checkout / 'tessera' / 'src' / 'tessera').mkdir(parents=True)
     (checkout / 'tessera' / 'src' / 'tessera' / 'encode.py').write_text('ENCODER = 1\n')
-    (checkout / dispatch_shards.WRAPPER).write_text('print("export")\n')
+
     (checkout / dispatch_ladder.WRAPPER).write_text('print("ladder")\n')
     return checkout
 
@@ -262,32 +262,6 @@ def test_a_dry_run_prints_rows_and_writes_nothing(dispatcher, tmp_path, capsys, 
         assert not row['env']['TMPDIR'].startswith('/tmp')
 
 
-def test_a_submission_seals_wrapper_plan_and_encoder_into_one_workspace(tmp_path, monkeypatch):
-    checkout = _checkout(tmp_path)
-    plan = tmp_path / 'plan.json'
-    plan.write_text('{"w": 896}')
-    submitted = []
-
-    def submit(rows, workspace, stage, *, wait_s):
-        submitted.append((rows, Path(workspace), stage))
-        return [{'action_key': 'a' * 64}] * len(rows)
-    monkeypatch.setattr(common, 'submit_detached', submit)
-    workspace = tmp_path / 'ws'
-    assert dispatch_shards.main(['--shards', '1-2', '--workspace', str(workspace),
-                                 '--checkout', str(checkout), '--plan', str(plan)]) == 0
-    rows, staged, stage = submitted[0]
-    assert stage == 'export' and staged == workspace.resolve()
-    assert (workspace / 'plan.json').read_text() == plan.read_text()
-    assert (workspace / dispatch_shards.WRAPPER).read_text() == 'print("export")\n'
-    assert (workspace / 'tessera/src/tessera/encode.py').read_text() == 'ENCODER = 1\n'
-    assert subprocess.run(['git', '-C', str(workspace), 'rev-parse', 'HEAD'],
-                          capture_output=True).returncode == 0
-    assert (workspace / '.git/info/exclude').read_text() == f'/{common.STATE}/\n'
-    assert all(row['cwd'] == str(workspace.resolve()) for row in rows)
-    assert all(row['argv'][row['argv'].index('--plan') + 1] == 'plan.json' for row in rows)
-    with pytest.raises(ValueError, match='already exists'):
-        dispatch_shards.main(['--shards', '1', '--workspace', str(workspace),
-                              '--checkout', str(checkout), '--plan', str(plan)])
 
 
 def test_two_ladder_dispatches_with_different_probes_are_separate_trees(tmp_path, monkeypatch):
@@ -344,7 +318,7 @@ def test_the_exit_status_is_the_worst_ending(statuses, expected):
 
 # --- nothing here reaches PrismaBuild internals -------------------------------
 
-@pytest.mark.parametrize('module', ['tessera_fleet.dispatch_model', 'tessera_fleet.dispatch_shards',
+@pytest.mark.parametrize('module', ['tessera_fleet.dispatch_model',
                                     'tessera_fleet.dispatch_ladder', 'tessera_fleet.status',
                                     'tessera_fleet.model_worker', 'render_identity'])
 def test_help_runs_without_the_fleet(module):
@@ -354,3 +328,4 @@ def test_help_runs_without_the_fleet(module):
                                cwd=root, capture_output=True, text=True, timeout=120)
     assert completed.returncode == 0, completed.stderr
     assert 'usage:' in completed.stdout
+
