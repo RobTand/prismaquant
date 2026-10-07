@@ -253,15 +253,15 @@ def _task_replay_job(root):
     return job_path, config, result, raw, Path(stage["output"])
 
 
-def _verify_task_replay(job_path, root):
+def _verify_replay_stage(job_path, root, identity):
     output = root / "verify.json"
     process = _cli("prismaquant.ship_gates", ["--config", str(job_path),
         "--output", str(output), "--verify-only"])
     assert process.returncode == 1, process.stderr
     report = json.loads(output.read_text())
     assert report["status"] == "refused"
-    task = next(stage for stage in report["stages"] if stage["id"] == "task_suite")
-    return report, task
+    stage = next(stage for stage in report["stages"] if stage["id"] == identity)
+    return report, stage
 
 
 @pytest.mark.parametrize("kind", ["config", "weight", "tokenizer"])
@@ -270,7 +270,7 @@ def test_task_replay_consumer_certified_replacement_refuses(tmp_path, monkeypatc
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     job, config, _, _, _ = _task_replay_job(tmp_path)
     replace_task_fixture(config, kind)
-    _, task = _verify_task_replay(job, tmp_path)
+    _, task = _verify_replay_stage(job, tmp_path, "task_suite")
     assert task["status"] == "failed"
     assert "provenance" in task["error"]
 
@@ -293,7 +293,7 @@ def test_task_replay_consumer_owned_bytes_and_math_refuse(tmp_path, monkeypatch,
         raw_path.write_text(json.dumps(raw))
         result["artifacts"] = [artifact(raw_path)]
         output.write_text(json.dumps(result))
-    _, task = _verify_task_replay(job, tmp_path)
+    _, task = _verify_replay_stage(job, tmp_path, "task_suite")
     assert task["status"] == "failed"
 
 
@@ -304,8 +304,50 @@ def test_task_replay_consumer_dev_preserves_metrics_and_stamp(tmp_path, monkeypa
     stored = copy.deepcopy(result["measurement"])
     replace_task_fixture(config, "weight")
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE")
-    report, task = _verify_task_replay(job, tmp_path)
+    report, task = _verify_replay_stage(job, tmp_path, "task_suite")
     assert task["status"] == "passed"
     assert task["result"]["measurement"] == stored
     assert task["result"].get("dev_uncertified") is True
     assert report.get("dev_uncertified") is True
+
+
+def _g3_replay_job(root):
+    from test_g3_quality_replay import make_g3_replay_fixture
+    job_path = job_config(root / "job")
+    job = json.loads(job_path.read_text())
+    config, result, kl, agreement = make_g3_replay_fixture(root / "quality")
+    config_path = root / "g3-replay.config.json"
+    config_path.write_text(json.dumps(config))
+    result["configuration"].update(path=str(config_path),
+        sha256=hashlib.sha256(config_path.read_bytes()).hexdigest())
+    stage = next(stage for stage in job["stages"] if stage["id"] == "offline.g3")
+    stage.update(config=str(config_path), output=str(root / "g3-result.json"))
+    Path(stage["output"]).write_text(json.dumps(result))
+    job["inputs"].append(str(config_path))
+    job_path.write_text(json.dumps(job))
+    return job_path, config, result, kl, agreement, Path(stage["output"])
+
+
+@pytest.mark.parametrize("dev", [False, True])
+@pytest.mark.parametrize("damage", ["metric_and_gate", "window_summary", "missing_kl",
+                                    "missing_agreement", "corrupt_kl"])
+def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypatch, dev, damage):
+    from prismaquant.quality_stage import evaluate_criteria
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, config, result, kl, agreement, output = _g3_replay_job(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    if damage == "metric_and_gate":
+        result["measurement"]["metrics"]["mean_kl"] += 0.25
+        result["gate"] = evaluate_criteria(result["measurement"]["metrics"], config["criteria"])
+        assert result["gate"]["status"] == "passed"
+    elif damage == "window_summary":
+        result["population"]["per_window"][0]["mean_kl"] += 0.25
+    elif damage == "missing_kl":
+        kl.unlink()
+    elif damage == "missing_agreement":
+        agreement.unlink()
+    else:
+        kl.write_bytes(b"corrupt owned KL array")
+    output.write_text(json.dumps(result))
+    _, g3 = _verify_replay_stage(job, tmp_path, "offline.g3")
+    assert g3["status"] == "failed"
