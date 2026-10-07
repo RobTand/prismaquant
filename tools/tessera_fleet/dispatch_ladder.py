@@ -25,7 +25,14 @@ import json
 from pathlib import Path
 
 from tools.tessera_fleet import common
-from tools.tessera_fleet.dispatch_shards import CHECKOUT, ENVIRONMENT, PYTHON, SOURCE
+CHECKOUT = Path("/mnt/shared/prismabuild-fleet/checkout")
+SOURCE = "/mnt/shared/models/GLM-5.3-Flash-BF16"
+PYTHON = "/home/rob/dq-runs/venvs/prismaquant-cu130/bin/python"
+ENVIRONMENT = {
+    "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
+    "PYTHONPATH": "tessera/src", "TMPDIR": "/home/rob/tmp",
+    "TRITON_CACHE_DIR": "/home/rob/.triton-cache",
+}
 
 WRAPPER = "tessera_ladder_probe.py"
 

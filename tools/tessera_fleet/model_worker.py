@@ -78,22 +78,7 @@ def producer_parts(root):
     return module
 
 
-def partitions(tensors, producer):
-    """Smallest whole-layer ownership units supported by this producer.
 
-    Contiguous models get one layer per action. For sparse layer numbering,
-    choose the largest modulo domain with no empty owner, never create an
-    invalid producer partition or ask the application for a shard count.
-    """
-    layers = {int(match.group(1)) for name in tensors
-              if (match := producer.BODY_LAYER.match(name))}
-    if not layers:
-        raise ValueError('source has no whole-layer export work')
-    for count in range(len(layers), 0, -1):
-        owners = {producer.partition_owner(name, count) for name in tensors}
-        if owners == set(range(count)):
-            return count
-    raise ValueError('producer cannot partition this source')
 
 
 def stamp(path):
@@ -182,13 +167,13 @@ def inside(spec, mode, index, destination):
         return original_hash(path)
     parts.sha256_file = memoized_hash
     if mode == 'encode':
-        sys.argv = ['encoder/experiments/export_tessera_serving.py', str(source), destination,
+        sys.argv = ['tessera.export_serving', str(source), destination,
                     '--plan-json', 'plan.json', '--grid', spec['grid'], '--q256', str(spec['q256']),
                     '--partition', f'{index}/{spec["count"]}',
                     '--partition-runtime-image', spec['image']]
         if spec.get('scales'):
             sys.argv += ['--input-scales', 'scales.safetensors']
-        namespace = runpy.run_path(sys.argv[0], run_name='pb_tessera_export')
+        namespace = runpy.run_module('tessera.export_serving', run_name='pb_tessera_export')
         namespace['main'].__globals__['git_hash'] = lambda: spec['encoder_commit']
         namespace['main']()
         manifest = read_json(Path(destination) / 'tessera_serving_manifest.json')
@@ -281,6 +266,10 @@ def main(argv=None):
     if spec.get('scales') and digest_file('scales.safetensors') != spec['scales']:
         raise ValueError('input scales changed')
     if args.command == 'prepare':
+        if __package__:
+            from prismaquant.export_partition import whole_layer_partitions
+        else:
+            from export_partition import whole_layer_partitions
         verify_image(spec['image'])
         parts = producer_parts('encoder')
         source = Path(spec['source'])
@@ -289,7 +278,8 @@ def main(argv=None):
         after = {p.name: stamp(p) for p in source.iterdir() if p.is_file()}
         if before != after:
             raise ValueError('source changed during preparation')
-        result = {'source_identity': identity, 'count': partitions(identity['tensors'], parts)}
+        result = {'source_identity': identity,
+                  'count': len(whole_layer_partitions(identity['tensors'], parts))}
         if not args.host or Path(args.host).name != args.host:
             raise ValueError('prepare needs --host, the tag it was pinned to')
         atomic_json(prepared_path(spec, args.host), result)
