@@ -769,35 +769,8 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
     assert state["is_a_pin"], state["verdict"]
     assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     assert state["commit"] in {
-        "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
-        "d403cc5a3199a348cc7ee6262f4adbdab8138745",
-        # The 2026-09-19 union-head pin: #563's rework moved export.py's
-        # docstrings, so the pin resolves under its own additive state.
-        "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
-        # The 2026-09-26 v38 re-pin for the MTP cached cohort: export.py
-        # moved by the Hessian collection owner only (ActivationSource).
-        "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
-        # The 2026-09-27 re-pin for tessera#662: export.py gained the served
-        # recipe per structure; wire_recipe and the WINDOW constants did not move.
-        "f94929defd9fa00b8726160a2cd436f02733b6dc",
-        # The 2026-09-27 re-pin for tessera#599 step 2: from_capture gained the
-        # canonical_capture keyword; wire_recipe and the WINDOW constants did not move.
-        # Renamed 2026-09-28 for the v42 pin 38e96012: export.py did not move.
-        "38e960127478b651e42c14d52acf2274b54bca38",
-        # The 2026-09-28 re-pin for the v44 pin a5f3b232cb: export.py moved
-        # by one docstring line (the supported exporter path); wire_recipe
-        # and the WINDOW constants did not move.
-        "a5f3b232cb3c424b537a06713c728c86153d55fb",
-        # The 2026-09-29 re-pin for the v45 pin a21d74d89b: export.py moved
-        # inside ActivationSource only (the seal-header fold); wire_recipe
-        # and the WINDOW constants did not move.
-        # Renamed 2026-09-29 for the v45 pin 83460680ed: export.py did
-        # not move.
-        # Renamed 2026-09-29 for the v45 pin b40c93cb73: export.py did
-        # not move.
-        "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
-        # Public v56: the cap delegates to the same WINDOW payload width.
-        "2dbac1910c88254d9c6391f02a34c4b07e516803",
+        domain.TESSERA_SOURCE_STATES[name]["commit"]
+        for name in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -851,12 +824,6 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     of the same re-pin: its ``export.py`` moved by docstrings only, so the
     wire bytes are the same and the equivalence claim survives verbatim.)
     """
-    assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
-        "reader-pin-387eda36", "study-producer-d403cc5a",
-        "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
-        "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-b40c93cb",
-        "reader-pin-2dbac191",
-    }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)
         for rate in (rates[0], rates[len(rates) // 2], rates[-1]):

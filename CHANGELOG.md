@@ -11,6 +11,15 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Changed
+- The Tessera pin moves to `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60 (Tessera #1033, PQ #2426).
+  The serving and development constants, legal-domain provenance, and identity snapshot move in one commit.
+  The generated admission answer remains unchanged.
+  The new producer supplies the attention projection APIs and the canonical rung-allowability API.
+  The contract retains the v56 cells and native-extension rows.
+
+  The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
+  Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
+  No new seal, serving result, or performance result is claimed.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

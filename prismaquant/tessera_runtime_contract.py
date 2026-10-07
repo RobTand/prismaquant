@@ -421,14 +421,16 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: v56 uses lane schema v11, rule-derived window coverage, four extensions
 #: and 22 eager cells. The literal is the complete existing-reader projection
 #: from PB bb291153; no compiled or full-artifact qualification is inferred.
-TESSERA_DEV_PIN_COMMIT = "2dbac1910c88254d9c6391f02a34c4b07e516803"
+#: Re-pinned 2026-10-07 to fca4c6ce0 with contract v60 (PQ #2426).
+#: The installed contract supplies the generated admission answer.
+TESSERA_DEV_PIN_COMMIT = "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+    "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -534,6 +536,8 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: answer, not a census alias. Eight additional eager cells scope image
 #: 5be13705; the routed MMA extension and published lane predicates move.
 #: D13 promotion still requires exact-source performance evidence and review.
+#: v60 review (PQ #2426): PB da8fbb6d706a regenerates the installed answer.
+#: Its diff from this literal is empty. The admission values remain unchanged.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
  'lane_schema': 'tessera.lane-eligibility.v11',
  'required_regimes': ['batch', 'decode'],

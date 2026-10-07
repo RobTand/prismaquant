@@ -144,7 +144,7 @@ def test_table_cannot_bypass_existing_run_table_rule(publication):
                                      expected_kernel_build=BUILD).allows(1024)
 
 
-def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
+def test_metadata_only_reader_keeps_the_serving_pin(publication):
     from prismaquant import tessera_runtime_contract as runtime
     from prismaquant import tessera_serving_runtime_pin as pin
     from prismaquant import rung_allowability
@@ -152,7 +152,6 @@ def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
     table = _load(publication)
     assert table.allows(1024)
     assert runtime.contract_path().read_bytes() == before
-    assert json.loads(before)["contract_version"] == 56
     assert pin.load_tessera_serving_runtime_pin().commit == runtime.TESSERA_DEV_PIN_COMMIT
     producer = rung_allowability._producer_api()
     if hasattr(producer, "evidence"):

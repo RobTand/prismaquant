@@ -1,5 +1,48 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
+`fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+The pin retains schema v2 and lane schema v11.
+The producer and serving commits remain equal; the serving-source constant remains `None`.
+The release label remains advisory.
+The v56 cells, format rows, activation rows, and four native-extension rows remain unchanged.
+
+The construction table uses the selective override and the current GLM receipt.
+The producer interface adds the export API to the reuse-authority drivers.
+The stock override table adds the default-off MHC method.
+Tessera #1033 supplies the attention projection APIs and routes that PQ #2371 needs.
+
+Construction proves module reachability, not a successful weight load or forward result.
+The pin move adds no seal, default change, serving claim, or performance claim.
+The isolated interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` on x86.
+The D13 overlay and active measurements stay unchanged.
+
+PB `da8fbb6d706a` generates the answer and snapshot from the installed v60 contract.
+The answer remains unchanged; only the snapshot's pin commit and contract digest change.
+PB `92867be921ae` passes the installed pin gate and real export preflight for dense and routed metadata.
+The evidence is `/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0/preflight.json`.
+These CPU results do not prove weight loading, model output, serving, or performance.
+
+The legal-domain provenance retains its historical study producer and measured values.
+Its exporter source delta extracts the same per-unit key set; the WINDOW rules and grammar bytes stay unchanged.
+
+The CPU population covers 49 modules and 1,067 unique selected nodes.
+The initial population has one failure from a copied source roster.
+The corrected wire check passes in PB `ce33bde128ff`.
+The reconciled record has 1,066 passed and one historical-v5 skip, with no uncollected module.
+The skip has no qualification value.
+The installed rung-allowability API lets both canonical producer test modules run; each passes 26 cases.
+
+PB `f05313eeee06` retains the allocation A/B from captured main on D13 and branch source on the new overlay.
+Only the fixture's contract version and reviewed digest differ.
+The corrected layer oracle keeps every other identity field and allocation value.
+The evidence and full commands reside in `prismaquant/tessera_runtime/README.md`.
+No overlay package changes after the parent verifies its six conditions.
+
+The review parent must check the exact head before the independent pool review.
+The PrismaQuant integrator owns the merge.
+
 Re-stamped 2026-10-07 (D50, PQ #2410): day-zero intake is a metadata-only consumer
 of profile detection, source-index grammar, name projection, and safetensors header validation.
 The source entry point is `tools/day0_model_intake.py`; its domain code is

@@ -282,6 +282,11 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "21b352ad9f9ce64b2348e4c7dfafb8bf880d7aa81bfb4e055f2ead23f86dc512",
     },
+    "reader-pin-fca4c6ce0": {
+        "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "export.py":
+            "3538d1275321e625682de38ef40107cf541d0cf1eadbf32d8d08dba5672373ba",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -321,11 +326,13 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 #: At 2dbac191 the cap expression delegates to manifest.body_rate_cap,
 #: whose WINDOW branch returns the same payload_bits; grammar.py and
 #: wire_recipe are unchanged. The PB audit walk still rederives the counts.
+#: At fca4c6ce0 the exporter extracts the same per-unit key set into a constant.
+#: The WINDOW rules and grammar bytes stay unchanged.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
     "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
     "reader-pin-a5f3b232", "reader-pin-b40c93cb",
-    "reader-pin-2dbac191",
+    "reader-pin-2dbac191", "reader-pin-fca4c6ce0",
 )
 
 
@@ -613,18 +620,20 @@ def live_pins() -> DomainPins:
 #: moves (PQ #1739).
 #: Re-taken 2026-10-05 for public 2dbac191 / v56 (PQ #2262). The source
 #: audit is the exact exporter/grammar crossing, not private 608bb equality.
+#: Re-taken 2026-10-07 for fca4c6ce0 / v60 (PQ #2426).
+#: The historical study producer and measured values stay unchanged.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="2dbac1910c88254d9c6391f02a34c4b07e516803",
+    reader_dev_pin_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
     reader_dev_pin_contract_sha256=(
-        "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
-    serving_runtime_pinned_commit="2dbac1910c88254d9c6391f02a34c4b07e516803",
+    serving_runtime_pinned_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
     producer_installed_contract_sha256=(
-        "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
 )
 
