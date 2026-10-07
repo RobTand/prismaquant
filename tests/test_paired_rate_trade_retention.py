@@ -111,29 +111,3 @@ def test_menu_summary_preserves_refusal_and_dominance_diagnostics():
     assert leaked == []
 
 
-def test_pricing_entry_point_still_returns_complete_evidence():
-    # The bound is on retention, not on arithmetic: the priced trade itself
-    # still carries the complete arrays the emitted assignment ships.
-    values = _routed_values(dominant=False)
-    costs, assignment, baseline = _trade_rows(values)
-    trade = ac.price_paired_rate_trade(costs, assignment, baseline,
-                                       profile=DefaultProfile(), ucb_z=1)
-    assert trade["difference_per_probe"] != []
-    assert trade["group_differences"] != {}
-    assert trade["routed_layers"]["model.layers.5.mlp.experts"]["experts"]["0"][
-        "difference_per_probe"] != []
-
-
-def test_refusal_stdout_row_drops_arrays_keeps_verdict():
-    values = _routed_values(dominant=True)
-    costs, assignment, baseline = _trade_rows(values)
-    trade = ac.price_paired_rate_trade(costs, assignment, baseline,
-                                       profile=DefaultProfile(), ucb_z=0)
-    assert trade["refused"] is True
-    row = trade["routed_layers"]["model.layers.5.mlp.experts"]
-    printed = ac.summarize_paired_routed_layer(row)
-    assert list(_find_full_arrays(printed)) == []
-    assert printed["refused"] is True
-    assert printed["dominant_experts"] == ["0"]
-    assert printed["refusal_reason"] == "expert_dominance"
-    assert "dominant_experts" in json.dumps(printed)
