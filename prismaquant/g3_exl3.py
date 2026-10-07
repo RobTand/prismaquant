@@ -13,8 +13,8 @@ Restates the published reader, without its compiled extension:
     H the natural-order Sylvester Hadamard of order 128 over each 128-block, normalised by
     1/sqrt(128) per side.  exllamav3 rounds to fp16 after every step; this decode keeps fp32
     throughout and rounds once, to bf16, so it is the stored operator's value rather than any
-    one kernel's rounding of it.  Every operation is an IEEE elementwise op in a fixed order,
-    so CPU and CUDA give the same bits.
+    one kernel's numerical result. The decoder preserves the accepted operation order.
+    CPU parity does not establish native GPU equality.
 
 Returns the HF-orientation [out, in] weight: the stored operator, which for routed experts is
 P.Wg, P.Wu, Wd.P^T (an intermediate-channel permutation that preserves each expert's function).
