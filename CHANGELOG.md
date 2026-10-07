@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- The streaming MXFP4 decode builds its lookup from the existing full signed
+  table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
+  code order, the positive zero at code 8, dtype, device, nibble order,
+  scales, chunking, copy behavior and output stay unchanged.
 
 - The shipcard model identity hashes its two canonical JSON texts through the
   existing text owner (#2384, references #1301). The canonical quant-config
