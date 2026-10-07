@@ -245,6 +245,12 @@
   The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
   The proof records process peaks, output bytes, profiles, and assignment arithmetic.
   It makes no scientific quality, serving, or GPU claim.
+  The proof tool now uses the public PrismaBuild client to reserve and
+  publish its archive as a retained output batch. It uses the existing
+  exact-byte digest and sorted, spaced, ASCII JSON profiles. The allocator
+  command profiler has a domain-specific name. Both boundary baselines and
+  their scanner rules are unchanged.
+
 - **Authenticated locator aliases survive both real acquisition merges** (#2195,
   PR #2253). The existing control owner derives one locator-independent request
   control identity carried through actual row loading, rendering and journals.

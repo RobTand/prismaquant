@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
 import math
 import os
@@ -19,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from prismaquant import format_registry as fr, joint_aura as joint
 from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
-from prismaquant.digests import DIRECT_UTF8_STRICT
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from prismabuild import client as pb
 from prismaquant.layer_config import load_assignment
 
 LOW, HIGH = "FP8_E4M3", "FP8_E5M2"
@@ -87,7 +87,7 @@ def fixture(directory, config, probes, layers):
     return identities
 
 
-def run(directory, fixture_dir, refusal=False):
+def profile_allocator_command(directory, fixture_dir, refusal=False):
     directory.mkdir()
     launcher = "import cProfile, runpy, sys\nprofile_path = sys.argv.pop(1)\nsys.argv[0] = 'prismaquant.allocator'\nprofile = cProfile.Profile()\ntry:\n    profile.enable()\n    runpy.run_module('prismaquant.allocator', run_name='__main__')\nfinally:\n    profile.disable()\n    profile.dump_stats(profile_path)\n"
     command = [sys.executable, "-c", launcher, str(directory / "profile.pstats"),
@@ -133,7 +133,7 @@ def main():
     identities = fixture(fixture_dir, config, args.probes, layers)
     fixture_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     gc.collect()
-    normal = run(args.output / "allocation", fixture_dir)
+    normal = profile_allocator_command(args.output / "allocation", fixture_dir)
     assert normal["returncode"] == 0, normal
     layer_path = args.output / "allocation/layer.json"
     selected = load_assignment(layer_path)
@@ -167,7 +167,7 @@ def main():
     (fixture_dir / "costs.pkl").write_bytes(pickle.dumps(payload))
     del payload
     gc.collect()
-    refusal = run(args.output / "refusal", fixture_dir, refusal=True)
+    refusal = profile_allocator_command(args.output / "refusal", fixture_dir, refusal=True)
     assert refusal["returncode"] != 0
     assert not (args.output / "refusal/layer.json").exists()
     stderr = (args.output / "refusal/stderr.txt").read_text()
@@ -179,7 +179,7 @@ def main():
                           for layer, row in refused.items()}
     proof = {"schema": "pq2286.actual_cli_structural_proof.v1", "synthetic": True, "scientific_allocation": False,
              "model": "GLM-5.3-Flash-BF16", "source_config": str(args.model_config),
-             "config_sha256": hashlib.sha256(config_bytes).hexdigest(), "dimensions": {
+             "config_sha256": bytes_sha256hex(config_bytes), "dimensions": {
                  "total_layers": c["num_hidden_layers"], "dense_layers": c["first_k_dense_replace"], "routed_layers": layers,
                  "experts_per_layer": c["n_routed_experts"], "roles": list(ROLES), "units": len(identities[LOW]),
                  "hidden_size": c["hidden_size"], "moe_intermediate_size": c["moe_intermediate_size"], "probes": args.probes},
@@ -187,14 +187,37 @@ def main():
              "native_threads": {key: os.environ[key] for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")}}
     (args.output / "proof.json").write_text(json.dumps(proof, indent=2))
     archive = args.output / "proof.tar.gz"
+    queue = pb.PoolQueue(os.environ["PRISMABUILD_QUEUE_ROOT"])
+    owner = os.environ["PRISMABUILD_ACTION_KEY"]
+    template = pb.declared_template(queue, owner)
+    assert template.get("write_only") is True
+    assert len(template["permitted_tiers"]) == 1
+    tier = template["permitted_tiers"][0]
+    instance = pb.bind_declared_instance(
+        queue, owner_action_key=owner, claim_snapshot=pb.read_claimed_record(queue, owner))
+    pb.declare_instance(queue.root, instance)
+    admitted = pb.admit_instance(queue, instance, template)
+    assert admitted["ok"], admitted
+    prewrite = pb.require_prewrite(
+        queue, instance, template, batch_id="cli-proof", tier=tier,
+        class_bytes={"payload": pb.checked_instance_maxima(template)["payload_max_bytes"],
+                     "checkpoint": 0, "temp": 0}, paths=[str(archive.resolve())])
+    assert prewrite["ok"], prewrite
     with tarfile.open(archive, "w:gz") as target:
         for child in ("allocation", "refusal", "proof.json"):
             target.add(args.output / child, arcname=child)
-    sys.path.insert(0, "/mnt/shared/prismabuild-fleet/repo/src")
-    from prismabuild.core import PrismaBuildCAS
-    entry, _ = PrismaBuildCAS("/mnt/shared/prismabuild-fleet/cas").ingest_input(archive, input_id="pq2286.cli-proof")
-    proof["artifact_bundle"] = entry
-    print(json.dumps(proof, sort_keys=True))
+    descriptor = pb.validate_descriptor({
+        "schema": pb.DESCRIPTOR_SCHEMA_V2, "slot": "cli_proof", "artifact_class": "payload",
+        "path": str(archive.resolve()), "bytes": archive.stat().st_size,
+        "sha256": file_sha256hex(archive), "producer_generation": instance["owner_attempt"]["nonce"],
+        "owner_action_key": owner, "owner_attempt": instance["owner_attempt"],
+    }, template, instance)
+    publication = pb.commit_origin_batch(
+        queue, instance, template, [descriptor], batch_id="cli-proof", lifetime="retain")
+    assert publication["ok"], publication
+    proof["artifact_bundle"] = descriptor
+    proof["artifact_publication"] = publication
+    print(DIRECT_ASCII_SPACED_LAX.text(proof))
 
 
 if __name__ == "__main__":
