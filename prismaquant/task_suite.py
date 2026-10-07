@@ -70,8 +70,13 @@ def _task_model_artifact(backend, *, model_config=None):
 
 
 def _task_tokenizer_files(tokenizer):
-    return [artifact(path) for path in sorted(Path(tokenizer).glob("*"))
-            if path.is_file() and path.suffix in (".json", ".model", ".txt")]
+    from tools.full_kl_teacher_payload import tokenizer_identity
+    root = Path(tokenizer)
+    if not root.is_dir():
+        return []
+    files = tokenizer_identity(root)["files"]
+    return [{"path": str((root / name).resolve()), "sha256": row["sha256"]}
+            for name, row in sorted(files.items())]
 
 
 def task_population(raw, config):

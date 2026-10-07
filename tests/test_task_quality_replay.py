@@ -140,3 +140,9 @@ def test_task_replay_rejects_boolean_effective_count(replay_case, monkeypatch, d
     result["population"]["samples"] = raw["n-samples"]
     with pytest.raises(ValueError, match="task|population"):
         verify_result(result, config, config_sha256="a" * 64)
+
+
+def test_certified_fixture_replay_ignores_unrelated_card_json(replay_case):
+    config, result, _ = replay_case
+    Path(config["backend"]["tokenizer"], "shipcard.json").write_text(json.dumps({"status": "updated"}))
+    assert verify_result(result, config, config_sha256="a" * 64)["status"] == "passed"
