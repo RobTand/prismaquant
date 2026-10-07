@@ -47,6 +47,8 @@ The export reader recomputes recorded chords from their original anchors.
 Canonical logical candidates retain their chord records and original anchors.
 Anchor stderr remains diagnostic data. It is not measured fractional uncertainty.
 The candidate records absent fractional stderr as null, not zero.
+The constructor refuses every non-null chord stderr, including zero.
+The current chord protocol supplies no measured fractional uncertainty.
 Measured marginal intervals and CI-overlap choices refuse absent uncertainty.
 Explicit point-only menus remain available without a measured CI claim.
 

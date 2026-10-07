@@ -16,6 +16,9 @@
   Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
   Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
   Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

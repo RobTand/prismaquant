@@ -464,13 +464,17 @@ class TesseraAllocatorCandidate:
             object.__setattr__(self, "predicted_dloss_stderr", _finite_float(
                 self.predicted_dloss_stderr, field="predicted_dloss_stderr", nonnegative=True))
         if self.quality_provenance is not None:
-            from .rung_allowability import complete_scientific_price
+            from .rung_allowability import CANONICAL_CHORD_SOURCE, complete_scientific_price
             price = complete_scientific_price(self.quality_provenance,
                 format_name=f"{self.family}_R{self.body_rate_q256}")
             scope = self.quality_provenance["quality_scope"]
             if (price != self.predicted_dloss_mean or scope["unit"] != self.unit_name
                     or tuple(scope["shape"]) != self.shape):
                 raise TesseraFormatError("candidate differs from its complete scientific quantity")
+            # The chord protocol supplies a point price, not fractional uncertainty.
+            if (self.quality_provenance.get("cost_source") == CANONICAL_CHORD_SOURCE
+                    and self.predicted_dloss_stderr is not None):
+                raise TesseraFormatError("canonical chord fractional uncertainty is unavailable; stderr must be null")
             object.__setattr__(self, "quality_provenance", _deep_freeze(self.quality_provenance))
 
     def require_measured_stderr(self, *, where: str) -> float:

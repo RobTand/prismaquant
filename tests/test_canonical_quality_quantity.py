@@ -302,3 +302,50 @@ def test_canonical_densify_does_not_publish_anchor_stderr_as_fractional_uncertai
     assert tessera_pareto_frontier(built, uncertainty_z=0).candidates == tuple(built)
     with pytest.raises(ValueError, match="uncertainty.*unavailable|stderr.*unavailable"):
         tessera_pareto_frontier(built, uncertainty_z=1.96)
+
+
+@pytest.fixture(params=[joint.JOINT_CURRENCY, "served_kl"])
+def canonical_chord_candidate(monkeypatch, request):
+    from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
+    owner = owner_for_rows(monkeypatch)
+    rows = anchor_rows(currency=request.param)
+    formats = [f"{FAMILY}_R{rate}" for rate in (768, 1024)]
+    surface = TesseraRateSurface("u", FAMILY, "tight", request.param, (768, 1024),
+        tuple(rows[fmt]["predicted_dloss"] for fmt in formats), (0.1, 0.2),
+        allowability=owner, anchor_scopes={rate: rows[fmt]["quality_scope"]
+            for rate, fmt in zip((768, 1024), formats)})
+    return densify_rate_surface(surface, (64, 128), q256_values=[896],
+        allowability_scope={"kernel_kind": "dense", "m": 8})[0]
+
+
+def _candidate_constructor_fields(candidate):
+    record = candidate.as_dict()
+    return {"unit_name": candidate.unit_name, "family": candidate.family,
+        "body_rate_q256": candidate.body_rate_q256, "layout": candidate.layout,
+        "variant_label": candidate.variant_label, "footprint": record["footprint"],
+        "predicted_dloss_mean": candidate.predicted_dloss_mean,
+        "predicted_dloss_stderr": candidate.predicted_dloss_stderr,
+        "servability": candidate.servability, "quality_provenance": record["quality_provenance"]}
+
+
+@pytest.mark.parametrize("stderr", [0.0, 0.1, 0.2])
+def test_canonical_chord_constructor_refuses_unmeasured_stderr(canonical_chord_candidate, stderr):
+    from prismaquant.tessera_allocator import TesseraAllocatorCandidate
+    from prismaquant.tessera_formats import TesseraFormatError
+    fields = _candidate_constructor_fields(canonical_chord_candidate)
+    fields["predicted_dloss_stderr"] = stderr
+    with pytest.raises(TesseraFormatError, match="canonical chord.*uncertainty.*unavailable"):
+        TesseraAllocatorCandidate(**fields)
+
+
+def test_canonical_chord_point_menu_does_not_claim_a_measured_interval(canonical_chord_candidate):
+    from prismaquant.tessera_allocator import tessera_pareto_frontier, tessera_solver_candidate_menu
+    from prismaquant.tessera_formats import TesseraFormatError
+    candidate = canonical_chord_candidate
+    assert candidate.predicted_dloss_stderr is None
+    assert candidate.as_dict()["predicted_dloss_stderr"] is None
+    assert tessera_solver_candidate_menu([candidate])["u"][0].predicted_dloss == candidate.predicted_dloss_mean
+    assert tessera_pareto_frontier([candidate], uncertainty_z=0).candidates == (candidate,)
+    with pytest.raises(TesseraFormatError, match="uncertainty.*unavailable"):
+        tessera_pareto_frontier([candidate], uncertainty_z=1.96)
+
