@@ -1,0 +1,13 @@
+{
+  "schema": "prismaquant.g3_protocol/2",
+  "name": "glm53-g3-v2",
+  "context_length": 2048,
+  "window_count": 25,
+  "vocab_size": 154880,
+  "prefix_tokens": ["[gMASK]", "<sop>"],
+  "prefix_ids": [154822, 154824],
+  "tensor_parallel_size": 2,
+  "tile_rows": 32,
+  "accepted_source_head": "658d6b56af22970d862dab167668176e4329c1d3",
+  "prefix_source": "accepted/v2_score.py:19"
+}
