@@ -17693,6 +17693,7 @@ class TesseraRouteCell:
     runtime_serving_source_sha256: str = ""
     covered_rungs_q256: frozenset[int] = frozenset()
     run_tables: tuple[tuple[int, ...], ...] | None = None
+    runtime_kernel_build: str = ""
 
     def covers_rate(self, rate_q256: int) -> bool:
         return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
@@ -19698,6 +19699,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
             covered_rungs_q256=frozenset(cell.covered_rungs_q256),
             run_tables=cell.run_tables,
+            runtime_kernel_build=cell.runtime_kernel_build,
         ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)

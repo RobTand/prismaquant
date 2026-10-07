@@ -543,10 +543,11 @@ class ServingContext:
     residency: str
     runtime_image: str
     execution_mode: str
+    kernel_build: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in self.as_dict().items():
-            if not isinstance(value, str) or not value.strip():
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
                 raise LaneEligibilityError(f"serving_context.{name} must be a non-empty string")
         for name, allowed in (("structure", STRUCTURES),
                               ("residency", TESSERA_RESIDENCY_MODES),
@@ -559,10 +560,16 @@ class ServingContext:
                 "serving_context.runtime_image must be an exact repository@sha256:<64 lowercase hex> reference")
 
     def as_dict(self) -> dict[str, str]:
-        return asdict(self)
+        values = asdict(self)
+        if self.kernel_build is None:
+            values.pop("kernel_build")
+        return values
 
     def key(self) -> tuple[str, ...]:
-        return tuple(self.as_dict().values())
+        values = self.as_dict()
+        if self.kernel_build is not None:
+            values.pop("runtime_image")
+        return tuple(values.values())
 
 
 #: The default of every serving-code check: read the tracked pin's digest
@@ -635,7 +642,8 @@ def cell_matches_serving_context(
         cell.platform == context.platform
         and cell.structure == context.structure
         and context.residency in cell.residency_modes
-        and cell.runtime_image == context.runtime_image
+        and ((getattr(cell, "runtime_kernel_build", "") == context.kernel_build)
+             if context.kernel_build is not None else cell.runtime_image == context.runtime_image)
         and context.execution_mode in cell.execution_modes
         and cell_serving_code_admits(cell, serving_source_sha256)[0]
     )
@@ -1979,6 +1987,7 @@ class EligibilityCell:
     #: V11 preserves census rungs separately from derived rule coverage.
     covered_rungs_q256: tuple[int, ...] = ()
     run_tables: tuple[tuple[int, ...], ...] | None = None
+    runtime_kernel_build: str = ""
 
     @classmethod
     def from_dict(
@@ -2129,6 +2138,7 @@ class EligibilityCell:
             runtime_serving_source_sha256=runtime_digest,
             covered_rungs_q256=covered_rungs_q256,
             run_tables=run_tables,
+            runtime_kernel_build=parse_kernel_build(payload.get("runtime", {}), where),
         )
 
     def covers_rate(self, rate_q256: int) -> bool:
@@ -2187,6 +2197,8 @@ class EligibilityCell:
             payload["runtime"] = {
                 "image": self.runtime_image, "execution_modes": list(self.execution_modes),
             }
+            if self.runtime_kernel_build:
+                payload["runtime"]["kernel_build"] = self.runtime_kernel_build
             if self.runtime_serving_source_sha256:
                 # Emitted only when the cell names its code, so a cell that
                 # names none serializes exactly as it did before v41.
@@ -2448,6 +2460,7 @@ class RegimeRoute:
     residency: str = ""
     runtime_image: str = ""
     execution_mode: str = ""
+    kernel_build: str = ""
     #: v6 evidence, carried so a shipcard says WHICH grade attested this
     #: regime (principle 12). Recorded, never gated on: see
     #: :func:`cell_evidence_admits`.
@@ -2483,6 +2496,8 @@ class RegimeRoute:
         if self.runtime_image:
             payload["runtime_image"] = self.runtime_image
             payload["execution_mode"] = self.execution_mode
+        if self.kernel_build:
+            payload["kernel_build"] = self.kernel_build
         if self.evidence_grade:
             payload["evidence_grade"] = self.evidence_grade
             payload["evidence_smoke"] = self.evidence_smoke
@@ -2579,6 +2594,7 @@ def resolve_unit_route(
     runtime_image: str | None = None,
     execution_mode: str | None = None,
     serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+    kernel_build: str | None = None,
 ) -> UnitRoute:
     """Resolve one unit's route status against the pinned eligibility table.
 
@@ -2672,7 +2688,8 @@ def resolve_unit_route(
         try:
             serving_context = ServingContext(
                 platform=platform, structure=facts.structure, residency=residency,
-                runtime_image=runtime_image, execution_mode=execution_mode)
+                runtime_image=runtime_image, execution_mode=execution_mode,
+                kernel_build=kernel_build)
         except LaneEligibilityError as exc:
             return UnitRoute(facts=facts, route_status=ROUTE_STATUS_UNATTESTED,
                              in_scope=True, unattested_reason=str(exc))
@@ -2773,6 +2790,7 @@ def resolve_unit_route(
             residency=str(residency) if is_v4 else "",
             runtime_image=str(runtime_image) if is_scoped else "",
             execution_mode=str(execution_mode) if is_scoped else "",
+            kernel_build=kernel_build or "",
             evidence_grade=best.evidence.grade if best.evidence else "",
             evidence_smoke=best.evidence.smoke_status if best.evidence else "",
             evidence_attribution=(
@@ -3297,7 +3315,7 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
                 for execution in cell.execution_modes if is_scoped else ("",):
                     scope = (cell.platform, cell.family, cell.structure, cell.regime, mode)
                     if is_scoped:
-                        scope += (cell.runtime_image, execution)
+                        scope += (cell.runtime_kernel_build or cell.runtime_image, execution)
                     previous = scopes.get(scope)
                     if previous is not None:
                         raise LaneEligibilityError(
@@ -3323,6 +3341,23 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
     )
 
 
+def parse_kernel_build(payload: Mapping[str, Any], where: str) -> str:
+    """Read the optional portable build name without a new qualification claim."""
+    if "kernel_build" not in payload:
+        return ""
+    value = payload["kernel_build"]
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise LaneEligibilityError(f"{where}.kernel_build must be a complete non-empty name")
+    return value
+
+
+def cell_key_compatibility(cells) -> dict[str, tuple]:
+    """Map historical receipt names to build and module-kind keys."""
+    return {cell.id: (cell.runtime_kernel_build or "legacy:" + cell.id,
+                     cell.structure, cell.platform, cell.family, cell.regime,
+                     cell.residency_modes, cell.execution_modes) for cell in cells}
+
+
 def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = False
                         ) -> tuple[str, tuple[str, ...], str, str]:
     """The per-cell ``runtime`` grammar, shared by both contract readers.
@@ -3341,7 +3376,8 @@ def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = Fa
     required = {"image", "execution_modes"}
     if require_versions:
         required |= {"vllm", "torch"}
-    _require_keys(payload, where, required=required, optional=set())
+    _require_keys(payload, where, required=required, optional={"kernel_build"})
+    parse_kernel_build(payload, where)
     image = payload["image"]
     if not isinstance(image, str) or not _DIGEST_IMAGE.fullmatch(image):
         raise LaneEligibilityError(
