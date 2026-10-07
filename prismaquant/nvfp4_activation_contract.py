@@ -1,9 +1,8 @@
 """Single-owner NVFP4 W4A4 activation execution contract.
 
 The compressed-tensors tensor ABI already names the calibrated scalar
-``<target>.input_global_scale``.  PrismaQuant reuses that exact tensor for
-FP4-CB instead of inventing a second spelling.  This module owns everything
-that is not expressible by the compressed-tensors scheme itself:
+``<target>.input_global_scale``.  This module owns the shared
+activation-scale convention around that tensor:
 
 * the versioned execution-contract and scale-policy identities;
 * calibrated max-abs -> input-global-scale conversion;
@@ -11,11 +10,12 @@ that is not expressible by the compressed-tensors scheme itself:
 * the canonical mapping digest stamped into ``quant_config.json``; and
 * the serve-faithful activation QDQ oracle used by producer tests/costs.
 
-Old CB artifacts can lack both the contract record and scalar tensors; legacy
+Old artifacts can lack both the contract record and scalar tensors; legacy
 native artifacts may carry an unversioned/defaultable scalar.  Both remain
-readable by their baseline paths, but neither can attest the fused-W4A4
-activation contract: only the versioned CB export path emits that record
-after complete calibration.
+readable by their baseline paths.  No live exporter emits the versioned
+contract record: the CB export path retired with the Gridbook lane
+(``archive/gridbook_lane_2026-09-02/``), and the legacy native config
+claims no versioned fused contract.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ NVFP4_INPUT_GLOBAL_SCALE_SUFFIX = "input_global_scale"
 # Public numerical/compatibility constants.  Exporters and loaders must import
 # these rather than grow a second activation-scale convention.  In particular,
 # the uncalibrated value is a legacy compressed-tensors compatibility fallback;
-# a versioned Gridbook activation contract never uses it implicitly.
+# versioned scale policies never select it implicitly.
 UNCALIBRATED_INPUT_GLOBAL_SCALE = 1.0
 FP4_E2M1_MAX = 6.0
 FP8_E4M3_MAX = 448.0
@@ -613,10 +613,9 @@ E2M1_MIDPOINTS = tuple(
 
 
 # Compatibility fallback for profiles that cannot expose serving fusion
-# metadata.  This catalog lives here because activation calibration, legacy
-# native export, and the Gridbook execution contract must never infer different
-# sibling units.  New architectures should still declare their groups in the
-# model profile/structure spec.
+# metadata.  This catalog lives here because activation calibration and legacy
+# native export must never infer different sibling units.  New architectures
+# should still declare their groups in the model profile/structure spec.
 _FUSED_DENSE_PATTERNS = (
     (
         re.compile(
