@@ -131,3 +131,66 @@ def test_the_scoped_options_belong_to_the_scoped_mode(tmp_path, capsys):
     with pytest.raises(SystemExit):
         head.main(_argv(tmp_path, "--unit-scope", "0:100", mode="walk"))
     assert "belong to --mode scoped-walk" in capsys.readouterr().err
+
+
+def test_sweep_plan_puts_a_one_unit_baseline_first_and_keeps_the_worker_order():
+    scopes = head.sweep_plan(1000, 250, [4, 1, 8, 2])
+    assert scopes[0] == {"label": "baseline", "scope": (1000, 1001), "workers": 4}
+    assert [item["workers"] for item in scopes[1:]] == [4, 1, 8, 2]
+    assert [item["label"] for item in scopes] == ["baseline", "run0", "run1", "run2", "run3"]
+
+
+def test_sweep_slices_are_disjoint_and_adjacent():
+    scopes = head.sweep_plan(0, 250, [4, 1, 8, 2, 2, 8, 1, 4])
+    edges = [item["scope"] for item in scopes]
+    for (_, high), (low, _) in zip(edges, edges[1:]):
+        assert low == high
+    assert len({unit for low, high in edges for unit in range(low, high)}) == 1 + 8 * 250
+
+
+def test_sweep_holds_one_budget_for_the_whole_sweep():
+    assert len(head.sweep_plan(0, 250, [1, 2, 4, 8, 8, 4, 2])) == 8
+    with pytest.raises(SystemExit, match="limit is 2000 for the whole sweep"):
+        head.sweep_plan(0, 250, [1, 2, 4, 8, 8, 4, 2, 1])
+    with pytest.raises(SystemExit, match="limit is 2000 for the whole sweep"):
+        head.sweep_plan(0, 500, [4, 1, 8, 2])
+    with pytest.raises(SystemExit, match="at least one worker count"):
+        head.sweep_plan(0, 250, [])
+
+
+def test_sweep_runs_each_scope_once_in_order_and_reports_read_load(monkeypatch):
+    calls = []
+    counters = iter([(0, 0), (10, 100), (10, 100), (30, 700)])
+    monkeypatch.setattr(head, "mount_ops", lambda mount_point="/mnt/shared": {"READ": 1})
+    monkeypatch.setattr(head, "read_rtt", lambda mount_point="/mnt/shared": next(counters))
+
+    def fake_walk(config, *, scope, workers):
+        calls.append((scope, workers))
+        return {"units_with_cells": scope[1] - scope[0], "measured_cells": 7}
+
+    report = head.scoped_walk_sweep({"inputs": {}}, start=0, slice_units=250,
+                                    workers_order=[4], walk=fake_walk)
+    assert calls == [((0, 1), 4), ((1, 251), 4)]
+    assert [run["label"] for run in report["runs"]] == ["baseline", "run0"]
+    assert report["runs"][0]["read_ops"] == 10
+    assert report["runs"][0]["read_rtt_ms_mean"] == 10.0
+    assert report["runs"][1]["read_ops"] == 20
+    assert report["runs"][1]["read_rtt_ms_mean"] == 30.0
+    assert report["sweep"]["units_total"] == 251
+
+
+@pytest.mark.parametrize("extra,message", [
+    (("--sweep-start", "0", "--slice-units", "500", "--sweep-workers", "4,1,8,2"),
+     "limit is 2000 for the whole sweep"),
+    (("--sweep-start", "0", "--slice-units", "250"), "needs --sweep-start, --slice-units and --sweep-workers"),
+    (("--sweep-start", "0", "--slice-units", "250", "--sweep-workers", "4,x"), "integers"),
+    (("--sweep-start", "0", "--slice-units", "250", "--sweep-workers", "4,17"), "counts in 1:16"),
+    (("--sweep-start", "0", "--slice-units", "250", "--sweep-workers", "4",
+      "--unit-scope", "0:10", "--head-walk-workers", "2"), "either"),
+])
+def test_main_refuses_a_bad_sweep_before_reading_anything(tmp_path, capsys, extra, message):
+    with pytest.raises(SystemExit) as exit_info:
+        head.main(_argv(tmp_path, *extra))
+    assert exit_info.value.code == 2
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "scratch").exists()

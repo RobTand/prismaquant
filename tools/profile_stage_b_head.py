@@ -143,6 +143,66 @@ def scoped_walk_intake(config, *, scope, workers):
             "units_with_cells": len({name for name, _ in data.cells})}
 
 
+def sweep_plan(start: int, slice_units: int, workers_order) -> list:
+    """The disjoint scopes of one sweep, baseline first.
+
+    The first scope holds one unit and gives the cost of the census-wide
+    gates, which every load repeats. Each later scope is a fresh slice of
+    ``slice_units`` units, so no run reads files an earlier run left in the
+    client page cache. The whole sweep is one budget of
+    ``SCOPED_WALK_MAX_UNITS`` units (#1492).
+    """
+    order = list(workers_order)
+    if not order or slice_units <= 0 or start < 0:
+        raise SystemExit("a sweep needs a start, a slice size and at least one worker count")
+    total = 1 + slice_units * len(order)
+    if total > SCOPED_WALK_MAX_UNITS:
+        raise SystemExit(
+            f"the sweep holds {total} units (1 baseline plus {len(order)} slices of "
+            f"{slice_units}); the limit is {SCOPED_WALK_MAX_UNITS} for the whole sweep")
+    scopes = [{"label": "baseline", "scope": (start, start + 1), "workers": order[0]}]
+    low = start + 1
+    for index, workers in enumerate(order):
+        scopes.append({"label": f"run{index}", "scope": (low, low + slice_units),
+                       "workers": workers})
+        low += slice_units
+    return scopes
+
+
+def scoped_walk_sweep(config, *, start, slice_units, workers_order, walk=None):
+    """Load the census-wide metadata once per scope, in one process.
+
+    The first load reads the large metadata files from the pool. Later loads
+    read them from the client page cache. Each run reports its wall time and
+    the NFS READ operations and round trip it caused.
+    """
+    import gc
+
+    walk = scoped_walk_intake if walk is None else walk
+    runs = []
+    for item in sweep_plan(start, slice_units, workers_order):
+        before_ops, before_rtt = mount_ops(), read_rtt()
+        began = time.monotonic()
+        result = walk(config, scope=item["scope"], workers=item["workers"])
+        wall = time.monotonic() - began
+        after_ops, after_rtt = mount_ops(), read_rtt()
+        reads = after_rtt[0] - before_rtt[0]
+        runs.append({"label": item["label"], "scope": list(item["scope"]),
+                     "workers": item["workers"], "wall_s": round(wall, 3),
+                     "read_ops": reads,
+                     "read_rtt_ms_mean": None if reads == 0 else round(
+                         (after_rtt[1] - before_rtt[1]) / reads, 3),
+                     "nfs_ops": delta(after_ops, before_ops),
+                     "units_with_cells": result["units_with_cells"],
+                     "measured_cells": result["measured_cells"]})
+        del result
+        gc.collect()
+    return {"sweep": {"start": start, "slice_units": slice_units,
+                      "workers_order": list(workers_order),
+                      "units_total": 1 + slice_units * len(list(workers_order))},
+            "runs": runs}
+
+
 def load_record(path, sha256):
     import hashlib
     raw = Path(path).read_bytes()
@@ -267,6 +327,12 @@ def main(argv=None) -> int:
                              f"roster, at most {SCOPED_WALK_MAX_UNITS} units")
     parser.add_argument("--head-walk-workers", type=int, default=None,
                         help="scoped-walk: explicit I/O worker count (1-16)")
+    parser.add_argument("--sweep-start", type=int, default=None,
+                        help="scoped-walk sweep: first roster index (replaces --unit-scope)")
+    parser.add_argument("--slice-units", type=int, default=None,
+                        help="scoped-walk sweep: units in each measured slice")
+    parser.add_argument("--sweep-workers", default=None,
+                        help="scoped-walk sweep: worker counts in run order, e.g. 4,1,8,2")
     parser.add_argument("--stop-read-rtt-ms", type=float, default=40.0,
                         help="scoped-walk: stop when the NFS READ round trip "
                              "exceeds this mean over a guard interval")
@@ -274,24 +340,47 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
-    scope = None
+    scope, sweep = None, None
+    sweep_args = (args.sweep_start, args.slice_units, args.sweep_workers)
     if args.mode == "scoped-walk":
         from prismaquant.tessera_joint_aura import (
             HEAD_WALK_MAX_WORKERS, parse_unit_scope)
-        if args.unit_scope is None or args.unit_scope.endswith(":"):
-            parser.error("scoped-walk needs --unit-scope LO:HI with an explicit end")
-        try:
-            scope = parse_unit_scope(args.unit_scope)
-        except (ValueError, TypeError) as exc:
-            parser.error(f"--unit-scope: {exc}")
-        if scope is None or scope[1] - scope[0] > SCOPED_WALK_MAX_UNITS:
-            parser.error(f"--unit-scope must hold at most {SCOPED_WALK_MAX_UNITS} units")
-        if args.head_walk_workers is None or not 1 <= args.head_walk_workers <= HEAD_WALK_MAX_WORKERS:
-            parser.error(f"scoped-walk needs --head-walk-workers in 1:{HEAD_WALK_MAX_WORKERS}")
+        single = args.unit_scope is not None or args.head_walk_workers is not None
+        swept = any(value is not None for value in sweep_args)
+        if single == swept:
+            parser.error("scoped-walk needs either --unit-scope with --head-walk-workers, "
+                         "or --sweep-start with --slice-units and --sweep-workers")
         if args.stop_read_rtt_ms <= 0 or args.guard_interval_s <= 0:
             parser.error("guard limits must be positive")
-    elif args.unit_scope is not None or args.head_walk_workers is not None:
-        parser.error("--unit-scope and --head-walk-workers belong to --mode scoped-walk")
+        if swept:
+            if any(value is None for value in sweep_args):
+                parser.error("a sweep needs --sweep-start, --slice-units and --sweep-workers")
+            try:
+                order = [int(item) for item in args.sweep_workers.split(",")]
+            except ValueError:
+                parser.error("--sweep-workers must be integers separated by commas")
+            if not order or any(not 1 <= item <= HEAD_WALK_MAX_WORKERS for item in order):
+                parser.error(f"--sweep-workers must be counts in 1:{HEAD_WALK_MAX_WORKERS}")
+            try:
+                sweep_plan(args.sweep_start, args.slice_units, order)
+            except SystemExit as exc:
+                parser.error(str(exc.code))
+            sweep = {"start": args.sweep_start, "slice_units": args.slice_units,
+                     "order": order}
+        else:
+            if args.unit_scope is None or args.unit_scope.endswith(":"):
+                parser.error("scoped-walk needs --unit-scope LO:HI with an explicit end")
+            try:
+                scope = parse_unit_scope(args.unit_scope)
+            except (ValueError, TypeError) as exc:
+                parser.error(f"--unit-scope: {exc}")
+            if scope is None or scope[1] - scope[0] > SCOPED_WALK_MAX_UNITS:
+                parser.error(f"--unit-scope must hold at most {SCOPED_WALK_MAX_UNITS} units")
+            if args.head_walk_workers is None or not 1 <= args.head_walk_workers <= HEAD_WALK_MAX_WORKERS:
+                parser.error(f"scoped-walk needs --head-walk-workers in 1:{HEAD_WALK_MAX_WORKERS}")
+    elif (args.unit_scope is not None or args.head_walk_workers is not None
+          or any(value is not None for value in sweep_args)):
+        parser.error("the scope, worker and sweep options belong to --mode scoped-walk")
     args.scratch.mkdir(parents=True, exist_ok=True)
 
     from prismaquant.io_spans import read_proc_io, read_proc_status
@@ -318,8 +407,9 @@ def main(argv=None) -> int:
             stopped.update(by_guard=True, mean_ms=round(mean, 3))
             print("STAGE_B_HEAD_PROFILE_STOPPED " + json.dumps(
                 {"limit_ms": args.stop_read_rtt_ms, "mean_ms": stopped["mean_ms"],
-                 "trace": guard_trace, "scope": list(scope),
-                 "workers": args.head_walk_workers}, sort_keys=True), flush=True)
+                 "trace": guard_trace,
+                 "scope": None if scope is None else list(scope),
+                 "workers": args.head_walk_workers, "sweep": sweep}, sort_keys=True), flush=True)
             os._exit(75)
         guard_stop, guard_trace = start_read_guard(
             args.stop_read_rtt_ms, interval_s=args.guard_interval_s, on_stop=on_stop)
@@ -327,7 +417,12 @@ def main(argv=None) -> int:
         result = walk_intake(config, prepared=prepared,
                              plan_sha256=args.plan_sha256, scratch=args.scratch)
     elif args.mode == "scoped-walk":
-        result = scoped_walk_intake(config, scope=scope, workers=args.head_walk_workers)
+        if sweep is not None:
+            result = scoped_walk_sweep(config, start=sweep["start"],
+                                       slice_units=sweep["slice_units"],
+                                       workers_order=sweep["order"])
+        else:
+            result = scoped_walk_intake(config, scope=scope, workers=args.head_walk_workers)
         guard_stop.set()
         result["guard"] = {"limit_ms": args.stop_read_rtt_ms,
                            "interval_s": args.guard_interval_s, "trace": guard_trace}
