@@ -15,6 +15,11 @@
   original refusal. Git errors and timeouts still refuse in both modes.
   The change does not rewrite or recompute checkpoints.
 
+- The allocator byte-budget test reuses the existing safetensors fixture
+  writer from test_footprint (#2388, references #1929). Fixture bytes,
+  tensor order, costs and semantic assertions stay unchanged. The
+  per-unit-rate file drops its unused writer import.
+
 ### Added
 
 - **Research-only finer-grained FIT pricing and packed reference wire**
