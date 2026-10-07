@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
 - Tessera export setup derives architecture wiring, census inputs and partitions
   from profile capabilities and source headers (#2409, D50 item six).
   The plan writer can emit the metadata plan. The model dispatcher exposes it

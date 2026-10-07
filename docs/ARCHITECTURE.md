@@ -23,6 +23,12 @@ preparation, encoding and complete-set assembly paths. The worker calls the
 supported `tessera.export_serving` package, not an experiment wrapper.
 The ladder probe retains its own historical configuration.
 
+Re-stamped 2026-10-07 (PQ #2417, R1): the worker imports the shared partition
+owner only for preparation. Standalone help and atomic publication require
+only the standard library. They do not require a copied export helper.
+Preparation still uses the staged shared owner and the producer's real
+source inventory. No ownership rule, source layout or runtime check changes.
+
 Provenance: `lane_spec.py`, `lane_specs/tessera.json`,
 `tessera_export_lane.py`, `tessera_plan_writer.py`, `export_partition.py`,
 and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.

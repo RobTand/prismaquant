@@ -21,6 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant.export_partition import whole_layer_partitions
 from tools.tessera_fleet import common, dispatch_ladder, dispatch_model
 from tools.tessera_fleet import model_worker as model
 from tools.tessera_fleet import status
@@ -37,7 +38,7 @@ DISPATCHERS = (dispatch_ladder,)
 def test_single_source_file_still_yields_24_layer_actions():
     tensors = {f'model.layers.{i}.weight': 'model.safetensors' for i in range(24)}
     tensors['model.embed_tokens.weight'] = 'model.safetensors'
-    assert len(model.whole_layer_partitions(tensors, PRODUCER)) == 24
+    assert len(whole_layer_partitions(tensors, PRODUCER)) == 24
     spec = dict(cpus=1, mem_gb=16, assembly_mem_gb=4, tags=['gb10'])
     rows = [dispatch_model.campaign_row('/checkout', spec, 'encode', index=i) for i in range(24)]
     assert len({tuple(row['argv']) for row in rows}) == 24
@@ -47,7 +48,7 @@ def test_single_source_file_still_yields_24_layer_actions():
 
 def test_sparse_layers_never_generate_empty_partitions():
     names = ['model.layers.0.weight', 'model.layers.2.weight']
-    count = len(model.whole_layer_partitions(dict.fromkeys(names, 'weights'), PRODUCER))
+    count = len(whole_layer_partitions(dict.fromkeys(names, 'weights'), PRODUCER))
     assert {PRODUCER.partition_owner(n, count) for n in names} == set(range(count))
 
 
@@ -123,10 +124,11 @@ def test_prepare_records_its_identity_under_the_host_it_was_pinned_to(tmp_path, 
     spec = {'plan_sha256': model.digest_file(tmp_path / 'plan.json'), 'image': 'x@sha256:' + '0' * 64,
             'source': str(source), 'out': str(tmp_path / 'out')}
     model.atomic_json('job.json', spec)
-    parts = SimpleNamespace(source_identity=lambda path: {'tensors': {'model.layers.0.w': 'weights'}})
+    parts = SimpleNamespace(
+        source_identity=lambda path: {'tensors': {'model.layers.0.w': 'weights'}},
+        BODY_LAYER=PRODUCER.BODY_LAYER, partition_owner=PRODUCER.partition_owner)
     monkeypatch.setattr(model, 'verify_image', lambda image: 'id')
     monkeypatch.setattr(model, 'producer_parts', lambda root: parts)
-    monkeypatch.setattr(model, 'whole_layer_partitions', lambda tensors, producer: [{}])
     with pytest.raises(ValueError, match='needs --host'):
         model.main(['prepare'])
     assert model.main(['prepare', '--host', 'sparky']) == 0

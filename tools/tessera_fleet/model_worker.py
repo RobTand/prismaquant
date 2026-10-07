@@ -28,11 +28,6 @@ import subprocess
 import sys
 import uuid
 
-if __package__:
-    from prismaquant.export_partition import whole_layer_partitions
-else:
-    from export_partition import whole_layer_partitions
-
 RESULT_PREFIX = 'PB_TESSERA_RESULT='
 #: Unchanged by the move: it names records already written beside exports.
 SCHEMA = 'prismabuild.tessera-model.v1'
@@ -271,6 +266,10 @@ def main(argv=None):
     if spec.get('scales') and digest_file('scales.safetensors') != spec['scales']:
         raise ValueError('input scales changed')
     if args.command == 'prepare':
+        if __package__:
+            from prismaquant.export_partition import whole_layer_partitions
+        else:
+            from export_partition import whole_layer_partitions
         verify_image(spec['image'])
         parts = producer_parts('encoder')
         source = Path(spec['source'])
