@@ -99,7 +99,7 @@ def run(directory, fixture_dir, refusal=False):
         command += ["--no-packed-aggregation", "--no-fused-aggregation"]
     with (directory / "stdout.txt").open("w") as stdout, (directory / "stderr.txt").open("w") as stderr:
         result = subprocess.run(["/usr/bin/time", "-v", "-o", str(directory / "time.txt"), *command],
-                                stdout=stdout, stderr=stderr, env={**os.environ, "PRISMAQUANT_COST_UCB_Z": "1"})
+                                stdout=stdout, stderr=stderr, env={**os.environ, "PRISMAQUANT_COST_UCB_Z": "0" if refusal else "1"})
     peak = next(int(line.split(":", 1)[1]) for line in (directory / "time.txt").read_text().splitlines()
                 if "Maximum resident set size" in line)
     profile = pstats.Stats(str(directory / "profile.pstats"))
@@ -159,8 +159,10 @@ def main():
     for name, rows in payload["costs"].items():
         if int(name.split(".experts.")[1].split(".")[0]) != 0:
             row = rows[HIGH]
+            signed = [component["total"] + 1 / 4096 for component in rows[LOW]["signed_components_per_probe"]]
             rows[HIGH] = joint.make_joint_aura_entry(operator_identity=row["joint_operator_identity"],
-                probe_identity=row["probe_identity"], signed_components=rows[LOW]["signed_components_per_probe"])
+                probe_identity=row["probe_identity"], signed_components=[
+                    {"weight": x, "activation": 0.0, "mixed": 0.0, "total": x} for x in signed])
     (fixture_dir / "costs.pkl").write_bytes(pickle.dumps(payload))
     del payload
     gc.collect()
