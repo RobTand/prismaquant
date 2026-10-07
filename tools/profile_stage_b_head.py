@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import signal
 import sys
@@ -127,11 +128,15 @@ def start_read_guard(limit_ms: float, *, interval_s: float = 5.0, min_ops: int =
     return stop, trace
 
 
-def scoped_walk_intake(config, *, scope, workers):
+def scoped_walk_intake(config, *, scope, workers, metadata_memo=None):
     """Walk ``sorted(names)[lo:hi]`` with one explicit I/O worker count.
 
     Read-only by construction: no head checkpoint, no payload verification,
-    existing renders only. The loader still runs every census-wide gate.
+    existing renders only. The loader still runs every census-wide gate. The
+    candidate overlay is left out of the inputs: its fence can hash wire
+    payloads after stat drift whatever ``verify_payloads`` says (#1519), and
+    this mode reads no payload. ``metadata_memo`` lets a sweep read the
+    census-wide metadata once.
     """
     from prismaquant.tessera_joint_aura import load_measured_anchor_input
     from prismaquant.tessera_reader import load_declared_reader
@@ -145,14 +150,18 @@ def scoped_walk_intake(config, *, scope, workers):
             f"{SCOPED_WALK_MAX_UNITS} (the pool crashed on 2026-10-06)")
     reader = load_declared_reader(config.get("reader"))
     started = time.monotonic()
+    inputs = {key: value for key, value in config["inputs"].items()
+              if key != "candidate_overlay"}
     data = load_measured_anchor_input(
-        config["inputs"], reader=reader, synthesis_device="cpu",
+        inputs, reader=reader, synthesis_device="cpu",
         progress_phase=None, head_checkpoint=None, head_resume=False,
         require_existing_renders=True, verify_payloads=False,
         unit_scope=(low, high), head_walk_workers=workers,
-        historical_encoder_reuse=config.get("historical_encoder_reuse"))
+        historical_encoder_reuse=config.get("historical_encoder_reuse"),
+        metadata_memo=metadata_memo)
     return {"marks": {"anchor_input_s": time.monotonic() - started},
             "scope": [low, high], "scope_units": high - low,
+            "candidate_overlay_left_out": "candidate_overlay" in config["inputs"],
             "head_walk_workers": data.head_walk_workers,
             "measured_cells": len(data.cells),
             "units_with_cells": len({name for name, _ in data.cells})}
@@ -185,20 +194,23 @@ def sweep_plan(start: int, slice_units: int, workers_order) -> list:
 
 
 def scoped_walk_sweep(config, *, start, slice_units, workers_order, walk=None):
-    """Load the census-wide metadata once per scope, in one process.
+    """Walk every scope of the sweep in one process, loading the metadata once.
 
-    The first load reads the large metadata files from the pool. Later loads
-    read them from the client page cache. Each run reports its wall time and
-    the NFS READ operations and round trip it caused.
+    The baseline scope reads, hashes and validates the large metadata files
+    from the pool. Later scopes reuse that state through one memo while the
+    stat fences of the files hold. Each run reports its wall time and the NFS
+    READ operations and round trip it caused.
     """
     import gc
 
     walk = scoped_walk_intake if walk is None else walk
+    memo = {}
     runs = []
     for item in sweep_plan(start, slice_units, workers_order):
         before_ops, before_rtt = mount_ops(), read_rtt()
         began = time.monotonic()
-        result = walk(config, scope=item["scope"], workers=item["workers"])
+        result = walk(config, scope=item["scope"], workers=item["workers"],
+                      metadata_memo=memo)
         wall = time.monotonic() - began
         after_ops, after_rtt = mount_ops(), read_rtt()
         reads = after_rtt[0] - before_rtt[0]
@@ -215,6 +227,8 @@ def scoped_walk_sweep(config, *, start, slice_units, workers_order, walk=None):
     return {"sweep": {"start": start, "slice_units": slice_units,
                       "workers_order": list(workers_order),
                       "units_total": 1 + slice_units * len(list(workers_order))},
+            "metadata_loads": memo.get("loads", 0),
+            "candidate_overlay_left_out": "candidate_overlay" in config["inputs"],
             "runs": runs}
 
 
@@ -365,8 +379,9 @@ def main(argv=None) -> int:
         if single == swept:
             parser.error("scoped-walk needs either --unit-scope with --head-walk-workers, "
                          "or --sweep-start with --slice-units and --sweep-workers")
-        if args.stop_read_rtt_ms <= 0 or args.guard_interval_s <= 0:
-            parser.error("guard limits must be positive")
+        if not all(math.isfinite(value) and value > 0
+                   for value in (args.stop_read_rtt_ms, args.guard_interval_s)):
+            parser.error("guard limits must be positive and finite")
         if swept:
             if any(value is None for value in sweep_args):
                 parser.error("a sweep needs --sweep-start, --slice-units and --sweep-workers")

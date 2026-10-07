@@ -9,11 +9,15 @@
   census roster with one explicit I/O worker count. It is read-only: it writes
   no head checkpoint, verifies no payload and synthesizes no render. One call
   holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
-  `--sweep-workers`) loads the census-wide metadata once and walks disjoint
-  slices in one process. The whole sweep shares the 2,000-unit budget, and
-  the first scope is a one-unit baseline. A guard thread stops the run when
-  the NFS READ round trip exceeds `--stop-read-rtt-ms`. A `SIGTERM` stops it
-  with one report. The tool changes no default. The default worker count stays
+  `--sweep-workers`) reads and validates the census-wide metadata once, in
+  the baseline scope, and walks disjoint slices in one process from that
+  state (`metadata_memo` on `load_measured_anchor_input`; a drifted file is
+  read and verified again). The mode leaves the candidate overlay out of the
+  inputs, so no wire payload is hashed. The whole sweep shares the 2,000-unit
+  budget, and the first scope is a one-unit baseline. A guard thread stops the
+  run when the NFS READ round trip exceeds `--stop-read-rtt-ms`. Both guard
+  limits must be positive and finite. A `SIGTERM` stops the run with one
+  report. The tool changes no default. The default worker count stays
   derived from the CPU reservation until a measurement supports a change.
 
 - **Research-only finer-grained FIT pricing and packed reference wire**
