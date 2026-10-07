@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-07 (D50, PQ #2410): day-zero intake is a metadata-only consumer
+of profile detection, source-index grammar, name projection, and safetensors header validation.
+The source entry point is `tools/day0_model_intake.py`; its domain code is
+`prismaquant/day0_model_intake.py`.
+It accepts a local checkpoint or an explicit model identifier with a full revision.
+Remote discovery uses Hugging Face snapshot download before config and index checks.
+Inconsistent inputs refuse before full-weight download or runtime launch.
+The generated structure draft stays outside profile registration and has no declared export lanes.
+The report names unsupported kinds and never claims native serving qualification.
+An explicit brain floating-point degree-two check uses Docker and the existing vLLM prompt smoke.
+Its central processor preflight runs that smoke's argument path without importing vLLM or acquiring a device.
+The runbook is `docs/new_model_intake.md`.
+No active PACT path, serving default, runtime pin, or production format menu changes.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
