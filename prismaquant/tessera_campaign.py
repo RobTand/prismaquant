@@ -5987,18 +5987,20 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
         return
     # The same declaration _finish_anchor stamps on a fresh measured row.
     # Producer wire/input integrity does not authenticate scoring metadata.
-    expected_contract = str(spec.act_dtype_name or "a16")
+    # Direct consumers use the same contract as the measured row.
+    direct_contract = _direct_consumer_activation_contract(anchor.qname)
+    expected_contract = direct_contract or str(spec.act_dtype_name or "a16")
     if anchor.activation_contract != expected_contract:
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} activation contract "
-            f"{anchor.activation_contract!r} differs from the format's {expected_contract!r}")
-    # This flag records whether the actual scoring rows changed, not whether
-    # the format can quantize. Exact input values may survive an A8/A4 route.
+            f"{anchor.activation_contract!r} differs from the expected {expected_contract!r}")
+    # A direct consumer never quantizes its input rows.
+    allows_quantized = direct_contract is None and spec.act_quant_changes_input
     if (type(anchor.activation_quantized) is not bool or
-            (anchor.activation_quantized and not spec.act_quant_changes_input)):
+            (anchor.activation_quantized and not allows_quantized)):
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} activation observation "
-            f"{anchor.activation_quantized!r} is incompatible with its format")
+            f"{anchor.activation_quantized!r} is incompatible with {expected_contract!r}")
 
 
 def _save_hessian_capture_with_page_release(payload, path, *, resource_check=None):

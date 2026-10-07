@@ -16,6 +16,9 @@
   The publication cache keeps the head values in FP32 and charges the actual publication bytes.
   T-16 retains its folded BF16 weight arithmetic before the head cache cast.
 
+- **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
+  The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic

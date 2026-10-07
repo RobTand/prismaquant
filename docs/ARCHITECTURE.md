@@ -31927,6 +31927,9 @@ The head screen uses FP32 inputs without A8 activation quantization.
 The key keeps its dense activation contract.
 MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
 
+Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
+Both direct consumers refuse quantized input observations in development and certified modes.
+
 The producer reads direct weights with projection_routes.direct_consumer_weight.
 The runtime and producer use the same folded T-16 arithmetic.
 The publication cache preserves the DSA head values in FP32.
