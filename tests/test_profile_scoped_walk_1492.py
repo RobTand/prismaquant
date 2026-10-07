@@ -59,7 +59,7 @@ def test_guard_does_not_stop_at_a_normal_round_trip_and_records_what_it_saw():
     stop, trace = _guard([(0, 0), (100, 500), (200, 1000), (300, 1500)], 10.0, stopped)
     deadline = threading.Event()
     deadline.wait(0.3)
-    stop.set()
+    stop.request_stop()
     assert stopped == []
     assert trace[:3] == [5.0, 5.0, 5.0]
 

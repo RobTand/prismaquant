@@ -34,7 +34,6 @@ import math
 import os
 import signal
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -104,28 +103,33 @@ class GuardStop(Exception):
 
 def start_read_guard(limit_ms: float, *, interval_s: float = 5.0, min_ops: int = 20,
                      sample=read_rtt, on_stop=None):
-    """Watch the NFS READ round trip in a thread; call ``on_stop`` past the limit.
+    """Watch the NFS READ round trip on the shared sampler thread.
 
-    Returns ``(stop_event, trace)``. ``trace`` lists every interval mean the
-    guard saw, so the report shows what the guard watched.
+    Calls ``on_stop`` past the limit. Returns ``(sampler, trace)``; stop the
+    watch with ``sampler.request_stop()``. ``trace`` lists every interval mean
+    the guard saw, so the report shows what the guard watched. The thread is
+    ``io_spans.PeriodicSampler``, the one sampler every periodic sampler uses
+    (#1299), so the tool adds no thread site (#1294).
     """
-    stop, trace = threading.Event(), []
+    from prismaquant.io_spans import PeriodicSampler
 
-    def watch():
-        before = sample()
-        while not stop.wait(interval_s):
-            after = sample()
-            mean = interval_read_rtt_ms(before, after, min_ops=min_ops)
-            trace.append(None if mean is None else round(mean, 3))
-            before = after
-            if mean is not None and mean > limit_ms:
-                trace.append(f"STOP above {limit_ms} ms")
-                if on_stop is not None:
-                    on_stop(mean)
-                return
+    trace, last = [], [None]
 
-    threading.Thread(target=watch, name="read-rtt-guard", daemon=True).start()
-    return stop, trace
+    def tick():
+        after = sample()
+        before, last[0] = last[0], after
+        if before is None:
+            return True
+        mean = interval_read_rtt_ms(before, after, min_ops=min_ops)
+        trace.append(None if mean is None else round(mean, 3))
+        if mean is not None and mean > limit_ms:
+            trace.append(f"STOP above {limit_ms} ms")
+            if on_stop is not None:
+                on_stop(mean)
+            return False
+        return True
+
+    return PeriodicSampler(tick, interval_s=interval_s, name="read-rtt-guard").start(), trace
 
 
 def scoped_walk_intake(config, *, scope, workers, metadata_memo=None):
@@ -462,7 +466,7 @@ def main(argv=None) -> int:
                                        workers_order=sweep["order"])
         else:
             result = scoped_walk_intake(config, scope=scope, workers=args.head_walk_workers)
-        guard_stop.set()
+        guard_stop.request_stop()
         result["guard"] = {"limit_ms": args.stop_read_rtt_ms,
                            "interval_s": args.guard_interval_s, "trace": guard_trace}
     else:
