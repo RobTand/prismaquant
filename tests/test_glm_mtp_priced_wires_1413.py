@@ -202,7 +202,10 @@ def test_anchor_only_quality_selects_and_exports_the_bound_fractional_wire(tmp_p
     owner = owner_for_rows(monkeypatch)
     budget = 16384 + sum(parts[2][0]["wire_bytes"][name][half] for name in units)
     selection = select_mtp_rungs(merged, byte_budget=budget, constants=CONSTANTS,
-        formats=[half, "BF16"], rung_allowability={"TESSERA_E4M3_K1": owner})
+        formats=[half, "BF16"], rung_allowability={"TESSERA_E4M3_K1": owner},
+        stats={name: {"unit_structure": "dense" if name == DENSE else "routed_moe",
+                      **({} if name == DENSE else {"routing": "balanced"})}
+               for name in merged["costs"]}, allowability_m=8)
     assignment = selection.pop("assignment")
     assert {assignment[name] for name in units} == {half}
     assert assignment[DENSE] == "BF16"

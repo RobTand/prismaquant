@@ -251,7 +251,7 @@ def test_mtp_anchor_only_quality_builds_and_replays_fractional_wire(monkeypatch,
     from prismaquant.glm_mtp_selection import select_mtp_rungs, _recompute_recorded_quality, _unit_rows
     from test_glm_mtp_selection import _probe, ROUTED, PARAMS, CONSTANTS
     unit = ROUTED[0]
-    owner = _cost_owner(monkeypatch)
+    owner = owner_for_rows(monkeypatch)
     probe = _probe()
     probe.update(calibration_shape=[512, 512], token_scope="all")
     rows = {f"{FAMILY}_R{rate}": _row(unit, f"{FAMILY}_R{rate}", [value] * 4, probe)
@@ -267,7 +267,8 @@ def test_mtp_anchor_only_quality_builds_and_replays_fractional_wire(monkeypatch,
         "costs": {unit: rows}, "wire_bytes": {unit: wire}}
     original = copy.deepcopy(payload)
     record = select_mtp_rungs(payload, byte_budget=501, constants=CONSTANTS,
-        formats=[half], rung_allowability={FAMILY: owner})
+        formats=[half], rung_allowability={FAMILY: owner},
+        stats={unit: {"unit_structure": "dense"}}, allowability_m=8)
     assert record["assignment"] == {unit: half}
     assert (record["E"], record["resident_bytes"]) == (1.25, 500)
     replayed = _recompute_recorded_quality(payload, record["canonical_quality"])

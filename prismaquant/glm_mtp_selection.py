@@ -294,10 +294,46 @@ def _unit_storage(payload, unit):
     return wire, params
 
 
+def add_mtp_scope_arguments(parser) -> None:
+    """Declare the MTP workload independently of the body's workload."""
+    parser.add_argument("--mtp-regime", type=int, default=None,
+                        help="Actual MTP token-row regime M for canonical admission")
+    parser.add_argument("--mtp-tensor-parallel", type=int, default=1,
+                        help="Serving tensor parallel size for the MTP rank-local shape")
+    parser.add_argument("--mtp-routing", default=None,
+                        help="Actual routing coordinate for scoped MTP experts")
+
+
+def _mtp_allowability_scope(unit, rung, measured, stats, context, owners, *, m, tensor_parallel):
+    """Derive scope from validated source operators through the shared owner."""
+    from .allocator_candidates import unit_allowability_scope
+    row = measured.get(rung)
+    if row is not None:
+        shape = row["joint_operator_identity"]["source_weight"]["shape"]
+    else:
+        shapes = {tuple(anchor["joint_operator_identity"]["source_weight"]["shape"])
+                  for anchor in measured.values()}
+        shape = next(iter(shapes)) if len(shapes) == 1 else ()
+    actual = dict(stats or {})
+    # Caller metadata can supply topology, but not replace the measured shape.
+    actual.pop("out_features", None)
+    actual.pop("in_features", None)
+    if len(shape) >= 2:
+        actual.update(out_features=shape[-2], in_features=shape[-1])
+    return unit_allowability_scope(rung, unit, actual, context, owners,
+                                  m=m, tensor_parallel=tensor_parallel)
+
+
 def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices=None,
-               quality_provenance=None) -> tuple[dict, dict]:
+               quality_provenance=None, scope_provenance=None, stats=None, context_by_unit=None,
+               target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> tuple[dict, dict]:
     """Price the exact wire menu from measured anchors or bound proposals."""
     from .rung_allowability import owner_for_format
+    from .allocator_candidates import candidate_rung_admission
+    from .lane_spec import family_hook
+    from .serving_profiles import load_serving_profile
+    from . import format_registry as fr
+    production = not load_serving_profile(target_profile).emulation_only
     groups = payload["groups"]
     units = [unit for members in groups.values() for unit in members]
     if set(units) != set(payload["costs"]) or len(units) != len(set(units)):
@@ -317,6 +353,29 @@ def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices
                 unattested.setdefault(rung, []).append(unit)
                 continue
             owner = owner_for_format(rung_allowability, rung)
+            if rung_allowability is not None or production:
+                context = None if context_by_unit is None else context_by_unit.get(unit)
+                unit_scope = _mtp_allowability_scope(unit, rung, measured,
+                    (stats or {}).get(unit), context, rung_allowability,
+                    m=allowability_m, tensor_parallel=allowability_tensor_parallel)
+                if owner is not None and owner.scoped:
+                    required = ("kernel_kind", "rows", "columns", "m")
+                    if (unit_scope is None or any(unit_scope.get(axis) is None for axis in required)
+                            or (unit_scope["kernel_kind"] in ("routed_moe", "routed")
+                                and unit_scope.get("routing") is None)):
+                        unattested.setdefault(rung, []).append(unit)
+                        continue
+                admission = candidate_rung_admission(rung, target_profile=target_profile,
+                    serving_context=context, rung_allowability=rung_allowability,
+                    allowability_scope=unit_scope)
+                family = fr.format_family_of(fr.canonical_format_name(rung))
+                if admission is not None and (
+                        (rung_allowability is not None and owner is None)
+                        or not admission.admits(family_hook(family, "menu_mode_in_force")(None))):
+                    unattested.setdefault(rung, []).append(unit)
+                    continue
+                if scope_provenance is not None and unit_scope is not None:
+                    scope_provenance[(unit, rung)] = unit_scope
             price = (owner.chord_cost(rung, unit=unit, costs=measured)
                      if owner is not None else proposals.get(rung, measured.get(rung)))
             if price is None:
@@ -411,15 +470,19 @@ def _restrict_to_declared(rows: dict, declared) -> tuple[dict, dict, list]:
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                      acceptance_points=(), k: int = 1, eligible=None,
                      fixed_formats: Mapping[str, str] | None = None,
-                     formats=None, rung_allowability=None) -> dict:
+                     formats=None, rung_allowability=None, stats=None, context_by_unit=None,
+                     target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
     (``t_ms``, ``d0_ms``, ``c_ms_per_bit`` and a ``source``); they are
     recorded, and with no ``acceptance_points`` they cannot move the choice:
     the selector is degenerate and returns the lowest-E rung within the budget.
-    ``eligible(unit, rung)``, when given, is the pinned runtime's attestation
-    (principle 14); a priced rung it refuses is left off the menu and recorded.
+    Canonical owners enforce admission independently of the native callback.
+    Callers supply per-unit topology in stats or context_by_unit, plus regime M.
+    The shared scope owner derives rank-local geometry from validated source shapes.
+    Missing or unresolved v3 scope removes the option, never broadens admission.
+    The native eligible callback remains an additional gate.
     ``fixed_formats`` restricts named whole groups to one format, intersected
     with that same eligible menu. A missing or unpriced group format refuses.
     ``formats``, when given, declares the layer's menu (PQ #1692), the MTP
@@ -436,9 +499,11 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         raise ValueError(f"MTP cost payload must be {SCHEMA}")
     byte_budget = _STORAGE.integer(byte_budget, where="byte_budget", minimum=0)
     probe_sha256, probe = _mtp_probe(payload)
-    quality_provenance = {}
+    quality_provenance, scope_provenance = {}, {}
     rows, unattested = _unit_rows(payload, eligible, rung_allowability=rung_allowability,
-                                 quality_provenance=quality_provenance)
+        quality_provenance=quality_provenance, scope_provenance=scope_provenance,
+        stats=stats, context_by_unit=context_by_unit, target_profile=target_profile,
+        allowability_m=allowability_m, allowability_tensor_parallel=allowability_tensor_parallel)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
     declared_record = {}
     if formats is not None:
@@ -517,6 +582,11 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "selection": result.provenance,
         **({"fixed_formats": dict(sorted(fixed_formats.items()))}
            if fixed_formats is not None else {}),
+        **({"rung_allowability_scopes": {unit: scope_provenance[(unit, fmt)]
+               for unit, fmt in assignment.items() if (unit, fmt) in scope_provenance},
+            "rung_allowability": {family: owner.provenance()
+                for family, owner in rung_allowability.items()}}
+           if rung_allowability is not None else {}),
         "assignment": assignment,
         **({"canonical_quality": quality_provenance} if quality_provenance else {}),
         **selected_wires,

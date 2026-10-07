@@ -259,23 +259,28 @@ def test_final_check_threads_per_unit_scope(monkeypatch):
                                               "columns": 7, "m": 8}})
 
 
-def test_mtp_uses_the_same_scoped_input(monkeypatch):
+def test_allocator_mtp_uses_the_same_scoped_input(tmp_path, monkeypatch):
     from prismaquant import allocator, format_registry as registry
+    from test_glm_mtp_selection import _write_payload
     from types import SimpleNamespace
-    whole = _owner("v3-whole.json", monkeypatch)
+    payload, owner, unit = _direct_mtp_case(monkeypatch)
     monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
     target = SimpleNamespace(context=lambda structure: _serving_context(structure))
     profile = SimpleNamespace(structure_spec=lambda: {}, packed_expert_format_group=lambda name: None,
         per_expert_moe_regex=lambda: None, per_expert_mtp_regex=lambda: None)
-    costs = {"mtp.unit": {f"{FAMILY}_R1024": {"joint_operator_identity":
-        {"source_weight": {"shape": [4, 8]}}}}}
-    eligible = allocator._mtp_rung_attestation(target, profile,
-        rung_allowability={FAMILY: whole}, target_profile="research", costs=costs, m=8)
-    assert eligible("mtp.unit", f"{FAMILY}_R1024")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1152")
-    wrong = allocator._mtp_rung_attestation(target, profile,
-        rung_allowability={FAMILY: whole}, target_profile="research", costs=costs, m=9)
-    assert not wrong("mtp.unit", f"{FAMILY}_R1024")
+    cost, constants = _write_payload(tmp_path, payload)
+    args = SimpleNamespace(mtp_joint_cost=cost, mtp_byte_budget=501, mtp_serve_constants=constants,
+        mtp_acceptance_points=None, mtp_formats=f"{FAMILY}_R896", mtp_regime=8,
+        mtp_tensor_parallel=1, mtp_routing=None)
+    _, selected = allocator._select_mtp(args, serving_target=target, profile=profile,
+        rung_allowability={FAMILY: owner}, target_profile="research")
+    assert selected["assignment"] == {unit: f"{FAMILY}_R896"}
+    assert selected["rung_allowability_scopes"][unit]["m"] == 8
+    args.mtp_regime = 9
+    with pytest.raises(SystemExit) as refused:
+        allocator._select_mtp(args, serving_target=target, profile=profile,
+            rung_allowability={FAMILY: owner}, target_profile="research")
+    assert refused.value.code == 2
 
 
 def _serving_context(structure):
@@ -489,7 +494,7 @@ def test_real_surface_prediction_uses_the_qualified_neighbour_chord(monkeypatch)
 def test_independent_mtp_selector_uses_chord_prices_and_bound_wire_bytes(monkeypatch):
     from prismaquant.glm_mtp_selection import select_mtp_rungs, _recompute_recorded_quality
     from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS, CONSTANTS
-    owner = _cost_owner(monkeypatch)
+    owner = _mtp_cost_owner(monkeypatch)
     unit = ROUTED[0]
     from canonical_quality_fixtures import scope_for
     probe = _probe()
@@ -503,7 +508,8 @@ def test_independent_mtp_selector_uses_chord_prices_and_bound_wire_bytes(monkeyp
         "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
         "costs": {unit: rows}, "wire_bytes": {unit: wire}}
     record = select_mtp_rungs(payload, byte_budget=501, constants=CONSTANTS,
-        formats=[f"{FAMILY}_R896", f"{FAMILY}_R1024"], rung_allowability={FAMILY: owner})
+        formats=[f"{FAMILY}_R896", f"{FAMILY}_R1024"], rung_allowability={FAMILY: owner},
+        stats={unit: {"unit_structure": "dense"}}, allowability_m=8)
     assert record["assignment"] == {unit: f"{FAMILY}_R896"}
     assert record["E"] == 1.25
     assert record["resident_bytes"] == 500
@@ -580,4 +586,113 @@ def test_unknown_parallel_cut_waits_and_invalid_known_cut_refuses(monkeypatch):
     with pytest.raises(ValueError, match="not divisible"):
         owner.scope_for_unit(f"{FAMILY}_R1024", unit="expert.gate_proj",
             shape=(5, 8), structure="dense", m=8, tensor_parallel=2)
+
+
+def _mtp_cost_owner(monkeypatch):
+    owner = _cost_owner(monkeypatch)
+    def shape(table):
+        for entry in table["scope"]["shapes"]:
+            entry["rows"], entry["columns"] = 64, 128
+        for row in table["rungs"]:
+            for measurement in row["measurements"]:
+                measurement["evidence"]["rows"], measurement["evidence"]["columns"] = 64, 128
+    return _mutated(owner, shape)
+
+
+def _direct_mtp_case(monkeypatch, rate=896):
+    from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS
+    from canonical_quality_fixtures import scope_for
+    owner = _mtp_cost_owner(monkeypatch)
+    unit = ROUTED[0]
+    probe = _probe()
+    probe.update(calibration_shape=[512, 512], token_scope="all")
+    rows = {f"{FAMILY}_R{rung}": _row(unit, f"{FAMILY}_R{rung}", [value] * 4, probe)
+            for rung, value in ((768, 2.0), (1024, 1.0), (1280, 0.5))}
+    for row in rows.values():
+        row["quality_scope"] = scope_for(row)
+    payload = {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
+        "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
+        "costs": {unit: rows}, "wire_bytes": {unit: {f"{FAMILY}_R{rate}": 500}}}
+    return payload, owner, unit
+
+
+@pytest.mark.parametrize("native", [None, lambda _unit, _rung: True], ids=["absent", "always_true"])
+@pytest.mark.parametrize("problem", ["held", "unmeasured", "outside_menu", "missing_structure",
+    "missing_m", "missing_routing", "wrong_m", "wrong_shape", "wrong_routing", "unknown_parallel_cut"])
+def test_direct_mtp_canonical_admission_cannot_be_bypassed(monkeypatch, problem, native):
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+    from test_glm_mtp_selection import CONSTANTS, PARAMS
+    rate = 1280 if problem == "outside_menu" else 896
+    payload, owner, unit = _direct_mtp_case(monkeypatch, rate)
+    if problem in {"held", "unmeasured"}:
+        def change(table):
+            row = _first_row(table, rate)
+            if problem == "held":
+                row["anomaly_flags"] = row["quality"]["anomaly_flags"] = ["quality_failure"]
+            else:
+                row["measurement_status"], row["measurements"] = "pending", []
+        owner = _mutated(owner, change)
+    stats = {unit: {"unit_structure": "dense"}}
+    if problem == "missing_structure":
+        stats = None
+    if problem == "missing_routing":
+        stats[unit]["unit_structure"] = "routed_moe"
+    if problem == "wrong_routing":
+        stats[unit]["routing"] = "unknown"
+    if problem == "wrong_shape":
+        # Supplied dimensions must not replace the actual measured shape.
+        def other_shape(table):
+            for shape in table["scope"]["shapes"]:
+                shape["rows"] = 32
+            for row in table["rungs"]:
+                for measurement in row["measurements"]:
+                    measurement["evidence"]["rows"] = 32
+        owner = _mutated(owner, other_shape)
+        stats[unit].update(out_features=32, in_features=128)
+    kwargs = dict(byte_budget=501, constants=CONSTANTS, rung_allowability={FAMILY: owner},
+        eligible=native, stats=stats,
+        allowability_m=None if problem == "missing_m" else 9 if problem == "wrong_m" else 8,
+        allowability_tensor_parallel=2 if problem == "unknown_parallel_cut" else 1)
+    with pytest.raises(ValueError, match="no rung fits"):
+        select_mtp_rungs(payload, **kwargs)
+    kwargs["byte_budget"] = 2 * PARAMS
+    selected = select_mtp_rungs(payload, **kwargs)
+    assert selected["assignment"] == {unit: "BF16"}
+    assert selected["resident_bytes"] == 2 * PARAMS
+    assert selected["E"] == 0.0
+    assert selected["unattested_rungs"] == {f"{FAMILY}_R{rate}": 1}
+
+
+@pytest.mark.parametrize("rate", [896, 1024])
+@pytest.mark.parametrize("structure,world", [("dense", 1), ("routed_moe", 1), ("routed_moe", 2)])
+def test_direct_mtp_allowed_scope_and_native_gate_intersect(monkeypatch, rate, structure, world):
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+    from test_glm_mtp_selection import CONSTANTS, PARAMS
+    payload, owner, unit = _direct_mtp_case(monkeypatch, rate)
+    if world == 2:
+        def rank_shape(table):
+            for shape in table["scope"]["shapes"]:
+                shape["rows"] = 32
+            for row in table["rungs"]:
+                for measurement in row["measurements"]:
+                    measurement["evidence"]["rows"] = 32
+        owner = _mutated(owner, rank_shape)
+    name = f"{FAMILY}_R{rate}"
+    routing = "balanced" if structure == "routed_moe" else None
+    kwargs = dict(byte_budget=501, constants=CONSTANTS, rung_allowability={FAMILY: owner},
+        stats={unit: {"unit_structure": structure, "routing": routing}},
+        allowability_m=8, allowability_tensor_parallel=world)
+    selected = select_mtp_rungs(payload, **kwargs, eligible=lambda _unit, _rung: True)
+    assert selected["assignment"] == {unit: name}
+    assert (selected["resident_bytes"], selected["E"]) == (500, 1.25 if rate == 896 else 0.5)
+    scope = selected["rung_allowability_scopes"][unit]
+    assert (scope["kernel_kind"], scope["rows"], scope["columns"], scope["m"]) == (structure, 64 // world, 128, 8)
+    assert scope["routing"] == routing
+    assert scope["activation_contract"] == owner.kernel_build["activation_contract"]
+    assert scope["recipe"] == owner.scope_for_unit(name, unit=unit, shape=(64, 128),
+        structure=structure, m=8, tensor_parallel=world, routing=routing)["recipe"]
+    kwargs["byte_budget"] = 2 * PARAMS
+    refused = select_mtp_rungs(payload, **kwargs, eligible=lambda _unit, _rung: False)
+    assert refused["assignment"] == {unit: "BF16"}
+    assert refused["unattested_rungs"] == {name: 1}
 

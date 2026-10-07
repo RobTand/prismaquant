@@ -38,6 +38,16 @@ Recorded chord reads compare numeric claims and scientific scope through that ow
 Missing qualified prices cannot remove a unit from byte accounting.
 
 The independent MTP selector retains its objective and byte budget.
+Its public API intersects each owned wire option with the shared admission owner.
+The native callback remains an additional gate. It cannot bypass canonical admission.
+The API derives each source shape from validated measured operators or their unique anchors.
+The shared scope owner derives rank-local geometry, the activation build and the wire recipe.
+Callers supply per-unit structure, regime M, tensor parallel size and required routing coordinates.
+Missing or unresolved v3 scope removes the option. It never permits an unscoped query.
+The selection record retains admitted unit scopes and the original table provenance.
+The allocator accepts separate --mtp-regime, --mtp-tensor-parallel and --mtp-routing arguments.
+The fixed-selection tool uses the same scope and publication owners.
+Legacy no-owner emulation keeps its original contract. Production still requires canonical evidence.
 Measured quality anchors and exact wire menus have separate rosters.
 An admitted fractional wire uses the existing qualified chord owner.
 It does not require fractional quality samples.

@@ -836,14 +836,26 @@ def _allocation_lane():
     return single_lane_plugin("allocation_menu") or _StockAllocationLane
 
 
-def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, target_profile=None,
-                          costs=None, m=None, tensor_parallel=1, scope_provenance=None):
-    """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
+def _mtp_scope_inputs(payload, serving_target, profile, *, routing=None):
+    """Read MTP topology through the existing lane and profile owners."""
+    from .tessera_serving_scope import unit_structure_from_profile
+    lane = _allocation_lane()
+    stats, contexts = {}, {}
+    for unit in payload["costs"]:
+        context = (None if serving_target is None else
+                   lane.allocation_unit_context(serving_target, unit, profile))
+        structure = (context.structure if context is not None else
+                     unit_structure_from_profile(unit, profile) if profile is not None else None)
+        stats[unit] = {"unit_structure": structure}
+        if structure == "routed_moe" and routing is not None:
+            stats[unit]["routing"] = routing
+        if context is not None:
+            contexts[unit] = context
+    return stats, contexts or None
 
-    The same reader the body menu uses (``format_is_producer_eligible``), asked
-    about one unit's serving context when a Tessera scope is declared. BF16
-    passthrough is not a Tessera route and is always offered.
-    """
+
+def _mtp_rung_attestation(serving_target, profile):
+    """Keep native runtime attestation separate from public API admission."""
     lane = _allocation_lane()
 
     def eligible(unit, rung):
@@ -852,33 +864,6 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
             return True
         context = None if serving_target is None else lane.allocation_unit_context(
             serving_target, unit, profile)
-        from .allocator_candidates import candidate_rung_admission
-        from .lane_spec import family_hook
-        from .serving_profiles import load_serving_profile
-        if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
-            from .allocator_candidates import unit_allowability_scope
-            measured = {} if costs is None else costs.get(unit, {})
-            row = measured.get(rung)
-            if row is not None:
-                shape = row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ())
-            else:
-                shapes = {tuple(anchor.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ()))
-                          for anchor in measured.values()}
-                shape = next(iter(shapes)) if len(shapes) == 1 else ()
-            unit_stats = ({"out_features": shape[-2], "in_features": shape[-1]}
-                          if len(shape) >= 2 else {})
-            if context is None and profile is not None:
-                from .tessera_serving_scope import unit_structure_from_profile
-                unit_stats["unit_structure"] = unit_structure_from_profile(unit, profile)
-            unit_scope = unit_allowability_scope(rung, unit, unit_stats, context,
-                rung_allowability, m=m, tensor_parallel=tensor_parallel)
-            if scope_provenance is not None and unit_scope is not None:
-                scope_provenance[(unit, rung)] = unit_scope
-            admission = candidate_rung_admission(rung, target_profile=target_profile,
-                serving_context=context, rung_allowability=rung_allowability,
-                allowability_scope=unit_scope)
-            if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
-                return False
         if context is None:
             return fr.format_is_producer_eligible(rung)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
@@ -921,21 +906,16 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
                   if args.mtp_acceptance_points else [])
         fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
                  if getattr(args, "mtp_fixed_formats", None) else None)
-        scope_provenance = {}
+        stats, contexts = _mtp_scope_inputs(payload, serving_target, profile,
+            routing=getattr(args, "mtp_routing", None))
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile,
-                                      rung_allowability=rung_allowability, target_profile=target_profile,
-                                      costs=payload["costs"], m=getattr(args, "pact_regime", None),
-                                      tensor_parallel=getattr(args, "pact_tensor_parallel", None) or 1,
-                                      scope_provenance=scope_provenance),
+                                  eligible=_mtp_rung_attestation(serving_target, profile),
                                   fixed_formats=fixed, rung_allowability=rung_allowability,
-                                  formats=(None if declared is None
-                                           else declared.split(",")))
-        if scope_provenance:
-            record["rung_allowability_scopes"] = {
-                unit: scope_provenance[(unit, fmt)] for unit, fmt in record["assignment"].items()
-                if (unit, fmt) in scope_provenance}
+                                  stats=stats, context_by_unit=contexts, target_profile=target_profile,
+                                  allowability_m=getattr(args, "mtp_regime", None),
+                                  allowability_tensor_parallel=getattr(args, "mtp_tensor_parallel", None) or 1,
+                                  formats=(None if declared is None else declared.split(",")))
     except MtpMenuRefused as exc:
         import sys
 
@@ -2257,6 +2237,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "c_ms_per_bit and their source (required with "
                          "--mtp-joint-cost; recorded, and inert without "
                          "acceptance points).")
+    from .glm_mtp_selection import add_mtp_scope_arguments
+    add_mtp_scope_arguments(ap)
     ap.add_argument("--mtp-fixed-formats", default=None,
                     help="Optional JSON file mapping MTP group names to one format "
                          "each; the selector keeps only that rung for the group, "

@@ -11,6 +11,13 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Changed
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Constructor repairs remain unchanged. No identity seal is added.
 - The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
   Fused sums apply no extra gain or activation transfer.
   Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.

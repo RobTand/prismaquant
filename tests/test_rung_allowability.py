@@ -184,16 +184,20 @@ def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
 
 
 def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
-    from prismaquant import allocator, format_registry as registry
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+    from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS, CONSTANTS
     table = _load(publication)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
-    monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
-    eligible = allocator._mtp_rung_attestation(
-        None, None, rung_allowability={FAMILY: table}, target_profile="research")
-    assert eligible("mtp.unit", f"{FAMILY}_R1024")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1025")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1026")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1027")
+    unit = ROUTED[0]
+    names = [f"{FAMILY}_R{rate}" for rate in (1024, 1025, 1026, 1027)]
+    payload = {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
+        "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
+        "costs": {unit: {name: _row(unit, name, [1.0] * 4, _probe()) for name in names}},
+        "wire_bytes": {unit: dict.fromkeys(names, 500)}}
+    selected = select_mtp_rungs(payload, byte_budget=501, constants=CONSTANTS, formats=names,
+        rung_allowability={FAMILY: table}, eligible=lambda _unit, _rung: True)
+    assert selected["assignment"] == {unit: names[0]}
+    assert selected["unattested_rungs"] == dict.fromkeys(names[1:], 1)
 
 
 def test_build_diagnostics_do_not_become_new_identity_seals(publication):
