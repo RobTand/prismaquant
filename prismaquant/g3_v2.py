@@ -58,13 +58,12 @@ def _g3_protocol(config):
 
 def _g3_panel_inputs(config, protocol):
     length, count, vocab = (protocol[name] for name in ("context_length", "window_count", "vocab_size"))
-    tokenizer = _g3_json(config["tokenizer"], "G3 tokenizer")
-    ids = {entry["content"]: entry["id"] for entry in tokenizer.get("added_tokens", [])}
-    ids.update({k: v for k, v in tokenizer.get("model", {}).get("vocab", {}).items() if k not in ids})
+    from tokenizers import Tokenizer
+    tokenizer = Tokenizer.from_str(read_binding(config["tokenizer"], "G3 tokenizer").decode("utf-8"))
     prefixes = protocol["prefix_tokens"]
     if not isinstance(prefixes, list) or not all(isinstance(x, str) for x in prefixes):
         raise ValueError("prefix_tokens must be an explicit token list")
-    actual = [ids.get(name) for name in prefixes]
+    actual = [tokenizer.token_to_id(name) for name in prefixes]
     if actual != protocol["prefix_ids"] or any(type(value) is not int for value in actual):
         raise ValueError("actual tokenizer prefix IDs differ from the protocol")
     panel = _g3_json(config["panel"], "G3 panel")

@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
 from prismaquant.g3_v2 import measure_g3, preflight_g3
 from prismaquant.g3_numerics import token_kl, fp8_per_token_dynamic
 
@@ -19,7 +21,11 @@ def put(path, value):
 
 
 def make_retained_configuration(tmp_path):
-    tokenizer = put(tmp_path/"tokenizer.json", {"added_tokens": [{"content": "[prefix]", "id": 2}]})
+    tokenizer_object = Tokenizer(WordLevel({"token0": 0, "token1": 1, "[prefix]": 2, "token3": 3,
+                                          "token4": 4, "token5": 5, "token6": 6}, unk_token="token0"))
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer_path.write_text(tokenizer_object.to_str())
+    tokenizer = bind(tokenizer_path)
     protocol = put(tmp_path/"protocol.json", {"schema": "prismaquant.g3_protocol/2", "name": "cpu-contract",
         "context_length": 5, "window_count": 2, "vocab_size": 7, "prefix_tokens": ["[prefix]"],
         "prefix_ids": [2], "tensor_parallel_size": 1, "tile_rows": 2})
@@ -73,7 +79,10 @@ def test_teacher_pair_order_is_a_correctness_refusal(configuration, tmp_path):
 
 def test_prefix_ids_come_from_the_actual_tokenizer(configuration):
     path = Path(configuration["tokenizer"]["path"])
-    configuration["tokenizer"] = put(path, {"added_tokens": [{"content": "[prefix]", "id": 3}]})
+    tokenizer = Tokenizer(WordLevel({"token0": 0, "token1": 1, "token2": 2, "[prefix]": 3,
+                                   "token4": 4, "token5": 5, "token6": 6}, unk_token="token0"))
+    path.write_text(tokenizer.to_str())
+    configuration["tokenizer"] = bind(path)
     with pytest.raises(ValueError, match="prefix"):
         preflight_g3(configuration)
 
