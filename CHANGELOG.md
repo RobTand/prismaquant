@@ -10,6 +10,11 @@
   `digests.text_sha256hex`. File reads, stat fences, limits, JSON parsing,
   campaign fields, geometry, identities, containment and refusal behavior
   stay unchanged. The streaming one-MiB reader keeps its own code.
+- The forward-recovery chain tools drop the source-text scan test
+  (#2398, references #1929). The test read the builder source and its
+  string literals instead of consumer behavior. Rendered-launcher
+  identity, invalid-field checks, read bounds and pre-load mismatch
+  checks stay unchanged. No speed change is claimed.
 
 - The shipcard model identity hashes its two canonical JSON texts through the
   existing text owner (#2384, references #1301). The canonical quant-config
