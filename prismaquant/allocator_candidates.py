@@ -639,9 +639,8 @@ def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
                              rung_allowability=None, allowability_scope=None):
     """One lane seam for body, auxiliary and final-assignment allowance.
 
-    ``allowability_scope`` names the unit priced (serving structure, declared
-    shape, regime M); axes the caller cannot state stay unscoped, and an
-    unresolvable scope waits rather than widening.
+    An omitted scope keeps the historical whole-table query.
+    An unresolved explicit scope waits and never broadens.
     """
     family = fr.format_family_of(fr.canonical_format_name(name))
     if family is None or not name.startswith(family.name_prefix):
@@ -656,21 +655,18 @@ def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
     return family_hook(family, "rung_admission")(name, **scope)
 
 
-def _body_allowability_scope(serving_context, out_features: int,
-                             in_features: int) -> dict | None:
-    """One body's D41 scope: actual structure plus declared shape when known.
-
-    Structure rides the serving context; rows are output features and columns
-    are input features, matching the kernel tables' declared shapes. A unit
-    whose run states no structure stays on the whole-table verdict.
-    """
-    structure = None if serving_context is None else serving_context.structure
-    if not structure:
+def unit_allowability_scope(fmt, unit, stats, serving_context, rung_allowability, *,
+                            m=None, tensor_parallel=1):
+    """Use the shared owner for body, auxiliary and final scope."""
+    from .rung_allowability import owner_for_format
+    owner = owner_for_format(rung_allowability, fmt)
+    if owner is None:
         return None
-    if out_features > 0 and in_features > 0:
-        return {"kernel_kind": structure, "rows": int(out_features),
-                "columns": int(in_features)}
-    return {"kernel_kind": structure}
+    structure = (stats.get("_allowability_structure", stats.get("unit_structure")) if serving_context is None
+                 else serving_context.structure)
+    return owner.scope_for_unit(fmt, unit=unit, shape=_shape_from_stats(stats),
+        structure=structure, m=m, tensor_parallel=tensor_parallel,
+        routing=stats.get("routing"))
 
 
 def require_assignment_rung_allowability(assignment, *, target_profile,
@@ -678,9 +674,8 @@ def require_assignment_rung_allowability(assignment, *, target_profile,
                                         allowability_scope_by_unit=None):
     """Fixed units and serving promotion cannot introduce a withheld rung.
 
-    ``allowability_scope_by_unit`` optionally names each unit's priced scope;
-    units without one reuse their serving context's structure alone, and units
-    with neither stay on the whole-table verdict.
+    V3 assignments require their actual unit scope. Legacy whole-table
+    evidence keeps its original contract. Missing explicit evidence waits.
     """
     if rung_allowability is None and load_serving_profile(target_profile).emulation_only:
         return
@@ -691,8 +686,10 @@ def require_assignment_rung_allowability(assignment, *, target_profile,
         unit_scope = None
         if allowability_scope_by_unit is not None:
             unit_scope = allowability_scope_by_unit.get(name)
-        if unit_scope is None and context is not None:
-            unit_scope = {"kernel_kind": context.structure}
+        from .rung_allowability import owner_for_format
+        owner = owner_for_format(rung_allowability, fmt)
+        if unit_scope is None and owner is not None and owner.scoped:
+            unit_scope = {"activation_contract": owner.kernel_build["activation_contract"]}
         key = (fmt, None if context is None else context.key(),
                None if unit_scope is None else _frozen_scope(unit_scope))
         if key in checked:
@@ -2550,6 +2547,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      census_loo: Mapping | None = None,
                      census_loo_groups: Mapping[object, Collection[str]] | None = None,
                      rung_allowability: Mapping | None = None,
+                     allowability_m: int | None = None,
+                     allowability_tensor_parallel: int = 1,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2588,6 +2587,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     unserved: dict[str, list[str]] = {}
     lane_cache: dict[tuple, object] = {}
     admission_cache: dict[tuple, object] = {}
+    quality_waits: dict[str, list[str]] = {}
     for name, s in stats.items():
         if name not in costs:
             continue
@@ -2632,6 +2632,17 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     entry = costs[name][candidate_name]
                     entry_fmt = candidate_name
                     break
+            from .rung_allowability import owner_for_format
+            owner = owner_for_format(rung_allowability, spec.name)
+            if owner is not None:
+                entry = owner.chord_cost(spec.name, unit=name, costs=costs[name], fallback=entry)
+                entry_fmt = spec.name
+                if entry is None:
+                    quality_waits.setdefault(name, []).append(spec.name)
+                    if mask_records is not None:
+                        mask_records.append({"qname": name, "format": spec.name,
+                            "reason": "canonical_quality_wait",
+                            "detail": "qualified neighbour anchors are absent"})
             if entry is None and spec.name in SOURCE_PASSTHROUGH_FORMATS:
                 # No cost table will ever carry a column for a byte-copy
                 # contract. Synthesize the row rather than dropping the
@@ -2670,15 +2681,15 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 continue
             family = fr.format_family_of(spec.name)
             if family is not None and spec.name.startswith(family.name_prefix):
-                # The owning lane's pinned runtime admits the rung, per
-                # serving scope, through the lane's own seam. The D41 scope
-                # names this unit's actual structure and declared shape when
-                # the run states them; without structure the whole-table
-                # verdict stands, exactly as before this join.
+                # The shared owner retains the actual unit scope.
+                # Unknown structure or partial explicit scope waits.
                 from .lane_spec import family_hook
 
-                unit_scope = _body_allowability_scope(
-                    serving_context, out_features, in_features)
+                unit_scope = unit_allowability_scope(
+                    spec.name, name, s, serving_context, rung_allowability,
+                    m=allowability_m, tensor_parallel=allowability_tensor_parallel)
+                if unit_scope is not None:
+                    s.setdefault("_rung_allowability_scope_by_format", {})[spec.name] = unit_scope
                 cache_key = (spec.name, context_key,
                              None if unit_scope is None else _frozen_scope(unit_scope))
                 if cache_key not in admission_cache:
@@ -2711,6 +2722,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     masked.setdefault((spec.name, reason), []).append(name)
                     unserved.setdefault(name, []).append(spec.name)
                     continue
+            if entry.get("canonical_quality") is not None:
+                s.setdefault("_canonical_quality_by_format", {})[spec.name] = entry["canonical_quality"]
             gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
             # Always use measured joint output perturbation when available.
             # Packed experts can carry an unmeasured output_mse placeholder;
@@ -2821,6 +2834,10 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             for branch, count in sorted(activation_branch_counts.items())
         )
         print(f"[alloc] activation-pricing branch: {summary}", flush=True)
+    quality_starved = sorted(name for name in quality_waits if name not in out)
+    if quality_starved:
+        raise ValueError("canonical quality waits: no qualified neighbour anchors for "
+                         + ", ".join(quality_starved))
     unserved_units = sorted(name for name in unserved if name not in out)
     if unserved_units:
         detail = "\n".join(

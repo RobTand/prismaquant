@@ -286,6 +286,8 @@ class PricedTime:
     source_id: str
     source: str  # "row" | "rate_pool"
     pool: Mapping | None = None
+    canonical: Mapping | None = None
+    sample_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -325,7 +327,7 @@ class ShapeRuntimeTable:
                 return pool
         return None
 
-    def lookup(self, key: ShapeKey) -> PricedTime | None:
+    def lookup(self, key: ShapeKey, *, allowability=None) -> PricedTime | None:
         """The time for one key, or ``None`` when the table has no measurement.
 
         A pool that covers the key's rate answers for it (the pool is the
@@ -336,7 +338,7 @@ class ShapeRuntimeTable:
         if pool is None:
             row = rows.get(key)
             if row is None:
-                return None
+                return None if allowability is None else _canonical_lookup(self, key, allowability)
             return PricedTime(key, row.measurement.median_ms, row.measurement.samples_ms,
                               row.kernel_lane, key.label(), "row")
         sources = [rows[source] for source in (replace(key, rate_q256=rate) for rate in pool.rates_q256)
@@ -359,15 +361,10 @@ class ShapeRuntimeTable:
 def canonical_rung_times(allowability, rung: int, *, kernel_kind: str,
                          rows: int, columns: int, m: int,
                          routing: str | None = None) -> dict:
-    """Canonical D41 times for one (structure, shape, rate, M) scope.
+    """Read raw canonical times before reconciliation with operator rows.
 
-    Reads the owning v3 candidate table through its loaded
-    :class:`rung_allowability.RungAllowability`: one ``canonical_time`` per
-    covering cell, each measured, class-derived or withheld with its own
-    reason. Empty cells mean no canonical evidence covers the scope, so
-    there is nothing to reconcile. This never feeds a pricing decision:
-    single-kernel D41 timing and per-unit shape-table timing stay separate
-    sources until a reconciliation policy admits the claim.
+    Missing cells withhold the price. These raw times remain separate from
+    the operator samples that anchor a proposal. No time qualifies serving.
     """
     if type(rung) is not int:
         raise ShapeRuntimeError("canonical rung must be an integer")
@@ -381,59 +378,69 @@ def canonical_rung_times(allowability, rung: int, *, kernel_kind: str,
             "provenance": allowability.provenance()}
 
 
-def canonical_class_time(allowability, rung: int, *, cell_id: str,
-                         class_identity: Mapping) -> dict:
-    """The owning safe class derivation for one unmeasured (rung, cell).
+def _canonical_operator_times(allowability, key: ShapeKey, *, require_admission=True) -> tuple[dict, ...]:
+    """Resolve each actual kernel shape of one served operator."""
+    if key.structure == STRUCTURE_DENSE:
+        match = _DENSE_SHAPE.fullmatch(key.rank_local_shape)
+        shapes = ((int(match[1]), int(match[2])),)
+    else:
+        match = _ROUTED_SHAPE.fullmatch(key.rank_local_shape)
+        shapes = ((int(match[2]), int(match[3])), (int(match[4]), int(match[5])))
+    results = []
+    for rows, columns in shapes:
+        scope = allowability.scope_for_unit(f"{key.family}_R{key.rate_q256}",
+            unit="operator", shape=(rows, columns), structure=key.structure, m=key.m)
+        if scope is None or (require_admission and not allowability.allows(key.rate_q256, scope=scope)):
+            return ()
+        resolved = canonical_rung_times(allowability, key.rate_q256,
+            kernel_kind=key.structure, rows=rows, columns=columns, m=key.m)
+        if not resolved["cells"]:
+            return ()
+        for cell_id, timing in zip(resolved["cells"], resolved["times"]):
+            if timing["status"] != "measured":
+                return ()
+            measurement = timing["measurement"]
+            identity = allowability.class_identity(key.rate_q256, measurement)
+            if identity["activation_contract"] != scope["activation_contract"] or identity["recipe"] != scope["recipe"]:
+                return ()
+            results.append({"cell_id": cell_id, "kernel_time_us": measurement["kernel_time_us"],
+                "class_identity": identity, "timing": timing})
+    return tuple(results)
 
-    The caller supplies the cell's measured geometry-class identity (read
-    through ``RungAllowability.class_identity`` on an actual measurement);
-    unsafe donors and thin classes wait inside the producer, never here.
-    """
-    if not isinstance(cell_id, str) or not cell_id:
-        raise ShapeRuntimeError("canonical class time needs a cell id")
-    return allowability.canonical_time(rung, cell_id=cell_id,
-                                       class_identity=class_identity)
 
+def _canonical_lookup(table: ShapeRuntimeTable, key: ShapeKey, allowability) -> PricedTime | None:
+    """Reconcile a class model with actual operator rows before proposal use."""
+    if not table.admitted:
+        return None
+    target = _canonical_operator_times(allowability, key)
+    if not target:
+        return None
+    target_classes = tuple(item["class_identity"] for item in target)
+    donors = []
+    for row in table.rows:
+        if replace(row.key, rate_q256=key.rate_q256) != key:
+            continue
+        source = _canonical_operator_times(allowability, row.key, require_admission=False)
+        if tuple(item["class_identity"] for item in source) != target_classes:
+            continue
+        ratios = [actual["kernel_time_us"] / anchor["kernel_time_us"]
+                  for actual, anchor in zip(target, source)]
+        factor = max(ratios)
+        samples = tuple(value * factor for value in row.measurement.samples_ms)
+        donors.append((median(samples), row, samples, source, factor))
+    if not donors:
+        return None
+    # Preserve the slowest reconciled estimate. No raw kernel time is an operator price.
+    value, row, samples, source, factor = max(donors, key=lambda item: (item[0], item[1].key))
+    provenance = {"status": "proposal_data", "method": "canonical_class_reconciled",
+        "operator_anchor": row.key.label(), "scale": factor,
+        "operator_receipt": row.measurement.receipt_path,
+        "operator_receipt_sha256": row.measurement.receipt_sha256,
+        "canonical_target": list(target), "canonical_anchor": list(source),
+        "numerical_qualification_inherited": False, "serving_qualification_inherited": False}
+    return PricedTime(key, float(value), row.measurement.samples_ms, row.kernel_lane,
+        row.key.label(), "canonical_class", canonical=MappingProxyType(provenance), sample_scale=factor)
 
-def reconcile_canonical_time(canonical: Mapping, priced_ms: float | None) -> dict:
-    """Advisory comparison of canonical D41 times against one table time.
-
-    Reports per measured cell whether the admitted shape-table time agrees
-    with the canonical single-kernel time; it prices nothing and qualifies
-    nothing. ``priced_ms=None`` is an unpriced scope, not a zero.
-    """
-    if not isinstance(canonical, Mapping):
-        raise ShapeRuntimeError("canonical reconciliation needs a canonical result")
-    if priced_ms is not None and (
-            type(priced_ms) is bool or not isinstance(priced_ms, (int, float))):
-        raise ShapeRuntimeError("reconciled table time must be a number")
-    compared = []
-    for cell, timing in zip(canonical.get("cells", []), canonical.get("times", [])):
-        if not isinstance(timing, Mapping):
-            compared.append({"cell_id": cell, "verdict": "no_canonical_time",
-                             "reason": "unreadable"})
-            continue
-        if timing.get("status") == "inherited":
-            compared.append({"cell_id": cell, "verdict": "class_derived",
-                             "kernel_time_us": timing.get("kernel_time_us"),
-                             "anchors": timing.get("anchors")})
-            continue
-        if timing.get("status") != "measured":
-            compared.append({"cell_id": cell, "verdict": "no_canonical_time",
-                             "reason": timing.get("reason")})
-            continue
-        if priced_ms is None:
-            compared.append({"cell_id": cell, "verdict": "unpriced_scope",
-                             "canonical_us": timing["measurement"]["kernel_time_us"]})
-            continue
-        canonical_ms = timing["measurement"]["kernel_time_us"] / 1000.0
-        compared.append({"cell_id": cell, "verdict": "compared",
-                         "canonical_us": timing["measurement"]["kernel_time_us"],
-                         "table_ms": float(priced_ms),
-                         "rel_diff": ((float(priced_ms) - canonical_ms) / canonical_ms
-                                      if canonical_ms > 0 else None)})
-    return {"format": canonical.get("format"), "rung": canonical.get("rung"),
-            "scope": dict(canonical.get("scope", {})), "compared": compared}
 
 
 def parse_shape_table(payload: Mapping, *, source_path: str = "") -> ShapeRuntimeTable:
@@ -792,6 +799,8 @@ class ShapePricing:
         for gap in self.gaps:
             by_reason[gap["kind"]] = by_reason.get(gap["kind"], 0) + 1
         return {"regime_m": self.regime_m, "priced_options": len(self.resources),
+                "canonical_prices": {f"{unit}@{fmt}": dict(time.canonical)
+                    for (unit, fmt), time in sorted(self.prefill.items()) if time.canonical is not None},
                 "unpriced_options": len(self.gaps), "by_kind": dict(sorted(by_reason.items())),
                 "gaps": [dict(gap) for gap in self.gaps],
                 "reading": ("an unpriced option is absent from the time-aware candidate set and is "
@@ -808,15 +817,23 @@ class ShapePricing:
         priced = self.prefill if axis == "prefill" else self.decode
         counts: dict[str, int] = {}
         samples: dict[str, tuple[float, ...]] = {}
+        scales: dict[str, float] = {}
         for unit, fmt in sorted(assignment.items()):
             time = priced.get((unit, fmt))
             if time is None:
                 raise ShapeRuntimeError(f"{unit}@{fmt} has no {axis} time; it cannot be in a priced sum")
             counts[time.source_id] = counts.get(time.source_id, 0) + 1
-            samples[time.source_id] = time.samples_ms
+            samples.setdefault(time.source_id, time.samples_ms)
+            scales[time.source_id] = scales.get(time.source_id, 0.0) + time.sample_scale
         ids = sorted(counts)
-        result = bootstrap_sum([samples[i] for i in ids], draws=draws, seed=seed, offset_ms=offset_ms,
-                               multiplicities=[counts[i] for i in ids])
+        if all(scales[i] == counts[i] for i in ids):
+            result = bootstrap_sum([samples[i] for i in ids], draws=draws, seed=seed,
+                offset_ms=offset_ms, multiplicities=[counts[i] for i in ids])
+        else:
+            result = bootstrap_sum([[value * scales[i] for value in samples[i]] for i in ids],
+                draws=draws, seed=seed, offset_ms=offset_ms)
+            result["class_model_scales"] = {i: scales[i] for i in ids}
+            result["uncertainty_scope"] = "operator_anchor_samples_conditional_on_class_model"
         result["distinct_measurements"] = len(ids)
         return result
 
@@ -841,7 +858,8 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
                                   option_members: Mapping[tuple[str, str], Mapping[str, str]],
                                   member_shapes: Mapping[str, Sequence[int]],
                                   member_structure: Mapping[str, str], regime_m: int,
-                                  published_formats: Mapping[str, Mapping[str, Any]]) -> ShapePricing:
+                                  published_formats: Mapping[str, Mapping[str, Any]],
+                                  rung_allowability: Mapping | None = None) -> ShapePricing:
     """Price every candidate option from shape rows; leave the unpriced out.
 
     ``option_members`` maps each DP option to the member ``{name: format}`` it
@@ -902,13 +920,15 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
             family, rate = families.pop(), rates.pop()
             if type(candidate.memory_bytes) is not int:
                 raise ShapeRuntimeError(f"{key}: candidate bytes must be an exact integer")
-            found = table.lookup(ShapeKey(structure, operators[unit], family, rate, regime_m))
+            time_key = ShapeKey(structure, operators[unit], family, rate, regime_m)
+            owner = None if rung_allowability is None else rung_allowability.get(family)
+            found = table.lookup(time_key, allowability=owner)
             if found is None:
                 gap(unit, candidate.fmt, "no_time_row",
-                    f"no row or rate pool times {structure} {operators[unit]} {family} R{rate} "
-                    f"at M={regime_m}")
+                    f"no admitted row or reconciled canonical class times {structure} "
+                    f"{operators[unit]} {family} R{rate} at M={regime_m}")
                 continue
-            one = (table.lookup(ShapeKey(structure, operators[unit], family, rate, DECODE_M))
+            one = (table.lookup(replace(time_key, m=DECODE_M), allowability=owner)
                    if DECODE_M in table.context.regimes else None)
             prefill[key] = found
             if one is not None:

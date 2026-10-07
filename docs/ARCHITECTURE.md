@@ -1,5 +1,53 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-07 (PQ #2364): the canonical consumer joins v3
+performance evidence through the existing lane admission owner.
+An explicit index file can select an immutable candidate without an active
+index change. A directory still selects its current `index.json`.
+Legacy tables require only the original three producer functions.
+V3 tables require the scope, class, time and quality functions they use.
+
+The shared owner retains each unit's actual rank-local shape, structure,
+token-row scope, independently observed activation build and wire recipe.
+Body, independent MTP, final assignments and logical surfaces use that scope.
+An unresolved explicit scope waits. It never becomes an unscoped allowance.
+
+The producer owns geometry classification and the performance menu.
+Its missing half-bit coverage remains missing. T4 remains unadmitted under
+its current policy. T8 R1280 remains a quality anchor, not a menu option.
+
+Qualified neighbouring whole anchors supply the producer's linear chord.
+Anchors must agree on unit, family, currency, calibration and actual source
+facts. Joint prices retain the existing joint-price validator and currency.
+Weight-error screens do not become validated KL. A derived price remains a
+proposal. Missing qualified prices cannot remove a unit from byte accounting.
+
+The independent MTP selector also retains its own objective and byte budget.
+Its export reader recomputes recorded chords from the bound original anchors.
+
+PACT retains actual operator rows as its first time source.
+A missing row can use a canonical class model only after reconciliation with
+an admitted operator row of the same class and actual operator scope.
+The model scales operator samples with canonical timing ratios.
+It keeps raw kernel times, operator receipts and original class identities
+separate in provenance. Shared operator samples remain correlated.
+The uncertainty interval is conditional on the class model.
+
+Neither class costs nor chords establish numerical or serving qualification.
+The existing exact solver charges integer serialized bytes and leaves budget
+slack when no assignment fills the budget. Fused-family constraints stay intact.
+
+The selected table, explicit index, unit scopes, chord sources and class
+cost sources remain in allocation and frontier provenance.
+The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
+Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
+The existing isolated test adapter fetches that module when no source is
+supplied. No untracked producer, serving overlay or global feature skip is required.
+
+CPU fixtures prove source mechanics, not measured speed, validated KL or a
+serving frontier. No serving pin, kernel, wire or active index changes.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,

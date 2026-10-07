@@ -279,7 +279,8 @@ def _unit_storage(payload, unit):
     return wire, params
 
 
-def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
+def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices=None,
+               quality_provenance=None) -> tuple[dict, dict]:
     """``{unit: {rung: (E, bytes)}}`` and the priced rungs the runtime does not attest.
 
     BF16 passthrough is added where the source is BF16. A priced rung that
@@ -302,10 +303,44 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
             if eligible is not None and not eligible(unit, rung):
                 unattested.setdefault(rung, []).append(unit)
                 continue
-            rows[unit][rung] = (float(row["predicted_dloss"]), wire[rung])
+            from .rung_allowability import owner_for_format
+            owner = owner_for_format(rung_allowability, rung)
+            price = (owner.chord_cost(rung, unit=unit, costs=payload["costs"][unit])
+                     if owner is not None else (quality_prices or {}).get(unit, {}).get(rung, row))
+            if price is None:
+                unattested.setdefault(rung, []).append(unit)
+                continue
+            if quality_provenance is not None and price.get("canonical_quality") is not None:
+                quality_provenance.setdefault(unit, {})[rung] = price["canonical_quality"]
+            rows[unit][rung] = (float(price["predicted_dloss"]), wire[rung])
         if payload["source_dtype"][unit] == "bfloat16":
             rows[unit][_BF16] = (0.0, 2 * params)
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
+
+
+def _recompute_recorded_quality(payload, recorded):
+    """Recompute proposal prices from their actual bound anchors before export."""
+    from .rung_allowability import _producer_api, qualified_cost_scope, qualified_rung_quality
+    from .tessera_formats import parse_tessera_format_name
+    prices = {}
+    producer = None
+    for unit, by_rung in recorded.items():
+        for name, expected in by_rung.items():
+            family, rung = parse_tessera_format_name(name)
+            lower, upper = expected["anchors"]
+            rows = payload["costs"][unit]
+            left, right = rows[family.format_name(lower)], rows[family.format_name(upper)]
+            if producer is None:
+                producer = _producer_api()
+            actual = qualified_rung_quality(producer, family.name, rung,
+                lower_rung=lower, upper_rung=upper,
+                lower_value=left["predicted_dloss"], upper_value=right["predicted_dloss"],
+                lower_scope=qualified_cost_scope(left, family=family.name),
+                upper_scope=qualified_cost_scope(right, family=family.name))
+            if actual != expected or actual["provenance"]["unit"] != unit:
+                raise ValueError("MTP canonical quality differs from its actual bound anchors")
+            prices.setdefault(unit, {})[name] = {"predicted_dloss": actual["value"]}
+    return prices
 
 
 class MtpMenuRefused(ValueError):
@@ -361,7 +396,7 @@ def _restrict_to_declared(rows: dict, declared) -> tuple[dict, dict, list]:
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                      acceptance_points=(), k: int = 1, eligible=None,
                      fixed_formats: Mapping[str, str] | None = None,
-                     formats=None) -> dict:
+                     formats=None, rung_allowability=None) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
@@ -386,7 +421,9 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         raise ValueError(f"MTP cost payload must be {SCHEMA}")
     byte_budget = _STORAGE.integer(byte_budget, where="byte_budget", minimum=0)
     probe_sha256, probe = _mtp_probe(payload)
-    rows, unattested = _unit_rows(payload, eligible)
+    quality_provenance = {}
+    rows, unattested = _unit_rows(payload, eligible, rung_allowability=rung_allowability,
+                                 quality_provenance=quality_provenance)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
     declared_record = {}
     if formats is not None:
@@ -466,6 +503,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         **({"fixed_formats": dict(sorted(fixed_formats.items()))}
            if fixed_formats is not None else {}),
         "assignment": assignment,
+        **({"canonical_quality": quality_provenance} if quality_provenance else {}),
         **selected_wires,
     }
 
@@ -508,7 +546,8 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
                   for unit in members}
     if len(assignment) != len(payload["costs"]) or set(assignment) != set(payload["costs"]):
         raise ValueError("MTP selection groups do not partition the bound cost")
-    rows, _unattested = _unit_rows(payload)
+    quality_prices = _recompute_recorded_quality(payload, record.get("canonical_quality", {}))
+    rows, _unattested = _unit_rows(payload, quality_prices=quality_prices)
     menu, _incomplete = canon.group_product_menu(
         {group: tuple(members) for group, members in payload["groups"].items()},
         rows, params=payload["params"])

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import os
+
 from pathlib import Path
 
 import pytest
@@ -19,12 +19,10 @@ BUILD = json.loads((FIXTURE / FAMILY / "fixture-t8" / "v0001.json").read_text())
 def publication(tmp_path, monkeypatch):
     root = tmp_path / "publication"
     shutil.copytree(FIXTURE, root)
-    if os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE"):
-        from prismaquant import rung_allowability
-        from _rung_allowability_producer import ExternalProducer
-        assert os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256"), "pin canonical producer bytes"
-        producer = ExternalProducer()
-        monkeypatch.setattr(rung_allowability, "_producer_api", lambda: producer)
+    from prismaquant import rung_allowability
+    from _rung_allowability_producer import ExternalProducer
+    producer = ExternalProducer()
+    monkeypatch.setattr(rung_allowability, "_producer_api", lambda: producer)
     return root
 
 

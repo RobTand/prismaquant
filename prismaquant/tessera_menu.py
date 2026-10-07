@@ -674,7 +674,7 @@ def route_admission(
 
     ``allowability_scope`` carries the unit priced to the D41 owner: actual
     serving structure, declared shape, regime M, activation build and recipe.
-    Axes the caller cannot state stay unscoped; an unresolvable scope waits.
+    An omitted scope stays unscoped. An unresolved explicit scope waits.
 
     A v5 development contract requires the caller's complete serving context.
     Its own scoped lookup checks every required regime under that one target;

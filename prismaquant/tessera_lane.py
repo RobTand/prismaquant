@@ -257,7 +257,7 @@ def allocation_arguments(parser) -> None:
                         help="Write a non-exportable selected-wire request here instead of layer-config; "
                              "finalize through prismaquant.tessera_materialization after selected wires exist")
     parser.add_argument("--tessera-rung-allowability-root", default=None,
-                        help="D41 publication root containing the current index.json")
+                        help="D41 publication directory or an explicit immutable index file")
     parser.add_argument("--tessera-rung-kernel-builds", default=None,
                         help="Independent observed format-to-kernel_build JSON; required with D41 root")
 

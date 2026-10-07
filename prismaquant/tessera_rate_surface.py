@@ -25,11 +25,10 @@ the ladder shows exactly where: E4M3 wSNR runs 11.04/16.79/22.12/27.35/29.57
 dB at rates 2-6, i.e. ~5.4 dB per bit until it saturates against the scalar
 E4M3 ceiling, where the last step delivers 2.22.  A straight line through
 those anchors overpredicts the top of the range badly.  So interpolation is
-**monotone piecewise-linear in (q256, log2 dloss) between bracketing anchors
-only**, and extrapolation beyond the measured envelope is refused rather than
-guessed.  Interpolation error is then a measurable quantity, not a modelling
-assumption: :func:`leave_one_anchor_out` reports it, and
-:func:`allocation_regret` reports the only thing that actually matters.
+**the generic, unqualified surface uses a monotone log-loss screen**.
+A canonical surface instead uses the producer's qualified neighbour chord.
+Both paths refuse extrapolation beyond their measured anchors.
+Derived quality remains proposal data and grants no serving qualification.
 
 Gate on the decision, not the residual
 --------------------------------------
@@ -68,6 +67,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 from tessera.errors import GrammarError
+from tessera.manifest import BodyKind
 
 from .tessera_allocator import (
     TesseraAllocatorCandidate,
@@ -80,6 +80,7 @@ from .tessera_formats import (
     TesseraFormatError,
     get_tessera_family,
     validate_body_rate_q256,
+    tessera_served_wire_recipe,
 )
 
 if TYPE_CHECKING:
@@ -174,6 +175,8 @@ class TesseraRateSurface:
     anchor_q256: tuple[int, ...]
     anchor_dloss: tuple[float, ...]
     anchor_stderr: tuple[float, ...]
+    allowability: object | None = None
+    anchor_scopes: Mapping[int, Mapping] | None = None
 
     def __post_init__(self) -> None:
         if len(self.anchor_q256) < 2:
@@ -187,19 +190,28 @@ class TesseraRateSurface:
             == len(self.anchor_stderr)
         ):
             raise TesseraFormatError("anchor arrays must agree in length")
+        if self.allowability is not None:
+            from .rung_allowability import _quality_anchor_scope
+            if self.allowability.format != self.family or self.anchor_scopes is None:
+                raise TesseraFormatError("canonical quality requires the actual family and qualified anchor scopes")
+            for rate in self.anchor_q256:
+                scope = self.anchor_scopes.get(rate)
+                unit = _quality_anchor_scope(scope, "surface", self.family)
+                if unit != self.unit_name or scope["currency"] != self.currency:
+                    raise TesseraFormatError("quality surface differs from its actual unit or currency")
         for left, right in zip(self.anchor_q256, self.anchor_q256[1:]):
             if left >= right:
                 raise TesseraFormatError(
                     "anchor rates must be strictly increasing"
                 )
         for value in self.anchor_dloss:
-            if not math.isfinite(value) or value <= 0.0:
+            if not math.isfinite(value) or value < 0.0 or (self.allowability is None and value == 0.0):
                 raise TesseraFormatError(
                     "anchor dloss must be positive and finite; a zero or "
                     "negative loss cannot be interpolated in log space"
                 )
         for left, right in zip(self.anchor_dloss, self.anchor_dloss[1:]):
-            if right >= left:
+            if self.allowability is None and right >= left:
                 raise TesseraFormatError(
                     "anchor dloss must strictly decrease as rate rises; a "
                     "non-monotone anchor set is a measurement problem, and "
@@ -231,6 +243,15 @@ class TesseraRateSurface:
             if rate > body_rate_q256
         )
         lower = upper - 1
+        if self.allowability is not None:
+            if self.anchor_scopes is None:
+                raise TesseraFormatError("canonical quality requires qualified anchor scopes")
+            result = self.allowability.chord_quality(body_rate_q256,
+                lower_rung=self.anchor_q256[lower], upper_rung=self.anchor_q256[upper],
+                lower_value=self.anchor_dloss[lower], upper_value=self.anchor_dloss[upper],
+                lower_scope=self.anchor_scopes[self.anchor_q256[lower]],
+                upper_scope=self.anchor_scopes[self.anchor_q256[upper]])
+            return float(result["value"])
         span = self.anchor_q256[upper] - self.anchor_q256[lower]
         weight = (body_rate_q256 - self.anchor_q256[lower]) / span
         log_low = math.log2(self.anchor_dloss[lower])
@@ -272,6 +293,8 @@ def fit_rate_surface(
     records: Sequence[TesseraAllocatorCandidate],
     *,
     currency: str,
+    allowability=None,
+    anchor_scopes: Mapping[int, Mapping] | None = None,
 ) -> TesseraRateSurface:
     """Build one unit's surface from its measured anchor candidates."""
 
@@ -305,6 +328,8 @@ def fit_rate_surface(
         layout=next(iter(layouts)),
         currency=currency,
         anchor_q256=rates,
+        allowability=allowability,
+        anchor_scopes=anchor_scopes,
         anchor_dloss=tuple(
             float(record.predicted_dloss_mean) for record in ordered
         ),
@@ -319,12 +344,14 @@ def densify_rate_surface(
     shape: Sequence[int],
     *,
     q256_values: Sequence[int],
-    alphabets: Mapping[int, Sequence[int]],
+    alphabets: Mapping[int, Sequence[int]] | None = None,
     schedule_for: "callable | None" = None,
     target_profile: str | None = "research",
     qname: str | None = None,
     packed_expert: bool | None = None,
     sidecar_header_bytes: int = 0,
+    allowability_scope: Mapping | None = None,
+    tensor_parallel: int = 1,
 ) -> tuple[TesseraAllocatorCandidate, ...]:
     """Price a dense set of rungs from one interpolated surface.
 
@@ -341,27 +368,37 @@ def densify_rate_surface(
     columns = dims[1]
     built: list[TesseraAllocatorCandidate] = []
     for rate in sorted(set(int(value) for value in q256_values)):
+        structure = (allowability_scope or {}).get("kernel_kind")
+        wire = tessera_served_wire_recipe(surface.family, rate, structure=structure,
+                                         refuse_unattested=False)
+        if surface.allowability is not None:
+            actual = surface.allowability.scope_for_unit(f"{surface.family}_R{rate}",
+                unit=surface.unit_name, shape=dims, structure=structure,
+                m=(allowability_scope or {}).get("m"), tensor_parallel=tensor_parallel,
+                routing=(allowability_scope or {}).get("routing"))
+            for axis in ("rows", "columns"):
+                if (allowability_scope or {}).get(axis) not in (None, actual.get(axis)):
+                    raise TesseraFormatError(f"quality surface {axis} differs from the actual unit shape")
+            actual = {**actual, **(allowability_scope or {})}
+            if not surface.allowability.allows(rate, scope=actual):
+                continue
         schedule = (
             schedule_for(columns, rate)
             if schedule_for is not None
             else uniform_column_schedule(
-                columns, rate, family=surface.family,
+                columns, rate, family=surface.family, recipe=wire,
             )
         )
-        # Each rung uses only the rates its own schedule contains, and
-        # `validate_alphabets` requires the mapping to match EXACTLY -- a
-        # superset is refused.  So the caller supplies every alphabet it
-        # holds and the rung selects the ones it actually spends.  Every
-        # scheduled rate is a coded trellis rate needing its table: "bypass"
-        # was the retired Gridbook wire's word and Tessera has no uncoded
-        # rate, so the set is the schedule's rates, unfiltered (#161).
-        used = set(schedule)
-        missing = used - set(alphabets)
-        if missing:
-            raise TesseraFormatError(
-                f"rung {rate} needs alphabets for rates {sorted(missing)}; "
-                f"got {sorted(alphabets)}"
-            )
+        if wire.body is BodyKind.WINDOW:
+            alphabet_payload = alphabets
+        else:
+            used = set(schedule)
+            missing = used - set(alphabets or {})
+            if missing:
+                raise TesseraFormatError(
+                    f"rung {rate} needs alphabets for rates {sorted(missing)}; "
+                    f"got {sorted(alphabets or {})}")
+            alphabet_payload = {key: alphabets[key] for key in sorted(used)}
         built.append(
             build_tessera_allocator_candidate(
                 surface.unit_name,
@@ -370,7 +407,8 @@ def densify_rate_surface(
                 body_rate_q256=rate,
                 layout=surface.layout,
                 schedule=schedule,
-                alphabets={key: alphabets[key] for key in sorted(used)},
+                alphabets=alphabet_payload,
+                recipe=wire,
                 predicted_dloss=surface.predict(rate),
                 predicted_dloss_stderr=surface.predict_stderr(rate),
                 target_profile=target_profile,

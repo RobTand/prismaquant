@@ -836,7 +836,8 @@ def _allocation_lane():
     return single_lane_plugin("allocation_menu") or _StockAllocationLane
 
 
-def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, target_profile=None):
+def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, target_profile=None,
+                          costs=None, m=None, tensor_parallel=1, scope_provenance=None):
     """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
 
     The same reader the body menu uses (``format_is_producer_eligible``), asked
@@ -855,9 +856,21 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
         from .lane_spec import family_hook
         from .serving_profiles import load_serving_profile
         if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
+            from .allocator_candidates import unit_allowability_scope
+            row = {} if costs is None else costs.get(unit, {}).get(rung, {})
+            shape = row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ())
+            unit_stats = ({"out_features": shape[-2], "in_features": shape[-1]}
+                          if len(shape) >= 2 else {})
+            if context is None and profile is not None:
+                from .tessera_serving_scope import unit_structure_from_profile
+                unit_stats["unit_structure"] = unit_structure_from_profile(unit, profile)
+            unit_scope = unit_allowability_scope(rung, unit, unit_stats, context,
+                rung_allowability, m=m, tensor_parallel=tensor_parallel)
+            if scope_provenance is not None and unit_scope is not None:
+                scope_provenance[(unit, rung)] = unit_scope
             admission = candidate_rung_admission(rung, target_profile=target_profile,
                 serving_context=context, rung_allowability=rung_allowability,
-                allowability_scope=(None if context is None else {"kernel_kind": context.structure}))
+                allowability_scope=unit_scope)
             if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
                 return False
         if context is None:
@@ -866,19 +879,14 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
     return eligible
 
 
-def _final_allowability_scopes(assignment, context_by_unit):
-    """Each assigned unit's D41 scope: actual structure when stated.
-
-    Shapes are not carried to the final check, so units scope by serving
-    structure alone; units without a context stay on the whole-table verdict.
-    """
-    if not assignment or context_by_unit is None:
-        return None
-    scopes = {name: {"kernel_kind": context.structure}
-              for name, context in context_by_unit.items()
-              if name in assignment and context is not None
-              and getattr(context, "structure", None)}
-    return scopes or None
+def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowability, *,
+                              m=None, tensor_parallel=1):
+    """Retain each final unit's exact scope, including fixed and auxiliary units."""
+    from .allocator_candidates import unit_allowability_scope
+    return {name: unit_allowability_scope(fmt, name, stats.get(name, {}),
+                None if context_by_unit is None else context_by_unit.get(name),
+                rung_allowability, m=m, tensor_parallel=tensor_parallel)
+            for name, fmt in assignment.items()}
 
 
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
@@ -907,13 +915,21 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
                   if args.mtp_acceptance_points else [])
         fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
                  if getattr(args, "mtp_fixed_formats", None) else None)
+        scope_provenance = {}
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
                                   eligible=_mtp_rung_attestation(serving_target, profile,
-                                      rung_allowability=rung_allowability, target_profile=target_profile),
-                                  fixed_formats=fixed,
+                                      rung_allowability=rung_allowability, target_profile=target_profile,
+                                      costs=payload["costs"], m=getattr(args, "pact_regime", None),
+                                      tensor_parallel=getattr(args, "pact_tensor_parallel", None) or 1,
+                                      scope_provenance=scope_provenance),
+                                  fixed_formats=fixed, rung_allowability=rung_allowability,
                                   formats=(None if declared is None
                                            else declared.split(",")))
+        if scope_provenance:
+            record["rung_allowability_scopes"] = {
+                unit: scope_provenance[(unit, fmt)] for unit, fmt in record["assignment"].items()
+                if (unit, fmt) in scope_provenance}
     except MtpMenuRefused as exc:
         import sys
 
@@ -3008,6 +3024,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     accounting_stats = dict(stats)
     tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
+    if rung_allowability is not None:
+        if any(owner.scoped for owner in rung_allowability.values()):
+            from .tessera_serving_scope import unit_structure_from_stats
+            for name, row in accounting_stats.items():
+                row["_allowability_structure"] = unit_structure_from_stats(name, row, model_profile)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
@@ -3268,6 +3289,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         rung_allowability=rung_allowability,
+        allowability_m=args.pact_regime,
+        allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
         **({"preserve_runtime_frontier": True}
            if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
@@ -3328,6 +3351,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             activation_pricing=None,
             context_by_unit=tessera_context_by_unit,
             rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_head_candidates = [
             name for name in head_probe_names
@@ -3416,6 +3441,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             activation_pricing=activation_pricing,
             context_by_unit=tessera_context_by_unit,
             rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_mtp_candidates = [
             name for name in mtp_names
@@ -3947,7 +3974,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             pact_pricing = build_shape_runtime_resources(
                 shape_table, candidates, option_members=pact_option_members,
                 member_shapes=member_shapes, member_structure=member_structure,
-                regime_m=args.pact_regime, published_formats=pact_formats)
+                regime_m=args.pact_regime, published_formats=pact_formats,
+                rung_allowability=rung_allowability)
             pact_candidates = pact_pricing.time_candidates(candidates)
         except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
             raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
@@ -4346,10 +4374,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             legal_formats=per_linear_legal_formats,
         )
         from .allocator_candidates import require_assignment_rung_allowability
+        final_scope_stats = {**accounting_stats, **fixed_stats, **stats}
+        final_scopes = _final_allowability_scopes(
+            assignment_expanded, tessera_context_by_unit, final_scope_stats, rung_allowability,
+            m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel or 1)
         require_assignment_rung_allowability(assignment_expanded, target_profile=target_profile,
             context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability,
-            allowability_scope_by_unit=_final_allowability_scopes(
-                assignment_expanded, tessera_context_by_unit))
+            allowability_scope_by_unit=final_scopes)
+        if rung_allowability is not None:
+            tessera_menu_widths["rung_allowability_scopes"] = {
+                name: scope for name, scope in final_scopes.items() if scope is not None}
+            tessera_menu_widths["canonical_quality"] = {
+                name: final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})[fmt]
+                for name, fmt in assignment_expanded.items()
+                if fmt in final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})}
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,

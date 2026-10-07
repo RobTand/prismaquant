@@ -625,7 +625,7 @@ def build_tessera_allocator_candidate(
     body_rate_q256: int,
     layout: str,
     schedule: Sequence[int],
-    alphabets: Mapping[int, Sequence[int]],
+    alphabets: Mapping[int, Sequence[int]] | None,
     predicted_dloss: float,
     predicted_dloss_stderr: float = 0.0,
     target_profile: str | None = "research",
@@ -633,6 +633,7 @@ def build_tessera_allocator_candidate(
     packed_expert: bool | None = None,
     sidecar_header_bytes: int = 0,
     variant_label: str | None = None,
+    recipe=None,
 ) -> TesseraAllocatorCandidate:
     """Validate and price one pre-render recipe, reporting uncertainty separately."""
 
@@ -654,6 +655,7 @@ def build_tessera_allocator_candidate(
         schedule=schedule,
         alphabets=alphabets,
         sidecar_header_bytes=sidecar_header_bytes,
+        recipe=recipe,
     )
     mean = _finite_float(
         predicted_dloss,

@@ -6,6 +6,31 @@ import os
 import subprocess
 import sys
 
+from functools import lru_cache
+from pathlib import Path
+import tempfile
+from urllib.request import urlopen
+
+
+@lru_cache(maxsize=1)
+def metadata_source():
+    declared = json.loads((Path(__file__).parent / "fixtures" /
+                           "rung_allowability_v3" / "producer.json").read_text())
+    supplied = os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE")
+    if supplied:
+        return supplied, os.environ["TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256"]
+    url = (f"https://raw.githubusercontent.com/{declared['repository']}/"
+           f"{declared['commit']}/{declared['path']}")
+    # Only the pure metadata module enters the isolated child process.
+    with urlopen(url, timeout=60) as response:
+        raw = response.read()
+    import hashlib
+    if hashlib.sha256(raw).hexdigest() != declared["sha256"]:
+        raise ValueError("canonical metadata bytes differ from the declared dependency")
+    target = Path(tempfile.mkdtemp(prefix="pq-rung-metadata-")) / "rung_allowability.py"
+    target.write_bytes(raw)
+    return str(target), declared["sha256"]
+
 _SCRIPT = r'''
 import hashlib, importlib.util, json, os, pathlib, sys
 path = pathlib.Path(os.environ["TESSERA_RUNG_ALLOWABILITY_MODULE"])
@@ -38,10 +63,13 @@ class ExternalProducer:
         self.evidence = None
 
     def _call(self, method, payload, *args, **kwargs):
+        path, digest = metadata_source()
         completed = subprocess.run(
             [os.environ.get("TESSERA_PRODUCER_PYTHON", sys.executable), "-c", _SCRIPT],
             input=json.dumps({"method": method, "payload": payload,
                               "args": list(args), "kwargs": kwargs}),
+            env={**os.environ, "TESSERA_RUNG_ALLOWABILITY_MODULE": path,
+                 "TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256": digest},
             text=True, capture_output=True, check=True)
         response = json.loads(completed.stdout)
         self.evidence = {key: response[key] for key in
