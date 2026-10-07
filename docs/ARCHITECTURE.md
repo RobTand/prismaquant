@@ -4782,6 +4782,17 @@ it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
 
+Re-stamped 2026-10-07 (PQ #2375, references #1301 and #1147, CEO D32):
+the AURA checkpoint producer comparison treats Git diff status one as source
+provenance. `aura_cost._checkpoint_git_commit` sends only this mismatch to
+`dev_mode.seal_check`. Development mode prints `[DEV-MODE]` and returns the
+resolved commit. Certified mode keeps the original exception and message.
+Git execution errors, timeouts, unresolved commits and malformed overrides
+still refuse in both modes. Explicit commit overrides keep their existing
+behavior. No checkpoint is archived, recomputed or rewritten. Byte integrity
+and mathematical checks stay unchanged. The pipeline topology stays unchanged.
+Tests: `tests/test_aura_checkpoint_resume_identity.py`.
+
 Re-stamped 2026-10-05 (PQ #2302, CEO D32): selected capture metadata,
 source digest stat reuse, and paired-rate trade consumers follow the same
 existing default-on policy. An owned capture snapshot keeps its original

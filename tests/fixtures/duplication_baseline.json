@@ -180,7 +180,6 @@
   "sorted-json:prismaquant/allocator.py::main",
   "sorted-json:prismaquant/anchored_cost.py::_write_allocator_identity",
   "sorted-json:prismaquant/anchored_cost.py::run_allocator_once",
-  "sorted-json:prismaquant/aura_cost.py::_write_aura_checkpoint_manifest",
   "sorted-json:prismaquant/cluster_campaign.py::main",
   "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256",
   "sorted-json:prismaquant/container_runtime_identity.py::main",
