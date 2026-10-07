@@ -26375,6 +26375,11 @@ GLM quality, served quality or whole-instrument equivalence.
 The gold stages use `measure_vllm_full_kl` and
 `measure_vllm_wikitext_ppl`. The latter reads the existing generic
 `model_wikitext_inputs/2` contract. It adds no corpus normalization path.
+
+Valid cache fingerprint drift uses the existing D32 provenance stamp in dev mode.
+Certified fixtures retain the provenance refusal. Corpus hashes, token values,
+revision, sampling, closed fields and own-byte integrity remain correctness checks.
+
 Opt-in `--preflight` reads real inputs without loading vLLM. It reports
 `runtime_qualification: not_run`. The job's CPU preflight cannot fill a
 serving gate. `--verify-only` replays existing evidence and refuses missing

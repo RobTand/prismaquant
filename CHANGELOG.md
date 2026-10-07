@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
 - Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
   Reuse the destination validator for configured and derived paths.
   Create logs exclusively so a later collision cannot truncate retained bytes.

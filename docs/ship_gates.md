@@ -69,6 +69,10 @@ Use `--score-positions all` for the existing gold contract. A final-position
 screen cannot close that slot. Keep graph, speculative-decode, calibration,
 artifact, runtime and uniform-control correctness checks in force.
 
+The generic input owner stamps valid cache fingerprint drift in default dev mode.
+Certified fixtures still refuse that provenance drift. Corpus hashes, revision,
+token values, sampling and own-byte integrity must still agree.
+
 ## Configure the real producers
 
 Use the artifact's existing lane declaration to select producers. Keep the
