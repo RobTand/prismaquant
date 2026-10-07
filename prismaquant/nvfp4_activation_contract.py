@@ -13,8 +13,9 @@ that is not expressible by the compressed-tensors scheme itself:
 
 Old CB artifacts can lack both the contract record and scalar tensors; legacy
 native artifacts may carry an unversioned/defaultable scalar.  Both remain
-readable by their baseline paths, but neither is eligible for Gridbook fused
-W4A4 dispatch.
+readable by their baseline paths, but neither can attest the fused-W4A4
+activation contract: only the versioned CB export path emits that record
+after complete calibration.
 """
 from __future__ import annotations
 
