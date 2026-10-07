@@ -25,6 +25,16 @@
   The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
   Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
   No new seal, serving result, or performance result is claimed.
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
+- Tessera export setup derives architecture wiring, census inputs and partitions
+  from profile capabilities and source headers (#2409, D50 item six).
+  The plan writer can emit the metadata plan. The model dispatcher exposes it
+  through a non-submit mode and replaces the fixed-count shard driver.
+  The existing exporter, construction census and native runtime checks remain
+  authoritative. This CPU work grants no runtime or serving qualification.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes
