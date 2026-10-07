@@ -51,9 +51,16 @@ def _write(path: Path, value: dict) -> None:
                                        allow_nan=False) + "\n").encode())
 
 
+def _validate_destinations(destinations: list[Path], protected: set[Path], artifact: Path) -> None:
+    if len(set(destinations)) != len(destinations):
+        raise OutputConflict("stage, log and job output paths must be distinct")
+    if any(destination in protected or artifact == destination or artifact in destination.parents
+           for destination in destinations):
+        raise OutputConflict("outputs must not overwrite inputs or enter the artifact")
 
 
-def load_config(path: str | Path, *, report_output: Path | None = None) -> tuple[dict, dict]:
+def load_config(path: str | Path, *, report_output: Path | None = None,
+                preflight: bool = False) -> tuple[dict, dict]:
     """Resolve the existing profile and the exact card's required slot set."""
     path = Path(path).resolve(strict=True)
     config = _read(path)
@@ -127,21 +134,29 @@ def load_config(path: str | Path, *, report_output: Path | None = None) -> tuple
                                "sha256": _sha(source)})
     protected = {path} | {Path(item).resolve() for item in inputs}
     protected.update(Path(stage["config"]).resolve() for stage in stages if "config" in stage)
-    destinations = [Path(stage["output"]).resolve() for stage in stages]
-    destinations += [destination.with_suffix(".log") for destination in destinations]
+    configured_outputs = [Path(stage["output"]).resolve() for stage in stages]
+    if preflight and report_output is None:
+        raise ValueError("preflight requires a job output path")
+    actual_outputs = [(report_output.parent / (report_output.stem + ".stages")
+                       / (stage["id"] + ".json")).resolve() if preflight else configured
+                      for stage, configured in zip(stages, configured_outputs)]
+    actual_logs = [destination.with_suffix(".log") for destination in actual_outputs]
+    destinations = configured_outputs + [path.with_suffix(".log") for path in configured_outputs]
+    for configured, actual, log in zip(configured_outputs, actual_outputs, actual_logs):
+        if actual != configured:
+            destinations.extend((actual, log))
     if report_output is not None:
         destinations.append(report_output)
-    if len(set(destinations)) != len(destinations):
-        raise OutputConflict("stage, log and job output paths must be distinct")
-    if any(destination in protected or artifact == destination or artifact in destination.parents
-           for destination in destinations):
-        raise OutputConflict("outputs must not overwrite inputs or enter the artifact")
+    _validate_destinations(destinations, protected, artifact)
+    stage_destinations = {stage["id"]: {"output": str(actual), "log": str(log)}
+                          for stage, actual, log in zip(stages, actual_outputs, actual_logs)}
 
     return config, {"artifact": str(artifact), "profile": profile.name,
                     "architectures": list(profile.declared_architectures()),
                     "lane": card.get("lane"), "model_sha": card["model_sha"],
                     "topology": engine, "required_slots": sorted(owed - set(QUALITY_STAGES)),
-                    "inputs": input_evidence, "config_sha256": _sha(path)}
+                    "inputs": input_evidence, "config_sha256": _sha(path),
+                    "stage_destinations": stage_destinations}
 
 
 def _command(stage: dict, context: dict, output: Path, image: str,
@@ -238,7 +253,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
     try:
         if output.exists():
             raise OutputConflict("job output already exists; use a new result path")
-        config, context = load_config(config_path, report_output=output)
+        config, context = load_config(config_path, report_output=output, preflight=preflight)
         report["context"] = context
         import torch
         from prismaquant.shipcard import git_provenance
@@ -252,12 +267,14 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                             for stage in config["stages"]]
         if not preflight and not verify_only and context["topology"]["nnodes"] > 1:
             raise ValueError("multi-host ordered stages need the serving owner's rank lifecycle driver")
+        if not verify_only and any(Path(paths["log"]).exists()
+                                   for paths in context["stage_destinations"].values()):
+            raise OutputConflict("stage log already exists; use a new result path")
         _write(output, report)
         stopped = False
         for stage, outcome in zip(config["stages"], report["stages"]):
             identity = stage["id"]
-            stage_output = (output.parent / (output.stem + ".stages") / (identity + ".json")
-                            if preflight else Path(stage["output"]).resolve())
+            stage_output = Path(context["stage_destinations"][identity]["output"])
             stage_output.parent.mkdir(parents=True, exist_ok=True)
             outcome["output"] = str(stage_output)
             if stopped and not verify_only:
@@ -278,9 +295,9 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                                OPENBLAS_NUM_THREADS="1")
                     if preflight:
                         env["CUDA_VISIBLE_DEVICES"] = ""
-                    log_path = stage_output.with_suffix(".log")
+                    log_path = Path(context["stage_destinations"][identity]["log"])
                     outcome["log"] = str(log_path)
-                    with log_path.open("wb") as log:
+                    with log_path.open("xb") as log:
                         completed = subprocess.run(command, env=env, stdout=log,
                                                    stderr=subprocess.STDOUT, check=False)
                     outcome["returncode"] = completed.returncode

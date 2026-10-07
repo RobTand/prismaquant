@@ -211,3 +211,21 @@ def test_runner_keeps_an_existing_result(tmp_path):
     assert run(config, output, verify_only=True)["status"] == "refused"
     assert output.read_bytes() == before
 
+
+@pytest.mark.parametrize("protected", [True, False], ids=["protected-input", "retained-log"])
+def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
+    from prismaquant.ship_gates import run
+    config_path = job_config(tmp_path)
+    report_path = tmp_path / "preflight.json"
+    log_path = tmp_path / "preflight.stages" / "gold.kl.log"
+    log_path.parent.mkdir()
+    retained = b"retained input or log bytes\n"
+    log_path.write_bytes(retained)
+    if protected:
+        config = json.loads(config_path.read_text())
+        config["inputs"].append(str(log_path))
+        config_path.write_text(json.dumps(config))
+    report = run(config_path, report_path, preflight=True)
+    assert report["status"] == "refused"
+    assert log_path.read_bytes() == retained
+    assert not log_path.with_suffix(".json").exists()

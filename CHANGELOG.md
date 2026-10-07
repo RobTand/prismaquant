@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
 - Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
   Keep every lane gate. Replay quality criteria through the shared quality owner.
   Keep offline G3 separate from served KL. Record stage exits, logs and hashes.

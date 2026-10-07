@@ -21,6 +21,10 @@ CPU setup keeps `runtime_qualification: not_run`. It cannot replace runtime cens
 
 Use a new job result path. Existing results, inputs and artifact files are not
 output destinations. Stage result and log paths must be distinct.
+The runner derives actual preflight destinations once. It checks them against
+protected inputs, all configured outputs and the artifact boundary before execution.
+An existing runtime log refuses. Exclusive creation prevents a later collision
+from truncating that log.
 
 The configuration schema is `prismaquant.ship_gates/1`. It has six fields:
 
