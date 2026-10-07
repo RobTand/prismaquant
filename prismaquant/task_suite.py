@@ -57,6 +57,90 @@ def task_metrics(raw):
     return metrics
 
 
+def _task_model_artifact(backend, *, model_config=None):
+    from .cost_streaming import build_source_checkpoint_identity
+    path = Path(backend["pretrained"])
+    if path.is_dir():
+        return build_source_checkpoint_identity(path)
+    if model_config is None:
+        from transformers import AutoConfig
+        model_config = AutoConfig.from_pretrained(backend["pretrained"], revision=backend.get("revision"),
+                                                  trust_remote_code=backend["trust_remote_code"])
+    return {"repository": str(path), "resolved_commit": getattr(model_config, "_commit_hash", None)}
+
+
+def _task_tokenizer_files(tokenizer):
+    return [artifact(path) for path in sorted(Path(tokenizer).glob("*"))
+            if path.is_file() and path.suffix in (".json", ".model", ".txt")]
+
+
+def task_population(raw, config):
+    """Replay actual task counts and the configured mathematical sample policy."""
+    expected = {task if isinstance(task, str) else task["task"] for task in config["tasks"]}
+    if not expected <= set(raw["results"]):
+        raise ValueError("task backend omitted a requested task")
+    samples = raw.get("n-samples")
+    if not isinstance(samples, dict) or any(not isinstance(samples.get(name), dict)
+            or samples[name].get("effective", 0) <= 0 for name in expected):
+        raise ValueError("task backend did not measure every requested task")
+    sampling = config["sampling"]
+    for name in ("limit", "random_seed", "numpy_seed", "torch_seed", "fewshot_seed"):
+        if raw.get("config", {}).get(name) != sampling[name]:
+            raise ValueError("task raw sampling differs: " + name)
+    if any(raw.get("n-shot", {}).get(name) != sampling["num_fewshot"] for name in expected):
+        raise ValueError("task raw sampling differs: num_fewshot")
+    return {"device": config["backend"]["device"], "tasks": sorted(expected),
+            "samples": samples, "sampling": sampling}
+
+
+def verify_task_result(result, config):
+    """Verify owned raw bytes. Stamp recorded provenance in default dev mode."""
+    from .dev_mode import NOT_COMPUTED, dev_mode_enabled, dev_stamp, seal_check
+    from .schemas import strict_json_loads
+    from .stage_inputs import read_bound
+    validate_config(config)
+    artifacts = result["artifacts"]
+    if len(artifacts) != 1:
+        raise ValueError("task result requires its raw lm-eval artifact")
+    raw = strict_json_loads(read_bound(artifacts[0], "task raw result"),
+        duplicate=lambda key: ValueError("duplicate task raw result key: " + key),
+        constant=lambda value: ValueError("nonfinite task raw result value: " + value))
+    if task_metrics(raw) != result["measurement"]["metrics"]:
+        raise ValueError("task raw metrics differ from the stored measurement")
+    for name, value in task_population(raw, config).items():
+        if result["population"].get(name) != value:
+            raise ValueError("task mathematical population differs: " + name)
+    identity = result["identity"]
+    if identity.get("task_configs") != raw.get("configs") or identity.get("task_versions") != raw.get("versions"):
+        raise ValueError("task definitions or versions differ from the owned raw result")
+    backend = config["backend"]
+    model = {"path": identity.get("model"), "artifact": identity.get("model_artifact")}
+    tokenizer = {"path": identity.get("tokenizer"), "files": identity.get("tokenizer_files"),
+                 "commit": identity.get("tokenizer_commit")}
+    dev = dev_mode_enabled()
+    if dev:
+        current_model = current_tokenizer = NOT_COMPUTED
+    else:
+        current_model = {"path": backend["pretrained"], "artifact": _task_model_artifact(backend)}
+        commit = None
+        if not Path(backend["tokenizer"]).is_dir():
+            from transformers import AutoTokenizer
+            current = AutoTokenizer.from_pretrained(backend["tokenizer"],
+                revision=backend.get("tokenizer_revision"), trust_remote_code=backend["trust_remote_code"])
+            commit = current.init_kwargs.get("_commit_hash")
+        current_tokenizer = {"path": backend["tokenizer"], "files": _task_tokenizer_files(backend["tokenizer"]),
+                             "commit": commit}
+    seal_check("task model provenance", model, current_model, where="task replay",
+               refusal=lambda: ValueError("task model provenance differs"))
+    seal_check("task tokenizer provenance", tokenizer, current_tokenizer, where="task replay",
+               refusal=lambda: ValueError("task tokenizer provenance differs"))
+    if dev:
+        result.update(dev_stamp(timestamped=False))
+        limit = "Stored dev metrics do not measure replacement model or tokenizer bytes."
+        if limit not in result["limitations"]:
+            result["limitations"].append(limit)
+
+
 def _versions():
     return {name: version(name) for name in ("lm-eval", "torch", "transformers", "datasets")}
 
@@ -84,7 +168,6 @@ def measure_tasks(config, output):
     from lm_eval import simple_evaluate
     from lm_eval.models.huggingface import HFLM
     from lm_eval.utils import handle_non_serializable
-    from .cost_streaming import build_source_checkpoint_identity
 
     backend = dict(config["backend"])
     backend.pop("name")
@@ -104,29 +187,19 @@ def measure_tasks(config, output):
     if raw is None:
         raise ValueError("task backend returned no result")
     metrics = task_metrics(raw)
-    expected = {task if isinstance(task, str) else task["task"] for task in config["tasks"]}
-    if not expected <= set(raw["results"]):
-        raise ValueError("task backend omitted a requested task")
-    samples = raw.get("n-samples")
-    if not isinstance(samples, dict) or any(not isinstance(samples.get(name), dict)
-            or samples[name].get("effective", 0) <= 0 for name in expected):
-        raise ValueError("task backend did not measure every requested task")
+    population = task_population(raw, config)
     payload = json.loads(json.dumps(raw, default=handle_non_serializable, allow_nan=False))
     raw_path = Path(output).with_suffix(".lm_eval.json")
     write_result(raw_path, payload)
-    model_path = Path(config["backend"]["pretrained"])
-    source = (build_source_checkpoint_identity(model_path) if model_path.is_dir() else
-              {"repository": str(model_path), "resolved_commit": getattr(lm.model.config, "_commit_hash", None)})
+    source = _task_model_artifact(config["backend"], model_config=lm.model.config)
     tokenizer = lm.tokenizer
     identity = {"backend": _versions(), "model_artifact": source, "model": config["backend"]["pretrained"],
                 "tokenizer": config["backend"]["tokenizer"], "tokenizer_vocab_size": len(tokenizer),
-                "tokenizer_files": [artifact(path) for path in sorted(Path(config["backend"]["tokenizer"]).glob("*"))
-                    if path.is_file() and path.suffix in (".json", ".model", ".txt")],
+                "tokenizer_files": _task_tokenizer_files(config["backend"]["tokenizer"]),
                 "tokenizer_commit": tokenizer.init_kwargs.get("_commit_hash"),
                 "task_versions": raw.get("versions"), "task_configs": payload.get("configs")}
     return {"metrics": metrics, "identity": identity,
-            "population": {"device": config["backend"]["device"], "cuda_available": torch.cuda.is_available(),
-                "tasks": sorted(expected), "samples": samples, "sampling": sample, "skips": []},
+            "population": {**population, "cuda_available": torch.cuda.is_available(), "skips": []},
             "artifacts": [artifact(raw_path)],
             "limitations": ["A small CPU smoke proves backend execution. It does not qualify GLM quality."]}
 

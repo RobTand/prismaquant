@@ -81,9 +81,9 @@ def verify_result(result, config, *, config_sha256):
     if status == "succeeded":
         if stage == "g3_v2" and result["identity"].get("candidate_inputs") != g3_candidate_binding(config):
             raise ValueError("G3 current candidate input binding differs")
-        if stage == "task_suite" and (result["identity"].get("model") != config["backend"]["pretrained"]
-                or result["identity"].get("tokenizer") != config["backend"]["tokenizer"]):
-            raise ValueError("task current model or tokenizer input differs")
+        if stage == "task_suite":
+            from .task_suite import verify_task_result
+            verify_task_result(result, config)
     return expected
 
 
