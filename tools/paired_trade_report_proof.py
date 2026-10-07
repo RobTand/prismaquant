@@ -89,7 +89,8 @@ def fixture(directory, config, probes, layers):
 
 def run(directory, fixture_dir, refusal=False):
     directory.mkdir()
-    command = [sys.executable, "-m", "cProfile", "-o", str(directory / "profile.pstats"), "-m", "prismaquant.allocator",
+    launcher = "import cProfile, runpy, sys\nprofile_path = sys.argv.pop(1)\nsys.argv[0] = 'prismaquant.allocator'\nprofile = cProfile.Profile()\ntry:\n    profile.enable()\n    runpy.run_module('prismaquant.allocator', run_name='__main__')\nfinally:\n    profile.disable()\n    profile.dump_stats(profile_path)\n"
+    command = [sys.executable, "-c", launcher, str(directory / "profile.pstats"),
                "--probe", str(fixture_dir / "probe.pkl"), "--costs", str(fixture_dir / "costs.pkl"),
                "--formats", f"{LOW},{HIGH}", "--allow-default-profile", "--target-bits", "9", "--pareto-targets", "9",
                "--bit-precision", "0.001", "--cost-baseline-assignment", str(fixture_dir / "baseline.json"),
