@@ -62,6 +62,12 @@ a metric, `le` or `ge`, and a finite threshold. A successful measurement with
 absent criteria is `not_evaluated`, not a passed gate. Offline G3 never fills
 `gold.kl`.
 
+G3 replay verifies owned KL and Boolean agreement arrays. The shared numerical
+owner derives metrics, counts and window summaries. Missing arrays and edited
+summaries refuse in both modes. A matching edited gate does not bypass those checks.
+Whole-configuration SHA and candidate provenance use the existing D32 stamp.
+Byte, schema, paired-population and numerical checks remain unconditional.
+
 Default dev replay keeps stored metrics and the quality owner's `dev_uncertified` stamp.
 The aggregate result carries the same dev classification. It is not certified
 current-artifact evidence. Owned raw-result corruption and mathematical changes

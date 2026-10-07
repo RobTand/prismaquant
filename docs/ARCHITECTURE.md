@@ -26366,6 +26366,16 @@ from served `gold.kl`. Missing criteria allow measurement but give `not_evaluate
 `quality_stage.verify_result` replays criteria. The job requires a passed replay,
 not a written pass flag.
 
+`g3_v2.verify_g3_result` verifies owned KL and Boolean agreement arrays through `read_bound`.
+The producer and replay use `g3_numerics.g3_summary` for all four metrics, counts and per-window summaries.
+Missing arrays, corrupt bytes and a summary that differs from those arrays refuse in both modes.
+An edited metric and a matching edited gate cannot bypass that numerical replay.
+Replay runs no model inference.
+
+The whole configuration SHA and candidate input provenance use the existing `seal_check`.
+Default dev mode stamps drift and retains stored data. Schema, paired population,
+owned-byte, numerical and gate checks remain unconditional.
+
 The task backend uses `lm-eval[hf]` 0.4.12. Inputs declare tasks, tokenizer,
 device, dtype, sample count, few-shot count and all four seeds. The receipt
 keeps task configurations, versions, model identity, samples, raw results and

@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
 - Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
   Keep stored metrics. Add verify-only consumer regressions for owned bytes,
   mathematical comparison and certified source replacement. No new seal gate is added.
