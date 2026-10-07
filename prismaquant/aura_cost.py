@@ -65,7 +65,9 @@ from prismaquant.routed_experts import (
     resolve_routed_expert_profile,
 )
 from .cost_stage_checkpoint import atomic_write_bytes, unit_path
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, canonical_json
+from .digests import (
+    DIRECT_UTF8_INDENT2_STRICT, DIRECT_UTF8_STRICT, bytes_sha256hex, canonical_json,
+)
 
 SCHEMA = "prismaquant.aura_cost.v1"
 AURA_CHECKPOINT_IDENTITY_SCHEMA = "prismaquant.aura_checkpoint.identity.v1"
@@ -126,9 +128,18 @@ def _checkpoint_git_commit() -> str:
         timeout=10,
     )
     if clean.returncode != 0:
-        raise RuntimeError(
+        refusal = RuntimeError(
             "AURA checkpoint git identity is not exact: aura_cost.py differs "
             f"from commit {commit}; commit it before checkpoint/resume"
+        )
+        if clean.returncode != 1:
+            raise refusal
+        # Only status one reports source drift. Git errors still refuse.
+        from prismaquant.dev_mode import seal_check
+
+        seal_check(
+            "AURA checkpoint producer source", commit, "changed working tree",
+            where="prismaquant/aura_cost.py", refusal=refusal,
         )
     return commit
 
@@ -226,13 +237,7 @@ def _write_aura_checkpoint_manifest(
         "producer_source_sha256": manifest_source_sha256,
         "producer_source_files_sha256": manifest_source_files,
     }
-    encoded = json.dumps(
-        manifest,
-        indent=2,
-        sort_keys=True,
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    encoded = DIRECT_UTF8_INDENT2_STRICT.encoded(manifest)
     atomic_write_bytes(checkpoint_dir / "manifest.json", encoded)
     return identity_sha256
 
