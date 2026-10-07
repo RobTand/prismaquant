@@ -118,6 +118,16 @@ def _argv(tmp_path, *extra, mode="scoped-walk"):
     (("--unit-scope", "0:100", "--head-walk-workers", "0"), "head-walk-workers"),
     (("--unit-scope", "0:100", "--head-walk-workers", "4", "--stop-read-rtt-ms", "0"),
      "guard limits"),
+    (("--unit-scope", "0:100", "--head-walk-workers", "4", "--stop-read-rtt-ms", "nan"),
+     "positive and finite"),
+    (("--unit-scope", "0:100", "--head-walk-workers", "4", "--stop-read-rtt-ms", "inf"),
+     "positive and finite"),
+    (("--unit-scope", "0:100", "--head-walk-workers", "4", "--guard-interval-s", "nan"),
+     "positive and finite"),
+    (("--unit-scope", "0:100", "--head-walk-workers", "4", "--guard-interval-s", "inf"),
+     "positive and finite"),
+    (("--sweep-start", "0", "--slice-units", "100", "--sweep-workers", "4",
+      "--stop-read-rtt-ms", "nan"), "positive and finite"),
 ])
 def test_main_refuses_a_bad_scoped_call_before_reading_anything(tmp_path, capsys, extra, message):
     with pytest.raises(SystemExit) as exit_info:
@@ -165,7 +175,7 @@ def test_sweep_runs_each_scope_once_in_order_and_reports_read_load(monkeypatch):
     monkeypatch.setattr(head, "mount_ops", lambda mount_point="/mnt/shared": {"READ": 1})
     monkeypatch.setattr(head, "read_rtt", lambda mount_point="/mnt/shared": next(counters))
 
-    def fake_walk(config, *, scope, workers):
+    def fake_walk(config, *, scope, workers, metadata_memo):
         calls.append((scope, workers))
         return {"units_with_cells": scope[1] - scope[0], "measured_cells": 7}
 
@@ -212,3 +222,107 @@ def test_sigterm_handler_reports_once_and_leaves_without_waiting(monkeypatch):
         signal.signal(signal.SIGTERM, previous)
     assert reasons == ["SIGTERM"]
     assert exits == [75]
+
+
+def _quiet_counters(monkeypatch):
+    monkeypatch.setattr(head, "mount_ops", lambda mount_point="/mnt/shared": {})
+    monkeypatch.setattr(head, "read_rtt", lambda mount_point="/mnt/shared": (0, 0))
+
+
+def _count_loads(monkeypatch):
+    real, loads = bridge._read_campaign_metadata, []
+
+    def counting(inputs, reuse_policy):
+        loads.append(1)
+        return real(inputs, reuse_policy)
+
+    monkeypatch.setattr(bridge, "_read_campaign_metadata", counting)
+    return loads
+
+
+def test_a_sweep_over_a_real_campaign_loads_the_metadata_once(tmp_path, monkeypatch):
+    from tests.test_tessera_joint_aura import fixture
+
+    config, names, _fmt, _payload, _states = fixture(tmp_path)
+    _quiet_counters(monkeypatch)
+    loads = _count_loads(monkeypatch)
+    report = head.scoped_walk_sweep({"inputs": config}, start=0, slice_units=1,
+                                    workers_order=[1])
+    assert [run["scope"] for run in report["runs"]] == [[0, 1], [1, 2]]
+    assert [run["units_with_cells"] for run in report["runs"]] == [1, 1]
+    assert len(loads) == 1
+    assert report["metadata_loads"] == 1
+
+
+def test_without_a_memo_every_load_reads_the_metadata_again(tmp_path, monkeypatch):
+    from tests.test_tessera_joint_aura import fixture
+
+    config, *_ = fixture(tmp_path)
+    loads = _count_loads(monkeypatch)
+    for scope in ((0, 1), (1, 2)):
+        bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=scope)
+    assert len(loads) == 2
+
+
+def test_a_memo_does_not_hide_a_changed_metadata_file(tmp_path):
+    from tests.test_tessera_joint_aura import fixture
+
+    config, *_ = fixture(tmp_path)
+    memo = {}
+    bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 1),
+                                      metadata_memo=memo)
+    census = tmp_path / "campaign/census.json"
+    census.write_text(census.read_text() + " ")
+    with pytest.raises(ValueError, match="checksum changed"):
+        bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(1, 2),
+                                          metadata_memo=memo)
+
+
+def test_a_scoped_walk_leaves_the_candidate_overlay_out(tmp_path, monkeypatch):
+    from prismaquant import joint_catalog_extension as extension
+    from tests.test_tessera_joint_aura import fixture
+
+    config, *_ = fixture(tmp_path)
+    config["candidate_overlay"] = {"path": str(tmp_path / "absent-overlay.json"),
+                                   "sha256": "0" * 64}
+    attached = []
+
+    def attach(*args, **kwargs):
+        attached.append(kwargs)
+        raise RuntimeError("the overlay fence ran")
+
+    monkeypatch.setattr(extension, "attach_candidate_overlay", attach)
+    result = head.scoped_walk_intake({"inputs": config}, scope=(0, 1), workers=1)
+    assert attached == []
+    assert result["candidate_overlay_left_out"] is True
+    assert result["units_with_cells"] == 1
+    # The control: the same inputs through the plain loader do reach the overlay.
+    with pytest.raises(RuntimeError, match="the overlay fence ran"):
+        bridge.load_measured_anchor_input(config, verify_payloads=False, unit_scope=(0, 1))
+    assert len(attached) == 1
+
+
+def test_sigterm_stops_a_process_with_blocked_workers_after_one_report(tmp_path):
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+
+    root = Path(head.__file__).resolve().parents[1]
+    script = tmp_path / "blocked_sigterm.py"
+    script.write_text(textwrap.dedent("""
+        import os, signal, sys, threading
+        sys.path.insert(0, sys.argv[1])
+        from tools import profile_stage_b_head as head
+
+        head.install_stop_signal(lambda reason: print("REPORT " + reason, flush=True))
+        never = threading.Event()
+        for _ in range(4):
+            threading.Thread(target=never.wait).start()
+        os.kill(os.getpid(), signal.SIGTERM)
+        never.wait()
+    """))
+    done = subprocess.run([sys.executable, str(script), str(root)], capture_output=True,
+                          text=True, timeout=60)
+    assert done.returncode == 75, done.stderr
+    assert done.stdout.splitlines() == ["REPORT SIGTERM"]
