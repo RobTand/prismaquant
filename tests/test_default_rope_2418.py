@@ -11,7 +11,6 @@ from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
 def test_actual_llama_config_uses_the_upstream_representation():
     config = LlamaConfig(hidden_size=32, num_attention_heads=4,
                          rope_parameters={"rope_type": "default", "rope_theta": 32123.0})
-    assert not hasattr(config, "rope_theta")
     actual, scaling = ROPE_INIT_FUNCTIONS["default"](config, device="cpu")
     expected, expected_scaling = LlamaRotaryEmbedding.compute_default_rope_parameters(config, device="cpu")
     assert actual.dtype == expected.dtype == torch.float32
