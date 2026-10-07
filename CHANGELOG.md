@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The shipcard model identity hashes its two canonical JSON texts through the
+  existing text owner (#2384, references #1301). The canonical quant-config
+  digest and the final canonical payload digest call `digests.text_sha256hex`;
+  canonicalization, scope flags, model hashes, errors, auxiliary files,
+  content checks and admission policy stay unchanged.
+
 - The AURA checkpoint manifest writer uses the existing strict, indented
   UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
   unit order, source diagnostics and atomic publication stay unchanged.
