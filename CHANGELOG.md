@@ -6,6 +6,9 @@
 
 - The allocator and PACT consume canonical v3 scope, qualified chords and
   reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
   Actual bytes, native admission and scientific gates remain unchanged.
   An immutable candidate index requires no active index change.
   Legacy metadata contracts retain the original producer interface.

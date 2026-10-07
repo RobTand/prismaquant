@@ -67,55 +67,174 @@ def owner_for_format(owners: Mapping | None, name: str):
     return None if parsed is None else owners.get(parsed[0].name)
 
 
-def qualified_cost_scope(row: Mapping, *, family: str) -> Mapping | None:
-    """Use explicit qualified evidence or the existing joint-price validator."""
-    if row.get("quality_scope") is not None:
-        return row["quality_scope"]
-    from .joint_aura import JOINT_CURRENCY, validate_joint_aura_entry
-    if not validate_joint_aura_entry(row):
-        return None
-    operator = row["joint_operator_identity"]
-    return {"unit": operator["qname"], "family": family, "currency": JOINT_CURRENCY,
-            "validated": True, "calibration": row["probe_identity"]["calibration_sha256"],
-            "source_weight": operator["source_weight"], "activation_contract": operator["activation"],
-            "probe_identity_sha256": row["probe_identity_sha256"]}
+QUALITY_COORDINATES = ("unit", "family", "currency", "calibration", "teacher", "window",
+                       "objective", "shape", "source_weight", "activation_contract")
+CANONICAL_CHORD_SOURCE = "canonical_qualified_chord"
 
 
 def _quality_anchor_scope(scope: Mapping, tag: str, family: str) -> str:
-    if not isinstance(scope, Mapping):
-        raise RungAllowabilityError(f"{tag} quality anchor scope must be a mapping")
-    unit, currency = scope.get("unit"), scope.get("currency")
-    if not isinstance(unit, str) or not unit:
-        raise RungAllowabilityError(f"{tag} quality anchor scope needs a unit")
-    from .joint_aura import JOINT_CURRENCY
-    if currency not in ("served_kl", JOINT_CURRENCY):
-        raise RungAllowabilityError(f"{tag} quality anchor currency is a screen, not a qualified loss")
-    if scope.get("validated") is not True:
-        raise RungAllowabilityError(f"{tag} quality anchor is not validated; sampled error waits")
-    if scope.get("family", family) != family:
-        raise RungAllowabilityError(f"{tag} quality anchor belongs to another format")
-    if not isinstance(scope.get("calibration"), str) or not scope["calibration"]:
-        raise RungAllowabilityError(f"{tag} quality anchor requires actual calibration scope")
+    """Validate the complete scientific coordinates, not a provenance label."""
+    from .schemas import Contract
+    from .joint_aura import JOINT_CURRENCY, identity_sha256
+    contract = Contract(RungAllowabilityError, f"{tag} quality anchor: ")
+    contract.mapping(scope, where="quality_scope")
+    required = (*QUALITY_COORDINATES, "format", "validated", "probe_ids",
+                "probe_identity", "probe_identity_sha256")
+    missing = [key for key in required if key not in scope or scope[key] is None]
+    contract.require(not missing, f"incomplete quality_scope coordinates: {missing}")
+    unit = contract.string(scope["unit"], where="unit")
+    contract.require(scope["family"] == family, "anchor belongs to another format family")
+    contract.require(scope["currency"] in ("served_kl", JOINT_CURRENCY),
+                     "currency is a screen, not a qualified loss")
+    contract.require(scope["validated"] is True, "anchor is not validated; sampled error waits")
+    contract.sha256(scope["calibration"], where="calibration")
+    contract.sha256(scope["teacher"], where="teacher")
+    contract.string(scope["format"], where="format")
+    shape = scope["shape"]
+    contract.require(isinstance(shape, (list, tuple)) and len(shape) == 2,
+                     "shape requires two actual dimensions")
+    for dim in shape:
+        contract.integer(dim, where="shape dimension", minimum=1)
+    source = contract.mapping(scope["source_weight"], where="source_weight")
+    contract.require(source.get("shape") == list(shape), "source_weight differs from shape")
+    contract.sha256(source.get("content_sha256"), where="source_weight content")
+    contract.mapping(scope["activation_contract"], where="activation_contract")
+    window = contract.mapping(scope["window"], where="window")
+    probe = contract.mapping(scope["probe_identity"], where="probe_identity")
+    for axis in ("calibration_shape", "token_scope", "temperature"):
+        contract.require(axis in window and axis in probe and window[axis] == probe[axis],
+                         f"window {axis} differs from actual probe coordinates")
+    dimensions = window["calibration_shape"]
+    contract.require(isinstance(dimensions, (list, tuple)) and len(dimensions) == 2,
+                     "window calibration_shape requires two dimensions")
+    for dim in dimensions:
+        contract.integer(dim, where="window dimension", minimum=1)
+    contract.string(window["token_scope"], where="token_scope")
+    import math
+    contract.require(type(window["temperature"]) in (int, float)
+                     and math.isfinite(window["temperature"]) and window["temperature"] > 0,
+                     "temperature must be finite and positive")
+    contract.require(probe.get("calibration_sha256") == scope["calibration"],
+                     "calibration differs from actual probe coordinates")
+    teacher = contract.mapping(probe.get("source_model"), where="probe teacher")
+    contract.require(teacher.get("content_sha256") == scope["teacher"],
+                     "teacher differs from actual probe coordinates")
+    objective = contract.mapping(scope["objective"], where="objective")
+    actual_objective = probe.get("objective")
+    contract.require(isinstance(actual_objective, (str, Mapping)) and bool(actual_objective),
+                     "actual objective coordinate is missing")
+    expected_objective = {"currency": scope["currency"],
+                          "normalization": probe.get("normalization"),
+                          "objective": probe.get("objective")}
+    contract.require(objective == expected_objective and isinstance(probe.get("normalization"), str),
+                     "objective differs from actual probe coordinates")
+    for axis in ("seed_base", "n_probes", "distribution", "normalization"):
+        contract.require(axis in probe and probe[axis] is not None,
+                         f"probe coordinate {axis} is missing")
+    seed = contract.integer(probe["seed_base"], where="seed_base", minimum=0)
+    count = contract.integer(probe["n_probes"], where="n_probes", minimum=1)
+    contract.require(scope["probe_ids"] == list(range(seed, seed + count)),
+                     "sample coordinates differ from actual probe ids")
+    contract.sha256(scope["probe_identity_sha256"], where="probe identity digest")
+    contract.require(identity_sha256(probe) == scope["probe_identity_sha256"],
+                     "probe identity digest differs from its own actual data")
     return unit
+
+
+def require_quality_scope_alignment(left: Mapping, right: Mapping, *, where: str,
+                                    same_unit: bool = True) -> None:
+    """Keep current scientific facts strict and use the existing D32 split."""
+    from .joint_aura import _require_probe_alignment
+    for axis in QUALITY_COORDINATES:
+        if not same_unit and axis in ("unit", "shape", "source_weight", "activation_contract"):
+            continue
+        if left[axis] != right[axis]:
+            raise RungAllowabilityError(f"quality anchors name different {axis}")
+    _require_probe_alignment(left, right, where=where,
+        message="quality anchors name different probe sample coordinates")
+
+
+def qualified_cost_scope(row: Mapping, *, family: str, unit: str | None = None,
+                         format_name: str | None = None) -> Mapping | None:
+    """Validate the measured row before any optional scope can be read."""
+    from .joint_aura import validate_joint_aura_entry, _require_probe_alignment
+    is_joint = validate_joint_aura_entry(row)
+    scope = row.get("quality_scope")
+    if scope is None:
+        if is_joint:
+            raise RungAllowabilityError("joint quality anchor requires complete quality_scope")
+        return None
+    actual_unit = _quality_anchor_scope(scope, "cost", family)
+    if unit is not None and actual_unit != unit:
+        raise RungAllowabilityError("quality anchor differs from the actual unit")
+    if format_name is not None and scope["format"] != format_name:
+        raise RungAllowabilityError("quality anchor differs from its actual format key")
+    if is_joint:
+        from .allocator_candidates import joint_row_binds_cell
+        joint_row_binds_cell(row, actual_unit, scope["format"], where="canonical quality anchor")
+        operator, probe = row["joint_operator_identity"], row["probe_identity"]
+        expected = {"shape": operator["source_weight"]["shape"],
+                    "source_weight": operator["source_weight"],
+                    "activation_contract": operator["activation"],
+                    "currency": row["cost_currency"],
+                    "calibration": probe["calibration_sha256"],
+                    "teacher": probe["source_model"]["content_sha256"]}
+        for axis, value in expected.items():
+            if scope[axis] != value:
+                raise RungAllowabilityError(f"joint quality_scope {axis} differs from actual row")
+        _require_joint_anchor(scope, row["predicted_dloss"])
+        evidence = scope["joint_anchor"]
+        for axis in ("probe_ids", "signed_per_probe", "x2_per_probe", "signed_components_per_probe"):
+            if evidence[axis] != row[axis]:
+                raise RungAllowabilityError(f"joint quality_scope {axis} differs from its actual samples")
+        if evidence["joint_operator_identity"]["rendered_weight"] != operator["rendered_weight"]:
+            raise RungAllowabilityError("joint quality_scope differs from actual rendered bytes")
+        _require_probe_alignment(scope, row, where="joint quality_scope binding",
+            message="joint quality_scope differs from actual probe sample coordinates")
+    return scope
+
+
+def _require_joint_anchor(scope: Mapping, value) -> None:
+    """Bind a joint scope and scalar to actual validated joint samples."""
+    from .joint_aura import JOINT_CURRENCY, validate_joint_aura_entry, _require_probe_alignment
+    if scope["currency"] != JOINT_CURRENCY:
+        return
+    original = scope.get("joint_anchor")
+    if not isinstance(original, Mapping) or not validate_joint_aura_entry(original):
+        raise RungAllowabilityError("joint quality_scope requires its actual validated joint_anchor")
+    from .allocator_candidates import joint_row_binds_cell
+    joint_row_binds_cell(original, scope["unit"], scope["format"], where="joint quality_scope evidence")
+    operator, probe = original["joint_operator_identity"], original["probe_identity"]
+    expected = {"shape": operator["source_weight"]["shape"],
+                "source_weight": operator["source_weight"], "activation_contract": operator["activation"],
+                "calibration": probe["calibration_sha256"],
+                "teacher": probe["source_model"]["content_sha256"]}
+    for axis, actual in expected.items():
+        if scope[axis] != actual:
+            raise RungAllowabilityError(f"joint quality_scope {axis} differs from actual joint_anchor")
+    _require_probe_alignment(scope, original, where="joint anchor evidence",
+        message="joint anchor differs from actual probe sample coordinates")
+    if value != original["predicted_dloss"]:
+        raise RungAllowabilityError("joint anchor scalar differs from its actual aligned samples")
 
 
 def qualified_rung_quality(producer, family: str, rung: int, *, lower_rung: int,
                            upper_rung: int, lower_value: float, upper_value: float,
                            lower_scope: Mapping, upper_scope: Mapping) -> dict:
-    """Share the qualified chord and its verification across all consumers."""
+    """Use the producer chord in the anchors' unchanged scientific quantity."""
     unit = _quality_anchor_scope(lower_scope, "lower", family)
-    if _quality_anchor_scope(upper_scope, "upper", family) != unit:
-        raise RungAllowabilityError("quality anchors name different units")
-    if lower_scope["currency"] != upper_scope["currency"]:
-        raise RungAllowabilityError("quality anchors name different currencies")
-    if lower_scope["calibration"] != upper_scope["calibration"]:
-        raise RungAllowabilityError("quality anchors name different calibrations")
-    for axis in ("shape", "source_weight", "probe_identity_sha256", "activation_contract"):
-        if lower_scope.get(axis) != upper_scope.get(axis):
-            raise RungAllowabilityError(f"quality anchors name different {axis}")
+    _quality_anchor_scope(upper_scope, "upper", family)
+    from .tessera_formats import parse_tessera_format_name
+    for rate, scope in ((lower_rung, lower_scope), (upper_rung, upper_scope)):
+        parsed = parse_tessera_format_name(scope["format"])
+        if parsed is None or parsed[0].name != family or parsed[1] != rate:
+            raise RungAllowabilityError("quality anchor differs from its actual format and rate")
+    require_quality_scope_alignment(lower_scope, upper_scope, where="canonical quality chord")
     for value, tag in ((lower_value, "lower"), (upper_value, "upper")):
         if type(value) is bool or not isinstance(value, (int, float)):
             raise RungAllowabilityError(f"{tag} quality anchor value must be a number")
+    _require_joint_anchor(lower_scope, lower_value)
+    _require_joint_anchor(upper_scope, upper_value)
     if not callable(getattr(producer, "rung_quality", None)):
         raise RungAllowabilityError("canonical qualified quality capability required")
     try:
@@ -123,8 +242,107 @@ def qualified_rung_quality(producer, family: str, rung: int, *, lower_rung: int,
             lower_value=lower_value, upper_value=upper_value))
     except ValueError as exc:
         raise RungAllowabilityError(str(exc)) from exc
-    result["provenance"] = {"format": family, "unit": unit, "currency": lower_scope["currency"]}
+    target_scope = {**lower_scope, "format": f"{family}_R{rung}"}
+    result["provenance"] = {"format": family, "unit": unit, "currency": lower_scope["currency"],
+                            "quality_scope": target_scope}
     return result
+
+
+def require_quality_result_matches(actual: Mapping, expected: Mapping, *, where: str) -> None:
+    """Compare current numeric claims without a provenance-only digest wall."""
+    for key in ("status", "value", "anchors", "fraction", "numerical_qualification_inherited"):
+        if type(actual.get(key)) is not type(expected.get(key)) or actual.get(key) != expected.get(key):
+            raise RungAllowabilityError(f"{where}: canonical quality differs from its actual bound anchors")
+    left, right = actual["provenance"], expected.get("provenance", {})
+    for key in ("format", "unit", "currency"):
+        if left[key] != right.get(key):
+            raise RungAllowabilityError(f"{where}: canonical quantity differs from actual {key}")
+    scope = right.get("quality_scope")
+    _quality_anchor_scope(scope, "recorded", left["format"])
+    if scope["format"] != left["quality_scope"]["format"]:
+        raise RungAllowabilityError(f"{where}: recorded quality differs from actual format")
+    require_quality_scope_alignment(left["quality_scope"], scope, where=where)
+
+
+CANONICAL_SUM_SOURCE = "canonical_qualified_sum"
+
+
+def make_scientific_price_sum(members: list, *, format_name: str) -> dict | None:
+    """Sum complete objective quantities without another scalar transfer."""
+    prices = [complete_scientific_price(item["row"], format_name=item["format"])
+              if isinstance(item["row"], Mapping) else None for item in members]
+    if not any(value is not None for value in prices):
+        return None
+    if any(value is None for value in prices):
+        raise RungAllowabilityError("scientific sum cannot mix complete and unqualified quantities")
+    reference = members[0]["row"]["quality_scope"]
+    for item in members:
+        scope = item["row"]["quality_scope"]
+        if scope["unit"] != item["unit"] or scope["format"] != item["format"]:
+            raise RungAllowabilityError("scientific sum member differs from its actual unit or format")
+        require_quality_scope_alignment(reference, scope, where="scientific sum", same_unit=False)
+    return {"predicted_dloss": sum(prices), "cost_source": CANONICAL_SUM_SOURCE,
+            "cost_currency": reference["currency"], "format": format_name,
+            "canonical_members": members}
+
+
+def complete_scientific_price(row: Mapping, *, format_name: str | None = None) -> float | None:
+    """Read a complete objective price without gain or activation transfer."""
+    from .tessera_formats import parse_tessera_format_name
+    if row.get("cost_source") == CANONICAL_SUM_SOURCE or "canonical_members" in row:
+        if row.get("cost_source") != CANONICAL_SUM_SOURCE or not row.get("canonical_members"):
+            raise RungAllowabilityError("scientific sum requires its actual member quantities")
+        actual = make_scientific_price_sum(row["canonical_members"], format_name=row["format"])
+        if (actual is None or row.get("predicted_dloss") != actual["predicted_dloss"]
+                or row.get("cost_currency") != actual["cost_currency"]
+                or (format_name is not None and row["format"] != format_name)):
+            raise RungAllowabilityError("scientific sum differs from its actual quantities or format")
+        return float(actual["predicted_dloss"])
+    claims = row.get("cost_source") == CANONICAL_CHORD_SOURCE or "canonical_quality" in row
+    scope = row.get("quality_scope")
+    if not claims and (not isinstance(scope, Mapping) or scope.get("currency") != "served_kl"):
+        return None
+    if not isinstance(scope, Mapping):
+        raise RungAllowabilityError("complete scientific price requires quality_scope")
+    parsed = parse_tessera_format_name(scope.get("format"))
+    if parsed is None:
+        raise RungAllowabilityError("complete scientific price requires an actual format")
+    family, rung = parsed
+    if format_name is not None and scope["format"] != format_name:
+        raise RungAllowabilityError("complete scientific price cannot price a different format")
+    _quality_anchor_scope(scope, "price", family.name)
+    if claims:
+        if row.get("cost_source") != CANONICAL_CHORD_SOURCE:
+            raise RungAllowabilityError("canonical price has a foreign cost_source")
+        anchors = row.get("canonical_anchors")
+        if not isinstance(anchors, (list, tuple)) or len(anchors) != 2:
+            raise RungAllowabilityError("canonical price requires its two bound actual anchors")
+        prepared = []
+        for anchor in anchors:
+            name, original = anchor["format"], anchor["row"]
+            parsed_anchor = parse_tessera_format_name(name)
+            if parsed_anchor is None or parsed_anchor[0].name != family.name:
+                raise RungAllowabilityError("canonical price anchor belongs to another family")
+            prepared.append((parsed_anchor[1], original,
+                qualified_cost_scope(original, family=family.name, unit=scope["unit"], format_name=name)))
+        left, right = prepared
+        actual = qualified_rung_quality(_producer_api(), family.name, rung,
+            lower_rung=left[0], upper_rung=right[0],
+            lower_value=left[1]["predicted_dloss"], upper_value=right[1]["predicted_dloss"],
+            lower_scope=left[2], upper_scope=right[2])
+        require_quality_result_matches(actual, row.get("canonical_quality", {}), where="canonical price")
+        require_quality_scope_alignment(actual["provenance"]["quality_scope"], scope,
+                                        where="canonical price quantity")
+        if row.get("cost_currency") != scope["currency"] or row.get("predicted_dloss") != actual["value"]:
+            raise RungAllowabilityError("canonical price differs from its actual scientific quantity")
+    else:
+        qualified_cost_scope(row, family=family.name, unit=scope["unit"], format_name=scope["format"])
+    value = row.get("predicted_dloss")
+    import math
+    if type(value) is bool or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise RungAllowabilityError("complete scientific price must be finite and nonnegative")
+    return float(value)
+
 
 
 def _producer_api():
@@ -397,7 +615,8 @@ class RungAllowability:
                 continue
             rate = parsed[1]
             if family.root_rate(rate).denominator == 1:
-                anchor_scope = qualified_cost_scope(row, family=self.format)
+                anchor_scope = qualified_cost_scope(row, family=self.format,
+                                                    unit=unit, format_name=name)
                 if anchor_scope is not None:
                     anchors.append((rate, row, anchor_scope))
         lower = max((item for item in anchors if item[0] < rung), default=None, key=lambda x: x[0])
@@ -411,8 +630,11 @@ class RungAllowability:
             lower_value=lower[1]["predicted_dloss"], upper_value=upper[1]["predicted_dloss"],
             lower_scope=lower[2], upper_scope=upper[2])
         return {"predicted_dloss": result["value"], "canonical_quality": result,
+                "quality_scope": result["provenance"]["quality_scope"],
+                "canonical_anchors": [{"format": anchor[2]["format"], "row": anchor[1]}
+                                      for anchor in (lower, upper)],
                 "cost_currency": lower[2]["currency"],
-                "cost_source": "canonical_qualified_chord", "output_mse_measured": False}
+                "cost_source": CANONICAL_CHORD_SOURCE, "output_mse_measured": False}
 
     def chord_quality(self, rung: int, *, lower_rung: int, upper_rung: int,
                       lower_value: float, upper_value: float,

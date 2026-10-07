@@ -172,32 +172,33 @@ def test_prev3_tables_wait_for_canonical_timing_but_keep_row_admission(monkeypat
 
 
 def _anchor(unit="u", currency="served_kl", validated=True, **extra):
-    return {"unit": unit, "currency": currency, "validated": validated,
-            "calibration": "fixture-calibration", **extra}
+    from canonical_quality_fixtures import served_scope
+    return served_scope(unit=unit, currency=currency, validated=validated, **extra)
 
 
 def test_chord_is_exact_between_qualified_anchors(monkeypatch):
     half = _owner("v3-half.json", monkeypatch)
     result = half.chord_quality(896, lower_rung=768, upper_rung=1024,
                                 lower_value=1.0, upper_value=0.5,
-                                lower_scope=_anchor(), upper_scope=_anchor())
+                                lower_scope=_anchor(), upper_scope=_anchor(rate=1024))
     assert result["value"] == 0.75
     assert result["fraction"] == 0.5
     assert result["anchors"] == [768, 1024]
-    assert result["provenance"] == {"format": FAMILY, "unit": "u", "currency": "served_kl"}
+    assert result["provenance"]["currency"] == "served_kl"
+    assert result["provenance"]["quality_scope"]["teacher"] == _anchor()["teacher"]
 
 
 @pytest.mark.parametrize("lower,upper,match", [
-    (_anchor(validated=False), _anchor(), "not validated"),
-    (_anchor(currency="weight_sse"), _anchor(), "currency"),
-    (_anchor(unit="v"), _anchor(), "units"),
-    (_anchor(calibration="a"), _anchor(calibration="b"), "calibrations"),
-    (_anchor(), {**_anchor(), "family": "TESSERA_BF16_K1"}, "another format"),
+    (_anchor(validated=False), _anchor(rate=1024), "not validated"),
+    (_anchor(currency="weight_sse"), _anchor(rate=1024), "currency"),
+    (_anchor(unit="v"), _anchor(rate=1024), "unit"),
+    (_anchor(calibration="a" * 64), _anchor(rate=1024, calibration="b" * 64), "calibration"),
+    (_anchor(), {**_anchor(rate=1024), "family": "TESSERA_BF16_K1"}, "another format"),
 ])
 def test_chord_withholds_unqualified_anchors(monkeypatch, lower, upper, match):
     half = _owner("v3-half.json", monkeypatch)
     with pytest.raises(RungAllowabilityError, match=match):
-        half.chord_quality(1024, lower_rung=896, upper_rung=1152,
+        half.chord_quality(896, lower_rung=768, upper_rung=1024,
                            lower_value=1.0, upper_value=0.5,
                            lower_scope=lower, upper_scope=upper)
 
@@ -205,13 +206,13 @@ def test_chord_withholds_unqualified_anchors(monkeypatch, lower, upper, match):
 def test_chord_withholds_bad_values_and_intervals(monkeypatch):
     half = _owner("v3-half.json", monkeypatch)
     with pytest.raises(RungAllowabilityError, match="number"):
-        half.chord_quality(1024, lower_rung=896, upper_rung=1152,
+        half.chord_quality(896, lower_rung=768, upper_rung=1024,
                            lower_value=True, upper_value=0.5,
-                           lower_scope=_anchor(), upper_scope=_anchor())
+                           lower_scope=_anchor(), upper_scope=_anchor(rate=1024))
     with pytest.raises(RungAllowabilityError, match="interval"):
-        half.chord_quality(897, lower_rung=896, upper_rung=897,
+        half.chord_quality(769, lower_rung=768, upper_rung=769,
                            lower_value=1.0, upper_value=0.5,
-                           lower_scope=_anchor(), upper_scope=_anchor())
+                           lower_scope=_anchor(), upper_scope=_anchor(rate=769))
 
 
 def test_canonical_times_keep_raw_kernel_provenance(monkeypatch):
@@ -366,7 +367,7 @@ def _cost_owner(monkeypatch):
 def _body_costs(unit="u"):
     return {unit: {
         f"{FAMILY}_R768": {"predicted_dloss": 1.0, "quality_scope": _anchor(unit=unit)},
-        f"{FAMILY}_R1024": {"predicted_dloss": 0.5, "quality_scope": _anchor(unit=unit)},
+        f"{FAMILY}_R1024": {"predicted_dloss": 0.5, "quality_scope": _anchor(unit=unit, rate=1024)},
         f"{FAMILY}_R896": {"predicted_dloss": 999.0}}}
 
 
@@ -475,13 +476,13 @@ def test_real_surface_prediction_uses_the_qualified_neighbour_chord(monkeypatch)
     owner = _owner("v3-half.json", monkeypatch)
     surface = TesseraRateSurface("u", FAMILY, "tight_offset", "served_kl", (768, 1024),
         (1.0, 0.5), (0.1, 0.1), allowability=owner,
-        anchor_scopes={768: _anchor(), 1024: _anchor()})
+        anchor_scopes={768: _anchor(), 1024: _anchor(rate=1024)})
     assert surface.predict(896) == 0.75
     assert surface.predict(768) == 1.0
     with pytest.raises(RungAllowabilityError, match="screen"):
         owner.chord_cost(f"{FAMILY}_R896", unit="u", costs={
             f"{FAMILY}_R768": {"predicted_dloss": 1.0, "quality_scope": _anchor(currency="weight_sse")},
-            f"{FAMILY}_R1024": {"predicted_dloss": 0.5, "quality_scope": _anchor(currency="weight_sse")}})
+            f"{FAMILY}_R1024": {"predicted_dloss": 0.5, "quality_scope": _anchor(rate=1024, currency="weight_sse")}})
 
 
 
@@ -490,9 +491,13 @@ def test_independent_mtp_selector_uses_chord_prices_and_bound_wire_bytes(monkeyp
     from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS, CONSTANTS
     owner = _cost_owner(monkeypatch)
     unit = ROUTED[0]
+    from canonical_quality_fixtures import scope_for
     probe = _probe()
+    probe.update(calibration_shape=[512, 512], token_scope="all")
     rows = {f"{FAMILY}_R{rate}": _row(unit, f"{FAMILY}_R{rate}", [value] * 4, probe)
             for rate, value in ((768, 2.0), (896, 10.0), (1024, 1.0))}
+    for row in rows.values():
+        row["quality_scope"] = scope_for(row)
     wire = {f"{FAMILY}_R{rate}": value for rate, value in ((768, 400), (896, 500), (1024, 600))}
     payload = {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
         "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
@@ -522,7 +527,7 @@ def test_canonical_densify_keeps_fractional_bytes_and_withholds_unadmitted_rates
     owner = _mutated(owner, actual_shape)
     surface = TesseraRateSurface("u", FAMILY, "tight", "served_kl", (768, 1024),
         (1.0, 0.5), (0.1, 0.1), allowability=owner,
-        anchor_scopes={768: _anchor(), 1024: _anchor()})
+        anchor_scopes={768: _anchor(shape=(64, 256)), 1024: _anchor(rate=1024, shape=(64, 256))})
     built = densify_rate_surface(surface, (64, 256), q256_values=[896, 1024, 1280],
         allowability_scope={"kernel_kind": "dense", "m": 8})
     assert [candidate.body_rate_q256 for candidate in built] == [896]

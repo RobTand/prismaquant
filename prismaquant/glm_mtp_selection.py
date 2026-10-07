@@ -320,7 +320,8 @@ def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices
 
 def _recompute_recorded_quality(payload, recorded):
     """Recompute proposal prices from their actual bound anchors before export."""
-    from .rung_allowability import _producer_api, qualified_cost_scope, qualified_rung_quality
+    from .rung_allowability import (_producer_api, qualified_cost_scope,
+                                   qualified_rung_quality, require_quality_result_matches)
     from .tessera_formats import parse_tessera_format_name
     prices = {}
     producer = None
@@ -335,10 +336,13 @@ def _recompute_recorded_quality(payload, recorded):
             actual = qualified_rung_quality(producer, family.name, rung,
                 lower_rung=lower, upper_rung=upper,
                 lower_value=left["predicted_dloss"], upper_value=right["predicted_dloss"],
-                lower_scope=qualified_cost_scope(left, family=family.name),
-                upper_scope=qualified_cost_scope(right, family=family.name))
-            if actual != expected or actual["provenance"]["unit"] != unit:
-                raise ValueError("MTP canonical quality differs from its actual bound anchors")
+                lower_scope=qualified_cost_scope(left, family=family.name, unit=unit,
+                                                format_name=family.format_name(lower)),
+                upper_scope=qualified_cost_scope(right, family=family.name, unit=unit,
+                                                format_name=family.format_name(upper)))
+            require_quality_result_matches(actual, expected, where="MTP quality price")
+            if actual["provenance"]["unit"] != unit:
+                raise ValueError("MTP canonical quality differs from its actual bound unit")
             prices.setdefault(unit, {})[name] = {"predicted_dloss": actual["value"]}
     return prices
 

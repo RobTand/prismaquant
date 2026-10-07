@@ -17,10 +17,25 @@ Its missing half-bit coverage remains missing. T4 remains unadmitted under
 its current policy. T8 R1280 remains a quality anchor, not a menu option.
 
 Qualified neighbouring whole anchors supply the producer's linear chord.
-Anchors must agree on unit, family, currency, calibration and actual source
-facts. Joint prices retain the existing joint-price validator and currency.
-Weight-error screens do not become validated KL. A derived price remains a
-proposal. Missing qualified prices cannot remove a unit from byte accounting.
+Both scientific currencies retain their actual quantity through the price owner.
+A complete objective price receives no gain or activation transfer.
+Fused and packed sums retain their original bound member quantities.
+The same rule applies to the exact frontier and later price reads.
+A derived price remains proposal data, not a new measurement.
+
+Joint anchors require complete `quality_scope` and their actual joint evidence.
+The existing joint validator runs before optional scope metadata is read.
+Unit, family, format, shape, calibration, teacher, window and objective remain explicit.
+Actual sample coordinates and probe identifiers also remain explicit.
+Missing or incompatible scientific coordinates refuse or wait.
+Weight-error screens never become validated KL.
+
+The existing probe owner separates mathematical facts from producer provenance.
+Current seeds, samples, tokens, temperatures, shapes and objectives remain strict.
+Actual data still match their own digests in every mode.
+Producer-only and run-only differences use `seal_check` and stamp `[DEV-MODE]`.
+Recorded chord reads compare numeric claims and scientific scope through that owner.
+Missing qualified prices cannot remove a unit from byte accounting.
 
 The independent MTP selector also retains its own objective and byte budget.
 Its export reader recomputes recorded chords from the bound original anchors.

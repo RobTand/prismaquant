@@ -191,14 +191,17 @@ class TesseraRateSurface:
         ):
             raise TesseraFormatError("anchor arrays must agree in length")
         if self.allowability is not None:
-            from .rung_allowability import _quality_anchor_scope
+            from .rung_allowability import _quality_anchor_scope, _require_joint_anchor
             if self.allowability.format != self.family or self.anchor_scopes is None:
                 raise TesseraFormatError("canonical quality requires the actual family and qualified anchor scopes")
-            for rate in self.anchor_q256:
+            for index, rate in enumerate(self.anchor_q256):
                 scope = self.anchor_scopes.get(rate)
                 unit = _quality_anchor_scope(scope, "surface", self.family)
                 if unit != self.unit_name or scope["currency"] != self.currency:
                     raise TesseraFormatError("quality surface differs from its actual unit or currency")
+                if scope["format"] != get_tessera_family(self.family).format_name(rate):
+                    raise TesseraFormatError("quality surface anchor differs from its actual format and rate")
+                _require_joint_anchor(scope, self.anchor_dloss[index])
         for left, right in zip(self.anchor_q256, self.anchor_q256[1:]):
             if left >= right:
                 raise TesseraFormatError(
@@ -365,6 +368,9 @@ def densify_rate_surface(
     dims = tuple(shape)
     if len(dims) != 2:
         raise TesseraFormatError("shape must be two dimensions")
+    if self_scopes := (surface.anchor_scopes if surface.allowability is not None else None):
+        if any(tuple(scope["shape"]) != dims for scope in self_scopes.values()):
+            raise TesseraFormatError("quality surface differs from the actual source shape")
     columns = dims[1]
     built: list[TesseraAllocatorCandidate] = []
     for rate in sorted(set(int(value) for value in q256_values)):
