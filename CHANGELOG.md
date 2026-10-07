@@ -207,6 +207,13 @@
 
 ### Fixed
 
+- **Correct readiness in the research preflight** (#2329). The census now
+  reports not-ready if any bank rung lacks canonical allow status. It keeps
+  all admission decisions and names the missing `rung_admission` prerequisite.
+  CPU CLI action `53433514eeee` passed the all-allow and valid R768-hold cases.
+  Both cases left HELDOUT payloads unopened. The test does not encode, score,
+  or capture a model.
+
 - **Restore the shared owned-byte digest comparison after the #2283 port.**
   `read_bound` again routes the acquired-byte hash through the hard `same`
   comparison before memoizing, preserving `owned bytes: identity mismatch`.

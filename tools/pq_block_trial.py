@@ -664,6 +664,9 @@ def preflight_census(args) -> tuple[dict, list[str]]:
         record.pop("table")
         record["all_allow"] = all(
             d.get("status") == "allow" for d in record["decisions"].values())
+        if not record["all_allow"]:
+            record["error"] = "canonical admission does not allow every bank rung"
+            missing.append("rung_admission")
         return record
 
     step("rung_admission", do_admission)
