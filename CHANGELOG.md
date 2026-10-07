@@ -121,6 +121,15 @@
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.
 
 ### Changed
+- **Reuse the shared E2M1 value owner in the MXFP4 widening table**
+  (#2380, Refs #1303). `mxfp4_widen.E2M1_VALUES` derives its positive half
+  from `_E2M1_POSITIVE` in `nvfp4_activation_contract`, keeping the same
+  public tuple type, the same code order, explicit positive zero at index 8
+  and a negative half that negates only the nonzero magnitudes. Table bytes,
+  widened weight bytes, carried scale bytes, geometry, route status and
+  evidence strings are unchanged. The module introduction now describes the
+  retired Gridbook MXFP8 dense lane in the past tense. No performance or
+  serving qualification follows from this refactor.
 
 - **Reuse the shared E2M1 value owner in RTN and MXFP4 source decode**
   (#2369, Refs #1303). `build_rtn_cache._nvfp4_round_rtn` reads its
@@ -294,6 +303,26 @@
   this slice.
 
 ### Fixed
+
+- **Bound paired-rate-trade diagnostic retention to summaries outside the
+  emitted assignment** (#2286). Menu, applicability and diagnostic-trace
+  records keep a bounded summary per priced trade -- priced scalars, refusal
+  verdict, per-group and per-expert means without per-probe arrays, and the
+  canonical digest binding the exact full trade -- instead of storing every
+  complete trade. Only the emitted assignment carries the full paired arrays
+  and per-expert breakdown; refusal stdout prints the summarized rows.
+  Pricing arithmetic, UCB hedging, joint sample/currency/format validation,
+  expert-dominance refusal and reproduction diagnostics are unchanged.
+  The command tests read the complete selected evidence and the actual refusal text.
+  `tools/paired_trade_report_proof.py` measures the real allocation and report paths with synthetic samples.
+  The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
+  The proof records process peaks, output bytes, profiles, and assignment arithmetic.
+  It makes no scientific quality, serving, or GPU claim.
+  The proof tool now uses the public PrismaBuild client to reserve and
+  publish its archive as a retained output batch. It uses the existing
+  exact-byte digest and sorted, spaced, ASCII JSON profiles. The allocator
+  command profiler has a domain-specific name. Both boundary baselines and
+  their scanner rules are unchanged.
 
 - **Correct readiness in the research preflight** (#2329). The census now
   reports not-ready if any bank rung lacks canonical allow status. It keeps
