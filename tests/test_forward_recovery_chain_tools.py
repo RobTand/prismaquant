@@ -62,14 +62,6 @@ def test_launcher_fields_are_exact(mutate):
         render_launcher(fields, **R11)
 
 
-def test_builder_carries_no_launcher_or_manifest_literal():
-    source = (ROOT / 'tools' / 'build_stagea_forward_recovery_package.py').read_text()
-    assert 'launch-r9.py' not in source
-    strings = [node.value for node in ast.walk(ast.parse(source))
-               if isinstance(node, ast.Constant) and isinstance(node.value, str)]
-    assert not [s for s in strings if len(s) == 64 and set(s) <= set('0123456789abcdef')]
-
-
 # ------------------------------------------------------------------ read bounds
 
 def _capsule(groups, header_bytes=0):

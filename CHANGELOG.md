@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Changed
+- The forward-recovery proof reader and campaign resolver call the existing
+  digest owners (#2398, references #1301). The capsule tail hash calls
+  `digests.bytes_sha256hex`; the source-record check calls the same bytes
+  owner and the historical trailing-newline roster check calls
+  `digests.text_sha256hex`. File reads, stat fences, limits, JSON parsing,
+  campaign fields, geometry, identities, containment and refusal behavior
+  stay unchanged. The streaming one-MiB reader keeps its own code.
+- The forward-recovery chain tools drop the source-text scan test
+  (#2398, references #1929). The test read the builder source and its
+  string literals instead of consumer behavior. Rendered-launcher
+  identity, invalid-field checks, read bounds and pre-load mismatch
+  checks stay unchanged. No speed change is claimed.
 - The streaming MXFP4 decode builds its lookup from the existing full signed
   table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
   code order, the positive zero at code 8, dtype, device, nibble order,
