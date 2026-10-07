@@ -191,3 +191,23 @@ def test_preflight_runs_real_gold_producers_but_refuses_absent_quality(tmp_path)
     assert stages["native_export.graph"]["status"] == "not_run"
     assert stages["offline.g3"]["status"] == "failed"
     assert stages["task_suite"]["status"] == "not_run"
+
+
+def test_runner_never_overwrites_its_configuration(tmp_path):
+    from prismaquant.ship_gates import run
+    config = job_config(tmp_path)
+    before = config.read_bytes()
+    report = run(config, config, preflight=True)
+    assert report["status"] == "refused"
+    assert config.read_bytes() == before
+
+
+def test_runner_keeps_an_existing_result(tmp_path):
+    from prismaquant.ship_gates import run
+    config = job_config(tmp_path)
+    output = tmp_path / "prior-result.json"
+    output.write_text('{"retained_result":true}')
+    before = output.read_bytes()
+    assert run(config, output, verify_only=True)["status"] == "refused"
+    assert output.read_bytes() == before
+

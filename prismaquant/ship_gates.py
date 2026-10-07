@@ -27,6 +27,10 @@ GOLD_TOOLS = {
 }
 
 
+class OutputConflict(ValueError):
+    """An output path would change an input or retained result."""
+
+
 def _read(path: Path) -> dict:
     value = dict(_strict_json_object(path.read_bytes(), where=str(path)))
     if not isinstance(value, dict):
@@ -49,7 +53,7 @@ def _write(path: Path, value: dict) -> None:
 
 
 
-def load_config(path: str | Path) -> tuple[dict, dict]:
+def load_config(path: str | Path, *, report_output: Path | None = None) -> tuple[dict, dict]:
     """Resolve the existing profile and the exact card's required slot set."""
     path = Path(path).resolve(strict=True)
     config = _read(path)
@@ -119,6 +123,18 @@ def load_config(path: str | Path) -> tuple[dict, dict]:
             raise ValueError(f"input is not a file: {source}")
         input_evidence.append({"path": str(source), "bytes": source.stat().st_size,
                                "sha256": _sha(source)})
+    protected = {path} | {Path(item).resolve() for item in inputs}
+    protected.update(Path(stage["config"]).resolve() for stage in stages if "config" in stage)
+    destinations = [Path(stage["output"]).resolve() for stage in stages]
+    destinations += [destination.with_suffix(".log") for destination in destinations]
+    if report_output is not None:
+        destinations.append(report_output)
+    if len(set(destinations)) != len(destinations):
+        raise OutputConflict("stage, log and job output paths must be distinct")
+    if any(destination in protected or artifact == destination or artifact in destination.parents
+           for destination in destinations):
+        raise OutputConflict("outputs must not overwrite inputs or enter the artifact")
+
     return config, {"artifact": str(artifact), "profile": profile.name,
                     "architectures": list(profile.declared_architectures()),
                     "lane": card.get("lane"), "model_sha": card["model_sha"],
@@ -217,9 +233,10 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
     report = {"schema": RESULT_SCHEMA, "status": "running", "mode":
               "preflight" if preflight else ("verify_only" if verify_only else "execute"),
               "runtime_qualification": "not_run", "stages": [], "problems": []}
-    _write(output, report)
     try:
-        config, context = load_config(config_path)
+        if output.exists():
+            raise OutputConflict("job output already exists; use a new result path")
+        config, context = load_config(config_path, report_output=output)
         report["context"] = context
         import torch
         from prismaquant.shipcard import git_provenance
@@ -297,6 +314,10 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
             report["runtime_qualification"] = "passed" if not report["problems"] else "refused"
         report["status"] = ("refused" if report["problems"] else
                             ("preflight" if preflight else "passed"))
+    except OutputConflict as exc:
+        report["problems"].append(str(exc))
+        report["status"] = "refused"
+        return report
     except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
         report["problems"].append(str(exc))
         report["status"] = "refused"
@@ -313,7 +334,10 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--verify-only", action="store_true")
     args = parser.parse_args(argv)
     report = run(args.config, args.output, preflight=args.preflight, verify_only=args.verify_only)
-    evidence = [{"path": str(Path(args.output).resolve()), "sha256": _sha(Path(args.output))}]
+    evidence = []
+    result_path = Path(args.output).resolve()
+    if result_path.is_file():
+        evidence.append({"path": str(result_path), "sha256": _sha(result_path)})
     for stage in report["stages"]:
         for key in ("output", "log"):
             path = Path(stage[key]) if key in stage else None
