@@ -241,6 +241,40 @@ class Glm5NextProfile(ModelProfile):
         # DSv4 and hy_v3 both sit in exactly this state.
         return None
 
+    def fused_sibling_group(self, linear_qname: str) -> str | None:
+        from tessera.serving.dense_ownership import fused_module
+        source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
+        tensor = source if source.endswith(".weight") else source + ".weight"
+        fused = fused_module(tensor, "Glm5NextForConditionalGeneration", config=self._declared_config)
+        return None if fused is None else fused[0]
+
+    def fused_sibling_leaf_mapping(self) -> dict[str, tuple[str, ...]]:
+        from tessera.serving.dense_ownership import GLM_FUSED, fused_module
+        owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
+        return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
+                **{target: members for _pattern, target, members in GLM_FUSED}}
+
+    def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
+        from prismaquant.fixed_head import parse_allow_pinned
+        tokens = parse_allow_pinned(allow_pinned)
+        names = super().campaign_dense_unit_names(model, allow_pinned=allow_pinned)
+        if not tokens:
+            return names
+        for name, module in model.named_modules():
+            if (any(token in name for token in tokens) and name not in names
+                    and self.is_dense_parameter_owner(name, module)):
+                names.append(name)
+        return names
+
+    def is_dense_parameter_owner(self, name, module) -> bool:
+        if super().is_dense_parameter_owner(name, module):
+            return True
+        if not name.endswith(".mlp.gate") or type(module).__name__ != "Glm5NextTextTopkRouter":
+            return False
+        if module.weight.ndim != 2 or tuple(module.weight.shape) != (module.num_experts, module.hidden_dim):
+            raise ValueError(f"{name}: the router weight does not match its dense input contract")
+        return True
+
     def to_vllm_internal_name(self, checkpoint_name: str) -> str:
         # Attested from the pinned serving image
         # vllm-glm5next:pr53906-933876c, models/glm5next/nvidia/model.py

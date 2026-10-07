@@ -653,6 +653,25 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 hessian_required=hessian_required)
 
 
+def _direct_consumer_memory_bytes(qname, family, shape):
+    """Charge each direct cache once through its source member."""
+    source = qname.removesuffix(".weight")
+    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return 0
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_resident_bytes
+    from tessera.serving.scheme import ROUTES
+    tensor = source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    owner = source if fused is None else fused[0]
+    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
+    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
+    rows, columns = map(int, shape)
+    extra = direct_consumer_resident_bytes(owner, route_family, rows, columns,
+                                           [(role_name(tensor), rows)])
+    return extra["resident_bytes_resident_mode"]
+
+
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
                    prepared, render, blob, elapsed, encoding_batch_size=1,
                    publisher=None):
@@ -765,7 +784,8 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # zero, and inventing one would put a fabricated uncertainty into the
         # allocator's UCB hedge.  Reported as zero and named as such.
         dloss_stderr=0.0,
-        memory_bytes=int(spec.memory_bytes_for_shape(tuple(weight.shape))),
+        memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
+                      + _direct_consumer_memory_bytes(qname, family, weight.shape)),
         bits_per_param=float(bits) / max(1, int(weight.numel())),
         activation_contract=str(spec.act_dtype_name or "a16"),
         activation_quantized=bool(quantized),
@@ -7052,7 +7072,7 @@ def _main(argv, *, source_scope, waits) -> int:
                   _require_campaign_population(model, profile, args.layer_stride))
     # Names only: no module is retained after source teardown.
     roster = campaign_roster(
-        [name for name, module in model.named_modules() if isinstance(module, torch.nn.Linear)],
+        profile.campaign_dense_unit_names(model, allow_pinned=args.allow_pinned),
         profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
     all_dense = list(roster.dense)
     pinned = list(roster.pinned)

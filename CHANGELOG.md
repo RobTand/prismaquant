@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Explicit GLM projection owners.** The producer reads fused members from Tessera dense_ownership instead of a duplicate profile table.
+  The source config separates KDA queries from standalone MLA queries.
+  Existing pin-lift controls can select the actual bare router parameter owner.
+  The producer keeps its stock forward and uses the existing input capture hook.
+  DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
+  Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic
