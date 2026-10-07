@@ -229,3 +229,83 @@ def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
     assert report["status"] == "refused"
     assert log_path.read_bytes() == retained
     assert not log_path.with_suffix(".json").exists()
+
+
+def _task_replay_job(root):
+    from test_task_quality_replay import make_task_replay_fixture
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    job_path = job_config(root / "job")
+    job = json.loads(job_path.read_text())
+    config, result, raw = make_task_replay_fixture(root / "quality")
+    model = Path(job["artifact"])
+    config["backend"]["pretrained"] = str(model)
+    result["identity"]["model"] = str(model)
+    result["identity"]["model_artifact"] = build_source_checkpoint_identity(model)
+    config_path = root / "task-replay.config.json"
+    config_path.write_text(json.dumps(config))
+    result["configuration"].update(path=str(config_path),
+        sha256=hashlib.sha256(config_path.read_bytes()).hexdigest())
+    stage = next(stage for stage in job["stages"] if stage["id"] == "task_suite")
+    stage.update(config=str(config_path), output=str(root / "task-result.json"))
+    Path(stage["output"]).write_text(json.dumps(result))
+    job["inputs"].extend((str(config_path), str(raw)))
+    job_path.write_text(json.dumps(job))
+    return job_path, config, result, raw, Path(stage["output"])
+
+
+def _verify_task_replay(job_path, root):
+    output = root / "verify.json"
+    process = _cli("prismaquant.ship_gates", ["--config", str(job_path),
+        "--output", str(output), "--verify-only"])
+    assert process.returncode == 1, process.stderr
+    report = json.loads(output.read_text())
+    assert report["status"] == "refused"
+    task = next(stage for stage in report["stages"] if stage["id"] == "task_suite")
+    return report, task
+
+
+@pytest.mark.parametrize("kind", ["config", "weight", "tokenizer"])
+def test_task_replay_consumer_certified_replacement_refuses(tmp_path, monkeypatch, kind):
+    from test_task_quality_replay import replace_task_fixture
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, config, _, _, _ = _task_replay_job(tmp_path)
+    replace_task_fixture(config, kind)
+    _, task = _verify_task_replay(job, tmp_path)
+    assert task["status"] == "failed"
+    assert "provenance" in task["error"]
+
+
+@pytest.mark.parametrize("dev", [False, True])
+@pytest.mark.parametrize("damage", ["corrupt", "metrics", "sampling"])
+def test_task_replay_consumer_owned_bytes_and_math_refuse(tmp_path, monkeypatch, dev, damage):
+    from prismaquant.quality_stage import artifact
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, _, result, raw_path, output = _task_replay_job(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    if damage == "corrupt":
+        raw_path.write_bytes(b"corrupt owned result")
+    else:
+        raw = json.loads(raw_path.read_text())
+        if damage == "metrics":
+            raw["results"]["facts"]["acc,none"] = 0.0
+        else:
+            raw["config"]["torch_seed"] = 1
+        raw_path.write_text(json.dumps(raw))
+        result["artifacts"] = [artifact(raw_path)]
+        output.write_text(json.dumps(result))
+    _, task = _verify_task_replay(job, tmp_path)
+    assert task["status"] == "failed"
+
+
+def test_task_replay_consumer_dev_preserves_metrics_and_stamp(tmp_path, monkeypatch):
+    from test_task_quality_replay import replace_task_fixture
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, config, result, _, _ = _task_replay_job(tmp_path)
+    stored = copy.deepcopy(result["measurement"])
+    replace_task_fixture(config, "weight")
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE")
+    report, task = _verify_task_replay(job, tmp_path)
+    assert task["status"] == "passed"
+    assert task["result"]["measurement"] == stored
+    assert task["result"].get("dev_uncertified") is True
+    assert report.get("dev_uncertified") is True
