@@ -332,6 +332,18 @@
 
 ### Fixed
 
+- **The nested-rotary meta-skeleton test owns its import process** (Refs
+  #2279, a residual exposure of #2276). `tests/test_dsv4_nested_rotary_init.py`
+  uses the existing `own_process` marker when it shares a pytest session, so a
+  native `transformers.models.deepseek_v4` import in an earlier test cannot make
+  `register_deepseek_v4()` refuse. On main, running
+  `test_streaming_text_only_wrapper_config.py` first failed this test; the
+  reverse order and the test alone passed. The regression runs the real
+  unsupported-configuration predecessor, this test and the native-import
+  refusal control together. Production registration and its native-module
+  refusal are unchanged. The other exposures listed in #2279 are not fixed
+  here, and the issue stays open.
+
 - **Bound paired-rate-trade diagnostic retention to summaries outside the
   emitted assignment** (#2286). Menu, applicability and diagnostic-trace
   records keep a bounded summary per priced trade -- priced scalars, refusal
