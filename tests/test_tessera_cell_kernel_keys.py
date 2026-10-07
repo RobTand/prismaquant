@@ -51,3 +51,30 @@ def test_development_projection_and_review_answer_keep_the_build_name():
     answer = runtime.contract_answer(parsed)
     assert any(isinstance(value, dict) and value.get("kernel_build") == "build-a"
                for row in answer["cells"] for value in row)
+
+
+def test_legacy_compatibility_key_selects_its_historical_cell():
+    cell = SimpleNamespace(id="historical_cell", platform="sm_121", structure="dense",
+        residency_modes=("resident",), execution_modes=("eager",),
+        runtime_image="example/old@sha256:" + "a" * 64, runtime_kernel_build="",
+        family="TESSERA_E4M3_K1", regime="decode")
+    key = lane.cell_key_compatibility([cell])[cell.id]
+    context = lane.ServingContext(platform=cell.platform, structure=cell.structure,
+        residency="resident", runtime_image=cell.runtime_image, execution_mode="eager", kernel_build=key[0])
+    assert lane.cell_matches_serving_context(cell, context, serving_source_sha256=None)
+
+
+def test_image_only_scope_cannot_overlap_across_build_names():
+    import copy
+    import json
+    import pytest
+    from prismaquant import tessera_runtime_contract as runtime
+    payload = json.loads(runtime.contract_path().read_text())
+    cell = payload["lane_eligibility"]["cells"][0]
+    cell["runtime"]["kernel_build"] = "build-a"
+    variant = copy.deepcopy(cell)
+    variant["id"] += "_other_build"
+    variant["runtime"]["kernel_build"] = "build-b"
+    payload["lane_eligibility"]["cells"].append(variant)
+    with pytest.raises(lane.LaneEligibilityError, match="overlapping serving scopes"):
+        runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")

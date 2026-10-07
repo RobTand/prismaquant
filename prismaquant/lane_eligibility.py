@@ -642,7 +642,7 @@ def cell_matches_serving_context(
         cell.platform == context.platform
         and cell.structure == context.structure
         and context.residency in cell.residency_modes
-        and ((getattr(cell, "runtime_kernel_build", "") == context.kernel_build)
+        and ((cell_kernel_build(cell) == context.kernel_build)
              if context.kernel_build is not None else cell.runtime_image == context.runtime_image)
         and context.execution_mode in cell.execution_modes
         and cell_serving_code_admits(cell, serving_source_sha256)[0]
@@ -3309,20 +3309,21 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
                         "launch through an extension is read by that "
                         "extension's lane, and a cell that names another "
                         "decoder for it would escape the lane's predicate")
-        scopes: dict[tuple[str, ...], str] = {}
+        scopes: dict[tuple, str] = {}
         for cell in cells:
             for mode in cell.residency_modes:
                 for execution in cell.execution_modes if is_scoped else ("",):
-                    scope = (cell.platform, cell.family, cell.structure, cell.regime, mode)
-                    if is_scoped:
-                        scope += (cell.runtime_kernel_build or cell.runtime_image, execution)
-                    previous = scopes.get(scope)
-                    if previous is not None:
-                        raise LaneEligibilityError(
-                            f"{where}.cells {previous!r} and {cell.id!r} both cover "
-                            f"{scope}; overlapping serving scopes make route "
-                            "resolution depend on cell order")
-                    scopes[scope] = cell.id
+                    base = (cell.platform, cell.family, cell.structure, cell.regime, mode, execution)
+                    keys = (("image", cell.runtime_image, base),
+                            ("build", cell_kernel_build(cell), base)) if is_scoped else (("unscoped", base),)
+                    for scope in keys:
+                        previous = scopes.get(scope)
+                        if previous is not None:
+                            raise LaneEligibilityError(
+                                f"{where}.cells {previous!r} and {cell.id!r} both cover "
+                                f"{scope}; overlapping serving scopes make route "
+                                "resolution depend on cell order")
+                        scopes[scope] = cell.id
 
     return EligibilityTable(
         present=True,
@@ -3351,11 +3352,20 @@ def parse_kernel_build(payload: Mapping[str, Any], where: str) -> str:
     return value
 
 
+def _cell_identifier(cell: Any) -> str:
+    return getattr(cell, "id", None) or cell.cell_id
+
+
+def cell_kernel_build(cell: Any) -> str:
+    """Use the same effective build name for lookup and compatibility keys."""
+    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + _cell_identifier(cell)
+
+
 def cell_key_compatibility(cells) -> dict[str, tuple]:
     """Map historical receipt names to build and module-kind keys."""
-    return {cell.id: (cell.runtime_kernel_build or "legacy:" + cell.id,
-                     cell.structure, cell.platform, cell.family, cell.regime,
-                     cell.residency_modes, cell.execution_modes) for cell in cells}
+    return {_cell_identifier(cell): (cell_kernel_build(cell), cell.structure,
+            cell.platform, cell.family, cell.regime, cell.residency_modes,
+            cell.execution_modes) for cell in cells}
 
 
 def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = False
