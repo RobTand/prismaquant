@@ -14,6 +14,35 @@ Its central processor preflight runs that smoke's argument path without importin
 The runbook is `docs/new_model_intake.md`.
 No active PACT path, serving default, runtime pin, or production format menu changes.
 
+Re-stamped 2026-10-07 (D50 item six, PQ #2409): Tessera export setup reads
+profile capabilities and the source index. The lane derives
+`wired_architectures` from the profile specs' `supported_lanes` field.
+No architecture gains runtime qualification from that roster.
+
+`tessera_export_lane.export_setup` reads headers through the producer's
+`source_inventory` and `quantizable` contracts. It emits construction-census
+inputs for Tessera's existing `tools/tessera_construction_census.py`.
+It records both census execution and runtime qualification as `not_run`.
+The plan writer exposes this result through `--export-setup-json`.
+
+`export_partition.whole_layer_partitions` owns the shared count rule.
+It uses Tessera's `partition_owner` for every source tensor, including
+passthrough tensors. The largest nonempty modulo domain defines the count.
+Fused modules and all experts of a stack retain one owner.
+
+`tools.tessera_fleet.dispatch_model --dry-run` exposes the real metadata
+plan without files or submissions. The fixed-count `dispatch_shards` driver
+and its dependency on a model-specific wrapper are removed. Full exports retain the existing
+preparation, encoding and complete-set assembly paths. The worker calls the
+supported `tessera.export_serving` package, not an experiment wrapper.
+The ladder probe retains its own historical configuration.
+
+Provenance: `lane_spec.py`, `lane_specs/tessera.json`,
+`tessera_export_lane.py`, `tessera_plan_writer.py`, `export_partition.py`,
+and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.
+The consumer proof is `tests/test_tessera_export_setup.py`.
+No production format, serving default, runtime pin or active PACT path changes.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,

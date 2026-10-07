@@ -44,43 +44,11 @@ from prismaquant.serving_profiles import (
     require_profile_export_lane,
 )
 
-# A serving runtime's supported producer IDs are never duplicated here: the
-# pinned runtime publishes them in its own runtime_contract.json and the
-# comparison is made against that one machine-readable table (AGENTS.md
-# principle 5 / CLAUDE.md principle 14). The Gridbook half of that comparison
-# retired with its lane on 2026-09-02.
-#
-# `GGUF_WIRED` / `TESSERA_WIRED` lived here until 2026-09-03: two module-level
-# sets named after two specific lanes, asserted by name in one test. That is
-# the roster-instead-of-rule shape (the eighth instance across these two
-# repositories), and its cost is precise: a THIRD non-default lane would have
-# been covered by nothing, because the test named two lanes and said nothing
-# about any other. The rosters moved into `lane_specs/<lane>.json`'s
-# `wired_architectures`, beside everything else about that lane, and the
-# assertions below are properties quantified over EXPORT_LANES.
-#
-# `wired_architectures` moved the roster beside the lane, which is the right
-# home for it, and the agreement below is two files written by two authors
-# answering one question. What neither file can answer is whether the wiring
-# EXISTS: there is no per-architecture lane-wiring table in this repository
-# (GGUF's architecture comes out of llama.cpp's own skeleton at export time,
-# and Tessera's gate constrains structure -- "dense" -- rather than
-# architecture), so a lockstep edit across the two files still satisfies the
-# agreement, which is the Laguna failure mode (`9a79963`) in two files instead
-# of one. #150 therefore adds a THIRD conjunct, derived from a place neither
-# roster maintains: `serving_profile_specs/*.json` declare an `export_lane`,
-# layered through `extends`, so an architecture's `default_serving_profile`
-# resolves to exactly one lane, and `lane_specs/*.json` say which serving
-# profiles serve a lane. An architecture whose serving profile goes to
-# compressed-tensors cannot declare the GGUF lane, whatever either roster says.
-#
-# It is a weaker claim than "the exporter is wired for this arch" and says so.
-# The Tessera lane is the honest hole: its own spec declares NO serving
-# profiles, because the plugin is chosen by the checkpoint's
-# `quantization_config.quant_method`, so the third conjunct has nothing to bite
-# on there and `qwen3`'s declaration rests on the two rosters alone. That
-# absence is read out of the lane spec below rather than encoded as a name to
-# skip.
+# Profiles own lane capabilities. Tessera derives its architecture roster
+# from those capabilities; it does not keep another manual roster.
+# Metadata does not attest a runtime. The exporter still checks actual module
+# kinds, source layouts, native routes and the construction census.
+# Other lanes retain their current declarations and serving-profile checks.
 
 
 def _resolved_serving_lane(profile) -> "str | None":
@@ -233,14 +201,7 @@ def test_preferred_lane_must_be_supported():
 @pytest.mark.parametrize("cls", PROFILE_CLASSES, ids=PROFILE_IDS)
 @pytest.mark.parametrize("lane", LANE_IDS)
 def test_a_profile_declares_a_lane_exactly_when_the_lane_declares_it(cls, lane):
-    """Two files, two authors, one answer -- for EVERY lane in the vocabulary.
-
-    The profile side says which lanes an architecture supports; the lane side
-    says which architectures are wired for it. Neither is derivable from the
-    other, so both are declared and this is the agreement. The predecessor
-    checked `gguf` and `tessera` by name against two sets defined in this
-    file, which is why a fourth lane would have escaped it entirely.
-    """
+    """Each lane consumer agrees with the profile capability it reads."""
     profile = _profile(cls)
     lanes = set(profile.supported_export_lanes())
     assert DEFAULT_EXPORT_LANE in lanes, (

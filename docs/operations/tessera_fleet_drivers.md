@@ -14,7 +14,6 @@ Run each driver as a module from the repository root:
 | Driver | What it submits |
 |---|---|
 | `python3 -m tools.tessera_fleet.dispatch_model` | A complete serving export, one action per whole layer, then an assembly behind the complete-set barrier. |
-| `python3 -m tools.tessera_fleet.dispatch_shards` | The GLM-5.3 E2M1K2 export, one action per input shard. |
 | `python3 -m tools.tessera_fleet.dispatch_ladder` | The Tessera rate-band probe, one action per input shard. |
 | `python3 -m tools.tessera_fleet.status` | Nothing. It reads a dispatch's recorded keys and asks `pbwait` for their endings. |
 | `python3 tools/render_identity.py` | Nothing. It renders on the local box; see [the cross-box render identity measurement](../measurements/cross-box-render-identity-2026-08-31.md). |
@@ -102,23 +101,48 @@ assembly blocked; `.pb-state/STAGE-pbcampaign.txt` holds the table and the
 worker errors. A passing unit test or a successful submission alone is not
 evidence of a completed model export.
 
-## Per-shard exports and the ladder probe
+## Metadata plan and construction-census inputs
 
-`dispatch_shards` and `dispatch_ladder` copy the wrapper
-(`tessera_export_shard.py` or `tessera_ladder_probe.py`) and every `.py` under
-the checkout's `tessera/` into the workspace; `dispatch_shards` also copies the
-plan. The default checkout is the fleet's shared tree the 2026-09-01 export
-ran from. Each row runs one shard with `PYTHONPATH=tessera/src`, relative to
-the sealed tree, so the import lands on sealed bytes on every box. Both submit
-with `pbcampaign --detach` and record the keys:
+Use the model dispatcher to plan export work without a submission:
 
 ```bash
-python3 -m tools.tessera_fleet.dispatch_shards --shards 1-120 \
-  --workspace /home/rob/tmp/glm-tessera-export
-python3 -m tools.tessera_fleet.status --workspace /home/rob/tmp/glm-tessera-export
+python3 -m tools.tessera_fleet.dispatch_model \
+  --source /path/to/source --plan /path/to/plan.json \
+  --cpus 2 --mem-gb 6 --dry-run
 ```
 
-`--dry-run` prints the manifest rows and stages and submits nothing. The
-status screen exits 0 when every recorded action is done, 4 while any is
-still waiting, 1 when one ended without its work done, and 3 when the
-workspace records nothing for the stage.
+Run this command through PrismaBuild with the project interpreter and CPU demand.
+The command reads profile metadata, the source index and tensor headers.
+It writes no files and submits no actions. No image or workspace is needed.
+
+The result contains the following fields:
+- `wired_architectures` comes from the profile specs' supported lane capabilities.
+- `units` records the producer's actual tensor kinds, shapes and source shards.
+- `partitions` covers every source tensor once under the producer's ownership rule.
+- `construction_census.argv` names Tessera's existing construction-census tool.
+- Census execution and runtime qualification remain `not_run`.
+
+Run the generated census command from the Tessera repository inside the target
+serving image through PrismaBuild. Supply its actual `--runtime-image` value.
+Use the full source configuration and tokenizer inputs. Do not replace the
+configuration with a guessed layer or expert count. This metadata plan does
+not replace a census receipt, a native route check or serving qualification.
+
+The plan writer emits the same metadata with `--export-setup-json PATH`.
+Metadata can describe a known profile that the lane does not yet declare wired.
+The `profile_wired` field reports that distinction; it grants no admission.
+Full exports still use the real preparation, encode and assembly stages above.
+
+The old fixed-count shard export driver is removed. Use `dispatch_model`
+instead. Physical input shards do not define independent fused-module work.
+
+## Historical ladder probe
+
+`dispatch_ladder` retains its existing rate-band configuration. It copies
+`tessera_ladder_probe.py` and encoder sources into its own workspace.
+Its `--dry-run` prints rows without a submission. Its defaults do not define
+an export partition count.
+
+The status screen exits zero when every recorded action is complete.
+It exits four for unfinished work, one for failure and three for absent records.
+
