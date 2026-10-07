@@ -2,9 +2,11 @@
 
 As of: 2026-10-07 · `sol/d50-ship-gates-2413` (D50, #2413; quality source #2412 and RoPE fix #2418).
 The configured job preserves every lane gate. CPU preflight does not qualify serving.
+
 The runner derives actual output and log paths once and validates them before execution.
 The same destination owner checks configured and preflight paths against protected inputs and the artifact boundary.
 Existing logs refuse. Exclusive log creation preserves retained bytes if a collision appears later.
+
 The quality source accepts upstream `rope_parameters` and preserves legacy `rope_theta`.
 The inverse-frequency arithmetic, float32 dtype and operation order stay unchanged.
 A missing theta still raises an error. The quality owner owns this compatibility fix.
