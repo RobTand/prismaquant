@@ -201,6 +201,12 @@ def test_real_router_uses_the_existing_dense_capture_without_a_model_change():
     profile = Glm5NextProfile()
     assert profile.campaign_dense_unit_names(model) == []
     assert profile.campaign_dense_unit_names(model, allow_pinned=name) == [name]
+    from prismaquant.cost_streaming import StreamedCausalLM
+    source = object.__new__(StreamedCausalLM)
+    source.model, source.profile, source.dtype = model, profile, router.weight.dtype
+    source.context = SimpleNamespace(buffer_dtypes={name + ".weight": router.weight.dtype})
+    assert source.selected_weight_specs([name]) == {
+        name: ((4, 4), router.weight.dtype, router.weight.numel() * router.weight.element_size())}
     x = torch.arange(8).reshape(2, 4).bfloat16()
     original_weight = router.weight.detach().clone()
     before = router(x)
