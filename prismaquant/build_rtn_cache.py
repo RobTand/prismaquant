@@ -37,6 +37,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from prismaquant.nvfp4_activation_contract import (
+    E2M1_MIDPOINTS,
+    FP4_E2M1_MAX,
+    _E2M1_POSITIVE,
+)
 from prismaquant.sensitivity_probe import (
     _mk_stage_dir,
     _is_packed_experts_module,
@@ -73,18 +78,18 @@ def _nvfp4_round_rtn(weight: torch.Tensor, group_size: int = 16) -> torch.Tensor
     w = F.pad(weight, (0, pad)) if pad > 0 else weight
     grouped = w.view(out_f, n_groups, group_size)
     scales = grouped.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8)
-    normalized = grouped / scales * 6.0
+    normalized = grouped / scales * FP4_E2M1_MAX
     abs_n = normalized.abs()
     sign = normalized.sign()
-    q = torch.where(abs_n <= 0.25, torch.zeros_like(abs_n),
-        torch.where(abs_n <= 0.75, torch.full_like(abs_n, 0.5),
-        torch.where(abs_n <= 1.25, torch.full_like(abs_n, 1.0),
-        torch.where(abs_n <= 1.75, torch.full_like(abs_n, 1.5),
-        torch.where(abs_n <= 2.5,  torch.full_like(abs_n, 2.0),
-        torch.where(abs_n <= 3.5,  torch.full_like(abs_n, 3.0),
-        torch.where(abs_n <= 5.0,  torch.full_like(abs_n, 4.0),
-                                   torch.full_like(abs_n, 6.0))))))))
-    dequant = sign * q / 6.0 * scales
+    q = torch.where(abs_n <= E2M1_MIDPOINTS[0], torch.zeros_like(abs_n),
+        torch.where(abs_n <= E2M1_MIDPOINTS[1], torch.full_like(abs_n, _E2M1_POSITIVE[1]),
+        torch.where(abs_n <= E2M1_MIDPOINTS[2], torch.full_like(abs_n, _E2M1_POSITIVE[2]),
+        torch.where(abs_n <= E2M1_MIDPOINTS[3], torch.full_like(abs_n, _E2M1_POSITIVE[3]),
+        torch.where(abs_n <= E2M1_MIDPOINTS[4], torch.full_like(abs_n, _E2M1_POSITIVE[4]),
+        torch.where(abs_n <= E2M1_MIDPOINTS[5], torch.full_like(abs_n, _E2M1_POSITIVE[5]),
+        torch.where(abs_n <= E2M1_MIDPOINTS[6], torch.full_like(abs_n, _E2M1_POSITIVE[6]),
+                                   torch.full_like(abs_n, _E2M1_POSITIVE[7]))))))))
+    dequant = sign * q / FP4_E2M1_MAX * scales
     dequant = dequant.view(out_f, n_groups * group_size)
     if pad > 0:
         dequant = dequant[:, :in_f]

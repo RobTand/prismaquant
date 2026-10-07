@@ -32,6 +32,7 @@ import torch.nn as nn
 
 from .autoscale import declared_expert_dtype_covers, declared_fp4_expert_dtype
 from .io_spans import mem_available_bytes
+from .nvfp4_activation_contract import _E2M1_POSITIVE
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
@@ -1011,9 +1012,12 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
     # element plane (~13 B per packed byte, see below) that would dwarf the
     # decoded output if the whole expert stack were gathered at once.
     if mxfp4_names:
+        # Codes 0 and 8 stay positive zero: the sign bit adds no
+        # magnitude, so the high half negates the positive grid
+        # past an explicit +0.0 at code 8.
         lut = torch.tensor(
-            [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-             0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+            [*_E2M1_POSITIVE, 0.0,
+             *(-v for v in _E2M1_POSITIVE[1:])],
             dtype=torch.float32, device=device)
         # (256, 2) byte LUT: byte -> (low-nibble, high-nibble) element
         # pair; low nibble is the even logical element, so flattening the
