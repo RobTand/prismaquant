@@ -70,6 +70,18 @@
 
 ### Changed
 
+- **Reuse the shared E2M1 value owner in RTN and MXFP4 source decode**
+  (#2369, Refs #1303). `build_rtn_cache._nvfp4_round_rtn` reads its
+  magnitudes, midpoint ties and maximum from `_E2M1_POSITIVE`,
+  `E2M1_MIDPOINTS` and `FP4_E2M1_MAX` in
+  `nvfp4_activation_contract`, and the MXFP4 nibble decode in
+  `layer_streaming._apply_fp8_dequant_inplace` builds its value table
+  from the same positive grid. The nested `torch.where` chain, the
+  decode order, positive zero at codes 0 and 8, dtypes, scales,
+  padding, ties and nonfinite behavior are unchanged. No format,
+  default, gate, pin or artifact byte changes. No performance or
+  serving qualification follows from this refactor.
+
 - **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
   Final-hidden manifests and MTP censuses use the existing
   `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
