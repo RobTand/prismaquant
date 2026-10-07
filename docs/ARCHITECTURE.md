@@ -2798,6 +2798,12 @@ and refuses a point without a bootstrap, and the sweep replay stamps
 constants in `prefill_frontier.py` are removed. No default, stage, format,
 lane or ship gate changes. Gate: `tests/test_pact_frontier_intervals.py`.
 
+Re-stamped 2026-10-07 (D50 item 3, `campaign/pact-frontier-adapter-20261007`): `prismaquant/pact_frontier_profile.py` reads the PACT cohort and TP rules from the model profile and config.
+The cohort is layers, bands, vocab, prefix ids and scored positions.
+GLM-5.3-Flash resolves to the exact running-measurement values (`glm_paths_identical`).
+No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_frontier_profile_adapter.py`.
+
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
 `prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
