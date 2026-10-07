@@ -2129,6 +2129,94 @@ def price_paired_rate_trade(
             "clipping": "nonnegative_candidate_total_only"}
 
 
+PAIRED_RATE_TRADE_SUMMARY_SCHEMA = "prismaquant.paired_rate_trade_summary.v1"
+
+
+def summarize_paired_routed_layer(row: Mapping) -> dict:
+    """Bounded retention form of one routed-layer trade row (#2286).
+
+    Keeps the scalars and member rosters a refusal verdict or a reproduction
+    needs (means, stderrs, dominant experts, refusal reason) and drops the
+    per-probe diagnostic arrays, which live only in the emitted assignment's
+    full trade. Already-summarized rows pass through unchanged.
+    """
+    if "difference_per_probe" not in row and "group_differences" not in row:
+        return dict(row)
+    experts = {}
+    for expert, summary in (row.get("experts") or {}).items():
+        experts[expert] = {
+            "members": list(summary["members"]),
+            "mean_difference": summary["mean_difference"],
+            "paired_standard_error": summary["paired_standard_error"],
+            "fraction_of_layer_change": summary["fraction_of_layer_change"],
+        }
+    return {
+        "members": list(row["members"]),
+        "mean_difference": row["mean_difference"],
+        "paired_standard_error": row["paired_standard_error"],
+        "refused": row["refused"],
+        "refusal_reason": row["refusal_reason"],
+        "dominant_experts": list(row["dominant_experts"]),
+        "experts": experts,
+    }
+
+
+def summarize_paired_rate_trade(trade: Mapping) -> dict:
+    """Bounded retention form of a priced paired-rate trade (#2286).
+
+    Menu, applicability and diagnostic-trace records keep this summary: the
+    priced scalars, the refusal verdict, per-group/per-expert means without
+    their per-probe arrays, and the canonical digest binding the exact full
+    trade. Only the emitted assignment carries the complete paired arrays
+    and per-expert breakdown. Arithmetic, validation and refusal semantics
+    are unchanged: this reads a priced trade, it never reprices.
+    """
+    if trade.get("schema") == PAIRED_RATE_TRADE_SUMMARY_SCHEMA:
+        return dict(trade)
+    routed = {
+        layer: summarize_paired_routed_layer(row)
+        for layer, row in (trade.get("routed_layers") or {}).items()
+    }
+    groups = {}
+    for group, summary in (trade.get("group_differences") or {}).items():
+        groups[group] = {
+            "members": list(summary["members"]),
+            "mean_difference": summary["mean_difference"],
+            "paired_standard_error": summary["paired_standard_error"],
+        }
+    assignment_a = trade.get("assignment_a") or {}
+    assignment_b = trade.get("assignment_b") or {}
+    summary = {
+        "schema": PAIRED_RATE_TRADE_SUMMARY_SCHEMA,
+        "full_trade_schema": trade["schema"],
+        "full_trade_sha256": DIRECT_UTF8_STRICT.sha256(dict(trade)),
+        "objective": trade["objective"],
+        "cost_currency": trade["cost_currency"],
+        "normalization": trade["normalization"],
+        "clipping": trade["clipping"],
+        "uncertainty_scope": trade["uncertainty_scope"],
+        "measurement_status": trade["measurement_status"],
+        "mean_difference": trade["mean_difference"],
+        "paired_standard_error": trade["paired_standard_error"],
+        "hedged_difference": trade["hedged_difference"],
+        "candidate_point_cost": trade["candidate_point_cost"],
+        "predicted_dloss": trade["predicted_dloss"],
+        "ucb_z": trade["ucb_z"],
+        "refused": trade["refused"],
+        "n_probes": len(trade["probe_ids"]),
+        "probe_identity_sha256": trade["probe_identity_sha256"],
+        "assignment_a_sha256": assignment_a.get("assignment_identity_sha256"),
+        "assignment_b_sha256": assignment_b.get("assignment_identity_sha256"),
+        "groups": groups,
+        "routed_layers": routed,
+    }
+    if "dev_uncertified" in trade:
+        summary["dev_uncertified"] = trade["dev_uncertified"]
+    if "dev_mode" in trade:
+        summary["dev_mode"] = trade["dev_mode"]
+    return summary
+
+
 def reprice_paired_candidates(
     stats: Mapping, costs: Mapping, candidates: Mapping, baseline_assignment: Mapping,
     *, profile, ucb_z: float, report: dict,
@@ -2153,7 +2241,7 @@ def reprice_paired_candidates(
         for candidate in menu:
             assignment = candidate.member_formats or {m: candidate.fmt for m in members}
             trade = price_paired_rate_trade(costs, assignment, baseline, profile=profile, ucb_z=ucb_z)
-            report[name][candidate.fmt] = trade
+            report[name][candidate.fmt] = summarize_paired_rate_trade(trade)
             if trade["refused"] and stats[name].get("_packed_group_members"):
                 continue
             kept.append(replace(candidate, predicted_dloss=(
@@ -3440,7 +3528,7 @@ def tessera_group_composites(
                 total_cost = trade["predicted_dloss"]
                 if report is not None:
                     report.setdefault("__paired_trades__", {})[
-                        fr.whole_group_option_name(family, index)] = trade
+                        fr.whole_group_option_name(family, index)] = summarize_paired_rate_trade(trade)
                 if trade["refused"]:
                     index += 1
                     continue
@@ -3737,7 +3825,7 @@ def aggregate_fused_siblings(
                 predicted = trade["predicted_dloss"]
                 entry.update(predicted_dloss=trade["candidate_point_cost"],
                              predicted_dloss_stderr=trade["paired_standard_error"],
-                             paired_rate_trade=trade)
+                             paired_rate_trade=summarize_paired_rate_trade(trade))
             cands.append(Candidate(
                 fmt=spec.name,
                 bits_per_param=bits_per_param,

@@ -128,6 +128,8 @@ from .allocator_candidates import (
     serialized_candidate_payload,
     serving_groups_by_key,
     summarize_applicability_masks,
+    summarize_paired_rate_trade,
+    summarize_paired_routed_layer,
     reduce_continuous_menu,
     _cost_ucb_z,
     price_paired_rate_trade,
@@ -4187,7 +4189,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 diag["exact_filter_trace"].append({
                     "exact_assignment_payload_bpp": achieved,
                     "feasible": feasible, "serve_constraints": verdict.as_dict(),
-                    **({"paired_rate_trade": trade} if trade is not None else {})})
+                    **({"paired_rate_trade": summarize_paired_rate_trade(trade)} if trade is not None else {})})
                 if feasible:
                     diag["achieved_bits"] = achieved
                     return (dict(proposal.assignment), achieved,
@@ -4260,7 +4262,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             })
             trade = _paired_trade_for_assignment(expanded)
             if trade is not None:
-                outer_diag["exact_filter_trace"][-1]["paired_rate_trade"] = trade
+                outer_diag["exact_filter_trace"][-1]["paired_rate_trade"] = summarize_paired_rate_trade(trade)
                 if trade["refused"]:
                     outer_diag["reason"] = "routed_expert_dominance"
                     outer_diag["exact_filter_trace"][-1]["feasible"] = False
@@ -4500,8 +4502,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         final_body_assignment = body_assignment_for_accounting(assignment_expanded)
         paired_trade = _paired_trade_for_assignment(final_body_assignment)
         if paired_trade is not None and paired_trade["refused"]:
-            refusals = {layer: row for layer, row in paired_trade["routed_layers"].items()
-                        if row["refused"]}
+            refusals = {layer: summarize_paired_routed_layer(row)
+                        for layer, row in paired_trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
                              + DIRECT_ASCII_SPACED_LAX.text(refusals))
         final_body_payload = _assignment_payload_totals(
@@ -6381,7 +6383,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         d = _solve_diagnostics.get(round(float(args.target_bits), 9), {})
         if d.get("reason") == "routed_expert_dominance":
             trade = d["exact_filter_trace"][-1]["paired_rate_trade"]
-            refusals = {layer: row for layer, row in trade["routed_layers"].items() if row["refused"]}
+            refusals = {layer: summarize_paired_routed_layer(row) for layer, row in trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
                              + DIRECT_ASCII_SPACED_LAX.text(refusals))
         if measured_runtime_table is not None:

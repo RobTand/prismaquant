@@ -362,7 +362,7 @@ def test_real_cli_dev_metadata_drift_or_certified_refusal(tmp_path, monkeypatch,
 @pytest.mark.parametrize("z", [0, 2])
 def test_real_cli_consumes_explicit_baseline_and_emits_paired_provenance(tmp_path, monkeypatch, z):
     import json
-
+    import pickle
     from prismaquant import allocator
     from prismaquant.layer_config import load_assignment
     from test_allocator_measured_runtime_cli import _main_fixture
@@ -371,15 +371,15 @@ def test_real_cli_consumes_explicit_baseline_and_emits_paired_provenance(tmp_pat
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps({name: HIGH}))
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", str(z))
-    argv += ["--cost-baseline-assignment", str(baseline)]
-    allocator.main(argv[1:])
-    assert load_assignment(tmp_path / "layer.json") == {name: LOW}
+    allocator.main([*argv[1:], "--cost-baseline-assignment", str(baseline)])
+    selected = load_assignment(tmp_path / "layer.json")
+    assert selected == {name: LOW}
+    costs = pickle.loads((tmp_path / "costs.pkl").read_bytes())["costs"]
     meta = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]
-    assert meta["paired_rate_trade"]["mean_difference"] == pytest.approx(-8)
-    assert meta["paired_rate_trade"]["refused"] is False
-    assert meta["paired_rate_trade"]["paired_standard_error"] == 0
+    full = _assert_complete_cli_trade(meta["paired_rate_trade"], costs, selected, {name: HIGH}, z)
+    assert full["difference_per_probe"] == [-8.0, -8.0, -8.0]
     applicability = json.loads((tmp_path / "format_applicability.json").read_text())
-    assert applicability["paired_rate_trades"][name][LOW]["predicted_dloss"] == 0.5
+    _assert_cli_summary(applicability["paired_rate_trades"][name][LOW], full)
 
 
 def test_real_cli_refuses_incomplete_baseline_before_emission(tmp_path, monkeypatch):
@@ -395,34 +395,163 @@ def test_real_cli_refuses_incomplete_baseline_before_emission(tmp_path, monkeypa
     assert not (tmp_path / "layer.json").exists()
 
 
-def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["exact_filter", "final_writer"])
+def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path, monkeypatch, phase):
     import json
     import pickle
     from prismaquant import allocator
+    from prismaquant.joint_aura import make_joint_aura_entry
     from test_allocator_measured_runtime_cli import _main_fixture
     names = [f"model.layers.5.mlp.experts.{e}.{p}_proj" for e in (0, 1)
              for p in ("gate", "up", "down")]
     _name, argv = _main_fixture(tmp_path, units=names, menu={LOW: (0.5, 1), HIGH: (8.5, 2)})
     argv = argv[:argv.index("--measured-runtime-table")]
     payload = pickle.loads((tmp_path / "costs.pkl").read_bytes())
-    for name in names:
-        if ".experts.1." in name:
-            # A different format still owns its own operator identity. Only
-            # the samples are equal; no expert-1 benefit finances this move.
-            row = payload["costs"][name][HIGH]
-            from prismaquant.joint_aura import make_joint_aura_entry
-            payload["costs"][name][HIGH] = make_joint_aura_entry(
-                operator_identity=row["joint_operator_identity"], probe_identity=row["probe_identity"],
-                signed_components=payload["costs"][name][LOW]["signed_components_per_probe"])
+    def dominate(costs):
+        for name in names:
+            if ".experts.1." in name:
+                row = costs[name][HIGH]
+                costs[name][HIGH] = make_joint_aura_entry(
+                    operator_identity=row["joint_operator_identity"], probe_identity=row["probe_identity"],
+                    signed_components=costs[name][LOW]["signed_components_per_probe"])
+    complete_calls = []
+    real_price = allocator.price_paired_rate_trade
+    def price_with_late_row_fault(costs, assignment, baseline, **kwargs):
+        if set(assignment) == set(names) and set(assignment.values()) == {LOW}:
+            if phase == "final_writer" and complete_calls:
+                # Inject a valid row change after the exact solve. Keep real arithmetic.
+                dominate(costs)
+            trade = real_price(costs, assignment, baseline, **kwargs)
+            complete_calls.append(trade)
+            return trade
+        return real_price(costs, assignment, baseline, **kwargs)
+    if phase == "exact_filter":
+        dominate(payload["costs"])
+    monkeypatch.setattr(allocator, "price_paired_rate_trade", price_with_late_row_fault)
     (tmp_path / "costs.pkl").write_bytes(pickle.dumps(payload))
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps(dict.fromkeys(names, HIGH)))
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
-    with pytest.raises(SystemExit, match="routed layer rate trade refused:.*dominant_experts"):
+    with pytest.raises(SystemExit, match="routed layer rate trade refused:.*dominant_experts") as refusal:
         allocator.main([*argv[1:], "--cost-baseline-assignment", str(baseline),
                         "--no-packed-aggregation", "--no-fused-aggregation"])
     assert not (tmp_path / "layer.json").exists()
+    assert [t["refused"] for t in complete_calls] == ([True] if phase == "exact_filter" else [False, True])
+    printed = json.loads(str(refusal.value).split("refused: ", 1)[1])
+    layer = "model.layers.5.mlp.experts"
+    row = printed[layer]
+    assert set(printed) == {layer}
+    assert row["refused"] is True
+    assert row["refusal_reason"] == "expert_dominance"
+    assert row["dominant_experts"] == ["0"]
+    assert row["members"] == sorted(names)
+    assert row["mean_difference"] == pytest.approx(-24)
+    assert row["paired_standard_error"] == 0
+    assert row["experts"]["0"] == {
+        "members": sorted(n for n in names if ".experts.0." in n),
+        "mean_difference": pytest.approx(-24), "paired_standard_error": 0,
+        "fraction_of_layer_change": 1.0}
+    assert row["experts"]["1"] == {
+        "members": sorted(n for n in names if ".experts.1." in n),
+        "mean_difference": 0, "paired_standard_error": 0, "fraction_of_layer_change": 0}
+    from test_paired_rate_trade_retention import _find_full_arrays
+    assert list(_find_full_arrays(printed)) == []
 
+
+def _assert_complete_cli_trade(actual, costs, selected, baseline, z):
+    from prismaquant.joint_aura import identity_sha256
+    expected = ac.price_paired_rate_trade(costs, selected, baseline, profile=DefaultProfile(), ucb_z=float(z))
+    assert actual == expected
+    assert actual["probe_ids"] == costs[next(iter(selected))][LOW]["probe_ids"]
+    for key, assignment in (("assignment_a", selected), ("assignment_b", baseline)):
+        identities = {n: costs[n][f]["joint_operator_identity_sha256"] for n, f in sorted(assignment.items())}
+        assert actual[key]["operator_identity_sha256_by_unit"] == identities
+        assert actual[key]["assignment_identity_sha256"] == identity_sha256(identities)
+    return expected
+
+
+def _assert_cli_summary(summary, full):
+    from prismaquant.digests import DIRECT_UTF8_STRICT
+    from test_paired_rate_trade_retention import _find_full_arrays
+    assert list(_find_full_arrays(summary)) == []
+    assert summary["full_trade_sha256"] == DIRECT_UTF8_STRICT.sha256(full)
+    assert summary["assignment_a_sha256"] == full["assignment_a"]["assignment_identity_sha256"]
+    assert summary["assignment_b_sha256"] == full["assignment_b"]["assignment_identity_sha256"]
+    assert summary["n_probes"] == len(full["probe_ids"])
+    for key in ("mean_difference", "paired_standard_error", "hedged_difference",
+                "candidate_point_cost", "predicted_dloss", "ucb_z", "refused",
+                "probe_identity_sha256", "dev_mode", "dev_uncertified"):
+        assert summary.get(key) == full.get(key)
+    assert summary["groups"] == {g: {k: v for k, v in row.items() if k != "difference_per_probe"}
+                                 for g, row in full["group_differences"].items()}
+    assert ac.summarize_paired_rate_trade(summary) == summary
+    for row in summary["routed_layers"].values():
+        assert ac.summarize_paired_routed_layer(row) == row
+
+
+def test_real_cli_emits_complete_diverse_expert_evidence(tmp_path, monkeypatch):
+    import json
+    import pickle
+    from prismaquant import allocator
+    from prismaquant.layer_config import load_assignment
+    from test_allocator_measured_runtime_cli import _main_fixture
+    names = [f"model.layers.5.mlp.experts.{e}.{p}_proj" for e in range(3)
+             for p in ("gate", "up", "down")]
+    _name, argv = _main_fixture(tmp_path, units=names)
+    argv = argv[:argv.index("--measured-runtime-table")]
+    costs = {n: {f: _row(n, [i + 1, -(i + 2), i + 3, -(i + 4)], fmt=f)
+                 for f, i in ((LOW, index % 3), (HIGH, index % 3 + 4))}
+             for index, n in enumerate(names)}
+    payload = pickle.loads((tmp_path / "costs.pkl").read_bytes())
+    payload["costs"] = costs
+    (tmp_path / "costs.pkl").write_bytes(pickle.dumps(payload))
+    baseline = dict.fromkeys(names, HIGH)
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps(baseline))
+    monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "1")
+    allocator.main([*argv[1:], "--cost-baseline-assignment", str(path)])
+    selected = load_assignment(tmp_path / "layer.json")
+    assert selected == dict.fromkeys(names, LOW)
+    full = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]["paired_rate_trade"]
+    _assert_complete_cli_trade(full, costs, selected, baseline, 1)
+    assert full["difference_per_probe"] == [-144.0, -180.0, -216.0, -252.0]
+    layer = "model.layers.5.mlp.experts"
+    for expert in range(3):
+        row = full["routed_layers"][layer]["experts"][str(expert)]
+        assert row["members"] == sorted(n for n in names if f".experts.{expert}." in n)
+        assert row["difference_per_probe"] == [-48.0, -60.0, -72.0, -84.0]
+        assert full["group_differences"][f"{layer}.{expert}"]["difference_per_probe"] == row["difference_per_probe"]
+    assert full["group_differences"][layer]["difference_per_probe"] == full["difference_per_probe"]
+    report = json.loads((tmp_path / "format_applicability.json").read_text())["paired_rate_trades"]
+    for options in report.values():
+        for fmt, summary in options.items():
+            members = full["routed_layers"][layer]["members"]
+            expected = ac.price_paired_rate_trade(costs, dict.fromkeys(members, fmt), baseline,
+                                                  profile=DefaultProfile(), ucb_z=1.0)
+            _assert_cli_summary(summary, expected)
+
+
+def test_real_cli_exact_filter_summary_preserves_dev_stamps(tmp_path, monkeypatch, capsys):
+    import json
+    import pickle
+    from prismaquant import allocator
+    from test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
+    admit_synthetic_table(monkeypatch)
+    name, argv = _main_fixture(tmp_path, menu={LOW: (0.5, 1), HIGH: (8.5, 2)})
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps({name: HIGH}))
+    monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "1")
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    allocator.main([*argv[1:], "--cost-baseline-assignment", str(path)])
+    meta = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]
+    costs = pickle.loads((tmp_path / "costs.pkl").read_bytes())["costs"]
+    full = _assert_complete_cli_trade(meta["paired_rate_trade"], costs, {name: LOW}, {name: HIGH}, 1)
+    trace = meta["measured_runtime_search"]["target_diagnostics"]["exact_filter_trace"]
+    assert len(trace) == 1
+    assert trace[0]["feasible"] is True
+    _assert_cli_summary(trace[0]["paired_rate_trade"], full)
+    assert trace[0]["paired_rate_trade"]["dev_uncertified"] is True
+    assert trace[0]["paired_rate_trade"]["dev_mode"] == full["dev_mode"]
 
 
 def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tmp_path, monkeypatch):

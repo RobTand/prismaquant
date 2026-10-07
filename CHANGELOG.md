@@ -275,6 +275,21 @@
 
 ### Fixed
 
+- **Bound paired-rate-trade diagnostic retention to summaries outside the
+  emitted assignment** (#2286). Menu, applicability and diagnostic-trace
+  records keep a bounded summary per priced trade -- priced scalars, refusal
+  verdict, per-group and per-expert means without per-probe arrays, and the
+  canonical digest binding the exact full trade -- instead of storing every
+  complete trade. Only the emitted assignment carries the full paired arrays
+  and per-expert breakdown; refusal stdout prints the summarized rows.
+  Pricing arithmetic, UCB hedging, joint sample/currency/format validation,
+  expert-dominance refusal and reproduction diagnostics are unchanged.
+  The command tests read the complete selected evidence and the actual refusal text.
+  `tools/paired_trade_report_proof.py` measures the real allocation and report paths with synthetic samples.
+  The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
+  The proof records process peaks, output bytes, profiles, and assignment arithmetic.
+  It makes no scientific quality, serving, or GPU claim.
+
 - **Correct readiness in the research preflight** (#2329). The census now
   reports not-ready if any bank rung lacks canonical allow status. It keeps
   all admission decisions and names the missing `rung_admission` prerequisite.
@@ -313,7 +328,6 @@
   unrequested families and refusing fabricated extras. The original raw joint evidence,
   normal opt-out paths and production/scientific qualification gates remain;
   no Fisher price, pin/default change or served artifact is inferred.
-
 - **Bind admitted produced output without input residency** (#2339). Queue
   discovery lives in the allowlisted staged-lease seam over the same sealed
   generation; the campaign container carries its launcher-owned
