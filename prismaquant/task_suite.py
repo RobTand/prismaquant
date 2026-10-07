@@ -85,9 +85,11 @@ def task_population(raw, config):
         raise ValueError("task backend did not measure every requested task")
     sampling = config["sampling"]
     for name in ("limit", "random_seed", "numpy_seed", "torch_seed", "fewshot_seed"):
-        if raw.get("config", {}).get(name) != sampling[name]:
+        value = raw.get("config", {}).get(name)
+        if type(value) is not type(sampling[name]) or value != sampling[name]:
             raise ValueError("task raw sampling differs: " + name)
-    if any(raw.get("n-shot", {}).get(name) != sampling["num_fewshot"] for name in expected):
+    if any(type(raw.get("n-shot", {}).get(name)) is not int
+            or raw["n-shot"][name] != sampling["num_fewshot"] for name in expected):
         raise ValueError("task raw sampling differs: num_fewshot")
     return {"device": config["backend"]["device"], "tasks": sorted(expected),
             "samples": samples, "sampling": sampling}

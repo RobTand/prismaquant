@@ -115,3 +115,15 @@ def test_task_replay_checks_raw_math_even_with_a_new_own_digest(replay_case, mon
     result["artifacts"] = [artifact(path)]
     with pytest.raises(ValueError, match="metrics|sampling"):
         verify_result(result, config, config_sha256="a" * 64)
+
+
+@pytest.mark.parametrize("dev", [False, True])
+def test_task_replay_rejects_boolean_seed(replay_case, monkeypatch, dev):
+    config, result, path = replay_case
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    raw = json.loads(path.read_text())
+    raw["config"]["torch_seed"] = False
+    path.write_text(json.dumps(raw))
+    result["artifacts"] = [artifact(path)]
+    with pytest.raises(ValueError, match="sampling"):
+        verify_result(result, config, config_sha256="a" * 64)
