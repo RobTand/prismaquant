@@ -10,6 +10,15 @@ Export the artifact and open its canonical `shipcard.json` first. Keep job
 outputs outside the artifact. Select the artifact with the existing model
 profile. Do not copy the architecture roster into the job configuration.
 
+Consume the existing export and policy owners:
+
+- Use `tessera_export_lane.export_setup(model_path, plan)` for export setup and census inputs.
+- Read `lane_spec_for_container("tessera").wired_architectures` for the wired architecture roster.
+- Use `export_partition.whole_layer_partitions` for whole-layer partitions.
+
+The issues owner controls these policies. Cards create no architecture admission.
+CPU setup keeps `runtime_qualification: not_run`. It cannot replace runtime census evidence.
+
 Use a new job result path. Existing results, inputs and artifact files are not
 output destinations. Stage result and log paths must be distinct.
 
@@ -148,6 +157,9 @@ KL probe and determinism. Full route, served PPL, offline quality and
 one-action coverage are not verified. Do not fork that lifecycle or invent a
 second transport. Until its owner supplies the complete stage contract, the
 runner refuses multi-host execution. CPU preflight can still inspect it.
+The kernels rank driver is not `gold_headless_peer`. Full ordered stages and
+peer teardown remain an explicit production prerequisite for the full invocation.
+No unsupported recipe arm ran for this source deliverable.
 
 ## Retain the evidence
 

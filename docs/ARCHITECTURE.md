@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-07 · `sol/d50-ship-gates-2413` (D50, #2413; quality source #2412 and RoPE fix #2418).
+The configured job preserves every lane gate. CPU preflight does not qualify serving.
+The quality source accepts upstream `rope_parameters` and preserves legacy `rope_theta`.
+The inverse-frequency arithmetic, float32 dtype and operation order stay unchanged.
+A missing theta still raises an error. The quality owner owns this compatibility fix.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
@@ -26370,9 +26376,14 @@ archived receipts and live GLM measurement tools are unchanged.
 PrismaBuild's native gang has one start barrier. It has no per-stage ordering
 or successful-peer teardown. A multi-host sequence needs an existing rank
 lifecycle driver from the serving owner. `gold_headless_peer` is a launcher,
-not that driver. No multi-host gold topology is qualified here. Item six owns
-export setup, construction-census policy, partitions and the architecture
-roster. Its CPU setup cannot fill a runtime census. See
+not that driver. The kernels rank driver is not `gold_headless_peer`.
+Full ordered stages and peer teardown remain a production prerequisite.
+No multi-host gold topology is qualified here. Item six owns export setup,
+construction-census policy, partitions and the architecture roster. Consumers
+use `tessera_export_lane.export_setup`,
+`lane_spec_for_container("tessera").wired_architectures`, and
+`export_partition.whole_layer_partitions`. Cards cannot admit an architecture.
+CPU setup keeps `runtime_qualification: not_run` and cannot fill a runtime census. See
 [the operator guide](ship_gates.md) for inputs, submission and evidence rules.
 
 
