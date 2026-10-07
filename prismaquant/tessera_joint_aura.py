@@ -991,6 +991,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # that reads as a verified campaign input.
     _require(unit_scope is None or not verify_payloads,
              "a scoped read cannot also verify the complete campaign payload")
+    # The walk's own admission, one refusal naming every unbound key: read
+    # with a subscript a missing chain key was a bare ``KeyError`` deep in the
+    # read, on a plan the grammar should have refused (PQ #1293).
+    _require(bool(inputs), "the campaign chain ``inputs`` block binds nothing; "
+             f"it must bind {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    missing = [key for key in HEAD_WALK_INPUT_KEYS if key not in inputs]
+    _require(not missing, "campaign chain input(s) not bound in the plan's "
+             f"``inputs`` block: {', '.join(missing)}")
     paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
     census = json.loads(paths["census"].read_text())
     plan = json.loads(paths["campaign_plan"].read_text())
@@ -2382,6 +2390,44 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     # A plan that names a historical encoder seal is the only place one may be
     # admitted; the strict default is the same as before this field existed.
     normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
+    # The campaign chain block is the one input every command reads
+    # (``load_measured_anchor_input``, the census read under ``synthesize``).
+    # Read with a subscript it surfaced as a bare ``KeyError: 'inputs'``
+    # raised inside the GPU action, after the projection prewarm had already
+    # allocated -- indistinguishable from an admitted plan that failed later
+    # (PQ #1293, preserved run-01 S3). Stated here it is the cheap input
+    # refusal the plan grammar owes: by name, before any command, before any
+    # device. Only keys that ARE bound are shape-checked, shape-only, with no
+    # read behind the binding: a Stage B quantum plan binds a subset (PQ
+    # #1024), and a catalog extension binds inputs beyond the head walk's.
+    _require(isinstance(config.get("inputs"), dict),
+             "joint anchor plan: the campaign chain ``inputs`` block is required; "
+             f"it binds {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    # Partial binding is legal here (a Stage B quantum plan binds a subset,
+    # PQ #1024, and a catalog extension binds keys beyond the head walk's);
+    # only the walk loader (``load_measured_anchor_input``) requires the
+    # complete chain. A binding's vocabulary is closed -- exactly
+    # ``{path, sha256}``, the shape the campaign scope compares
+    # (``SCOPE_ARTIFACT_BINDINGS``) -- so a binding with extra metadata keys
+    # is refused rather than silently carried.
+    for key in HEAD_WALK_INPUT_KEYS:
+        if key in config["inputs"]:
+            binding = config["inputs"][key]
+            _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
+                     and isinstance(binding["path"], str)
+                     and isinstance(binding["sha256"], str),
+                     f"campaign chain input {key}: exactly a bound path/SHA256 "
+                     "pair is required")
+    # Required, not newly: every prepare arm reads ``canonical_capture`` bare
+    # (``_prepare_source_owner``, ``prepare_cache``) and a campaign scope's
+    # artifact bindings always name it, so a plan without one never executed
+    # -- it died later, after the projection prewarm had allocated (PQ #1293,
+    # run-01 S3). Stating it at admission names the field the grammar owes.
+    _require(isinstance(config.get("canonical_capture"), dict)
+             and set(config["canonical_capture"]) == {"path", "sha256"}
+             and isinstance(config["canonical_capture"]["path"], str)
+             and isinstance(config["canonical_capture"]["sha256"], str),
+             "canonical capture: exactly a bound path/SHA256 pair is required")
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
@@ -3242,9 +3288,11 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
     reservation it does not use: measured, 125,144 shards at 2.6 cells/s on
     one core while the reserved GB10 sat at 5 W of 140 W (#549).
 
-    This is the same function, addressable on its own: a unit range, no
-    model, no capture, no GPU required, and idempotent -- a cell whose shard
-    exists is skipped, the origin marker is published before the shard, and
+    This is the same function, addressable on its own: a unit range, no model
+    or capture payload is loaded, and no GPU is required. The command still
+    takes a complete admitted campaign plan, including the shape-only
+    canonical capture binding. It is idempotent: a cell whose shard exists
+    is skipped, the origin marker is published before the shard, and
     staging names are unique per writer. PrismaBuild owns the fan-out; rows
     carry disjoint ``sorted(names)[lo:hi]`` ranges cut from the census, so no
     two rows ever address the same cell and a retried row re-reads rather
@@ -3261,6 +3309,10 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
              "publishing into the campaign row caches requires explicit authorization")
     _require(mirror_root is not None or not compare,
              "a byte comparison needs a mirror to compare against the campaign's shards")
+    # Named, not subscripted: a plan without the census binding is a plan the
+    # grammar should refuse, and the refusal says which key is absent (PQ #1293).
+    _require("census" in config["inputs"],
+             "campaign chain input census is not bound in the plan's ``inputs`` block")
     census = json.loads(_bound(config["inputs"]["census"], "census").read_text())
     scope = parse_unit_scope(units, len(census["unit_shapes"]))
     reader = load_declared_reader(config.get("reader"))

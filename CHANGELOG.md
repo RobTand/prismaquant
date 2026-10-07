@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Behavioral coverage of persisted multimodal calibration provenance**
+  (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
+  back after the actual loader blends a partial real dataset with synthetic
+  rows. Populated CPU forward/backward paths include a failed synthetic row
+  and check nonzero visual Fisher; loaded-row composition stays independent
+  of successful forwards. Duplicate synthetic-composition coverage and a
+  fixture-only shutdown-call assertion are removed; no blend policy or
+  numerical behavior changes.
+
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
   startup owners, derives expected source phases from the actual meta-model and
@@ -236,6 +245,38 @@
   The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
   The proof records process peaks, output bytes, profiles, and assignment arithmetic.
   It makes no scientific quality, serving, or GPU claim.
+- **Authenticated locator aliases survive both real acquisition merges** (#2195,
+  PR #2253). The existing control owner derives one locator-independent request
+  control identity carried through actual row loading, rendering and journals.
+  Checkpoint and scalar-payload joins compare those controls and all real
+  scientific inputs before stamping only raw request provenance. Own-file SHA
+  reads, schedule/source/scope, calibration and numerical refusals stay strict.
+
+- **Acquisition input byte checks participate in the seal ratchet** (#2195,
+  PR #2253). The torch-free input owner is scanned, with only its actual
+  own-byte digest check allowlisted as integrity. Injecting a new recorded
+  producer wall is a causal regression, not an unscanned escape.
+
+- **Acquisition producer identities and locator spelling follow development mode**
+  (#2195, PR #2253). Only recorded live pins and export/grammar source digests
+  stamp and continue; source-state schema and actual request/cost, rate, shape,
+  atomic scope and calibration correctness still refuse. Planning and manifest
+  validation authenticate controls through the existing input owners before
+  separating locator spelling, without trusting a declared digest alone.
+
+- **Authenticated acquisition requests reach complete per-row execution and
+  strict merge through the existing planner** (#2195). Each active atomic
+  cohort keeps the original request/cost/run/probe identity; deferred cohorts
+  remain explicit and produce no zero-work jobs. Whole request/cost bindings
+  precede captures in the torch-free staged readset, with a bounded fenced
+  metadata memo instead of repeated whole-cost reads. Submission and merge
+  require disjoint complete active coverage, exact requested scalar cells,
+  source proofs and common regime settings. Both merges use authenticated
+  checkpoint menus to bind the exact deferred family domain, retaining real
+  unrequested families and refusing fabricated extras. The original raw joint evidence,
+  normal opt-out paths and production/scientific qualification gates remain;
+  no Fisher price, pin/default change or served artifact is inferred.
+
 - **Bind admitted produced output without input residency** (#2339). Queue
   discovery lives in the allowlisted staged-lease seam over the same sealed
   generation; the campaign container carries its launcher-owned
@@ -268,6 +309,26 @@
   `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
   moved: a buffer still refuses unless the kernel reports all four seals; no
   default, pin, wire, GPU or serving claim.
+
+- **A joint plan that cannot name its campaign chain is refused by name, at
+  admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
+  plan with no `inputs` block, and the `prepare` GPU action then died on a
+  bare `KeyError: 'inputs'` after the projection prewarm had already
+  allocated — preserved in the #1293 non-release pilot's run-01 S3. The plan
+  grammar now requires the campaign chain `inputs` mapping, shape-checks
+  every bound head-walk key without reading behind the binding, and requires
+  the canonical capture binding; the anchor intake names its missing chain
+  keys in one refusal; the standalone synthesis census read refuses a missing
+  binding by name. A Stage B quantum plan that binds a subset (#1024) still
+  loads in both modes; its test explicitly sets the empty subset instead of
+  depending on the imported fixture default. No gate weakened, no wire, codec,
+  numerical or GPU claim; the named refusal moves the run-01 S3 failure from
+  minutes into a GPU action to a plan-load ValueError naming the absent key.
+  Policy-refusal tests start from the canonical shape-only plan and name each
+  probe, token-scope, temperature and activation-clipping refusal, so an
+  earlier missing-input error cannot hide those guards. The standalone
+  `synthesize` command also takes this complete plan and its canonical capture
+  binding, although it loads neither model nor capture payloads.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
 
