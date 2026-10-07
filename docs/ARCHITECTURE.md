@@ -49,6 +49,18 @@ and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.
 The consumer proof is `tests/test_tessera_export_setup.py`.
 No production format, serving default, runtime pin or active PACT path changes.
 
+Re-stamped 2026-10-07 for issue #2408.
+The Tessera cell reader accepts an explicit kernel build in `ServingContext`.
+The reader matches kernel build and module kind without an image-digest key.
+The compatibility map preserves historical cell identifiers and image-only calls.
+The image remains provenance. Evidence, wire predicates and source checks remain unchanged.
+This change moves no pin, default, wire byte or running measurement path.
+Central processor proof does not establish device qualification.
+The compatibility map and matcher use one effective build name for historical cells.
+Both lookup forms reject overlapping scopes. Cell order cannot select a route.
+Version-three and version-four tables refuse an explicit kernel build that their cells cannot attest.
+Calls without the build field remain unchanged.
+
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
