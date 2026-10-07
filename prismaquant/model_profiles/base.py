@@ -236,6 +236,14 @@ class ModelProfile(ABC):
         from .vllm_registry import vllm_class_for_architecture
         self._vllm_cls = vllm_class_for_architecture(arch)
 
+    def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
+        """Return actual parameter owners for the existing dense input hooks."""
+        return [name for name, module in model.named_modules() if isinstance(module, nn.Linear)]
+
+    def is_dense_parameter_owner(self, name, module) -> bool:
+        """Identify a source owner that exposes the existing dense weight contract."""
+        return isinstance(module, nn.Linear)
+
     # ------------------------------------------------------------
     # Fused-sibling promotion (allocator.py)
     # ------------------------------------------------------------

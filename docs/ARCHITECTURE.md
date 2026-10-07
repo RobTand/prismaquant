@@ -31913,3 +31913,35 @@ this is not the #1962 estimator fix, a repricing, or an issue closure. Design:
 The dense per-invocation oracle explicitly enables calibrated activation
 clipping, matching its independent clamp rather than inheriting a campaign
 or worker process setting. No production activation policy is changed.
+
+## Explicit GLM projection source owners
+
+The GLM profile reads fused members from Tessera dense_ownership.
+It uses the existing parsed source config to identify KDA layers and standalone MLA queries.
+No second unit schema or member table exists in PrismaQuant.
+The existing pin-lift controls select commissioned projection units without a default change.
+
+The source router has a two-dimensional parameter and a stock FP32 Linear operation.
+The profile can expose that actual parameter owner only when an explicit pin lift selects it.
+The campaign uses the existing module pre-hook and selected weight intake.
+It does not replace the source module or change its forward, dtype, bias, or tensor name.
+
+The campaign calls projection_routes.direct_consumer_resident_bytes for selected direct consumers.
+Only the DSA weights_proj member pays for its retained FP32 tail.
+The MLA kv_b_proj member pays for one decoded BF16 matrix.
+These charges increase memory_bytes, not wire_bytes.
+The exported fused owner pays for each retained buffer once.
+This price does not claim a compressed absorbed BMM route.
+
+The direct activation contract separates the DSA head from its key projection.
+The head screen uses FP32 inputs without A8 activation quantization.
+The key keeps its dense activation contract.
+MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
+
+Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
+Both direct consumers refuse quantized input observations in development and certified modes.
+
+The producer reads direct weights with projection_routes.direct_consumer_weight.
+The runtime and producer use the same folded T-16 arithmetic.
+The publication cache preserves the DSA head values in FP32.
+Its publication byte charge uses four bytes per element; other units keep the existing BF16 cache path.

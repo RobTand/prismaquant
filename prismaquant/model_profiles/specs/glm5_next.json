@@ -79,29 +79,7 @@
     ],
     "recipe_to_vllm": []
   },
-  "fused_groups": [
-    {
-      "target": "mlp.gate_up_proj",
-      "members": ["mlp.gate_proj", "mlp.up_proj"]
-    },
-    {
-      "target": "mlp.shared_experts.gate_up_proj",
-      "members": ["mlp.shared_experts.gate_proj", "mlp.shared_experts.up_proj"]
-    },
-    {
-      "target": "self_attn.in_proj_qkvbfg_a",
-      "members": ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.b_proj",
-                  "self_attn.f_a_proj", "self_attn.forget_gate.f_a_proj", "self_attn.g_a_proj"]
-    },
-    {
-      "target": "self_attn.fused_qkv_a_proj",
-      "members": ["self_attn.q_a_proj", "self_attn.kv_a_proj_with_mqa"]
-    },
-    {
-      "target": "self_attn.indexer.wk_weights_proj",
-      "members": ["self_attn.indexer.wk", "self_attn.indexer.weights_proj"]
-    }
-  ],
+  "fused_groups": [],
   "concat_merges": [
     {
       "target": "self_attn.conv1d.weight",
