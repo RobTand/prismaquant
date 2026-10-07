@@ -36,7 +36,6 @@ mixed-size choice.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import platform
@@ -54,7 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from prismaquant.digests import canonical_json_sha256  # noqa: E402
+from prismaquant.digests import bytes_sha256hex, canonical_json_sha256, file_sha256hex  # noqa: E402
 from prismaquant.qnames import DOTTED_LAYER_QNAME  # noqa: E402
 from prismaquant.io_engine import load_file  # noqa: E402
 from prismaquant.residency_map import bind_residency_manifest, residency_report  # noqa: E402
@@ -62,7 +61,6 @@ from prismaquant.staged_tier_policy import activate_staged_tier_policy  # noqa: 
 from tools.pq_block_concentration import (  # noqa: E402
     block_scores,
     concentration,
-    file_sha256,
 )
 from tools.pq_block_price_solver import (  # noqa: E402
     allocate_body_budget,
@@ -82,6 +80,7 @@ from tools.pq_block_trial_math import (  # noqa: E402
     evaluate_packed_candidate,
     validate_moment,
     validate_sample_split,
+    write_trial_json,
 )
 
 FORMAT_NAME = "TESSERA_E4M3_K1"
@@ -109,27 +108,15 @@ class TrialRefused(ValueError):
     """The trial refuses by name; invalid or missing actual input."""
 
 
-def _fail(message: str) -> None:
-    raise TrialRefused(message)
-
-
-def _write_json(path: Path, document: dict) -> None:
-    path.write_text(json.dumps(document, indent=2, allow_nan=False) + "\n")
-
-
-def _sha_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _geometry(text: str) -> tuple[int, int]:
     match = re.fullmatch(r"([0-9]+)x([0-9]+)", text)
     if match is None:
-        _fail(f"--extra-geometry {text!r} is not ROWxCOLS like 256x2")
+        raise TrialRefused(f"--extra-geometry {text!r} is not ROWxCOLS like 256x2")
     rows, cols = int(match.group(1)), int(match.group(2))
     if rows < 8 or rows % 8:
-        _fail(f"geometry {text}: block rows must be a positive multiple of 8")
+        raise TrialRefused(f"geometry {text}: block rows must be a positive multiple of 8")
     if cols < 1 or INPUT_GROUP_COLS % cols:
-        _fail(f"geometry {text}: block cols must divide {INPUT_GROUP_COLS}")
+        raise TrialRefused(f"geometry {text}: block cols must divide {INPUT_GROUP_COLS}")
     return rows, cols
 
 
@@ -144,19 +131,19 @@ def load_rung_reader(reader_path: Path) -> tuple[object, dict]:
     module's own validation and admission are the contract.
     """
     if not reader_path.is_file():
-        _fail(f"--rung-reader-source {reader_path} is not a readable file")
+        raise TrialRefused(f"--rung-reader-source {reader_path} is not a readable file")
     spec = importlib.util.spec_from_file_location(
         "producer_rung_allowability", reader_path)
     if spec is None or spec.loader is None:
-        _fail(f"{reader_path}: cannot load the producer rung reader")
+        raise TrialRefused(f"{reader_path}: cannot load the producer rung reader")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     for attribute in ("validate_index", "validate_table", "admit_rung"):
         if not callable(getattr(module, attribute, None)):
-            _fail(f"{reader_path}: producer reader lacks {attribute}()")
+            raise TrialRefused(f"{reader_path}: producer reader lacks {attribute}()")
     stamp = {
         "path": str(reader_path),
-        "sha256": file_sha256(reader_path),
+        "sha256": file_sha256hex(reader_path, block_size=1 << 20),
         "producer_reference_sha256": PRODUCER_READER_SHA256,
         "identity_gate": False,
     }
@@ -171,15 +158,15 @@ def admit_bank_rungs(index_root: Path, kernel_build_id: str, reader) -> dict:
     """
     index_path = index_root / "index.json"
     if not index_path.is_file():
-        _fail(f"rung index {index_path} is missing")
+        raise TrialRefused(f"rung index {index_path} is missing")
     index = json.loads(index_path.read_bytes())
     reader.validate_index(index)
     formats = index["formats"]
     if FORMAT_NAME not in formats:
-        _fail(f"rung index has no {FORMAT_NAME} format")
+        raise TrialRefused(f"rung index has no {FORMAT_NAME} format")
     builds = formats[FORMAT_NAME]["kernel_builds"]
     if kernel_build_id not in builds:
-        _fail(f"rung index has no kernel build {kernel_build_id!r} "
+        raise TrialRefused(f"rung index has no kernel build {kernel_build_id!r} "
               f"under {FORMAT_NAME}")
     entry = builds[kernel_build_id]
     current = entry["current_version"]
@@ -194,9 +181,9 @@ def admit_bank_rungs(index_root: Path, kernel_build_id: str, reader) -> dict:
             rung=rung)
     return {
         "index_path": str(index_path),
-        "index_sha256": file_sha256(index_path),
+        "index_sha256": file_sha256hex(index_path, block_size=1 << 20),
         "table_path": str(table_path),
-        "table_sha256": file_sha256(table_path),
+        "table_sha256": file_sha256hex(table_path, block_size=1 << 20),
         "table_version": table["table_version"],
         "table_status": table["table_status"],
         "current_version": current,
@@ -214,7 +201,7 @@ def require_all_admitted(admission: dict) -> None:
         if decision.get("status") != "allow"
     }
     if refused:
-        _fail(f"canonical admission refuses bank rungs {refused}")
+        raise TrialRefused(f"canonical admission refuses bank rungs {refused}")
 
 
 def admit_callable(reader, admission: dict):
@@ -237,41 +224,41 @@ def verify_split_manifest(capture_root: Path) -> dict:
     """Schema, fixed 384/128 split geometry and split-stamp rederivation."""
     path = capture_root / "split-manifest.json"
     if not path.is_file():
-        _fail(f"split manifest {path} is missing")
+        raise TrialRefused(f"split manifest {path} is missing")
     manifest = json.loads(path.read_bytes())
     if manifest.get("schema") != SPLIT_SCHEMA:
-        _fail(f"{path}: not a {SPLIT_SCHEMA} manifest")
+        raise TrialRefused(f"{path}: not a {SPLIT_SCHEMA} manifest")
     if manifest.get("sample_count") != 512 \
             or manifest.get("tokens_per_sample") != 512 \
             or manifest.get("same_forward_pass") is not True \
             or manifest.get("fit_stop") != 384:
-        _fail(f"{path}: not the fixed 512x512 same-pass 384 split")
+        raise TrialRefused(f"{path}: not the fixed 512x512 same-pass 384 split")
     roles = manifest["roles"]
     if roles["fit"]["sample_range"] != [0, 384] \
             or roles["heldout"]["sample_range"] != [384, 512]:
-        _fail(f"{path}: role sample ranges are not the fixed 384/128 split")
+        raise TrialRefused(f"{path}: role sample ranges are not the fixed 384/128 split")
     fit_provenance = roles["fit"]["provenance"]
     if fit_provenance.get("hessian_role") != "fit":
-        _fail(f"{path}: the FIT role provenance is not hessian_role=fit")
+        raise TrialRefused(f"{path}: the FIT role provenance is not hessian_role=fit")
     if fit_provenance.get("fit_tokens") != 384 * 512:
-        _fail(f"{path}: FIT provenance does not stamp 196608 fit tokens")
+        raise TrialRefused(f"{path}: FIT provenance does not stamp 196608 fit tokens")
     for field in ("text_sha256", "fit_ids_sha256"):
         if not isinstance(fit_provenance.get(field), str) \
                 or not fit_provenance[field]:
-            _fail(f"{path}: FIT provenance lacks {field}")
+            raise TrialRefused(f"{path}: FIT provenance lacks {field}")
     if roles["heldout"]["provenance"].get("hessian_role") != "held-out":
-        _fail(f"{path}: the HELDOUT role provenance is not held-out")
+        raise TrialRefused(f"{path}: the HELDOUT role provenance is not held-out")
     stored = manifest.get("split_sha256")
     rederived = canonical_json_sha256(
         {key: value for key, value in manifest.items()
          if key != "split_sha256"}, where="block trial split stamp")
     if stored != rederived:
-        _fail(f"{path}: split_sha256 {stored!r} does not rederive "
+        raise TrialRefused(f"{path}: split_sha256 {stored!r} does not rederive "
               f"({rederived})")
     return {
         "manifest": manifest,
         "path": str(path),
-        "sha256": file_sha256(path),
+        "sha256": file_sha256hex(path, block_size=1 << 20),
         "split_sha256": stored,
         "fit_range": [0, 384],
         "heldout_range": [384, 512],
@@ -282,7 +269,7 @@ def verify_split_manifest(capture_root: Path) -> dict:
 def layer_number(qname: str) -> int:
     match = DOTTED_LAYER_QNAME.search(qname)
     if match is None:
-        _fail(f"{qname}: a trial unit must name a decoder layer")
+        raise TrialRefused(f"{qname}: a trial unit must name a decoder layer")
     return int(match.group(1))
 
 
@@ -290,29 +277,29 @@ def _receipt_path(capture_root: Path, receipt: dict) -> Path:
     """Resolve a receipt's ROOT-RELATIVE file inside the capture root."""
     name = receipt.get("file")
     if not isinstance(name, str) or not name:
-        _fail(f"receipt {receipt} carries no file name")
+        raise TrialRefused(f"receipt {receipt} carries no file name")
     relative = PurePosixPath(name)
     if relative.is_absolute() or ".." in relative.parts:
-        _fail(f"receipt file {name!r} is not a safe capture-root-relative "
+        raise TrialRefused(f"receipt file {name!r} is not a safe capture-root-relative "
               "path")
     path = capture_root / relative
     if capture_root.resolve() not in path.resolve().parents:
-        _fail(f"receipt file {name!r} escapes the capture root")
+        raise TrialRefused(f"receipt file {name!r} escapes the capture root")
     return path
 
 
 def _check_receipt(receipt: dict, role_key: str) -> None:
     for field in ("bytes", "sha256", "count", "hessian_shape"):
         if field not in receipt:
-            _fail(f"{role_key} receipt lacks {field}: {receipt}")
+            raise TrialRefused(f"{role_key} receipt lacks {field}: {receipt}")
     if type(receipt["bytes"]) is not int or receipt["bytes"] <= 0 \
             or type(receipt["count"]) is not int or receipt["count"] <= 0:
-        _fail(f"{role_key} receipt bytes/count must be positive integers")
+        raise TrialRefused(f"{role_key} receipt bytes/count must be positive integers")
     if not re.fullmatch(r"[0-9a-f]{64}", str(receipt["sha256"])):
-        _fail(f"{role_key} receipt sha256 is not a hex digest")
+        raise TrialRefused(f"{role_key} receipt sha256 is not a hex digest")
     shape = receipt["hessian_shape"]
     if not isinstance(shape, list) or len(shape) != 2 or shape[0] != shape[1]:
-        _fail(f"{role_key} receipt hessian_shape {shape} is not [K,K]")
+        raise TrialRefused(f"{role_key} receipt hessian_shape {shape} is not [K,K]")
     inputs_shape = receipt.get("inputs_shape")
     ids_shape = receipt.get("prefix_sample_ids_shape")
     # The publisher's finish always emits an int64 prefix id tensor; with
@@ -320,15 +307,15 @@ def _check_receipt(receipt: dict, role_key: str) -> None:
     # inputs are None. An empty-prefix receipt is valid.
     if inputs_shape is None:
         if ids_shape is not None and ids_shape != [0]:
-            _fail(f"{role_key} receipt has no inputs but prefix ids shape "
+            raise TrialRefused(f"{role_key} receipt has no inputs but prefix ids shape "
                   f"{ids_shape}")
     else:
         if not isinstance(inputs_shape, list) or len(inputs_shape) != 2 \
                 or inputs_shape[1] != shape[1]:
-            _fail(f"{role_key} receipt inputs_shape {inputs_shape} "
+            raise TrialRefused(f"{role_key} receipt inputs_shape {inputs_shape} "
                   "disagrees with the [K,K] moment basis")
         if not isinstance(ids_shape, list) or len(ids_shape) != 1:
-            _fail(f"{role_key} receipt prefix ids shape {ids_shape} "
+            raise TrialRefused(f"{role_key} receipt prefix ids shape {ids_shape} "
                   "is not 1-D")
 
 
@@ -343,7 +330,7 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
     """
     units = layer_manifest["manifest"]["units"]
     if qname not in units or role_key not in units[qname]:
-        _fail(f"layer manifest has no {qname} {role_key} receipt")
+        raise TrialRefused(f"layer manifest has no {qname} {role_key} receipt")
     receipt = units[qname][role_key]
     _check_receipt(receipt, role_key)
     dimension = int(receipt["hessian_shape"][1])
@@ -361,10 +348,10 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
     if not load_tensors:
         return record
     if not path.is_file():
-        _fail(f"{role_key} role file {path} is missing")
+        raise TrialRefused(f"{role_key} role file {path} is missing")
     actual_bytes = path.stat().st_size
     if actual_bytes != receipt["bytes"]:
-        _fail(f"{path}: {actual_bytes} bytes, receipt stamps "
+        raise TrialRefused(f"{path}: {actual_bytes} bytes, receipt stamps "
               f"{receipt['bytes']}")
 
     def decode_role(raw, observed, staged):
@@ -374,26 +361,26 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
         binding=receipt["sha256"], decode=decode_role, sealed=True)
     actual_sha = load_observed[0]["sha256"]
     if actual_sha != receipt["sha256"]:
-        _fail(f"{path}: own-byte digest does not match receipt")
+        raise TrialRefused(f"{path}: own-byte digest does not match receipt")
     record.update({"bytes": actual_bytes, "sha256": actual_sha, "file_bytes_read": True})
     if payload["name"] != qname or payload["role"] != role_key:
-        _fail(f"{path}: payload names {payload['name']}/{payload['role']}, "
+        raise TrialRefused(f"{path}: payload names {payload['name']}/{payload['role']}, "
               f"not {qname}/{role_key}")
     hessian = payload["hessian"]
     if not isinstance(hessian, torch.Tensor) or hessian.device.type != "cpu" \
             or hessian.dtype != torch.float32:
-        _fail(f"{path}: the role hessian is not a CPU float32 tensor")
+        raise TrialRefused(f"{path}: the role hessian is not a CPU float32 tensor")
     if list(hessian.shape) != [dimension, dimension]:
-        _fail(f"{path}: hessian {list(hessian.shape)} is not "
+        raise TrialRefused(f"{path}: hessian {list(hessian.shape)} is not "
               f"[{dimension},{dimension}]")
     count = payload["count"]
     if type(count) is not int or count <= 0 or count != receipt["count"]:
-        _fail(f"{path}: actual count {count!r} disagrees with receipt "
+        raise TrialRefused(f"{path}: actual count {count!r} disagrees with receipt "
               f"{receipt['count']}")
     max_abs = payload["max_abs"]
     if not isinstance(max_abs, (int, float)) or not np.isfinite(max_abs) \
             or max_abs < 0:
-        _fail(f"{path}: max_abs {max_abs!r} is not finite and nonnegative")
+        raise TrialRefused(f"{path}: max_abs {max_abs!r} is not finite and nonnegative")
     inputs = payload["inputs"]
     ids = payload["prefix_sample_ids"]
     # The publisher's finish() always materializes an int64 id tensor; with
@@ -404,32 +391,32 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
                     and ids.ndim == 1 and ids.numel() == 0)
     if inputs is None:
         if ids is not None and not empty_prefix:
-            _fail(f"{path}: prefix sample ids present without retained rows")
+            raise TrialRefused(f"{path}: prefix sample ids present without retained rows")
     else:
         if not isinstance(inputs, torch.Tensor) \
                 or inputs.device.type != "cpu" \
                 or inputs.dtype != torch.float32 or inputs.ndim != 2:
-            _fail(f"{path}: role inputs are not a CPU float32 matrix")
+            raise TrialRefused(f"{path}: role inputs are not a CPU float32 matrix")
         if list(inputs.shape) != [int(v) for v in receipt["inputs_shape"]]:
-            _fail(f"{path}: inputs {list(inputs.shape)} disagree with "
+            raise TrialRefused(f"{path}: inputs {list(inputs.shape)} disagree with "
                   f"receipt {receipt['inputs_shape']}")
         if inputs.shape[1] != dimension:
-            _fail(f"{path}: inputs do not span the {dimension}-column basis")
+            raise TrialRefused(f"{path}: inputs do not span the {dimension}-column basis")
         if not isinstance(ids, torch.Tensor) or ids.dtype != torch.int64 \
                 or ids.ndim != 1 or ids.numel() == 0:
-            _fail(f"{path}: retained inputs need nonempty 1-D int64 prefix "
+            raise TrialRefused(f"{path}: retained inputs need nonempty 1-D int64 prefix "
                   "sample ids")
         if list(ids.shape) != [int(v)
                                for v in receipt["prefix_sample_ids_shape"]]:
-            _fail(f"{path}: prefix ids {list(ids.shape)} disagree with "
+            raise TrialRefused(f"{path}: prefix ids {list(ids.shape)} disagree with "
                   f"receipt {receipt['prefix_sample_ids_shape']}")
         # One sample id per RETAINED prefix row: never a full-moment roster.
         if ids.numel() != inputs.shape[0]:
-            _fail(f"{path}: {ids.numel()} prefix ids for "
+            raise TrialRefused(f"{path}: {ids.numel()} prefix ids for "
                   f"{inputs.shape[0]} retained rows")
         lo, hi = int(sample_range[0]), int(sample_range[1])
         if int(ids.min()) < lo or int(ids.max()) >= hi:
-            _fail(f"{path}: prefix sample ids leave the {role_key} range "
+            raise TrialRefused(f"{path}: prefix sample ids leave the {role_key} range "
                   f"[{lo},{hi})")
     validate_moment(hessian, count, dimension, f"{role_key} role")
     record.update({
@@ -451,21 +438,21 @@ def load_layer_roles(capture_root: Path, qname: str, split: dict,
     layer = layer_number(qname)
     path = capture_root / "layers" / f"L{layer:03d}" / "manifest.json"
     if not path.is_file():
-        _fail(f"layer manifest {path} is missing: the shared quantum for "
+        raise TrialRefused(f"layer manifest {path} is missing: the shared quantum for "
               f"layer {layer} is not published yet")
     manifest = json.loads(path.read_bytes())
     if manifest.get("schema") != LAYER_SCHEMA:
-        _fail(f"{path}: not a {LAYER_SCHEMA} manifest")
+        raise TrialRefused(f"{path}: not a {LAYER_SCHEMA} manifest")
     if manifest.get("layer") != layer:
-        _fail(f"{path}: manifest names layer {manifest.get('layer')}, "
+        raise TrialRefused(f"{path}: manifest names layer {manifest.get('layer')}, "
               f"expected {layer}")
     if manifest.get("split_sha256") != split["split_sha256"]:
-        _fail(f"{path}: split stamp {manifest.get('split_sha256')!r} is not "
+        raise TrialRefused(f"{path}: split stamp {manifest.get('split_sha256')!r} is not "
               f"the verified split {split['split_sha256']!r}")
     if qname not in manifest.get("units", {}):
-        _fail(f"{path}: no {qname} unit")
+        raise TrialRefused(f"{path}: no {qname} unit")
     if qname not in manifest.get("full_counts", {}):
-        _fail(f"{path}: no {qname} full census count")
+        raise TrialRefused(f"{path}: no {qname} full census count")
     full_count = int(manifest["full_counts"][qname])
     roles = {}
     for role_key in ROLE_KEYS:
@@ -482,7 +469,7 @@ def load_layer_roles(capture_root: Path, qname: str, split: dict,
 
     fit_count, held_count = actual_count("fit"), actual_count("heldout")
     if fit_count + held_count != full_count:
-        _fail(f"{qname}: fit {fit_count} + heldout {held_count} != census "
+        raise TrialRefused(f"{qname}: fit {fit_count} + heldout {held_count} != census "
               f"{full_count}; the split dropped or duplicated rows")
     both_loaded = all(r["tensors_loaded"] for r in roles.values())
     census = {
@@ -504,7 +491,7 @@ def load_layer_roles(capture_root: Path, qname: str, split: dict,
         "both_role_tensors_loaded_and_reverified": both_loaded,
     }
     return {
-        "path": str(path), "sha256": file_sha256(path),
+        "path": str(path), "sha256": file_sha256hex(path, block_size=1 << 20),
         "layer": layer, "split_sha256": manifest["split_sha256"],
         "full_count": full_count, "roles": roles, "census": census,
     }
@@ -517,12 +504,12 @@ def load_source_weight(source_root: Path, qname: str) -> dict:
     """Read the BF16 source weight named by the safetensors index."""
     index_path = source_root / "model.safetensors.index.json"
     if not index_path.is_file():
-        _fail(f"source index {index_path} is missing")
+        raise TrialRefused(f"source index {index_path} is missing")
     index = json.loads(index_path.read_bytes())
     key = qname + ".weight"
     shard = index.get("weight_map", {}).get(key)
     if shard is None:
-        _fail(f"{index_path}: no {key} entry; the trial needs an existing "
+        raise TrialRefused(f"{index_path}: no {key} entry; the trial needs an existing "
               "source key")
     shard_path = source_root / shard
     def decode_source(raw, observed, staged):
@@ -531,12 +518,12 @@ def load_source_weight(source_root: Path, qname: str) -> dict:
     tensor, observed = load_file(shard_path, shard_path.stat().st_size,
         binding=INPUT_DIGESTS.get(str(shard_path)), decode=decode_source, sealed=True)
     if tensor.dtype != torch.bfloat16 or tensor.ndim != 2:
-        _fail(f"{key}: source weight is {tensor.dtype}/{tensor.ndim}D, "
+        raise TrialRefused(f"{key}: source weight is {tensor.dtype}/{tensor.ndim}D, "
               "the trial encodes a 2-D BF16 projection")
     return {
         "tensor": tensor, "key": key, "shard": shard,
         "source_root": str(source_root),
-        "index_sha256": file_sha256(index_path),
+        "index_sha256": file_sha256hex(index_path, block_size=1 << 20),
         "shape": [int(v) for v in tensor.shape],
         "small_actual_values": tensor[:2, :8].float().tolist(),
         "source_file_bytes": observed[0]["bytes"],
@@ -552,28 +539,28 @@ FIT_IDENTITY_FIELDS = ("hessian_role", "fit_ids_sha256", "text_sha256",
                        "fit_tokens", "nsamples", "seqlen", "seed")
 
 
-def load_parent_bank(output: Path, intake: dict) -> dict:
+def verify_trial_parent_bank(output: Path, intake: dict) -> dict:
     """Score-side bank verification against the caller's own output files."""
     bank_path = output / "parent-bank.json"
     if not bank_path.is_file():
-        _fail(f"{bank_path} is missing; run --mode encode first")
+        raise TrialRefused(f"{bank_path} is missing; run --mode encode first")
     bank = json.loads(bank_path.read_bytes())
     if bank.get("schema") != BANK_SCHEMA:
-        _fail(f"{bank_path}: not a {BANK_SCHEMA} bank")
+        raise TrialRefused(f"{bank_path}: not a {BANK_SCHEMA} bank")
     if bank.get("qname") != intake["qname"]:
-        _fail(f"{bank_path}: bank encodes {bank.get('qname')!r}")
+        raise TrialRefused(f"{bank_path}: bank encodes {bank.get('qname')!r}")
     if bank.get("shape") != intake["source"]["shape"]:
-        _fail(f"{bank_path}: bank shape {bank.get('shape')} disagrees with "
+        raise TrialRefused(f"{bank_path}: bank shape {bank.get('shape')} disagrees with "
               f"the source {intake['source']['shape']}")
     if bank.get("fit_count") != intake["census"]["fit_count"]:
-        _fail(f"{bank_path}: bank fit_count {bank.get('fit_count')} is not "
+        raise TrialRefused(f"{bank_path}: bank fit_count {bank.get('fit_count')} is not "
               f"the actual {intake['census']['fit_count']}")
     recorded_identity = bank.get("fit_identity") or {}
     current_identity = intake["split"]["fit_identity"]
     mismatch = [field for field in FIT_IDENTITY_FIELDS
                 if recorded_identity.get(field) != current_identity.get(field)]
     if mismatch:
-        _fail(f"{bank_path}: bank FIT identity fields {mismatch} differ from "
+        raise TrialRefused(f"{bank_path}: bank FIT identity fields {mismatch} differ from "
               "the verified split; the bank was not encoded from this FIT")
     fit_identity_drift = {
         field: {"recorded": recorded_identity.get(field),
@@ -581,32 +568,32 @@ def load_parent_bank(output: Path, intake: dict) -> dict:
         for field in sorted(set(recorded_identity) | set(current_identity))
         if recorded_identity.get(field) != current_identity.get(field)}
     if bank.get("heldout_consumed") is not False:
-        _fail(f"{bank_path}: bank claims heldout consumption")
+        raise TrialRefused(f"{bank_path}: bank claims heldout consumption")
     if bank.get("uniform_control_rung") != CONTROL_RUNG:
-        _fail(f"{bank_path}: bank control rung is not {CONTROL_RUNG}")
+        raise TrialRefused(f"{bank_path}: bank control rung is not {CONTROL_RUNG}")
     bank_rungs = sorted(int(p["rung"]) for p in bank["parents"])
     if bank_rungs != sorted(BANK_RUNGS):
-        _fail(f"{bank_path}: bank rungs {bank_rungs} are not "
+        raise TrialRefused(f"{bank_path}: bank rungs {bank_rungs} are not "
               f"{sorted(BANK_RUNGS)}")
     parents = {}
     for entry in bank["parents"]:
         rung = int(entry["rung"])
         decision = entry.get("admission") or {}
         if decision.get("status") != "allow" or decision.get("rung") != rung:
-            _fail(f"{bank_path}: parent R{rung} admission {decision}")
+            raise TrialRefused(f"{bank_path}: parent R{rung} admission {decision}")
         path = output / f"parent-R{rung}.tessera"
         if not path.is_file():
-            _fail(f"parent blob {path} is missing")
+            raise TrialRefused(f"parent blob {path} is missing")
         blob = path.read_bytes()
         if len(blob) != entry["bytes"]:
-            _fail(f"{path}: {len(blob)} bytes, bank stamps {entry['bytes']}")
-        digest = _sha_bytes(blob)
+            raise TrialRefused(f"{path}: {len(blob)} bytes, bank stamps {entry['bytes']}")
+        digest = bytes_sha256hex(blob)
         if digest != entry["sha256"]:
-            _fail(f"{path}: digest {digest} does not match the bank")
+            raise TrialRefused(f"{path}: digest {digest} does not match the bank")
         parents[rung] = {"entry": entry, "blob": blob, "path": str(path),
                          "bytes": len(blob), "sha256": digest}
     return {"bank": bank, "bank_path": str(bank_path),
-            "bank_sha256": file_sha256(bank_path), "parents": parents,
+            "bank_sha256": file_sha256hex(bank_path, block_size=1 << 20), "parents": parents,
             "fit_identity_drift": fit_identity_drift}
 
 
@@ -620,11 +607,11 @@ def parse_and_render(parents: dict, source_shape: list[int]) -> dict:
         branch = getattr(unit.manifest, "branch", None)
         root_q = getattr(branch, "root_q256", None)
         if root_q != rung:
-            _fail(f"parent-R{rung}.tessera stores root_q256 {root_q!r}")
+            raise TrialRefused(f"parent-R{rung}.tessera stores root_q256 {root_q!r}")
         tensors = materialize_stock(unit.unit, unit.forests, unit.code)
         weights = stock_dequant(tensors)
         if [int(v) for v in weights.shape] != source_shape:
-            _fail(f"parent R{rung} renders {list(weights.shape)}, "
+            raise TrialRefused(f"parent R{rung} renders {list(weights.shape)}, "
                   f"expected {source_shape}")
         parsed[rung] = unit
         rendered[rung] = weights
@@ -683,7 +670,7 @@ def preflight_census(args) -> tuple[dict, list[str]]:
     def do_roles():
         split = findings["split_manifest"]
         if split.get("status") == "unavailable":
-            _fail("the layer census depends on the split manifest")
+            raise TrialRefused("the layer census depends on the split manifest")
         return load_layer_roles(
             Path(args.capture_root), args.qname, split,
             load_tensors={"fit": True, "heldout": args.mode == "score"})
@@ -771,10 +758,10 @@ def run_preflight(args) -> int:
         "elapsed_seconds": time.monotonic() - started,
     }
     path = output / "preflight.json"
-    _write_json(path, result)
+    write_trial_json(path, result)
     print(json.dumps({"preflight": True, "out": str(path),
                       "missing": sorted(missing),
-                      "sha256": file_sha256(path)}), flush=True)
+                      "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
     return 0
 
 
@@ -794,11 +781,11 @@ def strict_intake(args, heldout_tensors: bool) -> dict:
         load_tensors={"fit": True, "heldout": heldout_tensors})
     fit_hessian = layer["roles"]["fit"]["hessian"]
     if list(fit_hessian.shape) != [source["shape"][1]] * 2:
-        _fail("the FIT moment does not span the source projection columns")
+        raise TrialRefused("the FIT moment does not span the source projection columns")
     if heldout_tensors:
         held = layer["roles"]["heldout"]
         if list(held["hessian"].shape) != list(fit_hessian.shape):
-            _fail("the HELDOUT moment basis differs from the FIT basis")
+            raise TrialRefused("the HELDOUT moment basis differs from the FIT basis")
         fit_ids = layer["roles"]["fit"]["prefix_sample_ids"]
         held_ids = held["prefix_sample_ids"]
         if fit_ids is not None and held_ids is not None \
@@ -831,7 +818,7 @@ def run_encode(args) -> int:
         bank = json.loads(existing.read_bytes())
         if bank.get("qname") != args.qname \
                 or bank.get("shape") != intake["source"]["shape"]:
-            _fail(f"{existing} holds a different unit/shape; encode needs a "
+            raise TrialRefused(f"{existing} holds a different unit/shape; encode needs a "
                   "fresh --output")
     result = encode_parent_bank(
         intake["source_tensor"], intake["roles"]["fit"]["hessian"],
@@ -840,7 +827,7 @@ def run_encode(args) -> int:
                                                      admission),
         args.structure, output, device=args.device)
     if result["heldout_consumed"] is not False:
-        _fail("encoder claims heldout consumption")
+        raise TrialRefused("encoder claims heldout consumption")
 
     record = {
         "schema": "prismaquant.block_trial_encode.v1",
@@ -849,7 +836,7 @@ def run_encode(args) -> int:
         "shape": intake["source"]["shape"],
         "bank": {
             "path": str(output / "parent-bank.json"),
-            "sha256": file_sha256(output / "parent-bank.json"),
+            "sha256": file_sha256hex(output / "parent-bank.json", block_size=1 << 20),
             "uniform_control_rung": CONTROL_RUNG,
             "parents": [
                 {"rung": p["rung"], "bytes": p["bytes"],
@@ -887,11 +874,11 @@ def run_encode(args) -> int:
         "elapsed_seconds": time.monotonic() - started,
     }
     path = output / "encode-result.json"
-    _write_json(path, record)
+    write_trial_json(path, record)
     print(json.dumps({"encode": True, "out": str(path),
                       "bank": record["bank"]["path"],
                       "parents": len(result["parents"]),
-                      "sha256": file_sha256(path)}), flush=True)
+                      "sha256": file_sha256hex(path, block_size=1 << 20)}), flush=True)
     return 0
 
 
@@ -986,7 +973,7 @@ def run_score(args) -> int:
     admission = intake["admission"]
     require_all_admitted(admission)
     output = Path(args.output)
-    bank_record = load_parent_bank(output, intake)
+    bank_record = verify_trial_parent_bank(output, intake)
     bank = bank_record["bank"]
     # The actual D41 gate is the CURRENT canonical admission; a mere table
     # version move with every bank rung still allowed is stamped and
@@ -998,7 +985,7 @@ def run_score(args) -> int:
         recorded, current = stamped[key], admission["decisions"][key]
         if recorded != current:
             if current.get("status") != "allow":
-                _fail(f"rung {rung} is no longer admitted by the current "
+                raise TrialRefused(f"rung {rung} is no longer admitted by the current "
                       f"table: {current} (bank recorded {recorded}); "
                       "re-encode")
             admission_drift[key] = {"recorded": recorded,
@@ -1025,7 +1012,7 @@ def run_score(args) -> int:
     rows, cols = source.shape
     for rb, cb in set(SENSITIVITY_GEOMETRIES) | {PRIMARY_GEOMETRY}:
         if rows % rb or cols % cb:
-            _fail(f"geometry {rb}x{cb} does not tile {rows}x{cols}")
+            raise TrialRefused(f"geometry {rb}x{cb} does not tile {rows}x{cols}")
 
     prices_raw = conditional_fit_prices(
         source, control, candidates, h_fit, fit_count,
@@ -1037,7 +1024,7 @@ def run_score(args) -> int:
     fixed = fixed_bytes(units, primary_rb, primary_cb)
     cap = control_bytes - fixed
     if cap <= 0:
-        _fail(f"control body budget {cap} is not positive")
+        raise TrialRefused(f"control body budget {cap} is not positive")
     allocation = allocate_body_budget(prices_shrunk, body, cap,
                                       baseline_index=0)
     selection = allocation["selection"]
@@ -1085,9 +1072,9 @@ def run_score(args) -> int:
     for text in args.extra_geometry or []:
         rb, cb = _geometry(text)
         if (rb, cb) == PRIMARY_GEOMETRY:
-            _fail(f"--extra-geometry {text} duplicates the primary geometry")
+            raise TrialRefused(f"--extra-geometry {text} duplicates the primary geometry")
         if rows % rb or cols % cb:
-            _fail(f"{text} does not tile {rows}x{cols}")
+            raise TrialRefused(f"{text} does not tile {rows}x{cols}")
         g_raw = conditional_fit_prices(source, control, candidates, h_fit,
                                        fit_count, rb, cb)
         g_groups = block_groups(rows, cols, rb, cb, INPUT_GROUP_COLS)
@@ -1159,15 +1146,15 @@ def run_score(args) -> int:
         "wire": breakdown,
         "files": {
             "packed_blob": {"path": str(blob_path), "bytes": len(blob),
-                            "sha256": _sha_bytes(blob)},
+                            "sha256": bytes_sha256hex(blob)},
             "selection": {"path": str(selection_path),
-                          "sha256": file_sha256(selection_path),
+                          "sha256": file_sha256hex(selection_path, block_size=1 << 20),
                           "order": "row-major block index b = i*ncb + j"},
             "sensitivity_arrays": {"path": str(arrays_path),
-                                   "sha256": file_sha256(arrays_path)},
+                                   "sha256": file_sha256hex(arrays_path, block_size=1 << 20)},
         },
     }
-    _write_json(output / "breakdown.json", breakdown_doc)
+    write_trial_json(output / "breakdown.json", breakdown_doc)
 
     result = {
         "schema": "prismaquant.block_trial_score.v1",
@@ -1204,7 +1191,7 @@ def run_score(args) -> int:
         },
         "packed_candidate": {
             "bytes": len(blob),
-            "sha256": _sha_bytes(blob),
+            "sha256": bytes_sha256hex(blob),
             "equals_control_serialized_bytes": len(blob) == control_bytes,
             "pad_bytes": breakdown["pad_bytes"],
             "path": str(blob_path),
@@ -1254,7 +1241,7 @@ def run_score(args) -> int:
         "elapsed_seconds": time.monotonic() - started,
     }
     result_path = output / "result.json"
-    _write_json(result_path, result)
+    write_trial_json(result_path, result)
     print(json.dumps({
         "score": True, "out": str(result_path),
         "geometry": f"{primary_rb}x{primary_cb}",
@@ -1262,7 +1249,7 @@ def run_score(args) -> int:
         "fit_reduction": evaluation["fit_reduction"],
         "gate_passes_10pct": evaluation["gate_passes_10pct"],
         "candidate_bytes": len(blob), "control_bytes": control_bytes,
-        "sha256": file_sha256(result_path)}), flush=True)
+        "sha256": file_sha256hex(result_path, block_size=1 << 20)}), flush=True)
     return 0
 
 
@@ -1315,17 +1302,17 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.data_manifest is not None:
         readset_bytes = args.data_manifest.read_bytes()
-        bind_residency_manifest(hashlib.sha256(readset_bytes).hexdigest())
+        bind_residency_manifest(bytes_sha256hex(readset_bytes))
         readset = json.loads(readset_bytes)
         INPUT_DIGESTS.update({e["path"]: e.get("sha256") for e in readset["entries"] if e.get("offset", 0) == 0})
     if args.device == "cuda":
         if args.data_manifest is None:
-            _fail("CUDA encode requires a declared PB data manifest")
+            raise TrialRefused("CUDA encode requires a declared PB data manifest")
         activate_staged_tier_policy("ram,ssd")
     if args.threads < 1:
-        _fail("--threads must be positive")
+        raise TrialRefused("--threads must be positive")
     if args.device == "cuda" and (args.preflight or args.mode == "score"):
-        _fail("--device cuda is encode-only; preflight and score are CPU "
+        raise TrialRefused("--device cuda is encode-only; preflight and score are CPU "
               "research entries and never allocate a GPU")
     if args.preflight:
         return run_preflight(args)

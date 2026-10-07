@@ -6,13 +6,19 @@ an encoder: parent rungs use Tessera's existing ActivationSource/export path.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import torch
+
+from prismaquant.digests import bytes_sha256hex
+
+
+def write_trial_json(path: Path, document: dict) -> None:
+    """Write strict ASCII JSON in insertion order with one final newline."""
+    path.write_text(json.dumps(document, indent=2, allow_nan=False) + "\n")
 
 
 def validate_sample_split(fit_samples, heldout_samples) -> dict:
@@ -175,7 +181,7 @@ def encode_parent_bank(source: torch.Tensor, h_fit: torch.Tensor, fit_count: int
         path = root / f"parent-R{rung}.tessera"
         path.write_bytes(exported.blob)
         parents.append({"rung": rung, "path": str(path), "bytes": len(exported.blob),
-                        "sha256": hashlib.sha256(exported.blob).hexdigest(),
+                        "sha256": bytes_sha256hex(exported.blob),
                         "admission": decision})
         del unit, forests, exported
     result = {"schema": "prismaquant.block_trial_parent_bank.v1", "qname": qname,
@@ -183,7 +189,7 @@ def encode_parent_bank(source: torch.Tensor, h_fit: torch.Tensor, fit_count: int
               "fit_identity": dict(fit_identity), "parents": parents,
               "uniform_control_rung": 1024,
               "heldout_consumed": False, "production_admission_claimed": False}
-    (root / "parent-bank.json").write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+    write_trial_json(root / "parent-bank.json", result)
     return result
 
 

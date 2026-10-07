@@ -18,13 +18,14 @@ schedule's own files exist.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
 import torch
 from safetensors import safe_open
+from prismaquant.digests import bytes_sha256hex, file_sha256hex
+from pq_block_trial_math import write_trial_json
 
 import pq_block_reference_wire as wire
 from tessera.fused import parse_fused
@@ -122,19 +123,6 @@ def _stats(values):
             "mean": sum(values) / len(values), "n": len(values)}
 
 
-def _file_sha256(path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _require(condition, message: str) -> None:
-    if not condition:
-        raise ValueError(message)
-
-
 # ---------------------------------------------------------------------------
 # issue-tile framing over a selection grid
 # ---------------------------------------------------------------------------
@@ -143,20 +131,20 @@ def _issue_frame(geometry: dict) -> dict:
     """Tile the projection into ISSUE_TILE_ROWS x ISSUE_TILE_COLS tiles."""
     rows, cols = geometry["rows"], geometry["cols"]
     br, bc = geometry["block_rows"], geometry["block_cols"]
-    _require(rows % ISSUE_TILE_ROWS == 0 and cols % ISSUE_TILE_COLS == 0,
-             f"projection {rows}x{cols} does not tile "
-             f"{ISSUE_TILE_ROWS}x{ISSUE_TILE_COLS} issue tiles")
-    _require(bc <= ISSUE_TILE_COLS and ISSUE_TILE_COLS % bc == 0,
-             f"block_cols {bc} must divide the {ISSUE_TILE_COLS} issue columns")
+    if not (rows % ISSUE_TILE_ROWS == 0 and cols % ISSUE_TILE_COLS == 0):
+        raise ValueError(f"projection {rows}x{cols} does not tile "
+        f"{ISSUE_TILE_ROWS}x{ISSUE_TILE_COLS} issue tiles")
+    if not (bc <= ISSUE_TILE_COLS and ISSUE_TILE_COLS % bc == 0):
+        raise ValueError(f"block_cols {bc} must divide the {ISSUE_TILE_COLS} issue columns")
     if br <= ISSUE_TILE_ROWS:
-        _require(ISSUE_TILE_ROWS % br == 0,
-                 f"block_rows {br} must divide the {ISSUE_TILE_ROWS} issue rows")
+        if not (ISSUE_TILE_ROWS % br == 0):
+            raise ValueError(f"block_rows {br} must divide the {ISSUE_TILE_ROWS} issue rows")
         span = ISSUE_TILE_ROWS // br
         block_row_of = lambda tr: tr * span  # noqa: E731
     else:
-        _require(br % ISSUE_TILE_ROWS == 0,
-                 f"block_rows {br} must be a whole number of "
-                 f"{ISSUE_TILE_ROWS}-row issue tiles")
+        if not (br % ISSUE_TILE_ROWS == 0):
+            raise ValueError(f"block_rows {br} must be a whole number of "
+            f"{ISSUE_TILE_ROWS}-row issue tiles")
         span = 1
         block_row_of = lambda tr: (tr * ISSUE_TILE_ROWS) // br  # noqa: E731
     return {"issue_tile_rows": rows // ISSUE_TILE_ROWS,
@@ -172,8 +160,8 @@ def _tile_slot_tags(tags: np.ndarray, geometry: dict, frame: dict) -> np.ndarray
     """Source-order tags of every issue tile as ``[tir, tic, span*slots]``."""
     ncb = geometry["num_col_blocks"]
     slots = frame["slots"]
-    _require(ncb == frame["issue_tile_cols"] * slots,
-             "column blocks do not group into whole issue tiles")
+    if not (ncb == frame["issue_tile_cols"] * slots):
+        raise ValueError("column blocks do not group into whole issue tiles")
     tir, tic = frame["issue_tile_rows"], frame["issue_tile_cols"]
     flat = np.empty((tir, tic, frame["span"] * slots), dtype=np.int64)
     for tr in range(tir):
@@ -414,7 +402,8 @@ def _verify_breakdown(breakdown: dict, geometry: dict, sizes: dict,
     this path, so no checksum or content binding is performed.  A reported
     checksum is echoed as provenance and never verified here.
     """
-    _require(isinstance(breakdown, dict), "breakdown must be a JSON object")
+    if not (isinstance(breakdown, dict)):
+        raise ValueError("breakdown must be a JSON object")
     mismatches = []
 
     def check(name, want, got):
@@ -503,8 +492,8 @@ def summarize_schedule(parents, selection, block_rows: int, block_cols: int,
         tile_body = np.stack(
             [grouped[tr * frame["span"]:(tr + 1) * frame["span"]].sum(axis=0)
              for tr in range(tir)])
-        _require(int(tile_body.sum()) == int(breakdown["body_bytes"]),
-                 "issued body slices do not sum to the breakdown body_bytes")
+        if not (int(tile_body.sum()) == int(breakdown["body_bytes"])):
+            raise ValueError("issued body slices do not sum to the breakdown body_bytes")
         body_slice_model = "whole_fragments"
         body_slice_note = ("each issue tile covers whole blocks; its body "
                            "bytes are the exact wire cost of those fragments")
@@ -512,10 +501,10 @@ def summarize_schedule(parents, selection, block_rows: int, block_cols: int,
     else:
         share = ISSUE_TILE_ROWS / geometry["block_rows"]
         tile_body = enclosing_bytes * share
-        _require(abs(float(tile_body.sum()) - int(breakdown["body_bytes"]))
-                 < 1e-6,
-                 "proportional body slices diverge from the breakdown "
-                 "body_bytes")
+        if not (abs(float(tile_body.sum()) - int(breakdown["body_bytes"]))
+                 < 1e-6):
+            raise ValueError("proportional body slices diverge from the breakdown "
+            "body_bytes")
         body_slice_model = "proportional_fragment_slices"
         body_slice_note = ("the stored fragment streams once per "
                            f"{geometry['block_rows']}-row block; a 128-row "
@@ -699,10 +688,10 @@ def summarize_schedule(parents, selection, block_rows: int, block_cols: int,
 
 def load_selection(path) -> np.ndarray:
     array = np.load(Path(path), allow_pickle=False)
-    _require(isinstance(array, np.ndarray) and array.ndim in (1, 2),
-             f"selection {path} must be flat row-major or a 2-D grid")
-    _require(array.dtype != bool and np.issubdtype(array.dtype, np.integer),
-             f"selection {path} must hold integer parent tags")
+    if not (isinstance(array, np.ndarray) and array.ndim in (1, 2)):
+        raise ValueError(f"selection {path} must be flat row-major or a 2-D grid")
+    if not (array.dtype != bool and np.issubdtype(array.dtype, np.integer)):
+        raise ValueError(f"selection {path} must hold integer parent tags")
     return array.astype(np.int64, copy=False)
 
 
@@ -718,25 +707,25 @@ def _order_by_candidate(parents, provenance, order):
     an order.  Each reordered parent must decode to the rung it is named by.
     """
     rungs = [entry.get("rung") for entry in provenance]
-    _require(all(isinstance(r, int) for r in rungs),
-             "candidate ordering needs integer rungs on every bank entry")
-    _require(isinstance(order, list) and bool(order),
-             "candidate_order must be a non-empty list of rungs")
-    _require(len(set(order)) == len(order),
-             f"candidate_order carries duplicates: {order}")
-    _require(sorted(int(r) for r in order) == sorted(int(r) for r in rungs),
-             f"candidate_order {sorted(int(r) for r in order)} does not match "
-             f"the bank's rung multiset {sorted(int(r) for r in rungs)}; "
-             "refusing an unmatched order")
+    if not (all(isinstance(r, int) for r in rungs)):
+        raise ValueError("candidate ordering needs integer rungs on every bank entry")
+    if not (isinstance(order, list) and bool(order)):
+        raise ValueError("candidate_order must be a non-empty list of rungs")
+    if not (len(set(order)) == len(order)):
+        raise ValueError(f"candidate_order carries duplicates: {order}")
+    if not (sorted(int(r) for r in order) == sorted(int(r) for r in rungs)):
+        raise ValueError(f"candidate_order {sorted(int(r) for r in order)} does not match "
+        f"the bank's rung multiset {sorted(int(r) for r in rungs)}; "
+        "refusing an unmatched order")
     index_of = {int(r): i for i, r in enumerate(rungs)}
     ordered_parents, ordered_provenance = [], []
     for tag, rung in enumerate(order):
         i = index_of[int(rung)]
         parsed = parents[i]
         actual = int(parsed.manifest.branch.root_q256)
-        _require(actual == int(rung),
-                 f"candidate_order names rung {rung} but the bank entry at "
-                 f"position {i} decodes root_q256 {actual}")
+        if not (actual == int(rung)):
+            raise ValueError(f"candidate_order names rung {rung} but the bank entry at "
+            f"position {i} decodes root_q256 {actual}")
         entry = dict(provenance[i])
         entry["tag"] = tag
         entry["bank_position"] = i
@@ -757,30 +746,31 @@ def load_schedule_inputs(parent_bank, selection, breakdown, export_root=None,
     handoff provenance.
     """
     breakdown_doc = load_breakdown(breakdown)
-    _require(isinstance(breakdown_doc, dict), "breakdown must be a JSON object")
-    parents, provenance = load_parent_bank(parent_bank, export_root)
+    if not (isinstance(breakdown_doc, dict)):
+        raise ValueError("breakdown must be a JSON object")
+    parents, provenance = parse_schedule_parent_bank(parent_bank, export_root)
     handoff = {"replan_binding": "sizes_and_accounting_only_no_blob_checksum"}
     if breakdown_doc.get("schema") == WRAPPER_SCHEMA:
         wire = breakdown_doc.get("wire")
-        _require(isinstance(wire, dict) and isinstance(wire.get("geometry"), dict),
-                 "wrapper carries no wire breakdown with geometry")
+        if not (isinstance(wire, dict) and isinstance(wire.get("geometry"), dict)):
+            raise ValueError("wrapper carries no wire breakdown with geometry")
         order = breakdown_doc.get("candidate_order")
         files = breakdown_doc.get("files") or {}
         stamp = files.get("selection")
-        _require(isinstance(stamp, dict) and "sha256" in stamp,
-                 "wrapper carries no producer stamp over selection bytes; "
-                 "refusing to diagnose unverified selection")
-        actual = _file_sha256(selection)
-        _require(actual == stamp["sha256"],
-                 f"selection bytes fail their producer stamp: file "
-                 f"{actual} != wrapper {stamp['sha256']}")
+        if not (isinstance(stamp, dict) and "sha256" in stamp):
+            raise ValueError("wrapper carries no producer stamp over selection bytes; "
+            "refusing to diagnose unverified selection")
+        actual = file_sha256hex(selection, block_size=1 << 20)
+        if not (actual == stamp["sha256"]):
+            raise ValueError(f"selection bytes fail their producer stamp: file "
+            f"{actual} != wrapper {stamp['sha256']}")
         handoff["selection_producer_stamp_verified"] = True
         handoff["selection_stamp_sha256"] = stamp["sha256"]
         handoff["selection_stamp_order_note"] = stamp.get("order")
         if packed_blob is not None and "packed_blob" in files:
             blob_stamp = files["packed_blob"].get("sha256")
-            _require(_file_sha256(packed_blob) == blob_stamp,
-                     "packed blob bytes fail the wrapper producer stamp")
+            if not (file_sha256hex(packed_blob, block_size=1 << 20) == blob_stamp):
+                raise ValueError("packed blob bytes fail the wrapper producer stamp")
             handoff["packed_blob_stamp_verified"] = True
         parents, provenance = _order_by_candidate(parents, provenance, order)
         handoff["form"] = "wrapper"
@@ -792,21 +782,21 @@ def load_schedule_inputs(parent_bank, selection, breakdown, export_root=None,
         handoff["selection_producer_stamp_verified"] = None
         handoff["selection_stamp_order_note"] = None
     geometry = wire.get("geometry") or {}
-    _require(isinstance(geometry.get("block_rows"), int)
-             and isinstance(geometry.get("block_cols"), int),
-             "breakdown carries no block geometry; pass an actual "
-             "pack_projection breakdown or wrapper")
+    if not (isinstance(geometry.get("block_rows"), int)
+             and isinstance(geometry.get("block_cols"), int)):
+        raise ValueError("breakdown carries no block geometry; pass an actual "
+        "pack_projection breakdown or wrapper")
     nrb, ncb = geometry["num_row_blocks"], geometry["num_col_blocks"]
     selection_array = load_selection(selection)
     if selection_array.ndim == 1:
-        _require(selection_array.size == nrb * ncb,
-                 f"flat selection holds {selection_array.size} tags, the wire "
-                 f"geometry needs exactly {nrb}*{ncb} = {nrb * ncb}")
+        if not (selection_array.size == nrb * ncb):
+            raise ValueError(f"flat selection holds {selection_array.size} tags, the wire "
+            f"geometry needs exactly {nrb}*{ncb} = {nrb * ncb}")
         selection_array = selection_array.reshape(nrb, ncb)
         handoff["selection_flat_reshaped_row_major"] = True
     else:
-        _require(selection_array.ndim == 2,
-                 f"selection must be 1-D flat or 2-D, got {selection_array.ndim}-D")
+        if not (selection_array.ndim == 2):
+            raise ValueError(f"selection must be 1-D flat or 2-D, got {selection_array.ndim}-D")
         handoff["selection_flat_reshaped_row_major"] = False
     handoff["bank_tag_order_rungs"] = [entry.get("rung")
                                        for entry in provenance]
@@ -814,7 +804,7 @@ def load_schedule_inputs(parent_bank, selection, breakdown, export_root=None,
     return parents, provenance, selection_array, wire, handoff
 
 
-def load_parent_bank(bank_path, export_root=None):
+def parse_schedule_parent_bank(bank_path, export_root=None):
     """Parse a block-trial parent bank via the existing public core.
 
     Two entry forms, both ending in ``parse_unit_artifact``:
@@ -825,12 +815,12 @@ def load_parent_bank(bank_path, export_root=None):
     """
     bank_path = Path(bank_path)
     bank = json.loads(bank_path.read_bytes())
-    _require(bank.get("schema") == PARENT_BANK_SCHEMA,
-             f"parent bank schema must be {PARENT_BANK_SCHEMA}, got "
-             f"{bank.get('schema')!r}")
+    if not (bank.get("schema") == PARENT_BANK_SCHEMA):
+        raise ValueError(f"parent bank schema must be {PARENT_BANK_SCHEMA}, got "
+        f"{bank.get('schema')!r}")
     entries = bank.get("parents")
-    _require(isinstance(entries, list) and bool(entries),
-             "parent bank carries no parents list")
+    if not (isinstance(entries, list) and bool(entries)):
+        raise ValueError("parent bank carries no parents list")
     roots = dict(bank.get("roots") or {})
     if isinstance(bank.get("a8s_export"), str):
         roots.setdefault("a8s_export", bank["a8s_export"])
@@ -838,8 +828,8 @@ def load_parent_bank(bank_path, export_root=None):
     parents, provenance = [], []
     for index, entry in enumerate(entries):
         qname = entry.get("qname") or entry.get("name") or bank.get("qname")
-        _require(isinstance(qname, str) and bool(qname),
-                 f"parent {index} carries no qname")
+        if not (isinstance(qname, str) and bool(qname)):
+            raise ValueError(f"parent {index} carries no qname")
         provenance.append({"tag": index, "qname": qname,
                            "rung": entry.get("rung")})
         if "path" in entry:
@@ -848,27 +838,27 @@ def load_parent_bank(bank_path, export_root=None):
                 path = bank_dir / path
             blob = path.read_bytes()
             if "sha256" in entry:
-                _require(hashlib.sha256(blob).hexdigest() == entry["sha256"],
-                         f"parent {index} sha256 mismatch for {path}")
+                if not (bytes_sha256hex(blob) == entry["sha256"]):
+                    raise ValueError(f"parent {index} sha256 mismatch for {path}")
             if "bytes" in entry:
-                _require(len(blob) == int(entry["bytes"]),
-                         f"parent {index} byte count mismatch for {path}")
+                if not (len(blob) == int(entry["bytes"])):
+                    raise ValueError(f"parent {index} byte count mismatch for {path}")
             parsed = parse_unit_artifact(blob, device="cpu")
             provenance[-1].update({"form": "unit_file", "path": str(path),
                                    "bytes": len(blob),
-                                   "sha256": hashlib.sha256(blob).hexdigest()})
+                                   "sha256": bytes_sha256hex(blob)})
         else:
-            _require("tensor" in entry,
-                     f"parent {index} needs a 'path' or a 'tensor' (fused "
-                     "export) form; the safetensors index resolves the shard")
+            if not ("tensor" in entry):
+                raise ValueError(f"parent {index} needs a 'path' or a 'tensor' (fused "
+                "export) form; the safetensors index resolves the shard")
             root = export_root
             if root is None and entry.get("root") is not None:
                 root = roots.get(entry["root"])
             if root is None:
                 root = roots.get("a8s_export")
-            _require(root is not None,
-                     f"parent {index} names a fused export but no export root "
-                     "is available (bank roots or --export-root)")
+            if not (root is not None):
+                raise ValueError(f"parent {index} names a fused export but no export root "
+                "is available (bank roots or --export-root)")
             root = Path(root)
             index_map = json.loads(
                 (root / "model.safetensors.index.json").read_bytes())["weight_map"]
@@ -876,25 +866,25 @@ def load_parent_bank(bank_path, export_root=None):
             shard_path = root / index_map[tensor_key]
             with safe_open(str(shard_path), framework="pt", device="cpu") as handle:
                 stream = handle.get_tensor(tensor_key)
-            _require(stream.dtype == torch.uint8 and stream.ndim == 1,
-                     f"{tensor_key}: fused wire must be one uint8 byte stream")
+            if not (stream.dtype == torch.uint8 and stream.ndim == 1):
+                raise ValueError(f"{tensor_key}: fused wire must be one uint8 byte stream")
             blob = stream.numpy().tobytes()
             role = entry.get("role") or qname.rsplit(".", 1)[1]
             matching = [m for m in parse_fused(blob) if m.name == role]
-            _require(len(matching) == 1,
-                     f"{tensor_key}: expected one {role} member, found "
-                     f"{[m.name for m in parse_fused(blob)]}")
+            if not (len(matching) == 1):
+                raise ValueError(f"{tensor_key}: expected one {role} member, found "
+                f"{[m.name for m in parse_fused(blob)]}")
             member = matching[0]
             if "member_sha256" in entry:
-                _require(hashlib.sha256(member.blob).hexdigest()
-                         == entry["member_sha256"],
-                         f"parent {index} member sha256 mismatch")
+                if not (bytes_sha256hex(member.blob)
+                         == entry["member_sha256"]):
+                    raise ValueError(f"parent {index} member sha256 mismatch")
             parsed = parse_unit_artifact(member.blob, device="cpu")
             provenance[-1].update({
                 "form": "fused_export", "root": str(root),
                 "shard": index_map[tensor_key], "tensor": tensor_key,
                 "member": role, "member_bytes": len(member.blob),
-                "member_sha256": hashlib.sha256(member.blob).hexdigest()})
+                "member_sha256": bytes_sha256hex(member.blob)})
         provenance[-1]["unit_id"] = str(parsed.manifest.branch.unit_id)
         provenance[-1]["root_q256"] = int(parsed.manifest.branch.root_q256)
         parents.append(parsed)
@@ -935,21 +925,21 @@ def main() -> None:
     summary["handoff"] = handoff
     summary["provenance"] = {
         "parent_bank": {"path": str(args.parent_bank),
-                        "sha256": _file_sha256(args.parent_bank)},
+                        "sha256": file_sha256hex(args.parent_bank, block_size=1 << 20)},
         "selection": {"path": str(args.selection),
-                      "sha256": _file_sha256(args.selection),
+                      "sha256": file_sha256hex(args.selection, block_size=1 << 20),
                       "shape": handoff["selection_shape"],
                       "dtype": "int64"},
         "breakdown": {"path": str(args.breakdown),
-                      "sha256": _file_sha256(args.breakdown),
+                      "sha256": file_sha256hex(args.breakdown, block_size=1 << 20),
                       "form": handoff["form"]},
         "parents": parent_provenance,
         "sources": {"wire": "tools/pq_block_reference_wire.py",
                     "conditional_models": _ESTIMATE_SOURCE},
     }
-    args.output.write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
+    write_trial_json(args.output, summary)
     print(json.dumps({"schema": SCHEMA, "output": str(args.output),
-                      "sha256": _file_sha256(args.output),
+                      "sha256": file_sha256hex(args.output, block_size=1 << 20),
                       "handoff_form": handoff["form"],
                       "candidate_order": handoff["candidate_order"],
                       "issue_tiles": summary["geometry"]["issue_tile"]["total"],

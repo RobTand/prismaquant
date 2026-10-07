@@ -60,12 +60,12 @@ bound output geometry by body bytes; offset scratch is linear in block count.
 """
 from __future__ import annotations
 
-import hashlib
 import struct
 from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import torch
+from prismaquant.digests import bytes_sha256hex
 
 from tessera.alphabet import require_hardware_byte_grid
 from tessera.decode import replay_window, require_untransformed
@@ -99,10 +99,6 @@ class BlockWireFormatError(ValueError):
     """The blob, the parents or the geometry violate the research format."""
 
 
-def _fail(message: str) -> None:
-    raise BlockWireFormatError(message)
-
-
 # ---------------------------------------------------------------------------
 # Parent validation and shared planning
 # ---------------------------------------------------------------------------
@@ -117,76 +113,66 @@ def _validate_parents(parents: Sequence[Any]) -> List[Dict[str, Any]]:
     the wire carries.
     """
     if not parents:
-        _fail("pack needs at least one parent")
+        raise BlockWireFormatError("pack needs at least one parent")
     prepared: List[Dict[str, Any]] = []
     ref_grid = None
     for index, parsed in enumerate(parents):
         unit = getattr(parsed, "unit", None)
         grid = getattr(parsed, "grid", None)
         if unit is None or grid is None:
-            _fail(f"parent {index} is not a tessera ParsedUnit (needs .unit and .grid)")
+            raise BlockWireFormatError(f"parent {index} is not a tessera ParsedUnit (needs .unit and .grid)")
         if getattr(unit, "body", BodyKind.TCQ) is not BodyKind.WINDOW:
-            _fail(
-                f"parent {index} body is {BodyKind(getattr(unit, 'body', BodyKind.TCQ)).name}, "
-                "the reference wire packs WINDOW bodies only"
-            )
+            raise BlockWireFormatError(f"parent {index} body is {BodyKind(getattr(unit, 'body', BodyKind.TCQ)).name}, "
+            "the reference wire packs WINDOW bodies only")
         if getattr(unit, "scale_plane", ScalePlaneKind.S6B) is not ScalePlaneKind.CHANNEL:
-            _fail(f"parent {index} scale plane is not CHANNEL")
+            raise BlockWireFormatError(f"parent {index} scale plane is not CHANNEL")
         span = int(getattr(unit, "span", 1))
         if span != 1:
-            _fail(f"parent {index} span is {span}, the reference wire packs span 1 only")
+            raise BlockWireFormatError(f"parent {index} span is {span}, the reference wire packs span 1 only")
         require_untransformed(unit, f"{FORMAT_NAME} parent {index}")
         if getattr(unit, "initial_state", None) is not None:
-            _fail(
-                f"parent {index} carries a nonzero initial state; the wire packs "
-                "whole projections whose row-0 state is zero"
-            )
+            raise BlockWireFormatError(f"parent {index} carries a nonzero initial state; the wire packs "
+            "whole projections whose row-0 state is zero")
         require_hardware_byte_grid(grid, purpose=f"{FORMAT_NAME} parent {index}")
         window_bits = int(getattr(unit, "window_bits", 0))
         if not 1 <= window_bits <= _MAX_WINDOW_BITS:
-            _fail(f"parent {index} window_bits {window_bits} outside 1..{_MAX_WINDOW_BITS}")
+            raise BlockWireFormatError(f"parent {index} window_bits {window_bits} outside 1..{_MAX_WINDOW_BITS}")
         table = getattr(unit, "window_codes", None)
         if table is None or table.numel() != (1 << window_bits):
-            _fail(
-                f"parent {index} window table holds "
-                f"{None if table is None else table.numel()} entries, "
-                f"window_bits {window_bits} needs {1 << window_bits}"
-            )
+            raise BlockWireFormatError(f"parent {index} window table holds "
+            f"{None if table is None else table.numel()} entries, "
+            f"window_bits {window_bits} needs {1 << window_bits}")
         if int(table.max()) >= int(grid.size):
-            _fail(f"parent {index} window table names a code outside its {grid.size}-code grid")
+            raise BlockWireFormatError(f"parent {index} window table names a code outside its {grid.size}-code grid")
         rates = tuple(int(r) for r in unit.rates)
         rows, cols = (int(s) for s in unit.body_bits.shape)
         if len(rates) != cols:
-            _fail(f"parent {index} carries {len(rates)} rates for {cols} columns")
+            raise BlockWireFormatError(f"parent {index} carries {len(rates)} rates for {cols} columns")
         rate_limit = min(window_bits, 8)  # scalar 256-code byte-grid payload
         bad = [r for r in rates if not 1 <= r <= rate_limit]
         if bad:
-            _fail(f"parent {index} has rates {sorted(set(bad))} outside 1..{rate_limit}")
+            raise BlockWireFormatError(f"parent {index} has rates {sorted(set(bad))} outside 1..{rate_limit}")
         scale_rows = getattr(unit, "scale_rows", None)
         if scale_rows is None or scale_rows.numel() != rows:
-            _fail(f"parent {index} CHANNEL plane needs {rows} fp16 row scales")
+            raise BlockWireFormatError(f"parent {index} CHANNEL plane needs {rows} fp16 row scales")
         if scale_rows.dtype != torch.float16:
-            _fail(f"parent {index} row scales are {scale_rows.dtype}, expected float16")
+            raise BlockWireFormatError(f"parent {index} row scales are {scale_rows.dtype}, expected float16")
         if not bool(torch.isfinite(scale_rows).all()) or bool((scale_rows <= 0).any()):
-            _fail(f"parent {index} row scales must be finite and positive")
+            raise BlockWireFormatError(f"parent {index} row scales must be finite and positive")
         if unit.body_bits.dtype != torch.uint8:
-            _fail(f"parent {index} body bits are {unit.body_bits.dtype}, expected uint8")
+            raise BlockWireFormatError(f"parent {index} body bits are {unit.body_bits.dtype}, expected uint8")
         scale_global = float(unit.scale_global)
         if scale_global <= 0 or not np.isfinite(scale_global) or float(np.float32(scale_global)) != scale_global:
-            _fail(
-                f"parent {index} scale_global {scale_global!r} is not positive finite fp32-exact; "
-                "the wire refuses a global that would not decode to the parent's own weights"
-            )
+            raise BlockWireFormatError(f"parent {index} scale_global {scale_global!r} is not positive finite fp32-exact; "
+            "the wire refuses a global that would not decode to the parent's own weights")
         if not bool(torch.isfinite(scale_rows.float() * scale_global).all()):
-            _fail(f"parent {index} effective row scales overflow fp32")
+            raise BlockWireFormatError(f"parent {index} effective row scales overflow fp32")
         native = np.asarray(grid.native, dtype=np.uint8)
         if ref_grid is None:
             ref_grid = (str(grid.name), native.tobytes())
         elif (str(grid.name), native.tobytes()) != ref_grid:
-            _fail(
-                f"parent {index} grid {grid.name} disagrees with parent 0's grid "
-                f"{ref_grid[0]}; one blob carries one alphabet"
-            )
+            raise BlockWireFormatError(f"parent {index} grid {grid.name} disagrees with parent 0's grid "
+            f"{ref_grid[0]}; one blob carries one alphabet")
         prepared.append({
             "unit": unit,
             "grid": grid,
@@ -202,12 +188,10 @@ def _validate_parents(parents: Sequence[Any]) -> List[Dict[str, Any]]:
     first = prepared[0]
     for index, entry in enumerate(prepared[1:], start=1):
         if (entry["rows"], entry["cols"]) != (first["rows"], first["cols"]):
-            _fail(
-                f"parent {index} shape {entry['rows']}x{entry['cols']} disagrees with "
-                f"parent 0's {first['rows']}x{first['cols']}"
-            )
+            raise BlockWireFormatError(f"parent {index} shape {entry['rows']}x{entry['cols']} disagrees with "
+            f"parent 0's {first['rows']}x{first['cols']}")
         if entry["window_bits"] != first["window_bits"]:
-            _fail(f"parent {index} window_bits disagrees with parent 0's")
+            raise BlockWireFormatError(f"parent {index} window_bits disagrees with parent 0's")
     return prepared
 
 
@@ -217,16 +201,14 @@ def _validate_geometry(
     block_rows = int(block_rows)
     block_cols = int(block_cols)
     if block_rows % 8 or block_rows < 8:
-        _fail(f"block_rows {block_rows} must be a positive multiple of 8")
+        raise BlockWireFormatError(f"block_rows {block_rows} must be a positive multiple of 8")
     if block_cols < 1:
-        _fail(f"block_cols {block_cols} must be positive")
+        raise BlockWireFormatError(f"block_cols {block_cols} must be positive")
     prepared = _validate_parents(parents)
     rows, cols = prepared[0]["rows"], prepared[0]["cols"]
     if rows % block_rows or cols % block_cols:
-        _fail(
-            f"{rows}x{cols} does not tile {block_rows}x{block_cols}; every dimension "
-            "must be a whole number of blocks"
-        )
+        raise BlockWireFormatError(f"{rows}x{cols} does not tile {block_rows}x{block_cols}; every dimension "
+        "must be a whole number of blocks")
     geometry = {
         "rows": rows,
         "cols": cols,
@@ -258,7 +240,7 @@ def _dedup_tables(prepared: List[Dict[str, Any]]) -> Tuple[List[bytes], List[int
     return order, indices
 
 
-def _plan(
+def _projection_wire_layout(
     parents: Sequence[Any], block_rows: int, block_cols: int
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int], Dict[str, Any]]:
     """Every selection-independent size, once, for all three entry points."""
@@ -312,10 +294,8 @@ def _plan(
 def _expand_bits(values: np.ndarray, width: int) -> np.ndarray:
     """MSB-first bit expansion, batched on a trailing axis."""
     if values.size and (int(values.min()) < 0 or int(values.max()) >= (1 << width)):
-        _fail(
-            f"value out of range for a {width}-bit field: "
-            f"[{int(values.min())}, {int(values.max())}]"
-        )
+        raise BlockWireFormatError(f"value out of range for a {width}-bit field: "
+        f"[{int(values.min())}, {int(values.max())}]")
     shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
     return ((values.astype(np.int64)[..., None] >> shifts) & 1).astype(np.uint8)
 
@@ -358,9 +338,9 @@ def _unpack_group(packed: np.ndarray, widths: np.ndarray, block_rows: int) -> np
     total = sum(block_rows * int(w) for w in widths)
     bits = np.unpackbits(packed, axis=1, bitorder="big")
     if bits.shape[1] < total:
-        _fail(f"body fragment holds {bits.shape[1]} bits, the rates need {total}")
+        raise BlockWireFormatError(f"body fragment holds {bits.shape[1]} bits, the rates need {total}")
     if total < bits.shape[1] and bool(bits[:, total:].any()):
-        _fail("body fragment: non-zero pad bits after the last content bit")
+        raise BlockWireFormatError("body fragment: non-zero pad bits after the last content bit")
     bits = bits[:, :total]
     out = np.zeros((n, block_rows, block_cols), dtype=np.int64)
     cursor = 0
@@ -414,7 +394,7 @@ def body_costs(parents: Sequence[Any], block_rows: int, block_cols: int) -> np.n
     parent's global column rates; nothing here pretends a fragment carries the
     parent's nominal mean bits.
     """
-    prepared, geometry, _ = _plan(parents, block_rows, block_cols)
+    prepared, geometry, _ = _projection_wire_layout(parents, block_rows, block_cols)
     block_rows_, block_cols_ = geometry["block_rows"], geometry["block_cols"]
     ncb = geometry["num_col_blocks"]
     costs = np.zeros((ncb, geometry["num_parents"]), dtype=np.int64)
@@ -437,24 +417,20 @@ def fixed_bytes(parents: Sequence[Any], block_rows: int, block_cols: int) -> int
     charges each selected block its ``body_costs`` entry; padding to
     ``target_bytes`` is the only other bytes the blob can carry.
     """
-    _, _, sizes = _plan(parents, block_rows, block_cols)
+    _, _, sizes = _projection_wire_layout(parents, block_rows, block_cols)
     return int(sizes["fixed_bytes"])
 
 
 def _validate_selection(selection: Any, geometry: Dict[str, int]) -> np.ndarray:
     array = np.asarray(selection)
     if array.dtype == bool or not np.issubdtype(array.dtype, np.integer):
-        _fail(
-            f"selection must hold integer parent tags, got dtype {array.dtype}"
-        )
+        raise BlockWireFormatError(f"selection must hold integer parent tags, got dtype {array.dtype}")
     expected = (geometry["num_row_blocks"], geometry["num_col_blocks"])
     if array.shape != expected:
-        _fail(f"selection shape {array.shape} != {expected}")
+        raise BlockWireFormatError(f"selection shape {array.shape} != {expected}")
     tags = array.astype(np.int64, copy=False)
     if tags.size and (int(tags.min()) < 0 or int(tags.max()) >= geometry["num_parents"]):
-        _fail(
-            f"selection names parent {int(tags.max())} outside 0..{geometry['num_parents'] - 1}"
-        )
+        raise BlockWireFormatError(f"selection names parent {int(tags.max())} outside 0..{geometry['num_parents'] - 1}")
     return tags
 
 
@@ -473,7 +449,7 @@ def pack_projection(
     the breakdown.  The blob carries no whole-parent weight and no covert
     slack: every counted byte is in the breakdown.
     """
-    prepared, geometry, sizes = _plan(parents, block_rows, block_cols)
+    prepared, geometry, sizes = _projection_wire_layout(parents, block_rows, block_cols)
     tags = _validate_selection(selection, geometry)
     num_parents = geometry["num_parents"]
     tag_bits = sizes["tag_bits"]
@@ -554,16 +530,14 @@ def pack_projection(
     if target_bytes is not None:
         target = int(target_bytes)
         if target < content:
-            _fail(
-                f"overflow: packed content needs {content} bytes, target_bytes "
-                f"holds {target}; nothing is truncated or silently dropped"
-            )
+            raise BlockWireFormatError(f"overflow: packed content needs {content} bytes, target_bytes "
+            f"holds {target}; nothing is truncated or silently dropped")
         pad_bytes = target - content
     else:
         pad_bytes = 0
     pad_blob = b"\x00" * pad_bytes
     if pad_bytes and any(pad_blob):
-        _fail("padding must be all zero")
+        raise BlockWireFormatError("padding must be all zero")
 
     header = _HEADER_STRUCT.pack(
         MAGIC, HEADER_BYTES, FORMAT_VERSION, tag_bits, 0, GRID_E4M3FN,
@@ -580,12 +554,12 @@ def pack_projection(
     blob += state_blob
     blob += body_blob
     blob += pad_blob
-    digest = hashlib.sha256(bytes(blob)).digest()
+    digest = bytes.fromhex(bytes_sha256hex(bytes(blob)))
     blob += digest
     total = len(blob)
     # content_bytes already carries the checksum: fixed_bytes includes it.
     if total != content + pad_bytes:
-        _fail("internal accounting error: assembled length disagrees with the plan")
+        raise BlockWireFormatError("internal accounting error: assembled length disagrees with the plan")
 
     breakdown = {
         "format": FORMAT_NAME,
@@ -637,51 +611,49 @@ def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
     cursor = start
     end = start + length
     if cursor + 2 > end:
-        _fail("meta plane truncated before the LUT count")
+        raise BlockWireFormatError("meta plane truncated before the LUT count")
     (distinct,) = struct.unpack_from("<H", data, cursor)
     cursor += 2
     if distinct < 1 or distinct > num_parents:
-        _fail(f"meta declares {distinct} distinct LUTs for {num_parents} parents")
+        raise BlockWireFormatError(f"meta declares {distinct} distinct LUTs for {num_parents} parents")
     if distinct != expected_distinct:
-        _fail("header LUT count disagrees with the metadata plane")
+        raise BlockWireFormatError("header LUT count disagrees with the metadata plane")
     tables: List[bytes] = []
     for _ in range(distinct):
         if cursor + 2 > end:
-            _fail("meta plane truncated inside the LUT table list")
+            raise BlockWireFormatError("meta plane truncated inside the LUT table list")
         (declared,) = struct.unpack_from("<H", data, cursor)
         cursor += 2
         if declared != table_bytes:
-            _fail(
-                f"meta declares a {declared}-byte LUT, window_bits {window_bits} "
-                f"needs {table_bytes}"
-            )
+            raise BlockWireFormatError(f"meta declares a {declared}-byte LUT, window_bits {window_bits} "
+            f"needs {table_bytes}")
         if cursor + declared > end:
-            _fail("meta plane truncated inside a LUT table")
+            raise BlockWireFormatError("meta plane truncated inside a LUT table")
         tables.append(data[cursor:cursor + declared])
         cursor += declared
     parents: List[Dict[str, Any]] = []
     if cursor + 2 * num_parents > end:
-        _fail("meta plane truncated inside the LUT index")
+        raise BlockWireFormatError("meta plane truncated inside the LUT index")
     indices = struct.unpack_from("<" + "H" * num_parents, data, cursor)
     cursor += 2 * num_parents
     for index in indices:
         if index >= distinct:
-            _fail(f"LUT index {index} outside the {distinct} stored tables")
+            raise BlockWireFormatError(f"LUT index {index} outside the {distinct} stored tables")
     if cursor + 4 * num_parents > end:
-        _fail("meta plane truncated inside the global scales")
+        raise BlockWireFormatError("meta plane truncated inside the global scales")
     globals_ = struct.unpack_from("<" + "f" * num_parents, data, cursor)
     cursor += 4 * num_parents
     if cursor + 2 * rows * num_parents > end:
-        _fail("meta plane truncated inside the row scales")
+        raise BlockWireFormatError("meta plane truncated inside the row scales")
     scales = np.frombuffer(data, dtype="<f2", count=rows * num_parents, offset=cursor)
     cursor += 2 * rows * num_parents
     if cursor + cols * num_parents > end:
-        _fail("meta plane truncated inside the rate vectors")
+        raise BlockWireFormatError("meta plane truncated inside the rate vectors")
     for p_index in range(num_parents):
         rates = np.frombuffer(data, dtype=np.uint8, count=cols, offset=cursor + p_index * cols)
         rate_limit = min(window_bits, 8)
         if rates.size and (int(rates.min()) < 1 or int(rates.max()) > rate_limit):
-            _fail(f"parent {p_index} declares rates outside 1..{rate_limit}")
+            raise BlockWireFormatError(f"parent {p_index} declares rates outside 1..{rate_limit}")
         parents.append({
             "table": tables[indices[p_index]],
             "scale_global": globals_[p_index],
@@ -691,14 +663,14 @@ def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
         scale = globals_[p_index]
         row_scales = parents[p_index]["scale_rows"]
         if not np.isfinite(scale) or scale <= 0 or not np.isfinite(row_scales).all() or np.any(row_scales <= 0):
-            _fail(f"parent {p_index} scales must be finite and positive")
+            raise BlockWireFormatError(f"parent {p_index} scales must be finite and positive")
         with np.errstate(over="ignore", invalid="ignore"):
             effective = row_scales.astype(np.float32) * np.float32(scale)
         if not np.isfinite(effective).all():
-            _fail(f"parent {p_index} effective row scales overflow fp32")
+            raise BlockWireFormatError(f"parent {p_index} effective row scales overflow fp32")
     cursor += cols * num_parents
     if cursor != end:
-        _fail(f"meta plane has {end - cursor} trailing bytes")
+        raise BlockWireFormatError(f"meta plane has {end - cursor} trailing bytes")
     return parents
 
 
@@ -741,22 +713,22 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
     elif isinstance(blob, bytes):
         data = blob
     else:
-        _fail(f"decode needs bytes, got {type(blob).__name__}")
+        raise BlockWireFormatError(f"decode needs bytes, got {type(blob).__name__}")
     if len(data) < HEADER_BYTES + CHECKSUM_BYTES:
-        _fail(f"blob is {len(data)} bytes, shorter than header + checksum")
+        raise BlockWireFormatError(f"blob is {len(data)} bytes, shorter than header + checksum")
     fields = _HEADER_STRUCT.unpack_from(data, 0)
     (magic, header_bytes, version, tag_bits, flags, grid_id) = fields[:6]
     named = dict(zip(_HEADER_FIELDS, fields[6:]))
     if magic != MAGIC:
-        _fail("bad magic: this is not a pq-block-reference-wire blob")
+        raise BlockWireFormatError("bad magic: this is not a pq-block-reference-wire blob")
     if version != FORMAT_VERSION or header_bytes != HEADER_BYTES:
-        _fail(f"unsupported format version {version} (header {header_bytes} bytes)")
+        raise BlockWireFormatError(f"unsupported format version {version} (header {header_bytes} bytes)")
     if flags != 0 or named["reserved0"] != 0 or named["reserved1"] != 0:
-        _fail("reserved header fields must be zero")
+        raise BlockWireFormatError("reserved header fields must be zero")
     if grid_id != GRID_E4M3FN or named["alphabet_bytes"] != 256:
-        _fail(f"unknown grid id {grid_id} or alphabet of {named['alphabet_bytes']} bytes")
+        raise BlockWireFormatError(f"unknown grid id {grid_id} or alphabet of {named['alphabet_bytes']} bytes")
     if tag_bits < 1 or tag_bits > _MAX_TAG_BITS:
-        _fail(f"tag_bits {tag_bits} outside 1..{_MAX_TAG_BITS}")
+        raise BlockWireFormatError(f"tag_bits {tag_bits} outside 1..{_MAX_TAG_BITS}")
 
     block_rows = int(named["block_rows"])
     block_cols = int(named["block_cols"])
@@ -767,20 +739,18 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
     cols = int(named["cols"])
     window_bits = int(named["window_bits"])
     if block_rows % 8 or block_rows < 8 or block_cols < 1:
-        _fail(f"bad block geometry {block_rows}x{block_cols}")
+        raise BlockWireFormatError(f"bad block geometry {block_rows}x{block_cols}")
     if min(nrb, ncb, num_parents, rows, cols) < 1:
-        _fail("header declares an empty projection")
+        raise BlockWireFormatError("header declares an empty projection")
     if nrb * block_rows != rows or ncb * block_cols != cols:
-        _fail(
-            f"header geometry does not tile: {nrb}x{block_rows} rows and "
-            f"{ncb}x{block_cols} columns against {rows}x{cols}"
-        )
+        raise BlockWireFormatError(f"header geometry does not tile: {nrb}x{block_rows} rows and "
+        f"{ncb}x{block_cols} columns against {rows}x{cols}")
     if int(named["span"]) != 1 or int(named["state_bits"]) != window_bits:
-        _fail("the format packs span-1 window bodies with state_bits == window_bits")
+        raise BlockWireFormatError("the format packs span-1 window bodies with state_bits == window_bits")
     if not 1 <= window_bits <= _MAX_WINDOW_BITS:
-        _fail(f"window_bits {window_bits} outside 1..{_MAX_WINDOW_BITS}")
+        raise BlockWireFormatError(f"window_bits {window_bits} outside 1..{_MAX_WINDOW_BITS}")
     if tag_bits != _tag_bits(num_parents):
-        _fail(f"tag_bits {tag_bits} disagrees with {num_parents} parents")
+        raise BlockWireFormatError(f"tag_bits {tag_bits} disagrees with {num_parents} parents")
 
     alphabet_bytes = int(named["alphabet_bytes"])
     meta_bytes = int(named["meta_bytes"])
@@ -794,20 +764,18 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
         + body_bytes + pad_bytes + CHECKSUM_BYTES
     )
     if needed != len(data):
-        _fail(
-            f"declared planes need {needed} bytes, the blob holds {len(data)}; "
-            "refusing a truncated or misdeclared blob before any allocation"
-        )
+        raise BlockWireFormatError(f"declared planes need {needed} bytes, the blob holds {len(data)}; "
+        "refusing a truncated or misdeclared blob before any allocation")
     if tag_bytes != (nrb * ncb * tag_bits + 7) // 8:
-        _fail("declared tag plane length is not canonical")
+        raise BlockWireFormatError("declared tag plane length is not canonical")
     if body_bytes < (rows * cols + 7) // 8:
-        _fail("body plane is smaller than the positive-rate geometry minimum")
-    if hashlib.sha256(data[:-CHECKSUM_BYTES]).digest() != data[-CHECKSUM_BYTES:]:
-        _fail("checksum mismatch: the blob is corrupt")
+        raise BlockWireFormatError("body plane is smaller than the positive-rate geometry minimum")
+    if bytes.fromhex(bytes_sha256hex(data[:-CHECKSUM_BYTES])) != data[-CHECKSUM_BYTES:]:
+        raise BlockWireFormatError("checksum mismatch: the blob is corrupt")
 
     alphabet_native = np.frombuffer(data, dtype=np.uint8, count=256, offset=HEADER_BYTES)
     if bool(((alphabet_native & 0x7f) == 0x7f).any()):
-        _fail("the alphabet plane holds an E4M3FN NaN byte")
+        raise BlockWireFormatError("the alphabet plane holds an E4M3FN NaN byte")
     cursor = HEADER_BYTES + alphabet_bytes
     parents = _meta_plane(data, cursor, meta_bytes, window_bits, num_parents, rows, cols,
                           int(named["num_distinct_luts"]))
@@ -815,22 +783,20 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
 
     pad_start = cursor + tag_bytes + state_bytes + body_bytes
     if pad_bytes and any(data[pad_start:pad_start + pad_bytes]):
-        _fail("padding bytes are not zero")
+        raise BlockWireFormatError("padding bytes are not zero")
 
     num_blocks = nrb * ncb
     tags = unpack_uniform(
         bytes(data[cursor:cursor + tag_bytes]), num_blocks, tag_bits
     ).numpy()
     if tags.size and (int(tags.min()) < 0 or int(tags.max()) >= num_parents):
-        _fail(
-            f"selection tag {int(tags.max())} outside 0..{num_parents - 1}"
-        )
+        raise BlockWireFormatError(f"selection tag {int(tags.max())} outside 0..{num_parents - 1}")
     tags = tags.reshape(nrb, ncb)
     cursor += tag_bytes
 
     entry_bytes = (block_cols * window_bits + 7) // 8
     if state_entries != (nrb - 1) * ncb or state_bytes != entry_bytes * state_entries:
-        _fail("declared state plane disagrees with the geometry")
+        raise BlockWireFormatError("declared state plane disagrees with the geometry")
     state_values = np.zeros((state_entries, block_cols), dtype=np.int64)
     if state_entries:
         state_values = _unpack_group(
@@ -853,10 +819,8 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
     }
     offsets = _fragment_offsets(parents, tags, geometry)
     if int(offsets[-1]) != body_bytes:
-        _fail(
-            f"fragment lengths sum to {int(offsets[-1])} bytes, the body plane "
-            f"declares {body_bytes}"
-        )
+        raise BlockWireFormatError(f"fragment lengths sum to {int(offsets[-1])} bytes, the body plane "
+        f"declares {body_bytes}")
     body_region = np.frombuffer(data, dtype=np.uint8, count=body_bytes,
                                 offset=cursor)
 
@@ -887,7 +851,7 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
             flat_blocks = rows_of * ncb + j
             lengths = offsets[flat_blocks + 1] - offsets[flat_blocks]
             if len(set(int(x) for x in lengths)) != 1:
-                _fail("fragments of one (parent, column block) group disagree in length")
+                raise BlockWireFormatError("fragments of one (parent, column block) group disagree in length")
             span_bytes = int(lengths[0])
             # fragments of one group sit num_col_blocks apart in the body
             # plane; gather them by their own offsets, never as a run

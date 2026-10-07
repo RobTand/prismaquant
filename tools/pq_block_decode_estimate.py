@@ -6,9 +6,10 @@ allocation, calibration capture, serving change, or speed-neutrality claim.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
+
+from prismaquant.digests import bytes_sha256hex
 
 
 def main() -> None:
@@ -99,7 +100,7 @@ def main() -> None:
     result = {
         "schema": "prismaquant.block_decode_estimate.v1",
         "intake_path": str(args.intake_json),
-        "intake_sha256": hashlib.sha256(intake_bytes).hexdigest(),
+        "intake_sha256": bytes_sha256hex(intake_bytes),
         "table_path": str(args.table), "table_version": table["table_version"],
         "baseline_rung_status": baseline["measurement_status"],
         "baseline_observations_not_allocation_admission": observed,

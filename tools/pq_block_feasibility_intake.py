@@ -8,21 +8,19 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import csv
-import hashlib
 import json
 from pathlib import Path
 import platform
 import re
 import socket
 
+from prismaquant.digests import file_sha256hex
+
 
 def own_file(path: Path) -> dict:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
+    digest = file_sha256hex(path, block_size=1 << 20)
     return {"path": str(path), "bytes": path.stat().st_size,
-            "sha256": digest.hexdigest()}
+            "sha256": digest}
 
 
 def inspect_table(path: Path) -> dict:

@@ -11,7 +11,6 @@ retains cross-block coupling; it is not an admitted rung or an equal-byte arm.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import platform
@@ -21,18 +20,12 @@ import time
 import numpy as np
 import torch
 from safetensors import safe_open
+from prismaquant.digests import bytes_sha256hex, file_sha256hex
+from prismaquant.tensor_digests import tensor_sha256
 from tessera.fused import parse_fused
 from tessera.manifest import BodyKind, ScalePlaneKind
 from tessera.stock import materialize_stock, stock_dequant
 from tessera.unit_artifact import parse_unit_artifact
-
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def concentration(scores: torch.Tensor) -> dict:
@@ -165,8 +158,8 @@ def decode_existing(export: Path, weight_map: dict, qname: str):
         raise ValueError("decoded rows disagree with fused framing")
     return rendered, {"tensor_key": key, "shard": weight_map[key],
                       "container_bytes": len(blob), "member_bytes": len(member.blob),
-                      "container_sha256": hashlib.sha256(blob).hexdigest(),
-                      "member_sha256": hashlib.sha256(member.blob).hexdigest(),
+                      "container_sha256": tensor_sha256(tensor),
+                      "member_sha256": bytes_sha256hex(member.blob),
                       "stored_root_q256": parsed.manifest.branch.root_q256,
                       "stored_unit_name": parsed.manifest.branch.unit_id}
 
@@ -175,7 +168,7 @@ def measure(args, qname: str, captures: dict, source_map: dict, export_map: dict
     started = time.monotonic()
     entry = captures[qname]
     capture_path = args.capture_root / entry["path"]
-    actual_sha = file_sha256(capture_path)
+    actual_sha = file_sha256hex(capture_path, block_size=1 << 20)
     if actual_sha != entry["sha256"]:
         raise ValueError(f"{capture_path}: own-byte digest does not match capture receipt")
     saved = torch.load(capture_path, map_location="cpu", weights_only=True)
@@ -255,7 +248,7 @@ def measure(args, qname: str, captures: dict, source_map: dict, export_map: dict
                         "full_draw_count": count, "max_abs": saved["max_abs"]},
             "full_prefix_relative_output_error": float(output_error / reference_energy),
             "geometries": geometries, "score_arrays": str(scores_path),
-            "score_arrays_sha256": file_sha256(scores_path),
+            "score_arrays_sha256": file_sha256hex(scores_path, block_size=1 << 20),
             "elapsed_seconds": time.monotonic() - started}
 
 
@@ -284,14 +277,14 @@ def main() -> None:
               "score": "tr(E_block H_block E_block^T)/(calibration_count * existing_body_bits)",
               "scope": "existing canonical calibration; isolated A8S baseline residual blocks, not rate-change marginal; cross-input-block terms excluded from concentration",
               "conditional_repair": args.conditional_repair,
-              "capture_manifest_sha256": file_sha256(capture_manifest), "units": []}
+              "capture_manifest_sha256": file_sha256hex(capture_manifest, block_size=1 << 20), "units": []}
     for qname in args.qname:
         row = measure(args, qname, captures, source_map, export_map)
         result["units"].append(row)
         print(json.dumps({"provisional": True, "unit": row}), flush=True)
     output = args.out_dir / "result.json"
     output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
-    print(json.dumps({"out": str(output), "sha256": file_sha256(output),
+    print(json.dumps({"out": str(output), "sha256": file_sha256hex(output, block_size=1 << 20),
                       "provisional": True, "units_measured": len(result["units"])}), flush=True)
 
 
