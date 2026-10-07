@@ -150,9 +150,9 @@ def test_kl_preflight_refuses_invalid_teacher_values(tmp_path, damage):
 
 
 def test_runner_keeps_every_missing_evidence_failure(tmp_path):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     config = job_config(tmp_path)
-    result = run(config, tmp_path / "refusal.json", verify_only=True)
+    result = run_ship_gates(config, tmp_path / "refusal.json", verify_only=True)
     assert result["status"] == "refused"
     assert result["runtime_qualification"] == "refused"
     assert all(stage["status"] == "failed" for stage in result["stages"])
@@ -162,7 +162,7 @@ def test_runner_keeps_every_missing_evidence_failure(tmp_path):
 
 @pytest.mark.parametrize("damage", ["omit_graph", "omit_gold", "duplicate", "tp", "nested", "identity"])
 def test_runner_refuses_incomplete_or_inconsistent_configuration(tmp_path, damage):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     path = job_config(tmp_path)
     config = json.loads(path.read_text())
     if damage in {"omit_graph", "omit_gold"}:
@@ -177,13 +177,13 @@ def test_runner_refuses_incomplete_or_inconsistent_configuration(tmp_path, damag
     else:
         config["stages"][0]["args"] += ["--model=other-model"]
     path.write_text(json.dumps(config))
-    assert run(path, tmp_path / "refusal.json", preflight=True)["status"] == "refused"
+    assert run_ship_gates(path, tmp_path / "refusal.json", preflight=True)["status"] == "refused"
 
 
 def test_preflight_runs_real_gold_producers_but_refuses_absent_quality(tmp_path):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     config = job_config(tmp_path)
-    report = run(config, tmp_path / "preflight.json", preflight=True)
+    report = run_ship_gates(config, tmp_path / "preflight.json", preflight=True)
     assert report["status"] == "refused"
     assert report["runtime_qualification"] == "not_run"
     stages = {stage["id"]: stage for stage in report["stages"]}
@@ -194,27 +194,27 @@ def test_preflight_runs_real_gold_producers_but_refuses_absent_quality(tmp_path)
 
 
 def test_runner_never_overwrites_its_configuration(tmp_path):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     config = job_config(tmp_path)
     before = config.read_bytes()
-    report = run(config, config, preflight=True)
+    report = run_ship_gates(config, config, preflight=True)
     assert report["status"] == "refused"
     assert config.read_bytes() == before
 
 
 def test_runner_keeps_an_existing_result(tmp_path):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     config = job_config(tmp_path)
     output = tmp_path / "prior-result.json"
     output.write_text('{"retained_result":true}')
     before = output.read_bytes()
-    assert run(config, output, verify_only=True)["status"] == "refused"
+    assert run_ship_gates(config, output, verify_only=True)["status"] == "refused"
     assert output.read_bytes() == before
 
 
 @pytest.mark.parametrize("protected", [True, False], ids=["protected-input", "retained-log"])
 def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
-    from prismaquant.ship_gates import run
+    from prismaquant.ship_gates import run_ship_gates
     config_path = job_config(tmp_path)
     report_path = tmp_path / "preflight.json"
     log_path = tmp_path / "preflight.stages" / "gold.kl.log"
@@ -225,7 +225,7 @@ def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
         config = json.loads(config_path.read_text())
         config["inputs"].append(str(log_path))
         config_path.write_text(json.dumps(config))
-    report = run(config_path, report_path, preflight=True)
+    report = run_ship_gates(config_path, report_path, preflight=True)
     assert report["status"] == "refused"
     assert log_path.read_bytes() == retained
     assert not log_path.with_suffix(".json").exists()

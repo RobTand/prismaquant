@@ -2,6 +2,8 @@
 
 As of: 2026-10-07 · `sol/d50-ship-gates-2413` (D50, #2413; quality source #2412 and RoPE fix #2418).
 The configured job preserves every lane gate. CPU preflight does not qualify serving.
+The runner uses the shared file digest owner. Its digest recipe and eight-MiB read size stay unchanged.
+Section 7.0 owns operator instructions. The current task backend is HF-only.
 
 The runner derives actual output and log paths once and validates them before execution.
 The same destination owner checks configured and preflight paths against protected inputs and the artifact boundary.
@@ -26378,7 +26380,9 @@ owned-byte, numerical and gate checks remain unconditional.
 
 The task backend is HF-only and uses `lm-eval[hf]` 0.4.12.
 It requires a current checkpoint that its Hugging Face model classes can load.
-It does not load Tessera serving bytes. Its scores do not prove native task quality.
+The shared HF capability guard refuses unsupported declared formats before preflight or measurement.
+The HF backend does not load Tessera serving bytes and cannot prove native task quality.
+Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
 The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
@@ -26453,6 +26457,7 @@ shared inputs in their read order.
 Each stage has a unique `output` path. Quality stages also have a `config` path.
 Gold stages have an `args` array. The runner owns their model, output, image
 and topology arguments. Other stages have an `argv` array and `record` path.
+
 Use `record: "{shipcard}"` when a real producer fills the canonical card.
 Use `record: "{output}"` when it writes a slot record for the existing verifier.
 
@@ -26527,6 +26532,8 @@ A single-host declaration does not cover the two-Spark target.
 The HF-only task backend cannot complete native task quality for Tessera bytes.
 Keep that task limitation explicit in a Tessera production plan.
 An HF proxy score cannot replace current-artifact native task evidence.
+Serving-backed Tessera tasks require a backend with the native vLLM plugin.
+That backend remains a production prerequisite; this HF path does not provide native qualification.
 
 For multi-host submission, use published `pbgang.py --manifest M --cwd CHECKOUT`.
 Each member needs explicit topology, resource, image and data declarations.

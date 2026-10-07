@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes
-from prismaquant.digests import file_sha256hex
+from prismaquant.digests import file_sha256hex, indent2_json_file_bytes
 from prismaquant.model_profiles import detect_profile
 from prismaquant.shipcard import _strict_json_object, load_shipcard, required_slots, verify
 
@@ -31,16 +31,15 @@ class OutputConflict(ValueError):
     """An output path would change an input or retained result."""
 
 
-def _read(path: Path) -> dict:
+def _read_gate_document(path: Path) -> dict:
     value = dict(_strict_json_object(path.read_bytes(), where=str(path)))
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
 
 
-def _write(path: Path, value: dict) -> None:
-    atomic_write_bytes(path, (json.dumps(value, sort_keys=True, indent=2,
-                                       allow_nan=False) + "\n").encode())
+def _publish_gate_result(path: Path, value: dict) -> None:
+    atomic_write_bytes(path, indent2_json_file_bytes(value))
 
 
 def _validate_destinations(destinations: list[Path], protected: set[Path], artifact: Path) -> None:
@@ -55,7 +54,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
                 preflight: bool = False) -> tuple[dict, dict]:
     """Resolve the existing profile and the exact card's required slot set."""
     path = Path(path).resolve(strict=True)
-    config = _read(path)
+    config = _read_gate_document(path)
     fields = {"schema", "artifact", "topology", "serve_image", "stages", "inputs"}
     if set(config) != fields or config.get("schema") != CONFIG_SCHEMA:
         raise ValueError("ship-gates configuration fields or schema differ")
@@ -97,7 +96,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
         if set(stage) != expected:
             raise ValueError(f"{identity}: stage fields differ from {sorted(expected)}")
         if identity in QUALITY_STAGES:
-            _read(Path(stage["config"]).resolve(strict=True))
+            _read_gate_document(Path(stage["config"]).resolve(strict=True))
         else:
             argv = stage.get("args", stage.get("argv"))
             if not isinstance(argv, list) or not all(isinstance(word, str) for word in argv):
@@ -183,12 +182,12 @@ def _command(stage: dict, context: dict, output: Path, image: str,
 def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str) -> dict:
     from prismaquant.quality_stage import verify_result
     config_path = Path(stage["config"])
-    config = _read(config_path)
+    config = _read_gate_document(config_path)
     if stage["id"] == "task_suite":
         measured = config.get("backend", {}).get("pretrained")
         if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
             raise ValueError("task backend must measure the configured current artifact")
-    result = _read(output)
+    result = _read_gate_document(output)
     gate = verify_result(result, config, config_sha256=file_sha256hex(config_path))
     if result.get("stage") != QUALITY_STAGES[stage["id"]]:
         raise ValueError("quality result stage differs")
@@ -219,7 +218,7 @@ def _replay_slot(stage: dict, context: dict, output: Path, *, produced: bool) ->
         record_path = stage["record"]
         source = card_path if record_path == "{shipcard}" else (
             output if record_path == "{output}" else Path(record_path))
-        document = _read(source)
+        document = _read_gate_document(source)
         record = document.get("slots", {}).get(identity) if source == card_path else document
         candidate = copy.deepcopy(card)
         candidate["slots"][identity] = record
@@ -235,7 +234,7 @@ def _replay_slot(stage: dict, context: dict, output: Path, *, produced: bool) ->
     return card["slots"][identity]
 
 
-def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
+def run_ship_gates(config_path: str | Path, output: str | Path, *, preflight: bool = False,
         verify_only: bool = False) -> dict:
     """Keep every stage outcome. A CPU preflight can never pass qualification."""
     output = Path(output).resolve()
@@ -262,7 +261,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
         if not verify_only and any(Path(paths["log"]).exists()
                                    for paths in context["stage_destinations"].values()):
             raise OutputConflict("stage log already exists; use a new result path")
-        _write(output, report)
+        _publish_gate_result(output, report)
         stopped = False
         for stage, outcome in zip(config["stages"], report["stages"]):
             identity = stage["id"]
@@ -274,7 +273,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                 continue
             if preflight and identity not in QUALITY_STAGES and identity not in GOLD_TOOLS:
                 outcome.update(status="not_run", reason="This gate requires serving evidence.")
-                _write(output, report)
+                _publish_gate_result(output, report)
                 continue
             try:
                 if not verify_only:
@@ -295,14 +294,14 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                     outcome["returncode"] = completed.returncode
                     if stage_output.is_file():
                         outcome["sha256"] = file_sha256hex(stage_output)
-                        outcome["result"] = _read(stage_output)
+                        outcome["result"] = _read_gate_document(stage_output)
                     if completed.returncode:
                         raise ValueError(f"stage process exited {completed.returncode}")
                 if identity in QUALITY_STAGES:
                     result = _replay_quality(stage, stage_output, preflight=preflight,
                                              artifact=context["artifact"])
                 elif preflight:
-                    result = _read(stage_output)
+                    result = _read_gate_document(stage_output)
                     if (result.get("schema") != "prismaquant.gold_preflight/1"
                             or result.get("stage") != identity
                             or result.get("status") != "preflight"
@@ -320,7 +319,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                 outcome.update(status="failed", error=str(exc))
                 report["problems"].append(f"{identity}: {exc}")
                 stopped = True
-            _write(output, report)
+            _publish_gate_result(output, report)
         if not preflight:
             problems = verify(load_shipcard(Path(context["artifact"]) / "shipcard.json"),
                               model_dir=context["artifact"])
@@ -335,7 +334,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
     except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
         report["problems"].append(str(exc))
         report["status"] = "refused"
-    _write(output, report)
+    _publish_gate_result(output, report)
     return report
 
 
@@ -347,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--verify-only", action="store_true")
     args = parser.parse_args(argv)
-    report = run(args.config, args.output, preflight=args.preflight, verify_only=args.verify_only)
+    report = run_ship_gates(args.config, args.output, preflight=args.preflight, verify_only=args.verify_only)
     evidence = []
     result_path = Path(args.output).resolve()
     if result_path.is_file():
