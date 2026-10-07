@@ -458,7 +458,7 @@ def summarize_schedule(parents, selection, block_rows: int, block_cols: int,
     parents/selection/geometry, verified against a re-plan rather than
     trusted blind.  Conditional numbers are labeled linked models.
     """
-    prepared, geometry, sizes = wire._plan(parents, block_rows, block_cols)
+    prepared, geometry, sizes = wire._projection_wire_layout(parents, block_rows, block_cols)
     tags = wire._validate_selection(selection, geometry)
     rows, cols = geometry["rows"], geometry["cols"]
     num_weights = rows * cols
