@@ -10,6 +10,12 @@
   canonicalization, scope flags, model hashes, errors, auxiliary files,
   content checks and admission policy stay unchanged.
 
+- The shipcard model identity hashes its raw config bytes through the
+  existing bytes owner (#2394, references #1301). The config digest calls
+  `digests.bytes_sha256hex`; the read position, call count, scope flags,
+  model hashes, errors, auxiliary files, content checks and admission
+  policy stay unchanged.
+
 - The AURA checkpoint manifest writer uses the existing strict, indented
   UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
   unit order, source diagnostics and atomic publication stay unchanged.

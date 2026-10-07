@@ -380,7 +380,7 @@ def compute_model_sha(
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
     before the card figures (``CARD_FIGURE_FILENAMES``) joined the exclusion.
     """
-    from .digests import text_sha256hex
+    from .digests import bytes_sha256hex, text_sha256hex
 
     root = Path(model_dir)
     if not root.is_dir():
@@ -388,7 +388,7 @@ def compute_model_sha(
     payload: dict[str, Any] = {}
     cfg = root / "config.json"
     if cfg.is_file():
-        payload["config_sha"] = hashlib.sha256(cfg.read_bytes()).hexdigest()
+        payload["config_sha"] = bytes_sha256hex(cfg.read_bytes())
     quant_cfg = root / "quant_config.json"
     raw_quant_cfg: dict[str, Any] | None = None
     canonical_quant_cfg: dict[str, Any] | None = None
