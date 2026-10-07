@@ -27,6 +27,10 @@
   The serve-constraints introduction no longer cites the retired Gridbook
   lane policy as a live document.
 
+- The native route-histogram test reuses the existing safetensors fixture
+  writer from test_footprint (#2390, references #1929). Fixture bytes,
+  tensor order, costs, route reports and semantic assertions stay unchanged.
+
 ### Added
 
 - **Bounded head walk measurement mode** (#1492, #1247).
