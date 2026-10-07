@@ -763,6 +763,27 @@ def format_subfamily(canonical: str) -> str | None:
     return None if parsed is None else parsed[0].name
 
 
+# -- model ownership through the declared lane seam -------------------------
+
+def glm_fused_sibling_group(linear_qname: str, *, config=None):
+    """Resolve the GLM fused owner through the runtime's authoritative rule."""
+    from tessera.serving.dense_ownership import fused_module
+
+    source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
+    tensor = source if source.endswith(".weight") else source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration", config=config)
+    return None if fused is None else fused[0]
+
+
+def glm_fused_sibling_leaf_mapping():
+    """Read GLM fused members from the same runtime owner."""
+    from tessera.serving.dense_ownership import GLM_FUSED, fused_module
+
+    owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
+    return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
+            **{target: members for _pattern, target, members in GLM_FUSED}}
+
+
 # -- the pinned serving runtime (serving_profiles) ---------------------------
 
 class ServingRuntimePinError(ValueError):

@@ -241,18 +241,21 @@ class Glm5NextProfile(ModelProfile):
         # DSv4 and hy_v3 both sit in exactly this state.
         return None
 
+    @staticmethod
+    def _fused_ownership_lane():
+        from ..lane_spec import single_lane_plugin
+
+        owner = single_lane_plugin("glm_fused_sibling_group")
+        if owner is None:
+            raise LookupError("No declared lane provides GLM fused ownership")
+        return owner
+
     def fused_sibling_group(self, linear_qname: str) -> str | None:
-        from tessera.serving.dense_ownership import fused_module
-        source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
-        tensor = source if source.endswith(".weight") else source + ".weight"
-        fused = fused_module(tensor, "Glm5NextForConditionalGeneration", config=self._declared_config)
-        return None if fused is None else fused[0]
+        owner = self._fused_ownership_lane()
+        return owner.glm_fused_sibling_group(linear_qname, config=self._declared_config)
 
     def fused_sibling_leaf_mapping(self) -> dict[str, tuple[str, ...]]:
-        from tessera.serving.dense_ownership import GLM_FUSED, fused_module
-        owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
-        return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
-                **{target: members for _pattern, target, members in GLM_FUSED}}
+        return self._fused_ownership_lane().glm_fused_sibling_leaf_mapping()
 
     def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
         from prismaquant.fixed_head import parse_allow_pinned

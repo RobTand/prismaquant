@@ -31905,7 +31905,8 @@ or worker process setting. No production activation policy is changed.
 
 ## Explicit GLM projection source owners
 
-The GLM profile reads fused members from Tessera dense_ownership.
+The GLM profile uses the declared lane plugin for fused ownership.
+The Tessera lane reads fused members from the runtime's dense_ownership module.
 It uses the existing parsed source config to identify KDA layers and standalone MLA queries.
 No second unit schema or member table exists in PrismaQuant.
 The existing pin-lift controls select commissioned projection units without a default change.

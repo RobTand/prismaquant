@@ -19,6 +19,9 @@
 - **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
   The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
 
+- **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
+  The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic
