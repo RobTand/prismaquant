@@ -85,7 +85,7 @@ def test_default_dev_replay_retains_metrics_without_checkpoint_rehash(replay_cas
     assert result["measurement"] == stored
     assert result["dev_uncertified"] is True
     assert "[DEV-MODE]" in capsys.readouterr().out
-    assert any("stored" in text and "replacement" in text for text in result["limitations"])
+    assert any("stored" in text.lower() and "replacement" in text.lower() for text in result["limitations"])
 
 
 @pytest.mark.parametrize("dev", [False, True])
