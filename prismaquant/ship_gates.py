@@ -63,6 +63,8 @@ def load_config(path: str | Path, *, report_output: Path | None = None) -> tuple
     artifact = Path(config["artifact"]).resolve(strict=True)
     if not artifact.is_dir():
         raise ValueError("artifact must be a directory")
+    if report_output is not None and (artifact == report_output or artifact in report_output.parents):
+        raise OutputConflict("job output must stay outside the artifact")
     profile = detect_profile(artifact)
     card = load_shipcard(artifact / "shipcard.json")
     from prismaquant.dev_mode import seal_check

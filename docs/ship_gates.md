@@ -10,6 +10,9 @@ Export the artifact and open its canonical `shipcard.json` first. Keep job
 outputs outside the artifact. Select the artifact with the existing model
 profile. Do not copy the architecture roster into the job configuration.
 
+Use a new job result path. Existing results, inputs and artifact files are not
+output destinations. Stage result and log paths must be distinct.
+
 The configuration schema is `prismaquant.ship_gates/1`. It has six fields:
 
 - `schema`: the version above.
