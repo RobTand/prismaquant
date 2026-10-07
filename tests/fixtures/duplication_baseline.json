@@ -50,7 +50,6 @@
   "hashlib:prismaquant/sample_parallel_probe_merge.py::_reference_activation_priority_key",
   "hashlib:prismaquant/shipcard.py::_file_content_sha256",
   "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd",
-  "hashlib:prismaquant/shipcard.py::compute_model_sha",
   "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
   "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",
   "hashlib:prismaquant/tessera_calibration_cache.py::sha256",
