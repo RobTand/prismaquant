@@ -1,5 +1,75 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
+lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
+applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
+legacy residency-map path otherwise) after resolving the same sealed
+generation. Discovery is independent of whether inputs have residency.
+The campaign container forwards this launcher-owned value and refuses a
+spec that forges it; the older strict tuple remains accepted without it.
+Live-claim/nonce/scope, declared-template, own-byte and budget checks are
+unchanged. Unstaged D38 must bind the actual admitted produced-output owner
+on CPU before any subsequent GPU capture, not just sample its input files.
+
+Re-stamped 2026-10-06 (D41, PQ #2328): production allocations of Tessera
+rungs require a current measured allowability table.
+`--tessera-rung-allowability-root` names its publication root;
+`--tessera-rung-kernel-builds` names an independently observed
+format-to-`kernel_build` JSON map, never a build copied from the measurement
+table itself. `index.json` selects the format/build `current_version` in
+`formats[format].kernel_builds[build_id]` and its `versions[str(version)]` safe relative
+path, schema and status. Absent, unreadable or invalid index/table evidence
+refuses in both modes; kernel and measurement-scope comparability stay hard.
+Present publication identity drift goes through `dev_mode.seal_check`: dev mode
+stamps and continues with the stored validated selection, while certified mode
+retains the refusal. A version move with a changed required-cell scope is not
+identity-only: canonical `admit_rung(scope=current_selected_scope)` refuses
+carrying narrow measurements into the widened scope. The pure producer
+`tessera.rung_allowability` validators and `admit_rung`
+own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
+admission. PrismaQuant intersects that answer with its existing v11
+`formats[].allowable_rungs` run-table rule, then passes it through the existing
+`tessera_lane.rung_admission` → `tessera_menu.route_admission` seam. Unlisted or
+unmeasured rows wait; observations alone are not exclusions or seals.
+
+Versioned intake delegates table/index schema dispatch to the canonical producer:
+`fleet.rung_allowability.v1`/`.v2` and versioned index contracts are not
+revalidated through a consumer-owned schema roster. The selected descriptor
+must still match the actual payload schema/version/status, and provenance records
+that payload schema. V2 body/decoder/owner/execution-scope and explicit word-ring
+applicability facts are required where its producer grammar requires them; TCQ
+non-WINDOW fields are explicitly non-applicable, never fabricated positive WINDOW
+geometry. WINDOW width zero remains a producer refusal. No v1 behavior, serving
+pin, allocation default or shared-index rollout changes as part of this intake.
+
+Body candidate menus, independent MTP menus and the final expanded assignment
+(including fixed auxiliary units) use the same lane admission seam.
+Binding checks the observed build id, library variant, architecture and
+activation contract; source-commit stamps and extra diagnostic metadata are
+provenance, not new identity seals. Producer decisions are cached per queried
+rung within one loaded table, never across allocations or index versions.
+An explicitly supplied table also restricts an emulation-only allocation, so
+the next full campaign allocation can consume the measured input without
+changing a serving profile, default or pin. Production cannot opt out through
+a research menu mode. Existing wire/shape, serving, export and quality gates
+remain independent. The allocation records the selected table version and
+observed build in its menu provenance; fixture tables establish only reader
+mechanics, not measured or served qualification.
+The current shared root is `/mnt/shared/fleet-ceo/rung-allowability`. Its v0003
+20-cell scope is distinct from historical v0002 16-cell mechanics; v2 measurements
+are never a narrowed production substitute for v3. Cost-only geometry observations
+do not change pending measurement status or admit an allocated rung.
+
+Re-stamped 2026-10-06 (PQ #2342): forward-split quanta compare the full
+retained and running bind identities through the chain-resume owner. Only
+its declared producer/source seals stamp in dev mode; all calibration,
+draw, probe, seed, token-scope, temperature, execution-partition and unknown
+fields remain comparability walls (key presence matters even for null).
+After that comparison, the original bind identity is reused so the unchanged
+exact-session hash check remains enforced. No prep, hash, entry or checkpoint
+is re-keyed or overwritten. The CPU exact-session preflight uses the same
+capture bind-construction owner and verifies the original retained hash.
+
 Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `7b02dafa602`,
 PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
 caller-declared set of top-level producer seal fields. The joint qualification
@@ -81,7 +151,9 @@ by default. Source citations are to this rebased branch.
 
 ## Adjacent acquisition and readset correctness
 
-The current main has no separate `units.*.acquisition_source_weight` journal field. Actual acquisition weight shape, dtype, logical bytes and content digest are checked against authenticated requests (`tessera_campaign.py:1005–1022,7694–7707`); all remain correctness refusals. Any later such identity field stays undeclared comparability. Source/capture authentication and replay readset/frontier agreement remain unchanged (`tessera_joint_aura.py:1911–1928,1951–1979`): they bind actual capture bytes, roster and execution reads, not producer-only hashes.
+Acquisition checkpoints retain `units.*.acquisition_source_weight`, checked against the authenticated request and the measured unit weight. Shape, dtype, logical bytes, content digest, raw request/cost bytes, exact atomic coverage, legal rates, calibration and probe comparability remain correctness refusals. Source/capture authentication and replay readset/frontier agreement likewise bind actual capture bytes, roster and execution reads, not producer-only hashes.
+
+`load_joint_campaign_acquisition` treats recorded live domain pins and export/grammar producer source digests as identities: the existing `dev_mode.seal_check` stamps their mismatch and continues with stored data by default. Producer source-state schema remains a protocol refusal. Dispatcher planning and manifest validation authenticate both request and cost bytes through their existing input owners before comparing controls, stamping only locator spelling. The same control owner supplies canonical request content excluding only `cost_path`; the loader carries its `request_control_sha256` through projected runtime origins, journals and scalar payloads. Both merges and plan reload require that authenticated control identity, actual cost/run/probe identity and regime to agree before stamping only raw `request_sha256` provenance differences. The raw request/cost SHA checks still authenticate each file read, never the canonical control digest alone. Absence, changed content, shape/rate/source/calibration, schedule, atomic coverage, deferred-domain and numerical disagreement refuse in every mode. The producer document schema and raw joint evidence remain unchanged; no archive, re-seal, recapture, domain reduction or qualification follows from a development stamp.
 
 PR 2313 is closed because its exact approved production head `b987bff97244397e04f14b7a54727d58a43d45fc` landed through merged PR 2324 (`7b02dafa602a09fc5ed14d0aae746d98a9e4ee96`); no literal PR 2313 merged-state gate exists. Every field added by future callers is comparability unless explicitly classified and declared; this deliverable declares no other caller.
 
@@ -817,6 +889,21 @@ source-header rank/non-Linear exclusions and independent export/serving gates,
 formats, numerical methods, pins, caches and production defaults are unchanged.
 CPU fixture choices supply no multimodal quality, wire, runtime or performance
 qualification. The representative GPU/serving acceptance remains in #1921.
+
+Re-stamped 2026-10-06 (Refs #1921, #2244, persisted calibration provenance):
+both multimodal visual probe passes persist `meta.calibration_source` with
+`dataset`, `requested`, `real_loaded` and `synthetic_loaded`. These are rows
+actually loaded, not the real/synthetic composition of successful forwards.
+The streaming final write counts successes in `nsamples`; the non-streaming
+pass and streaming no-match exit retain the loaded-row budget there. Blend
+policy and Fisher normalization are unchanged.
+`TestMultimodalProbePassIntegration` in `tests/test_prismaquant_visual_phase2.py`
+reads all three emitted pickle paths using the actual loader, a partial real
+dataset, its synthetic fallback and a populated CPU model. A failed synthetic
+forward leaves the loaded composition intact; successful paths also require
+nonzero visual Fisher. This proves persistence, not a consumer refusal policy,
+real-checkpoint calibration, GPU arithmetic or served qualification.
+
 Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
 MTP probe-identity admission compares each unit's exact positive integer
 parameter count with the product of its validated joint-AURA source-weight
@@ -2574,6 +2661,17 @@ refuses rather than silently dropping `--producer-authority`. (Rebased onto
 PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
 the pinned package; it stays fail-closed with a named refusal on any older
 pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
+
+Re-stamped 2026-10-05 (PQ #2319, `PerUnitRates967.pq2319-allocator-export`):
+`stack_plan` expresses a mixed-run routed stack per unit — the stack entry
+keeps the producer-planned `q256` from the carried projection's request and
+adds `unit_q256`, the canonical logical unit names (`.weight` stripped, the
+producer's own spelling) whose rung differs from that baseline, normalized
+away when no leaf differs so a stack-uniform plan is byte-identical to the
+spelling #1587 wrote. Mixed Tessera/BF16 leaves and mixed grids still refuse;
+a mixed stack without the carried request refuses (no baseline to normalize
+against), and the expressibility gate is the installed runtime's v57
+`producer_interface.routed_units` capability (§4.10).
 
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
@@ -5963,11 +6061,12 @@ prewrite per group of files it creates (extension, inputs, manifests,
 records, launch), writes them first-writer as before and commits them with
 `produced_output.commit_origin_batch`; a later action can declare them with
 `origin_batch_manifest`. Without the flag both tools write exactly as before,
-including inside a test shard. `--residency stage` is required, not a tuning
-choice: PrismaBuild sets `PRISMABUILD_RESIDENCY_MAP` only for an action with a
-residency plan, and the produced-output binding derives the queue root from
-it. The preparation's reads are plain file reads, so the staged copy is not
-yet what they read. Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
+including inside a test shard. The preparation still declares staged input
+residency, but produced-output queue discovery does not depend on it:
+the allowlisted staged-lease seam prefers `PRISMABUILD_QUEUE_ROOT` and
+owns the legacy residency-map path rule. The preparation's reads remain plain
+file reads, so the staged copy is not yet what they read.
+Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
 hook shows every file the generator opens is in its manifest),
 `tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
 published generation pinned in `tests/pb_runtime_generation_pin.json`: every file
@@ -15626,6 +15725,12 @@ from completed measured Tessera anchors** (#322). The explicit
 its fleet receipts, merged scalar payload/journal, full census and canonical
 token/capture artifacts. Only journaled measured wire cells enter the exact
 per-Linear format plan; interpolated MSE rows never become joint prices.
+Admission requires the campaign `inputs` mapping and a shape-only
+`canonical_capture` path/SHA256 pair for every plan command, including
+`synthesize`, which loads neither model nor capture payloads. Bound head-walk
+inputs are shape-checked without reading their files; a Stage B subset remains
+legal at plan load, while the anchor walk names every missing chain binding.
+The synthesis census read also refuses a missing binding by name before work.
 Preparation derives the producer's encoding identity from actual streamed source
 weights and original prefetched Hessians, verifies original wire bytes, and
 requires their decoded BF16 values to equal original PWC shards (see the
@@ -16934,6 +17039,69 @@ the tree was and stays clean; what changed is that the pin now holds the shape
 it claims to hold. The census's own docstring names what it does not cover
 (aliased or dispatched calls, a swallow one frame up, computed exception
 classes, callers outside `prismaquant/`), since it is cited as future-proofing.
+
+Re-stamped (2026-10-05, `PerUnitRates967.pq2319-allocator-export`, PQ #2319)
+for **the allocator spending the byte budget at per-unit routed granularity**
+(§4.10; the D36 ruling that the corrected T-8 build's 188,331,767 B headroom
+must fill once the wire is expressible — RobTand/tessera#967). The price
+surface was per unit all along (11,232 routed rows for the 13 up-only layers,
+262,144 B per R1024→R1088 wire delta); the export path could only express
+picks whole per layer stack, so the corrected all-rates allocation under the
+EXL3 cap was arithmetically empty. Three owners move together:
+
+- `tessera_expert_projection.select_priced_unit_upgrades` consumes the
+  campaign table's exact per-unit rows (`predicted_dloss`, `wire_bytes`) and
+  a HARD price-row wire-delta byte cap: exactly one best-fitting marginal per
+  recompute, ordered by ascending predicted_dloss delta per added wire byte
+  (ties by unit then format; a total order, so row insertion order never
+  moves a pick), until no eligible single-unit upgrade fits. Same grid only
+  -- a stack's units keep their family/body/plane and differ only in rung;
+  downgrades, same-bytes moves, BF16/non-Tessera baselines and units priced only at stack
+  granularity stay grouped where they were. An explicit `reserve_bytes` comes
+  off the cap before any pick. The record states its currency
+  (`price_row_wire_delta_bytes`) and sets `whole_artifact_bytes_claimed`
+  false: the whole-artifact accounting is the export's own exact owner, and
+  body rows alone never claim it.
+- `require_unit_assignment` replaces `require_stack_uniform_assignment` as
+  the one owner of the executed-stack selection rule: a stack whose units
+  share one rung keeps the stack-uniform stamps byte for byte; a mixed stack
+  returns the complete per-unit member map and is expressible only when the
+  INSTALLED runtime publishes `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 — read straight from
+  the packaged table by
+  `tessera_runtime_contract.packaged_routed_unit_capability` (exact
+  five-field block, version and block both refusing by name; the dev pin, the
+  serving pin and every admission answer are untouched). Without it the mixed
+  stack refuses by unit, stack and required version. The allocation block
+  carries the mixed map as `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`) beside the stack formats, with
+  exactly the selected rungs' receipts; the export lane and the census close
+  verify their selection against that stamp the way they verify the
+  stack-uniform one.
+- `tessera_plan_writer.stack_plan` emits the plan's `unit_q256` overrides on
+  a mixed stack entry — the entry keeps the producer-planned `q256` (the
+  carried projection's request) and names only the leaves that differ, so a
+  stack-uniform plan is byte-identical to what it wrote before; mixed
+  Tessera/BF16 leaves and mixed grids still refuse.
+
+The post-selection application belongs to
+`tessera_lane.allocation_routed_unit_rates`, reached through the existing
+`_allocation_lane()` / `lane_spec` plugin seam. Core passes its canonical
+format and artifact-pricing callbacks and never imports the Tessera lane;
+the final whole-artifact stamp remains owned by the existing footprint rule.
+
+Unit source records, receipts, wire bytes and framing are unchanged:
+`check_expert_wire_receipt` / `verify_expert_wire_record` keep their
+correctness refusals, and the packed-serving-group DP route, production
+admission and every default are unchanged. Gate:
+`tests/test_tessera_per_unit_rates.py` (fixture = the byte-identical
+corrected-derivation price table, sha256 `43144ce9…`; the 718-pick fill of
+188,331,767 B at 262,144 B per upgrade is the derivation's own arithmetic)
+plus the migrated `tests/test_tessera_expert_projection.py` selection-rule
+test; pre-fix red through PB (key `137d610a…`, 21 failed, unchanged v56 SDK):
+missing `select_priced_unit_upgrades` / `require_unit_assignment` /
+`packaged_routed_unit_capability`, and the migrated owner test's
+`AttributeError`.
 
 Re-stamped (2026-09-05, `claude/pq-gates`) for **the export seal's
 capture-context roster read from Tessera rather than typed** (§5.7;
@@ -24362,20 +24530,31 @@ Two properties make the numbers comparable with the rest of the menu:
   block verbatim, the producer's `tessera_expert_projection` it was priced
   under, `tessera_expert_wires` holding for every projected unit the receipt
   of exactly the rung selected (checked against that unit's projection and
-  rung), `tessera_expert_stack_formats` (one format per executed stack) and
-  `tessera_expert_wire_dir`. A projected unit the assignment does not place,
-  a stack given different rungs, or a selected rung with no priced wire is
-  refused by name before the layer config is written; a stock table adds
-  nothing.
+  rung), `tessera_expert_stack_formats` (one format per stack whose units
+  share one rung) and `tessera_expert_wire_dir`.  A stack whose units carry
+  different rungs of the producer's served E4M3 grid is carried per unit
+  under `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`, complete member map per mixed
+  stack) and only when the installed Tessera runtime publishes the per-unit
+  capability — `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 (PrismaQuant #2319);
+  a stack-uniform world emits no unit-rungs block and keeps every spelling it
+  had.  A projected unit the assignment does not place, a partly selected
+  stack, a mixed stack under a runtime without the capability, a mixed stack
+  off the served E4M3/BF16 families, a mixed stack whose rungs span more than
+  one grid, or a selected rung with no priced wire is refused by name before
+  the layer config is written; a stock table adds nothing.
 
 * **The export lane hands the exporter the priced bytes (PrismaQuant #183).**
   `require_assignment_scope` re-binds the selected routed expert units to the
   carried projection (`_carried_expert_projection`) before it resolves any
   route: a unit the producer did not project, a source tensor in a shard the
-  producer did not hash, a partly selected or split-rung stack, a
-  `tessera_expert_stack_formats` stamp that disagrees with the selection, a
-  selected rung with no receipt, or a priced blob whose bytes are not the
-  receipt's — each refused by name (`expert projection: ...`). The producer's
+  producer did not hash, a partly selected stack, a stack-uniform stamp that
+  disagrees with the selection, a mixed per-unit stack whose
+  `tessera_expert_unit_rungs` stamp is absent or disagrees (expressible only
+  under the installed v57 per-unit capability, PrismaQuant #2319), a selected
+  rung with no receipt, or a priced blob whose bytes are not the receipt's —
+  each refused by name (`expert projection: ...`). The producer's
   record is what attests the executed unit here, so a **predicated
   `routed_moe` cell resolves** on the producer's geometry rather than being
   refused for lacking one; dense units keep the source-member refusal, which
@@ -30833,6 +31012,35 @@ a quantum reads is declared, and every row the builder adds is read. It
 also stages a later round from a joined checkpoint.
 `tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
 drives the ordering with a fake `pbrun` over the fixture's real receipts.
+
+### Stage A CPU input/readset preflight (#2325)
+
+The existing joint_adjoint_capture CLI accepts explicit, default-off
+--cpu-input-preflight. It shares the capture calibration reader, profile
+selection and streamed metadata owners. When the action binds a data manifest,
+the existing sealed-readset owner decodes it. Expected source phases come from
+the actual loader's meta-model geometry and the normalized job's forward,
+reverse, split, seed or recovery schedule, independently of the manifest. Every
+expected phase must exist, then every loader-selected tensor must fit one
+declared range in its consumption phase. Global coverage, a wholly omitted
+phase, or two ranges meeting inside a tensor cannot satisfy that rule. The
+shared indexed/single-file checkpoint owner also handles unindexed sources;
+live-tree head extras (including LFM2 and DSv4) use the same resident-head
+selection as the actual loader, never an empty-head fallback.
+Resume phases use the same adjoint-checkpoint kind/session as the executing
+resume. Recovery frontiers replace only an actual forward walk, never restore
+one in a resumed chain. The CLI reads and authenticates selected-row diagnostic
+specs through the existing owner, binds them to the real draw, and uses their
+through boundary; unconsumed lower-chain phases are not required.
+
+The report explicitly says capture_executed=false and price_measured=false;
+success is only CPU input/readset evidence. No generation, checkpoint, model
+materialization or CUDA allocation is performed, and the GPU path's existing
+CUDA and staged-tier guards remain unchanged. Source-plan index metadata uses
+the loader's staged metadata owner; bounded safetensors headers retain the
+existing source-header allowance, not a bulk-weight pool fallback.
+Regressions: tests/test_joint_adjoint_cpu_preflight.py and
+tests/test_joint_adjoint_source_schedule.py.
 
 ### Stage A forward split (#738)
 

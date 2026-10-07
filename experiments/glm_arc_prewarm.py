@@ -83,6 +83,12 @@ _selection_spec = importlib.util.spec_from_file_location(
                  "tessera_campaign_selection.py"))
 _selection_owner = importlib.util.module_from_spec(_selection_spec)
 _selection_spec.loader.exec_module(_selection_owner)
+_acquisition_spec = importlib.util.spec_from_file_location(
+    "tessera_acquisition_inputs_contract",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "tessera_acquisition_inputs.py"))
+_acquisition_owner = importlib.util.module_from_spec(_acquisition_spec)
+_acquisition_spec.loader.exec_module(_acquisition_owner)
 ARC_PATH = "/proc/spl/kstat/zfs/arcstats"
 RECORD_SIZE = 1 << 20
 
@@ -278,6 +284,7 @@ class Campaign:
         self._header_cache: dict[str, dict] = {}
         self._weight_map = None
 
+
     # -- rows ------------------------------------------------------------
 
     def members(self, row_id: str) -> list[str]:
@@ -449,11 +456,23 @@ class Campaign:
                 unique.append((path, size))
         return unique
 
+    def acquisition_reads(self, argv):
+        """Use the public bound-input owner; this read set is not an intake parser."""
+        path = None if argv is None else argv_value(argv, "--acquisition-request")
+        digest = None if argv is None else argv_value(argv, "--acquisition-request-sha256")
+        if path is None and digest is None:
+            return []
+        if not path or not digest:
+            raise SystemExit("acquisition read set requires paired request path/SHA256")
+        return _acquisition_owner.joint_campaign_acquisition_control_inputs(
+            {"path": path, "sha256": digest})
+
     def row_plan(self, row_id: str, argv: "list | None" = None) -> dict:
+        acquisition = self.acquisition_reads(argv)
         caps = self.capture_files(row_id)
         ext = self.weight_extents(row_id)
         seeds = self.seed_reads(row_id, argv)
-        return {
+        result = {
             "row_id": row_id,
             "group": self.rows[row_id]["groups"][0],
             "capture_files": len(caps),
@@ -468,6 +487,11 @@ class Campaign:
             "_extents": ext,
             "_seeds": seeds,
         }
+        if acquisition:
+            result.update(acquisition_files=len(acquisition),
+                acquisition_bytes=sum(record["bytes"] for record in acquisition), _acquisition=acquisition)
+            result["total_bytes"] += result["acquisition_bytes"]
+        return result
 
 
 # ----------------------------------------------------------- queue reading
@@ -660,7 +684,8 @@ class Reader:
 
 
 def jobs_for(plan: dict, include_weights: bool) -> list[tuple[str, int, int]]:
-    jobs: list[tuple[str, int, int]] = [(p, 0, 0) for p, _ in plan["_captures"]]
+    jobs: list[tuple[str, int, int]] = [(record["path"], 0, 0) for record in plan.get("_acquisition", [])]
+    jobs += [(p, 0, 0) for p, _ in plan["_captures"]]
     jobs += [(p, 0, 0) for p, _ in plan["_seeds"]]
     if include_weights:
         jobs += list(plan["_extents"])
@@ -728,7 +753,7 @@ def main() -> int:
         plan = campaign.row_plan(args.warm_row)
         jobs = jobs_for(plan, not args.no_weights)
         planned = sum(n for _, _, n in plan["_extents"]) if not args.no_weights else 0
-        planned += plan["capture_bytes"] + plan["seed_bytes"]
+        planned += plan["capture_bytes"] + plan["seed_bytes"] + plan.get("acquisition_bytes", 0)
         head, size, c, c_max = arc_headroom_bytes(args.arc_reserve_fraction)
         log_event(args.log, {"event": "warm_start", "row": args.warm_row,
                              "bytes": planned, "row_total_bytes": plan["total_bytes"],

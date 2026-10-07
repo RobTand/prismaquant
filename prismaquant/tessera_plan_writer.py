@@ -305,15 +305,49 @@ def model_plan_context(model: Path, config: dict, surface, *, research_selected:
     return shapes, members, layouts
 
 
-def stack_plan(plan: dict, members: dict, layouts: dict) -> dict:
-    """Replace logical leaves only when the whole stack has one exact choice."""
+def stack_plan(plan: dict, members: dict, layouts: dict, *,
+               baseline_q256: dict | None = None) -> dict:
+    """Replace logical leaves with the stack entry the exporter plans.
+
+    A stack whose leaves share one exact choice keeps the stack-uniform
+    spelling, byte for byte.  A stack whose leaves carry different RUNGS of
+    one grid is expressible per unit under the v57 per-unit contract
+    (PrismaQuant #2319): the entry keeps the producer-planned ``q256`` -- the
+    carried projection's request, passed as ``baseline_q256`` -- and names the
+    leaves that differ in ``unit_q256``; when no leaf differs from the
+    baseline the map normalizes away and the entry is the stack-uniform
+    spelling again.  Mixed Tessera/BF16 leaves and mixed grids still refuse:
+    a stack entry is one grid, and BF16 is not a rung on it.
+    """
     result = dict(plan)
     for stack, tensors in sorted(members.items()):
         choices = [result.pop(tensor) for tensor in tensors]
         choice = choices[0] if choices else "BF16"
         if any(value != choice for value in choices):
-            raise PlanError(f"{stack}: the producer serves the whole stack at one exact rung; "
-                            "mixed Tessera/BF16 choices or differing rungs cannot be exported")
+            if any(not isinstance(value, dict) for value in choices):
+                raise PlanError(f"{stack}: the producer serves the whole stack at one exact "
+                                "rung; mixed Tessera/BF16 choices cannot be exported")
+            grids = sorted({value["grid"] for value in choices})
+            if len(grids) != 1:
+                raise PlanError(
+                    f"{stack}: per-unit rungs share one grid/family/body/plane and "
+                    f"differ only in rung; this stack mixes grids {grids}")
+            baseline = (baseline_q256 or {}).get(stack)
+            if baseline is None:
+                raise PlanError(
+                    f"{stack}: a mixed-run stack needs the producer's planned rung "
+                    "to normalize its per-unit overrides against (the carried "
+                    "projection's request names none); without it the producer "
+                    "serves the whole stack at one exact rung only")
+            overrides = {tensor[:-len(".weight")]: value["q256"]
+                         for tensor, value in zip(tensors, choices)
+                         if value["q256"] != baseline}
+            entry: dict = {"grid": grids[0], "q256": int(baseline),
+                           "source_layout": layouts[stack]}
+            if overrides:
+                entry["unit_q256"] = dict(sorted(overrides.items()))
+            result[stack] = entry
+            continue
         result[stack] = (dict(choice, source_layout=layouts[stack])
                          if isinstance(choice, dict) else choice)
     return result
@@ -614,7 +648,15 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
     # Returned alongside for --write-uniform-plan; main() must not
     # reconstruct it, because a reordering of the stacked plan is not it.
     logical_plan = plan
-    stacked = stack_plan(logical_plan, members, layouts)
+    carried = read_carried_projection(config)
+    baseline_q256 = None
+    if carried is not None:
+        request = carried.get("request") or {}
+        baseline_q256 = {stack: int(entry["q256"])
+                         for stack, entry in request.items()
+                         if isinstance(entry, dict)
+                         and isinstance(entry.get("q256"), int)} or None
+    stacked = stack_plan(logical_plan, members, layouts, baseline_q256=baseline_q256)
     # Declare the schema the plan is written against and hold it to the
     # package's own validator before anything reads it: a package schema
     # move refuses here, at plan time, not after the first encode.

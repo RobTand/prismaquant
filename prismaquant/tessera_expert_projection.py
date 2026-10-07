@@ -29,7 +29,7 @@ What flows through here, in order:
 * the allocator carries the projection block and the priced-wire receipts of
   the selected rungs into ``__prismaquant__`` unchanged;
 * the export lane re-binds every selected routed unit to that projection
-  (:func:`require_stack_uniform_assignment`, :func:`verify_expert_wire_record`)
+  (:func:`require_unit_assignment`, :func:`verify_expert_wire_record`)
   and writes the producer's ``tessera.cached_units.v1`` manifest
   (:func:`cached_units_manifest`) so the exporter packs the priced bytes
   unchanged (``--cached-expert-units``): priced == written.
@@ -507,17 +507,55 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
 
 
 # ---------------------------------------------------------------------------
-# The export side: selected units, stack-uniform rungs, priced-wire receipts
+# The export side: selected units, per-unit rungs, priced-wire receipts
 # ---------------------------------------------------------------------------
-def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapping[str, str],
-                                     units: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-    """One rung per executed stack, or refuse by name.
+#: Where the allocation and the export lane carry the per-unit rungs of MIXED
+#: routed stacks -- the sibling of :data:`STACK_FORMATS_KEY`.  A stack-uniform
+#: world emits no such block: its artifacts and config spellings are the
+#: stack-uniform ones, byte for byte (PrismaQuant #2319).
+UNIT_RUNGS_KEY = "tessera_expert_unit_rungs"
+UNIT_RUNGS_SCHEMA = "prismaquant.tessera_expert_unit_rungs.v1"
 
-    The producer's stack plan carries ONE ``(grid, q256)`` per stack, and the
-    profile's ``format_groups`` make the allocator broadcast one format over
-    the stack's members; a stack whose selected members disagree, or that is
-    only partly selected, is one the producer cannot execute as planned.
-    Returns ``{stack: format}`` for every stack with a selected member.
+#: Sentinel default for ``require_unit_assignment``'s ``capability``: resolve
+#: the installed Tessera runtime's per-unit capability only when a stack is
+#: actually mixed, so a stack-uniform world never imports the producer
+#: package and never changes behavior.
+_RESOLVE_INSTALLED_CAPABILITY = object()
+
+
+def _routed_unit_capability_refusal(stack: str, distinct: list[str],
+                                    first_unit: str) -> str:
+    return (
+        f"{stack}: first mixed unit {first_unit}; selected rungs differ "
+        f"across the stack {distinct}; planning per-unit rungs requires the Tessera "
+        "runtime contract v57 with producer_interface.routed_units "
+        "(tessera.routed-unit-assignment.v1)")
+
+
+def require_unit_assignment(selected: Mapping[str, str], stack_of: Mapping[str, str],
+                            units: Mapping[str, Mapping[str, Any]], *,
+                            capability: Any = _RESOLVE_INSTALLED_CAPABILITY,
+                            ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """The complete per-unit assignment of the selected routed units, or refuse by name.
+
+    The producer executes a stack whole: every projected unit of an executed
+    stack must be selected (a partly selected stack refuses, exactly as
+    before, and a selected unit outside the carried projection refuses).  What
+    changes with the v57 per-unit contract (PrismaQuant #2319) is the rate
+    axis: a stack whose selected units share one rung keeps the stack-uniform
+    stamps -- ``{stack: format}``, byte for byte the spellings
+    ``require_stack_uniform_assignment`` emitted -- while a stack whose units
+    carry different rungs of the producer's served E4M3 grid is returned per
+    unit, and only when the installed Tessera runtime publishes the per-unit
+    capability (``producer_interface.routed_units``, contract v57).  A mixed
+    stack on any other grid refuses by name: v57 serves per-unit rungs on
+    E4M3 and BF16 only.  Without the capability the mixed stack refuses by
+    unit, stack and required contract version.
+
+    Returns ``(stack_formats, unit_rungs)``: ``stack_formats`` holds one
+    format per stack-uniform executed stack; ``unit_rungs`` holds, for each
+    MIXED stack, the complete ``{unit: format}`` member map.  A stack-uniform
+    world returns an empty ``unit_rungs`` and never consults the capability.
     """
     by_stack: dict[str, dict[str, str]] = {}
     for name, fmt in selected.items():
@@ -526,7 +564,8 @@ def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapp
             raise ExpertProjectionError(
                 f"{name}: selected routed expert unit is not in the carried producer projection")
         by_stack.setdefault(stack, {})[name] = fmt
-    formats: dict[str, str] = {}
+    stack_formats: dict[str, str] = {}
+    unit_rungs: dict[str, dict[str, str]] = {}
     for stack, members in sorted(by_stack.items()):
         planned = sorted(n for n, s in stack_of.items() if s == stack)
         unselected = sorted(set(planned) - set(members))
@@ -536,12 +575,51 @@ def require_stack_uniform_assignment(selected: Mapping[str, str], stack_of: Mapp
                 f"{len(unselected)} of its {len(planned)} projected units are not "
                 f"selected for Tessera (first: {unselected[0]})")
         distinct = sorted(set(members.values()))
-        if len(distinct) != 1:
+        if len(distinct) == 1:
+            stack_formats[stack] = distinct[0]
+            continue
+        ordered = sorted(members)
+        reference = members[ordered[0]]
+        first_unit = next((name for name in ordered if members[name] != reference), ordered[0])
+        refusal = _routed_unit_capability_refusal(stack, distinct, first_unit)
+        if capability is _RESOLVE_INSTALLED_CAPABILITY:
+            from .tessera_runtime_contract import packaged_routed_unit_capability
+            try:
+                _sha, capability = packaged_routed_unit_capability()
+            except Exception as exc:  # absent/stale/malformed: refuse by name
+                raise ExpertProjectionError(
+                    f"{refusal}; the installed Tessera runtime does not "
+                    f"publish it: {exc}") from exc
+        if not capability:
+            raise ExpertProjectionError(refusal)
+        from .tessera_formats import parse_tessera_format_name
+
+        def _grid(fmt: str) -> str | None:
+            parsed = parse_tessera_format_name(fmt)
+            if parsed is None:
+                return None
+            spec, _rung = parsed
+            return spec.base + ("" if spec.arity == 1 else f"x{spec.arity}")
+
+        grids = sorted({grid for grid in (_grid(fmt) for fmt in distinct)
+                        if grid is not None})
+        spellings = sorted(fmt for fmt in distinct if _grid(fmt) is None)
+        if spellings:
             raise ExpertProjectionError(
-                f"{stack}: selected rungs differ across the stack {distinct}; the producer "
-                "plans one rung per stack (no role split of a projected stack)")
-        formats[stack] = distinct[0]
-    return formats
+                f"{stack}: a mixed per-unit stack must carry Tessera wire "
+                f"formats for every member; non-Tessera spellings "
+                f"{spellings} cannot be planned beside them (first: {first_unit})")
+        if len(grids) != 1:
+            raise ExpertProjectionError(
+                f"{stack}: per-unit rungs share one grid/family/body/plane and "
+                f"differ only in rung; this stack mixes grids {grids} "
+                f"(first: {first_unit})")
+        if grids[0] not in {"E4M3", "BF16"}:
+            raise ExpertProjectionError(
+                f"{stack}: this stack carries {grids}; per-unit rungs are "
+                "served on the producer's E4M3 and BF16 families only (v57)")
+        unit_rungs[stack] = {name: members[name] for name in sorted(members)}
+    return stack_formats, unit_rungs
 
 
 def check_expert_wire_receipt(record: Any, *, name: str, unit: Mapping[str, Any],
@@ -634,6 +712,174 @@ STACK_FORMATS_KEY = "tessera_expert_stack_formats"
 WIRE_DIR_KEY = "tessera_expert_wire_dir"
 
 
+def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
+    """One cost row's ``(predicted_dloss, wire_bytes)``, or refuse by name.
+
+    Exact fields or nothing: a row that carries neither a float-able
+    ``predicted_dloss`` nor an integer ``wire_bytes`` is not a price this
+    allocator may spend, and guessing one would spend the byte budget on a
+    number nobody measured.
+    """
+    if not isinstance(row, Mapping):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: cost row is not an object; the per-unit upgrade "
+            "allocator prices exact campaign rows only")
+    try:
+        dloss = row["predicted_dloss"]
+        wire = row["wire_bytes"]
+    except KeyError as exc:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row publishes no {exc.args[0]!r}; the "
+            "per-unit upgrade allocator prices exact campaign rows only") from exc
+    if dloss is None or isinstance(dloss, bool) or not isinstance(dloss, (int, float)):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not a number")
+    if type(wire) is not int:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row wire_bytes {wire!r} is not an integer")
+    return float(dloss), int(wire)
+
+
+def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
+                                assignment: Mapping[str, str], *, byte_budget: int,
+                                reserve_bytes: int = 0) -> tuple[dict[str, str], dict]:
+    """Spend a hard serialized-byte budget at per-unit routed granularity.
+
+    This is the allocator the D36 ruling asked for (PrismaQuant #2319): the
+    price surface is per unit -- one expert projection's own campaign rows --
+    and the export path used to express picks only whole per layer stack, so
+    a 188,331,767 B headroom bought nothing.  The rule is the corrected
+    derivation's, at unit granularity: repeatedly buy the best priced
+    single-unit upgrade that fits, ordered by ascending ``predicted_dloss``
+    delta per added wire byte (ties by unit name, then format spelling --
+    a total order, so the picks never depend on row insertion order), and
+    stop at the fixed point where no eligible single-unit upgrade fits the
+    remaining headroom.  Nothing here invents an objective, a default rung or
+    a stop-at-zero cutoff: the rows are the menu, the cap is hard.
+
+    ``costs`` is the campaign table ``{unit: {format: row}}``; a unit counts
+    as an upgrade candidate only when its CURRENT format's row and the
+    candidate row both carry exact ``predicted_dloss`` and ``wire_bytes`` and
+    both spellings parse to ONE Tessera grid (same family/body/plane; only
+    the rung differs), with a strictly positive byte delta -- a downgrade or
+    a same-bytes move is not an upgrade.  Units priced only at stack
+    granularity, units whose rows carry no exact price fields, and BF16 or
+    non-Tessera baselines stay grouped exactly where they were.
+    ``byte_budget`` is that hard cap, in PRICE-ROW WIRE DELTA bytes --
+    NOT a whole-artifact claim; ``reserve_bytes`` is an explicit fixed
+    reserve taken off the cap before any pick (metadata/sidecar allowances
+    the caller already owes), refused when it exceeds the budget.
+
+    Returns ``(picks, record)``: ``picks`` maps unit -> new format in pick
+    order, and ``record`` is the spend leg's own receipt -- budget, reserve,
+    spend cap, spent and remaining wire-delta bytes, and the rule -- with
+    ``whole_artifact_bytes_claimed`` false, because the whole-artifact
+    accounting is the export's own exact owner and this record does not
+    speak for it.
+    """
+    if type(byte_budget) is not int:
+        raise ExpertProjectionError(
+            f"byte_budget {byte_budget!r} is not an integer wire-delta byte cap")
+    if byte_budget < 0:
+        raise ExpertProjectionError(f"byte_budget {byte_budget} is negative")
+    if type(reserve_bytes) is not int:
+        raise ExpertProjectionError(
+            f"reserve_bytes {reserve_bytes!r} is not an integer wire-delta reserve")
+    if reserve_bytes < 0:
+        raise ExpertProjectionError(f"reserve_bytes {reserve_bytes} is negative")
+    if reserve_bytes > byte_budget:
+        raise ExpertProjectionError(
+            f"reserve_bytes {reserve_bytes} exceeds the byte_budget {byte_budget} "
+            "it is reserved from")
+    spend_cap = byte_budget - reserve_bytes
+
+    from .tessera_formats import parse_tessera_format_name
+
+    def _grid_rung(fmt: str):
+        parsed = parse_tessera_format_name(fmt)
+        if parsed is None:
+            return None
+        spec, rung = parsed
+        return (spec.base + ("" if spec.arity == 1 else f"x{spec.arity}"), int(rung))
+
+    current: dict[str, tuple[float, int]] = {}
+    for unit, fmt in assignment.items():
+        rows = costs.get(unit)
+        if not isinstance(rows, Mapping) or fmt not in rows:
+            continue  # not priced at unit granularity: stays grouped
+        baseline = rows.get(fmt)
+        if not isinstance(baseline, Mapping) or "wire_bytes" not in baseline \
+                or "predicted_dloss" not in baseline:
+            continue  # stack-only / sampled rows: stay grouped, never guessed
+        shape = _grid_rung(fmt)
+        if shape is None:
+            continue  # a non-Tessera baseline has no wire rows to climb
+        current[unit] = _priced_row(baseline, unit=unit, fmt=fmt)
+
+    current_fmt = {unit: assignment[unit] for unit in current}
+    spent = 0
+    picks: dict[str, str] = {}
+    eligible_rows = 0
+    first_scan = True
+    while True:
+        # Exactly one marginal per recompute: after every pick the margins
+        # move (a unit's second step prices from its new rung, and the
+        # remaining headroom shrinks), so a sorted snapshot from before the
+        # pick cannot price the next one.  The single best fitting marginal
+        # wins each round; the loop stops when no eligible priced upgrade
+        # fits -- the fixed point the rule names.
+        best_key = None
+        best_pick = None
+        for unit, (base_dloss, base_wire) in current.items():
+            base_grid, base_rung = _grid_rung(current_fmt[unit])
+            for fmt, row in costs[unit].items():
+                shape = _grid_rung(fmt) if isinstance(fmt, str) else None
+                if shape is None or shape[0] != base_grid or shape[1] == base_rung:
+                    continue  # another grid, or the rung the unit already runs
+                if not isinstance(row, Mapping):
+                    raise ExpertProjectionError(
+                        f"{unit}@{fmt}: cost row is not an object; the per-unit "
+                        "upgrade allocator prices exact campaign rows only")
+                if "predicted_dloss" not in row or "wire_bytes" not in row:
+                    continue  # an aggregated/sampled cell is not an exact price
+                dloss, wire = _priced_row(row, unit=unit, fmt=fmt)
+                delta = wire - base_wire
+                if delta <= 0:
+                    continue  # only upgrades spend the headroom
+                if first_scan:
+                    eligible_rows += 1
+                key = ((dloss - base_dloss) / delta, unit, fmt)
+                if delta <= spend_cap - spent and (
+                        best_key is None or key < best_key):
+                    best_key = key
+                    best_pick = (unit, fmt, delta, dloss, wire)
+        first_scan = False
+        if best_pick is None:
+            break
+        unit, fmt, delta, dloss, wire = best_pick
+        picks[unit] = fmt
+        spent += delta
+        current[unit] = (dloss, wire)
+        current_fmt[unit] = fmt
+
+    record = {
+        "schema": "prismaquant.priced_unit_upgrades.v1",
+        "currency": "price_row_wire_delta_bytes",
+        "byte_budget": byte_budget,
+        "reserve_bytes": reserve_bytes,
+        "spend_cap_bytes": spend_cap,
+        "spent_wire_delta_bytes": spent,
+        "remaining_wire_delta_bytes": spend_cap - spent,
+        "upgrades": len(picks),
+        "eligible_rows": eligible_rows,
+        "whole_artifact_bytes_claimed": False,
+        "rule": ("ascending predicted_dloss delta per wire-delta byte, ties by "
+                 "unit then format; single best eligible upgrade at a time; "
+                 "stops when no eligible priced upgrade fits the cap"),
+    }
+    return picks, record
+
+
 def expand_stack_decision_assignment(assignment: Mapping[str, Any], population: Any,
                                      *, units: Mapping[str, Any], stack_of: Mapping[str, str],
                                      costs: Mapping[str, Any] | None = None) -> tuple[dict, dict]:
@@ -715,8 +961,12 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
     producer's projection, every projected unit must be placed by the
     assignment or an explicit population ``stack_decisions`` member map. A
     packed decision expands only for these receipt checks; members do not
-    acquire separate prices. Each executed stack must be assigned one format (the producer
-    plans one rung per stack), and every Tessera rung selected for a projected
+    acquire separate prices. Each executed stack whose units share one rung is
+    assigned that one format (``tessera_expert_stack_formats``, the
+    stack-uniform spelling); a stack whose units carry different rungs of one
+    grid is carried per unit under ``tessera_expert_unit_rungs`` and only
+    when the installed Tessera runtime publishes the v57 per-unit capability
+    (PrismaQuant #2319).  Every Tessera rung selected for a projected
     unit must have a receipt sealed under that unit's projection and that rung
     -- refused by name otherwise.  The receipts of exactly the selected rungs
     travel with the allocation (``tessera_expert_wires``), with the campaign's
@@ -806,7 +1056,7 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
     projected_assignment, _owners = expand_stack_decision_assignment(
         assignment, population, units=units, stack_of=stack_of, costs=payload.get("costs", {}))
     selected = {name: str(projected_assignment[name]) for name in units}
-    stack_formats = require_stack_uniform_assignment(selected, stack_of, units)
+    stack_formats, unit_rungs = require_unit_assignment(selected, stack_of, units)
     wire_dir = provenance.get("wire_dir")
     if not isinstance(wire_dir, str) or not wire_dir:
         raise ExpertProjectionError(
@@ -836,6 +1086,8 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
     block[PROJECTION_KEY] = json.loads(DIRECT_ASCII_SPACED_LAX.text(carried))
     block[EXPERT_WIRES_KEY] = receipts
     block[STACK_FORMATS_KEY] = dict(stack_formats)
+    if unit_rungs:
+        block[UNIT_RUNGS_KEY] = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
     block[WIRE_DIR_KEY] = wire_dir
     return block
 
@@ -880,7 +1132,8 @@ __all__ = [
     "declared_stacks_from_members",
     "producer_plan_tool",
     "request_expert_projection",
-    "require_stack_uniform_assignment",
+    "require_unit_assignment",
+    "select_priced_unit_upgrades",
     "source_unit_weight",
     "stack_plan_request",
     "unit_name_of",

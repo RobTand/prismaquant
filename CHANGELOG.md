@@ -78,6 +78,38 @@
 
 ### Changed
 
+- **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
+  Final-hidden manifests and MTP censuses use the existing
+  `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
+  ASCII escapes, strict non-finite handling, UTF-8 and one final line feed.
+  Atomic publication, publish-once checks, native encoding errors, returned
+  byte digests and census admission ordering are unchanged. The projection
+  tool and its text summaries retain their own recipes.
+
+- **Allocator partition and cost byte digests reuse the shared bytes owner**
+  (#2355, Refs #1301). The rank-partition manifest reference and the
+  measured-runtime cost payload integrity comparison in `allocator.main` call
+  `digests.bytes_sha256hex` instead of inlining
+  `hashlib.sha256(...).hexdigest()`. Bytes, digest values, comparison order,
+  refusal messages and ownership are unchanged: the partition reference still
+  authenticates the exact rank manifest bytes the recomputation consumes, and
+  the cost comparison still runs on the owned bytes before `pickle.loads`,
+  ahead of any parse or publication. The remaining `hashlib` use in
+  `allocator.main` is the assignment-payload dedupe digest, which hashes a
+  canonical JSON string, not artifact bytes.
+
+- **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
+  Refs #1303). The final `_student` scoring path of
+  `tools/measure_vllm_full_kl.py` now calls
+  `prismaquant.kl_fisher.forward_kl_per_token` instead of inlining the
+  `teacher.exp() * (teacher - student)` sum over the vocabulary axis.
+  Operand order, dtypes, broadcasting, the last-axis reduction, the
+  non-finite refusal and every published field are unchanged, as are script
+  and module bootstrap. The all-position estimator keeps its own convention
+  (`_position_kl` / `_student_all_positions`: top-K support plus one tail
+  bucket); final-position full vocabulary is not all-position top-K plus
+  tail.
+
 - **Caller-declared journal producer seals** (#687, CEO
   dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
   the joint qualification journal declares only `implementation_sha256`;
@@ -213,6 +245,127 @@
   CPU CLI action `53433514eeee` passed the all-allow and valid R768-hold cases.
   Both cases left HELDOUT payloads unopened. The test does not encode, score,
   or capture a model.
+- **Authenticated locator aliases survive both real acquisition merges** (#2195,
+  PR #2253). The existing control owner derives one locator-independent request
+  control identity carried through actual row loading, rendering and journals.
+  Checkpoint and scalar-payload joins compare those controls and all real
+  scientific inputs before stamping only raw request provenance. Own-file SHA
+  reads, schedule/source/scope, calibration and numerical refusals stay strict.
+
+- **Acquisition input byte checks participate in the seal ratchet** (#2195,
+  PR #2253). The torch-free input owner is scanned, with only its actual
+  own-byte digest check allowlisted as integrity. Injecting a new recorded
+  producer wall is a causal regression, not an unscanned escape.
+
+- **Acquisition producer identities and locator spelling follow development mode**
+  (#2195, PR #2253). Only recorded live pins and export/grammar source digests
+  stamp and continue; source-state schema and actual request/cost, rate, shape,
+  atomic scope and calibration correctness still refuse. Planning and manifest
+  validation authenticate controls through the existing input owners before
+  separating locator spelling, without trusting a declared digest alone.
+
+- **Authenticated acquisition requests reach complete per-row execution and
+  strict merge through the existing planner** (#2195). Each active atomic
+  cohort keeps the original request/cost/run/probe identity; deferred cohorts
+  remain explicit and produce no zero-work jobs. Whole request/cost bindings
+  precede captures in the torch-free staged readset, with a bounded fenced
+  metadata memo instead of repeated whole-cost reads. Submission and merge
+  require disjoint complete active coverage, exact requested scalar cells,
+  source proofs and common regime settings. Both merges use authenticated
+  checkpoint menus to bind the exact deferred family domain, retaining real
+  unrequested families and refusing fabricated extras. The original raw joint evidence,
+  normal opt-out paths and production/scientific qualification gates remain;
+  no Fisher price, pin/default change or served artifact is inferred.
+
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery lives in the allowlisted staged-lease seam over the same sealed
+  generation; the campaign container carries its launcher-owned
+  `PRISMABUILD_QUEUE_ROOT` and refuses spec forgeries. Legacy residency-map
+  discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
+- **Sealed io buffers open where this interpreter's os lacks
+  `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
+  has no `os.memfd_create`, and every io engine stream entry died on the
+  missing attribute (PrismaBuild action `ded8698fa4d6`). `SealedBuffer` now
+  opens through `io_engine._create_memfd`: `os.memfd_create` when present,
+  otherwise the runtime libc's `memfd_create` wrapper (glibc 2.27+,
+  musl 1.1.20+), with the MFD flags resolved from their ABI-fixed Linux
+  UAPI numbers and a named `OSError` when the runtime libc has no wrapper.
+  The seal-and-verify guard is unchanged; no default, pin, wire, GPU or
+  serving claim.
+
+- **The io engine resolves memfd seal constants without CPython build-time
+  fcntl names** (#1896). Portable interpreters whose build headers predate
+  glibc 2.27 expose only part of the fcntl seal surface, and reading
+  `fcntl.F_SEAL_*` at import crashed the engine there, failing collection of
+  every capture and calibration test file that imports it (qualified CPU venv
+  `pq-cpu312` on dl380g10; PrismaBuild actions `be3dd1332259`, `5e848d8252be`).
+  The numbers now resolve from the Linux UAPI values they denote, ABI-fixed
+  since kernel 3.11, and the kernel stays the authority: each seal is
+  attempted through fcntl and read back through `F_GET_SEALS`. The
+  original-material delivery witness reads seals through
+  `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
+  moved: a buffer still refuses unless the kernel reports all four seals; no
+  default, pin, wire, GPU or serving claim.
+
+- **A joint plan that cannot name its campaign chain is refused by name, at
+  admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
+  plan with no `inputs` block, and the `prepare` GPU action then died on a
+  bare `KeyError: 'inputs'` after the projection prewarm had already
+  allocated — preserved in the #1293 non-release pilot's run-01 S3. The plan
+  grammar now requires the campaign chain `inputs` mapping, shape-checks
+  every bound head-walk key without reading behind the binding, and requires
+  the canonical capture binding; the anchor intake names its missing chain
+  keys in one refusal; the standalone synthesis census read refuses a missing
+  binding by name. A Stage B quantum plan that binds a subset (#1024) still
+  loads in both modes; its test explicitly sets the empty subset instead of
+  depending on the imported fixture default. No gate weakened, no wire, codec,
+  numerical or GPU claim; the named refusal moves the run-01 S3 failure from
+  minutes into a GPU action to a plan-load ValueError naming the absent key.
+  Policy-refusal tests start from the canonical shape-only plan and name each
+  probe, token-scope, temperature and activation-clipping refusal, so an
+  earlier missing-input error cannot hide those guards. The standalone
+  `synthesize` command also takes this complete plan and its canonical capture
+  binding, although it loads neither model nor capture payloads.
+
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+
+- **The RTN FP8 helper keeps finite FP16 zero and tiny rows finite**
+  (#2352; `build_rtn_cache._fp8_round`, parent #1303). The 1e-8 max-abs
+  floor and the resulting `/448` scale underflow FP16 to `0.0`: an
+  all-zero row divides `0/0` to NaN, and a nonzero tiny row divides to
+  ±Inf, which the finite-only E4M3FN cast turns into NaN — every
+  element of the row comes back NaN either way. FP16 inputs now
+  round-trip through FP32 with the dequantized result cast back at the
+  output boundary; FP32 and BF16 keep the original arithmetic and
+  byte-identical outputs (pinned by
+  `test_fp8_round_preserves_fp32_bf16_recipe_bytes`), and the default
+  BF16 cache recipe is unchanged.
+
+- **`file_sha256hex` refuses a zero read count instead of hashing no bytes**
+  (#2344). `read(0)` never advances, so a `block_size=0` caller — including
+  every zero spelling `read` coerces (`False`, any `__index__` zero) — got
+  the SHA-256 of no bytes: any **nonempty** file silently returned the
+  empty-input digest `e3b0c442…855` instead of a digest of its bytes (an
+  empty file already matched that digest, which is how the bug could hide).
+  The owner now
+  raises a `ValueError` naming `block_size` before the first read, whether
+  the file is empty or not. Everything else is unchanged: positive sizes
+  stream in that many bytes per read, `-1` and `None` read the whole file,
+  other negative sizes keep `read`'s own refusal, non-integer sizes keep
+  the `TypeError` from the integer coercion, and a missing path or
+  directory still raises what `open` raises before any read-count check.
+  Regression tests pin the refusal on real empty and nonempty files plus
+  the read-all and type-refusal boundaries.
+
+- **Forward-split relaunches reuse declared producer seals** (#2342). Full
+  retained/running bind identities now use the existing chain-resume
+  classifier before adopting the original identity for exact-session rebind.
+  Calibration/draw/probe/seed/temperature/partition and unknown fields still
+  refuse, including an unknown null field; certified mode still refuses
+  seal drift. Session hashes and prep/entry bytes are never re-keyed.
 
 - **Restore the shared owned-byte digest comparison after the #2283 port.**
   `read_bound` again routes the acquired-byte hash through the hard `same`

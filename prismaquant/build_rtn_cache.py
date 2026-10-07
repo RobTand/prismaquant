@@ -45,7 +45,21 @@ from prismaquant.sensitivity_probe import (
 
 
 def _fp8_round(weight: torch.Tensor) -> torch.Tensor:
-    """FP8 E4M3 round-trip with per-output-channel scale."""
+    """FP8 E4M3 round-trip with per-output-channel scale.
+
+    FP16 inputs round-trip through FP32 (#2352): the 1e-8 max-abs floor
+    and the resulting /448 scale underflow FP16 to 0.0. An all-zero row
+    then divides 0/0 to NaN, while a nonzero tiny row divides to ±Inf,
+    which the finite-only E4M3FN cast converts to NaN. The dequantized
+    result is cast back to the input dtype at the output boundary. FP32
+    and BF16 inputs keep the original arithmetic unchanged.
+    """
+    if weight.dtype == torch.float16:
+        w32 = weight.to(torch.float32)
+        max_abs = w32.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8)
+        scale = max_abs / 448.0
+        dequant = (w32 / scale).to(torch.float8_e4m3fn).to(torch.float32) * scale
+        return dequant.to(weight.dtype)
     max_abs = weight.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8)
     scale = max_abs / 448.0
     return ((weight / scale).to(torch.float8_e4m3fn).to(weight.dtype)) * scale

@@ -182,3 +182,50 @@ immutable export and held-out quality/serving remain separate actual transitions
 The original request keeps every deferred legal rate. This wiring does not adopt
 a provider, promote row-zero diagnostics to full-calibration H, move a public or
 private reader pin, or qualify any unsupported native cell.
+
+## Bound per-row intake and control readset (#2195)
+
+`load_joint_campaign_acquisition(binding, units=names)` authenticates the whole
+original request and raw cost table before projecting onto explicit row units.
+An altered unselected report or cost unit cannot escape validation. The pure
+`project_joint_campaign_acquisition` helper accepts only an already authenticated
+intake; it selects whole known units deterministically, retains deferred families
+and empty atomic members, and does not infer groups from names. The runtime still
+requires every actual member of each selected atomic group. An all-deferred row
+contains no measurement work and is not an admitted zero-work execution.
+
+Projection never rewrites the original request, creates another price currency,
+changes its global request/cost/run/probe identity, or snaps requested rates. The
+default `units=None` return remains unchanged.
+
+Both checkpoint and scalar-payload merges validate the exact deferred family
+domain against the producer's already authenticated checkpoint unit menus and
+the original requested schedule. Explicit empty requested families and legitimate
+unrequested menu families remain; unknown extras, active-family insertions and
+dropped unrequested families refuse. The existing merge command authenticates
+checkpoint identities before joining payload provenance. Direct acquisition
+`merge_payloads` callers must supply those `acquisition_unit_identities`; a payload
+alone cannot establish its producer menu. Ordinary non-acquisition merge behavior
+is unchanged, and the shared menu/request derivation introduces no new prices or
+independent domain controller.
+
+The torch-free `tessera_acquisition_inputs` owner provides
+`joint_campaign_acquisition_control_inputs(binding)`, reusing the same strict
+bound JSON owner and declaring the actual whole request and raw cost, in that
+order, with SHA256 and byte lengths. Standalone metadata builders stream-hash
+the cost through the existing digest/stat-identity owners, without importing
+PrismaQuant or Torch. Runtime intake supplies its existing fenced staged reader.
+These are control inputs read before captures or weights, not a scientific-
+admission shortcut: planning still performs complete intake validation. Drift
+after cached reads refuses under the existing bound-byte/stat-fence owner. The
+existing staged readset remains the
+owner of mount, entry and consumption accounting. Candidate journals and decoded
+wire caches still need the separate four-probe joint pricing and production
+qualification transitions above.
+
+The September 13 executed example and its quantizable population, immutable-byte
+count and reserve are historical inputs, not authority for the current original
+GLM5.3-Flash allocation or its EXL3 size comparison. The current campaign needs
+its actual eligible Linear census and immutable serialized footprint; immutable
+BF16/F32 tensors stay outside the quantizable bpp denominator. No reserve,
+tolerance or serving-performance target is inferred from that historical example.

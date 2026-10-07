@@ -188,8 +188,6 @@
   "sorted-json:prismaquant/cost_streaming.py::StreamedBoundaryArtifacts._publish_status",
   "sorted-json:prismaquant/dev_mode.py::_shown",
   "sorted-json:prismaquant/glm53_stock_reprice.py::main",
-  "sorted-json:prismaquant/glm_mtp_capture.py::publish_final_hidden",
-  "sorted-json:prismaquant/glm_mtp_capture.py::publish_mtp_capture",
   "sorted-json:prismaquant/io_spans.py::IoSpanLog.close",
   "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit",
   "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs",
