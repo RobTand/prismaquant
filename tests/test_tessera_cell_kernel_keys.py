@@ -76,5 +76,5 @@ def test_image_only_scope_cannot_overlap_across_build_names():
     variant["id"] += "_other_build"
     variant["runtime"]["kernel_build"] = "build-b"
     payload["lane_eligibility"]["cells"].append(variant)
-    with pytest.raises(lane.LaneEligibilityError, match="overlapping serving scopes"):
+    with pytest.raises(runtime.TesseraContractError, match="overlapping serving scopes"):
         runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
