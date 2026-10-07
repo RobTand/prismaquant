@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from .schemas import strict_json_loads
 from .digests import DIRECT_UTF8_INDENT2_STRICT, bytes_sha256hex
-from .digests import DIRECT_UTF8_INDENT2_STRICT, bytes_sha256hex
+
 
 SCHEMA = "prismaquant.quality_stage/1"
 STAGES = {"g3_v2": ("prismaquant.g3_v2/1", "offline_decoded_kl"),
@@ -116,9 +116,9 @@ def cli(stage, measure, preflight, argv=None):
     try:
         raw = args.config.read_bytes()
         result["configuration"]["sha256"] = bytes_sha256hex(raw)
-        config = json.loads(raw)
         config = strict_json_loads(raw, duplicate=lambda key: ValueError("duplicate configuration key: "+key),
                                   constant=lambda value: ValueError("nonfinite configuration value: "+value))
+        if not isinstance(config, dict) or config.get("schema") != schema:
             raise ValueError(f"configuration requires schema {schema}")
         facts = preflight(config) if args.preflight else measure(config, args.output)
         result.update(facts)
