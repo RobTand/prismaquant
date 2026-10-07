@@ -51,6 +51,7 @@ def evaluate_criteria(metrics, criteria):
 
 def verify_result(result, config, *, config_sha256):
     """Replay the decision. Never trust a producer's pass flag alone."""
+    from .dev_mode import NOT_COMPUTED, dev_mode_enabled, dev_stamp, seal_check
     if not isinstance(result, dict) or result.get("schema") != SCHEMA:
         raise ValueError("unsupported quality result schema")
     stage = result.get("stage")
@@ -58,9 +59,10 @@ def verify_result(result, config, *, config_sha256):
         raise ValueError("unknown quality stage")
     schema, kind = STAGES[stage]
     binding = result.get("configuration", {})
-    if (config.get("schema") != schema or binding.get("schema") != schema
-            or binding.get("sha256") != config_sha256):
-        raise ValueError("quality configuration binding differs")
+    if config.get("schema") != schema or binding.get("schema") != schema:
+        raise ValueError("quality configuration schema differs")
+    seal_check("quality configuration provenance", binding.get("sha256"), config_sha256,
+        where="quality replay", refusal=lambda: ValueError("quality configuration provenance differs"))
     measurement = result.get("measurement", {})
     if measurement.get("metric_kind") != kind:
         raise ValueError("quality metric kind differs")
@@ -79,11 +81,17 @@ def verify_result(result, config, *, config_sha256):
         if not isinstance(result.get(field), cls):
             raise ValueError(f"quality result lacks {field}")
     if status == "succeeded":
-        if stage == "g3_v2" and result["identity"].get("candidate_inputs") != g3_candidate_binding(config):
-            raise ValueError("G3 current candidate input binding differs")
+        if stage == "g3_v2":
+            current = NOT_COMPUTED if dev_mode_enabled() else g3_candidate_binding(config)
+            seal_check("G3 candidate provenance", result["identity"].get("candidate_inputs"), current,
+                where="quality replay", refusal=lambda: ValueError("G3 candidate provenance differs"))
+            from .g3_v2 import verify_g3_result
+            verify_g3_result(result, config)
         if stage == "task_suite":
             from .task_suite import verify_task_result
             verify_task_result(result, config)
+    if dev_mode_enabled():
+        result.update(dev_stamp(timestamped=False))
     return expected
 
 
