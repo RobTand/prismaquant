@@ -307,14 +307,37 @@ def test_canonical_densify_does_not_publish_anchor_stderr_as_fractional_uncertai
 @pytest.fixture(params=[joint.JOINT_CURRENCY, "served_kl"])
 def canonical_chord_candidate(monkeypatch, request):
     from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
-    owner = owner_for_rows(monkeypatch)
+    base_owner = owner_for_rows(monkeypatch)
+    def widen(table):
+        for shape in table["scope"]["shapes"]:
+            shape["rows"], shape["columns"] = 64, 256
+        for row in table["rungs"]:
+            for measurement in row["measurements"]:
+                measurement["evidence"]["rows"], measurement["evidence"]["columns"] = 64, 256
+    owner = _mutated(base_owner, widen)
     rows = anchor_rows(currency=request.param)
+    for row in rows.values():
+        scope = row.get("quality_scope")
+        if scope is None:
+            continue
+        if "joint_operator_identity" in row:
+            operator = row["joint_operator_identity"]
+            operator["source_weight"]["shape"] = [64, 256]
+            operator["source_weight"]["logical_bytes"] = 2 * 64 * 256
+            operator["rendered_weight"]["shape"] = [64, 256]
+            operator["rendered_weight"]["logical_bytes"] = 4 * 64 * 256
+            from canonical_quality_fixtures import scope_for as rebuild_scope
+            row["quality_scope"] = rebuild_scope(row)
+        else:
+            scope["shape"] = [64, 256]
+            scope["source_weight"]["shape"] = [64, 256]
+            scope["source_weight"]["logical_bytes"] = 2 * 64 * 256
     formats = [f"{FAMILY}_R{rate}" for rate in (768, 1024)]
     surface = TesseraRateSurface("u", FAMILY, "tight", request.param, (768, 1024),
         tuple(rows[fmt]["predicted_dloss"] for fmt in formats), (0.1, 0.2),
         allowability=owner, anchor_scopes={rate: rows[fmt]["quality_scope"]
             for rate, fmt in zip((768, 1024), formats)})
-    return densify_rate_surface(surface, (64, 128), q256_values=[896],
+    return densify_rate_surface(surface, (64, 256), q256_values=[896],
         allowability_scope={"kernel_kind": "dense", "m": 8})[0]
 
 
