@@ -54,6 +54,8 @@ from __future__ import annotations
 
 import torch
 
+from .nvfp4_activation_contract import _E2M1_POSITIVE
+
 
 __all__ = [
     "E2M1_VALUES",
@@ -104,9 +106,13 @@ MXFP8_GROUPED_ROUTE_EVIDENCE = (
 #: The 16 E2M1 code points in code order (index == nibble value). Code 0x8 is
 #: negative zero in the format; it is listed as ``0.0`` because that is the
 #: value this module and ``layer_streaming``'s decode LUT both materialize.
+#: The positive half is the shared grid owned by
+#: ``nvfp4_activation_contract``; the negative half negates only the nonzero
+#: magnitudes, keeping explicit positive zero at index 8.
 E2M1_VALUES: tuple[float, ...] = (
-    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-    0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+    *_E2M1_POSITIVE,
+    0.0,
+    *(-v for v in _E2M1_POSITIVE[1:]),
 )
 
 #: Elements per E8M0 scale, on BOTH wires. Shared value, so a mismatch is a
