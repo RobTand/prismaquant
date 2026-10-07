@@ -636,8 +636,13 @@ def _profile_allows_format(
 
 
 def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
-                             rung_allowability=None):
-    """One lane seam for body, auxiliary and final-assignment allowance."""
+                             rung_allowability=None, allowability_scope=None):
+    """One lane seam for body, auxiliary and final-assignment allowance.
+
+    ``allowability_scope`` names the unit priced (serving structure, declared
+    shape, regime M); axes the caller cannot state stay unscoped, and an
+    unresolvable scope waits rather than widening.
+    """
     family = fr.format_family_of(fr.canonical_format_name(name))
     if family is None or not name.startswith(family.name_prefix):
         return None
@@ -646,30 +651,73 @@ def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
     production = not load_serving_profile(target_profile).emulation_only
     if rung_allowability is not None or production:
         scope.update(allowability=rung_allowability, require_allowability=production)
+    if allowability_scope is not None:
+        scope["allowability_scope"] = allowability_scope
     return family_hook(family, "rung_admission")(name, **scope)
 
 
+def _body_allowability_scope(serving_context, out_features: int,
+                             in_features: int) -> dict | None:
+    """One body's D41 scope: actual structure plus declared shape when known.
+
+    Structure rides the serving context; rows are output features and columns
+    are input features, matching the kernel tables' declared shapes. A unit
+    whose run states no structure stays on the whole-table verdict.
+    """
+    structure = None if serving_context is None else serving_context.structure
+    if not structure:
+        return None
+    if out_features > 0 and in_features > 0:
+        return {"kernel_kind": structure, "rows": int(out_features),
+                "columns": int(in_features)}
+    return {"kernel_kind": structure}
+
+
 def require_assignment_rung_allowability(assignment, *, target_profile,
-                                        context_by_unit=None, rung_allowability=None):
-    """Fixed units and serving promotion cannot introduce a withheld rung."""
+                                        context_by_unit=None, rung_allowability=None,
+                                        allowability_scope_by_unit=None):
+    """Fixed units and serving promotion cannot introduce a withheld rung.
+
+    ``allowability_scope_by_unit`` optionally names each unit's priced scope;
+    units without one reuse their serving context's structure alone, and units
+    with neither stay on the whole-table verdict.
+    """
     if rung_allowability is None and load_serving_profile(target_profile).emulation_only:
         return
     from .lane_spec import family_hook
     checked = set()
     for name, fmt in assignment.items():
         context = None if context_by_unit is None else context_by_unit.get(name)
-        key = (fmt, None if context is None else context.key())
+        unit_scope = None
+        if allowability_scope_by_unit is not None:
+            unit_scope = allowability_scope_by_unit.get(name)
+        if unit_scope is None and context is not None:
+            unit_scope = {"kernel_kind": context.structure}
+        key = (fmt, None if context is None else context.key(),
+               None if unit_scope is None else _frozen_scope(unit_scope))
         if key in checked:
             continue
         checked.add(key)
         admission = candidate_rung_admission(fmt, target_profile=target_profile,
-            serving_context=context, rung_allowability=rung_allowability)
+            serving_context=context, rung_allowability=rung_allowability,
+            allowability_scope=unit_scope)
         if admission is None:
             continue
         family = fr.format_family_of(fr.canonical_format_name(fmt))
         mode = family_hook(family, "menu_mode_in_force")(None)
         if not admission.admits(mode):
             raise ValueError(f"{name}: {fmt} is not allocation-eligible: {admission.detail}")
+
+
+def _frozen_scope(scope: Mapping) -> tuple:
+    """A hashable spelling of one allowability scope for cache keys."""
+    frozen = []
+    for key in sorted(scope):
+        value = scope[key]
+        if isinstance(value, Mapping):
+            value = _frozen_scope(value)
+        frozen.append((key, value if not isinstance(value, list) else tuple(value)))
+    return tuple(frozen)
 
 
 def _format_kernel_supports_shape(fmt_name: str, in_features: int,
@@ -2623,14 +2671,20 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             family = fr.format_family_of(spec.name)
             if family is not None and spec.name.startswith(family.name_prefix):
                 # The owning lane's pinned runtime admits the rung, per
-                # serving scope, through the lane's own seam.
+                # serving scope, through the lane's own seam. The D41 scope
+                # names this unit's actual structure and declared shape when
+                # the run states them; without structure the whole-table
+                # verdict stands, exactly as before this join.
                 from .lane_spec import family_hook
 
-                cache_key = (spec.name, context_key)
+                unit_scope = _body_allowability_scope(
+                    serving_context, out_features, in_features)
+                cache_key = (spec.name, context_key,
+                             None if unit_scope is None else _frozen_scope(unit_scope))
                 if cache_key not in admission_cache:
                     admission_cache[cache_key] = candidate_rung_admission(
                         spec.name, target_profile=target_profile, serving_context=serving_context,
-                        rung_allowability=rung_allowability)
+                        rung_allowability=rung_allowability, allowability_scope=unit_scope)
                 admission = admission_cache[cache_key]
                 if (
                     (production_allocation or rung_allowability is not None

@@ -110,7 +110,12 @@ def parse_format_name(fmt: object):
 # -- candidate admission (allocator_candidates) ------------------------------
 
 def rung_admission(name: str, *, allowability=None, require_allowability=False, **scope):
-    """The pinned runtime and measured geometry share one admission seam."""
+    """The pinned runtime and measured geometry share one admission seam.
+
+    ``scope`` carries ``serving_context`` and ``allowability_scope`` through
+    to :func:`tessera_menu.route_admission` untouched: this seam names no
+    D41 axis of its own.
+    """
     from .tessera_menu import route_admission as admission
     from .tessera_formats import parse_tessera_format_name
 

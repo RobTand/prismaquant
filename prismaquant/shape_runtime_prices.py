@@ -356,8 +356,87 @@ class ShapeRuntimeTable:
                           "rate_pool", MappingProxyType(record))
 
 
+def canonical_rung_times(allowability, rung: int, *, kernel_kind: str,
+                         rows: int, columns: int, m: int,
+                         routing: str | None = None) -> dict:
+    """Canonical D41 times for one (structure, shape, rate, M) scope.
+
+    Reads the owning v3 candidate table through its loaded
+    :class:`rung_allowability.RungAllowability`: one ``canonical_time`` per
+    covering cell, each measured, class-derived or withheld with its own
+    reason. Empty cells mean no canonical evidence covers the scope, so
+    there is nothing to reconcile. This never feeds a pricing decision:
+    single-kernel D41 timing and per-unit shape-table timing stay separate
+    sources until a reconciliation policy admits the claim.
+    """
+    if type(rung) is not int:
+        raise ShapeRuntimeError("canonical rung must be an integer")
+    cells = allowability.cells_for(kernel_kind=kernel_kind, rows=rows,
+                                   columns=columns, m=m, routing=routing)
+    times = [allowability.canonical_time(rung, cell_id=cell) for cell in cells]
+    return {"format": allowability.format, "rung": rung,
+            "scope": {"kernel_kind": kernel_kind, "rows": rows,
+                      "columns": columns, "m": m, "routing": routing},
+            "cells": list(cells), "times": times,
+            "provenance": allowability.provenance()}
+
+
+def canonical_class_time(allowability, rung: int, *, cell_id: str,
+                         class_identity: Mapping) -> dict:
+    """The owning safe class derivation for one unmeasured (rung, cell).
+
+    The caller supplies the cell's measured geometry-class identity (read
+    through ``RungAllowability.class_identity`` on an actual measurement);
+    unsafe donors and thin classes wait inside the producer, never here.
+    """
+    if not isinstance(cell_id, str) or not cell_id:
+        raise ShapeRuntimeError("canonical class time needs a cell id")
+    return allowability.canonical_time(rung, cell_id=cell_id,
+                                       class_identity=class_identity)
+
+
+def reconcile_canonical_time(canonical: Mapping, priced_ms: float | None) -> dict:
+    """Advisory comparison of canonical D41 times against one table time.
+
+    Reports per measured cell whether the admitted shape-table time agrees
+    with the canonical single-kernel time; it prices nothing and qualifies
+    nothing. ``priced_ms=None`` is an unpriced scope, not a zero.
+    """
+    if not isinstance(canonical, Mapping):
+        raise ShapeRuntimeError("canonical reconciliation needs a canonical result")
+    if priced_ms is not None and (
+            type(priced_ms) is bool or not isinstance(priced_ms, (int, float))):
+        raise ShapeRuntimeError("reconciled table time must be a number")
+    compared = []
+    for cell, timing in zip(canonical.get("cells", []), canonical.get("times", [])):
+        if not isinstance(timing, Mapping):
+            compared.append({"cell_id": cell, "verdict": "no_canonical_time",
+                             "reason": "unreadable"})
+            continue
+        if timing.get("status") == "inherited":
+            compared.append({"cell_id": cell, "verdict": "class_derived",
+                             "kernel_time_us": timing.get("kernel_time_us"),
+                             "anchors": timing.get("anchors")})
+            continue
+        if timing.get("status") != "measured":
+            compared.append({"cell_id": cell, "verdict": "no_canonical_time",
+                             "reason": timing.get("reason")})
+            continue
+        if priced_ms is None:
+            compared.append({"cell_id": cell, "verdict": "unpriced_scope",
+                             "canonical_us": timing["measurement"]["kernel_time_us"]})
+            continue
+        canonical_ms = timing["measurement"]["kernel_time_us"] / 1000.0
+        compared.append({"cell_id": cell, "verdict": "compared",
+                         "canonical_us": timing["measurement"]["kernel_time_us"],
+                         "table_ms": float(priced_ms),
+                         "rel_diff": ((float(priced_ms) - canonical_ms) / canonical_ms
+                                      if canonical_ms > 0 else None)})
+    return {"format": canonical.get("format"), "rung": canonical.get("rung"),
+            "scope": dict(canonical.get("scope", {})), "compared": compared}
+
+
 def parse_shape_table(payload: Mapping, *, source_path: str = "") -> ShapeRuntimeTable:
-    """Validate the table's own declarations. Admission is a separate step."""
     try:
         return _parse_shape_table(payload, source_path)
     except ShapeRuntimeError:

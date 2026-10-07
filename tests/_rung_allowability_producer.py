@@ -21,7 +21,8 @@ forbidden = sorted(n for n in sys.modules if
 assert not forbidden, forbidden
 request = json.load(sys.stdin)
 try:
-    result = getattr(producer, request["method"])(request["payload"], **request["kwargs"])
+    result = getattr(producer, request["method"])(
+        request["payload"], *request.get("args", []), **request["kwargs"])
     response = {"ok": True, "value": result}
 except ValueError as error:
     response = {"ok": False, "error": str(error)}
@@ -36,10 +37,11 @@ class ExternalProducer:
     def __init__(self):
         self.evidence = None
 
-    def _call(self, method, payload, **kwargs):
+    def _call(self, method, payload, *args, **kwargs):
         completed = subprocess.run(
             [os.environ.get("TESSERA_PRODUCER_PYTHON", sys.executable), "-c", _SCRIPT],
-            input=json.dumps({"method": method, "payload": payload, "kwargs": kwargs}),
+            input=json.dumps({"method": method, "payload": payload,
+                              "args": list(args), "kwargs": kwargs}),
             text=True, capture_output=True, check=True)
         response = json.loads(completed.stdout)
         self.evidence = {key: response[key] for key in
@@ -56,3 +58,9 @@ class ExternalProducer:
 
     def admit_rung(self, table, **kwargs):
         return self._call("admit_rung", table, **kwargs)
+
+    def __getattr__(self, method):
+        """Forward newer owning calls (scope, speed, quality) unchanged."""
+        def forward(payload, *args, **kwargs):
+            return self._call(method, payload, *args, **kwargs)
+        return forward

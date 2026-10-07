@@ -856,13 +856,29 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
         from .serving_profiles import load_serving_profile
         if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
             admission = candidate_rung_admission(rung, target_profile=target_profile,
-                serving_context=context, rung_allowability=rung_allowability)
+                serving_context=context, rung_allowability=rung_allowability,
+                allowability_scope=(None if context is None else {"kernel_kind": context.structure}))
             if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
                 return False
         if context is None:
             return fr.format_is_producer_eligible(rung)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
+
+
+def _final_allowability_scopes(assignment, context_by_unit):
+    """Each assigned unit's D41 scope: actual structure when stated.
+
+    Shapes are not carried to the final check, so units scope by serving
+    structure alone; units without a context stay on the whole-table verdict.
+    """
+    if not assignment or context_by_unit is None:
+        return None
+    scopes = {name: {"kernel_kind": context.structure}
+              for name, context in context_by_unit.items()
+              if name in assignment and context is not None
+              and getattr(context, "structure", None)}
+    return scopes or None
 
 
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
@@ -4331,7 +4347,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
         from .allocator_candidates import require_assignment_rung_allowability
         require_assignment_rung_allowability(assignment_expanded, target_profile=target_profile,
-            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability)
+            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability,
+            allowability_scope_by_unit=_final_allowability_scopes(
+                assignment_expanded, tessera_context_by_unit))
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,
