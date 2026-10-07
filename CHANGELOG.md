@@ -7,6 +7,10 @@
   Remove the private digest helper and unused import. Keep the digest recipe and read size.
   Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
   State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
 - Consume the shared G3 array verifier through the quality owner (#2413).
   Add verify-only consumer cases for edited summaries, consistent edited gates,
   missing arrays and corrupt bytes. Preserve unconditional numerical checks.

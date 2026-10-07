@@ -26529,6 +26529,7 @@ eligible host. `IMAGE` is immutable; `SERVING_PYTHON` names its interpreter.
 
 This example grants no GPU priority. D49 still sets GPU order.
 A single-host declaration does not cover the two-Spark target.
+
 The HF-only task backend cannot complete native task quality for Tessera bytes.
 Keep that task limitation explicit in a Tessera production plan.
 An HF proxy score cannot replace current-artifact native task evidence.
