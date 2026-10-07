@@ -7,12 +7,14 @@ import json
 import time
 from pathlib import Path
 
-from vllm import LLM, SamplingParams
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--dtype", default="auto")
+    parser.add_argument("--distributed-executor-backend", choices=("mp", "ray"))
+    parser.add_argument("--cpu-preflight", action="store_true",
+                        help="Validate runtime arguments without importing vLLM or using a device.")
     parser.add_argument("--prompt", default="The capital of France is")
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.35)
@@ -24,6 +26,10 @@ def main() -> int:
     parser.add_argument("--output-json", default=None,
                         help="Optional path for a compact JSON result.")
     args = parser.parse_args()
+    if args.tensor_parallel_size < 1 or args.max_model_len < 1 or args.max_new_tokens < 1:
+        parser.error("parallel size, model length and token count must be positive")
+    if not 0 < args.gpu_memory_utilization < 1:
+        parser.error("gpu-memory-utilization must be greater than zero and less than one")
 
     t0 = time.time()
     kwargs = {
@@ -33,9 +39,18 @@ def main() -> int:
         "max_model_len": args.max_model_len,
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_num_seqs": 1,
+        "tensor_parallel_size": args.tensor_parallel_size,
+        "dtype": args.dtype,
     }
+    if args.distributed_executor_backend:
+        kwargs["distributed_executor_backend"] = args.distributed_executor_backend
     if args.quantization:
         kwargs["quantization"] = args.quantization
+    if args.cpu_preflight:
+        print(json.dumps({"status": "cpu_preflight_only", "llm_kwargs": kwargs}, indent=2))
+        return 0
+    from vllm import LLM, SamplingParams
+
     llm = LLM(**kwargs)
     init_seconds = time.time() - t0
 
@@ -52,6 +67,9 @@ def main() -> int:
         "generate_seconds": generate_seconds,
         "mode": "graph" if args.no_enforce_eager else "eager",
         "quantization": args.quantization,
+        "tensor_parallel_size": args.tensor_parallel_size,
+        "dtype": args.dtype,
+        "distributed_executor_backend": args.distributed_executor_backend,
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     if args.output_json:
