@@ -4,6 +4,38 @@
 
 ### Added
 
+- **Research-only finer-grained FIT pricing and packed reference wire**
+  (#2329). Conditional single-block prices retain the complete baseline
+  gradient; group residual shrinkage and a deterministic integer-byte solver
+  select existing whole-projection parent fragments. The standalone wire
+  preserves actual column rates, tables, scales and incoming window states,
+  charging tags, framing, checksum and padding exactly. Its reader rejects
+  invalid rates, noncanonical planes and nonfinite scales before allocating
+  decoded weights; offset scratch is linear in block count. The recorded
+  real-A8S CPU proof covers exact mixed-fragment reconstruction and boundary
+  refusals, not in-domain held-out gain or a serving qualification. No
+  production menu, pipeline default, serving pin or kernel changes.
+  The research CLI binds declared inputs through the existing I/O engine
+  and validates actual source/FIT shapes, row counts and current canonical
+  producer admission. Encode and encode preflight never open HELDOUT
+  payloads; CPU scoring verifies their own bytes and complete moments.
+  Real L0 source/FIT preflight is recorded by action `fad7fa64ee59`. The
+  later complete dense L0 gate `6b5288acd80c` matches the native control
+  exactly at 25,191,435 bytes but has 3.475059 times its HELDOUT output-error
+  loss. The routed L3 expert0-up contrast `509251c3242d` also matches exactly
+  at 4,215,563 bytes, with 2.044249 times the control HELDOUT loss. Both
+  early-site contrasts reject this recipe, not fine-grained allocation in
+  general. FIT loss is already 4.13x/3.67x control: surrogate additivity fails
+  before held-out generalization. L28/L44 are cancelled and unmeasured under
+  CEO `dec-1006-223431-2bf3`, not deferred. No sampling interval or G3
+  qualification is claimed.
+  `pq_block_schedule_cost.py` consumes the real driver's flat row-major
+  selection, candidate-order mapping and own-byte stamps, while retaining
+  raw source-order input. CPU proof `63a5fc616b98` exercises both CLI forms
+  and malformed order, digest, geometry and tag refusals. Stored bytes are
+  exact; run, launch and shared-memory estimates remain conditional models,
+  not measured traffic, occupancy or speed.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic
@@ -230,6 +262,13 @@
   this slice.
 
 ### Fixed
+
+- **Correct readiness in the research preflight** (#2329). The census now
+  reports not-ready if any bank rung lacks canonical allow status. It keeps
+  all admission decisions and names the missing `rung_admission` prerequisite.
+  CPU CLI action `53433514eeee` passed the all-allow and valid R768-hold cases.
+  Both cases left HELDOUT payloads unopened. The test does not encode, score,
+  or capture a model.
 
 - **Authenticated locator aliases survive both real acquisition merges** (#2195,
   PR #2253). The existing control owner derives one locator-independent request
