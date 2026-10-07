@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- The AURA checkpoint manifest writer uses the existing strict, indented
+  UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
+  unit order, source diagnostics and atomic publication stay unchanged.
+  The writer adds no final newline.
+
+- The AURA checkpoint producer comparison follows development-mode policy
+  (#2375, references #1147, CEO D32). A dirty producer file prints the source
+  provenance stamp and keeps the resolved commit. Certified mode keeps its
+  original refusal. Git errors and timeouts still refuse in both modes.
+  The change does not rewrite or recompute checkpoints.
+
 ### Added
 
 - **Research-only finer-grained FIT pricing and packed reference wire**
