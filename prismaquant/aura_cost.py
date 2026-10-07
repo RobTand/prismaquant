@@ -65,7 +65,9 @@ from prismaquant.routed_experts import (
     resolve_routed_expert_profile,
 )
 from .cost_stage_checkpoint import atomic_write_bytes, unit_path
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, canonical_json
+from .digests import (
+    DIRECT_UTF8_INDENT2_STRICT, DIRECT_UTF8_STRICT, bytes_sha256hex, canonical_json,
+)
 
 SCHEMA = "prismaquant.aura_cost.v1"
 AURA_CHECKPOINT_IDENTITY_SCHEMA = "prismaquant.aura_checkpoint.identity.v1"
@@ -226,13 +228,7 @@ def _write_aura_checkpoint_manifest(
         "producer_source_sha256": manifest_source_sha256,
         "producer_source_files_sha256": manifest_source_files,
     }
-    encoded = json.dumps(
-        manifest,
-        indent=2,
-        sort_keys=True,
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    encoded = DIRECT_UTF8_INDENT2_STRICT.encoded(manifest)
     atomic_write_bytes(checkpoint_dir / "manifest.json", encoded)
     return identity_sha256
 

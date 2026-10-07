@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- The AURA checkpoint manifest writer uses the existing strict, indented
+  UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
+  unit order, source diagnostics and atomic publication stay unchanged.
+  The writer adds no final newline.
+
 ### Added
 
 - **Behavioral coverage of persisted multimodal calibration provenance**
