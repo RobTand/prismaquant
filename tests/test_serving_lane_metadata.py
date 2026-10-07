@@ -35,14 +35,13 @@ from __future__ import annotations
 
 import json
 import pickle
-import struct
 import sys
 
 import pytest
 
 import prismaquant.allocator as alloc
-from prismaquant import footprint as fp
 from prismaquant import serving_profiles as sp
+from test_footprint import _write_safetensors
 
 
 # ---------------------------------------------------------------------------
@@ -224,23 +223,6 @@ _FLOOR_TENSORS = {
     "lm_head.weight": ("BF16", (512, 64)),
     "model.norm.weight": ("BF16", (64,)),
 }
-
-
-def _write_safetensors(path, tensors):
-    header = {}
-    off = 0
-    for name, (dtype, shape) in tensors.items():
-        nbytes = fp._ST_DTYPE_BYTES[dtype]
-        for d in shape:
-            nbytes *= d
-        header[name] = {"dtype": dtype, "shape": list(shape),
-                        "data_offsets": [off, off + nbytes]}
-        off += nbytes
-    blob = json.dumps(header).encode()
-    with open(path, "wb") as fh:
-        fh.write(struct.pack("<Q", len(blob)))
-        fh.write(blob)
-        fh.write(b"\x00" * off)
 
 
 def _fixture(tmp_path):

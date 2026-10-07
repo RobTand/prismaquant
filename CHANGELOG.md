@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The shipcard model identity hashes its two canonical JSON texts through the
+  existing text owner (#2384, references #1301). The canonical quant-config
+  digest and the final canonical payload digest call `digests.text_sha256hex`;
+  canonicalization, scope flags, model hashes, errors, auxiliary files,
+  content checks and admission policy stay unchanged.
+
 - The AURA checkpoint manifest writer uses the existing strict, indented
   UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
   unit order, source diagnostics and atomic publication stay unchanged.
@@ -15,7 +21,29 @@
   original refusal. Git errors and timeouts still refuse in both modes.
   The change does not rewrite or recompute checkpoints.
 
+- The allocator serve-constraints and serving-lane tests reuse the existing
+  safetensors fixture writer from test_footprint (#2383, references #1929).
+  Fixture bytes, tensor order, costs and semantic assertions stay unchanged.
+  The serve-constraints introduction no longer cites the retired Gridbook
+  lane policy as a live document.
+
 ### Added
+
+- **Bounded head walk measurement mode** (#1492, #1247).
+  `tools/profile_stage_b_head.py --mode scoped-walk` walks a slice of the
+  census roster with one explicit I/O worker count. It is read-only: it writes
+  no head checkpoint, verifies no payload and synthesizes no render. One call
+  holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
+  `--sweep-workers`) reads and validates the census-wide metadata once, in
+  the baseline scope, and walks disjoint slices in one process from that
+  state (`metadata_memo` on `load_measured_anchor_input`; a drifted file is
+  read and verified again). The mode leaves the candidate overlay out of the
+  inputs, so no wire payload is hashed. The whole sweep shares the 2,000-unit
+  budget, and the first scope is a one-unit baseline. A guard thread stops the
+  run when the NFS READ round trip exceeds `--stop-read-rtt-ms`. Both guard
+  limits must be positive and finite. A `SIGTERM` stops the run with one
+  report. The tool changes no default. The default worker count stays
+  derived from the CPU reservation until a measurement supports a change.
 
 - **Research-only finer-grained FIT pricing and packed reference wire**
   (#2329). Conditional single-block prices retain the complete baseline

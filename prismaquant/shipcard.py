@@ -380,6 +380,8 @@ def compute_model_sha(
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
     before the card figures (``CARD_FIGURE_FILENAMES``) joined the exclusion.
     """
+    from .digests import text_sha256hex
+
     root = Path(model_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"model dir does not exist: {root}")
@@ -418,9 +420,9 @@ def compute_model_sha(
         ) if isinstance(raw_quant_cfg.get("provenance"), dict) else None
         if manifest is not None:
             _validate_weight_content_manifest(manifest, weights, where=quant_cfg)
-        payload["quant_config_sha"] = hashlib.sha256(
-            _canonical_json(canonical_quant_cfg).encode("utf-8")
-        ).hexdigest()
+        payload["quant_config_sha"] = text_sha256hex(
+            _canonical_json(canonical_quant_cfg)
+        )
     codebooks = {
         p.name: {
             "bytes": p.stat().st_size,
@@ -486,7 +488,7 @@ def compute_model_sha(
         }
         if auxiliary:
             payload["auxiliary_files"] = auxiliary
-    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+    return text_sha256hex(_canonical_json(payload))
 
 
 def accepted_model_shas(model_dir: str | os.PathLike) -> tuple[str, ...]:
