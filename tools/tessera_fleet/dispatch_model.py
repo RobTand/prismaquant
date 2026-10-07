@@ -55,6 +55,8 @@ def stage_checkout(encoder, revision, workspace, plan, scales):
     with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
         bundle.extractall(workspace / 'encoder', filter='data')
     shutil.copyfile(WORKER, workspace / 'worker.py')
+    partitioner = Path(__file__).resolve().parents[2] / 'prismaquant' / 'export_partition.py'
+    shutil.copyfile(partitioner, workspace / 'export_partition.py')
     shutil.copyfile(plan, workspace / 'plan.json')
     if not isinstance(model.read_json(workspace / 'plan.json'), dict):
         raise ValueError('plan must be a JSON object')
@@ -110,7 +112,7 @@ def main(argv=None):
     parser.add_argument('--encoder-revision', help='full immutable commit ID of the encoder to pin')
     parser.add_argument('--image', help='qualified producer repository@sha256 digest')
     parser.add_argument('--out', type=Path, help='shared path the assembled model is written to')
-    parser.add_argument('--workspace', type=Path, required=True, help='directory this dispatch seals its job, receipts and state into')
+    parser.add_argument('--workspace', type=Path, help='directory for the dispatch job, receipts and state')
     parser.add_argument('--resume', action='store_true', help='continue the dispatch already sealed in --workspace')
     parser.add_argument('--prepare-host', action='append', dest='prepare_hosts', default=None,
                         help='placement tag of a host an encode may run on; repeat for each. '
@@ -122,7 +124,27 @@ def main(argv=None):
     parser.add_argument('--grid', default='E4M3', help='quantization grid the encoder is run with')
     parser.add_argument('--q256', type=int, default=1024, help='quanta per 256 rows the plan is partitioned at')
     parser.add_argument('--wait-s', type=float, default=86400., help="seconds to wait for a stage's actions before giving up")
+    parser.add_argument('--dry-run', action='store_true',
+                        help='derive source partitions and construction-census inputs; do not stage or submit')
     args = parser.parse_args(argv)
+    if min(args.cpus, args.mem_gb, args.assembly_mem_gb) < 1:
+        parser.error('resource reservations must be positive')
+    if args.dry_run:
+        if args.resume or args.source is None or args.plan is None:
+            parser.error('--dry-run requires --source and --plan, without --resume')
+        from prismaquant.tessera_export_lane import export_setup
+        setup = export_setup(args.source, model.read_json(args.plan))
+        spec = {'cpus': args.cpus, 'mem_gb': args.mem_gb,
+                'assembly_mem_gb': args.assembly_mem_gb, 'tags': args.tags or ['gb10']}
+        setup['encode_rows'] = [campaign_row(args.workspace or Path('<workspace>'), spec,
+                                            'encode', index=part['index'])
+                                for part in setup['partitions']]
+        setup['execution_inputs'] = {'encoder_revision': args.encoder_revision,
+                                     'image': args.image, 'out': str(args.out) if args.out else None}
+        print(json.dumps(setup, indent=2))
+        return 0
+    if args.workspace is None:
+        parser.error('--workspace is required for execution or resume')
     workspace = args.workspace.resolve()
     if args.resume:
         if any(getattr(args, name) is not None for name in ('source', 'plan', 'input_scales', 'encoder_checkout', 'encoder_revision', 'image', 'out', 'prepare_hosts')):
@@ -137,8 +159,6 @@ def main(argv=None):
                 parser.error(flag + ' is required')
         if not re.fullmatch(r'[^\s]+@sha256:[0-9a-f]{64}', args.image):
             parser.error('--image must be an immutable repository@sha256 digest')
-        if min(args.cpus, args.mem_gb, args.assembly_mem_gb) < 1:
-            parser.error('resource reservations must be positive')
         if any(Path(host).name != host or not host for host in args.prepare_hosts):
             parser.error('--prepare-host must be a bare placement tag')
         for path in (args.source.resolve(), args.out.resolve()):
