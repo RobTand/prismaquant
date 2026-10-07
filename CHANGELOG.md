@@ -108,6 +108,15 @@
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.
 
 ### Changed
+- **Reuse the shared E2M1 value owner in the MXFP4 widening table**
+  (#2380, Refs #1303). `mxfp4_widen.E2M1_VALUES` derives its positive half
+  from `_E2M1_POSITIVE` in `nvfp4_activation_contract`, keeping the same
+  public tuple type, the same code order, explicit positive zero at index 8
+  and a negative half that negates only the nonzero magnitudes. Table bytes,
+  widened weight bytes, carried scale bytes, geometry, route status and
+  evidence strings are unchanged. The module introduction now describes the
+  retired Gridbook MXFP8 dense lane in the past tense. No performance or
+  serving qualification follows from this refactor.
 
 - **Reuse the shared E2M1 value owner in RTN and MXFP4 source decode**
   (#2369, Refs #1303). `build_rtn_cache._nvfp4_round_rtn` reads its

@@ -3,8 +3,8 @@
 WHY THIS EXISTS. DSv4-Flash stores its routed experts — body *and* MTP — as
 OCP-MX FP4: E2M1 nibble pairs packed two-per-byte along the reduce dim, with
 one E8M0 (UE8M0) power-of-two scale per 32 logical elements. Gridbook's served
-lanes for that wire are format-specific, and the MXFP8 dense lane
-(``mxfp8_e4m3_e8m0_g32``) reads a *different* element plane. Widening lets a
+lanes for that wire were format-specific, and the MXFP8 dense lane
+(``mxfp8_e4m3_e8m0_g32``) read a *different* element plane. Widening lets a
 unit that is only available as MXFP4 in the source reach the MXFP8 lane without
 inventing any numerics.
 
