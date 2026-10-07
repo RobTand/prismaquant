@@ -68,7 +68,8 @@ def main(argv=None):
         "prefix_tokens": [], "prefix_ids": [], "tensor_parallel_size": 1, "tile_rows": 32})
     panel = _smoke_json(root/"panel.json", {"schema": "prismaquant.g3_panel/1", "windows": windows})
     teacher = _smoke_json(root/"teacher.json", {"windows": [row["window_id"] for row in windows],
-        "prefix": {"ids": []}, "arrays": arrays, "source_model_identity": identity})
+        "prefix": {"ids": []}, "arrays": arrays, "source_model_identity": identity,
+        "panel": panel, "tokenizer": artifact(model_path/"tokenizer.json")})
     g3 = {"schema": "prismaquant.g3_v2/1", "protocol": protocol,
         "tokenizer": artifact(model_path/"tokenizer.json"), "panel": panel, "teacher": teacher,
         "candidate": {"backend": "streamed", "model": str(model_path), "offload_folder": str(root/"offload"),

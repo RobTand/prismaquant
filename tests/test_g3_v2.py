@@ -39,7 +39,7 @@ def configuration(tmp_path):
         candidates.append({"window_id": f"w{i}", "path": str(candidate), "file_sha256": bind(candidate)["sha256"]})
     panel = put(tmp_path/"panel.json", {"schema": "prismaquant.g3_panel/1", "windows": windows})
     teacher = put(tmp_path/"teacher.json", {"windows": ["w0", "w1"], "prefix": {"ids": [2]},
-        "arrays": teachers, "source_model_identity": {"model": "cpu-contract"}})
+        "arrays": teachers, "panel": panel, "tokenizer": tokenizer, "source_model_identity": {"model": "cpu-contract"}})
     candidate = put(tmp_path/"candidate.json", {"windows": ["w0", "w1"], "arrays": candidates})
     return {"schema": "prismaquant.g3_v2/1", "protocol": protocol, "tokenizer": tokenizer,
         "panel": panel, "teacher": teacher, "candidate": {"backend": "retained_logits", "receipt": candidate},
@@ -94,3 +94,17 @@ def test_fp8_signed_zero_and_tp_slices():
     codes, scales = fp8_per_token_dynamic(x)
     assert torch.signbit(codes.float())[0, 1]
     assert scales.dtype == torch.float32 and codes.dtype == torch.float8_e4m3fn
+
+
+def test_changed_input_tokens_do_not_pair_with_the_old_teacher(configuration):
+    panel_path = Path(configuration["panel"]["path"])
+    panel = json.loads(panel_path.read_text())
+    window = panel["windows"][0]
+    tokens_path = Path(window["tokens_path"])
+    tokens = np.load(tokens_path, allow_pickle=False)
+    tokens[0] = 1
+    np.save(tokens_path, tokens, allow_pickle=False)
+    window["tokens_sha256"] = bind(tokens_path)["sha256"]
+    configuration["panel"] = put(panel_path, panel)
+    with pytest.raises(ValueError, match="panel.*pairing"):
+        preflight_g3(configuration)

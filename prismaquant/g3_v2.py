@@ -84,6 +84,9 @@ def prepare_g3(config, *, verify=False, check_device=True):
         if mask.dtype != np.uint8 or mask.shape != (length,) or not np.all(mask == 1):
             raise ValueError("G3 requires unpadded causal inputs")
     teacher = _g3_json(config["teacher"], "G3 emitted teacher")
+    for name in ("panel", "tokenizer"):
+        if teacher.get(name, {}).get("sha256") != config[name]["sha256"]:
+            raise ValueError(f"teacher {name} pairing differs from the current inputs")
     if teacher["windows"] != names or teacher["prefix"]["ids"] != actual:
         raise ValueError("teacher/panel prefix and window pairing differs")
     if [row["window_id"] for row in teacher["arrays"]] != names:
