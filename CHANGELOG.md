@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Bounded head walk measurement mode** (#1492, #1247).
+  `tools/profile_stage_b_head.py --mode scoped-walk` walks a slice of the
+  census roster with one explicit I/O worker count. It is read-only: it writes
+  no head checkpoint, verifies no payload and synthesizes no render. One call
+  holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
+  `--sweep-workers`) loads the census-wide metadata once and walks disjoint
+  slices in one process. The whole sweep shares the 2,000-unit budget, and
+  the first scope is a one-unit baseline. A guard thread stops the run when
+  the NFS READ round trip exceeds `--stop-read-rtt-ms`. A `SIGTERM` stops it
+  with one report. The tool changes no default. The default worker count stays
+  derived from the CPU reservation until a measurement supports a change.
+
 - **Research-only finer-grained FIT pricing and packed reference wire**
   (#2329). Conditional single-block prices retain the complete baseline
   gradient; group residual shrinkage and a deterministic integer-byte solver
