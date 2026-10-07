@@ -195,3 +195,20 @@ def test_main_refuses_a_bad_sweep_before_reading_anything(tmp_path, capsys, extr
     assert exit_info.value.code == 2
     assert message in capsys.readouterr().err
     assert not (tmp_path / "scratch").exists()
+
+
+def test_sigterm_handler_reports_once_and_leaves_without_waiting(monkeypatch):
+    import os
+    import signal
+
+    exits, reasons = [], []
+    monkeypatch.setattr(os, "_exit", exits.append)
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        handler = head.install_stop_signal(reasons.append)
+        assert signal.getsignal(signal.SIGTERM) is handler
+        handler(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert reasons == ["SIGTERM"]
+    assert exits == [75]

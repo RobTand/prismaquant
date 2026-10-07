@@ -82,6 +82,21 @@ def interval_read_rtt_ms(before: tuple, after: tuple, *, min_ops: int = 20):
     return (after[1] - before[1]) / ops
 
 
+def install_stop_signal(report):
+    """Turn ``SIGTERM`` into one stop report and an immediate exit.
+
+    The pool watcher stops a run from outside with ``SIGTERM``. The handler
+    prints what the run knew, then leaves without waiting for worker threads
+    that block on the pool. Returns the handler so a test can call it.
+    """
+    def handler(signum, frame):
+        report("SIGTERM")
+        os._exit(75)
+
+    signal.signal(signal.SIGTERM, handler)
+    return handler
+
+
 class GuardStop(Exception):
     """The READ round trip rose past the limit; the run is stopped."""
 
@@ -413,6 +428,15 @@ def main(argv=None) -> int:
             os._exit(75)
         guard_stop, guard_trace = start_read_guard(
             args.stop_read_rtt_ms, interval_s=args.guard_interval_s, on_stop=on_stop)
+
+        def sigterm_report(reason):
+            print("STAGE_B_HEAD_PROFILE_STOPPED " + json.dumps(
+                {"reason": reason, "trace": guard_trace,
+                 "scope": None if scope is None else list(scope),
+                 "workers": args.head_walk_workers, "sweep": sweep}, sort_keys=True),
+                flush=True)
+
+        install_stop_signal(sigterm_report)
     if args.mode == "walk":
         result = walk_intake(config, prepared=prepared,
                              plan_sha256=args.plan_sha256, scratch=args.scratch)
