@@ -109,7 +109,7 @@ def _argv(tmp_path, *extra, mode="scoped-walk"):
 
 
 @pytest.mark.parametrize("extra,message", [
-    ((), "explicit end"),
+    ((), "needs either --unit-scope"),
     (("--unit-scope", "0:2001", "--head-walk-workers", "4"), "at most 2000"),
     (("--unit-scope", "0:", "--head-walk-workers", "4"), "explicit end"),
     (("--unit-scope", "5:5", "--head-walk-workers", "4"), "empty or reversed"),
@@ -141,11 +141,12 @@ def test_sweep_plan_puts_a_one_unit_baseline_first_and_keeps_the_worker_order():
 
 
 def test_sweep_slices_are_disjoint_and_adjacent():
-    scopes = head.sweep_plan(0, 250, [4, 1, 8, 2, 2, 8, 1, 4])
+    scopes = head.sweep_plan(0, 249, [4, 1, 8, 2, 2, 8, 1, 4])
     edges = [item["scope"] for item in scopes]
     for (_, high), (low, _) in zip(edges, edges[1:]):
         assert low == high
-    assert len({unit for low, high in edges for unit in range(low, high)}) == 1 + 8 * 250
+    assert len({unit for low, high in edges for unit in range(low, high)}) == 1 + 8 * 249
+    assert 1 + 8 * 249 <= head.SCOPED_WALK_MAX_UNITS
 
 
 def test_sweep_holds_one_budget_for_the_whole_sweep():
