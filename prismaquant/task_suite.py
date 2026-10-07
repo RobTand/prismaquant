@@ -81,7 +81,7 @@ def task_population(raw, config):
         raise ValueError("task backend omitted a requested task")
     samples = raw.get("n-samples")
     if not isinstance(samples, dict) or any(not isinstance(samples.get(name), dict)
-            or samples[name].get("effective", 0) <= 0 for name in expected):
+            or type(samples[name].get("effective")) is not int or samples[name]["effective"] <= 0 for name in expected):
         raise ValueError("task backend did not measure every requested task")
     sampling = config["sampling"]
     for name in ("limit", "random_seed", "numpy_seed", "torch_seed", "fewshot_seed"):
