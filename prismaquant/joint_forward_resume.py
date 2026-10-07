@@ -71,7 +71,7 @@ def _read(path, expected=None):
     raw = path.read_bytes()
     if file_stat_signature(path.lstat()) != file_stat_signature(before):
         raise ForwardRecoveryRefused('recovery proof changed during read')
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if expected is not None and digest != expected:
         raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     document = json.loads(raw)
