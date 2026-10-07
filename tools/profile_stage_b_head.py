@@ -443,7 +443,7 @@ def main(argv=None) -> int:
                 {"limit_ms": args.stop_read_rtt_ms, "mean_ms": stopped["mean_ms"],
                  "trace": guard_trace,
                  "scope": None if scope is None else list(scope),
-                 "workers": args.head_walk_workers, "sweep": sweep}, sort_keys=True), flush=True)
+                 "workers": args.head_walk_workers, "sweep": sweep}), flush=True)
             os._exit(75)
         guard_stop, guard_trace = start_read_guard(
             args.stop_read_rtt_ms, interval_s=args.guard_interval_s, on_stop=on_stop)
@@ -452,7 +452,7 @@ def main(argv=None) -> int:
             print("STAGE_B_HEAD_PROFILE_STOPPED " + json.dumps(
                 {"reason": reason, "trace": guard_trace,
                  "scope": None if scope is None else list(scope),
-                 "workers": args.head_walk_workers, "sweep": sweep}, sort_keys=True),
+                 "workers": args.head_walk_workers, "sweep": sweep}),
                 flush=True)
 
         install_stop_signal(sigterm_report)
