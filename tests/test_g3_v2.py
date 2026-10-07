@@ -18,8 +18,7 @@ def put(path, value):
     return bind(path)
 
 
-@pytest.fixture
-def configuration(tmp_path):
+def make_retained_configuration(tmp_path):
     tokenizer = put(tmp_path/"tokenizer.json", {"added_tokens": [{"content": "[prefix]", "id": 2}]})
     protocol = put(tmp_path/"protocol.json", {"schema": "prismaquant.g3_protocol/2", "name": "cpu-contract",
         "context_length": 5, "window_count": 2, "vocab_size": 7, "prefix_tokens": ["[prefix]"],
@@ -44,6 +43,11 @@ def configuration(tmp_path):
     return {"schema": "prismaquant.g3_v2/1", "protocol": protocol, "tokenizer": tokenizer,
         "panel": panel, "teacher": teacher, "candidate": {"backend": "retained_logits", "receipt": candidate},
         "device": "cpu", "criteria": []}
+
+
+@pytest.fixture
+def configuration(tmp_path):
+    return make_retained_configuration(tmp_path)
 
 
 def test_retained_arrays_preserve_order_and_full_precision(configuration, tmp_path):

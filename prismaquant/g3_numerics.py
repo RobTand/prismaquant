@@ -53,4 +53,26 @@ def token_kl(teacher, candidate, *, tile_rows=32, require_cuda=True):
         raise ValueError("nonfinite full-vocabulary KL")
     return result
 
+def g3_summary(kl_rows, agreement_rows):
+    """Preserve the producer's Torch window means and ordered NumPy reductions."""
+    import numpy as np
+    rows = [torch.as_tensor(row) for row in kl_rows]
+    agreements = [torch.as_tensor(row) for row in agreement_rows]
+    if not rows or len(rows) != len(agreements) or rows[0].ndim != 1 or not rows[0].numel():
+        raise ValueError("G3 summary requires a nonempty paired window population")
+    shape = rows[0].shape
+    if any(row.dtype != torch.float64 or row.shape != shape for row in rows):
+        raise ValueError("G3 KL array geometry or float64 dtype differs")
+    if any(row.dtype != torch.bool or row.shape != shape for row in agreements):
+        raise ValueError("G3 agreement array geometry or Boolean dtype differs")
+    values = np.stack([row.detach().cpu().numpy() for row in rows])
+    if not np.isfinite(values).all():
+        raise ValueError("G3 owned KL data must be finite")
+    agreement_values = np.stack([row.detach().cpu().numpy() for row in agreements])
+    window_means = [float(row.mean()) for row in rows]
+    window_agreements = [float(row.double().mean()) for row in agreements]
+    allk = np.concatenate(list(values)).astype(np.float64)
+    metrics = {"mean_kl": float(allk.mean()), "p99_kl": float(np.quantile(allk, 0.99)),
+               "max_kl": float(allk.max()), "top1_agreement": float(np.mean(window_agreements))}
+    return metrics, values, agreement_values, window_means, window_agreements
 

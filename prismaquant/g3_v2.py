@@ -44,8 +44,7 @@ def _array(row, shape, *, verify):
     return array
 
 
-def prepare_g3(config, *, verify=False, check_device=True):
-    """Read the declared population, actual prefix IDs and paired teacher."""
+def _g3_protocol(config):
     protocol = _g3_json(config["protocol"], "G3 protocol")
     if protocol.get("schema") != "prismaquant.g3_protocol/2":
         raise ValueError("unsupported G3 protocol schema")
@@ -54,6 +53,11 @@ def prepare_g3(config, *, verify=False, check_device=True):
     length, count, vocab = (protocol[name] for name in ("context_length", "window_count", "vocab_size"))
     if length < 2 or vocab < 2:
         raise ValueError("G3 needs causal positions and more than one vocabulary column")
+    return protocol
+
+
+def _g3_panel_inputs(config, protocol):
+    length, count, vocab = (protocol[name] for name in ("context_length", "window_count", "vocab_size"))
     tokenizer = _g3_json(config["tokenizer"], "G3 tokenizer")
     ids = {entry["content"]: entry["id"] for entry in tokenizer.get("added_tokens", [])}
     ids.update({k: v for k, v in tokenizer.get("model", {}).get("vocab", {}).items() if k not in ids})
@@ -83,6 +87,10 @@ def prepare_g3(config, *, verify=False, check_device=True):
         mask = np.load(io.BytesIO(raw), allow_pickle=False)
         if mask.dtype != np.uint8 or mask.shape != (length,) or not np.all(mask == 1):
             raise ValueError("G3 requires unpadded causal inputs")
+    return inputs, names, actual
+
+
+def _g3_teacher(config, names, actual):
     teacher = _g3_json(config["teacher"], "G3 emitted teacher")
     for name in ("panel", "tokenizer"):
         if teacher.get(name, {}).get("sha256") != config[name]["sha256"]:
@@ -91,6 +99,25 @@ def prepare_g3(config, *, verify=False, check_device=True):
         raise ValueError("teacher/panel prefix and window pairing differs")
     if [row["window_id"] for row in teacher["arrays"]] != names:
         raise ValueError("teacher array order differs from paired windows")
+    return teacher
+
+
+def _g3_fidelity(protocol):
+    from tools.gold_measurement_fidelity import tr3_kl_fidelity
+    fidelity = tr3_kl_fidelity(vocab_size=protocol["vocab_size"], n_windows=protocol["window_count"],
+                             seqlen=protocol["context_length"])
+    fidelity.update(instrument="prismaquant.g3_v2", execution="offline_decoded_forward",
+        prefix_ids=protocol["prefix_ids"], scored_slice=[len(protocol["prefix_ids"]),
+        protocol["context_length"]+len(protocol["prefix_ids"])-1])
+    return fidelity
+
+
+def prepare_g3(config, *, verify=False, check_device=True):
+    """Read the declared population, actual prefix IDs and paired teacher."""
+    protocol = _g3_protocol(config)
+    length, count, vocab = (protocol[name] for name in ("context_length", "window_count", "vocab_size"))
+    inputs, names, actual = _g3_panel_inputs(config, protocol)
+    teacher = _g3_teacher(config, names, actual)
     for row in teacher["arrays"]:
         _array(row, (length-1, vocab), verify=verify)
     device = torch.device(config["device"])
@@ -273,7 +300,7 @@ def _stream(config, protocol, inputs, consume):
 
 def measure_g3(config, output):
     protocol, teacher, inputs, names, device, retained = prepare_g3(config)
-    rows, details = [], []
+    rows, agreements, details = [], [], []
     next_window = 0
     def consume(index, logits):
         nonlocal next_window
@@ -290,11 +317,13 @@ def measure_g3(config, output):
         array = _array(trow, (protocol["context_length"]-1, protocol["vocab_size"]), verify=True)
         target = torch.from_numpy(np.array(array, copy=True)).to(device)
         vector = token_kl(target, raw, tile_rows=protocol["tile_rows"], require_cuda=device.type == "cuda")
-        rows.append(vector.cpu().numpy())
-        details.append({"window_id": names[index], "mean_kl": float(vector.mean()),
+        rows.append(vector)
+        agreements.append(target.argmax(-1) == raw.argmax(-1))
+        details.append({"window_id": names[index],
+            "input_tokens_sha256": bytes_sha256hex(memoryview(inputs[index][0].detach().cpu().numpy()).cast("B")),
+            "teacher_file_sha256": trow["file_sha256"],
             "teacher_array_sha256": bytes_sha256hex(memoryview(array).cast("B")),
-            "candidate_array_sha256": bytes_sha256hex(memoryview(raw.cpu().numpy()).cast("B")),
-            "top1_agreement": float((target.argmax(-1) == raw.argmax(-1)).double().mean())})
+            "candidate_array_sha256": bytes_sha256hex(memoryview(raw.cpu().numpy()).cast("B"))})
         next_window += 1
     with torch.inference_mode():
         if retained is not None:
@@ -306,28 +335,78 @@ def measure_g3(config, output):
             execution = _stream(config, protocol, inputs, consume)
     if next_window != protocol["window_count"]:
         raise ValueError("candidate omitted paired windows")
-    values = np.stack(rows)
-    allk = np.concatenate(rows).astype(np.float64)
+    from .g3_numerics import g3_summary
+    metrics, values, agreement_values, means, top1_means = g3_summary(rows, agreements)
+    for row, mean, top1 in zip(details, means, top1_means, strict=True):
+        row.update(mean_kl=mean, top1_agreement=top1)
     array_path = Path(output).with_suffix(".per_position_kl.npy")
     from .cost_stage_checkpoint import publish_new_bytes
     payload = io.BytesIO()
     np.save(payload, values, allow_pickle=False)
     if not publish_new_bytes(array_path, payload.getvalue()):
         raise ValueError("G3 per-position output already exists")
-    from tools.gold_measurement_fidelity import tr3_kl_fidelity
-    fidelity = tr3_kl_fidelity(vocab_size=protocol["vocab_size"], n_windows=len(rows), seqlen=protocol["context_length"])
-    fidelity.update(instrument="prismaquant.g3_v2", execution="offline_decoded_forward",
-                    prefix_ids=protocol["prefix_ids"], scored_slice=[len(protocol["prefix_ids"]), len(inputs[0][0])-1])
-    return {"metrics": {"mean_kl": float(allk.mean()), "p99_kl": float(np.quantile(allk, 0.99)),
-                "max_kl": float(allk.max()), "top1_agreement": float(np.mean([row["top1_agreement"] for row in details]))},
+    agreement_path = Path(output).with_suffix(".per_position_top1_agreement.npy")
+    payload = io.BytesIO()
+    np.save(payload, agreement_values, allow_pickle=False)
+    if not publish_new_bytes(agreement_path, payload.getvalue()):
+        raise ValueError("G3 per-position agreement output already exists")
+    return {"metrics": metrics,
         "identity": {"teacher": config["teacher"], "tokenizer": config["tokenizer"], "protocol": config["protocol"],
+                     "panel": config["panel"],
                      "candidate_inputs": g3_candidate_binding(config),
                      "source_model_identity": teacher.get("source_model_identity", teacher.get("source")), "execution": execution,
                      "torch": torch.__version__},
         "population": {"device": str(device), "cuda_available": torch.cuda.is_available(), "skips": [],
-            "window_ids": names, "windows": len(rows), "positions": int(allk.size), "per_window": details,
-            "measurement_fidelity": fidelity}, "artifacts": [artifact(array_path)],
+            "window_ids": names, "windows": len(rows), "positions": int(values.size), "per_window": details,
+            "measurement_fidelity": _g3_fidelity(protocol)}, "artifacts": [artifact(array_path), artifact(agreement_path)],
         "limitations": ["Offline decoded KL is not served KL.", "CPU execution does not qualify GLM or native kernels."]}
+
+
+def verify_g3_result(result, config):
+    """Replay owned arrays and mathematical inputs without model inference."""
+    from .g3_numerics import g3_summary
+    from .stage_inputs import read_bound
+    protocol = _g3_protocol(config)
+    inputs, names, actual = _g3_panel_inputs(config, protocol)
+    teacher = _g3_teacher(config, names, actual)
+    artifacts = result["artifacts"]
+    if len(artifacts) != 2:
+        raise ValueError("G3 result requires owned KL and agreement arrays")
+    arrays = [np.load(io.BytesIO(read_bound(binding, "G3 owned result array")), allow_pickle=False)
+              for binding in artifacts]
+    shape = (protocol["window_count"], protocol["context_length"] - 1)
+    if any(not isinstance(array, np.ndarray) or array.shape != shape for array in arrays):
+        raise ValueError("G3 owned array population or geometry differs")
+    values, agreements = arrays
+    if values.dtype != np.float64 or agreements.dtype != np.bool_:
+        raise ValueError("G3 owned array dtype differs")
+    population = result["population"]
+    device = torch.device(population["device"])
+    if device.type not in ("cpu", "cuda") or (device.type == "cuda" and not torch.cuda.is_available()):
+        raise ValueError("G3 recorded numerical device is unavailable")
+    metrics, _, _, means, top1_means = g3_summary(torch.from_numpy(values).to(device),
+                                                 torch.from_numpy(agreements).to(device))
+    if result["measurement"]["metrics"] != metrics:
+        raise ValueError("G3 metrics differ from the owned arrays")
+    expected = {"window_ids": names, "windows": len(values), "positions": int(values.size),
+                "measurement_fidelity": _g3_fidelity(protocol)}
+    if any(type(population.get(name)) is not type(value) or population.get(name) != value
+           for name, value in expected.items()):
+        raise ValueError("G3 recorded population differs from owned data")
+    windows = population.get("per_window")
+    if not isinstance(windows, list) or len(windows) != len(values):
+        raise ValueError("G3 recorded per-window population differs")
+    for index, (row, mean, top1) in enumerate(zip(windows, means, top1_means, strict=True)):
+        if row.get("window_id") != names[index] or row.get("mean_kl") != mean or row.get("top1_agreement") != top1:
+            raise ValueError("G3 window summaries differ from owned data")
+        tokens = bytes_sha256hex(memoryview(inputs[index][0].numpy()).cast("B"))
+        if row.get("input_tokens_sha256") != tokens:
+            raise ValueError("G3 window token population differs from the measurement")
+        current = teacher["arrays"][index]
+        if row.get("teacher_file_sha256") != current["file_sha256"]:
+            raise ValueError("G3 paired teacher array differs from the measurement")
+        if current.get("array_sha256") and row.get("teacher_array_sha256") != current["array_sha256"]:
+            raise ValueError("G3 paired teacher numeric data differs")
 
 
 def main(argv=None):
