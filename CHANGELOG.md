@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
+  The central processor path writes a valid structure draft without tensor payload reads or profile registration.
+  Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
+  The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
+  Its central processor preflight checks the real runtime arguments without a graphics processor.
+  Native serving qualification and all production defaults stay unchanged.
+
 ### Changed
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
