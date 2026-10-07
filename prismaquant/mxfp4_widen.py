@@ -3,8 +3,8 @@
 WHY THIS EXISTS. DSv4-Flash stores its routed experts — body *and* MTP — as
 OCP-MX FP4: E2M1 nibble pairs packed two-per-byte along the reduce dim, with
 one E8M0 (UE8M0) power-of-two scale per 32 logical elements. Gridbook's served
-lanes for that wire are format-specific, and the MXFP8 dense lane
-(``mxfp8_e4m3_e8m0_g32``) reads a *different* element plane. Widening lets a
+lanes for that wire were format-specific, and the MXFP8 dense lane
+(``mxfp8_e4m3_e8m0_g32``) read a *different* element plane. Widening lets a
 unit that is only available as MXFP4 in the source reach the MXFP8 lane without
 inventing any numerics.
 
@@ -53,6 +53,8 @@ with neither compressed-tensors nor vLLM present.
 from __future__ import annotations
 
 import torch
+
+from .nvfp4_activation_contract import _E2M1_POSITIVE
 
 
 __all__ = [
@@ -104,9 +106,13 @@ MXFP8_GROUPED_ROUTE_EVIDENCE = (
 #: The 16 E2M1 code points in code order (index == nibble value). Code 0x8 is
 #: negative zero in the format; it is listed as ``0.0`` because that is the
 #: value this module and ``layer_streaming``'s decode LUT both materialize.
+#: The positive half is the shared grid owned by
+#: ``nvfp4_activation_contract``; the negative half negates only the nonzero
+#: magnitudes, keeping explicit positive zero at index 8.
 E2M1_VALUES: tuple[float, ...] = (
-    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-    0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+    *_E2M1_POSITIVE,
+    0.0,
+    *(-v for v in _E2M1_POSITIVE[1:]),
 )
 
 #: Elements per E8M0 scale, on BOTH wires. Shared value, so a mismatch is a
