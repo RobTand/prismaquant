@@ -28,7 +28,7 @@ def test_missing_metric_refuses():
         evaluate_criteria({}, [{"metric": "x", "op": "le", "threshold": 1}])
 
 
-def test_verifier_replays_gate_and_config_identity():
+def test_verifier_replays_gate_and_config_identity(tmp_path):
     config = {"schema": "prismaquant.g3_v2/1", "candidate": {"backend": "retained_logits",
         "receipt": {"path": "candidate.json", "sha256": "c"*64}},
         "criteria": [{"metric": "mean_kl", "op": "le", "threshold": 0.1}]}
@@ -50,3 +50,6 @@ def test_verifier_replays_gate_and_config_identity():
     changed["identity"]["candidate_inputs"]["receipt"]["sha256"] = "d"*64
     with pytest.raises(ValueError, match="candidate"):
         verify_result(changed, config, config_sha256="a"*64)
+    streamed = g3_candidate_binding({"candidate": {"backend": "streamed", "model": str(tmp_path), "assignments": []}})
+    assert streamed["model"] == str(tmp_path)
+    assert len(streamed["assignments_sha256"]) == 64

@@ -97,7 +97,7 @@ def g3_candidate_binding(config):
         raise ValueError("unsupported G3 candidate backend")
     return {"backend": "streamed", "model": str(Path(candidate["model"]).resolve()),
             "production_cache": candidate.get("production_cache"),
-            "assignments_sha256": canonical_json_sha256(candidate["assignments"]),
+            "assignments_sha256": canonical_json_sha256(candidate["assignments"], where="G3 current assignments"),
             "rendered_wires": [row["render"]["wire"] for row in candidate["assignments"] if row.get("render")]}
 
 def read_binding(binding, label):

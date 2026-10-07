@@ -63,8 +63,8 @@ def main(argv=None):
     per_window = [float(row.mean()) for row in retained]
     unit_roundoff = np.finfo(np.float64).eps / 2
     terms = retained.size
-    reduction_bound = (terms*unit_roundoff)/(1-terms*unit_roundoff)*float(np.abs(retained).mean())
-    checks["retained_mean_within_fp64_reduction_bound"] = abs(mean-expected) <= reduction_bound
+    reduction_bound = float((terms*unit_roundoff)/(1-terms*unit_roundoff)*float(np.abs(retained).mean()))
+    checks["retained_mean_within_fp64_reduction_bound"] = bool(abs(mean-expected) <= reduction_bound)
     checks["retained_window_reduction"] = per_window == result["teacher2"]["per_window_mean"]
     if not all(checks.values()):
         raise ValueError("CPU numerical parity failed: "+repr(checks))
