@@ -31921,3 +31921,13 @@ The MLA kv_b_proj member pays for one decoded BF16 matrix.
 These charges increase memory_bytes, not wire_bytes.
 The exported fused owner pays for each retained buffer once.
 This price does not claim a compressed absorbed BMM route.
+
+The direct activation contract separates the DSA head from its key projection.
+The head screen uses FP32 inputs without A8 activation quantization.
+The key keeps its dense activation contract.
+MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
+
+The producer reads direct weights with projection_routes.direct_consumer_weight.
+The runtime and producer use the same folded T-16 arithmetic.
+The publication cache preserves the DSA head values in FP32.
+Its publication byte charge uses four bytes per element; other units keep the existing BF16 cache path.

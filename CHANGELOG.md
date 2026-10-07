@@ -11,6 +11,11 @@
   DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
   Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
 
+- **Direct head arithmetic.** The DSA head screen uses FP32 inputs without the key projection's A8 activation quantization.
+  The producer reads its decoded weights with the runtime's direct consumer helper.
+  The publication cache keeps the head values in FP32 and charges the actual publication bytes.
+  T-16 retains its folded BF16 weight arithmetic before the head cache cast.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic

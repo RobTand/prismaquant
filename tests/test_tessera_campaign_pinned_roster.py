@@ -228,3 +228,67 @@ def test_direct_consumer_prices_charge_the_final_buffer_once():
     assert tc._direct_consumer_memory_bytes(prefix + "indexer.weights_proj", family, (32, 64)) == 32 * 64 * 4
     assert tc._direct_consumer_memory_bytes(prefix + "indexer.wk", family, (64, 64)) == 0
     assert tc._direct_consumer_memory_bytes(prefix + "kv_b_proj", family, (128, 64)) == 128 * 64 * 2
+
+
+def test_t8_head_screen_does_not_quantize_its_fp32_input():
+    import torch
+    from prismaquant.production_weight_cache import _local_forward_render_score
+    prefix = P + "3.self_attn.indexer."
+    head = tc._prepare_anchor(qname=prefix + "weights_proj", format_name="TESSERA_E4M3_K1_R1024",
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense")
+    key = tc._prepare_anchor(qname=prefix + "wk", format_name="TESSERA_E4M3_K1_R1024",
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense")
+    x = torch.linspace(0.013, 1.073, 32).reshape(1, 32)
+    weight = torch.eye(32)
+    head_score = _local_forward_render_score(reference_weight=weight, rendered_weight=weight,
+        activations=x, activation_quantize=head["activation_qdq"], activation_max_abs=None)
+    key_score = _local_forward_render_score(reference_weight=weight, rendered_weight=weight,
+        activations=x, activation_quantize=key["activation_qdq"], activation_max_abs=None)
+    assert head_score == (0.0, "output_mse", False, False)
+    assert key_score[0] > 0 and key_score[2] is True
+
+
+def test_explicit_fp32_cache_keeps_the_direct_head_values():
+    import torch
+    from prismaquant.production_weight_cache import _store_rendered_weight_entry
+    value = torch.tensor([[0.1234567, 1.0034567]], dtype=torch.float32)
+    weights = {}
+    kwargs = dict(weights=weights, cache_dir_path=None, qname=P + "3.self_attn.indexer.weights_proj",
+                  fmt="TESSERA_E4M3_K1_R1024", tensor=value, weight_dtype=torch.float32)
+    _store_rendered_weight_entry(**kwargs, preserve_fp32=True)
+    retained = next(iter(weights.values()))
+    assert retained.dtype == torch.float32 and torch.equal(retained, value)
+    _store_rendered_weight_entry(**kwargs)
+    retained = next(iter(weights.values()))
+    assert retained.dtype == torch.bfloat16 and torch.equal(retained, value.bfloat16())
+
+
+@pytest.mark.parametrize("format_name, route_family", [
+    ("TESSERA_E4M3_K1_R1024", "TESSERA_FP8"),
+    ("TESSERA_BF16_K1_R1792", "TESSERA_BF16")])
+def test_head_wire_decoder_cache_and_screen_agree(tmp_path, format_name, route_family):
+    import torch
+    from prismaquant.production_weight_cache import ProductionWeightCache, _local_forward_render_score
+    from tessera.serving.projection_routes import direct_consumer_weight
+    name = P + "3.self_attn.indexer.weights_proj"
+    source = torch.randn(32, 32, generator=torch.Generator().manual_seed(17)).bfloat16()
+    original = source.clone()
+    inputs = torch.randn(2, 32, generator=torch.Generator().manual_seed(19)).bfloat16()
+    cache_dir, wire_dir = tmp_path / "cache", tmp_path / "wire"
+    cache_dir.mkdir()
+    wire_dir.mkdir()
+    cache = ProductionWeightCache(weights={}, levers={}, cache_dir=str(cache_dir), metadata={})
+    anchor = tc._measure_anchor(qname=name, weight=source, activations=inputs, format_name=format_name,
+        cache=cache, wire_dir=wire_dir, hessian_required=False, structure="dense")
+    blob = next(wire_dir.glob("*.tessera")).read_bytes()
+    decoded = direct_consumer_weight(blob, P + "3.self_attn.indexer.wk_weights_proj",
+                                    "weights_proj", route_family)
+    retained = torch.load(cache_dir / cache.weights[(name, format_name)], weights_only=True)
+    assert decoded.dtype == retained.dtype == torch.float32
+    assert torch.equal(decoded, retained)
+    score = _local_forward_render_score(reference_weight=source, rendered_weight=retained,
+        activations=inputs, activation_quantize=lambda x: x, activation_max_abs=None)
+    assert anchor.dloss == score[0]
+    assert anchor.activation_contract == "a32" and anchor.activation_quantized is False
+    assert anchor.wire_bytes == len(blob)
+    assert torch.equal(source, original)

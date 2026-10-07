@@ -574,10 +574,23 @@ def _bind_served_quantizer(qname, format_name):
               f"{record.get('dequant_kernel')}", flush=True)
 
 
+def _direct_consumer_activation_contract(qname):
+    source = qname.removesuffix(".weight")
+    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return None
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_activation_contract
+    tensor = source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    return direct_consumer_activation_contract(source if fused is None else fused[0], role_name(tensor))
+
+
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                     hessian_required, static_input_scale, structure=None):
     """Admit each unit's Hessian and served activation contract before encode."""
-    _bind_served_quantizer(qname, format_name)
+    direct_contract = _direct_consumer_activation_contract(qname)
+    if direct_contract is None:
+        _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
     from .tessera_formats import (
         parse_tessera_format_name, tessera_served_wire_recipe, tessera_serving_route,
@@ -630,6 +643,8 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
     else:
         input_scale = None
         activation_qdq = spec.activation_quantize_dequantize
+    if direct_contract is not None:
+        activation_qdq = fr.get_format("BF16").activation_quantize_dequantize
     activation_kwargs = None
     # Whether an H can be applied is a property of the RUNG'S WIRE, not of the
     # run, and it is DERIVED from what the pinned ActivationSource emits for
@@ -649,6 +664,7 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 "must not fall through to a weights-only encode.")
     return dict(spec=spec, family=family, rung=rung, wire=wire, structure=structure,
                 activation_qdq=activation_qdq, input_scale=input_scale,
+                activation_contract=direct_contract or str(spec.act_dtype_name or "a16"),
                 activation_kwargs=activation_kwargs,
                 hessian_required=hessian_required)
 
@@ -672,6 +688,19 @@ def _direct_consumer_memory_bytes(qname, family, shape):
     return extra["resident_bytes_resident_mode"]
 
 
+def _direct_consumer_render(blob, qname, family, device):
+    """Use the runtime owner's direct decoder for the priced source unit."""
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_weight
+    from tessera.serving.scheme import ROUTES
+    tensor = qname.removesuffix(".weight") + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    owner = tensor.removesuffix(".weight") if fused is None else fused[0]
+    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
+    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
+    return direct_consumer_weight(blob, owner, role_name(tensor), route_family, device=str(device))
+
+
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
                    prepared, render, blob, elapsed, encoding_batch_size=1,
                    publisher=None):
@@ -693,6 +722,12 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
         "activation_qdq", "input_scale"))
+    direct_contract = _direct_consumer_activation_contract(qname)
+    preserve_fp32 = direct_contract == "a32"
+    cache_dtype = torch.float32 if preserve_fp32 else torch.bfloat16
+    if direct_contract is not None:
+        render = _direct_consumer_render(blob, qname, family, weight.device)
+    publication_bytes = render.numel() * (4 if preserve_fp32 else 2) + len(blob)
     score, metric, quantized, _clipped = _local_forward_render_score(
         reference_weight=weight,
         rendered_weight=render,
@@ -711,10 +746,9 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     # writer will own, so the budget has to admit it BEFORE it exists: charging
     # it after the fact would leave this thread holding one artifact more than
     # the bound allows, every time the writer is behind.  The size is known
-    # without making it -- one BF16 element per render element, plus the blob
-    # the encoder already returned.
+    # without a copy: the declared cache dtype sets each element's bytes.
     if publisher is not None:
-        publisher.reserve(render.numel() * 2 + len(blob))
+        publisher.reserve(publication_bytes)
     try:
         # The device-to-host copy stays on the thread that owns the device
         # work, whichever way the bytes are written.
@@ -724,10 +758,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # it always stored.  Staging it here is what gives the writer thread
         # bytes nobody else owns.
         staged = _canonical_rendered_weight_tensor(
-            render, weight_dtype=torch.bfloat16)
+            render, weight_dtype=cache_dtype, preserve_fp32=preserve_fp32)
     except BaseException:
         if publisher is not None:
-            publisher.release(render.numel() * 2 + len(blob))
+            publisher.release(publication_bytes)
         raise
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
@@ -745,7 +779,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
             fmt=format_name,
             tensor=staged,
             cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-            weight_dtype=torch.bfloat16,
+            weight_dtype=cache_dtype, preserve_fp32=preserve_fp32,
         )
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
@@ -766,10 +800,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         _publish()
     else:
         # The reservation above was taken for exactly these bytes; the
-        # element count is the render's and the dtype is BF16 either way.
+        # The selected direct head cache keeps FP32; other caches keep BF16.
         publisher.submit(PublicationJob(
             key=(FILES_JOB, qname, format_name),
-            charged_bytes=(staged.numel() * staged.element_size()) + len(blob),
+            charged_bytes=publication_bytes,
             publish=_publish,
         ))
 
@@ -787,7 +821,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
                       + _direct_consumer_memory_bytes(qname, family, weight.shape)),
         bits_per_param=float(bits) / max(1, int(weight.numel())),
-        activation_contract=str(spec.act_dtype_name or "a16"),
+        activation_contract=prepared.get("activation_contract", str(spec.act_dtype_name or "a16")),
         activation_quantized=bool(quantized),
         wire_bytes=len(blob),
         seconds=elapsed,
