@@ -37,8 +37,18 @@ Producer-only and run-only differences use `seal_check` and stamp `[DEV-MODE]`.
 Recorded chord reads compare numeric claims and scientific scope through that owner.
 Missing qualified prices cannot remove a unit from byte accounting.
 
-The independent MTP selector also retains its own objective and byte budget.
-Its export reader recomputes recorded chords from the bound original anchors.
+The independent MTP selector retains its objective and byte budget.
+Measured quality anchors and exact wire menus have separate rosters.
+An admitted fractional wire uses the existing qualified chord owner.
+It does not require fractional quality samples.
+Selection and export retain the actual M3/M4 wire receipts and byte counts.
+The export reader recomputes recorded chords from their original anchors.
+
+Canonical logical candidates retain their chord records and original anchors.
+Anchor stderr remains diagnostic data. It is not measured fractional uncertainty.
+The candidate records absent fractional stderr as null, not zero.
+Measured marginal intervals and CI-overlap choices refuse absent uncertainty.
+Explicit point-only menus remain available without a measured CI claim.
 
 PACT retains actual operator rows as its first time source.
 A missing row can use a canonical class model only after reconciliation with

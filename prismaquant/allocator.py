@@ -857,8 +857,14 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
         from .serving_profiles import load_serving_profile
         if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
             from .allocator_candidates import unit_allowability_scope
-            row = {} if costs is None else costs.get(unit, {}).get(rung, {})
-            shape = row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ())
+            measured = {} if costs is None else costs.get(unit, {})
+            row = measured.get(rung)
+            if row is not None:
+                shape = row.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ())
+            else:
+                shapes = {tuple(anchor.get("joint_operator_identity", {}).get("source_weight", {}).get("shape", ()))
+                          for anchor in measured.values()}
+                shape = next(iter(shapes)) if len(shapes) == 1 else ()
             unit_stats = ({"out_features": shape[-2], "in_features": shape[-1]}
                           if len(shape) >= 2 else {})
             if context is None and profile is not None:

@@ -299,8 +299,11 @@ def complete_scientific_price(row: Mapping, *, format_name: str | None = None) -
             raise RungAllowabilityError("scientific sum differs from its actual quantities or format")
         return float(actual["predicted_dloss"])
     claims = row.get("cost_source") == CANONICAL_CHORD_SOURCE or "canonical_quality" in row
+    from .joint_aura import validate_joint_aura_entry
+    measured_joint = not claims and validate_joint_aura_entry(row)
     scope = row.get("quality_scope")
-    if not claims and (not isinstance(scope, Mapping) or scope.get("currency") != "served_kl"):
+    if not claims and (not isinstance(scope, Mapping)
+                       or (not measured_joint and scope.get("currency") != "served_kl")):
         return None
     if not isinstance(scope, Mapping):
         raise RungAllowabilityError("complete scientific price requires quality_scope")

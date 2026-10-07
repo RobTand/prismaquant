@@ -11,6 +11,11 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Changed
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

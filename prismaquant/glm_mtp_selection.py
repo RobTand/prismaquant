@@ -84,15 +84,19 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
     for index, payload in enumerate(payloads):
         if set(payload["costs"]) != set(costs):
             raise ValueError(f"MTP cost part {index} prices a different unit set")
+        if set(payload["wire_bytes"]) != set(costs):
+            raise ValueError(f"MTP cost part {index} serializes a different unit set")
         for unit, by_rung in payload["costs"].items():
-            if set(payload["wire_bytes"].get(unit, {})) != set(by_rung):
-                raise ValueError(f"MTP cost part {index}, unit {unit}: wire bytes and costs "
-                                 "name different rungs")
             twice = sorted(set(by_rung) & set(costs[unit]))
             if twice:
                 raise ValueError(f"MTP unit {unit}: rung(s) {twice} priced by more than one part")
             costs[unit].update(by_rung)
-            wire[unit].update(payload["wire_bytes"][unit])
+            by_wire = payload["wire_bytes"][unit]
+            repeated_wires = sorted(set(by_wire) & set(wire[unit]))
+            if repeated_wires:
+                raise ValueError(f"MTP unit {unit}: wire rung(s) {repeated_wires} serialized by more than one part")
+            wire[unit].update({rung: _STORAGE.integer(value, where=f"wire_bytes[{unit}][{rung}]", minimum=1)
+                               for rung, value in by_wire.items()})
     return {
         "schema": SCHEMA,
         "mtp_layer": first["mtp_layer"],
@@ -106,6 +110,7 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
             "probe_identity_sha256": probes[0],
             "parts": [{**({"source": sources[index]} if sources else {}),
                        "rungs": sorted({rung for rows in payload["costs"].values() for rung in rows}),
+                       "wire_rungs": sorted({rung for rows in payload["wire_bytes"].values() for rung in rows}),
                        "provenance": payload.get("provenance", {})}
                       for index, payload in enumerate(payloads)],
         },
@@ -150,6 +155,7 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
     bindings = {name: {} for name in payload["costs"]}
     projection = None
     seen = set()
+    seen_wires = set()
     for index, part in enumerate(parts):
         m4_ref = part.get("source")
         m4 = _bound_payload(m4_ref, label=f"MTP M4 part {index}")
@@ -163,6 +169,9 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
         rungs = sorted({fmt for by_fmt in m4["costs"].values() for fmt in by_fmt})
         if rungs != part.get("rungs"):
             raise ValueError(f"MTP M4 part {index} rung roster differs from merged cost")
+        wire_rungs = sorted({fmt for by_fmt in m4.get("wire_bytes", {}).values() for fmt in by_fmt})
+        if wire_rungs != part.get("wire_rungs"):
+            raise ValueError(f"MTP M4 part {index} wire roster differs from merged cost")
         anchors = m4["provenance"].get("tessera_joint_anchors", {})
         m3 = _bound_payload(anchors.get("inputs", {}).get("merged_cost"),
                             label=f"MTP M3 price {index}")
@@ -186,17 +195,23 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
                 if cell in seen:
                     raise ValueError(f"MTP {name}@{fmt} is priced by multiple parts")
                 seen.add(cell)
-                if (payload["costs"].get(name, {}).get(fmt) != row
-                        or payload["wire_bytes"].get(name, {}).get(fmt) !=
-                        m4.get("wire_bytes", {}).get(name, {}).get(fmt)):
+                if payload["costs"].get(name, {}).get(fmt) != row:
                     raise ValueError(f"MTP {name}@{fmt} differs from bound M4 price")
-                if (m3.get("costs", {}).get(name, {}).get(fmt, {}).get("wire_bytes") !=
-                        m4["wire_bytes"][name][fmt]):
+        for name, by_fmt in m4["wire_bytes"].items():
+            if name not in payload["costs"]:
+                raise ValueError(f"MTP M4 part {index} serializes an unknown unit")
+            for fmt, wire_bytes in by_fmt.items():
+                cell = (name, fmt)
+                if cell in seen_wires:
+                    raise ValueError(f"MTP {name}@{fmt} wire is bound by multiple parts")
+                seen_wires.add(cell)
+                wire_bytes = _STORAGE.integer(wire_bytes, where=f"wire_bytes[{name}][{fmt}]", minimum=1)
+                if payload["wire_bytes"].get(name, {}).get(fmt) != wire_bytes:
+                    raise ValueError(f"MTP {name}@{fmt} differs from bound M4 wire")
+                if m3.get("costs", {}).get(name, {}).get(fmt, {}).get("wire_bytes") != wire_bytes:
                     raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
                 if name not in units:
-                    # Dense/shared rows are priced by the same M3 source but
-                    # are not members of its routed expert projection. Their
-                    # selected BF16 passthrough needs no producer wire.
+                    # A selected dense BF16 passthrough needs no expert wire.
                     continue
                 parsed = parse_tessera_format_name(fmt)
                 if parsed is None:
@@ -210,16 +225,16 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
                     tep.locate_expert_wire(checked, name=name, wire_dir=Path(root))
                 except tep.ExpertProjectionError as exc:
                     raise ValueError(f"MTP {name}@{fmt} lacks its priced wire: {exc}") from exc
-                if (m4["wire_bytes"][name][fmt] !=
-                        checked["blob_bytes"]):
+                if wire_bytes != checked["blob_bytes"]:
                     raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
                 receipts[name][fmt] = checked
                 wire_roots[name][fmt] = root
                 bindings[name][fmt] = {"m4": dict(m4_ref),
                                        "m3": dict(anchors["inputs"]["merged_cost"])}
-    if seen != {(name, fmt) for name, by_fmt in payload["costs"].items()
-                for fmt in by_fmt}:
+    if seen != {(name, fmt) for name, by_fmt in payload["costs"].items() for fmt in by_fmt}:
         raise ValueError("MTP bound parts do not cover the merged priced cells")
+    if seen_wires != {(name, fmt) for name, by_fmt in payload["wire_bytes"].items() for fmt in by_fmt}:
+        raise ValueError("MTP bound parts do not cover the merged wire cells")
     return {**payload, "mtp_expert_projection": projection,
             "mtp_expert_wires": receipts, "mtp_expert_wire_roots": wire_roots,
             "mtp_expert_source_bindings": bindings,
@@ -281,12 +296,8 @@ def _unit_storage(payload, unit):
 
 def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices=None,
                quality_provenance=None) -> tuple[dict, dict]:
-    """``{unit: {rung: (E, bytes)}}`` and the priced rungs the runtime does not attest.
-
-    BF16 passthrough is added where the source is BF16. A priced rung that
-    ``eligible(unit, rung)`` refuses is not offered; it is returned as
-    ``{rung: [units]}`` so the narrowing is recorded, not inferred.
-    """
+    """Price the exact wire menu from measured anchors or bound proposals."""
+    from .rung_allowability import owner_for_format
     groups = payload["groups"]
     units = [unit for members in groups.values() for unit in members]
     if set(units) != set(payload["costs"]) or len(units) != len(set(units)):
@@ -294,19 +305,20 @@ def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices
     rows, unattested = {}, {}
     for unit in units:
         wire, params = _unit_storage(payload, unit)
-        if set(wire) != set(payload["costs"][unit]):
+        measured = payload["costs"][unit]
+        proposals = (quality_prices or {}).get(unit, {})
+        if set(wire) != set(measured) and rung_allowability is None and not proposals:
             raise ValueError(f"MTP unit {unit}: wire bytes and costs name different rungs")
-        if _BF16 in payload["costs"][unit]:
+        if _BF16 in measured or _BF16 in wire:
             raise ValueError(f"MTP unit {unit}: BF16 is passthrough, not a priced row")
         rows[unit] = {}
-        for rung, row in payload["costs"][unit].items():
+        for rung in wire:
             if eligible is not None and not eligible(unit, rung):
                 unattested.setdefault(rung, []).append(unit)
                 continue
-            from .rung_allowability import owner_for_format
             owner = owner_for_format(rung_allowability, rung)
-            price = (owner.chord_cost(rung, unit=unit, costs=payload["costs"][unit])
-                     if owner is not None else (quality_prices or {}).get(unit, {}).get(rung, row))
+            price = (owner.chord_cost(rung, unit=unit, costs=measured)
+                     if owner is not None else proposals.get(rung, measured.get(rung)))
             if price is None:
                 unattested.setdefault(rung, []).append(unit)
                 continue
@@ -316,7 +328,6 @@ def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices
         if payload["source_dtype"][unit] == "bfloat16":
             rows[unit][_BF16] = (0.0, 2 * params)
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
-
 
 def _recompute_recorded_quality(payload, recorded):
     """Recompute proposal prices from their actual bound anchors before export."""

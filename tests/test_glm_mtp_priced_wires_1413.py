@@ -25,24 +25,28 @@ def _write(path, payload):
 
 @pytest.fixture
 def bound_parts(tmp_path):
+    return _bound_parts_for_rates(tmp_path, (1024, 896))
+
+
+def _bound_parts_for_rates(tmp_path, rates, *, probe=None):
     producer = _projection(experts=(0,))
     declared = _declared(experts=(0,))
     carried = tep.carried_projection(
         producer, tep.bind_expert_projection(producer, declared=declared),
         request=tep.stack_plan_request({STACK: ("E4M3", 1024)}), tool="fixture")
     _source, units, _stacks = tep.carried_units(carried)
-    probe = _probe()
+    probe = probe or _probe()
     parts = []
-    for index, fmt in enumerate((FMT, FMT_LOW)):
+    for index, rate in enumerate(rates):
         root = tmp_path / f"r{index}"
         root.mkdir()
-        rate = 1024 if index == 0 else 896
+        fmt = f"TESSERA_E4M3_K1_R{rate}"
         records = {}
         for name, unit in units.items():
             record = _record(root, name, unit, q256=rate)
-            if index:
+            if rate != 1024:
                 old = root / record["file"]
-                record["file"] = record["file"].replace("R1024", "R896")
+                record["file"] = record["file"].replace("R1024", f"R{rate}")
                 old.rename(root / record["file"])
             records[name] = record
         m3_costs = {name: {fmt: {"wire_bytes": record["blob_bytes"],
@@ -171,3 +175,52 @@ def test_enrichment_refuses_unbound_or_unpriced_wires(bound_parts, problem):
                                  sources=[bound for _, bound in parts])
     with pytest.raises((ValueError, FileNotFoundError)):
         enrich_mtp_cost_wires(merged)
+
+
+def test_anchor_only_quality_selects_and_exports_the_bound_fractional_wire(tmp_path, monkeypatch):
+    from prismaquant import format_registry as registry
+    from prismaquant.glm_mtp_selection import merge_mtp_costs, select_mtp_rungs, backfill_mtp_selection_wires
+    from canonical_quality_fixtures import scope_for
+    from test_canonical_quality_quantity import owner_for_rows
+    probe = _probe()
+    probe.update(calibration_shape=[512, 512], token_scope="all")
+    parts, units, carried = _bound_parts_for_rates(tmp_path, (1024, 768, 896), probe=probe)
+    half = "TESSERA_E4M3_K1_R896"
+    for index, (part, source) in enumerate(parts):
+        if index == 2:
+            part["costs"] = {name: {} for name in part["costs"]}
+        else:
+            fmt = next(iter(next(iter(part["costs"].values()))))
+            value = 1.0 if index == 0 else 2.0
+            for name in part["costs"]:
+                row = _row(name, fmt, [value] * 4, probe)
+                row["quality_scope"] = scope_for(row)
+                part["costs"][name][fmt] = row
+        source.update(_write(Path(source["path"]), part))
+    merged = merge_mtp_costs([part for part, _ in parts], sources=[source for _, source in parts])
+    assert all(half not in rows for rows in merged["costs"].values())
+    owner = owner_for_rows(monkeypatch)
+    budget = 16384 + sum(parts[2][0]["wire_bytes"][name][half] for name in units)
+    selection = select_mtp_rungs(merged, byte_budget=budget, constants=CONSTANTS,
+        formats=[half, "BF16"], rung_allowability={"TESSERA_E4M3_K1": owner})
+    assignment = selection.pop("assignment")
+    assert {assignment[name] for name in units} == {half}
+    assert assignment[DENSE] == "BF16"
+    assert selection["resident_bytes"] == budget
+    assert selection["E"] == 1.25 * len(units)
+    cost_path = tmp_path / "anchor-only.pkl"
+    _write(cost_path, merged)
+    for key in ("mtp_expert_projection", "mtp_expert_wires", "mtp_expert_wire_roots",
+                "mtp_expert_source_bindings", "mtp_expert_wire_binding_schema"):
+        selection.pop(key)
+    config = {name: registry.get_format(fmt).autoround_config() for name, fmt in assignment.items()}
+    config["__prismaquant__"] = {"mtp_selection": {**selection, "cost_path": str(cost_path),
+                                                "units": len(assignment)}}
+    exported = backfill_mtp_selection_wires(config, cost_path)
+    record = exported["__prismaquant__"]["mtp_selection"]
+    assert record["mtp_expert_projection"] == carried
+    for name in units:
+        receipt = record["mtp_expert_wires"][name]
+        assert receipt["identity"]["recipe"]["q256"] == 896
+        assert receipt["blob_bytes"] == parts[2][0]["wire_bytes"][name][half]
+        assert record["mtp_expert_source_bindings"][name]["m4"] == parts[2][1]
