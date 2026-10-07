@@ -22,6 +22,9 @@
 - **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
   The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
 
+- **Shared-expert roster migration.** The quality population reads census names and the profile fused-owner seam.
+  It no longer reads the removed duplicate fused-group table.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic

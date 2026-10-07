@@ -31910,6 +31910,9 @@ The Tessera lane reads fused members from the runtime's dense_ownership module.
 It uses the existing parsed source config to identify KDA layers and standalone MLA queries.
 No second unit schema or member table exists in PrismaQuant.
 The existing pin-lift controls select commissioned projection units without a default change.
+The quality population derives its shared-expert parent from census names and the same profile fused-owner seam.
+It keeps no duplicate runtime group table.
+
 
 The source router has a two-dimensional parameter and a stock FP32 Linear operation.
 The profile can expose that actual parameter owner only when an explicit pin lift selects it.
