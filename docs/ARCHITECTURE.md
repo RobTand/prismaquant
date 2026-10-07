@@ -26376,11 +26376,14 @@ The whole configuration SHA and candidate input provenance use the existing `sea
 Default dev mode stamps drift and retains stored data. Schema, paired population,
 owned-byte, numerical and gate checks remain unconditional.
 
-The task backend uses `lm-eval[hf]` 0.4.12. Inputs declare tasks, tokenizer,
-device, dtype, sample count, few-shot count and all four seeds. The receipt
-keeps task configurations, versions, model identity, samples, raw results and
-numerical metrics. Fixed task metadata is not a metric. Numerical metrics
-must stay finite. Metadata-only results refuse.
+The task backend is HF-only and uses `lm-eval[hf]` 0.4.12.
+It requires a current checkpoint that its Hugging Face model classes can load.
+It does not load Tessera serving bytes. Its scores do not prove native task quality.
+
+Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
+The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
+Fixed task metadata is not a metric. Numerical metrics must stay finite.
+Metadata-only results refuse.
 
 CPU evidence cannot establish GLM quality, served quality or whole-instrument equivalence.
 
@@ -26424,8 +26427,140 @@ construction-census policy, partitions and the architecture roster. Consumers
 use `tessera_export_lane.export_setup`,
 `lane_spec_for_container("tessera").wired_architectures`, and
 `export_partition.whole_layer_partitions`. Cards cannot admit an architecture.
-CPU setup keeps `runtime_qualification: not_run` and cannot fill a runtime census. See
-[the operator guide](ship_gates.md) for inputs, submission and evidence rules.
+CPU setup keeps `runtime_qualification: not_run` and cannot fill a runtime census.
+
+#### 7.0.1 Prepare the configured action
+
+Export the artifact and open its canonical `shipcard.json` first.
+Keep job outputs outside the artifact. Use a new job result path.
+Existing inputs, results and artifact files are not output destinations.
+Actual stage outputs and logs must remain distinct from all protected files.
+The runner derives preflight paths once and creates logs exclusively.
+
+The configuration schema is `prismaquant.ship_gates/1`. Supply these fields:
+
+- `schema`: the version above.
+- `artifact`: the exported checkpoint directory.
+- `topology`: explicit `tensor_parallel_size` and `nnodes`, plus the required stock gold-engine options.
+- `serve_image`: the actual immutable serving image reference.
+- `inputs`: scientific configurations, teacher payload and metadata, token inputs and existing evidence files.
+- `stages`: an ordered list with the card's `required_slots`, `offline.g3` and `task_suite` exactly once.
+
+Multi-node topology also needs explicit rank, master address, port and both
+multiprocessing backend selections. PrismaBuild's data manifest must declare
+shared inputs in their read order.
+
+Each stage has a unique `output` path. Quality stages also have a `config` path.
+Gold stages have an `args` array. The runner owns their model, output, image
+and topology arguments. Other stages have an `argv` array and `record` path.
+Use `record: "{shipcard}"` when a real producer fills the canonical card.
+Use `record: "{output}"` when it writes a slot record for the existing verifier.
+
+Whole-argument substitutions are `{artifact}`, `{shipcard}`, `{output}`,
+`{image}`, `{tp}` and `{nnodes}`. Other arguments stay literal.
+Use actual producer commands. Do not replace missing evidence with a pass flag.
+
+Use the existing `model_wikitext_inputs/2` producer for generic models.
+Pass its independent file hash with `--wikitext-inputs-sha256`.
+Do not normalize WikiText a second time. Served KL needs the stored teacher
+and its metadata. Use `--score-positions all`; a final-position screen cannot close that slot.
+
+| Stage | Existing producer or verifier | Required evidence |
+|---|---|---|
+| `offline.g3` | `python -m prismaquant.g3_v2 --config FILE --output JSON` | Paired teacher panel, bound candidate and explicit criteria |
+| `task_suite` | `python -m prismaquant.task_suite --config FILE --output JSON` | Current HF-loadable artifact, tokenizer, tasks, sampling and explicit criteria |
+| `native_export.eager` | Lane eager producer; native compressed-tensors uses `validate_native_export --shipcard` | Actual eager generation record |
+| `native_export.graph` | Lane graph producer; native compressed-tensors uses `validate_native_export --no-enforce-eager --shipcard` | Actual graph record under the lane contract |
+| `ship_gate` | `validate_quantized_model --base-url URL --model-name NAME --artifact-dir DIR --shipcard CARD` | Numeric and boundary ledger from the bound live endpoint |
+| `gold.kl` | Runner-owned `measure_vllm_full_kl` student entry point | Stored teacher, metadata, all-position protocol and observed no-spec execution |
+| `gold.ppl` | Runner-owned `measure_vllm_wikitext_ppl` | Generic token payload and independent file hash |
+| `route.sweep`, when declared | `validate_native_export --route-sweep-out`, then `shipcard_cli fill-route-sweep` | Actual served sweep per configured rank |
+| `route.census`, when declared | Public Tessera census producer, then `shipcard_cli fill-route-census` | Complete census and exact allocation binding |
+| `route.trace`, when declared | Lane trace capture, then `shipcard_cli fill-route-trace` | Actual trace per rank and explicit rank count |
+| `uniform_control`, when required | Installed `tessera.uniform_control verify`, then `shipcard_cli fill-control` | Producer block and the control checkpoint's own served gold record |
+
+Keep lane-specific route slots distinct. Keep graph, speculative-decode,
+calibration, artifact, runtime and byte-matched control checks in force.
+A serving deployment is an explicit input. Its endpoint must run on the
+admitted host under the declared image and artifact. Unobserved service state
+is not evidence. A lane producer may need its serving owner's lifecycle driver.
+
+#### 7.0.2 Submit and retain evidence
+
+Inspect the published client's `--help` before submission.
+Run disk admission on every eligible host. Retain its complete JSON for the
+checkout, output, scratch and CAS mounts. Supply actual resource demand for
+the configured workload, including the controller and concurrent children.
+The examples use operator-supplied demands; they are not workload requirements.
+
+`CLIENT`, `CHECKOUT`, `CONFIG`, `RESULT`, `DATA_MANIFEST` and interpreter
+variables name actual operator paths. CPU preflight uses the same entry point:
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd "$CHECKOUT" --tag x86 --cpus "$CPUS" --demand "mem_gb=$HOST_MEMORY_GB" \
+  --max-attempts 1 --timeout-s "$TIMEOUT_S" --data-manifest "$DATA_MANIFEST" \
+  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+  --env OPENBLAS_NUM_THREADS=1 --env CUDA_VISIBLE_DEVICES= --env TMPDIR=/tmp \
+  --detach -- "$CPU_PYTHON" -m prismaquant.ship_gates \
+  --config "$CONFIG" --output "$RESULT" --preflight
+```
+
+After CPU preflight succeeds, the single-host production command uses the same
+configuration and module. Declare aggregate CPUs, host memory and the GPU
+subset from the actual workload. The serving image must already exist on an
+eligible host. `IMAGE` is immutable; `SERVING_PYTHON` names its interpreter.
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd "$CHECKOUT" --tag gb10 --cpus "$CPUS" --gpu \
+  --demand "mem_gb=$HOST_MEMORY_GB" --gpu-memory-gb "$GPU_MEMORY_GB" \
+  --container-image "$IMAGE" --max-attempts 1 --timeout-s "$TIMEOUT_S" \
+  --data-manifest "$DATA_MANIFEST" --residency stage \
+  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
+  --detach -- "$SERVING_PYTHON" -m prismaquant.ship_gates \
+  --config "$CONFIG" --output "$RESULT"
+```
+
+This example grants no GPU priority. D49 still sets GPU order.
+A single-host declaration does not cover the two-Spark target.
+The HF-only task backend cannot complete native task quality for Tessera bytes.
+Keep that task limitation explicit in a Tessera production plan.
+An HF proxy score cannot replace current-artifact native task evidence.
+
+For multi-host submission, use published `pbgang.py --manifest M --cwd CHECKOUT`.
+Each member needs explicit topology, resource, image and data declarations.
+The kernels-owned `rank_window.py`, `managed_window.py` and `tp2_recipe.py`
+own rank lifecycle. Their reported recipe covers eager, graph, KL probe and
+determinism. Full route, served PPL, offline quality and complete one-action
+coverage remain unverified. The native gang orders no stages and stops no successful peers.
+
+Do not fork that lifecycle or add another transport.
+Full ordered stages and peer teardown remain explicit production prerequisites.
+The runner refuses multi-host execution without that complete lifecycle.
+CPU preflight can inspect its topology without qualifying it.
+
+Retain each action key at submission. Start the published completion client:
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbwait.py \
+  "$ACTION_KEY" --wait-s "$WAIT_S" --json
+```
+
+Run that client under the existing supervisor. Do not poll with an agent.
+Inspect the native ending, process exit, logs, result claim, CAS payload and
+receipt. Keep failed actions. A submission is not completion.
+
+The runner atomically writes `prismaquant.ship_gates_result/1` after each stage.
+It retains process exits, output and log paths, file hashes, source and device
+population. Compare retained files with the hashes printed in stdout.
+PrismaBuild seals input identity, not arbitrary output files.
+A final pass needs every quality criterion and required card slot.
+Publication still uses the existing `publish_artifact` gate.
+
+Use `--verify-only` to replay stored quality and card evidence without new inference.
+Missing evidence still refuses. A CPU preflight, selected tests or primitive
+parity does not establish serving, model quality or multi-host behavior.
 
 
 ### 7.1 What runs where

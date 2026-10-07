@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +14,7 @@ import subprocess
 import sys
 
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+from prismaquant.digests import file_sha256hex
 from prismaquant.model_profiles import detect_profile
 from prismaquant.shipcard import _strict_json_object, load_shipcard, required_slots, verify
 
@@ -36,14 +36,6 @@ def _read(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
-
-
-def _sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _write(path: Path, value: dict) -> None:
@@ -131,7 +123,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
         if not source.is_file():
             raise ValueError(f"input is not a file: {source}")
         input_evidence.append({"path": str(source), "bytes": source.stat().st_size,
-                               "sha256": _sha(source)})
+                               "sha256": file_sha256hex(source)})
     protected = {path} | {Path(item).resolve() for item in inputs}
     protected.update(Path(stage["config"]).resolve() for stage in stages if "config" in stage)
     configured_outputs = [Path(stage["output"]).resolve() for stage in stages]
@@ -155,7 +147,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
                     "architectures": list(profile.declared_architectures()),
                     "lane": card.get("lane"), "model_sha": card["model_sha"],
                     "topology": engine, "required_slots": sorted(owed - set(QUALITY_STAGES)),
-                    "inputs": input_evidence, "config_sha256": _sha(path),
+                    "inputs": input_evidence, "config_sha256": file_sha256hex(path),
                     "stage_destinations": stage_destinations}
 
 
@@ -197,7 +189,7 @@ def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str
         if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
             raise ValueError("task backend must measure the configured current artifact")
     result = _read(output)
-    gate = verify_result(result, config, config_sha256=_sha(config_path))
+    gate = verify_result(result, config, config_sha256=file_sha256hex(config_path))
     if result.get("stage") != QUALITY_STAGES[stage["id"]]:
         raise ValueError("quality result stage differs")
     if stage["id"] == "offline.g3" and result["measurement"]["metric_kind"] != "offline_decoded_kl":
@@ -302,7 +294,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                                                    stderr=subprocess.STDOUT, check=False)
                     outcome["returncode"] = completed.returncode
                     if stage_output.is_file():
-                        outcome["sha256"] = _sha(stage_output)
+                        outcome["sha256"] = file_sha256hex(stage_output)
                         outcome["result"] = _read(stage_output)
                     if completed.returncode:
                         raise ValueError(f"stage process exited {completed.returncode}")
@@ -323,7 +315,7 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                     from prismaquant.dev_mode import dev_stamp
                     report.update(dev_stamp(timestamped=False))
                 if stage_output.is_file():
-                    outcome["sha256"] = _sha(stage_output)
+                    outcome["sha256"] = file_sha256hex(stage_output)
             except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
                 outcome.update(status="failed", error=str(exc))
                 report["problems"].append(f"{identity}: {exc}")
@@ -359,12 +351,12 @@ def main(argv: list[str] | None = None) -> int:
     evidence = []
     result_path = Path(args.output).resolve()
     if result_path.is_file():
-        evidence.append({"path": str(result_path), "sha256": _sha(result_path)})
+        evidence.append({"path": str(result_path), "sha256": file_sha256hex(result_path)})
     for stage in report["stages"]:
         for key in ("output", "log"):
             path = Path(stage[key]) if key in stage else None
             if path is not None and path.is_file():
-                evidence.append({"path": str(path), "sha256": _sha(path)})
+                evidence.append({"path": str(path), "sha256": file_sha256hex(path)})
     print(json.dumps({"status": report["status"], "evidence": evidence,
                       "problems": report["problems"]}))
     return 1 if report["status"] == "refused" else 0

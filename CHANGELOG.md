@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
 - Consume the shared G3 array verifier through the quality owner (#2413).
   Add verify-only consumer cases for edited summaries, consistent edited gates,
   missing arrays and corrupt bytes. Preserve unconditional numerical checks.
