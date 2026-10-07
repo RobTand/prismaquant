@@ -73,6 +73,8 @@ def main(argv=None):
         "tokenizer": artifact(model_path/"tokenizer.json"), "panel": panel, "teacher": teacher,
         "candidate": {"backend": "streamed", "model": str(model_path), "offload_folder": str(root/"offload"),
             "assignments": [row], "production_cache": artifact(cache_path), "max_resident_bytes": rendered.nbytes,
+            "activation_specs": [{"layer": 0, "qname": qname, "kind": "dense", "role": "down_proj",
+                                  "expert": None, "family": "T8", "contract": "fp8_per_token_dynamic"}],
             "source_prefetch": {"max_cache_slots": 2, "prefetch_workers": 1, "prefetch_lookahead": 1,
                 "cache_headroom_gb": 1, "prefetch_min_available_gb": 1, "require_prefetched_residency": True}},
         "device": "cpu", "criteria": []}

@@ -78,8 +78,27 @@ def verify_result(result, config, *, config_sha256):
     for field, cls in (("identity", dict), ("population", dict), ("artifacts", list), ("limitations", list)):
         if not isinstance(result.get(field), cls):
             raise ValueError(f"quality result lacks {field}")
+    if status == "succeeded":
+        if stage == "g3_v2" and result["identity"].get("candidate_inputs") != g3_candidate_binding(config):
+            raise ValueError("G3 current candidate input binding differs")
+        if stage == "task_suite" and (result["identity"].get("model") != config["backend"]["pretrained"]
+                or result["identity"].get("tokenizer") != config["backend"]["tokenizer"]):
+            raise ValueError("task current model or tokenizer input differs")
     return expected
 
+
+def g3_candidate_binding(config):
+    """Name current offline inputs. Do not call them a served artifact."""
+    from .cost_stage_checkpoint import canonical_json_sha256
+    candidate = config["candidate"]
+    if candidate["backend"] == "retained_logits":
+        return {"backend": "retained_logits", "receipt": candidate["receipt"]}
+    if candidate["backend"] != "streamed":
+        raise ValueError("unsupported G3 candidate backend")
+    return {"backend": "streamed", "model": str(Path(candidate["model"]).resolve()),
+            "production_cache": candidate.get("production_cache"),
+            "assignments_sha256": canonical_json_sha256(candidate["assignments"]),
+            "rendered_wires": [row["render"]["wire"] for row in candidate["assignments"] if row.get("render")]}
 
 def read_binding(binding, label):
     from .stage_inputs import read_bound

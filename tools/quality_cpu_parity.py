@@ -61,7 +61,10 @@ def main(argv=None):
     mean = float(np.concatenate(list(retained)).astype(np.float64).mean())
     expected = result["teacher2"]["mean_kl"]
     per_window = [float(row.mean()) for row in retained]
-    checks["retained_mean_reduction"] = mean == expected
+    unit_roundoff = np.finfo(np.float64).eps / 2
+    terms = retained.size
+    reduction_bound = (terms*unit_roundoff)/(1-terms*unit_roundoff)*float(np.abs(retained).mean())
+    checks["retained_mean_within_fp64_reduction_bound"] = abs(mean-expected) <= reduction_bound
     checks["retained_window_reduction"] = per_window == result["teacher2"]["per_window_mean"]
     if not all(checks.values()):
         raise ValueError("CPU numerical parity failed: "+repr(checks))
@@ -72,6 +75,11 @@ def main(argv=None):
         "accepted_source_head": "658d6b56af22970d862dab167668176e4329c1d3", "reference_files": reference_files,
         "retained_result": artifact(args.retained_result), "retained_array": artifact(args.retained_array),
         "retained_mean": mean, "retained_mean_difference": mean-expected,
+        "retained_mean_absolute_difference": abs(mean-expected),
+        "retained_mean_relative_difference": abs(mean-expected)/abs(expected) if expected else None,
+        "retained_mean_bitwise": mean == expected, "fp64_reduction_bound": reduction_bound,
+        "reduction_dtype": "float64", "reduction_order": "concatenate ordered window rows, cast float64, NumPy mean",
+        "reduction_bound_derivation": "gamma_N times mean(abs(values)); unit roundoff is float64 epsilon divided by two",
         "limitations": ["CPU parity does not establish native GPU equality.",
                         "Retained arrays prove reduction parity, not a new full-model measurement."]}
     write_result(args.output, report)

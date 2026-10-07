@@ -120,6 +120,8 @@ def measure_tasks(config, output):
     tokenizer = lm.tokenizer
     identity = {"backend": _versions(), "model_artifact": source, "model": config["backend"]["pretrained"],
                 "tokenizer": config["backend"]["tokenizer"], "tokenizer_vocab_size": len(tokenizer),
+                "tokenizer_files": [artifact(path) for path in sorted(Path(config["backend"]["tokenizer"]).glob("*"))
+                    if path.is_file() and path.suffix in (".json", ".model", ".txt")],
                 "tokenizer_commit": tokenizer.init_kwargs.get("_commit_hash"),
                 "task_versions": raw.get("versions"), "task_configs": payload.get("configs")}
     return {"metrics": metrics, "identity": identity,

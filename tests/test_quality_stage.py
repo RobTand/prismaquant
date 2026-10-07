@@ -1,7 +1,7 @@
 """Quality receipts separate measurements from configured decisions."""
 import copy
 import pytest
-from prismaquant.quality_stage import evaluate_criteria, verify_result
+from prismaquant.quality_stage import evaluate_criteria, verify_result, g3_candidate_binding
 
 
 def test_missing_criteria_is_not_a_pass():
@@ -29,13 +29,16 @@ def test_missing_metric_refuses():
 
 
 def test_verifier_replays_gate_and_config_identity():
-    config = {"schema": "prismaquant.g3_v2/1", "criteria": [{"metric": "mean_kl", "op": "le", "threshold": 0.1}]}
+    config = {"schema": "prismaquant.g3_v2/1", "candidate": {"backend": "retained_logits",
+        "receipt": {"path": "candidate.json", "sha256": "c"*64}},
+        "criteria": [{"metric": "mean_kl", "op": "le", "threshold": 0.1}]}
     result = {"schema": "prismaquant.quality_stage/1", "stage": "g3_v2",
         "configuration": {"schema": config["schema"], "sha256": "a"*64, "path": "config.json"},
         "measurement": {"status": "succeeded", "metric_kind": "offline_decoded_kl",
                         "metrics": {"mean_kl": 0.2}, "error": None},
         "gate": evaluate_criteria({"mean_kl": 0.2}, config["criteria"]),
-        "identity": {}, "population": {}, "artifacts": [], "limitations": []}
+        "identity": {"candidate_inputs": g3_candidate_binding(config)},
+        "population": {}, "artifacts": [], "limitations": []}
     assert verify_result(result, config, config_sha256="a"*64)["status"] == "failed"
     changed = copy.deepcopy(result)
     changed["gate"]["status"] = "passed"
@@ -43,3 +46,7 @@ def test_verifier_replays_gate_and_config_identity():
         verify_result(changed, config, config_sha256="a"*64)
     with pytest.raises(ValueError, match="configuration"):
         verify_result(result, config, config_sha256="b"*64)
+    changed = copy.deepcopy(result)
+    changed["identity"]["candidate_inputs"]["receipt"]["sha256"] = "d"*64
+    with pytest.raises(ValueError, match="candidate"):
+        verify_result(changed, config, config_sha256="a"*64)

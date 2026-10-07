@@ -12,7 +12,7 @@ import torch
 
 from .digests import bytes_sha256hex, file_sha256hex
 from .g3_numerics import token_kl
-from .quality_stage import artifact, cli, read_binding
+from .quality_stage import artifact, cli, read_binding, g3_candidate_binding
 
 
 def _g3_json(binding, label):
@@ -44,7 +44,7 @@ def _array(row, shape, *, verify):
     return array
 
 
-def prepare_g3(config, *, verify=False):
+def prepare_g3(config, *, verify=False, check_device=True):
     """Read the declared population, actual prefix IDs and paired teacher."""
     protocol = _g3_json(config["protocol"], "G3 protocol")
     if protocol.get("schema") != "prismaquant.g3_protocol/2":
@@ -93,7 +93,7 @@ def prepare_g3(config, *, verify=False):
     device = torch.device(config["device"])
     if device.type not in ("cpu", "cuda"):
         raise ValueError("G3 device must be CPU or CUDA")
-    if device.type == "cuda" and not torch.cuda.is_available():
+    if check_device and device.type == "cuda" and not torch.cuda.is_available():
         raise ValueError("G3 requested CUDA without a visible device")
     candidate = config["candidate"]
     if candidate["backend"] == "retained_logits":
@@ -117,13 +117,14 @@ def prepare_g3(config, *, verify=False):
 
 
 def preflight_g3(config):
-    protocol, teacher, inputs, names, device, retained = prepare_g3(config)
+    protocol, teacher, inputs, names, device, retained = prepare_g3(config, check_device=False)
     return {"identity": {"teacher": config["teacher"], "tokenizer": config["tokenizer"],
-                         "source_model_identity": teacher.get("source_model_identity")},
+                         "candidate_inputs": g3_candidate_binding(config),
+                         "source_model_identity": teacher.get("source_model_identity", teacher.get("source"))},
             "population": {"window_ids": names, "windows": len(inputs),
                 "input_tokens": len(inputs[0][0]), "scored_positions_per_window": protocol["context_length"]-1,
                 "prefix_ids": protocol["prefix_ids"], "vocab_size": protocol["vocab_size"],
-                "device": str(device), "backend": config["candidate"]["backend"]},
+                "device": "cpu", "requested_device": str(device), "backend": config["candidate"]["backend"]},
             "limitations": ["Preflight reads configuration and array shapes. It does not measure quality."]}
 
 
@@ -244,8 +245,13 @@ def _stream(config, protocol, inputs, consume):
                         jobs.append((view, rendered))
                 for view, rendered in jobs:
                     view.copy_(rendered)
+                packed = {projected[spec.qname].module for spec in specs_by_layer.get(layer, [])
+                          if spec.kind == "routed" and spec.qname in projected}
+                if len(packed) > 1:
+                    raise ValueError("G3 activation plan has more than one packed module in a layer")
                 hooks = inject_layer(runner.layers[layer], specs_by_layer[layer], tp=protocol["tensor_parallel_size"],
-                                     unit_views=views, allow_empty=True) if layer in specs_by_layer else nullcontext()
+                    unit_views=views, unit_modules=modules, packed_module=next(iter(packed), None),
+                    allow_empty=True) if layer in specs_by_layer else nullcontext()
                 with hooks:
                     for tokens in inputs:
                         forward_batch(tokens)
@@ -312,7 +318,8 @@ def measure_g3(config, output):
     return {"metrics": {"mean_kl": float(allk.mean()), "p99_kl": float(np.quantile(allk, 0.99)),
                 "max_kl": float(allk.max()), "top1_agreement": float(np.mean([row["top1_agreement"] for row in details]))},
         "identity": {"teacher": config["teacher"], "tokenizer": config["tokenizer"], "protocol": config["protocol"],
-                     "source_model_identity": teacher.get("source_model_identity"), "execution": execution,
+                     "candidate_inputs": g3_candidate_binding(config),
+                     "source_model_identity": teacher.get("source_model_identity", teacher.get("source")), "execution": execution,
                      "torch": torch.__version__},
         "population": {"device": str(device), "cuda_available": torch.cuda.is_available(), "skips": [],
             "window_ids": names, "windows": len(rows), "positions": int(allk.size), "per_window": details,

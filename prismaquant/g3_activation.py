@@ -240,8 +240,9 @@ class _PackedActivationMode(TorchFunctionMode):
 @contextmanager
 def inject_layer(layer_module, unit_specs, decoded_weights=None, *, kinds=KINDS,
                  roles=ROLES, families=frozenset(("T4", "T8", "BF16")), amplitude=1,
-                 weight=False, activation=True, tp=2, allow_empty=False, unit_views=None):
-    """Shared parent interface; all changes restored on success or exception.
+                 weight=False, activation=True, tp=2, allow_empty=False, unit_views=None,
+                 unit_modules=None, packed_module=None):
+    """Use profile-selected modules. Restore each change on exit.
 
     unit_specs: UnitSpec list for this layer, with actual role/expert scales.
     decoded_weights: qname -> actual FP32 or BF16 decoded [out,in] tensor.
@@ -323,10 +324,12 @@ def inject_layer(layer_module, unit_specs, decoded_weights=None, *, kinds=KINDS,
             for spec in active.values():
                 if spec.kind == "routed":
                     continue
-                module = layer_module.mlp.shared_experts if spec.kind == "shared" else layer_module.mlp
-                handles.append(getattr(module, spec.role).register_forward_pre_hook(pre_hook(spec), with_kwargs=True))
+                module = unit_modules[spec.qname]
+                handles.append(module.register_forward_pre_hook(pre_hook(spec), with_kwargs=True))
             if any(s.kind == "routed" for s in active.values()):
-                experts = layer_module.mlp.experts
+                if packed_module is None:
+                    raise ValueError("routed activation requires its profile-selected packed module")
+                experts = packed_module
                 had_instance_forward = "forward" in experts.__dict__
                 previous = experts.__dict__.get("forward")
                 original = experts.forward
