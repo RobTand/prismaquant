@@ -106,6 +106,7 @@ def verify_task_result(result, config):
     from .schemas import strict_json_loads
     from .stage_inputs import read_bound
     validate_config(config)
+    require_hf_reader(config["backend"])
     artifacts = result["artifacts"]
     if len(artifacts) != 1:
         raise ValueError("task result requires its raw lm-eval artifact")
@@ -148,17 +149,31 @@ def verify_task_result(result, config):
             result["limitations"].append(limit)
 
 
+def require_hf_reader(backend):
+    """Refuse declared bytes that the authoritative HF reader would skip."""
+    from transformers import AutoConfig
+    from transformers.quantizers.auto import AutoHfQuantizer
+    model_config = AutoConfig.from_pretrained(backend["pretrained"], revision=backend.get("revision"),
+                                             trust_remote_code=backend["trust_remote_code"])
+    quantization = getattr(model_config, "quantization_config", None) or getattr(
+        model_config.get_text_config(decoder=True), "quantization_config", None)
+    if quantization is not None and not AutoHfQuantizer.supports_quant_method(quantization):
+        raise ValueError("HF task backend cannot read declared quant_method "
+                         + repr(quantization.get("quant_method"))
+                         + "; use a backend that reads this artifact")
+    return model_config
+
+
 def _versions():
     return {name: version(name) for name in ("lm-eval", "torch", "transformers", "datasets")}
 
 
 def preflight_tasks(config):
     validate_config(config)
-    from transformers import AutoConfig, AutoTokenizer
+    from transformers import AutoTokenizer
     from lm_eval.tasks import TaskManager, get_task_dict
     backend = config["backend"]
-    model_config = AutoConfig.from_pretrained(backend["pretrained"], revision=backend.get("revision"),
-                                            trust_remote_code=backend["trust_remote_code"])
+    model_config = require_hf_reader(backend)
     tokenizer = AutoTokenizer.from_pretrained(backend["tokenizer"], revision=backend.get("tokenizer_revision"),
                                              trust_remote_code=backend["trust_remote_code"])
     tasks = get_task_dict(config["tasks"], task_manager=TaskManager())
@@ -171,6 +186,7 @@ def preflight_tasks(config):
 
 def measure_tasks(config, output):
     validate_config(config)
+    require_hf_reader(config["backend"])
     import torch
     from lm_eval import simple_evaluate
     from lm_eval.models.huggingface import HFLM
