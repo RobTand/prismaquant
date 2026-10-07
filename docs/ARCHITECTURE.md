@@ -6,7 +6,7 @@ The reader matches kernel build and module kind without an image-digest key.
 The compatibility map preserves historical cell identifiers and image-only calls.
 The image remains provenance. Evidence, wire predicates and source checks remain unchanged.
 This change moves no pin, default, wire byte or running measurement path.
-CPU proof does not establish device qualification.
+Central processor proof does not establish device qualification.
 
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which

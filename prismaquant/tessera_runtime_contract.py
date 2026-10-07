@@ -18098,7 +18098,8 @@ def contract_answer(contract: "TesseraContract") -> dict:
                 [list(launch) for launch in sorted(cell.executes)],
                 sorted(cell.residency_modes),
             ] + ([{"image": cell.runtime_image,
-                   "execution_modes": sorted(cell.execution_modes)}]
+                   "execution_modes": sorted(cell.execution_modes),
+                   **({"kernel_build": cell.runtime_kernel_build} if cell.runtime_kernel_build else {})}]
                  if contract.requires_serving_context else [])
             # v6's per-cell runtime versions and evidence. Both are ANSWER,
             # not identity: ``cell_evidence_admits`` decides on the evidence

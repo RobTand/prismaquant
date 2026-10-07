@@ -39,3 +39,15 @@ def test_cell_parser_preserves_build_and_compatibility_key():
     assert cell.runtime_kernel_build == "build-a"
     assert cell.as_dict()["runtime"]["kernel_build"] == "build-a"
     assert lane.cell_key_compatibility([cell])["old_cell"][:2] == ("build-a", "dense")
+
+
+def test_development_projection_and_review_answer_keep_the_build_name():
+    import json
+    from prismaquant import tessera_runtime_contract as runtime
+    payload = json.loads(runtime.contract_path().read_text())
+    payload["lane_eligibility"]["cells"][0]["runtime"]["kernel_build"] = "build-a"
+    parsed = runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
+    assert parsed.cells[0].runtime_kernel_build == "build-a"
+    answer = runtime.contract_answer(parsed)
+    assert any(isinstance(value, dict) and value.get("kernel_build") == "build-a"
+               for row in answer["cells"] for value in row)
