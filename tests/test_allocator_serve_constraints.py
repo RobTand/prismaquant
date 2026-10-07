@@ -1,11 +1,10 @@
 """The constrained-Pareto axis, end to end through ``allocator.main()`` (P5c).
 
-``docs/lanes/nvfp4-cb/format-speed-policy.md`` §1 specifies quality-minimizing
-selection under hard byte AND serving constraints and, until ultraplan P5c,
-deferred the serving half. This file pins the shipped behaviour of that half
-by driving the REAL ``allocator.main()`` — same harness as
-``test_allocator_byte_budget_selection.py``, which pins the byte half — so
-what is tested is the code that ships selections.
+The allocator selects the minimum predicted loss that fits the byte budget
+and meets each serving SLO. This file pins the serving half of that rule. It
+drives the REAL ``allocator.main()`` with the same harness as
+``test_allocator_byte_budget_selection.py``, which pins the byte half. What is
+tested is the code that ships selections.
 
 Three properties:
 
