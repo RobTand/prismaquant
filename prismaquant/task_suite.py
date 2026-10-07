@@ -48,7 +48,7 @@ def task_metrics(raw):
     for task, values in results.items():
         task_count = 0
         for name, value in values.items():
-            if name == "alias" or "_stderr" in name:
+            if name in ("name", "alias", "sample_len", "sample_count") or "_stderr" in name:
                 continue
             metrics[f"{task}/{name}"] = finite_number(value, f"{task}/{name}")
             task_count += 1

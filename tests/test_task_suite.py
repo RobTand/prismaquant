@@ -39,3 +39,12 @@ def test_task_metrics_ignore_errors_not_metrics():
 def test_empty_task_population_refuses():
     with pytest.raises(ValueError):
         task_metrics({"results": {}})
+
+
+def test_task_population_metadata_is_not_a_metric():
+    values = {"name": "small_cpu_facts", "alias": "Facts", "sample_len": 2,
+              "sample_count": {"acc,none": 2}, "acc,none": 0.5}
+    assert task_metrics({"results": {"small_cpu_facts": values}}) == {"small_cpu_facts/acc,none": 0.5}
+    del values["acc,none"]
+    with pytest.raises(ValueError, match="no measured metric"):
+        task_metrics({"results": {"small_cpu_facts": values}})
