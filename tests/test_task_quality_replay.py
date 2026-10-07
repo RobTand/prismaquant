@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 from safetensors.torch import save_file
+from transformers import LlamaConfig
 
 from prismaquant.cost_streaming import build_source_checkpoint_identity
 from prismaquant.quality_stage import artifact, evaluate_criteria, verify_result
@@ -15,7 +16,8 @@ def make_task_replay_fixture(root):
     model, tokenizer = root / "model", root / "tokenizer"
     model.mkdir(parents=True)
     tokenizer.mkdir()
-    (model / "config.json").write_text(json.dumps({"model_type": "llama", "hidden_size": 4}))
+    LlamaConfig(vocab_size=4, hidden_size=4, intermediate_size=8, num_hidden_layers=1,
+                num_attention_heads=1, num_key_value_heads=1).save_pretrained(model)
     save_file({"weight": torch.arange(8, dtype=torch.float32).reshape(2, 4)}, str(model / "model.safetensors"))
     (tokenizer / "tokenizer.json").write_text(json.dumps({"model": {"vocab": {"fixture": 0}}}))
     config = {"schema": "prismaquant.task_suite/1", "backend": {"name": "hf", "pretrained": str(model),
@@ -47,8 +49,8 @@ def make_task_replay_fixture(root):
 
 def replace_task_fixture(config, kind):
     if kind == "config":
-        Path(config["backend"]["pretrained"], "config.json").write_text(
-            json.dumps({"model_type": "llama", "hidden_size": 8}))
+        LlamaConfig(vocab_size=4, hidden_size=8, intermediate_size=16, num_hidden_layers=1,
+                    num_attention_heads=1, num_key_value_heads=1).save_pretrained(config["backend"]["pretrained"])
     elif kind == "weight":
         path = Path(config["backend"]["pretrained"], "model.safetensors")
         save_file({"weight": torch.ones((2, 4), dtype=torch.float32)}, str(path))
