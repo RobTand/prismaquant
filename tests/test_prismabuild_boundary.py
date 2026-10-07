@@ -1,11 +1,9 @@
 """Freeze where PrismaQuant reaches into PrismaBuild internals (#1534).
 
-PrismaBuild (PB) stands alone. PrismaQuant's allowed interface to it is
-``pbrun``, ``pbtest``, ``pbcampaign`` and the progress helper; everything
-else should go through a published, versioned PB client module, which does
-not exist yet (step 2 of the decoupling plan in the 2026-09-27 coupling
-inventory). This test is the mechanical half of that rule, step 0 of the
-same plan.
+PrismaBuild stands alone. PrismaQuant uses ``pbrun``, ``pbtest``,
+``pbcampaign``, the progress helper, and the published, versioned
+``prismabuild.client`` module. All other PrismaBuild modules are internal.
+This test checks that boundary.
 
 Over ``prismaquant/`` and ``tools/`` it parses each module with ``ast`` and
 finds:
@@ -14,8 +12,7 @@ finds:
   any depth, ``importlib.import_module`` on a ``prismabuild.`` string or
   f-string, and calls to ``staged_lease.sdk_submodule``, PQ's own loader
   for PB modules (a call with a computed name records ``prismabuild.*``).
-  Modules named in ``PUBLIC_CLIENT`` are exempt; step 2 names the client
-  there;
+  ``PUBLIC_CLIENT`` exempts the published ``prismabuild.client`` module;
 - **private access**: an attribute whose name starts with one underscore,
   read off a PB module or a name imported from one, and private names
   imported from PB directly. The binding is resolved within one module,
@@ -39,7 +36,7 @@ The test requires exact multiset equality:
 - a removed reference fails until its line is deleted in the same change.
 
 The allowlist only shrinks; CI refuses a pull request that adds a line.
-Step 2 (the PB client SDK) empties it.
+The public client supports removal of internal references.
 """
 from __future__ import annotations
 
