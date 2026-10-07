@@ -653,7 +653,7 @@ def legacy_runtime_scope_refusal(schema: str) -> str:
     """The one refusal for a scoped query a legacy table cannot attest."""
     return (
         f"lane schema {schema!r} carries no per-cell runtime scope; an explicit "
-        f"serving context (runtime-image/execution query) requires one of "
+        f"serving context (runtime-image, kernel-build, or execution query) requires one of "
         f"{sorted(SCOPED_LANE_SCHEMAS)!r}. "
         "Global runtime identity is not a scoped admission."
     )
@@ -2667,7 +2667,8 @@ def resolve_unit_route(
 
     is_v4 = table.schema in _LAUNCH_SCHEMAS
     is_scoped = table.schema in SCOPED_LANE_SCHEMAS
-    if not is_scoped and (runtime_image is not None or execution_mode is not None):
+    if not is_scoped and (
+            runtime_image is not None or execution_mode is not None or kernel_build is not None):
         return UnitRoute(
             facts=facts, route_status=ROUTE_STATUS_UNATTESTED, in_scope=True,
             unattested_reason=legacy_runtime_scope_refusal(table.schema))

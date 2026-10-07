@@ -78,3 +78,26 @@ def test_image_only_scope_cannot_overlap_across_build_names():
     payload["lane_eligibility"]["cells"].append(variant)
     with pytest.raises(runtime.TesseraContractError, match="overlapping serving scopes"):
         runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
+
+
+def test_version_three_table_refuses_a_kernel_only_query():
+    _assert_legacy_table_refuses_kernel("tessera.lane-eligibility.v3")
+
+
+def test_version_four_table_refuses_a_kernel_only_query():
+    _assert_legacy_table_refuses_kernel("tessera.lane-eligibility.v4")
+
+
+def _assert_legacy_table_refuses_kernel(schema):
+    from test_lane_eligibility_v4 import _contract, _facts, _parse
+    block, formats = _contract()
+    block["schema"] = schema
+    table = _parse(block, formats)
+    ordinary = lane.resolve_unit_route(_facts(), table, platform="sm_121", residency="resident",
+        serving_source_sha256=None)
+    assert ordinary.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
+    requested = lane.resolve_unit_route(_facts(), table, platform="sm_121", residency="resident",
+        kernel_build="unpublished-build", serving_source_sha256=None)
+    assert requested.route_status == lane.ROUTE_STATUS_UNATTESTED
+    assert "no per-cell runtime scope" in requested.unattested_reason
+    assert requested.regimes == ()
