@@ -62,9 +62,15 @@ a metric, `le` or `ge`, and a finite threshold. A successful measurement with
 absent criteria is `not_evaluated`, not a passed gate. Offline G3 never fills
 `gold.kl`.
 
+Default dev replay keeps stored metrics and the quality owner's `dev_uncertified` stamp.
+The aggregate result carries the same dev classification. It is not certified
+current-artifact evidence. Owned raw-result corruption and mathematical changes
+still refuse. Certified fixtures detect same-path source and tokenizer replacement.
+
 Use the existing `model_wikitext_inputs/2` input producer for generic models.
 Pass the independent file hash with `--wikitext-inputs-sha256`. Do not normalize
 WikiText a second time. Served KL needs the stored teacher and its metadata.
+
 Use `--score-positions all` for the existing gold contract. A final-position
 screen cannot close that slot. Keep graph, speculative-decode, calibration,
 artifact, runtime and uniform-control correctness checks in force.

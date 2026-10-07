@@ -319,6 +319,9 @@ def run(config_path: str | Path, output: str | Path, *, preflight: bool = False,
                 else:
                     result = _replay_slot(stage, context, stage_output, produced=not verify_only)
                 outcome.update(status="preflight" if preflight else "passed", result=result)
+                if result.get("dev_uncertified") is True:
+                    from prismaquant.dev_mode import dev_stamp
+                    report.update(dev_stamp(timestamped=False))
                 if stage_output.is_file():
                     outcome["sha256"] = _sha(stage_output)
             except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:

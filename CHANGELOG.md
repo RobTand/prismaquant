@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
 - Stamp generic WikiText cache provenance drift under D32 (#2413).
   Preserve exact corpus hashes, sampling, token values and own-byte integrity.
   Keep the certified fixture refusal and the unchanged DSv4 input path.

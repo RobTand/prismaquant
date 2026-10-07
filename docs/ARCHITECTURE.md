@@ -26359,6 +26359,7 @@ Versioned configuration drives `prismaquant.g3_v2` and `prismaquant.task_suite`.
 Each module writes `prismaquant.quality_stage/1` evidence. The G3 configuration
 names the protocol, tokenizer, panel, teacher and candidate. GLM protocol
 version two keeps `[gMASK]<sop>`, 25 windows and 2047 scored positions per window.
+
 The streamed candidate reuses the model profile, source prefetch,
 `ProductionWeightCache` and resident window. Offline decoded KL stays separate
 from served `gold.kl`. Missing criteria allow measurement but give `not_evaluated`.
@@ -26369,8 +26370,18 @@ The task backend uses `lm-eval[hf]` 0.4.12. Inputs declare tasks, tokenizer,
 device, dtype, sample count, few-shot count and all four seeds. The receipt
 keeps task configurations, versions, model identity, samples, raw results and
 numerical metrics. Fixed task metadata is not a metric. Numerical metrics
-must stay finite. Metadata-only results refuse. CPU evidence cannot establish
-GLM quality, served quality or whole-instrument equivalence.
+must stay finite. Metadata-only results refuse.
+
+CPU evidence cannot establish GLM quality, served quality or whole-instrument equivalence.
+
+The quality owner verifies owned raw-result bytes and reuses `task_metrics` for decision replay.
+Task population, sample policy, seeds, few-shot counts and task definitions remain correctness checks.
+Default dev replay keeps stored measurements and does not rehash checkpoint or tokenizer data solely for provenance.
+The runner retains the owner's `dev_uncertified` stamp and stored metrics.
+Its aggregate result also carries the existing dev stamp. These metrics do not measure replacement bytes.
+
+Certified fixtures compare the existing model content identity and tokenizer file metadata.
+Same-path config, weight and tokenizer replacements refuse. Fixture evidence does not certify a real artifact.
 
 The gold stages use `measure_vllm_full_kl` and
 `measure_vllm_wikitext_ppl`. The latter reads the existing generic
