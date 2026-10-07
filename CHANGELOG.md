@@ -15,6 +15,12 @@
   original refusal. Git errors and timeouts still refuse in both modes.
   The change does not rewrite or recompute checkpoints.
 
+- The allocator serve-constraints and serving-lane tests reuse the existing
+  safetensors fixture writer from test_footprint (#2383, references #1929).
+  Fixture bytes, tensor order, costs and semantic assertions stay unchanged.
+  The serve-constraints introduction no longer cites the retired Gridbook
+  lane policy as a live document.
+
 ### Added
 
 - **Bounded head walk measurement mode** (#1492, #1247).

@@ -1,11 +1,10 @@
 """The constrained-Pareto axis, end to end through ``allocator.main()`` (P5c).
 
-``docs/lanes/nvfp4-cb/format-speed-policy.md`` §1 specifies quality-minimizing
-selection under hard byte AND serving constraints and, until ultraplan P5c,
-deferred the serving half. This file pins the shipped behaviour of that half
-by driving the REAL ``allocator.main()`` — same harness as
-``test_allocator_byte_budget_selection.py``, which pins the byte half — so
-what is tested is the code that ships selections.
+The allocator selects the minimum predicted loss that fits the byte budget
+and meets each serving SLO. This file pins the serving half of that rule. It
+drives the REAL ``allocator.main()`` with the same harness as
+``test_allocator_byte_budget_selection.py``, which pins the byte half. What is
+tested is the code that ships selections.
 
 Three properties:
 
@@ -30,7 +29,6 @@ from __future__ import annotations
 
 import json
 import pickle
-import struct
 import sys
 
 import pytest
@@ -39,6 +37,7 @@ import prismaquant.allocator as alloc
 from prismaquant import footprint as fp
 from prismaquant import format_registry as fr
 from prismaquant.serve_dispatch_table import SCHEMA as TABLE_SCHEMA
+from test_footprint import _write_safetensors
 
 _NAMES = [f"model.layers.{i}.self_attn.o_proj" for i in range(4)]
 _OUT = _IN = 256
@@ -58,23 +57,6 @@ _PROV = {
     "units": "dimensionless",
     "derivation": "fixture constant",
 }
-
-
-def _write_safetensors(path, tensors):
-    header = {}
-    off = 0
-    for name, (dtype, shape) in tensors.items():
-        nbytes = fp._ST_DTYPE_BYTES[dtype]
-        for d in shape:
-            nbytes *= d
-        header[name] = {"dtype": dtype, "shape": list(shape),
-                        "data_offsets": [off, off + nbytes]}
-        off += nbytes
-    blob = json.dumps(header).encode()
-    with open(path, "wb") as fh:
-        fh.write(struct.pack("<Q", len(blob)))
-        fh.write(blob)
-        fh.write(b"\x00" * off)
 
 
 def _fixture(tmp_path, *, nvfp4_dloss, fp8_dloss):
