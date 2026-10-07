@@ -128,9 +128,18 @@ def _checkpoint_git_commit() -> str:
         timeout=10,
     )
     if clean.returncode != 0:
-        raise RuntimeError(
+        refusal = RuntimeError(
             "AURA checkpoint git identity is not exact: aura_cost.py differs "
             f"from commit {commit}; commit it before checkpoint/resume"
+        )
+        if clean.returncode != 1:
+            raise refusal
+        # Only status one reports source drift. Git errors still refuse.
+        from prismaquant.dev_mode import seal_check
+
+        seal_check(
+            "AURA checkpoint producer source", commit, "changed working tree",
+            where="prismaquant/aura_cost.py", refusal=refusal,
         )
     return commit
 

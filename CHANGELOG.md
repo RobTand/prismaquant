@@ -9,6 +9,12 @@
   unit order, source diagnostics and atomic publication stay unchanged.
   The writer adds no final newline.
 
+- The AURA checkpoint producer comparison follows development-mode policy
+  (#2375, references #1147, CEO D32). A dirty producer file prints the source
+  provenance stamp and keeps the resolved commit. Certified mode keeps its
+  original refusal. Git errors and timeouts still refuse in both modes.
+  The change does not rewrite or recompute checkpoints.
+
 ### Added
 
 - **Behavioral coverage of persisted multimodal calibration provenance**
