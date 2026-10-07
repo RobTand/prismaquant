@@ -26353,12 +26353,22 @@ lane still owes eager, graph, census, trace, the numeric ship gate, served KL,
 served PPL and the applicable byte-matched uniform control. This runner changes
 no architecture roster, runtime pin, admission rule or numerical default.
 
-The quality stages consume versioned inputs. G3 scores the configured prefixed
-panel in paired order. It reports offline decoded KL, not served `gold.kl`.
-The task stage uses the real configured lm-eval backend. It records backend
-versions and model identity. Measurement and criteria are separate. Missing
-criteria give `not_evaluated`. `quality_stage.verify_result` replays criteria;
-the job requires a passing replay, not a written pass flag.
+Versioned configuration drives `prismaquant.g3_v2` and `prismaquant.task_suite`.
+Each module writes `prismaquant.quality_stage/1` evidence. The G3 configuration
+names the protocol, tokenizer, panel, teacher and candidate. GLM protocol
+version two keeps `[gMASK]<sop>`, 25 windows and 2047 scored positions per window.
+The streamed candidate reuses the model profile, source prefetch,
+`ProductionWeightCache` and resident window. Offline decoded KL stays separate
+from served `gold.kl`. Missing criteria allow measurement but give `not_evaluated`.
+`quality_stage.verify_result` replays criteria. The job requires a passed replay,
+not a written pass flag.
+
+The task backend uses `lm-eval[hf]` 0.4.12. Inputs declare tasks, tokenizer,
+device, dtype, sample count, few-shot count and all four seeds. The receipt
+keeps task configurations, versions, model identity, samples, raw results and
+numerical metrics. Fixed task metadata is not a metric. Numerical metrics
+must stay finite. Metadata-only results refuse. CPU evidence cannot establish
+GLM quality, served quality or whole-instrument equivalence.
 
 The gold stages use `measure_vllm_full_kl` and
 `measure_vllm_wikitext_ppl`. The latter reads the existing generic
