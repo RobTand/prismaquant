@@ -26328,6 +26328,54 @@ re-render, it is the render the gate declined to keep.
 
 ## 7. Validation & ship gates
 
+### 7.0 Configured ship-gates action (D50, #2413)
+
+`python -m prismaquant.ship_gates --config FILE --output JSON` runs one
+ordered stage sequence inside a PrismaBuild action. It submits no child jobs.
+The `prismaquant.ship_gates/1` configuration names the artifact, topology,
+serving image, input files and every stage. The existing model profile owns
+model structure. `gold_engine_options` validates the explicit topology.
+The runner does not assume one tensor-parallel rank.
+
+The required stage set is the artifact card's `required_slots`, plus
+`offline.g3` and `task_suite`. A missing or duplicate stage is a refusal.
+The existing lane spec and card verifier remain the gate owners. The Tessera
+lane still owes eager, graph, census, trace, the numeric ship gate, served KL,
+served PPL and the applicable byte-matched uniform control. This runner changes
+no architecture roster, runtime pin, admission rule or numerical default.
+
+The quality stages consume versioned inputs. G3 scores the configured prefixed
+panel in paired order. It reports offline decoded KL, not served `gold.kl`.
+The task stage uses the real configured lm-eval backend. It records backend
+versions and model identity. Measurement and criteria are separate. Missing
+criteria give `not_evaluated`. `quality_stage.verify_result` replays criteria;
+the job requires a passing replay, not a written pass flag.
+
+The gold stages use `measure_vllm_full_kl` and
+`measure_vllm_wikitext_ppl`. The latter reads the existing generic
+`model_wikitext_inputs/2` contract. It adds no corpus normalization path.
+Opt-in `--preflight` reads real inputs without loading vLLM. It reports
+`runtime_qualification: not_run`. The job's CPU preflight cannot fill a
+serving gate. `--verify-only` replays existing evidence and refuses missing
+quality output or card slots. Each job result retains stage status, process
+exit, log path, output hash, device population and measured source.
+
+`shipcard.verify_gold_producer_record` owns producer-record intake. It accepts
+the generic `prismaquant.gold_record/1` interchange and the unchanged live
+TR3 interchange. It refuses unknown schemas, wrong slots, invalid metrics,
+unknown speculative decode, and a different control artifact path. The CLI
+has no model-specific producer dispatch. Unused DSv4 card constants are removed;
+archived receipts and live GLM measurement tools are unchanged.
+
+PrismaBuild's native gang has one start barrier. It has no per-stage ordering
+or successful-peer teardown. A multi-host sequence needs an existing rank
+lifecycle driver from the serving owner. `gold_headless_peer` is a launcher,
+not that driver. No multi-host gold topology is qualified here. Item six owns
+export setup, construction-census policy, partitions and the architecture
+roster. Its CPU setup cannot fill a runtime census. See
+[the operator guide](ship_gates.md) for inputs, submission and evidence rules.
+
+
 ### 7.1 What runs where
 
 | Stage | Tool | Run by the pipeline? | Verdict? |

@@ -853,6 +853,31 @@ def test_fill_control_closes_the_slot_from_two_measurements(tmp_path):
     assert _publish(model_dir) == 0
 
 
+@pytest.mark.parametrize("schema", ["prismaquant.gold_record/1", "prismaquant.glm_tr3_gold_record.v1"])
+def test_fill_control_replays_registered_producer_records(tmp_path, schema):
+    model_dir = _artifact(tmp_path)
+    path = _close_base_slots(model_dir, candidate_kl=0.1500)
+    control_dir = _artifact(tmp_path, name="control")
+    arm = make_record(
+        slot="gold.kl", tool="producer", passed=True,
+        model_sha=compute_model_sha(control_dir),
+        metrics=_gold_metrics(_CONTROL_KL)["gold.kl"],
+        spec_decode_detected=False, serve_fingerprint=_CONTROL_FINGERPRINT,
+        git_commit=_FAKE_COMMIT,
+        extra={"measurement_schema": schema, "measured_model": str(control_dir)},
+    )
+    block = tmp_path / "control_block.json"
+    block.write_text(json.dumps(_block(candidate=0.1500)))
+    record = tmp_path / "control_record.json"
+    record.write_text(json.dumps(arm))
+    assert shipcard_cli([
+        "fill-control", str(path), "--control-block", str(block),
+        "--control-record", str(record), "--control-model-dir", str(control_dir),
+    ]) == 0
+    assert load_shipcard(path)["slots"][UNIFORM_CONTROL_SLOT]["control_arm"] == arm
+
+
+
 def test_fill_control_refuses_an_unserved_block_without_the_flag(tmp_path):
     model_dir = _artifact(tmp_path)
     path = _close_base_slots(model_dir)
@@ -892,3 +917,40 @@ def test_ship_gate_ledger_follows_the_producer_not_a_roster(monkeypatch):
     ledger = _ship_gate_record("0" * 64, source="test")["metrics"]
     assert "mtp_acceptance_v2" in ledger
     assert "mtp_acceptance" not in ledger
+
+@pytest.mark.parametrize("damage", ["schema", "slot", "path", "spec", "metric"])
+def test_generic_control_producer_refuses_invalid_evidence_without_writing(tmp_path, damage):
+    from prismaquant.shipcard import GOLD_PRODUCER_RECORD_SCHEMA
+    model_dir = _artifact(tmp_path)
+    path = _close_base_slots(model_dir, candidate_kl=0.1500)
+    control_dir = _artifact(tmp_path, name="control")
+    arm = make_record(
+        slot="gold.kl", tool="test", passed=True,
+        model_sha=compute_model_sha(control_dir),
+        metrics=_gold_metrics(_CONTROL_KL)["gold.kl"],
+        spec_decode_detected=False, serve_fingerprint=_CONTROL_FINGERPRINT,
+        git_commit=_FAKE_COMMIT,
+        extra={"measurement_schema": GOLD_PRODUCER_RECORD_SCHEMA,
+               "measured_model": str(control_dir)},
+    )
+    if damage == "schema":
+        arm["measurement_schema"] = "arbitrary.producer/1"
+    elif damage == "slot":
+        arm["slot"] = "gold.ppl"
+    elif damage == "path":
+        arm["measured_model"] = str(model_dir)
+    elif damage == "spec":
+        arm["spec_decode_detected"] = None
+    else:
+        arm["metrics"]["score_positions"] = "final"
+    block = tmp_path / "control_block.json"
+    block.write_text(json.dumps(_block(candidate=0.1500)))
+    record = tmp_path / "control_record.json"
+    record.write_text(json.dumps(arm))
+    before = path.read_bytes()
+    assert shipcard_cli([
+        "fill-control", str(path), "--control-block", str(block),
+        "--control-record", str(record), "--control-model-dir", str(control_dir),
+    ]) == 2
+    assert path.read_bytes() == before
+

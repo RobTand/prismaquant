@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes
