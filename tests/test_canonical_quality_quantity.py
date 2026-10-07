@@ -326,6 +326,7 @@ def canonical_chord_candidate(monkeypatch, request):
             operator["source_weight"]["logical_bytes"] = 2 * 64 * 256
             operator["rendered_weight"]["shape"] = [64, 256]
             operator["rendered_weight"]["logical_bytes"] = 4 * 64 * 256
+            row["joint_operator_identity_sha256"] = joint.identity_sha256(operator)
             from canonical_quality_fixtures import scope_for as rebuild_scope
             row["quality_scope"] = rebuild_scope(row)
         else:
