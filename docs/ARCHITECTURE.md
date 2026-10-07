@@ -51,6 +51,9 @@ The constructor refuses every non-null chord stderr, including zero.
 The current chord protocol supplies no measured fractional uncertainty.
 Measured marginal intervals and CI-overlap choices refuse absent uncertainty.
 Explicit point-only menus remain available without a measured CI claim.
+Candidate construction restores its owned frozen coordinates through the existing thaw path.
+The original scientific validator checks those coordinates before the candidate freezes them again.
+Immutable-provenance construction and dataclass replacement retain both currencies and their original anchors.
 
 PACT retains actual operator rows as its first time source.
 A missing row can use a canonical class model only after reconciliation with

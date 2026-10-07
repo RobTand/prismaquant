@@ -19,6 +19,9 @@
 - Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
   Anchor stderr does not supply fractional uncertainty evidence.
   Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

@@ -349,3 +349,29 @@ def test_canonical_chord_point_menu_does_not_claim_a_measured_interval(canonical
     with pytest.raises(TesseraFormatError, match="uncertainty.*unavailable"):
         tessera_pareto_frontier([candidate], uncertainty_z=1.96)
 
+
+@pytest.mark.parametrize("round_trip", ["constructor", "replace"])
+def test_canonical_chord_frozen_provenance_round_trip(canonical_chord_candidate, round_trip):
+    from dataclasses import replace
+    from prismaquant.tessera_allocator import TesseraAllocatorCandidate
+    candidate = canonical_chord_candidate
+    original = candidate.as_dict()
+    if round_trip == "constructor":
+        fields = _candidate_constructor_fields(candidate)
+        fields["quality_provenance"] = candidate.quality_provenance
+        rebuilt = TesseraAllocatorCandidate(**fields)
+    else:
+        rebuilt = replace(candidate)
+    assert rebuilt.as_dict() == original
+    assert rebuilt.predicted_dloss_stderr is None
+    assert rebuilt.quality_provenance["canonical_quality"]["anchors"] == (768, 1024)
+    assert rebuilt.quality_provenance["quality_scope"]["currency"] == candidate.quality_provenance["quality_scope"]["currency"]
+    assert rebuilt.quality_provenance["canonical_anchors"] == candidate.quality_provenance["canonical_anchors"]
+    with pytest.raises(TypeError):
+        rebuilt.quality_provenance["quality_scope"]["source_weight"]["shape"][0] = 1
+    serialized = rebuilt.as_dict()
+    serialized["quality_provenance"]["quality_scope"]["source_weight"]["shape"][0] = 1
+    assert rebuilt.as_dict() == original
+    assert candidate.as_dict() == original
+
+
