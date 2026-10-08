@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+### Added
+- The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
+  The central processor path writes a valid structure draft without tensor payload reads or profile registration.
+  Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
+  The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
+  Its central processor preflight checks the real runtime arguments without a graphics processor.
+  Native serving qualification and all production defaults stay unchanged.
+
 ### Changed
+
 - The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
   Remove the private digest helper and unused import. Keep the digest recipe and read size.
   Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
@@ -30,6 +39,18 @@
   model constants. Live GLM measurements and serving admission stay unchanged.
   Multi-host stage lifecycle and real served qualification remain external
   prerequisites. No performance, energy or residency change is claimed.
+
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
+- Tessera export setup derives architecture wiring, census inputs and partitions
+  from profile capabilities and source headers (#2409, D50 item six).
+  The plan writer can emit the metadata plan. The model dispatcher exposes it
+  through a non-submit mode and replaces the fixed-count shard driver.
+  The existing exporter, construction census and native runtime checks remain
+  authoritative. This CPU work grants no runtime or serving qualification.
+
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

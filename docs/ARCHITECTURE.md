@@ -1,5 +1,6 @@
 # PrismaQuant Architecture
 
+
 As of: 2026-10-07 · `sol/d50-ship-gates-2413` (D50, #2413; quality source #2412 and RoPE fix #2418).
 The configured job preserves every lane gate. CPU preflight does not qualify serving.
 The runner uses the shared file digest owner. Its digest recipe and eight-MiB read size stay unchanged.
@@ -12,6 +13,68 @@ Existing logs refuse. Exclusive log creation preserves retained bytes if a colli
 The quality source accepts upstream `rope_parameters` and preserves legacy `rope_theta`.
 The inverse-frequency arithmetic, float32 dtype and operation order stay unchanged.
 A missing theta still raises an error. The quality owner owns this compatibility fix.
+
+Re-stamped 2026-10-07 (D50, PQ #2410): day-zero intake is a metadata-only consumer
+of profile detection, source-index grammar, name projection, and safetensors header validation.
+The source entry point is `tools/day0_model_intake.py`; its domain code is
+`prismaquant/day0_model_intake.py`.
+It accepts a local checkpoint or an explicit model identifier with a full revision.
+Remote discovery uses Hugging Face snapshot download before config and index checks.
+Inconsistent inputs refuse before full-weight download or runtime launch.
+The generated structure draft stays outside profile registration and has no declared export lanes.
+The report names unsupported kinds and never claims native serving qualification.
+An explicit brain floating-point degree-two check uses Docker and the existing vLLM prompt smoke.
+Its central processor preflight runs that smoke's argument path without importing vLLM or acquiring a device.
+The runbook is `docs/new_model_intake.md`.
+No active PACT path, serving default, runtime pin, or production format menu changes.
+
+Re-stamped 2026-10-07 (D50 item six, PQ #2409): Tessera export setup reads
+profile capabilities and the source index. The lane derives
+`wired_architectures` from the profile specs' `supported_lanes` field.
+No architecture gains runtime qualification from that roster.
+
+`tessera_export_lane.export_setup` reads headers through the producer's
+`source_inventory` and `quantizable` contracts. It emits construction-census
+inputs for Tessera's existing `tools/tessera_construction_census.py`.
+It records both census execution and runtime qualification as `not_run`.
+The plan writer exposes this result through `--export-setup-json`.
+
+`export_partition.whole_layer_partitions` owns the shared count rule.
+It uses Tessera's `partition_owner` for every source tensor, including
+passthrough tensors. The largest nonempty modulo domain defines the count.
+Fused modules and all experts of a stack retain one owner.
+
+`tools.tessera_fleet.dispatch_model --dry-run` exposes the real metadata
+plan without files or submissions. The fixed-count `dispatch_shards` driver
+and its dependency on a model-specific wrapper are removed. Full exports retain the existing
+preparation, encoding and complete-set assembly paths. The worker calls the
+supported `tessera.export_serving` package, not an experiment wrapper.
+The ladder probe retains its own historical configuration.
+
+Re-stamped 2026-10-07 (PQ #2417, R1): the worker imports the shared partition
+owner only for preparation. Standalone help and atomic publication require
+only the standard library. They do not require a copied export helper.
+Preparation still uses the staged shared owner and the producer's real
+source inventory. No ownership rule, source layout or runtime check changes.
+
+Provenance: `lane_spec.py`, `lane_specs/tessera.json`,
+`tessera_export_lane.py`, `tessera_plan_writer.py`, `export_partition.py`,
+and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.
+The consumer proof is `tests/test_tessera_export_setup.py`.
+No production format, serving default, runtime pin or active PACT path changes.
+
+Re-stamped 2026-10-07 for issue #2408.
+The Tessera cell reader accepts an explicit kernel build in `ServingContext`.
+The reader matches kernel build and module kind without an image-digest key.
+The compatibility map preserves historical cell identifiers and image-only calls.
+The image remains provenance. Evidence, wire predicates and source checks remain unchanged.
+This change moves no pin, default, wire byte or running measurement path.
+Central processor proof does not establish device qualification.
+The compatibility map and matcher use one effective build name for historical cells.
+Both lookup forms reject overlapping scopes. Cell order cannot select a route.
+Version-three and version-four tables refuse an explicit kernel build that their cells cannot attest.
+Calls without the build field remain unchanged.
+
 
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
 lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
