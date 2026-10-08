@@ -66,8 +66,9 @@ def test_observer_preserves_forward_return_and_partial_failure(tmp_path):
     assert json.loads((tmp_path/'partial/progress.json').read_text()) == result
 
 
-def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatch):
+def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatch, capsys):
     from experiments import glm_full_capture_profile as module
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
     observer = CaptureObserver(tmp_path/'sample-gap', profile_layers=())
     calls = []
     rounds = 0
@@ -92,8 +93,45 @@ def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatc
     records = [json.loads(line) for line in (observer.out/'netdata.jsonl').read_text().splitlines()]
     assert [row['host'] for row in records] == ['sparklina', 'sparky', 'sparklina']
     assert observer.result['netdata']['samples'] == 2
-    # A lost sample remains an explicit incomplete-evidence failure, even when
-    # subsequent samples were retained. Collection recovery is not gap erasure.
+    # PQ #2315: a lost sample stays explicit incomplete evidence, but in dev
+    # mode it no longer discards the finished work. Collection recovery is
+    # not gap erasure: the missing instrument is named and stamped.
+    observer.__exit__(None, None, None)
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    result = json.loads((observer.out/'result.json').read_text())
+    assert result['status'] == 'complete'
+    assert result['dev_uncertified'] is True
+    assert result['evidence_complete'] is False
+    assert 'netdata' in result['incomplete_instruments']
+    assert result['errors'][0]['host'] == 'sparky'
+    assert 'GPU power chart missing' in result['errors'][0]['error']
+    assert json.loads((observer.out/'progress.json').read_text()) == result
+
+
+def test_incomplete_evidence_refuses_in_certified_mode(tmp_path, monkeypatch):
+    from experiments import glm_full_capture_profile as module
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    observer = CaptureObserver(tmp_path/'certified-gap', profile_layers=())
+    calls = []
+    rounds = 0
+
+    def sample(host):
+        calls.append(host)
+        if len(calls) == 1:
+            raise RuntimeError('Netdata required GPU power chart missing')
+        return {'host': host, 'metrics': {'observed': True}}
+
+    def wait(_seconds):
+        nonlocal rounds
+        rounds += 1
+        if rounds == 2:
+            observer.stopped.set()
+        return observer.stopped.is_set()
+
+    monkeypatch.setattr(module, 'sample_netdata', sample)
+    monkeypatch.setattr(observer.stopped, 'wait', wait)
+    observer.monitor('netdata')
+    assert observer.result['netdata']['samples'] == 2
     with pytest.raises(RuntimeError, match='required profiler evidence') as raised:
         observer.__exit__(None, None, None)
     # #1096: the message names the failing entry and its host.
@@ -101,8 +139,27 @@ def test_netdata_failure_keeps_other_host_and_later_samples(tmp_path, monkeypatc
     assert 'GPU power chart missing' in str(raised.value)
     result = json.loads((observer.out/'result.json').read_text())
     assert result['status'] == 'failed'
+    assert 'dev_uncertified' not in result
     assert result['errors'][0]['host'] == 'sparky'
     assert 'GPU power chart missing' in result['errors'][0]['error']
+
+
+def test_campaign_error_supersedes_observer_error(tmp_path, monkeypatch):
+    from experiments import glm_full_capture_profile as module
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    observer = CaptureObserver(tmp_path/'campaign-wins', profile_layers=())
+    monkeypatch.setattr(module, 'sample_netdata',
+                        lambda host: (_ for _ in ()).throw(RuntimeError('telemetry gap')))
+    monkeypatch.setattr(observer.stopped, 'wait', lambda _: observer.stopped.set())
+    observer.monitor('netdata')
+    assert observer.result['errors']
+    with pytest.raises(ValueError, match='original campaign failure'):
+        with observer:
+            raise ValueError('original campaign failure')
+    result = json.loads((observer.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert 'original campaign failure' in result['campaign_error']
+    assert result['errors']
 
 
 @pytest.mark.parametrize('kind,first_key', [('netdata', 'hosts'), ('python_sampler', 'scope')])

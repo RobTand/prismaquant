@@ -109,6 +109,9 @@ def test_exact_original_calls_returns_and_finite_windows(tmp_path, controlled, m
 @pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
                                     ('netdata', 'python_sampler')])
 def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeypatch, missing):
+    # Certified mode keeps the refusal (PQ #2315); dev mode is covered by
+    # test_delayed_monitors_retain_completed_anchors_in_dev_mode below.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     obs = observer(tmp_path, calls=(0,))
     ready = monitor_readiness(obs, monkeypatch)
     original_monitor = obs.monitor
@@ -141,8 +144,46 @@ def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeyp
         assert f"anchor_profiler: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
 
 
+@pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
+                                    ('netdata', 'python_sampler')])
+def test_delayed_monitors_retain_completed_anchors_in_dev_mode(
+        tmp_path, controlled, monkeypatch, missing, capsys):
+    # PQ #2315: finished anchor work survives missing telemetry in dev mode,
+    # stamped dev_uncertified with the missing instruments named. Native
+    # profiling truth is preserved, not rewritten.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    obs = observer(tmp_path, calls=(0,))
+    ready = monitor_readiness(obs, monkeypatch)
+    original_monitor = obs.monitor
+    def delayed_monitor(kind):
+        if kind in missing:
+            assert obs.stopped.wait(timeout=10), 'observer did not reach shutdown'
+        original_monitor(kind)
+    monkeypatch.setattr(obs, 'monitor', delayed_monitor)
+    token = object()
+    journal = []
+    with obs:
+        for kind, event in ready.items():
+            if kind not in missing:
+                assert event.wait(timeout=10), f'{kind} did not sample'
+        journal.append(obs.wrap_anchor(lambda **_: token)(qname='u', format_name='f'))
+    assert journal == [token]
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and result['native_anchor_profiled']
+    assert result['dev_uncertified'] is True
+    assert result['evidence_complete'] is False
+    assert result['profile_status'] == 'observed'
+    assert result['anchors'][0]['status'] == 'complete'
+    assert {row['error'] for row in result['errors']} == {
+        repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
+    assert json.loads((obs.out/'progress.json').read_text()) == result
+
 @pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
 def test_observation_failure_preserves_success_for_journaling(tmp_path, controlled, monkeypatch, failure):
+    # Certified mode keeps the refusal (PQ #2315); dev mode is covered by
+    # test_observation_failure_retains_journal_in_dev_mode below.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     if failure == 'no_cuda':
         monkeypatch.setattr(FakeProfiler, 'cuda', False)
     if failure == 'enter':
@@ -166,7 +207,40 @@ def test_observation_failure_preserves_success_for_journaling(tmp_path, controll
         assert not list(obs.out.glob('*.trace.json'))
 
 
-def test_original_encoder_exception_is_preserved(tmp_path, controlled):
+@pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
+def test_observation_failure_retains_journal_in_dev_mode(
+        tmp_path, controlled, monkeypatch, failure, capsys):
+    # PQ #2315: the journaled anchor value survives a failed profiler window
+    # in dev mode. The missing native proof stays explicit: profile_status
+    # remains 'missing' and native_anchor_profiled stays False.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    if failure == 'no_cuda':
+        monkeypatch.setattr(FakeProfiler, 'cuda', False)
+    if failure == 'enter':
+        monkeypatch.setattr(FakeProfiler, 'enter_error', RuntimeError('profiler unavailable'))
+    obs = observer(tmp_path, calls=(0,), cap=1 if failure == 'trace_cap' else 4096)
+    seen, journal = [], []
+    token = object()
+    def original(**kwargs):
+        seen.append(kwargs)
+        return token
+    with obs:
+        journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+    assert len(seen) == 1 and journal == [token]
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and not result['native_anchor_profiled']
+    assert result['dev_uncertified'] is True
+    assert result['evidence_complete'] is False
+    assert result['profile_status'] == 'missing'
+    assert result['anchors'][0]['status'] == 'observation_failed'
+
+
+@pytest.mark.parametrize('certified', [False, True])
+def test_original_encoder_exception_is_preserved(tmp_path, controlled, monkeypatch, certified):
+    # PQ #2315: a real encoder failure propagates unchanged in both modes;
+    # observer evidence never replaces it.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
     obs = observer(tmp_path, calls=(0,))
     error = ValueError('original encoder rejection')
     calls = []
@@ -177,7 +251,10 @@ def test_original_encoder_exception_is_preserved(tmp_path, controlled):
         with obs:
             obs.wrap_anchor(original)(qname='u', format_name='f')
     assert caught.value is error and len(calls) == 1
-    assert json.loads((obs.out/'result.json').read_text())['anchors'][0]['status'] == 'anchor_failed'
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert result['anchors'][0]['status'] == 'anchor_failed'
+    assert 'original encoder rejection' in result['campaign_error']
 
 
 def test_retry_keeps_attempt_evidence_and_no_work_is_not_native_proof(tmp_path, controlled):
