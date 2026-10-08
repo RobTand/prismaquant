@@ -165,23 +165,58 @@ class CaptureObserver:
         return self
 
     def __exit__(self, error_type, error, tb):
+        # Measurement completion and evidence completeness are distinct facts
+        # (PQ #2315). A finished campaign with only profiler/telemetry gaps
+        # keeps its result in development mode, stamped dev_uncertified with
+        # the missing instruments named. Certified mode keeps the refusal. A
+        # real campaign exception, and a monitor that never stopped, stay
+        # failures in both modes: safety is never a warning.
         self.stopped.set()
         for thread in self.threads:
             thread.join(timeout=12)
             if thread.is_alive():
                 self.result['errors'].append(dict(instrument='shutdown', error='monitor did not stop'))
         self.validate_result()
+        errors = self.result['errors']
+        shutdown = any(row.get('instrument') == 'shutdown' for row in errors)
+        if error is not None or shutdown:
+            self.result.update(finished_unix=time.time(),
+                status='failed',
+                campaign_error=None if error is None else repr(error))
+            final = json.dumps(self.result, indent=2)+'\n'
+            (self.out/'result.json').write_text(final)
+            (self.out/'progress.json').write_text(final)
+            if error is None:
+                # Name the failing recorder entries: result.json may live in a
+                # temporary directory that is gone before anyone can read it.
+                raise RuntimeError('campaign completed but required profiler evidence is incomplete: '
+                                   + describe_errors(errors))
+            return False
+        if errors:
+            from prismaquant import dev_mode as _dev_mode
+            if _dev_mode.dev_mode_enabled():
+                instruments = sorted({str(row.get('instrument', '?')) for row in errors})
+                self.result.update(_dev_mode.dev_stamp(),
+                    evidence_complete=False, incomplete_instruments=instruments,
+                    finished_unix=time.time(), status='complete', campaign_error=None)
+                final = json.dumps(self.result, indent=2)+'\n'
+                (self.out/'result.json').write_text(final)
+                (self.out/'progress.json').write_text(final)
+                _dev_mode.dev_warning('campaign completed but required profiler evidence is incomplete: '
+                                      + describe_errors(errors)
+                                      + ' -- result retained as complete without speed, energy or residency qualification')
+                return False
         self.result.update(finished_unix=time.time(),
-            status='failed' if error or self.result['errors'] else 'complete',
-            campaign_error=None if error is None else repr(error))
+            status='failed' if errors else 'complete',
+            campaign_error=None)
         final = json.dumps(self.result, indent=2)+'\n'
         (self.out/'result.json').write_text(final)
         (self.out/'progress.json').write_text(final)
-        if error is None and self.result['errors']:
+        if errors:
             # Name the failing recorder entries: result.json may live in a
             # temporary directory that is gone before anyone can read it.
             raise RuntimeError('campaign completed but required profiler evidence is incomplete: '
-                               + describe_errors(self.result['errors']))
+                               + describe_errors(errors))
 
     def validate_result(self):
         pass
