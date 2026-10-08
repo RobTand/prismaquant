@@ -98,14 +98,24 @@ def pact_bands(num_layers=None, profile=None, config=None):
 
 
 def pact_cohort_from_profile(profile=None, config=None):
-    """Return the pricing cohort dict. Resolve GLM values bit-identically."""
+    """Return the pricing cohort dict. Explicit config wins, then declared profile config, then GLM."""
+    declared = getattr(profile, "_declared_config", None)
     prefix = _config_value(config, "prefix_ids", "serving_prefix_ids", default=None)
     if prefix is None:
+        prefix = _config_value(declared, "prefix_ids", "serving_prefix_ids", default=None)
+    if prefix is None:
         prefix = GLM_LEGACY["prefix_ids"]
-    vocab = _config_value(config, "vocab_size", default=GLM_LEGACY["vocab_size"])
-    scored = _config_value(config, "scored_positions_per_sequence", default=GLM_LEGACY["scored_positions"])
-    raw_tokens = _config_value(
-        config, "raw_tokens_per_sequence", default=GLM_LEGACY["raw_tokens_per_sequence"])
+    vocab = _config_value(config, "vocab_size", default=None)
+    if vocab is None:
+        vocab = _config_value(declared, "vocab_size", default=GLM_LEGACY["vocab_size"])
+    scored = _config_value(config, "scored_positions_per_sequence", default=None)
+    if scored is None:
+        scored = _config_value(
+            declared, "scored_positions_per_sequence", default=GLM_LEGACY["scored_positions"])
+    raw_tokens = _config_value(config, "raw_tokens_per_sequence", default=None)
+    if raw_tokens is None:
+        raw_tokens = _config_value(
+            declared, "raw_tokens_per_sequence", default=GLM_LEGACY["raw_tokens_per_sequence"])
     cohort = {
         "sample_range": list(GLM_LEGACY["sample_range"]),
         "raw_tokens_per_sequence": int(raw_tokens),

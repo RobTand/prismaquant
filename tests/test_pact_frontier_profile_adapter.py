@@ -57,7 +57,7 @@ def test_config_overrides_flow_through():
     config = {"num_hidden_layers": 32, "vocab_size": 100000}
     cohort = pact_cohort_from_profile(config=config)
     assert cohort["vocab_size"] == 100000
-    # Prefix ids stay GLM until the profile owner exposes them.
+    # Prefix ids stay GLM without an explicit or declared value.
     assert cohort["prefix_ids"] == [154822, 154824]
     bands = pact_bands(config=config)
     assert bands[-1][1] == 32
