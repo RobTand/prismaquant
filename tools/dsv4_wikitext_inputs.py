@@ -391,10 +391,16 @@ def _model_dataset(value: object, *, split: str) -> dict[str, Any]:
     total = value.get("total_tokens")
     if type(total) is not int or total <= 0:
         raise DSv4WikiTextInputsError("WikiText dataset token count is invalid")
+    fingerprint = value.get("fingerprint")
+    if not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{16}", fingerprint) is None:
+        raise DSv4WikiTextInputsError("WikiText dataset identity differs")
     expected = {**_expected_dataset(split=split), "total_tokens": total,
-                "fingerprint": MODEL_DATASET_FINGERPRINTS[split]}
+                "fingerprint": fingerprint}
     if dict(value) != expected:
         raise DSv4WikiTextInputsError("WikiText dataset identity differs")
+    from prismaquant.dev_mode import seal_check
+    seal_check("dataset fingerprint", MODEL_DATASET_FINGERPRINTS[split], fingerprint,
+               where=f"WikiText {split} dataset", refusal=DSv4WikiTextInputsError)
     return dict(value)
 
 

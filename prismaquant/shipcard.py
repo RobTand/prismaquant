@@ -269,6 +269,11 @@ FULL_KL_TEACHER_EVIDENCE_SCHEMA = "prismaquant.full_kl_teacher_evidence/1"
 WIKITEXT_GOLD_CALIBRATION_SCHEMA = "prismaquant.wikitext_gold_calibration/1"
 WIKITEXT_PPL_CALIBRATION_SCHEMA = "prismaquant.wikitext_ppl_calibration/1"
 GOLD_PRODUCER_IDENTITY_SCHEMA = "prismaquant.gold_producer_identity/1"
+GOLD_PRODUCER_RECORD_SCHEMA = "prismaquant.gold_record/1"
+# Keep the live producer interchange. Its measurement path does not change.
+GOLD_PRODUCER_RECORD_SCHEMAS = frozenset({
+    GOLD_PRODUCER_RECORD_SCHEMA, "prismaquant.glm_tr3_gold_record.v1",
+})
 TOPK_COVERAGE_POLICY_SCHEMA = "prismaquant.topk_tail_coverage_policy/1"
 
 
@@ -325,17 +330,6 @@ UNIFORM_CONTROL_CONTRACT_KEYS = (
 #: one, and it must be a KL: the gate's whole point is the serving metric.
 UNIFORM_CONTROL_METRIC_KEYS = ("kl_mean", "kl_confident_mean")
 WIKITEXT_REVISION = "b08601e04326c79dfdd32d625aee71d232d685c3"
-DSV4_WIKITEXT_DATASET_FINGERPRINT = "7ccd6deaa4fc56e5"
-DSV4_WIKITEXT_CORPUS_SHA256 = (
-    "c5b5caea5bd655cb221545a484f2f0f59d35092a17a66840d7b9513d0b99687d"
-)
-DSV4_WIKITEXT_TOTAL_TOKENS = 287_597
-DSV4_WIKITEXT_SELECTED_TOKEN_IDS_SHA256 = (
-    "6c23cefbd78c327d6edac566a5c6b419871021b6cf9890ec830713c1de704961"
-)
-DSV4_TOKENIZER_IDENTITY_SHA256 = (
-    "9f7ee7cb93b58bf30f278965547e7584b89c848e76c3adfeb92c070a88492de0"
-)
 _CB_FORMAT_RE = re.compile(r"^(?:NVFP4_CB|FP8_CB)_[KS][0-9]+$")
 _FP8_SOURCE_W8A16_WIRE_IDS = frozenset({
     "fp8_e4m3_ue8m0_block128",
@@ -2084,6 +2078,27 @@ def _verify_gold_record(
     ) or metrics.get("n_tokens_scored", 0) <= 0:
         problems.append(f"{slot}: missing positive scored-token count")
     return problems
+
+
+def verify_gold_producer_record(
+    record: Mapping[str, Any], *, slot: str, model_dir: str | os.PathLike,
+) -> list[str]:
+    """Replay a supported producer record before attaching it to a card."""
+    problems = []
+    if record.get("measurement_schema") not in GOLD_PRODUCER_RECORD_SCHEMAS:
+        problems.append("unsupported gold producer record schema")
+    if slot not in GOLD_SLOTS or record.get("slot") != slot:
+        problems.append("gold producer record slot differs")
+    if record.get("passed") is not True or record.get("spec_decode_detected") is not False:
+        problems.append("gold producer record did not observe a passing no-spec serve")
+    if record.get("model_sha") != compute_model_sha(model_dir):
+        problems.append("gold producer record artifact identity differs")
+    measured = record.get("measured_model")
+    if not isinstance(measured, str) or Path(measured).resolve() != Path(model_dir).resolve():
+        problems.append("gold producer record measured_model differs from the control path")
+    problems.extend(_verify_gold_record(slot, record, model_dir=model_dir))
+    return problems
+
 
 
 def _verify_native_export_record(
