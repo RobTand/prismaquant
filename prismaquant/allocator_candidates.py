@@ -2149,7 +2149,7 @@ def price_paired_rate_trade(
             row, _entry_fmt = _resolve_cost_entry(costs.get(name, {}), fmt)
             if row is None or "error" in row:
                 raise ValueError(f"paired rate trade missing matched cost row: {name}@{fmt}")
-            if not joint_row_binds_cell(row, name, fmt, where="paired rate trade"):
+            if not joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
                 raise ValueError(f"paired rate trade requires matched joint AURA currency: {name}@{fmt}")
             rows[name] = row
         return rows
