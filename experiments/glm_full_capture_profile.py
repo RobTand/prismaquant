@@ -164,6 +164,16 @@ class CaptureObserver:
             self.threads.append(thread)
         return self
 
+    def observation_error(self, error, *, instrument='anchor_profiler', cleanup=False):
+        row = dict(instrument=instrument, error=repr(error))
+        if cleanup:
+            row['failure_kind'] = 'cleanup'
+        self.result['errors'].append(row)
+
+    def cleanup_failed(self):
+        return any(row.get('instrument') == 'shutdown' or row.get('failure_kind') == 'cleanup'
+                   for row in self.result['errors'])
+
     def __exit__(self, error_type, error, tb):
         # Measurement completion and evidence completeness are distinct facts
         # (PQ #2315). A finished campaign with only profiler/telemetry gaps
@@ -178,8 +188,8 @@ class CaptureObserver:
                 self.result['errors'].append(dict(instrument='shutdown', error='monitor did not stop'))
         self.validate_result()
         errors = self.result['errors']
-        shutdown = any(row.get('instrument') == 'shutdown' for row in errors)
-        if error is not None or shutdown:
+        cleanup_failed = self.cleanup_failed()
+        if error is not None or cleanup_failed:
             self.result.update(finished_unix=time.time(),
                 status='failed',
                 campaign_error=None if error is None else repr(error))
@@ -263,8 +273,6 @@ class AnchorObserver(CaptureObserver):
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
 
-    def observation_error(self, error):
-        self.result['errors'].append(dict(instrument='anchor_profiler', error=repr(error)))
 
     @contextmanager
     def collection_window(self, profiler, record):
