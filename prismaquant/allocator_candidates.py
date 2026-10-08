@@ -2233,26 +2233,32 @@ def _priced_trade_covers_complete_routed_layers(trade: Mapping, baseline_assignm
     contribution dominating that subgroup denominator need not dominate the
     eventual complete-layer trade. Such a subgroup verdict reprices the
     option without pruning it; only a complete roster prunes, and the final
-    expanded-assignment guards refuse genuinely dominant trades. Anything
-    this predicate cannot establish keeps the option: the menu fails open
-    and the final guard still fails closed.
+    expanded-assignment guards refuse genuinely dominant trades.
+
+    Completeness that cannot be established keeps the option (#2288 R1): a
+    baseline member whose expert identity the profile cannot name may still
+    belong to the priced layer, so skipping it and certifying the shortened
+    roster could prune on a subgroup denominator. The menu fails open and
+    the final guard still fails closed.
     """
     routed = trade.get("routed_layers") or {}
     if not routed:
         return True
     identify = getattr(profile, "routed_expert_identity", None)
     if not callable(identify):
-        return True
+        return False
     if not isinstance(baseline_assignment, Mapping):
-        return True
+        return False
     for layer, row in routed.items():
-        priced = set(row.get("members", ()))
+        priced = set(row.get("members") or ())
+        if not priced:
+            return False
         complete = set()
         for name in baseline_assignment:
             try:
                 identity = identify(name)
             except Exception:
-                continue
+                return False
             if identity is not None and identity[0] == layer:
                 complete.add(name)
         if priced != complete:
