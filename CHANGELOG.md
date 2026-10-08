@@ -219,6 +219,27 @@
   exact; run, launch and shared-memory estimates remain conditional models,
   not measured traffic, occupancy or speed.
 
+- **Explicit GLM projection owners.** The producer reads fused members from Tessera dense_ownership instead of a duplicate profile table.
+  The source config separates KDA queries from standalone MLA queries.
+  Existing pin-lift controls can select the actual bare router parameter owner.
+  The producer keeps its stock forward and uses the existing input capture hook.
+  DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
+  Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
+
+- **Direct head arithmetic.** The DSA head screen uses FP32 inputs without the key projection's A8 activation quantization.
+  The producer reads its decoded weights with the runtime's direct consumer helper.
+  The publication cache keeps the head values in FP32 and charges the actual publication bytes.
+  T-16 retains its folded BF16 weight arithmetic before the head cache cast.
+
+- **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
+  The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
+
+- **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
+  The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
+
+- **Shared-expert roster migration.** The quality population reads census names and the profile fused-owner seam.
+  It no longer reads the removed duplicate fused-group table.
+
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
   back after the actual loader blends a partial real dataset with synthetic
