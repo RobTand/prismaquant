@@ -25,6 +25,35 @@
   The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
   Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
   No new seal, serving result, or performance result is claimed.
+
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
+
 - The Tessera worker loads the shared partition helper only for preparation
   (#2417, R1). Standalone help and atomic publication retain their standard-library
   contract without that helper. The tests use the shared owner directly.
@@ -35,6 +64,31 @@
   through a non-submit mode and replaces the fixed-count shard driver.
   The existing exporter, construction census and native runtime checks remain
   authoritative. This CPU work grants no runtime or serving qualification.
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Scope cache keys reuse the exact strict and lax JSON profiles from the digest owner.
+  Body and MTP topology use the existing allocation lane protocol and shared scope owner.
+  Synthetic card fixtures declare a compatible Qwen3 MoE profile. Missing-profile refusals remain strict.
+  Constructor repairs remain unchanged. No identity seal is added.
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
+- Mark the task-suite tests for the required layered gate (#2412, #2413).
+  Ordinary runs report explicit skips with the recorded receipt.
+  The task-suite gate must run the marked tests and must report zero skips.
+  Select it with `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes
@@ -51,6 +105,16 @@
   table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
   code order, the positive zero at code 8, dtype, device, nibble order,
   scales, chunking, copy behavior and output stay unchanged.
+
+- The allocator and PACT consume canonical v3 scope, qualified chords and
+  reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
+  Actual bytes, native admission and scientific gates remain unchanged.
+  An immutable candidate index requires no active index change.
+  Legacy metadata contracts retain the original producer interface.
+  CPU fixtures do not qualify speed, served loss or serving.
 
 - The shipcard model identity hashes its two canonical JSON texts through the
   existing text owner (#2384, references #1301). The canonical quant-config

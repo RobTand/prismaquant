@@ -683,6 +683,47 @@ def _student(args) -> int:
         raise RuntimeError("v2 teacher requires authenticated --teacher-meta before engine loading")
     if v2:
         _require_v2_candidate_identity(args, payload)
+    if getattr(args, "preflight", False):
+        ids = payload.get("calib_ids")
+        vocab = payload.get("vocab_size")
+        seqlen = payload.get("seqlen")
+        if (not isinstance(ids, torch.Tensor) or ids.ndim != 2
+                or ids.dtype != torch.long or ids.shape[0] <= 0
+                or type(seqlen) is not int or seqlen < 2 or ids.shape[1] != seqlen
+                or type(vocab) is not int or vocab <= 0
+                or bool(((ids < 0) | (ids >= vocab)).any())):
+            raise RuntimeError("teacher token shape or vocabulary is invalid")
+        if args.score_positions == "all":
+            if payload.get("score_positions") != "all":
+                raise RuntimeError("all-position scoring requires an all-position teacher")
+            top_ids, top_lps = payload.get("topk_ids"), payload.get("topk_lps")
+            k = payload.get("prompt_top_k")
+            expected = (ids.shape[0], seqlen - 1, k)
+            if (type(k) is not int or not 0 < k <= vocab
+                    or not isinstance(top_ids, torch.Tensor) or not isinstance(top_lps, torch.Tensor)
+                    or tuple(top_ids.shape) != expected or tuple(top_lps.shape) != expected
+                    or top_ids.dtype not in (torch.int32, torch.int64)):
+                raise RuntimeError("teacher logprob shape is invalid")
+            for sample_ids, sample_lps in zip(top_ids, top_lps):
+                for row_ids, row_lps in zip(sample_ids, sample_lps):
+                    entries = _validated_topk_entries(row_ids, row_lps, role="teacher")
+                    if any(token >= vocab for token, _ in entries):
+                        raise RuntimeError("teacher top-K token exceeds its vocabulary")
+        else:
+            logits = payload.get("final_logprobs" if v2 else "teacher_logprobs")
+            if (not isinstance(logits, torch.Tensor) or tuple(logits.shape) != (ids.shape[0], vocab)
+                    or not torch.isfinite(logits).all()):
+                raise RuntimeError("teacher final logprob shape or values are invalid")
+
+        from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+        report = {"schema": "prismaquant.gold_preflight/1", "status": "preflight",
+                  "stage": "gold.kl", "model": str(args.model),
+                  "n_samples": int(ids.shape[0]), "seqlen": seqlen,
+                  "vocab_size": vocab, "teacher_evidence": teacher_evidence,
+                  "runtime_qualification": "not_run"}
+        atomic_write_bytes(Path(args.output), json.dumps(report, allow_nan=False).encode())
+        return 0
+
     final_companion = v2 and args.score_positions == "final"
     if final_companion and payload.get("final_logprobs") is None:
         raise RuntimeError("final scoring requires a full-vocabulary teacher companion")
@@ -739,6 +780,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=["teacher", "student"], required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--preflight", action="store_true",
+                        help="Read student inputs on CPU. Do not load vLLM or qualify a gate.")
     parser.add_argument("--meta-output", default="teacher_meta.json")
     parser.add_argument("--teacher-payload")
     parser.add_argument(
@@ -797,6 +840,8 @@ def main() -> int:
         parser.error(str(exc))
     if args.mode == "student" and not args.teacher_payload:
         parser.error("--teacher-payload is required in student mode")
+    if args.preflight and args.mode != "student":
+        parser.error("--preflight requires student mode and a stored teacher payload")
     if args.mode == "teacher":
         return _teacher(args)
     return _student(args)

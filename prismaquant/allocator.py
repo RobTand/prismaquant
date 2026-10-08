@@ -772,6 +772,10 @@ class _StockAllocationLane:
         raise LookupError("no lane provides a serving target, so no unit has a serving context")
 
     @staticmethod
+    def allocation_unit_structure(unit, profile, *, stats=None):
+        raise LookupError("no lane provides unit structure")
+
+    @staticmethod
     def allocation_scope_meta(serving_target, context_by_unit) -> dict:
         return {}
 
@@ -836,13 +840,25 @@ def _allocation_lane():
     return single_lane_plugin("allocation_menu") or _StockAllocationLane
 
 
-def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, target_profile=None):
-    """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
+def _mtp_scope_inputs(payload, serving_target, profile, *, routing=None):
+    """Read MTP topology through the existing lane and profile owners."""
+    lane = _allocation_lane()
+    stats, contexts = {}, {}
+    for unit in payload["costs"]:
+        context = (None if serving_target is None else
+                   lane.allocation_unit_context(serving_target, unit, profile))
+        structure = (context.structure if context is not None else
+                     lane.allocation_unit_structure(unit, profile) if profile is not None else None)
+        stats[unit] = {"unit_structure": structure}
+        if structure == "routed_moe" and routing is not None:
+            stats[unit]["routing"] = routing
+        if context is not None:
+            contexts[unit] = context
+    return stats, contexts or None
 
-    The same reader the body menu uses (``format_is_producer_eligible``), asked
-    about one unit's serving context when a Tessera scope is declared. BF16
-    passthrough is not a Tessera route and is always offered.
-    """
+
+def _mtp_rung_attestation(serving_target, profile):
+    """Keep native runtime attestation separate from public API admission."""
     lane = _allocation_lane()
 
     def eligible(unit, rung):
@@ -851,18 +867,20 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
             return True
         context = None if serving_target is None else lane.allocation_unit_context(
             serving_target, unit, profile)
-        from .allocator_candidates import candidate_rung_admission
-        from .lane_spec import family_hook
-        from .serving_profiles import load_serving_profile
-        if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
-            admission = candidate_rung_admission(rung, target_profile=target_profile,
-                serving_context=context, rung_allowability=rung_allowability)
-            if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
-                return False
         if context is None:
             return fr.format_is_producer_eligible(rung)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
+
+
+def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowability, *,
+                              m=None, tensor_parallel=1):
+    """Retain each final unit's exact scope, including fixed and auxiliary units."""
+    from .allocator_candidates import unit_allowability_scope
+    return {name: unit_allowability_scope(fmt, name, stats.get(name, {}),
+                None if context_by_unit is None else context_by_unit.get(name),
+                rung_allowability, m=m, tensor_parallel=tensor_parallel)
+            for name, fmt in assignment.items()}
 
 
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
@@ -891,13 +909,16 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
                   if args.mtp_acceptance_points else [])
         fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
                  if getattr(args, "mtp_fixed_formats", None) else None)
+        stats, contexts = _mtp_scope_inputs(payload, serving_target, profile,
+            routing=getattr(args, "mtp_routing", None))
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile,
-                                      rung_allowability=rung_allowability, target_profile=target_profile),
-                                  fixed_formats=fixed,
-                                  formats=(None if declared is None
-                                           else declared.split(",")))
+                                  eligible=_mtp_rung_attestation(serving_target, profile),
+                                  fixed_formats=fixed, rung_allowability=rung_allowability,
+                                  stats=stats, context_by_unit=contexts, target_profile=target_profile,
+                                  allowability_m=getattr(args, "mtp_regime", None),
+                                  allowability_tensor_parallel=getattr(args, "mtp_tensor_parallel", None) or 1,
+                                  formats=(None if declared is None else declared.split(",")))
     except MtpMenuRefused as exc:
         import sys
 
@@ -2219,6 +2240,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "c_ms_per_bit and their source (required with "
                          "--mtp-joint-cost; recorded, and inert without "
                          "acceptance points).")
+    from .glm_mtp_selection import add_mtp_scope_arguments
+    add_mtp_scope_arguments(ap)
     ap.add_argument("--mtp-fixed-formats", default=None,
                     help="Optional JSON file mapping MTP group names to one format "
                          "each; the selector keeps only that rung for the group, "
@@ -2992,6 +3015,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     accounting_stats = dict(stats)
     tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
+    if rung_allowability is not None:
+        if any(owner.scoped for owner in rung_allowability.values()):
+            for name, row in accounting_stats.items():
+                row["_allowability_structure"] = lane.allocation_unit_structure(
+                    name, model_profile, stats=row)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
@@ -3252,6 +3280,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         rung_allowability=rung_allowability,
+        allowability_m=args.pact_regime,
+        allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
         **({"preserve_runtime_frontier": True}
            if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
@@ -3312,6 +3342,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             activation_pricing=None,
             context_by_unit=tessera_context_by_unit,
             rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_head_candidates = [
             name for name in head_probe_names
@@ -3400,6 +3432,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             activation_pricing=activation_pricing,
             context_by_unit=tessera_context_by_unit,
             rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_mtp_candidates = [
             name for name in mtp_names
@@ -3931,7 +3965,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             pact_pricing = build_shape_runtime_resources(
                 shape_table, candidates, option_members=pact_option_members,
                 member_shapes=member_shapes, member_structure=member_structure,
-                regime_m=args.pact_regime, published_formats=pact_formats)
+                regime_m=args.pact_regime, published_formats=pact_formats,
+                rung_allowability=rung_allowability)
             pact_candidates = pact_pricing.time_candidates(candidates)
         except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
             raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
@@ -4330,8 +4365,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             legal_formats=per_linear_legal_formats,
         )
         from .allocator_candidates import require_assignment_rung_allowability
+        final_scope_stats = {**accounting_stats, **fixed_stats, **stats}
+        final_scopes = _final_allowability_scopes(
+            assignment_expanded, tessera_context_by_unit, final_scope_stats, rung_allowability,
+            m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel or 1)
         require_assignment_rung_allowability(assignment_expanded, target_profile=target_profile,
-            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability)
+            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability,
+            allowability_scope_by_unit=final_scopes)
+        if rung_allowability is not None:
+            tessera_menu_widths["rung_allowability_scopes"] = {
+                name: scope for name, scope in final_scopes.items() if scope is not None}
+            tessera_menu_widths["canonical_quality"] = {
+                name: final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})[fmt]
+                for name, fmt in assignment_expanded.items()
+                if fmt in final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})}
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,
