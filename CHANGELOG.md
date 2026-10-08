@@ -11,6 +11,20 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Changed
+- The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
+  Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
+  The commit, read digest, read-byte comparison, contract path, and all other fields remain in the oracle.
+  The retained D13 and v60 outputs produce the same digest in the final CPU check.
+  The applicability and Pareto digests remain unchanged.
+- The Tessera pin moves to `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60 (Tessera #1033, PQ #2426).
+  The serving and development constants, legal-domain provenance, and identity snapshot move in one commit.
+  The generated admission answer remains unchanged.
+  The new producer supplies the attention projection APIs and the canonical rung-allowability API.
+  The contract retains the v56 cells and native-extension rows.
+
+  The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
+  Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
+  No new seal, serving result, or performance result is claimed.
 - The Tessera worker loads the shared partition helper only for preparation
   (#2417, R1). Standalone help and atomic publication retain their standard-library
   contract without that helper. The tests use the shared owner directly.
