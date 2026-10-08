@@ -726,3 +726,71 @@ def test_real_cli_packed_menu_emits_and_final_guard_refuses_dominant_trade(tmp_p
         allocator.main([*argv[1:], "--cost-baseline-assignment", str(baseline),
                         "--no-packed-aggregation", "--no-fused-aggregation"])
     assert not (tmp_path / "layer.json").exists()
+
+
+class _AttributionFaultProfile(DefaultProfile):
+    """DefaultProfile that cannot attribute one baseline member (#2288 R1)."""
+    fault_name = None
+
+    def routed_expert_identity(self, qname):
+        if qname == self.fault_name:
+            raise ValueError(f"paired rate trade lacks per-expert attribution: {qname}")
+        return super().routed_expert_identity(qname)
+
+
+def test_unattributable_baseline_member_keeps_reprice_option():
+    """An unpriced baseline member blocks pruning, not the option (#2288 R1).
+
+    The priced group covers every baseline member the profile can attribute,
+    but one baseline member's expert identity cannot be established. The old
+    coverage check skipped that member, certified the shortened roster as
+    complete, and pruned the refused option. The corrected check fails open:
+    the verdict stays in the report and the option survives for the final
+    complete-assignment guard.
+    """
+    from prismaquant.allocator_solver import Candidate
+    layer, names = _two_expert_layer()
+    values = {name: ([1, 1], [3 if ".experts.0." in name else 1,
+                              3 if ".experts.0." in name else 1])
+              for name in names}
+    costs, _assignment, baseline = _trade_rows(values)
+    fault = f"{layer}.9.gate_proj"
+    baseline[fault] = HIGH
+    profile = _AttributionFaultProfile()
+    profile.fault_name = fault
+    group = "actual-layer::__packed__"
+    stats = {group: {"_packed_group_members": sorted(names)}}
+    candidates = {group: [Candidate(LOW, 1, 10, 3.0), Candidate(HIGH, 2, 20, 15.0)]}
+    report = {}
+    repriced = ac.reprice_paired_candidates(stats, costs, candidates, baseline,
+                                            profile=profile, ucb_z=0, report=report)
+    assert report[group][LOW]["refused"] is True
+    assert report[group][LOW]["routed_layers"][layer]["dominant_experts"] == ["0"]
+    assert [c.fmt for c in repriced[group]] == [LOW, HIGH]
+
+
+def test_unattributable_baseline_member_keeps_fold_composites():
+    """The same fail-open rule holds on the mixed-group fold (#2288 R1)."""
+    from prismaquant.allocator_solver import Candidate
+    from test_allocator_sibling_aggregation import _installed_fused_licence
+    layer = "model.layers.5.mlp.experts"
+    members = [f"{layer}.0.{role}_proj" for role in ("gate", "up")]
+    low, high = "TESSERA_E4M3_K1_R832", "TESSERA_E4M3_K1_R864"
+    costs = {name: {low: _row(name, [1, 1], fmt=low), high: _row(name, [3, 3], fmt=high)}
+             for name in members}
+    candidates = {name: [Candidate(fmt, 0, 10 + 10 * i, 1.0 + float(i))
+                         for i, fmt in enumerate((low, high))]
+                  for name in members}
+    fault = f"{layer}.9.gate_proj"
+    baseline = dict.fromkeys(members, high)
+    baseline[fault] = high
+    profile = _AttributionFaultProfile()
+    profile.fault_name = fault
+    report = {}
+    options = ac.tessera_group_composites(
+        members, candidates, 8, licence=_installed_fused_licence(), ucb_z=2,
+        costs=costs, baseline_assignment=baseline, profile=profile, report=report)
+    assert len(options) == 4
+    refused = report["__paired_trades__"]
+    assert sum(1 for trade in refused.values() if trade["refused"]) == 3
+    assert refused[options[0].fmt]["predicted_dloss"] == options[0].predicted_dloss
