@@ -138,3 +138,61 @@ def test_single_probe_cannot_claim_zero_sampling_uncertainty(measured_payload):
     with pytest.raises(ValueError, match="at least two probes"):
         make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
             signed_components=row["signed_components_per_probe"][:1])
+
+
+def _paired_costs(payload, name):
+    return {name: dict(payload["costs"][name])}
+
+
+@pytest.mark.parametrize("alias", ["FP8_DYNAMIC", "FP8"])
+def test_resolved_alias_prices_same_paired_trade_as_canonical_row(measured_payload, alias):
+    """A supported alias prices the trade of its canonical row."""
+    from prismaquant.model_profiles import DefaultProfile
+    name, _ = _first(measured_payload)
+    costs = _paired_costs(measured_payload, name)
+    baseline = {name: "NVFP4A16"}
+    canonical = ac.price_paired_rate_trade(
+        costs, {name: "FP8_E4M3"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
+    assert canonical["mean_difference"] != 0
+    aliased = ac.price_paired_rate_trade(
+        costs, {name: alias}, baseline, profile=DefaultProfile(), ucb_z=1.0)
+    for key in ("difference_per_probe", "mean_difference", "paired_standard_error",
+                "predicted_dloss", "hedged_difference", "candidate_point_cost",
+                "probe_ids", "probe_identity_sha256"):
+        assert aliased[key] == canonical[key]
+    assert aliased["assignment_a"] == canonical["assignment_a"]
+    assert aliased["assignment_b"] == canonical["assignment_b"]
+
+
+def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
+    """The resolved identity keeps every genuine mismatch a refusal."""
+    from prismaquant.model_profiles import DefaultProfile
+    name, _ = _first(measured_payload)
+    costs = _paired_costs(measured_payload, name)
+    baseline = {name: "NVFP4A16"}
+    with pytest.raises(ValueError, match="missing matched cost row"):
+        ac.price_paired_rate_trade(
+            costs, {name: "FP8_E5M2"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
+    other = next(unit for unit in sorted(measured_payload["costs"]) if unit != name)
+    donated = {other: dict(costs[name])}
+    with pytest.raises(ValueError, match="matched joint AURA currency"):
+        ac.price_paired_rate_trade(
+            donated, {other: "FP8_DYNAMIC"}, {other: "NVFP4A16"},
+            profile=DefaultProfile(), ucb_z=1.0)
+    plain = _paired_costs(measured_payload, name)
+    plain[name]["FP8_E4M3"] = {"predicted_dloss": 0.1}
+    with pytest.raises(ValueError, match="matched joint AURA currency"):
+        ac.price_paired_rate_trade(
+            plain, {name: "FP8_E4M3"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
+    _, row = _first(measured_payload)
+    probe = copy.deepcopy(row["probe_identity"])
+    probe["seed_base"] += 1
+    operator = copy.deepcopy(row["joint_operator_identity"])
+    operator["probe_identity_sha256"] = identity_sha256(probe)
+    resampled = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
+        signed_components=row["signed_components_per_probe"])
+    forked = _paired_costs(measured_payload, name)
+    forked[name]["FP8_E4M3"] = resampled
+    with pytest.raises(ValueError, match="align"):
+        ac.price_paired_rate_trade(
+            forked, {name: "FP8_E4M3"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
