@@ -2799,8 +2799,9 @@ constants in `prefill_frontier.py` are removed. No default, stage, format,
 lane or ship gate changes. Gate: `tests/test_pact_frontier_intervals.py`.
 
 Re-stamped 2026-10-07 (D50 item 3, `campaign/pact-frontier-adapter-20261007`): `prismaquant/pact_frontier_profile.py` reads the PACT cohort and TP rules from the model profile and config.
-The cohort is layers, bands, vocab, prefix ids and scored positions.
+The cohort is layers, bands, vocab, prefix ids, scored positions, prefix-row handling and the input contract.
 GLM-5.3-Flash resolves to the exact running-measurement values (`glm_paths_identical`).
+Corrected 2026-10-08 (issue 2427): the cohort carries `local_prefix_rows="excluded"` and `input_contract="prefixed_514"`; the guard rejects a cohort that lacks or changes them.
 No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_frontier_profile_adapter.py`.
 
 

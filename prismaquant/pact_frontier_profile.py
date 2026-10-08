@@ -27,6 +27,11 @@ GLM_LEGACY = {
     "dense_layers": (0, 3),
     "band_width": 6,
     "prefix_ids": (154822, 154824),
+    # Measured-consumer contract (issue 2427): the running measurement
+    # excludes the local prefix rows; each input carries the prefix.
+    # The identity guard rejects any cohort that lacks or changes these.
+    "local_prefix_rows": "excluded",
+    "input_contract": "prefixed_514",
     "vocab_size": 154880,
     "scored_positions": 511,
     "sample_range": (384, 448),
@@ -105,7 +110,8 @@ def pact_cohort_from_profile(profile=None, config=None):
         "sample_range": list(GLM_LEGACY["sample_range"]),
         "raw_tokens_per_sequence": int(raw_tokens),
         "prefix_ids": list(prefix),
-        "local_prefix_rows": len(list(prefix)),
+        "local_prefix_rows": GLM_LEGACY["local_prefix_rows"],
+        "input_contract": GLM_LEGACY["input_contract"],
         "global_original_tokens": GLM_LEGACY["global_original_tokens"],
         "scored_positions_per_sequence": int(scored),
         "vocab_size": int(vocab),

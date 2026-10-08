@@ -15,10 +15,29 @@ def test_glm_cohort_matches_legacy():
     assert cohort["sample_range"] == [384, 448]
     assert cohort["raw_tokens_per_sequence"] == 512
     assert cohort["prefix_ids"] == [154822, 154824]
+    assert cohort["local_prefix_rows"] == "excluded"
+    assert cohort["input_contract"] == "prefixed_514"
     assert cohort["scored_positions_per_sequence"] == 511
     assert cohort["vocab_size"] == 154880
     assert cohort["global_original_tokens"] == 32768
     assert glm_paths_identical(cohort)
+
+
+def test_glm_guard_rejects_missing_semantic_fields():
+    cohort = pact_cohort_from_profile()
+    assert glm_paths_identical(cohort)
+    for field in ("local_prefix_rows", "input_contract"):
+        stripped = {key: value for key, value in cohort.items() if key != field}
+        assert not glm_paths_identical(stripped)
+
+
+def test_glm_guard_rejects_wrong_semantic_fields():
+    cohort = pact_cohort_from_profile()
+    assert glm_paths_identical(cohort)
+    wrong_rows = dict(cohort, local_prefix_rows=2)
+    assert not glm_paths_identical(wrong_rows)
+    wrong_contract = dict(cohort, input_contract="raw_512")
+    assert not glm_paths_identical(wrong_contract)
 
 
 def test_glm_bands_match_legacy_shape():
@@ -58,4 +77,6 @@ def test_manifest_overlay_keeps_paths():
     for key in manifest:
         assert overlay[key] == manifest[key]
     assert overlay["cohort"]["prefix_ids"] == [154822, 154824]
+    assert overlay["cohort"]["local_prefix_rows"] == "excluded"
+    assert overlay["cohort"]["input_contract"] == "prefixed_514"
     assert overlay["bands"][0] == [0, 3]
