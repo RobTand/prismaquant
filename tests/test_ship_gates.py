@@ -351,3 +351,21 @@ def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypa
     output.write_text(json.dumps(result))
     _, g3 = _verify_replay_stage(job, tmp_path, "offline.g3")
     assert g3["status"] == "failed"
+
+
+@pytest.mark.parametrize("dev", [False, True])
+def test_task_replay_consumer_refuses_declared_tessera_bytes(tmp_path, monkeypatch, dev):
+    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, config, result, _, output = _task_replay_job(tmp_path)
+    model = Path(config["backend"]["pretrained"])
+    model_config = json.loads((model / "config.json").read_text())
+    model_config["quantization_config"] = {"quant_method": "tessera"}
+    (model / "config.json").write_text(json.dumps(model_config))
+    result["identity"]["model_artifact"] = build_source_checkpoint_identity(model)
+    output.write_text(json.dumps(result))
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    _, task = _verify_replay_stage(job, tmp_path, "task_suite")
+    assert task["status"] == "failed"
+    assert "tessera" in task["error"]
+    assert "cannot read declared quant_method" in task["error"]
