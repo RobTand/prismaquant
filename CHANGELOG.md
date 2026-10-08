@@ -15,7 +15,8 @@
   Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
   The retained result carries no speed, energy or residency qualification.
   Certified mode keeps the refusal and the failed status.
-  A real campaign error and a monitor that never stopped still fail in both modes.
+  A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
+  Missing telemetry retains each actual instrument name and its exact error detail.
 
 ### Changed
 - The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).

@@ -273,11 +273,28 @@ class AnchorObserver(CaptureObserver):
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
 
+    @contextmanager
+    def profiler_lifetime(self, profiler):
+        def stop(error_info):
+            try:
+                return profiler.__exit__(*error_info)
+            except BaseException as error:
+                self.observation_error(error, cleanup=True)
+                raise
+
+        profiler.__enter__()
+        try:
+            yield
+        except BaseException:
+            if not stop(sys.exc_info()):
+                raise
+        else:
+            stop((None, None, None))
 
     @contextmanager
     def collection_window(self, profiler, record):
         if self.window_seconds is None:
-            with profiler:
+            with self.profiler_lifetime(profiler):
                 yield
             return
         cancel = threading.Event()
@@ -294,7 +311,7 @@ class AnchorObserver(CaptureObserver):
                 # is thread-local. One owner starts AND drains/stops the CUDA-only
                 # profiler. Stop drains pending CUDA activity instead of toggling
                 # it off before finalization. The anchor stays on its calling thread.
-                with profiler:
+                with self.profiler_lifetime(profiler):
                     started = time.monotonic()
                     ready.set()
                     returned = cancel.wait(self.window_seconds)
@@ -401,7 +418,7 @@ class AnchorObserver(CaptureObserver):
         if self.result['anchor_calls']:
             for kind in ('netdata', 'python_sampler'):
                 if not self.result[kind].get('samples'):
-                    self.observation_error(RuntimeError(f'no {kind} sample was recorded'))
+                    self.observation_error(RuntimeError(f'no {kind} sample was recorded'), instrument=kind)
 
 
 def selected_anchor_command(command):

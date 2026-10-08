@@ -138,10 +138,10 @@ def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeyp
         repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
     for kind in ready:
         assert bool(result[kind].get('samples')) == (kind not in missing)
-    # #1096: the failing recorder entry is in the message, not only in a
-    # result.json that a test's temporary directory may delete.
+    assert {row['instrument'] for row in result['errors']} == set(missing)
+    assert json.loads((obs.out/'progress.json').read_text()) == result
     for kind in missing:
-        assert f"anchor_profiler: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
+        assert f"{kind}: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
 
 
 @pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
@@ -175,6 +175,8 @@ def test_delayed_monitors_retain_completed_anchors_in_dev_mode(
     assert result['evidence_complete'] is False
     assert result['profile_status'] == 'observed'
     assert result['anchors'][0]['status'] == 'complete'
+    assert set(result['incomplete_instruments']) == set(missing)
+    assert {row['instrument'] for row in result['errors']} == set(missing)
     assert {row['error'] for row in result['errors']} == {
         repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
     assert json.loads((obs.out/'progress.json').read_text()) == result
@@ -508,3 +510,53 @@ def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
     trace = json.loads((obs.out/record['trace']['path']).read_text())
     kernels = [event for event in trace['traceEvents'] if event.get('cat') == 'kernel']
     assert len(kernels) == 1, 'CUDA work after the deadline was also collected'
+
+
+@pytest.mark.parametrize('timed', [False, True])
+@pytest.mark.parametrize('certified', [False, True])
+@pytest.mark.parametrize('original_fails', [False, True])
+def test_profiler_teardown_failure_refuses_full_lifecycle(
+        tmp_path, controlled, monkeypatch, timed, certified, original_fails):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    teardown_error = RuntimeError('native profiler teardown failed')
+    stopped = threading.Event()
+    def stop(self, *_):
+        stopped.set()
+        raise teardown_error
+    monkeypatch.setattr(FakeProfiler, '__exit__', stop)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=timed, window_seconds=60 if timed else None)
+    ready = monitor_readiness(obs, monkeypatch)
+    campaign_error = ValueError('original campaign failure during profiling')
+    token, calls, journal = object(), [], []
+    def original(**kwargs):
+        calls.append(kwargs)
+        if original_fails:
+            raise campaign_error
+        return token
+    with pytest.raises(ValueError if original_fails else RuntimeError) as caught:
+        with obs:
+            for event in ready.values():
+                assert event.wait(10), 'monitor did not commit its sample'
+            journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+    if original_fails:
+        assert caught.value is campaign_error
+    else:
+        assert journal == [token]
+        assert 'native profiler teardown failed' in str(caught.value)
+    assert len(calls) == 1 and stopped.is_set()
+    assert not any(thread.is_alive() for thread in obs.threads)
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert result['campaign_error'] == (repr(campaign_error) if original_fails else None)
+    assert result['native_anchor_profiled'] is False
+    assert result['profile_status'] == 'missing'
+    assert result['anchors'][0]['status'] == (
+        'anchor_failed' if original_fails else 'observation_failed')
+    assert any(row['instrument'] == 'anchor_profiler' and
+               row['error'] == repr(teardown_error) for row in result['errors'])
+    assert 'dev_uncertified' not in result
+    assert not list(obs.out.glob('*.trace.json'))
+    assert json.loads((obs.out/'progress.json').read_text()) == result
+    if timed:
+        assert result['anchors'][0]['collection_window']['stopped_by'] == 'stop_failed'

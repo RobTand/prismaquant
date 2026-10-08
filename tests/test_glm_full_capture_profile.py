@@ -144,9 +144,10 @@ def test_incomplete_evidence_refuses_in_certified_mode(tmp_path, monkeypatch):
     assert 'GPU power chart missing' in result['errors'][0]['error']
 
 
-def test_campaign_error_supersedes_observer_error(tmp_path, monkeypatch):
+@pytest.mark.parametrize('certified', [False, True])
+def test_campaign_error_supersedes_observer_error(tmp_path, monkeypatch, certified):
     from experiments import glm_full_capture_profile as module
-    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
     observer = CaptureObserver(tmp_path/'campaign-wins', profile_layers=())
     monkeypatch.setattr(module, 'sample_netdata',
                         lambda host: (_ for _ in ()).throw(RuntimeError('telemetry gap')))
@@ -190,3 +191,51 @@ def test_snapshot_survives_first_monitor_round_during_dict_iteration(tmp_path, m
         # Earlier fields can precede this monitor round in a progress snapshot.
         # The final joined snapshot still carries the retained error.
         assert observer.result['errors'][0]['host'] == 'sparky'
+
+
+@pytest.mark.parametrize('certified', [False, True])
+@pytest.mark.parametrize('original_fails', [False, True])
+def test_live_monitor_refuses_full_lifecycle(
+        tmp_path, monkeypatch, certified, original_fails):
+    import threading
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    observer = CaptureObserver(tmp_path/'live-monitor', profile_layers=())
+    started = {kind: threading.Event() for kind in ('netdata', 'python_sampler')}
+    release = threading.Event()
+    def blocked_monitor(kind):
+        started[kind].set()
+        release.wait(10)
+    monkeypatch.setattr(observer, 'monitor', blocked_monitor)
+    error = ValueError('original campaign failure with live monitor')
+    token, journal = object(), []
+    try:
+        with pytest.raises(ValueError if original_fails else RuntimeError) as caught:
+            with observer:
+                for event in started.values():
+                    assert event.wait(10), 'monitor did not start'
+                for thread in observer.threads:
+                    join = thread.join
+                    monkeypatch.setattr(thread, 'join', lambda timeout=None, join=join: join(0))
+                journal.append(observer.wrap_collector(
+                    lambda *, forward_batch: forward_batch(None))(
+                        forward_batch=lambda _: token))
+                if original_fails:
+                    raise error
+        if original_fails:
+            assert caught.value is error
+        else:
+            assert 'monitor did not stop' in str(caught.value)
+        assert journal == [token]
+        assert all(thread.is_alive() for thread in observer.threads)
+        result = json.loads((observer.out/'result.json').read_text())
+        assert result['status'] == 'failed'
+        assert result['campaign_error'] == (repr(error) if original_fails else None)
+        assert result['collections'][0]['status'] == 'complete'
+        assert {row['instrument'] for row in result['errors']} == {'shutdown'}
+        assert 'dev_uncertified' not in result
+        assert json.loads((observer.out/'progress.json').read_text()) == result
+    finally:
+        release.set()
+        for thread in observer.threads:
+            threading.Thread.join(thread, timeout=10)
+        assert not any(thread.is_alive() for thread in observer.threads)
