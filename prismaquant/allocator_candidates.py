@@ -2125,6 +2125,13 @@ def price_paired_rate_trade(
     global KL Fisher normalization is already inside the signed projections;
     no sensitivity, family gain, token divisor or sample clipping enters here.
     Dominance and the hedge consume the same named paired statistics.
+
+    The dominance refusal is scoped to the priced roster: it is a
+    complete-layer verdict only when that roster covers the complete routed
+    layer. A menu path pricing one decision group keeps the priced
+    uncertainty and the verdict in its report, but only a complete roster
+    may prune on it (see ``_priced_trade_covers_complete_routed_layers``).
+    The complete-assignment guards apply the rule before anything is served.
     """
     from .joint_aura import paired_assignment_difference
 
@@ -2142,7 +2149,7 @@ def price_paired_rate_trade(
             row, _entry_fmt = _resolve_cost_entry(costs.get(name, {}), fmt)
             if row is None or "error" in row:
                 raise ValueError(f"paired rate trade missing matched cost row: {name}@{fmt}")
-            if not joint_row_binds_cell(row, name, fmt, where="paired rate trade"):
+            if not joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
                 raise ValueError(f"paired rate trade requires matched joint AURA currency: {name}@{fmt}")
             rows[name] = row
         return rows
@@ -2283,6 +2290,48 @@ def summarize_paired_rate_trade(trade: Mapping) -> dict:
     return summary
 
 
+def _priced_trade_covers_complete_routed_layers(trade: Mapping, baseline_assignment: Mapping,
+                                                profile) -> bool:
+    """True when a priced trade covers every routed layer it touches.
+
+    A menu path prices one decision group: a role-split packed unit or a
+    fused expert pair can be a strict subgroup of its routed layer, and a
+    contribution dominating that subgroup denominator need not dominate the
+    eventual complete-layer trade. Such a subgroup verdict reprices the
+    option without pruning it; only a complete roster prunes, and the final
+    expanded-assignment guards refuse genuinely dominant trades.
+
+    Completeness that cannot be established keeps the option (#2288 R1): a
+    baseline member whose expert identity the profile cannot name may still
+    belong to the priced layer, so skipping it and certifying the shortened
+    roster could prune on a subgroup denominator. The menu fails open and
+    the final guard still fails closed.
+    """
+    routed = trade.get("routed_layers") or {}
+    if not routed:
+        return True
+    identify = getattr(profile, "routed_expert_identity", None)
+    if not callable(identify):
+        return False
+    if not isinstance(baseline_assignment, Mapping):
+        return False
+    for layer, row in routed.items():
+        priced = set(row.get("members") or ())
+        if not priced:
+            return False
+        complete = set()
+        for name in baseline_assignment:
+            try:
+                identity = identify(name)
+            except Exception:
+                return False
+            if identity is not None and identity[0] == layer:
+                complete.add(name)
+        if priced != complete:
+            return False
+    return True
+
+
 def reprice_paired_candidates(
     stats: Mapping, costs: Mapping, candidates: Mapping, baseline_assignment: Mapping,
     *, profile, ucb_z: float, report: dict,
@@ -2291,6 +2340,9 @@ def reprice_paired_candidates(
 
     A routed layer is indivisible on the normal packed path. The final full
     assignment guard also covers callers opting out of that aggregation.
+    Subgroup pricing, whole-layer policy (#2288): the priced group can be a
+    strict subgroup of its routed layer, so its verdict reprices without
+    pruning unless the group covers the complete layer.
     """
     from dataclasses import replace
 
@@ -2308,7 +2360,13 @@ def reprice_paired_candidates(
             assignment = candidate.member_formats or {m: candidate.fmt for m in members}
             trade = price_paired_rate_trade(costs, assignment, baseline, profile=profile, ucb_z=ucb_z)
             report[name][candidate.fmt] = summarize_paired_rate_trade(trade)
-            if trade["refused"] and stats[name].get("_packed_group_members"):
+            # Subgroup verdicts reprice without pruning (#2288): only a group
+            # covering its complete routed layer may drop an option here. The
+            # verdict stays in the report either way, and the final
+            # expanded-assignment guard refuses genuinely dominant trades.
+            if (trade["refused"] and stats[name].get("_packed_group_members")
+                    and _priced_trade_covers_complete_routed_layers(
+                        trade, baseline_assignment, profile)):
                 continue
             kept.append(replace(candidate, predicted_dloss=(
                 trade["predicted_dloss"] if ucb_z > 0 else candidate.predicted_dloss)))
@@ -3633,7 +3691,13 @@ def tessera_group_composites(
                 if report is not None:
                     report.setdefault("__paired_trades__", {})[
                         fr.whole_group_option_name(family, index)] = summarize_paired_rate_trade(trade)
-                if trade["refused"]:
+                # Subgroup verdicts reprice without pruning (#2288): a fused
+                # group can be a strict subgroup of its routed layer, so only
+                # a group covering the complete layer drops an option here.
+                # The verdict stays in the report either way, and the final
+                # expanded-assignment guard refuses genuinely dominant trades.
+                if trade["refused"] and _priced_trade_covers_complete_routed_layers(
+                        trade, baseline_assignment, profile):
                     index += 1
                     continue
             out.append(Candidate(

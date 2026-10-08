@@ -16877,6 +16877,14 @@ marginal pricing without a paired baseline and default `z=0` prices stay
 unchanged. CPU fixtures in `tests/test_paired_rate_trade.py` qualify this source
 policy, not corrected model prices, held-out KL, GPU execution or #2281.
 
+Re-stamped 2026-10-08 (#2288): menu pruning on expert dominance applies only
+when the priced decision group covers its complete routed layer. A
+subgroup-scoped verdict stays in provenance and reprices the option without
+pruning it. The complete-assignment exact filter and the final emission guard
+refuse genuinely dominant trades. A baseline member whose expert identity
+cannot be established blocks pruning the same way (R1): the menu never
+certifies a shortened roster.
+
 Re-stamped (2026-09-05, `codex/two-anchor-bootstrap`) for campaign
 bootstrapping from two endpoints (§4.10). A requested initial count of one
 or two retains both endpoints; subsequent rounds use the existing widest-gap
