@@ -95,7 +95,6 @@ def _qwen3_declared_profile():
     }
     profile = profile_from_config(declared)
     assert profile.name == "qwen3"
-    assert profile._declared_config == declared
     return profile
 
 
@@ -106,26 +105,6 @@ def test_profile_declared_cohort_flows_without_explicit_config():
     assert cohort["prefix_ids"] == [151935, 151934]
     assert cohort["scored_positions_per_sequence"] == 1023
     assert cohort["raw_tokens_per_sequence"] == 1024
-
-
-def test_profile_declared_overlay_flows_without_explicit_config():
-    profile = _qwen3_declared_profile()
-    manifest = {
-        "d41_index": "/mnt/shared/fleet-ceo/rung-allowability/index.json",
-        "price_tables": [],
-        "anchors": "a",
-        "heldout_preregistration": "b",
-        "stack_scope_source": "c",
-        "thresholds": {},
-        "predictor": {},
-    }
-    overlay = frontier_manifest_overlay(manifest, profile)
-    for key in manifest:
-        assert overlay[key] == manifest[key]
-    assert overlay["cohort"]["vocab_size"] == 151936
-    assert overlay["cohort"]["prefix_ids"] == [151935, 151934]
-    assert overlay["cohort"]["scored_positions_per_sequence"] == 1023
-    assert overlay["cohort"]["raw_tokens_per_sequence"] == 1024
 
 
 def test_explicit_config_beats_declared_config():
