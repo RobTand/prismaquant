@@ -5332,7 +5332,7 @@ class StreamedCausalLM:
             if name in projected:
                 weight = projected[name].weight
                 parameter_name = projected[name].module_qname+'.'+projected[name].param_name
-            elif isinstance(modules.get(name), torch.nn.Linear):
+            elif self.profile.is_dense_parameter_owner(name, modules.get(name)):
                 weight = modules[name].weight
                 parameter_name = name+'.weight'
             else:
