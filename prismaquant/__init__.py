@@ -185,21 +185,27 @@ def _polyfill_transformers() -> None:
     except Exception:
         pass
     try:
-        # ROPE_INIT_FUNCTIONS['default'] was removed in transformers 5.x
-        # (renamed to 'linear', which takes a 'factor' kwarg the old
-        # default never needed). Remote modeling files from older
-        # checkpoints still look up 'default'. Re-register the old
-        # implementation verbatim — a ~6-line function computing the
-        # standard rotary inv_freq schedule with no scaling.
+        # Old remote model files still request the removed default entry.
+        # Keep their inverse-frequency arithmetic unchanged. Current configs
+        # store the same parameters in the upstream rope_parameters mapping.
         from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
         if "default" not in ROPE_INIT_FUNCTIONS:
             import torch as _torch
             def _compute_default_rope_parameters(config=None, device=None, **_):
-                base = config.rope_theta
-                partial = getattr(config, "partial_rotary_factor", 1.0)
-                head_dim = getattr(
-                    config, "head_dim",
-                    config.hidden_size // config.num_attention_heads)
+                if hasattr(config, "rope_theta"):
+                    base = config.rope_theta
+                    partial = getattr(config, "partial_rotary_factor", 1.0)
+                    head_dim = getattr(
+                        config, "head_dim",
+                        config.hidden_size // config.num_attention_heads)
+                else:
+                    parameters = config.rope_parameters
+                    if _.get("layer_type") is not None:
+                        parameters = parameters[_["layer_type"]]
+                    base = parameters["rope_theta"]
+                    partial = parameters.get("partial_rotary_factor", 1.0)
+                    head_dim = (getattr(config, "head_dim", None)
+                                or config.hidden_size // config.num_attention_heads)
                 dim = int(head_dim * partial)
                 inv_freq = 1.0 / (base ** (
                     _torch.arange(0, dim, 2, dtype=_torch.int64)
