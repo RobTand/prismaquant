@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Mark the task-suite tests for the required layered gate (#2412, #2413).
+  Ordinary runs report explicit skips with the recorded receipt.
+  The task-suite gate must run the marked tests and must report zero skips.
+  Select it with `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes

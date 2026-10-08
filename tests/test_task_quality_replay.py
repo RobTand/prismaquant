@@ -11,6 +11,8 @@ from transformers import LlamaConfig
 from prismaquant.cost_streaming import build_source_checkpoint_identity
 from prismaquant.quality_stage import artifact, evaluate_criteria, verify_result
 
+pytestmark = pytest.mark.task_suite
+
 
 def make_task_replay_fixture(root):
     model, tokenizer = root / "model", root / "tokenizer"

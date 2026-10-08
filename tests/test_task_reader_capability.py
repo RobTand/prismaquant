@@ -10,6 +10,8 @@ from transformers import LlamaConfig, LlavaConfig, PreTrainedTokenizerFast
 
 from prismaquant.task_suite import preflight_tasks, measure_tasks
 
+pytestmark = pytest.mark.task_suite
+
 
 def make_reader_configuration(root, *, scope, quant_method="tessera"):
     model = root / "artifact"
