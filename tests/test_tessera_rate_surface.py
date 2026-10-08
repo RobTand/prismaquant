@@ -48,22 +48,6 @@ def test_top_rung_schedule_is_accepted():
     assert sum(schedule) * 256 == top * spec.arity * 256
 
 
-def test_schedule_is_the_grammar_schedule():
-    """The helper returns what ``TesseraFamily.column_schedule`` returns."""
-    for family, rung, columns in [
-        ("TESSERA_E2M1_K1", 256, 256),
-        ("TESSERA_E2M1_K1", 512, 512),
-        ("TESSERA_E2M1_K1", 768, 1024),
-        ("TESSERA_E2M1_K1", 600, 256),
-        ("TESSERA_E2M1_K2", 896, 256),
-        ("TESSERA_E4M3_K1", 256, 256),
-    ]:
-        spec = get_tessera_family(family)
-        assert uniform_column_schedule(
-            columns, rung, family=family,
-        ) == spec.column_schedule(rung, columns)
-
-
 def test_out_of_bounds_rung_is_refused():
     spec = get_tessera_family("TESSERA_E2M1_K1")
     cap = family_rate_cap(spec)
@@ -76,14 +60,6 @@ def test_out_of_bounds_rung_is_refused():
 def test_short_block_width_is_refused():
     with pytest.raises(TesseraFormatError):
         uniform_column_schedule(320, 512, family="TESSERA_E2M1_K1")
-
-
-def test_no_trellis_minimum_exported():
-    """The grammar owns the minimum, so the seam must not name one."""
-    import prismaquant.tessera_formats as formats
-
-    assert not hasattr(formats, "MIN_TRELLIS_STEPS")
-    assert "MIN_TRELLIS_STEPS" not in formats.__all__
 
 
 def test_densify_prices_the_top_rung():

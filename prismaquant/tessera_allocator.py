@@ -411,7 +411,7 @@ class TesseraServabilityGate:
 
 @dataclass(frozen=True, slots=True)
 class TesseraAllocatorCandidate:
-    """One measured, exactly priced pre-render recipe for one allocator unit."""
+    """One exactly priced recipe with explicit measured or proposal quality."""
 
     unit_name: str
     family: str
@@ -420,8 +420,9 @@ class TesseraAllocatorCandidate:
     variant_label: str | None
     footprint: Mapping[str, object]
     predicted_dloss_mean: float
-    predicted_dloss_stderr: float
+    predicted_dloss_stderr: float | None
     servability: TesseraServabilityGate
+    quality_provenance: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.footprint, Mapping):
@@ -459,15 +460,30 @@ class TesseraAllocatorCandidate:
                 nonnegative=True,
             ),
         )
-        object.__setattr__(
-            self,
-            "predicted_dloss_stderr",
-            _finite_float(
-                self.predicted_dloss_stderr,
-                field="predicted_dloss_stderr",
-                nonnegative=True,
-            ),
-        )
+        if self.predicted_dloss_stderr is not None:
+            object.__setattr__(self, "predicted_dloss_stderr", _finite_float(
+                self.predicted_dloss_stderr, field="predicted_dloss_stderr", nonnegative=True))
+        if self.quality_provenance is not None:
+            from .rung_allowability import CANONICAL_CHORD_SOURCE, complete_scientific_price
+            # Restore owned frozen coordinates before the strict scientific validator.
+            provenance = _deep_thaw(self.quality_provenance)
+            price = complete_scientific_price(provenance,
+                format_name=f"{self.family}_R{self.body_rate_q256}")
+            scope = provenance["quality_scope"]
+            if (price != self.predicted_dloss_mean or scope["unit"] != self.unit_name
+                    or tuple(scope["shape"]) != self.shape):
+                raise TesseraFormatError("candidate differs from its complete scientific quantity")
+            # The chord protocol supplies a point price, not fractional uncertainty.
+            if (provenance.get("cost_source") == CANONICAL_CHORD_SOURCE
+                    and self.predicted_dloss_stderr is not None):
+                raise TesseraFormatError("canonical chord fractional uncertainty is unavailable; stderr must be null")
+            object.__setattr__(self, "quality_provenance", _deep_freeze(provenance))
+
+    def require_measured_stderr(self, *, where: str) -> float:
+        """Refuse a measured interval when this candidate has no uncertainty evidence."""
+        if self.predicted_dloss_stderr is None:
+            raise TesseraFormatError(f"{where}: fractional uncertainty is unavailable for {self.unit_name}")
+        return self.predicted_dloss_stderr
 
     @property
     def predicted_dloss_objective(self) -> float:
@@ -533,6 +549,9 @@ class TesseraAllocatorCandidate:
             "research_only": True,
             "producer_eligible": False,
         }
+        if self.quality_provenance is not None:
+            body["quality_provenance"] = _deep_thaw(self.quality_provenance)
+            body["objective_source"] = self.quality_provenance["cost_source"]
         return {**body, "identity_sha256": _canonical_sha256(body)}
 
     @property
@@ -625,14 +644,16 @@ def build_tessera_allocator_candidate(
     body_rate_q256: int,
     layout: str,
     schedule: Sequence[int],
-    alphabets: Mapping[int, Sequence[int]],
+    alphabets: Mapping[int, Sequence[int]] | None,
     predicted_dloss: float,
-    predicted_dloss_stderr: float = 0.0,
+    predicted_dloss_stderr: float | None = 0.0,
+    quality_provenance: Mapping[str, object] | None = None,
     target_profile: str | None = "research",
     qname: str | None = None,
     packed_expert: bool | None = None,
     sidecar_header_bytes: int = 0,
     variant_label: str | None = None,
+    recipe=None,
 ) -> TesseraAllocatorCandidate:
     """Validate and price one pre-render recipe, reporting uncertainty separately."""
 
@@ -654,17 +675,18 @@ def build_tessera_allocator_candidate(
         schedule=schedule,
         alphabets=alphabets,
         sidecar_header_bytes=sidecar_header_bytes,
+        recipe=recipe,
     )
     mean = _finite_float(
         predicted_dloss,
         field="predicted_dloss",
         nonnegative=True,
     )
-    stderr = _finite_float(
+    stderr = (None if predicted_dloss_stderr is None else _finite_float(
         predicted_dloss_stderr,
         field="predicted_dloss_stderr",
         nonnegative=True,
-    )
+    ))
     profile_id = str(target_profile or "research")
     wire_format = str(footprint["format"])
     format_decision = check_serving_format(
@@ -712,6 +734,7 @@ def build_tessera_allocator_candidate(
         predicted_dloss_mean=mean,
         predicted_dloss_stderr=stderr,
         servability=gate,
+        quality_provenance=quality_provenance,
     )
 
 
@@ -975,6 +998,9 @@ def tessera_pareto_frontier(
     ]
     if not eligible:
         raise TesseraFormatError("Pareto frontier has no profile-legal records")
+    if z_value > 0:
+        for record in eligible:
+            record.require_measured_stderr(where="Pareto uncertainty interval")
     ordered = sorted(eligible, key=_candidate_order_key)
     frontier: list[TesseraAllocatorCandidate] = []
     best_objective = math.inf
@@ -1255,8 +1281,8 @@ def _marginal_segment(
     )
     uncertainty_low, uncertainty_high = _uncertainty_bounds_loss_per_byte(
         mean_reduction,
-        cheaper.predicted_dloss_stderr,
-        dearer.predicted_dloss_stderr,
+        cheaper.require_measured_stderr(where="marginal interval") if uncertainty_z > 0 else 0.0,
+        dearer.require_measured_stderr(where="marginal interval") if uncertainty_z > 0 else 0.0,
         delta_bytes,
         uncertainty_z,
     )
@@ -1412,14 +1438,14 @@ def trellis_local_repair_solver_menu(
                 )
             )
             chosen = choice.candidate
-            chosen_radius = z_value * chosen.predicted_dloss_stderr
+            chosen_radius = z_value * chosen.require_measured_stderr(where="CI overlap")
             if not math.isfinite(chosen_radius):
                 raise TesseraFormatError(
                     "derived CI overlap z * chosen stderr is not finite"
                 )
             for candidate in frontier.candidates:
                 candidate_radius = (
-                    z_value * candidate.predicted_dloss_stderr
+                    z_value * candidate.require_measured_stderr(where="CI overlap")
                 )
                 if not math.isfinite(candidate_radius):
                     raise TesseraFormatError(

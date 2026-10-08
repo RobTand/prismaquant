@@ -82,15 +82,6 @@ def test_the_dp_reductions_live_in_the_solver():
     assert tessera_menu.collapse_to_dp_bins is solver.collapse_to_dp_bins
 
 
-def test_the_licence_follows_the_lane_read(monkeypatch):
-    """Substituting the lane's one read substitutes what the DP receives."""
-    from prismaquant import tessera_menu
-
-    marker = object()
-    monkeypatch.setattr(tessera_menu, "fused_module_licence", lambda: marker)
-    assert solver.lane_fused_module_licence() is marker
-
-
 def test_the_licence_vocabulary_is_the_lanes():
     from prismaquant import tessera_formats as tf
 

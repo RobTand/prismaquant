@@ -636,8 +636,12 @@ def _profile_allows_format(
 
 
 def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
-                             rung_allowability=None):
-    """One lane seam for body, auxiliary and final-assignment allowance."""
+                             rung_allowability=None, allowability_scope=None):
+    """One lane seam for body, auxiliary and final-assignment allowance.
+
+    An omitted scope keeps the historical whole-table query.
+    An unresolved explicit scope waits and never broadens.
+    """
     family = fr.format_family_of(fr.canonical_format_name(name))
     if family is None or not name.startswith(family.name_prefix):
         return None
@@ -646,30 +650,71 @@ def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
     production = not load_serving_profile(target_profile).emulation_only
     if rung_allowability is not None or production:
         scope.update(allowability=rung_allowability, require_allowability=production)
+    if allowability_scope is not None:
+        scope["allowability_scope"] = allowability_scope
     return family_hook(family, "rung_admission")(name, **scope)
 
 
+def unit_allowability_scope(fmt, unit, stats, serving_context, rung_allowability, *,
+                            m=None, tensor_parallel=1):
+    """Use the shared owner for body, auxiliary and final scope."""
+    from .rung_allowability import owner_for_format
+    owner = owner_for_format(rung_allowability, fmt)
+    if owner is None:
+        return None
+    structure = (stats.get("_allowability_structure", stats.get("unit_structure")) if serving_context is None
+                 else serving_context.structure)
+    return owner.scope_for_unit(fmt, unit=unit, shape=_shape_from_stats(stats),
+        structure=structure, m=m, tensor_parallel=tensor_parallel,
+        routing=stats.get("routing"))
+
+
 def require_assignment_rung_allowability(assignment, *, target_profile,
-                                        context_by_unit=None, rung_allowability=None):
-    """Fixed units and serving promotion cannot introduce a withheld rung."""
+                                        context_by_unit=None, rung_allowability=None,
+                                        allowability_scope_by_unit=None):
+    """Fixed units and serving promotion cannot introduce a withheld rung.
+
+    V3 assignments require their actual unit scope. Legacy whole-table
+    evidence keeps its original contract. Missing explicit evidence waits.
+    """
     if rung_allowability is None and load_serving_profile(target_profile).emulation_only:
         return
     from .lane_spec import family_hook
     checked = set()
     for name, fmt in assignment.items():
         context = None if context_by_unit is None else context_by_unit.get(name)
-        key = (fmt, None if context is None else context.key())
+        unit_scope = None
+        if allowability_scope_by_unit is not None:
+            unit_scope = allowability_scope_by_unit.get(name)
+        from .rung_allowability import owner_for_format
+        owner = owner_for_format(rung_allowability, fmt)
+        if unit_scope is None and owner is not None and owner.scoped:
+            unit_scope = {"activation_contract": owner.kernel_build["activation_contract"]}
+        key = (fmt, None if context is None else context.key(),
+               None if unit_scope is None else _frozen_scope(unit_scope))
         if key in checked:
             continue
         checked.add(key)
         admission = candidate_rung_admission(fmt, target_profile=target_profile,
-            serving_context=context, rung_allowability=rung_allowability)
+            serving_context=context, rung_allowability=rung_allowability,
+            allowability_scope=unit_scope)
         if admission is None:
             continue
         family = fr.format_family_of(fr.canonical_format_name(fmt))
         mode = family_hook(family, "menu_mode_in_force")(None)
         if not admission.admits(mode):
             raise ValueError(f"{name}: {fmt} is not allocation-eligible: {admission.detail}")
+
+
+def _frozen_scope(scope: Mapping) -> tuple:
+    """A hashable spelling of one allowability scope for cache keys."""
+    frozen = []
+    for key in sorted(scope):
+        value = scope[key]
+        if isinstance(value, Mapping):
+            value = _frozen_scope(value)
+        frozen.append((key, value if not isinstance(value, list) else tuple(value)))
+    return tuple(frozen)
 
 
 def _format_kernel_supports_shape(fmt_name: str, in_features: int,
@@ -1505,7 +1550,11 @@ def cost_entry_weight_only_dloss(
 def cost_entry_is_joint_aura(cost_entry: dict) -> bool:
     """Validate any joint claim before interpreting generic cost fields."""
     from .joint_aura import validate_joint_aura_entry
-
+    from .rung_allowability import CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE, complete_scientific_price
+    if (cost_entry.get("cost_source") in (CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE)
+            or "canonical_quality" in cost_entry or "canonical_members" in cost_entry):
+        complete_scientific_price(cost_entry)
+        return False
     return validate_joint_aura_entry(cost_entry)
 
 
@@ -1629,6 +1678,10 @@ def cost_entry_activation_pricing_branch(
     question is answerable from the artifact rather than from the code
     version that produced it.
     """
+    from .rung_allowability import complete_scientific_price
+    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    if complete_scientific_price(entry, format_name=format_name) is not None:
+        return "canonical_qualified_chord" if entry.get("canonical_quality") is not None else "qualified_served_kl"
     if cost_entry_is_joint_aura(cost_entry):
         return "joint_aura"
     if cost_entry_is_source_passthrough(cost_entry, format_name):
@@ -1712,6 +1765,11 @@ def cost_entry_predicted_dloss(
     price off zero — ``cost_entry_prices_unmeasured_activation_at_zero``
     keeps its full strength.
     """
+    from .rung_allowability import complete_scientific_price
+    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    complete = complete_scientific_price(entry, format_name=format_name)
+    if complete is not None:
+        return complete
     if cost_entry_is_joint_aura(cost_entry):
         if float(gain) != 1.0 or cost_entry.get(APPLIED_MARKER_KEY) is True:
             raise ValueError("joint AURA refuses calibrated gain or a second activation transfer")
@@ -1870,6 +1928,10 @@ def cost_entry_prices_unmeasured_activation_at_zero(
         stay free to take the cheapest format instead of being forced onto
         BF16.
     """
+    from .rung_allowability import complete_scientific_price
+    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    if complete_scientific_price(entry, format_name=format_name) is not None:
+        return False
     if cost_entry_is_joint_aura(cost_entry):
         return False
     if format_name is None:
@@ -2036,13 +2098,17 @@ def _cost_ucb_z() -> float:
         return 0.0
 
 
-def _resolve_cost_entry(cost_rows: dict, fmt_name: str) -> tuple[dict | None, str]:
+def _resolve_cost_entry(cost_rows: dict, fmt_name: str, *, stats_entry=None) -> tuple[dict | None, str]:
     """Resolve one Linear's cost row for ``fmt_name``, alias-aware.
 
     Returns ``(entry, entry_fmt)`` where ``entry_fmt`` is the alias actually
     present in the cost table (what ``calibrated_gains`` may be keyed by), or
     ``(None, fmt_name)`` when the format was never measured.
     """
+    if stats_entry is not None:
+        cached = stats_entry.get("_canonical_price_by_format", {}).get(fmt_name)
+        if cached is not None:
+            return cached, fmt_name
     for candidate_name in fr.aliases_for(fmt_name):
         if candidate_name in cost_rows:
             return cost_rows[candidate_name], candidate_name
@@ -2282,6 +2348,9 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
             continue
         if cost_entry is None or "error" in cost_entry:
             continue
+        from .rung_allowability import complete_scientific_price
+        if complete_scientific_price(cost_entry) is not None:
+            continue
         if cost_entry_is_joint_aura(cost_entry):
             # The family transfer never scaled the full-residual member, so
             # it must not scale the hedge removed from that member either.
@@ -2502,6 +2571,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      census_loo: Mapping | None = None,
                      census_loo_groups: Mapping[object, Collection[str]] | None = None,
                      rung_allowability: Mapping | None = None,
+                     allowability_m: int | None = None,
+                     allowability_tensor_parallel: int = 1,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2540,9 +2611,12 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     unserved: dict[str, list[str]] = {}
     lane_cache: dict[tuple, object] = {}
     admission_cache: dict[tuple, object] = {}
+    quality_waits: dict[str, list[str]] = {}
     for name, s in stats.items():
         if name not in costs:
             continue
+        s.pop("_canonical_price_by_format", None)
+        s.pop("_canonical_quality_by_format", None)
         serving_context = (
             context_by_unit.get(name) if context_by_unit is not None else None
         )
@@ -2584,6 +2658,17 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     entry = costs[name][candidate_name]
                     entry_fmt = candidate_name
                     break
+            from .rung_allowability import owner_for_format
+            owner = owner_for_format(rung_allowability, spec.name)
+            if owner is not None:
+                entry = owner.chord_cost(spec.name, unit=name, costs=costs[name], fallback=entry)
+                entry_fmt = spec.name
+                if entry is None:
+                    quality_waits.setdefault(name, []).append(spec.name)
+                    if mask_records is not None:
+                        mask_records.append({"qname": name, "format": spec.name,
+                            "reason": "canonical_quality_wait",
+                            "detail": "qualified neighbour anchors are absent"})
             if entry is None and spec.name in SOURCE_PASSTHROUGH_FORMATS:
                 # No cost table will ever carry a column for a byte-copy
                 # contract. Synthesize the row rather than dropping the
@@ -2622,15 +2707,21 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 continue
             family = fr.format_family_of(spec.name)
             if family is not None and spec.name.startswith(family.name_prefix):
-                # The owning lane's pinned runtime admits the rung, per
-                # serving scope, through the lane's own seam.
+                # The shared owner retains the actual unit scope.
+                # Unknown structure or partial explicit scope waits.
                 from .lane_spec import family_hook
 
-                cache_key = (spec.name, context_key)
+                unit_scope = unit_allowability_scope(
+                    spec.name, name, s, serving_context, rung_allowability,
+                    m=allowability_m, tensor_parallel=allowability_tensor_parallel)
+                if unit_scope is not None:
+                    s.setdefault("_rung_allowability_scope_by_format", {})[spec.name] = unit_scope
+                cache_key = (spec.name, context_key,
+                             None if unit_scope is None else _frozen_scope(unit_scope))
                 if cache_key not in admission_cache:
                     admission_cache[cache_key] = candidate_rung_admission(
                         spec.name, target_profile=target_profile, serving_context=serving_context,
-                        rung_allowability=rung_allowability)
+                        rung_allowability=rung_allowability, allowability_scope=unit_scope)
                 admission = admission_cache[cache_key]
                 if (
                     (production_allocation or rung_allowability is not None
@@ -2657,6 +2748,15 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     masked.setdefault((spec.name, reason), []).append(name)
                     unserved.setdefault(name, []).append(spec.name)
                     continue
+            if entry.get("canonical_quality") is not None:
+                s.setdefault("_canonical_quality_by_format", {})[spec.name] = entry["canonical_quality"]
+            if (entry.get("cost_source") == "canonical_qualified_chord"
+                    or entry.get("quality_scope", {}).get("currency") == "served_kl"):
+                from .rung_allowability import complete_scientific_price
+                complete_scientific_price(entry, format_name=spec.name)
+                if entry["quality_scope"]["unit"] != name or tuple(entry["quality_scope"]["shape"]) != shape:
+                    raise ValueError("canonical scientific price differs from the actual unit or source shape")
+                s.setdefault("_canonical_price_by_format", {})[spec.name] = entry
             gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
             # Always use measured joint output perturbation when available.
             # Packed experts can carry an unmeasured output_mse placeholder;
@@ -2767,6 +2867,10 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             for branch, count in sorted(activation_branch_counts.items())
         )
         print(f"[alloc] activation-pricing branch: {summary}", flush=True)
+    quality_starved = sorted(name for name in quality_waits if name not in out)
+    if quality_starved:
+        raise ValueError("canonical quality waits: no qualified neighbour anchors for "
+                         + ", ".join(quality_starved))
     unserved_units = sorted(name for name in unserved if name not in out)
     if unserved_units:
         detail = "\n".join(
@@ -3673,7 +3777,7 @@ def aggregate_fused_siblings(
             missing = []
             for m in members:
                 entry, entry_fmt = _resolve_cost_entry(
-                    costs.get(m, {}), spec.name)
+                    costs.get(m, {}), spec.name, stats_entry=stats[m])
                 if entry is None or "error" in entry:
                     missing.append(m)
                 else:
@@ -3683,6 +3787,14 @@ def aggregate_fused_siblings(
                 continue
             if resolved_entries:
                 super_cost_entry_fmt[spec.name] = resolved_entries[0][0]
+            from .rung_allowability import make_scientific_price_sum
+            complete_sum = make_scientific_price_sum([
+                {"unit": member, "format": spec.name, "row": entry}
+                for member, (_entry_fmt, entry) in zip(members, resolved_entries)],
+                format_name=spec.name)
+            if complete_sum is not None:
+                super_cost[spec.name] = complete_sum
+                continue
             sum_pred = 0.0
             member_terms = []
             # P5a: the per-family activation penalty is a MULTIPLIER on the
@@ -3807,14 +3919,18 @@ def aggregate_fused_siblings(
             stats_ext[super_name]["_memory_bytes_by_format"][spec.name] = total_bytes
             entry_fmt = super_cost_entry_fmt.get(spec.name, spec.name)
             gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
+            from .rung_allowability import complete_scientific_price
+            complete = complete_scientific_price(entry, format_name=spec.name)
             # gain·(base + z·stderr_agg) == gain·base + z·Σ (stderr·gain)
             # for the single group-wide gain this path applies, i.e. exactly the
             # packed path's construction. At z == 0 this is gain·sum_pred,
             # bit-for-bit what this path produced before the hedge fix.
-            predicted = (
+            predicted = (complete if complete is not None else (
                 entry["predicted_dloss"]
                 + ucb_z * float(entry.get("predicted_dloss_stderr", 0.0))
-            ) * gain
+            ) * gain)
+            if complete is not None and baseline_assignment is not None and ucb_z > 0:
+                raise ValueError("canonical chords have no measured paired samples for a baseline hedge")
             if baseline_assignment is not None and ucb_z > 0:
                 missing = sorted(set(members) - baseline_assignment.keys())
                 if missing:
@@ -3920,7 +4036,18 @@ def aggregate_fused_siblings(
                     "weight_mse": point_cost / (0.5 * sum_h) if sum_h > 0 else 0.0,
                     **({"paired_rate_trade": trade} if trade is not None else {}),
                 }
-                if activation_pricing is not None:
+                from .rung_allowability import make_scientific_price_sum
+                complete_members = []
+                for member, member_format in member_formats.items():
+                    entry, _entry_format = _resolve_cost_entry(
+                        costs.get(member, {}), member_format, stats_entry=stats[member])
+                    complete_members.append({"unit": member, "format": member_format, "row": entry})
+                complete_sum = make_scientific_price_sum(complete_members, format_name=composite.fmt)
+                if complete_sum is not None:
+                    if trade is not None:
+                        raise ValueError("canonical chords have no measured paired samples for a baseline hedge")
+                    super_cost[composite.fmt] = complete_sum
+                elif activation_pricing is not None:
                     super_cost[composite.fmt][APPLIED_MARKER_KEY] = True
                 stats_ext[super_name]["_memory_bytes_by_format"][
                     composite.fmt] = int(composite.memory_bytes)
@@ -4310,7 +4437,7 @@ def aggregate_packed_serving_groups(
             act_penalty = _activation_penalty(spec.name, activation_pricing)
             for m in members:
                 entry, entry_fmt = _resolve_cost_entry(
-                    costs.get(m, {}), spec.name)
+                    costs.get(m, {}), spec.name, stats_entry=stats[m])
                 member_terms.append((
                     stats[m],
                     entry,
@@ -4327,7 +4454,14 @@ def aggregate_packed_serving_groups(
                 "predicted_dloss": base_pred,
                 "predicted_dloss_stderr": stderr_agg,
             }
-            if activation_pricing is not None:
+            from .rung_allowability import make_scientific_price_sum
+            complete_sum = make_scientific_price_sum([
+                {"unit": member, "format": spec.name, "row": term[1]}
+                for member, term in zip(members, member_terms)], format_name=spec.name)
+            if complete_sum is not None:
+                super_cost[spec.name] = complete_sum
+                hedged_pred = complete_sum["predicted_dloss"]
+            elif activation_pricing is not None:
                 super_cost[spec.name][APPLIED_MARKER_KEY] = True
             cands.append(Candidate(
                 fmt=spec.name,

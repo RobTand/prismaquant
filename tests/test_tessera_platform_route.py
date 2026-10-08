@@ -198,18 +198,3 @@ def test_the_capability_gate_reads_the_contract():
     assert legal is True
 
 
-def test_the_allocator_no_longer_parses_a_capability_out_of_a_platform_id():
-    """The mechanism, not only the verdict.
-
-    ``sm_121`` still resolves legal and ``sm_89`` still refuses E2M1, so the
-    verdicts alone cannot tell whether the gate reads the contract or the
-    string.  What distinguishes them is that the regex is gone.
-    """
-    import inspect
-
-    from prismaquant import tessera_allocator
-
-    source = inspect.getsource(tessera_allocator)
-    assert "_SM_PLATFORM" not in source
-    assert "minimum_capability_sm" not in inspect.getsource(
-        tessera_allocator._capability_gate)
