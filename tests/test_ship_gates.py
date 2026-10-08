@@ -16,6 +16,8 @@ from prismaquant import shipcard
 from tools import dsv4_wikitext_inputs as inputs
 from tools.full_kl_teacher_payload import tokenizer_identity
 
+pytestmark = pytest.mark.task_suite
+
 
 def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     """Build small tensors and run the real generic input sealer."""

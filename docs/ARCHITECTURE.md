@@ -26447,6 +26447,12 @@ The shared HF capability guard refuses unsupported declared formats before prefl
 The HF backend does not load Tessera serving bytes and cannot prove native task quality.
 Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
+The four task-suite test modules carry the `task_suite` marker.
+Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
+The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
+An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
+
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
 The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
 Fixed task metadata is not a metric. Numerical metrics must stay finite.
