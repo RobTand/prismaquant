@@ -175,7 +175,7 @@ def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
             costs, {name: "FP8_E5M2"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
     other = next(unit for unit in sorted(measured_payload["costs"]) if unit != name)
     donated = {other: dict(costs[name])}
-    with pytest.raises(ValueError, match="matched joint AURA currency"):
+    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
         ac.price_paired_rate_trade(
             donated, {other: "FP8_DYNAMIC"}, {other: "NVFP4A16"},
             profile=DefaultProfile(), ucb_z=1.0)
