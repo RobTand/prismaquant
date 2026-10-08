@@ -7753,10 +7753,10 @@ def _fused_modules_mapping_for_profile(profile) -> dict[str, tuple[str, ...]]:
 
     getter = getattr(profile, "fused_sibling_leaf_mapping", None)
     if callable(getter):
-        try:
-            mapping = getter()
-        except Exception:
-            mapping = None
+        # A failed lookup propagates. Falling through would return a mapping that
+        # lacks the profile's own fused groups, and the export would skip the
+        # fill-in of fused siblings into `ignore` without an error (#2443).
+        mapping = getter()
         if mapping:
             return {
                 str(fused): tuple(str(sibling) for sibling in siblings)
