@@ -46,6 +46,7 @@ from prismaquant.shipcard import (
     uniform_control_summary,
     verify,
     write_shipcard,
+    verify_gold_producer_record,
 )
 
 #: Metrics lifted out of a gold-lane result JSON onto the record, in the order
@@ -288,10 +289,6 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
     producer_record = "slot" in payload or "measurement_schema" in payload
     if producer_record:
         payload = dict(_strict_json_object(raw, where="control producer record"))
-        if (payload.get("slot") != "gold.kl"
-                or payload.get("measurement_schema") != "prismaquant.glm_tr3_gold_record.v1"):
-            print("[shipcard] REFUSED: unsupported control producer record schema", file=sys.stderr)
-            return 2
 
     verdict = (block.get("verdict") or {}) if isinstance(block, dict) else {}
     if not verdict.get("measured") and not args.allow_unserved:
@@ -317,16 +314,11 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
         return 2
 
     if producer_record:
-        if payload.get("model_sha") != compute_model_sha(control_model_dir):
-            print("[shipcard] REFUSED: control producer record artifact identity differs",
-                  file=sys.stderr)
-            return 2
-        problems = _verify_gold_record("gold.kl", payload, model_dir=control_model_dir,
-                                       require_current_artifact_path=False)
-        if payload.get("passed") is not True or payload.get("spec_decode_detected") is not False \
-                or problems:
-            print("[shipcard] REFUSED: control producer record did not replay as gold",
-                  file=sys.stderr)
+        problems = verify_gold_producer_record(
+            payload, slot="gold.kl", model_dir=control_model_dir,
+        )
+        if problems:
+            print("[shipcard] REFUSED: " + "; ".join(problems), file=sys.stderr)
             return 2
         control_arm = payload
     else:

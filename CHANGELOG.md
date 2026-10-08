@@ -25,6 +25,35 @@
   The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
   Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
   No new seal, serving result, or performance result is claimed.
+
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
+
 - The Tessera worker loads the shared partition helper only for preparation
   (#2417, R1). Standalone help and atomic publication retain their standard-library
   contract without that helper. The tests use the shared owner directly.
