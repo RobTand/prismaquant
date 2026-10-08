@@ -44,7 +44,9 @@ def selected_runner(monkeypatch):
         release_completed_layer=release)
     monkeypatch.setattr(routed_experts, 'profile_declared_packed_expert_projections', lambda *_: [])
     monkeypatch.setattr(routed_experts, 'refresh_packed_expert_projections', lambda *_: [])
-    runner = StreamedCausalLM(context, profile=SimpleNamespace(),
+    profile = SimpleNamespace(
+        is_dense_parameter_owner=lambda _name, module: isinstance(module, torch.nn.Linear))
+    runner = StreamedCausalLM(context, profile=profile,
         prefetch_lookahead=1, require_prefetched_residency=True)
     return runner, calls, source
 
