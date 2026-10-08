@@ -10,6 +10,13 @@
   Its central processor preflight checks the real runtime arguments without a graphics processor.
   Native serving qualification and all production defaults stay unchanged.
 
+### Fixed
+- The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
+  Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
+  The retained result carries no speed, energy or residency qualification.
+  Certified mode keeps the refusal and the failed status.
+  A real campaign error and a monitor that never stopped still fail in both modes.
+
 ### Changed
 - The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
   Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
