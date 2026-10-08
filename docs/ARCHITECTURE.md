@@ -43,6 +43,94 @@ No overlay package changes after the parent verifies its six conditions.
 The review parent must check the exact head before the independent pool review.
 The PrismaQuant integrator owns the merge.
 
+Re-stamped 2026-10-07 (PQ #2364): the canonical consumer joins v3
+performance evidence through the existing lane admission owner.
+An explicit index file can select an immutable candidate without an active
+index change. A directory still selects its current `index.json`.
+Legacy tables require only the original three producer functions.
+V3 tables require the scope, class, time and quality functions they use.
+
+The shared owner retains each unit's actual rank-local shape, structure,
+token-row scope, independently observed activation build and wire recipe.
+Body, independent MTP, final assignments and logical surfaces use that scope.
+An unresolved explicit scope waits. It never becomes an unscoped allowance.
+
+The producer owns geometry classification and the performance menu.
+Its missing half-bit coverage remains missing. T4 remains unadmitted under
+its current policy. T8 R1280 remains a quality anchor, not a menu option.
+
+Qualified neighbouring whole anchors supply the producer's linear chord.
+Both scientific currencies retain their actual quantity through the price owner.
+A complete objective price receives no gain or activation transfer.
+Fused and packed sums retain their original bound member quantities.
+The same rule applies to the exact frontier and later price reads.
+A derived price remains proposal data, not a new measurement.
+
+Joint anchors require complete `quality_scope` and their actual joint evidence.
+The existing joint validator runs before optional scope metadata is read.
+Unit, family, format, shape, calibration, teacher, window and objective remain explicit.
+Actual sample coordinates and probe identifiers also remain explicit.
+Missing or incompatible scientific coordinates refuse or wait.
+Weight-error screens never become validated KL.
+
+The existing probe owner separates mathematical facts from producer provenance.
+Current seeds, samples, tokens, temperatures, shapes and objectives remain strict.
+Actual data still match their own digests in every mode.
+Producer-only and run-only differences use `seal_check` and stamp `[DEV-MODE]`.
+Recorded chord reads compare numeric claims and scientific scope through that owner.
+Missing qualified prices cannot remove a unit from byte accounting.
+
+The independent MTP selector retains its objective and byte budget.
+Its public API intersects each owned wire option with the shared admission owner.
+The native callback remains an additional gate. It cannot bypass canonical admission.
+The API derives each source shape from validated measured operators or their unique anchors.
+The shared scope owner derives rank-local geometry, the activation build and the wire recipe.
+Callers supply per-unit structure, regime M, tensor parallel size and required routing coordinates.
+Missing or unresolved v3 scope removes the option. It never permits an unscoped query.
+The selection record retains admitted unit scopes and the original table provenance.
+The allocator accepts separate --mtp-regime, --mtp-tensor-parallel and --mtp-routing arguments.
+The fixed-selection tool uses the same scope and publication owners.
+Legacy no-owner emulation keeps its original contract. Production still requires canonical evidence.
+Measured quality anchors and exact wire menus have separate rosters.
+An admitted fractional wire uses the existing qualified chord owner.
+It does not require fractional quality samples.
+Selection and export retain the actual M3/M4 wire receipts and byte counts.
+The export reader recomputes recorded chords from their original anchors.
+
+Canonical logical candidates retain their chord records and original anchors.
+Anchor stderr remains diagnostic data. It is not measured fractional uncertainty.
+The candidate records absent fractional stderr as null, not zero.
+The constructor refuses every non-null chord stderr, including zero.
+The current chord protocol supplies no measured fractional uncertainty.
+Measured marginal intervals and CI-overlap choices refuse absent uncertainty.
+Explicit point-only menus remain available without a measured CI claim.
+Candidate construction restores its owned frozen coordinates through the existing thaw path.
+The original scientific validator checks those coordinates before the candidate freezes them again.
+Immutable-provenance construction and dataclass replacement retain both currencies and their original anchors.
+
+PACT retains actual operator rows as its first time source.
+A missing row can use a canonical class model only after reconciliation with
+an admitted operator row of the same class and actual operator scope.
+The model scales operator samples with canonical timing ratios.
+It keeps raw kernel times, operator receipts and original class identities
+separate in provenance. Shared operator samples remain correlated.
+The uncertainty interval is conditional on the class model.
+
+Neither class costs nor chords establish numerical or serving qualification.
+The existing exact solver charges integer serialized bytes and leaves budget
+slack when no assignment fills the budget. Fused-family constraints stay intact.
+
+The selected table, explicit index, unit scopes, chord sources and class
+cost sources remain in allocation and frontier provenance.
+The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
+Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
+The existing isolated test adapter fetches that module when no source is
+supplied. No untracked producer, serving overlay or global feature skip is required.
+
+CPU fixtures prove source mechanics, not measured speed, validated KL or a
+serving frontier. No serving pin, kernel, wire or active index changes.
+
 Re-stamped 2026-10-07 (D50, PQ #2410): day-zero intake is a metadata-only consumer
 of profile detection, source-index grammar, name projection, and safetensors header validation.
 The source entry point is `tools/day0_model_intake.py`; its domain code is

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from prismaquant import format_registry as fr
 from prismaquant.allocator_candidates import selection_serving_lane_provenance
-from prismaquant.allocator import _mtp_rung_attestation
+from prismaquant.allocator import _mtp_rung_attestation, _mtp_scope_inputs
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 
 from prismaquant.footprint import (
@@ -22,11 +22,12 @@ from prismaquant.footprint import (
     whole_artifact_budget_stamp,
 )
 from prismaquant.glm_mtp_selection import (
-    backfill_mtp_selection_wires, load_mtp_cost, select_mtp_rungs,
+    add_mtp_scope_arguments, backfill_mtp_selection_wires, load_mtp_cost, select_mtp_rungs,
 )
 from prismaquant.model_profiles import detect_profile
 from prismaquant.layer_config import canonicalize_format
 from prismaquant.serving_profiles import load_serving_profile
+from prismaquant.tessera_lane import allocation_allowability_arguments, allocation_rung_allowability
 from prismaquant.tessera_serving_scope import (
     add_serving_scope_arguments, scope_provenance, serving_target_from_args,
     unit_structure_from_profile,
@@ -51,6 +52,8 @@ def main() -> int:
     parser.add_argument("--target-profile", required=True)
     parser.add_argument("--output", required=True)
     add_serving_scope_arguments(parser)
+    add_mtp_scope_arguments(parser)
+    allocation_allowability_arguments(parser)
     args = parser.parse_args()
 
     output = Path(args.output)
@@ -83,9 +86,13 @@ def main() -> int:
         args, target_platform=load_serving_profile(args.target_profile).target_platform)
     if target is None:
         parser.error("MTP serving target must be explicit")
+    stats, contexts = _mtp_scope_inputs(payload, target, profile, routing=args.mtp_routing)
     record = select_mtp_rungs(
         payload, byte_budget=args.mtp_byte_budget, constants=constants,
-        fixed_formats=fixed, eligible=_mtp_rung_attestation(target, profile))
+        fixed_formats=fixed, eligible=_mtp_rung_attestation(target, profile),
+        stats=stats, context_by_unit=contexts, target_profile=args.target_profile,
+        rung_allowability=allocation_rung_allowability(args), allowability_m=args.mtp_regime,
+        allowability_tensor_parallel=args.mtp_tensor_parallel)
     assignment = record.pop("assignment")
     if set(assignment) & set(body):
         parser.error("MTP selection overlaps the body assignment")

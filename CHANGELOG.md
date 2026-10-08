@@ -35,6 +35,25 @@
   through a non-submit mode and replaces the fixed-count shard driver.
   The existing exporter, construction census and native runtime checks remain
   authoritative. This CPU work grants no runtime or serving qualification.
+
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Constructor repairs remain unchanged. No identity seal is added.
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
 - The forward-recovery proof reader and campaign resolver call the existing
   digest owners (#2398, references #1301). The capsule tail hash calls
   `digests.bytes_sha256hex`; the source-record check calls the same bytes
@@ -51,6 +70,16 @@
   table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
   code order, the positive zero at code 8, dtype, device, nibble order,
   scales, chunking, copy behavior and output stay unchanged.
+
+- The allocator and PACT consume canonical v3 scope, qualified chords and
+  reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
+  Actual bytes, native admission and scientific gates remain unchanged.
+  An immutable candidate index requires no active index change.
+  Legacy metadata contracts retain the original producer interface.
+  CPU fixtures do not qualify speed, served loss or serving.
 
 - The shipcard model identity hashes its two canonical JSON texts through the
   existing text owner (#2384, references #1301). The canonical quant-config

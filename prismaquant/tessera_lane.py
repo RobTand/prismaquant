@@ -110,7 +110,12 @@ def parse_format_name(fmt: object):
 # -- candidate admission (allocator_candidates) ------------------------------
 
 def rung_admission(name: str, *, allowability=None, require_allowability=False, **scope):
-    """The pinned runtime and measured geometry share one admission seam."""
+    """The pinned runtime and measured geometry share one admission seam.
+
+    ``scope`` carries ``serving_context`` and ``allowability_scope`` through
+    to :func:`tessera_menu.route_admission` untouched: this seam names no
+    D41 axis of its own.
+    """
     from .tessera_menu import route_admission as admission
     from .tessera_formats import parse_tessera_format_name
 
@@ -243,6 +248,14 @@ def restamp_topology(payload, profile, *, input_sha256=None):
 # module; the code is moved here unchanged, so a run prints, refuses and
 # stamps exactly what it did.
 
+def allocation_allowability_arguments(parser) -> None:
+    """Declare the shared publication and observed-build inputs."""
+    parser.add_argument("--tessera-rung-allowability-root", default=None,
+                        help="D41 publication directory or an explicit immutable index file")
+    parser.add_argument("--tessera-rung-kernel-builds", default=None,
+                        help="Independent observed format-to-kernel_build JSON; required with D41 root")
+
+
 def allocation_arguments(parser) -> None:
     """The lane's allocator flags: the serving scope and the selection request."""
     from .tessera_serving_scope import add_serving_scope_arguments
@@ -251,10 +264,7 @@ def allocation_arguments(parser) -> None:
     parser.add_argument("--tessera-materialization-plan", default=None,
                         help="Write a non-exportable selected-wire request here instead of layer-config; "
                              "finalize through prismaquant.tessera_materialization after selected wires exist")
-    parser.add_argument("--tessera-rung-allowability-root", default=None,
-                        help="D41 publication root containing the current index.json")
-    parser.add_argument("--tessera-rung-kernel-builds", default=None,
-                        help="Independent observed format-to-kernel_build JSON; required with D41 root")
+    allocation_allowability_arguments(parser)
 
 
 def allocation_serving_target(args, *, target_platform):
