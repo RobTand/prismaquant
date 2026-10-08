@@ -17,6 +17,9 @@
   The selector retains rank-local scope, the activation build, the recipe and the table provenance.
   The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
   Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Scope cache keys reuse the exact strict and lax JSON profiles from the digest owner.
+  Body and MTP topology use the existing allocation lane protocol and shared scope owner.
+  Synthetic card fixtures declare a compatible Qwen3 MoE profile. Missing-profile refusals remain strict.
   Constructor repairs remain unchanged. No identity seal is added.
 - The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
   Fused sums apply no extra gain or activation transfer.

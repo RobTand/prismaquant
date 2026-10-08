@@ -111,6 +111,36 @@ def test_scope_spelling_refuses(monkeypatch):
         whole.refusal(1024, scope=["dense"])
 
 
+@pytest.mark.parametrize("recipe,expected", [
+    ({"z": "雪", "a": "é\n\0"}, br'{"a": "\u00e9\n\u0000", "z": "\u96ea"}'),
+    ({"z": -0.0, "a": [True, None]}, b'{"a": [true, null], "z": -0.0}'),
+])
+def test_scope_recipe_cache_key_keeps_exact_ascii_spaced_bytes(recipe, expected):
+    from prismaquant.rung_allowability import _scope_key
+
+    assert _scope_key({"recipe": recipe})[-1].encode("utf-8") == expected
+    assert _scope_key({"recipe": dict(reversed(list(recipe.items())))})[-1].encode("utf-8") == expected
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_scope_recipe_cache_key_still_refuses_nonfinite_values(value):
+    from prismaquant.rung_allowability import _scope_key
+
+    with pytest.raises(RungAllowabilityError, match="recipe is not JSON-serialisable"):
+        _scope_key({"recipe": {"value": value}})
+
+
+def test_class_time_cache_keeps_ascii_spaces_and_nonfinite_tokens(monkeypatch):
+    timing = _owner("v3-timing.json", monkeypatch)
+    identity = {"z": "雪", "a": [float("nan"), float("inf"), float("-inf"), -0.0]}
+    encoded = r'{"a": [NaN, Infinity, -Infinity, -0.0], "z": "\u96ea"}'
+    retained = {"status": "wait", "reason": "retained_class_decision"}
+    timing._times[(896, "dense:c0:M8", encoded)] = retained
+
+    assert timing.canonical_time(896, cell_id="dense:c0:M8",
+        class_identity=dict(reversed(list(identity.items())))) is retained
+
+
 def _first_row(table, rung):
     return next(row for row in table["rungs"] if row["rung"] == rung)
 

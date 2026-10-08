@@ -281,11 +281,18 @@ def allocation_contexts(serving_target, stats, profile):
     return context_by_unit_from_stats(serving_target, stats, profile)
 
 
-def allocation_unit_context(serving_target, unit, profile):
-    """One unit's serving context, its structure read from the profile grammar."""
-    from .tessera_serving_scope import unit_structure_from_profile
+def allocation_unit_structure(unit, profile, *, stats=None):
+    """Read profile grammar or checked producer topology through the scope owner."""
+    from .tessera_serving_scope import unit_structure_from_profile, unit_structure_from_stats
 
-    return serving_target.context(unit_structure_from_profile(unit, profile))
+    if stats is None:
+        return unit_structure_from_profile(unit, profile)
+    return unit_structure_from_stats(unit, stats, profile)
+
+
+def allocation_unit_context(serving_target, unit, profile):
+    """One unit's serving context, with structure from the declared profile."""
+    return serving_target.context(allocation_unit_structure(unit, profile))
 
 
 def allocation_scope_meta(serving_target, context_by_unit) -> dict:

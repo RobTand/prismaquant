@@ -47,6 +47,10 @@ Missing or unresolved v3 scope removes the option. It never permits an unscoped 
 The selection record retains admitted unit scopes and the original table provenance.
 The allocator accepts separate --mtp-regime, --mtp-tensor-parallel and --mtp-routing arguments.
 The fixed-selection tool uses the same scope and publication owners.
+The allocator reads profile structure and checked probe topology through its existing allocation lane protocol.
+The Tessera plugin calls the shared scope owner for both body and MTP units.
+Synthetic card tests declare a Qwen3 MoE profile with the required expert grammar.
+An absent profile still refuses explicit scope. The fixture does not qualify GLM serving.
 Legacy no-owner emulation keeps its original contract. Production still requires canonical evidence.
 Measured quality anchors and exact wire menus have separate rosters.
 An admitted fractional wire uses the existing qualified chord owner.
@@ -77,6 +81,8 @@ Neither class costs nor chords establish numerical or serving qualification.
 The existing exact solver charges integer serialized bytes and leaves budget
 slack when no assignment fills the budget. Fused-family constraints stay intact.
 
+Scope recipes use the digest owner's strict, ASCII-escaped, default-spaced JSON profile.
+Class identities use its lax profile. Exact cache bytes and nonfinite policies remain unchanged.
 The selected table, explicit index, unit scopes, chord sources and class
 cost sources remain in allocation and frontier provenance.
 The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.

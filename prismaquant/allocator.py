@@ -772,6 +772,10 @@ class _StockAllocationLane:
         raise LookupError("no lane provides a serving target, so no unit has a serving context")
 
     @staticmethod
+    def allocation_unit_structure(unit, profile, *, stats=None):
+        raise LookupError("no lane provides unit structure")
+
+    @staticmethod
     def allocation_scope_meta(serving_target, context_by_unit) -> dict:
         return {}
 
@@ -838,14 +842,13 @@ def _allocation_lane():
 
 def _mtp_scope_inputs(payload, serving_target, profile, *, routing=None):
     """Read MTP topology through the existing lane and profile owners."""
-    from .tessera_serving_scope import unit_structure_from_profile
     lane = _allocation_lane()
     stats, contexts = {}, {}
     for unit in payload["costs"]:
         context = (None if serving_target is None else
                    lane.allocation_unit_context(serving_target, unit, profile))
         structure = (context.structure if context is not None else
-                     unit_structure_from_profile(unit, profile) if profile is not None else None)
+                     lane.allocation_unit_structure(unit, profile) if profile is not None else None)
         stats[unit] = {"unit_structure": structure}
         if structure == "routed_moe" and routing is not None:
             stats[unit]["routing"] = routing
@@ -3014,9 +3017,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_serving_target, accounting_stats, model_profile)
     if rung_allowability is not None:
         if any(owner.scoped for owner in rung_allowability.values()):
-            from .tessera_serving_scope import unit_structure_from_stats
             for name, row in accounting_stats.items():
-                row["_allowability_structure"] = unit_structure_from_stats(name, row, model_profile)
+                row["_allowability_structure"] = lane.allocation_unit_structure(
+                    name, model_profile, stats=row)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]

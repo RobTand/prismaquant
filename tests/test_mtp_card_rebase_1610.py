@@ -90,8 +90,8 @@ def test_a_manifest_that_disagrees_with_the_payload_is_refused():
 
 # --- through the real allocator ------------------------------------------------
 
-#: The default profile's live names (it maps ``model.language_model.`` to
-#: ``model.``), so the synthetic checkpoint resolves them as GLM's profile does.
+#: The synthetic checkpoint uses recipe names under a declared Qwen3 MoE profile.
+#: Its expert grammar supplies the routed and dense structures this card needs.
 PREFIX = "model.layers.45.mlp."
 ROUTED = tuple(f"{PREFIX}experts.{e}.{p}" for e in range(2)
                for p in ("gate_proj", "up_proj", "down_proj"))
@@ -128,8 +128,11 @@ def mtp_case(tmp_path, monkeypatch):
     monkeypatch.setattr(format_registry, "format_is_producer_eligible", lambda name, **_: True)
     draft = {f"{name}.weight": ("BF16", (64, 128)) for name in ROUTED + SHARED}
     assert 64 * 128 == PARAMS
-    _, probe_p, cost_p, _stats = _fixture(tmp_path, nvfp4_dloss=1.0, fp8_dloss=0.5,
-                                          extra_tensors=draft)
+    model_dir, probe_p, cost_p, _stats = _fixture(
+        tmp_path, nvfp4_dloss=1.0, fp8_dloss=0.5, extra_tensors=draft)
+    (model_dir / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_moe", "architectures": ["Qwen3MoeForCausalLM"],
+    }))
     payload = _mtp_payload()
     cost, constants = _write_payload(tmp_path, payload)
     return tmp_path, probe_p, cost_p, payload, cost, constants
@@ -140,7 +143,8 @@ def _run_mtp(monkeypatch, case, *extra):
 
     tmp_path, probe_p, cost_p = case[:3]
     selection, layer_cfg = _run(monkeypatch, tmp_path, probe_p, cost_p, disk_gb=1.0,
-                                fmt_for_target=lambda t: "FP8_E4M3", extra_argv=extra)
+        fmt_for_target=lambda t: "FP8_E4M3",
+        extra_argv=("--target-profile", "research", *extra))
     return selection, layer_cfg["__prismaquant__"]
 
 
@@ -206,3 +210,30 @@ def test_the_budget_stamp_binds_the_assignment_the_file_emits(mtp_case, monkeypa
     assert set(ROUTED + SHARED) <= set(emitted)
     assert (meta["whole_artifact_budget"]["selection_assignment_sha256"]
             == assignment_serialization_sha256(emitted))
+
+
+def test_declared_profile_supplies_mtp_structures_and_routing(mtp_case):
+    from prismaquant import allocator
+    from prismaquant.model_profiles import detect_profile
+    from prismaquant.tessera_serving_scope import ServingTarget
+    from test_tessera_scope_endpoints import IMAGE
+
+    profile = detect_profile(str(mtp_case[0] / "model"))
+    assert profile.name == "qwen3"
+    target = ServingTarget("sm_121", IMAGE, "eager", "resident")
+    stats, contexts = allocator._mtp_scope_inputs(
+        mtp_case[3], target, profile, routing="fixture-routing")
+    assert {stats[name]["unit_structure"] for name in ROUTED} == {"routed_moe"}
+    assert {stats[name]["unit_structure"] for name in SHARED} == {"dense"}
+    assert all(stats[name]["routing"] == "fixture-routing" for name in ROUTED)
+    assert all("routing" not in stats[name] for name in SHARED)
+    assert {name: context.structure for name, context in contexts.items()} == {
+        name: row["unit_structure"] for name, row in stats.items()}
+
+
+def test_mtp_card_still_refuses_a_missing_declared_profile(mtp_case, monkeypatch):
+    (mtp_case[0] / "model" / "config.json").unlink()
+    cost, constants = mtp_case[-2:]
+    with pytest.raises(SystemExit, match="explicit Tessera scope needs a declared model profile"):
+        _run_mtp(monkeypatch, mtp_case, "--mtp-joint-cost", str(cost),
+                 "--mtp-byte-budget", str(10**9), "--mtp-serve-constants", str(constants))

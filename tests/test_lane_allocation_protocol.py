@@ -57,6 +57,8 @@ def test_the_stock_lane_answers_without_a_lane(monkeypatch):
     assert lane.allocation_expert_projection({}, {}) == {}
     with pytest.raises(LookupError):
         lane.allocation_unit_context(None, "u", None)
+    with pytest.raises(LookupError):
+        lane.allocation_unit_structure("u", None)
     with pytest.raises(SystemExit, match="no declared allocation lane"):
         lane.allocation_routed_unit_rates(
             {}, {}, cost_data={}, per_linear_legal_formats=None,

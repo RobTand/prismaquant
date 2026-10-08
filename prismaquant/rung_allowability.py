@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_SPACED_STRICT
 from .lane_eligibility import _allowable_rung_tables
 from .schemas import strict_json_loads
 from .dev_mode import seal_check
@@ -410,7 +411,7 @@ def _scope_key(scope: Mapping | None) -> tuple | None:
         if not isinstance(recipe, Mapping):
             raise RungAllowabilityError("allowability scope recipe must be a mapping")
         try:
-            recipe_json = json.dumps(recipe, sort_keys=True, allow_nan=False)
+            recipe_json = DIRECT_ASCII_SPACED_STRICT.text(recipe)
         except (ValueError, TypeError) as exc:
             raise RungAllowabilityError(
                 f"allowability scope recipe is not JSON-serialisable: {exc}") from exc
@@ -588,7 +589,8 @@ class RungAllowability:
             return {"status": "wait", "reason": "canonical_timing_requires_v3_table"}
         if class_identity is not None and not isinstance(class_identity, Mapping):
             raise RungAllowabilityError("canonical class identity must be a mapping")
-        key = (rung, cell_id, None if class_identity is None else json.dumps(dict(class_identity), sort_keys=True))
+        key = (rung, cell_id, None if class_identity is None else
+               DIRECT_ASCII_SPACED_LAX.text(dict(class_identity)))
         if key in self._times:
             return self._times[key]
         result = dict(self._producer.rung_speed(
