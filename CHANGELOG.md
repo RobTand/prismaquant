@@ -10,6 +10,15 @@
   Its central processor preflight checks the real runtime arguments without a graphics processor.
   Native serving qualification and all production defaults stay unchanged.
 
+### Fixed
+- The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
+  Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
+  The retained result carries no speed, energy or residency qualification.
+  Certified mode keeps the refusal and the failed status.
+  A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
+  Missing telemetry retains each actual instrument name and its exact error detail.
+  Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
+
 ### Changed
 - The paired expert-dominance menu rule applies only to complete routed layers (#2288).
   A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
