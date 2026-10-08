@@ -601,3 +601,196 @@ def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tm
     with pytest.raises(SystemExit, match="no_runtime_frontier_assignment_passed_exact_checks"):
         allocator.main([*argv[1:], *flags, "--cost-baseline-assignment", str(baseline)])
     assert not (tmp_path / "layer.json").exists()
+
+
+def _two_expert_layer():
+    layer = "model.layers.5.mlp.experts"
+    return layer, [f"{layer}.{expert}.{role}_proj"
+                   for expert in (0, 1) for role in ("gate", "up", "down")]
+
+
+def test_subgroup_menu_option_survives_reprice_when_complete_layer_is_valid():
+    """A subgroup denominator must not prune a valid whole-layer option (#2288).
+
+    The packed menu prices only expert 0, where expert 0 trivially dominates
+    its own delta. The complete layer splits the signed change exactly in
+    half, so the option stays valid and the final guard still refuses a
+    genuinely dominant complete-layer move.
+    """
+    from prismaquant.allocator_solver import Candidate
+    layer, names = _two_expert_layer()
+    costs, _assignment, baseline = _trade_rows(
+        {name: ([1, 1], [3, 3]) for name in names})
+    subgroup = sorted(n for n in names if ".experts.0." in n)
+    group = "actual-layer::__packed__"
+    stats = {group: {"_packed_group_members": subgroup}}
+    candidates = {group: [Candidate(LOW, 1, 10, 3.0), Candidate(HIGH, 2, 20, 15.0)]}
+    report = {}
+    repriced = ac.reprice_paired_candidates(stats, costs, candidates, baseline,
+                                            profile=DefaultProfile(), ucb_z=0, report=report)
+    assert report[group][LOW]["refused"] is True
+    assert [c.fmt for c in repriced[group]] == [LOW, HIGH]
+    complete = ac.price_paired_rate_trade(costs, dict.fromkeys(names, LOW), baseline,
+                                          profile=DefaultProfile(), ucb_z=0)
+    assert complete["refused"] is False
+    assert complete["routed_layers"][layer]["experts"]["0"]["fraction_of_layer_change"] == 0.5
+    invalid = ac.price_paired_rate_trade(
+        costs, {n: (LOW if ".experts.0." in n else HIGH) for n in names}, baseline,
+        profile=DefaultProfile(), ucb_z=0)
+    assert invalid["refused"] is True
+    assert invalid["routed_layers"][layer]["dominant_experts"] == ["0"]
+
+
+def test_subgroup_composite_survives_fold_when_complete_layer_is_valid():
+    """The mixed-group fold keeps a subgroup-refused composite (#2288).
+
+    Members are expert 0's fused projections, priced against the complete
+    two-expert baseline roster. Every mixed option refuses on the subgroup
+    denominator, but the complete layer splits the change exactly in half.
+    """
+    from itertools import product
+    from prismaquant.allocator_solver import Candidate
+    from test_allocator_sibling_aggregation import _installed_fused_licence
+    layer = "model.layers.5.mlp.experts"
+    members = [f"{layer}.0.{role}_proj" for role in ("gate", "up")]
+    rest = [f"{layer}.1.{role}_proj" for role in ("gate", "up")]
+    low, high = "TESSERA_E4M3_K1_R832", "TESSERA_E4M3_K1_R864"
+    costs = {name: {low: _row(name, [1, 1], fmt=low), high: _row(name, [3, 3], fmt=high)}
+             for name in members + rest}
+    candidates = {name: [Candidate(fmt, 0, 10 + 10 * i, 1.0 + float(i))
+                         for i, fmt in enumerate((low, high))]
+                  for name in members}
+    baseline = dict.fromkeys(members + rest, high)
+    report = {}
+    options = ac.tessera_group_composites(
+        members, candidates, 8, licence=_installed_fused_licence(), ucb_z=2,
+        costs=costs, baseline_assignment=baseline, profile=DefaultProfile(), report=report)
+    assert len(options) == 4
+    assert sorted(tuple(o.member_formats[m] for m in members) for o in options) == sorted(
+        product((low, high), repeat=2))
+    expected = {}
+    for formats in product((low, high), repeat=2):
+        assignment = dict(zip(members, formats))
+        paired = ac.price_paired_rate_trade(costs, assignment,
+                                            {m: baseline[m] for m in members},
+                                            profile=DefaultProfile(), ucb_z=2)
+        expected[formats] = paired["predicted_dloss"]
+    for option in options:
+        key = tuple(option.member_formats[m] for m in members)
+        assert option.predicted_dloss == expected[key]
+        assert report["__paired_trades__"][option.fmt]["predicted_dloss"] == option.predicted_dloss
+    refused = report["__paired_trades__"]
+    assert sum(1 for trade in refused.values() if trade["refused"]) == 3
+    complete = ac.price_paired_rate_trade(
+        costs, dict.fromkeys(members + rest, low), baseline,
+        profile=DefaultProfile(), ucb_z=2)
+    assert complete["refused"] is False
+    dominated = dict(dict.fromkeys(members, low), **dict.fromkeys(rest, high))
+    invalid = ac.price_paired_rate_trade(costs, dominated, baseline,
+                                         profile=DefaultProfile(), ucb_z=2)
+    assert invalid["refused"] is True
+    assert invalid["routed_layers"][layer]["dominant_experts"] == ["0"]
+
+
+def test_real_cli_packed_menu_emits_and_final_guard_refuses_dominant_trade(tmp_path, monkeypatch):
+    """Public-path smoke: packed reprice emits, the final guard still refuses (#2288)."""
+    import json
+    import pickle
+    from prismaquant import allocator
+    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.layer_config import load_assignment
+    from test_allocator_measured_runtime_cli import _main_fixture
+    _layer, names = _two_expert_layer()
+    _name, argv = _main_fixture(tmp_path, units=names, menu={LOW: (0.5, 1), HIGH: (8.5, 2)})
+    argv = argv[:argv.index("--measured-runtime-table")]
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(dict.fromkeys(names, HIGH)))
+    monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "1")
+    allocator.main([*argv[1:], "--cost-baseline-assignment", str(baseline)])
+    assert load_assignment(tmp_path / "layer.json") == dict.fromkeys(names, LOW)
+    full = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]["paired_rate_trade"]
+    assert full["refused"] is False
+    menu_report = json.loads((tmp_path / "format_applicability.json").read_text())["paired_rate_trades"]
+    assert menu_report
+    payload = pickle.loads((tmp_path / "costs.pkl").read_bytes())
+    for name in names:
+        if ".experts.1." in name:
+            row = payload["costs"][name][HIGH]
+            payload["costs"][name][HIGH] = make_joint_aura_entry(
+                operator_identity=row["joint_operator_identity"], probe_identity=row["probe_identity"],
+                signed_components=payload["costs"][name][LOW]["signed_components_per_probe"])
+    (tmp_path / "costs.pkl").write_bytes(pickle.dumps(payload))
+    (tmp_path / "layer.json").unlink()
+    monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
+    with pytest.raises(SystemExit, match="routed layer rate trade refused"):
+        allocator.main([*argv[1:], "--cost-baseline-assignment", str(baseline),
+                        "--no-packed-aggregation", "--no-fused-aggregation"])
+    assert not (tmp_path / "layer.json").exists()
+
+
+class _AttributionFaultProfile(DefaultProfile):
+    """DefaultProfile that cannot attribute one baseline member (#2288 R1)."""
+    fault_name = None
+
+    def routed_expert_identity(self, qname):
+        if qname == self.fault_name:
+            raise ValueError(f"paired rate trade lacks per-expert attribution: {qname}")
+        return super().routed_expert_identity(qname)
+
+
+def test_unattributable_baseline_member_keeps_reprice_option():
+    """An unpriced baseline member blocks pruning, not the option (#2288 R1).
+
+    The priced group covers every baseline member the profile can attribute,
+    but one baseline member's expert identity cannot be established. The old
+    coverage check skipped that member, certified the shortened roster as
+    complete, and pruned the refused option. The corrected check fails open:
+    the verdict stays in the report and the option survives for the final
+    complete-assignment guard.
+    """
+    from prismaquant.allocator_solver import Candidate
+    layer, names = _two_expert_layer()
+    values = {name: ([1, 1], [3 if ".experts.0." in name else 1,
+                              3 if ".experts.0." in name else 1])
+              for name in names}
+    costs, _assignment, baseline = _trade_rows(values)
+    fault = f"{layer}.9.gate_proj"
+    baseline[fault] = HIGH
+    profile = _AttributionFaultProfile()
+    profile.fault_name = fault
+    group = "actual-layer::__packed__"
+    stats = {group: {"_packed_group_members": sorted(names)}}
+    candidates = {group: [Candidate(LOW, 1, 10, 3.0), Candidate(HIGH, 2, 20, 15.0)]}
+    report = {}
+    repriced = ac.reprice_paired_candidates(stats, costs, candidates, baseline,
+                                            profile=profile, ucb_z=0, report=report)
+    assert report[group][LOW]["refused"] is True
+    assert report[group][LOW]["routed_layers"][layer]["dominant_experts"] == ["0"]
+    assert [c.fmt for c in repriced[group]] == [LOW, HIGH]
+
+
+def test_unattributable_baseline_member_keeps_fold_composites():
+    """The same fail-open rule holds on the mixed-group fold (#2288 R1)."""
+    from prismaquant.allocator_solver import Candidate
+    from test_allocator_sibling_aggregation import _installed_fused_licence
+    layer = "model.layers.5.mlp.experts"
+    members = [f"{layer}.0.{role}_proj" for role in ("gate", "up")]
+    low, high = "TESSERA_E4M3_K1_R832", "TESSERA_E4M3_K1_R864"
+    costs = {name: {low: _row(name, [1, 1], fmt=low), high: _row(name, [3, 3], fmt=high)}
+             for name in members}
+    candidates = {name: [Candidate(fmt, 0, 10 + 10 * i, 1.0 + float(i))
+                         for i, fmt in enumerate((low, high))]
+                  for name in members}
+    fault = f"{layer}.9.gate_proj"
+    baseline = dict.fromkeys(members, high)
+    baseline[fault] = high
+    profile = _AttributionFaultProfile()
+    profile.fault_name = fault
+    report = {}
+    options = ac.tessera_group_composites(
+        members, candidates, 8, licence=_installed_fused_licence(), ucb_z=2,
+        costs=costs, baseline_assignment=baseline, profile=profile, report=report)
+    assert len(options) == 4
+    refused = report["__paired_trades__"]
+    assert sum(1 for trade in refused.values() if trade["refused"]) == 3
+    assert refused[options[0].fmt]["predicted_dloss"] == options[0].predicted_dloss

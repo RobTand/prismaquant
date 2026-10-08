@@ -11,6 +11,10 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Changed
+- The paired expert-dominance menu rule applies only to complete routed layers (#2288).
+  A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
+  The complete-assignment exact filter and the final emission guard still refuse dominant trades.
+  The price arithmetic, strict-half boundary, cancellation, and all-zero behavior stay unchanged.
 - The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
   Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
   The commit, read digest, read-byte comparison, contract path, and all other fields remain in the oracle.
