@@ -560,3 +560,66 @@ def test_profiler_teardown_failure_refuses_full_lifecycle(
     assert json.loads((obs.out/'progress.json').read_text()) == result
     if timed:
         assert result['anchors'][0]['collection_window']['stopped_by'] == 'stop_failed'
+
+
+@pytest.mark.parametrize('certified', [False, True])
+@pytest.mark.parametrize('deletion_fails', [False, True])
+@pytest.mark.parametrize('campaign_fails', [False, True])
+def test_rejected_trace_cleanup_full_lifecycle(
+        tmp_path, controlled, monkeypatch, certified, deletion_fails, campaign_fails):
+    from contextlib import nullcontext
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    obs = observer(tmp_path, calls=(0,), cap=1)
+    ready = monitor_readiness(obs, monkeypatch)
+    trace = obs.out/'anchor-000000.trace.json'
+    original_unlink = Path.unlink
+    cleanup_error = PermissionError('rejected trace deletion denied')
+    def unlink(path, *args, **kwargs):
+        if deletion_fails and path == trace:
+            raise cleanup_error
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    campaign_error = ValueError('original campaign failure after trace rejection')
+    token, calls, journal = object(), [], []
+    def original(**kwargs):
+        calls.append(kwargs)
+        return token
+    expected_error = (ValueError if campaign_fails else
+                      RuntimeError if certified or deletion_fails else None)
+    try:
+        with (pytest.raises(expected_error) if expected_error else nullcontext()) as caught:
+            with obs:
+                for event in ready.values():
+                    assert event.wait(10), 'monitor did not commit its sample'
+                journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+                if campaign_fails:
+                    raise campaign_error
+        if campaign_fails:
+            assert caught.value is campaign_error
+        elif deletion_fails:
+            assert 'rejected trace deletion denied' in str(caught.value)
+        assert calls and len(calls) == 1 and journal == [token]
+        result = json.loads((obs.out/'result.json').read_text())
+        assert result['status'] == ('failed' if expected_error else 'complete')
+        assert result['campaign_error'] == (repr(campaign_error) if campaign_fails else None)
+        assert result['anchors'][0]['status'] == 'observation_failed'
+        assert result['anchors'][0]['rejected_trace_bytes'] > 1
+        assert result['native_anchor_profiled'] is False
+        assert result['profile_status'] == 'missing'
+        assert trace.exists() == deletion_fails
+        if expected_error:
+            assert 'dev_uncertified' not in result
+        else:
+            assert result['dev_uncertified'] is True
+            assert result['evidence_complete'] is False
+            assert result['incomplete_instruments'] == ['anchor_profiler']
+        if deletion_fails:
+            assert any(row['error'] == repr(cleanup_error) for row in result['errors'])
+        else:
+            assert any('exported byte cap' in row['error'] for row in result['errors'])
+        assert json.loads((obs.out/'progress.json').read_text()) == result
+        assert not any(thread.is_alive() for thread in obs.threads)
+    finally:
+        if trace.exists():
+            original_unlink(trace)
+        assert not trace.exists()

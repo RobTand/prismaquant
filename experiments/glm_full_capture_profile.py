@@ -372,7 +372,11 @@ class AnchorObserver(CaptureObserver):
                     size = path.stat().st_size
                     if not 0 < size <= self.trace_max_bytes:
                         record['rejected_trace_bytes'] = size
-                        path.unlink()
+                        try:
+                            path.unlink()
+                        except BaseException as error:
+                            self.observation_error(error, cleanup=True)
+                            raise
                         raise RuntimeError('anchor trace exceeded its exported byte cap or was empty')
                     record['cuda_events'] = sum(
                         event.device_type == torch.autograd.DeviceType.CUDA
