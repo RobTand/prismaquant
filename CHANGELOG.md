@@ -85,6 +85,13 @@
   writer from test_footprint (#2390, references #1929). Fixture bytes,
   tensor order, costs, route reports and semantic assertions stay unchanged.
 
+- The PACT frontier profile cohort carries the measured-consumer contract
+  (#2423, references #2427). `pact_cohort_from_profile` returns
+  `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
+  the existing adapter, and `glm_paths_identical` rejects a cohort that
+  lacks or changes them. Remaining cohort values, bands, TP rules, defaults,
+  gates and the active index stay unchanged.
+
 ### Added
 
 - **Bounded head walk measurement mode** (#1492, #1247).
