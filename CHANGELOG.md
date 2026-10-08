@@ -11,6 +11,12 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
+  Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
+  With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
+  The completeness check reported fused units as claimed by no mechanism.
+  Both now raise the lookup error. A working lookup gives the same mapping as before.
+  No format, default, gate threshold or artifact byte changes when the lookup works.
 - The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
   Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
   The retained result carries no speed, energy or residency qualification.
