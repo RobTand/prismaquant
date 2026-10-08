@@ -57,8 +57,8 @@
   (#2423, references #2427). `pact_cohort_from_profile` returns
   `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
   the existing adapter, and `glm_paths_identical` rejects a cohort that
-  lacks or changes them. Cohort values, bands, TP rules, defaults, gates
-  and the active index stay unchanged.
+  lacks or changes them. Remaining cohort values, bands, TP rules, defaults,
+  gates and the active index stay unchanged.
 
 ### Added
 
