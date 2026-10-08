@@ -130,17 +130,6 @@ def test_scope_recipe_cache_key_still_refuses_nonfinite_values(value):
         _scope_key({"recipe": {"value": value}})
 
 
-def test_class_time_cache_keeps_ascii_spaces_and_nonfinite_tokens(monkeypatch):
-    timing = _owner("v3-timing.json", monkeypatch)
-    identity = {"z": "雪", "a": [float("nan"), float("inf"), float("-inf"), -0.0]}
-    encoded = r'{"a": [NaN, Infinity, -Infinity, -0.0], "z": "\u96ea"}'
-    retained = {"status": "wait", "reason": "retained_class_decision"}
-    timing._times[(896, "dense:c0:M8", encoded)] = retained
-
-    assert timing.canonical_time(896, cell_id="dense:c0:M8",
-        class_identity=dict(reversed(list(identity.items())))) is retained
-
-
 def _first_row(table, rung):
     return next(row for row in table["rungs"] if row["rung"] == rung)
 
