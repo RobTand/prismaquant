@@ -57,7 +57,7 @@ def test_config_overrides_flow_through():
     config = {"num_hidden_layers": 32, "vocab_size": 100000}
     cohort = pact_cohort_from_profile(config=config)
     assert cohort["vocab_size"] == 100000
-    # Prefix ids stay GLM until the profile owner exposes them.
+    # Prefix ids stay GLM without an explicit or declared value.
     assert cohort["prefix_ids"] == [154822, 154824]
     bands = pact_bands(config=config)
     assert bands[-1][1] == 32
@@ -80,3 +80,69 @@ def test_manifest_overlay_keeps_paths():
     assert overlay["cohort"]["local_prefix_rows"] == "excluded"
     assert overlay["cohort"]["input_contract"] == "prefixed_514"
     assert overlay["bands"][0] == [0, 3]
+
+
+def _qwen3_declared_profile():
+    from prismaquant.model_profiles import profile_from_config
+    declared = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3MoeForCausalLM"],
+        "num_hidden_layers": 48,
+        "vocab_size": 151936,
+        "prefix_ids": [151935, 151934],
+        "scored_positions_per_sequence": 1023,
+        "raw_tokens_per_sequence": 1024,
+    }
+    profile = profile_from_config(declared)
+    assert profile.name == "qwen3"
+    return profile
+
+
+def test_profile_declared_cohort_flows_without_explicit_config():
+    profile = _qwen3_declared_profile()
+    cohort = pact_cohort_from_profile(profile)
+    assert cohort["vocab_size"] == 151936
+    assert cohort["prefix_ids"] == [151935, 151934]
+    assert cohort["scored_positions_per_sequence"] == 1023
+    assert cohort["raw_tokens_per_sequence"] == 1024
+
+
+def test_explicit_config_beats_declared_config():
+    profile = _qwen3_declared_profile()
+    explicit = {
+        "vocab_size": 100001,
+        "prefix_ids": [1, 2],
+        "scored_positions_per_sequence": 777,
+        "raw_tokens_per_sequence": 778,
+    }
+    cohort = pact_cohort_from_profile(profile, explicit)
+    assert cohort["vocab_size"] == 100001
+    assert cohort["prefix_ids"] == [1, 2]
+    assert cohort["scored_positions_per_sequence"] == 777
+    assert cohort["raw_tokens_per_sequence"] == 778
+
+
+def test_declared_nested_text_config_and_prefix_alias():
+    from prismaquant.model_profiles import profile_from_config
+    declared = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3MoeForCausalLM"],
+        "num_hidden_layers": 48,
+        "serving_prefix_ids": [11, 12],
+        "text_config": {
+            "vocab_size": 151937,
+            "scored_positions_per_sequence": 779,
+            "raw_tokens_per_sequence": 780,
+        },
+    }
+    profile = profile_from_config(declared)
+    assert profile.name == "qwen3"
+    cohort = pact_cohort_from_profile(profile)
+    assert cohort["prefix_ids"] == [11, 12]
+    assert cohort["vocab_size"] == 151937
+    assert cohort["scored_positions_per_sequence"] == 779
+    assert cohort["raw_tokens_per_sequence"] == 780
+    explicit = {"prefix_ids": [1, 2], "serving_prefix_ids": [11, 12]}
+    assert pact_cohort_from_profile(profile, explicit)["prefix_ids"] == [1, 2]
+    nested_explicit = {"text_config": {"vocab_size": 99999}}
+    assert pact_cohort_from_profile(None, nested_explicit)["vocab_size"] == 99999
