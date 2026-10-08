@@ -364,6 +364,16 @@ def test_task_replay_consumer_refuses_declared_tessera_bytes(tmp_path, monkeypat
     (model / "config.json").write_text(json.dumps(model_config))
     result["identity"]["model_artifact"] = build_source_checkpoint_identity(model)
     output.write_text(json.dumps(result))
+    job_config_doc = json.loads(job.read_text())
+    configured = {stage["id"] for stage in job_config_doc["stages"]}
+    required = shipcard.required_slots(shipcard.load_shipcard(model / "shipcard.json"), model_dir=model)
+    for slot in required:
+        if slot not in configured:
+            job_config_doc["stages"].append({"id": slot,
+                "argv": [sys.executable, "-m", "prismaquant.shipcard_cli", "verify",
+                         "{shipcard}", "--model-dir", "{artifact}"],
+                "record": "{shipcard}", "output": str(tmp_path / (slot + ".json"))})
+    job.write_text(json.dumps(job_config_doc))
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
     _, task = _verify_replay_stage(job, tmp_path, "task_suite")
     assert task["status"] == "failed"
