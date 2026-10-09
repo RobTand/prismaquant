@@ -25,6 +25,7 @@ export TS="$TS_Q"
 export IMG
 export TESSERA_SERVE_MODE=resident
 export TESSERA_TP_WORKER="$WORKER"
+export TESSERA_TP_ENV="GLOO_SOCKET_IFNAME=enp1s0f0np0"
 bash "$TS_Q/experiments/tessera_plugin_served_tp.sh" \
   /mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported \
   "$OUT" \
