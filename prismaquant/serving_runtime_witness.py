@@ -134,8 +134,14 @@ def witness_problems(witness: object) -> list[str]:
 
 
 def canonical_witness_bytes(witness: Mapping[str, Any]) -> bytes:
-    """The canonical UTF-8 bytes of ``witness`` (sorted keys, strict)."""
-    return json.dumps(witness, sort_keys=True, separators=(",", ":"),
+    """The canonical UTF-8 bytes of ``witness`` (sorted keys, strict).
+
+    The stored ``witness_sha256`` is metadata about the joined facts, never
+    one of them: canonical bytes exclude it so the digest a collector prints
+    before the write is the digest a verifier recomputes after the read.
+    """
+    payload = {k: v for k, v in witness.items() if k != "witness_sha256"}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
