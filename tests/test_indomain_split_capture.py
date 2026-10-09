@@ -190,6 +190,37 @@ def test_completed_matching_binding_adopts_the_stored_result_without_a_forward(t
     assert "research_quantum_replay" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("tamper", ["role_bytes", "layer_manifest"])
+def test_completed_adoption_refuses_a_publication_that_differs_from_its_verified_receipt(
+        tmp_path, monkeypatch, capsys, tamper):
+    """A matching binding adopts only a publication that equals the quantum's verified receipt.
+
+    The join tests hold this rule for the join. Adoption has its own call site, so a
+    changed role file or layer manifest must refuse there too: it is neither adopted
+    nor replayed.
+    """
+    capture._toy_control_preflight(tmp_path, lambda _label: None)
+    root = tmp_path / "capture"
+    manifest_path = root / "layers/L000/manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    roles = manifest["units"][sorted(manifest["units"])[0]]
+    if tamper == "role_bytes":
+        payload_path = root / roles["fit"]["file"]
+        payload = torch.load(payload_path, weights_only=True)
+        payload["hessian"][0, 0] += 1
+        torch.save(payload, payload_path)
+    else:
+        roles["fit"]["count"] += 1
+        roles["heldout"]["count"] -= 1
+        manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(capture, "build_streamed_causal_lm",
+                        lambda *_args, **_kwargs: pytest.fail("a changed publication reached a forward"))
+    capsys.readouterr()
+    with pytest.raises(capture.ResearchRefused, match="verified"):
+        capture.mode_quantum(_resume_args(tmp_path), lambda _label: None)
+    assert "research_quantum_replay" not in capsys.readouterr().out
+
+
 _BINDING = {"selection_sha256": "a", "units": ["u"], "max_act_rows": 7, "max_prefix_rows": 4}
 
 
