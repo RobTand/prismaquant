@@ -509,3 +509,19 @@ def test_certified_capture_still_refuses_runtime_drift(tmp_path, monkeypatch):
     monkeypatch.setattr(fixture, "identity", changed_runtime)
     with pytest.raises(CaptureChainRefused):
         fixture.quantum((0, 1))
+
+
+def test_prep_comparability_refuses_another_batch_count(tmp_path):
+    """One rule holds the draw size for a fresh quantum and for the adoption of a completed one.
+
+    The control passes the prep's own batch count, so only the count can be the refusal.
+    """
+    fixture = _Chain(tmp_path)
+    prep = chain.read_prep(fixture.root)
+    with chain.authenticate_quantum_source(fixture.root, census_path=fixture.census,
+                                           model=fixture.source) as owner:
+        identity = fixture.identity(owner)
+        recorded = chain.require_prep_identity(prep, identity, n_batches=fixture.n_batches, label="0:1")
+        assert recorded == prep["identity"]
+        with pytest.raises(CaptureChainRefused, match="calibration batches"):
+            chain.require_prep_identity(prep, identity, n_batches=fixture.n_batches + 1, label="0:1")
