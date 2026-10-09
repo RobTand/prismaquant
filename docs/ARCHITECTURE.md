@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2301, revision 4): `tools/g3job` owns the imported G3 measurement harness.
+Re-stamped 2026-10-09 (PQ #2301, revision 5): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -74,7 +74,7 @@ Each pass installs and verifies 876 candidate units, including 867 units in the 
 The actual logits and both 2,047-position KL arrays match bitwise between the two passes.
 These are truncated diagnostic logits, not full-model quality or promotion evidence.
 
-The final result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a4-final/real-arm-ig-a4-final/comparison.json`.
+The revision-4 result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a4-final/real-arm-ig-a4-final/comparison.json`.
 The two in-process traces are `source-read/runner.trace.json` and `omission/runner.trace.json` beside that result.
 The reader records three map parses per pass, versus 2,009 and 1,220 staged reads.
 It records three and six phase acquisitions; partial publication can require another batch.
@@ -83,7 +83,22 @@ Their native interval is ten seconds.
 Work per joule remains null because this correctness smoke is not a controlled energy comparison.
 No speed, energy, whole-model residency gain, serving, or promotion claim follows from this comparison.
 
+The revision-5 merge retains both documentation additions from `origin/main` at `b597fc363b74`.
+The merge changes no G3 code or pinned numerical code.
+PB `42ee5b235134` passes all 113 selected CPU cases, with no skips.
+PB `07921c3dd917` repeats the real container comparison on Sparky at priority zero.
+Both passes verify 876 replacements; the logits and both FP64 KL arrays match bitwise.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a5-merge/real-arm-ig-a5-merge/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a5/netdata-power.json`.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
 
+
+Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
+The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
+Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
 
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
@@ -32492,6 +32507,20 @@ MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
 
 Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
 Both direct consumers refuse quantized input observations in development and certified modes.
+
+The activation rule and memory helper require the profile argument.
+A declared architecture must equal `Glm5NextForConditionalGeneration` before either helper selects a GLM direct consumer.
+An undeclared profile uses its canonical `glm5_next` identity.
+Other architectures receive no direct activation contract and no direct-cache charge.
+Single-anchor measurement, batch measurement, resume checks, and seed admission pass the profile through the existing path.
+
+PB `3b99c748b714eb7237206a696c52e41d7310cd7d31edb342383b21093fef5d6d` executes two CPU batches through the actual encoder, publication, and resume paths.
+It observes GLM contracts `a16` and `a32`, with direct-cache charges of 16,384 and 32,768 bytes for 32-by-256 weights.
+The non-GLM batch receives zero direct-cache charge for both leaves.
+The same action compiles the three changed production modules.
+The sealed command is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m tools.ig2457_smoke`.
+The action snapshot retains the temporary script.
+Its result payload is `/mnt/shared/prismabuild-fleet/cas/blobs/cf/cff3ba1b18ba6f652c572c7fa7bf0841cd7ed31f82f863c313c9d7b843e6e4ed`.
 
 The producer reads direct weights with projection_routes.direct_consumer_weight.
 The runtime and producer use the same folded T-16 arithmetic.

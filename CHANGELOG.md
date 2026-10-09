@@ -24,6 +24,14 @@
   Hash batches use the shared IO engine and preserve their digests.
   Development mode retains identity stamps without a new promotion gate.
   The pinned `/pq` package and action `1cb0d64a` remain unchanged.
+  The merge with `origin/main` preserves the accepted fix and both documentation additions.
+  PB `42ee5b235134` passes 113 CPU cases; PB `07921c3dd917` preserves bitwise equality in the real container.
+- The unknown-deferral test starts its release timer after initial staging and tensor access (#2304).
+  The real mover retains the fixture's normal staging budget; only release uses the 30-second budget.
+  A synthetic 31-second staging delay verifies immediate refusal, zero release retries, zero supported deferrals, and the exact unclassified debt.
+  Production deadlines and fail-closed release behavior remain unchanged.
+  PB `cc59619e6a893b3778cfd0e8863565a6b6dd98e594631114e5210ee8e444dc0f` passes 11 affected tests, the direct delay smoke, and the compile check on x86.
+  The same run retains deterministic staging-timeout and release-budget coverage.
 - A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
   Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
   With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
