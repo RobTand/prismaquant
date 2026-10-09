@@ -12,7 +12,7 @@ Automatic campaigns are separately refused by
 * the source is hashed by the read that consumes it, through the descriptor
   the tensors are read through, before the first tensor reaches the capture;
 * metadata-observable changes between the hash and a later read refuse;
-  same-signature mutation detection remains an unmet requirement (#2010);
+  a same-signature byte change refuses by exit digest reread (#2010);
 * a census producer digest is compared at that first use and refuses before
   any tensor is read;
 * a chain prep hashes nothing, and its join refuses quanta that recorded
@@ -86,7 +86,8 @@ def test_the_read_that_consumes_a_file_hashes_it_through_its_own_descriptor(tmp_
                                torch.arange(64, dtype=torch.float32).reshape(8, 8))
             reader.get_tensor('w')
         held = owner._files[shard.name]['fd']
-        assert hashes == [(shard.name, held)]  # once, through the held descriptor
+        # Admission hashes once; the lease exit rereads once (#2010).
+        assert hashes == [(shard.name, held), (shard.name, held)]
         receipt = owner.receipt()
     assert receipt['schema'] == cc.RECORDING_RECEIPT_SCHEMA
     assert [(row['name'], row['sha256'], row['payload_reads'])
@@ -130,6 +131,48 @@ def test_a_change_after_the_last_read_refuses_at_the_read_lease_exit(tmp_path):
             _mutate_preserving_mtime(shard)
             os.utime(shard, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
             assert file_stat_signature(shard.stat()) != file_stat_signature(before)
+    with pytest.raises(RuntimeError, match='changed during consumption'):
+        owner.close()
+
+
+def test_same_signature_byte_mutation_refuses_at_lease_exit_2010(tmp_path, monkeypatch):
+    """A same-stat byte change refuses by held digest reread (#2010).
+
+    The stat mock freezes the shard identity across the mutation. It models
+    ZFS timestamp-tick same-signature mutation. The lease exit and the owner
+    close both refuse by content digest, not by stat.
+    """
+    from safetensors import safe_open
+    source, census = _source(tmp_path)
+    shard = source / 'model-00001.safetensors'
+    owner = cc.record_capture_source(census, model=source)
+    reader = owner.safe_open(safe_open, shard, framework='pt')
+    handle = reader.__enter__()
+    handle.get_tensor('w')
+    frozen_stat = shard.stat()
+    frozen_fstat = os.fstat(owner._files[shard.name]['fd'])
+    frozen_key = (frozen_fstat.st_dev, frozen_fstat.st_ino)
+    real_stat, real_fstat = os.stat, os.fstat
+
+    def frozen_os_stat(path, *args, **kwargs):
+        try:
+            if Path(path) == shard:
+                return frozen_stat
+        except (OSError, ValueError):
+            pass
+        return real_stat(path, *args, **kwargs)
+
+    def frozen_os_fstat(fd, *args, **kwargs):
+        live = real_fstat(fd, *args, **kwargs)
+        if (live.st_dev, live.st_ino) == frozen_key:
+            return frozen_fstat
+        return live
+
+    monkeypatch.setattr(os, 'stat', frozen_os_stat)
+    monkeypatch.setattr(os, 'fstat', frozen_os_fstat)
+    _mutate_preserving_mtime(shard)
+    with pytest.raises(RuntimeError, match='changed during consumption'):
+        reader.__exit__(None, None, None)
     with pytest.raises(RuntimeError, match='changed during consumption'):
         owner.close()
 
@@ -525,13 +568,14 @@ def test_a_streamed_capture_reads_each_source_file_once_on_cuda(tmp_path, monkey
 
 
 def _reads_each_source_file_once(tmp_path, monkeypatch, policy, *, device):
-    """The monolith hashes every file exactly once, each through the descriptor it reads.
+    """The monolith seals every file, then rereads consumed bytes at exit (#2010).
 
     The census pass runs first, unobserved. During the capture every whole-file
     hash of the source is recorded with the descriptor it read through, and
     every tensor payload read through the owner with its file. Each roster file
-    is hashed once; the files the forward reads are hashed by that read, and the
-    rest (the vision tower, the tokenizer assets) once at the seal.
+    is hashed at admission; each consumed file is reread at its lease exit and
+    every fresh file is reread at close. The rest (the vision tower, the
+    tokenizer assets) is sealed once and reread at close.
     """
     from prismaquant import tessera_campaign as campaign
     # Controlled legacy-mechanism fixture, not a qualified immutable provider.
@@ -568,7 +612,10 @@ def _reads_each_source_file_once(tmp_path, monkeypatch, policy, *, device):
         argv += ['--streaming-capture-policy', policy]
     assert campaign.main(argv) == 0
     roster = {path.name for path in cc.capture_source_files(source)}
-    assert Counter(name for name, _fd in hashed) == Counter(roster)  # once each
+    counts = Counter(name for name, _fd in hashed)
+    # Admission plus close reread at least; consumed files add lease exits.
+    assert set(counts) == roster
+    assert all(n >= 2 for n in counts.values())
     assert all(through_descriptor for _name, through_descriptor in hashed)
     read = set(payload)
     assert {'model-head.safetensors', *(f'model-layer-{i:03d}.safetensors' for i in range(3))} <= read

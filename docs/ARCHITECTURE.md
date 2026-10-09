@@ -1,5 +1,8 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2010): the capture source owner rereads held bytes at lease exit.
+Admission still hashes inside the consuming read, with no separate admission read. The exit and close rereads run on CPU, off the GPU hot path. They carry no new resource charge. Adopted and recorded rows keep zero-read proofs and refuse by stat. No default, format, pin, or serving gate moves.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
@@ -1387,11 +1390,15 @@ can force tensor rereads. The #1885 prep/GPU wording below records its initial
 implementation, superseded by prep v2 and the original narrow GPU receipts;
 those receipts are not rebased-source GPU qualification. Existing parallel
 fallback hashing (#1889) remains. Numerical, serving, pins and export wire are
-unchanged. Stat fences detect metadata-observable mutation, not arbitrary
-same-signature byte mutation: #2010 records two same-signature admissions in
-a bounded ZFS diagnostic, with no end-to-end corrupted artifact demonstrated.
-That original integrity requirement remains unmet; the exit-only regression
-now constructs deterministic drift, not a stronger production guarantee.
+unchanged. Stat fences detect metadata-observable mutation. Same-signature
+byte mutation now refuses by held-digest reread (#2010). Each file hashed by
+its consuming read is reread at its lease exit. Every fresh file is reread
+at owner close. Both rereads run on the CPU caller thread. They carry no new
+resource charge. Adopted and recorded rows keep their zero-read proof
+optimization and refuse by stat. #2010 recorded two same-signature admissions
+in a bounded ZFS diagnostic, with no end-to-end corrupted artifact
+demonstrated. The exit-only regression retains its deterministic drift
+fixture. The mtime-restoration control remains.
 See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
 Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
 `sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
