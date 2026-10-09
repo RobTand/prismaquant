@@ -952,3 +952,108 @@ def test_terminal_read_ahead_error_survives_reclaim_without_retry(where):
         assert stream._reads[1] == (1 if where == "reader" else 0)
         error = stream._errors[1]
         assert error is not None and error.__traceback__ is None
+
+# -- growth-aware read-ahead budget (PQ #1347) -------------------------------
+
+
+def _fake_guard(live):
+    from types import SimpleNamespace
+
+    reading = {"live": live}
+    guard = SimpleNamespace(headroom_bytes=lambda: reading["live"])
+    return guard, reading
+
+
+def test_growth_reserve_is_subtracted_from_live_headroom():
+    """PQ #1347 repro: admission leaves room for the consumer's next growth."""
+    guard, reading = _fake_guard(10 * SIZE)
+    budget = GuardReadBudget(guard, buffer_bytes=SIZE, growth_reserve_bytes=3 * SIZE)
+    assert budget.growth_reserve_bytes == 3 * SIZE
+    assert budget.headroom_bytes(0) == 7 * SIZE
+    assert budget.headroom_bytes(5 * SIZE) == 7 * SIZE
+    reading["live"] = 2 * SIZE
+    assert budget.headroom_bytes(2 * SIZE) == -SIZE
+    with pytest.raises(ValueError, match="growth reserve"):
+        GuardReadBudget(guard, buffer_bytes=SIZE, growth_reserve_bytes=-1)
+
+
+def test_measured_growth_ignores_stream_bytes_and_keeps_peak():
+    """The reserve is max(baseline - min) over live+held, not a constant."""
+    guard, reading = _fake_guard(10 * SIZE)
+    budget = GuardReadBudget(guard, buffer_bytes=SIZE)
+    budget.note_window_start(2 * SIZE)
+    # The stream reads two more groups: live drops as held rises, sum holds.
+    reading["live"] = 8 * SIZE
+    budget.note_window_sample(4 * SIZE)
+    assert budget.note_window_end(4 * SIZE) == 0
+    assert budget.growth_reserve_bytes == 0
+    assert budget.windows_measured == 1
+    # The consumer grows three groups inside the next window.
+    budget.note_window_start(4 * SIZE)
+    reading["live"] = 5 * SIZE
+    assert budget.note_window_end(4 * SIZE) == 3 * SIZE
+    assert budget.growth_reserve_bytes == 3 * SIZE
+    assert budget.headroom_bytes(4 * SIZE) == 2 * SIZE
+    # A smaller later window never lowers the peak.
+    budget.note_window_start(4 * SIZE)
+    reading["live"] = 4 * SIZE
+    assert budget.note_window_end(4 * SIZE) == SIZE
+    assert budget.growth_reserve_bytes == 3 * SIZE
+    assert budget.windows_measured == 3
+
+
+def test_floor_still_covers_the_phase_buffers_beside_growth():
+    guard, reading = _fake_guard(SIZE)
+    budget = GuardReadBudget(guard, buffer_bytes=SIZE, floor_bytes=3 * SIZE,
+                             growth_reserve_bytes=2 * SIZE)
+    assert budget.headroom_bytes(0) == 3 * SIZE
+    assert budget.headroom_bytes(2 * SIZE) == SIZE
+    assert budget.headroom_bytes(4 * SIZE) == -SIZE
+
+
+def test_stream_learns_window_growth_without_extra_rereads():
+    """Safe admission: the stream measures one window's growth, then holds it back."""
+    entries, _calls = _range_entries(groups=4)
+    guard, reading = _fake_guard(10 * SIZE)
+    budget = GuardReadBudget(guard, buffer_bytes=SIZE)
+    with io_engine.read_stream(entries, budget=budget) as stream:
+        assert _quiet(stream) == (4 * SIZE, 4)
+        stream.take(("chunk", 0))
+        # The consumer grows one group inside window 1; no release between
+        # takes, so the take itself releases and the sum stays comparable.
+        reading["live"] = 9 * SIZE
+        stream.take(("chunk", 1))
+        assert budget.growth_reserve_bytes == SIZE
+        assert budget.windows_measured == 1
+        assert stream.counters["growth_reserve_bytes"] == SIZE
+        assert budget.headroom_bytes(stream._held + stream._unreleased) == 8 * SIZE
+        stream.take(("chunk", 2))
+        stream.take(("chunk", 3))
+    assert stream.counters["rereads"] == 0
+    assert stream.counters["evictions"] == 0
+    assert stream.counters["evicted_bytes"] == 0
+
+
+def test_emergency_growth_past_reserve_still_reclaims_and_rereads():
+    """Emergency reclaim stays: sudden growth past the reserve drops read-ahead."""
+    entries, _calls = _range_entries(groups=3)
+    guard, reading = _fake_guard(10 * SIZE)
+    budget = GuardReadBudget(guard, buffer_bytes=SIZE, growth_reserve_bytes=SIZE)
+    with io_engine.read_stream(entries, budget=budget) as stream:
+        assert _quiet(stream) == (3 * SIZE, 3)
+        stream.take(("chunk", 0))
+        with stream.paused():
+            assert stream.reclaim(2 * SIZE + 1) == 2 * SIZE
+            assert stream.counters["evictions"] == 2
+            assert stream.counters["evicted_bytes"] == 2 * SIZE
+            # Freed memfd pages return to the guard reading at once; move
+            # the reading before the pause exit re-pumps, so the budget
+            # does not mistake the reclaim for consumer growth.
+            reading["live"] = 12 * SIZE
+        delivered = stream.take(("chunk", 1))
+        assert [item.value for item in delivered] == [bytes([1]) * SIZE]
+        stream.release()
+        stream.take(("chunk", 2))
+        stream.release()
+    assert stream.counters["rereads"] == 2
+    assert budget.growth_reserve_bytes == SIZE

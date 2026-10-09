@@ -253,23 +253,95 @@ class GuardReadBudget:
     ``floor_bytes`` is what the phase already reserved for this stream at its
     guard check (the spill's own read buffers): the stream may always hold
     that much, read ahead or taken, whatever the reading says.
+
+    Growth reserve (PQ #1347). The consumer's own bytes grow inside a
+    window after the stream admits its read-ahead, so admission at the live
+    headroom alone over-admits by that growth and the next guard check
+    reclaims the farthest-ahead group. The budget therefore admits
+    ``live - growth_reserve_bytes``, where the reserve is the measured
+    per-window peak growth, not a constant:
+    ``growth = max over closed windows of (baseline - minimum)`` with
+    ``baseline`` and ``minimum`` read as ``adjusted_live + held_bytes``.
+    The sum cancels the stream's own reads (a new held byte lowers the
+    live reading by one), so only the consumer's growth and a later
+    phase's larger reservation remain. The current phase's reservation
+    is already inside the live reading and is never added again.
+    The stream brackets each window with :meth:`note_window_start` and
+    :meth:`note_window_end`; :meth:`headroom_bytes` also samples the
+    minimum while the window is open. A sudden growth past the reserve
+    still reclaims through the guard's reclaimers: the reserve makes
+    reclaim the exception, never the steady state.
     """
 
-    def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0):
+    def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0,
+                 growth_reserve_bytes=0):
         if type(floor_bytes) is not int or floor_bytes < 0:
             raise ValueError('a read budget floor must be nonnegative bytes')
+        if type(growth_reserve_bytes) is not int or growth_reserve_bytes < 0:
+            raise ValueError('a read budget growth reserve must be nonnegative bytes')
         self.guard = guard
         self.buffer_bytes = int(buffer_bytes)
         self.yield_to = yield_to
         self.floor_bytes = floor_bytes
+        self._growth_reserve_bytes = growth_reserve_bytes
+        self._window_baseline = None
+        self._window_min = None
+        self.windows_measured = 0
 
-    def headroom_bytes(self, held_bytes: int) -> int:
+    @property
+    def growth_reserve_bytes(self) -> int:
+        """The measured per-window peak growth the budget holds back (PQ #1347)."""
+        return self._growth_reserve_bytes
+
+    def _adjusted_live(self) -> int:
         live = self.guard.headroom_bytes()
         if self.yield_to is not None:
             group = self.yield_to.next_group()
             if group is not None:
                 live -= self.yield_to.unread_bytes(group)
-        return max(live, self.floor_bytes - held_bytes)
+        return live
+
+    def note_window_start(self, held_bytes: int) -> None:
+        """Open a window growth measurement at the current live reading."""
+        live = self._adjusted_live()
+        total = live + int(held_bytes)
+        self._window_baseline = total
+        self._window_min = total
+
+    def note_window_sample(self, held_bytes: int) -> None:
+        """Fold one live reading into the open window's minimum."""
+        if self._window_baseline is None:
+            return
+        live = self._adjusted_live()
+        total = live + int(held_bytes)
+        if total < self._window_min:
+            self._window_min = total
+
+    def note_window_end(self, held_bytes: int) -> int:
+        """Close the window; keep the largest measured growth as the reserve."""
+        if self._window_baseline is None:
+            return 0
+        live = self._adjusted_live()
+        total = live + int(held_bytes)
+        if total < self._window_min:
+            self._window_min = total
+        growth = self._window_baseline - self._window_min
+        if growth < 0:
+            growth = 0
+        if growth > self._growth_reserve_bytes:
+            self._growth_reserve_bytes = growth
+        self._window_baseline = None
+        self._window_min = None
+        self.windows_measured += 1
+        return growth
+
+    def headroom_bytes(self, held_bytes: int) -> int:
+        live = self._adjusted_live()
+        if self._window_baseline is not None:
+            total = live + int(held_bytes)
+            if total < self._window_min:
+                self._window_min = total
+        return max(live - self._growth_reserve_bytes, self.floor_bytes - held_bytes)
 
 
 #: The device bytes a render cache may hold when no capture guard reads the

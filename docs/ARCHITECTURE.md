@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #1347): the Stage B read-ahead budget holds back
+the measured per-window peak consumer growth. Depth is live guard headroom
+less that reserve; reclaim stays for sudden growth past it. No format, pin,
+gate, or default moves in this change.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
@@ -4218,9 +4223,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   - A dropped render is read again later.
   - The layer quantum's source baseline is taken with the stream paused and
     its measured bytes left out (`ReadStream.paused`, `:798`).
-- **Depth and the cgroup term (PQ #1383).** The stream's depth is
+- **Depth and the cgroup term (PQ #1383, growth reserve PQ #1347).** The stream's depth is
   `GuardReadBudget.headroom_bytes` → `CaptureMemoryGuard.headroom_bytes`
-  (`memory_management.py:648`). That is the room under every term that a
+  (`memory_management.py:648`) less the measured per-window peak consumer growth.
+  That is the room under every term that a
   host allocation moves, and the cgroup term is one of them, with the
   current phase's host reservation held against the cap.
   - The depth is read each time a read is admitted, and it knows only the
@@ -4228,7 +4234,14 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   - Anon memory that a later phase allocates can therefore push the row's
     committed bytes past the cap while the memfds read earlier are still
     held.
-  - Reclaim is what gives that room back.
+  - The budget holds back the largest per-window growth measured so far:
+    `growth = max(baseline - minimum)` over `adjusted_live + held_bytes`,
+    bracketed by `ReadStream.take` (`note_window_start/end`). The sum cancels
+    the stream's own reads, so only consumer growth and a later phase's larger
+    reservation remain; the current reservation is never added twice.
+  - Reclaim stays for sudden growth past the reserve; the reserve makes it
+    the exception, not the steady state. `ReadStream.counters` reports
+    `growth_reserve_bytes`.
 - **Order and staging.** The quantum builds one stream over every pending
   window's renders, in window order, after the own-source phase starts
   (`joint_cost_quantum.py:2353`); window 0 loads while the own source
