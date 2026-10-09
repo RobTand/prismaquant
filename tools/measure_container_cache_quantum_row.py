@@ -629,7 +629,7 @@ def main(argv=None) -> int:
     # The receipt file lives on the worker's local disk. Print the full
     # canonical bytes to stdout so the PB log carries the evidence.
     print(args.out.read_bytes().decode())
-    return 0
+    return 0 if measurement["valid"] else 1
 
 
 def _delta_io(before: dict, after: dict) -> dict:

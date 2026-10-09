@@ -70,6 +70,25 @@ worker/launcher loss through the eventual public lifetime contract, quota
 enforcement and cleanup still need proof under #1091 and PB #1360. No
 work-per-joule result or speedup follows from this measurement.
 
+## Sampler lifecycle requirements
+
+The sampler confirms its first complete scan before the row can start.
+The child appends that sample before it sends the startup confirmation.
+A missing confirmation, failed initial scan, or dead child prevents row execution.
+
+The parent requests the final scan after the row ends.
+The child records the final scan and exits with code zero.
+The parent checks the exit code, sample sequence, and both row boundaries.
+An early exit, signal, failed final scan, or row exception invalidates the evidence.
+An active sampler cannot report a complete row.
+Both measurement commands return a nonzero status for an invalid receipt.
+
+The control pipe has no shared process lock.
+A killed child cannot hold the parent's stop request on an abandoned event lock.
+The existing scan-error and sample-gap checks still apply.
+The retained GPU receipts predate these lifecycle checks; this repair does not add fields to those immutable receipts.
+The CPU repair evidence appears in the measurement report.
+
 This extends the existing container/scratch adapter. It adds no rendered-
 weight/activation cache, model arithmetic, wire format, serving gate, runtime
 pin, kernel, production recipe default, stage graph or agent scheduler.

@@ -2,8 +2,8 @@
 
 The cache ROOT/MAX pair (PQ #1820, ``PRISMAQUANT_CONTAINER_CACHE_ROOT`` and
 ``PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES``) declares an operator-chosen
-reservation. No party has measured cache bytes on a real row. This module
-records the peak first, so the ceiling derives from evidence, not a guess.
+reservation. The retained PQ #2463 rows measure a workload-specific peak.
+This module records samples so the ceiling derives from evidence.
 
 Byte convention: allocated bytes count 512 times ``st_blocks`` for each
 unique device/inode pair, directories included. Apparent bytes sum
@@ -11,7 +11,7 @@ unique device/inode pair, directories included. Apparent bytes sum
 are the file lengths a reader sees. The derivation reads the allocated
 peak only.
 
-Method: a sampler thread walks the cache root every ``interval_s`` seconds
+Method: a sampler child walks the cache root every ``interval_s`` seconds
 and keeps the largest observed sample. The recorded number is the maximum
 observed sample, not the final directory size and not an asserted exact peak
 between samples. A scan that fails or an event overflow invalidates the
@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import threading
 import time
 from pathlib import Path
 
@@ -41,11 +40,6 @@ SAMPLE_INTERVAL_S = 0.25
 SCHEMA = "prismaquant.container_cache_peak.v1"
 #: Receipt schema for a derived cache ceiling.
 CEILING_SCHEMA = "prismaquant.container_cache_ceiling.v1"
-
-
-def _allocation_bytes(path: Path) -> int:
-    """Allocated bytes of one path: 512 times its block count."""
-    return int(path.stat().st_blocks) * 512
 
 
 def scan_cache_bytes(root) -> dict:
@@ -119,32 +113,28 @@ def describe_initial_state(root) -> dict:
 
 
 def _sample_loop(root: str, interval_s: float, out_path: str,
-                 stop_path: str) -> None:
-    """Scan ``root`` every ``interval_s`` in a sampler child process.
-
-    Appends one JSON object per line to ``out_path``. Exits when
-    ``stop_path`` exists. A scan error appends a line carrying the error
-    instead of totals, so the parent sees every failed scan.
-    """
-    import json as _json
-    import os as _os
-    import time as _time
-
+                 control) -> None:
+    """Confirm the initial sample and scan through the requested row end."""
     index = 0
-    while not _os.path.exists(stop_path):
-        started = _time.time()
-        try:
+    phase = "initial"
+    try:
+        while True:
+            started = time.time()
             totals = scan_cache_bytes(root)
-            line = {"index": index, "unix": started,
-                    "scan_duration_s": _time.time() - started, **totals}
-        except OSError as exc:
-            line = {"index": index, "unix": started, "scan_duration_s": 0.0,
-                    "allocated_bytes": 0, "apparent_bytes": 0,
-                    "files": 0, "dirs": 0, "errors": [f"scan failed: {exc}"]}
-        with open(out_path, "a") as handle:
-            handle.write(_json.dumps(line, sort_keys=True) + "\n")
-        index += 1
-        _time.sleep(interval_s)
+            line = {"index": index, "unix": started, "phase": phase,
+                    "scan_duration_s": time.time() - started, **totals}
+            with open(out_path, "a") as handle:
+                handle.write(json.dumps(line, sort_keys=True) + "\n")
+            if index == 0:
+                # Confirm only after the complete sample reaches the log.
+                control.send(not totals["errors"])
+            if phase == "final":
+                return
+            index += 1
+            phase = ("final" if control.poll(interval_s)
+                     and control.recv() == "stop" else "periodic")
+    finally:
+        control.close()
 
 
 class CachePeakSampler:
@@ -153,14 +143,16 @@ class CachePeakSampler:
     The peak is the largest observed sample, never the final size. ``errors``
     collects every failed scan and every gap longer than twice the interval.
     Any entry invalidates the evidence: a failed scan may miss bytes, and a
-    gap may miss the peak. ``incomplete_scan`` marks a run whose sampler
-    stopped early, such as a crashed row.
+    gap may miss the peak. ``incomplete_scan`` marks missing lifecycle coverage
+    or a failed row, even when a final inventory exists.
 
     Sampling runs in a forked child process with its own GIL: the row
     under measurement compiles and holds this process's GIL for longer
     than the sample interval, which starved the earlier sampler thread
     past the gap limit. The child appends one JSON line per scan to a
-    file outside the measured root; the parent reads them at ``stop``.
+    file outside the measured root. Entry waits for the first complete sample.
+    The child writes a final sample after the parent requests the row end.
+    The parent requires a successful child exit and both coverage boundaries.
 
     Enter the sampler before starting threads or CUDA work: ``fork``
     carries only the calling thread, and a child forked after CUDA
@@ -171,8 +163,8 @@ class CachePeakSampler:
     def __init__(self, root, *, interval_s=SAMPLE_INTERVAL_S):
         self.root = Path(root)
         self.interval_s = float(interval_s)
-        if self.interval_s <= 0:
-            raise ValueError("sample interval must be positive")
+        if not math.isfinite(self.interval_s) or self.interval_s <= 0:
+            raise ValueError("sample interval must be finite and positive")
         self.samples: list[dict] = []
         self.errors: list[str] = []
         self.peak_allocated_bytes = 0
@@ -180,49 +172,56 @@ class CachePeakSampler:
         self._tmpdir: object = None
         self._process: object = None
         self._out_path: object = None
-        self._stop_path: object = None
+        self._control: object = None
+        self._started_unix: float | None = None
+        self._finished_unix: float | None = None
+        self._child_exitcode: int | None = None
+        self._complete = False
+        self._row_failed = False
 
     def __enter__(self):
         import multiprocessing
         import tempfile
+        from multiprocessing.connection import wait
 
+        if self._tmpdir is not None or self._started_unix is not None:
+            raise RuntimeError("sampler cannot start twice")
         tmpdir = tempfile.mkdtemp(prefix="container-cache-peak-")
         self._tmpdir = tmpdir
         self._out_path = os.path.join(tmpdir, "samples.jsonl")
-        self._stop_path = os.path.join(tmpdir, "stop")
         Path(self._out_path).write_text("")
         context = multiprocessing.get_context("fork")
+        receiver, sender = context.Pipe(duplex=True)
+        self._control = receiver
         self._process = context.Process(
             target=_sample_loop,
-            args=(str(self.root), self.interval_s,
-                  self._out_path, self._stop_path),
+            args=(str(self.root), self.interval_s, self._out_path, sender),
             name="container-cache-peak", daemon=True)
-        self._process.start()
+        try:
+            self._process.start()
+            sender.close()
+            available = wait([receiver, self._process.sentinel], timeout=30)
+            try:
+                confirmed = receiver in available and receiver.recv() is True
+            except EOFError:
+                confirmed = False
+            if not confirmed or not self._process.is_alive():
+                raise RuntimeError("sampler did not confirm the first complete scan")
+            self._started_unix = time.time()
+        except BaseException:
+            self.errors.append("sampler startup failed")
+            self.stop()
+            raise
+        finally:
+            sender.close()
         return self
 
-    def __exit__(self, *_exc):
+    def __exit__(self, exc_type, _exc, _traceback):
+        self._row_failed = exc_type is not None
         self.stop()
 
-    def _take(self):
-        started = time.time()
-        try:
-            totals = scan_cache_bytes(self.root)
-        except OSError as exc:
-            self.errors.append(f"scan failed: {exc}")
-            return
-        finished = time.time()
-        index = len(self.samples)
-        self.samples.append({"index": index, "unix": started,
-                             "scan_duration_s": finished - started, **totals})
-        if totals["errors"]:
-            self.errors.extend(f"sample {index}: {item}"
-                               for item in totals["errors"])
-        if totals["allocated_bytes"] > self.peak_allocated_bytes:
-            self.peak_allocated_bytes = totals["allocated_bytes"]
-            self.peak_sample_index = index
-
     def _collect(self):
-        """Read the child's samples, reindex them, and fold them in."""
+        """Read the child's samples and fold them into the observed peak."""
         import json as _json
 
         try:
@@ -239,7 +238,8 @@ class CachePeakSampler:
                 self.errors.append(f"sample line undecodable: {exc}")
                 continue
             index = len(self.samples)
-            sample["index"] = index
+            if sample.get("index") != index:
+                self.errors.append(f"sample sequence is incomplete at index {index}")
             self.samples.append(sample)
             for item in sample.get("errors", []):
                 self.errors.append(f"sample {index}: {item}")
@@ -250,18 +250,37 @@ class CachePeakSampler:
     def stop(self):
         if self._process is None:
             return
-        Path(str(self._stop_path)).write_text("stop\n")
-        self._process.join(timeout=30)
-        if self._process.is_alive():
-            self._process.terminate()
+        self._finished_unix = time.time()
+        if not self._process.is_alive():
+            self.errors.append("sampler child exited before the row ended")
+        else:
+            try:
+                self._control.send("stop")
+            except OSError as exc:
+                self.errors.append(f"sampler stop request failed: {exc}")
+        if self._process.pid is not None:
             self._process.join(timeout=30)
-            self.errors.append("sampler child did not exit; terminated")
+            if self._process.is_alive():
+                self._process.terminate()
+                self._process.join(timeout=30)
+                self.errors.append("sampler child did not exit; terminated")
+        self._child_exitcode = self._process.exitcode
+        if self._child_exitcode != 0:
+            self.errors.append(f"sampler child exit code: {self._child_exitcode}")
+        self._process.close()
         self._process = None
+        self._control.close()
         self._collect()
-        # A closing scan after the row ends: the last periodic sample can
-        # predate cleanup, which would report a stale final size. The peak
-        # is a monotonic maximum, so one more sample only corrects it.
-        self._take()
+        if self._started_unix is not None and len(self.samples) >= 2:
+            first, last = self.samples[0], self.samples[-1]
+            self._complete = (
+                first.get("phase") == "initial"
+                and first["unix"] + first["scan_duration_s"] <= self._started_unix
+                and last.get("phase") == "final"
+                and last["unix"] >= self._finished_unix
+                and self._child_exitcode == 0)
+        if not self._complete:
+            self.errors.append("sampler did not cover the complete row")
         import shutil
 
         shutil.rmtree(str(self._tmpdir), ignore_errors=True)
@@ -273,6 +292,7 @@ class CachePeakSampler:
         errors = list(self.errors)
         peak = self.peak_allocated_bytes
         peak_index = self.peak_sample_index
+        incomplete_scan = bool(incomplete_scan or self._row_failed or not self._complete)
         gaps: list[dict] = []
         for first, second in zip(samples, samples[1:]):
             gap = second["unix"] - first["unix"]
@@ -284,6 +304,9 @@ class CachePeakSampler:
                 "sample_count": len(samples), "gaps": gaps,
                 "peak_allocated_bytes": peak, "peak_sample_index": peak_index,
                 "final_allocated_bytes": final_allocated,
+                "row_started_unix": self._started_unix,
+                "row_finished_unix": self._finished_unix,
+                "child_exitcode": self._child_exitcode,
                 "errors": errors, "incomplete_scan": bool(incomplete_scan),
                 "valid": not errors and not incomplete_scan and bool(samples)}
 

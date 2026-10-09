@@ -204,7 +204,7 @@ def main(argv=None) -> int:
     print(json.dumps({"receipt": str(args.out), "sha256": digest,
                       "peak_allocated_bytes": measurement["peak_allocated_bytes"],
                       "valid": measurement["valid"]}, sort_keys=True))
-    return 0
+    return 0 if measurement["valid"] else 1
 
 
 def _delta_io(before: dict, after: dict) -> dict:

@@ -8,6 +8,9 @@ import json
 import math
 import sys
 import time
+import subprocess
+import os
+import signal
 from pathlib import Path
 import pytest
 
@@ -66,11 +69,13 @@ def test_initial_inventory_is_captured_before_the_row_runs(tmp_path):
 
 def test_failed_scan_invalidates_the_evidence(tmp_path):
     sampler = peak_mod.CachePeakSampler(tmp_path / "missing", interval_s=0.02)
-    with sampler:
-        time.sleep(0.08)
+    with pytest.raises(RuntimeError, match="first complete scan"):
+        with sampler:
+            pytest.fail("a failed first scan must prevent row execution")
     result = sampler.result()
     assert not result["valid"]
     assert result["errors"]
+    assert result["incomplete_scan"]
 
 
 def test_crash_marks_the_scan_incomplete(tmp_path):
@@ -83,6 +88,195 @@ def test_crash_marks_the_scan_incomplete(tmp_path):
 
     with pytest.raises(RuntimeError, match="row crashed"):
         peak_mod.measure_around(fail, cache, interval_s=0.02)
+
+
+def test_sampler_confirms_first_scan_before_row_start(tmp_path, monkeypatch):
+    scan = peak_mod.scan_cache_bytes
+
+    def delayed_scan(root):
+        time.sleep(0.1)
+        return scan(root)
+
+    monkeypatch.setattr(peak_mod, "scan_cache_bytes", delayed_scan)
+    with peak_mod.CachePeakSampler(tmp_path, interval_s=0.25) as sampler:
+        samples = Path(sampler._out_path).read_text().splitlines()
+        assert samples, "the row started before the first sample"
+        first = json.loads(samples[0])
+        assert first["unix"] + first["scan_duration_s"] <= time.time()
+    assert sampler.result()["valid"]
+
+
+def test_child_failure_before_first_scan_prevents_row_start(tmp_path, monkeypatch):
+    def fail_scan(root):
+        raise RuntimeError("sampler failed before first scan")
+
+    monkeypatch.setattr(peak_mod, "scan_cache_bytes", fail_scan)
+    sampler = peak_mod.CachePeakSampler(tmp_path, interval_s=0.05)
+    entered = False
+    try:
+        with pytest.raises(RuntimeError, match="sampler"):
+            with sampler:
+                entered = True
+    finally:
+        sampler.stop()
+    assert not entered
+    result = sampler.result()
+    assert not result["valid"]
+    assert result["incomplete_scan"]
+
+
+@pytest.mark.parametrize("exit_kind", ["nonzero", "zero", "signal"])
+def test_early_child_exit_cannot_certify_final_only_peak(
+        tmp_path, monkeypatch, exit_kind):
+    scan = peak_mod.scan_cache_bytes
+    calls = 0
+
+    def exit_on_second_scan(root):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            if exit_kind == "signal":
+                os.kill(os.getpid(), signal.SIGKILL)
+            os._exit(7 if exit_kind == "nonzero" else 0)
+        return scan(root)
+
+    monkeypatch.setattr(peak_mod, "scan_cache_bytes", exit_on_second_scan)
+    sampler = peak_mod.CachePeakSampler(tmp_path, interval_s=0.05)
+    with sampler:
+        sampler._process.join(timeout=5)
+        assert not sampler._process.is_alive()
+        transient = tmp_path / "transient.bin"
+        transient.write_bytes(b"\x5a" * 600000)
+        transient.unlink()
+    result = sampler.result()
+    assert not result["valid"], "a closing scan hid the sampler failure"
+    assert result["incomplete_scan"]
+    assert result["errors"]
+
+def test_child_failure_during_closing_scan_invalidates_result(tmp_path, monkeypatch):
+    scan = peak_mod.scan_cache_bytes
+    calls = 0
+
+    def fail_final_scan(root):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("final scan failed")
+        return scan(root)
+
+    monkeypatch.setattr(peak_mod, "scan_cache_bytes", fail_final_scan)
+    with peak_mod.CachePeakSampler(tmp_path, interval_s=10) as sampler:
+        (tmp_path / "cache.bin").write_bytes(b"\x5a" * 100000)
+    result = sampler.result()
+    assert not result["valid"]
+    assert result["incomplete_scan"]
+    assert result["child_exitcode"] != 0
+
+
+def test_stop_after_external_child_kill_has_no_shared_lock_wait(tmp_path):
+    command = [
+        sys.executable, "-c",
+        "import json, sys; "
+        "from prismaquant.container_cache_peak import CachePeakSampler; "
+        "sampler = CachePeakSampler(sys.argv[1], interval_s=10); "
+        "sampler.__enter__(); "
+        "sampler._process.kill(); sampler._process.join(timeout=5); "
+        "sampler.stop(); print(json.dumps(sampler.result()))",
+        str(tmp_path),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True,
+                               check=True, timeout=30)
+    result = json.loads(completed.stdout)
+    assert not result["valid"]
+    assert result["incomplete_scan"]
+    assert result["child_exitcode"] == -signal.SIGKILL
+
+
+@pytest.mark.parametrize("module_name", [
+    "tools.measure_container_cache_row",
+    "tools.measure_container_cache_quantum_row",
+])
+def test_row_cli_rejects_receipt_after_sampler_child_failure(
+        tmp_path, monkeypatch, module_name):
+    import multiprocessing
+
+    runner = importlib.import_module(module_name)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    workspace = tmp_path / "workspace"
+    out = tmp_path / "receipt.json"
+    for name, subdir in (("HF_HOME", "hf"), ("TRITON_CACHE_DIR", "triton"),
+                         ("TORCHINDUCTOR_CACHE_DIR", "inductor"),
+                         ("XDG_CACHE_HOME", "xdg")):
+        monkeypatch.setenv(name, str(cache / subdir))
+    parent_pid = os.getpid()
+    child_failed = multiprocessing.get_context("fork").Event()
+    scan = peak_mod.scan_cache_bytes
+    child_calls = 0
+
+    def fail_periodic_scan(root):
+        nonlocal child_calls
+        if os.getpid() != parent_pid:
+            child_calls += 1
+            if child_calls == 2:
+                child_failed.set()
+                os._exit(7)
+        return scan(root)
+
+    def row(**_kwargs):
+        assert child_failed.wait(timeout=5)
+        path = cache / "transient.bin"
+        path.write_bytes(b"\x5a" * 600000)
+        path.unlink()
+        return {"status": "complete"}
+
+    monkeypatch.setattr(peak_mod, "scan_cache_bytes", fail_periodic_scan)
+    args = ["--cache-root", str(cache), "--workspace", str(workspace),
+            "--out", str(out), "--interval-s", "0.05"]
+    if module_name.endswith("quantum_row"):
+        monkeypatch.setattr(runner, "_preview_reserves", lambda _device: None)
+        monkeypatch.setattr(runner, "_run_complete_row", row)
+        args += ["--device", "cpu"]
+    else:
+        monkeypatch.setattr(runner, "_run_compilation_workload", row)
+    assert runner.main(args) == 1
+    receipt = json.loads(out.read_bytes())
+    assert receipt["workload"]["status"] == "complete"
+    assert not receipt["measurement"]["valid"]
+    assert receipt["measurement"]["incomplete_scan"]
+    assert receipt["measurement"]["child_exitcode"] == 7
+
+
+
+def test_active_sampler_cannot_certify_complete_row(tmp_path):
+    with peak_mod.CachePeakSampler(tmp_path, interval_s=0.05) as sampler:
+        result = sampler.result()
+        assert not result["valid"]
+        assert result["incomplete_scan"]
+    assert sampler.result()["valid"]
+
+
+def test_context_row_failure_invalidates_result(tmp_path):
+    sampler = peak_mod.CachePeakSampler(tmp_path, interval_s=0.05)
+    with pytest.raises(RuntimeError, match="row failed"):
+        with sampler:
+            raise RuntimeError("row failed")
+    result = sampler.result()
+    assert not result["valid"]
+    assert result["incomplete_scan"]
+
+
+def test_fast_row_has_samples_before_and_after_execution(tmp_path):
+    row_times = []
+    with peak_mod.CachePeakSampler(tmp_path, interval_s=0.25) as sampler:
+        row_times.append(time.time())
+        (tmp_path / "cache.bin").write_bytes(b"\x5a" * 100000)
+        row_times.append(time.time())
+    result = sampler.result()
+    assert result["valid"], result["errors"]
+    first, last = result["samples"][0], result["samples"][-1]
+    assert first["unix"] + first["scan_duration_s"] <= row_times[0]
+    assert last["unix"] >= row_times[1]
 
 
 def test_hard_links_count_once(tmp_path):
