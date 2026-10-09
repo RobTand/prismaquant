@@ -153,6 +153,9 @@ print(json.dumps(launch), flush=True)
 if args.preflight or args.qualify_then_score:
     cmd = ["python3", "/workspace/tools/g3job/g3_v1_preflight.py", json.dumps(cmd)] + (["--qualify-then-score"] if args.qualify_then_score else [])
 sys.path.insert(0, PQ)
+# Teacher-04's pinned adapter: its main() calls image_content_sha256 from its own namespace, and the
+# dev-mode stamp below wraps that name. The checkout's tools/ adapter binds _runtime_identity instead
+# and is not loaded. tests/g3job/test_g3_launch_image_seal.py runs both modes on this adapter.
 adapter = runpy.run_path(str(Path(PQ) / "tools" / "tessera_campaign_container.py"))["main"]
 adapter_globals = adapter.__globals__
 from g3_pq_policy.dev_mode import dev_mode_enabled, seal_check
