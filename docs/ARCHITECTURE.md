@@ -9,6 +9,11 @@ No eager waiver exists.
 The research refusal stays in force.
 CPU verification is not a serving qualification.
 
+Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
+applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
+only at a rung its scope covers; a launch without the key keeps the scope
+of its cell. The pin stays at lane schema v11; no pin moves in this change.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
@@ -1562,9 +1567,19 @@ EXL3; #1921 is full-gamut PACT work and does not block A8S. CPU regression:
 synthetic contract/cost/source evidence, mixed tower/merger choices, coverage
 refusals, attribution and the uniform control; it is not a GPU measurement.
 
-Re-stamped 2026-10-01 (PQ #1930): the trusted-base `linked issue` metadata
-check keeps native same-repository closing references and also accepts an
-explicit `Refs #N` or `Part of #N` directive to an OPEN same-repository Issue.
+Re-stamped 2026-10-09 (PQ #2518): the trusted-base `linked issue` metadata
+check keeps native same-repository closing references and explicit
+`Refs #N` or `Part of #N` directives to an OPEN same-repository Issue.
+For pull requests created at or after `2026-10-09T17:00:00Z`, the head branch must use
+`prismaquant-<issue>` or `prismaquant-<issue>-<word>`.
+The suffix must match `[a-z0-9][a-z0-9-]*`.
+The branch issue must match a verified same-repository closing reference or an open parent reference.
+The check can match a later parent or an open parent beside a different closing issue.
+Head branches with `ig/` or `release` prefixes retain branch exemptions.
+Earlier pull requests also retain branch exemptions.
+These exemptions do not bypass the issue-link check.
+PrismaBuild action `e0087aafc8cd` passes all 62 behavioral cases on x86.
+Action `4a11ec1d4a68` passes a direct gate smoke and both syntax checks with a simulated GitHub API.
 The parent is fetched from GitHub using query variables; contributor body text
 is data, not code. Closed/cross-repository/non-issue parents, quoted examples
 and missing links fail. Partial slices do not require new bookkeeping issues.
@@ -3111,11 +3126,56 @@ and refuses a point without a bootstrap, and the sweep replay stamps
 constants in `prefill_frontier.py` are removed. No default, stage, format,
 lane or ship gate changes. Gate: `tests/test_pact_frontier_intervals.py`.
 
-Re-stamped 2026-10-07 (D50 item 3, `campaign/pact-frontier-adapter-20261007`): `prismaquant/pact_frontier_profile.py` reads the PACT cohort and TP rules from the model profile and config.
-The cohort is layers, bands, vocab, prefix ids, scored positions, prefix-row handling and the input contract.
-GLM-5.3-Flash resolves to the exact running-measurement values (`glm_paths_identical`).
-Corrected 2026-10-08 (issue 2427): the cohort carries `local_prefix_rows="excluded"` and `input_contract="prefixed_514"`; the guard rejects a cohort that lacks or changes them.
+Re-stamped 2026-10-09 (issue 2483, part of 2427): the PACT scope lives in the existing model profile contract.
+`ModelStructureSpec.pact` states dense end, band width, role TP splits and hidden streams; `ModelProfile` exposes
+layer, cohort, hidden and TP readers. `Glm5NextProfile` states the exact running cohort and layer count;
+`Qwen3Profile` resolves its declared fields with no GLM fallback. The adapter consumes only that public contract
+and refuses undeclared or inconsistent scope. GLM-5.3-Flash resolves to the exact running-measurement values
+(`glm_paths_identical`). Calibration rows and teacher payloads stay explicit inputs.
 No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_frontier_profile_adapter.py`.
+
+The base owner supplies one explicit-before-declared alias reader for GLM and Qwen3.
+It preserves top-level precedence over `text_config` and keeps empty prefix lists as explicit values.
+The helper gate uses its unchanged baseline; neither profile defines a second prefix reader.
+
+The current CPU command uses `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
+Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
+Its installed PrismaBuild commit is `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
+The `pbtest` dependency guard verifies both Git identities and installed package bytes before pytest.
+The Tessera package supplies `tessera.serving.dense_ownership`; no fallback or test exemption replaces that owner.
+
+Run the affected CPU population with:
+
+```bash
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout /path/to/prismaquant \
+  --python /home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python \
+  --tag x86 --tmpdir /tmp --shards 4 \
+  --workers-per-shard 1 --threads-per-shard 1 --mem-gb 4 \
+  --timeout-s 600 --wait-s 300 \
+  --pytest-args '["-m", "not integration and not slow"]' \
+  tests/test_pact_frontier_profile_adapter.py tests/test_model_structure.py \
+  tests/test_spec_match_profile.py tests/test_model_profile_conformance.py \
+  tests/test_name_projection.py tests/test_profile_detection_and_calibration.py \
+  tests/test_profile_name_remap_validation.py tests/test_qwen3_profile.py \
+  tests/test_glm5_next_attention_fused_groups.py tests/test_duplication_baseline.py
+```
+
+The historical source `72ebedaf33de` used `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` with PrismaBuild `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
+PB actions `8b6da86ec9b9`, `b69df9dffdfb`, `b8d6a1d78a42`, and `5c2fd3921c9c` passed its eight-file population.
+They reported 843 passes, 12 skips, one expected failure, and 60 deselected integration or slow cases.
+The revised ten-file population passes in PB `342fafa5a232`, `026f060b5652`, `b3f92dac80a6`, and `53347b859e27`.
+These actions report 874 passes, 12 skips, one expected failure, and 60 deselected integration or slow cases.
+PB `026f060b5652` passes the unchanged helper gate that failed on duplicate `_prefix_entry` definitions in PB `c6181b0a235c`.
+PB `53347b859e27` records a passed call for the exact GLM fused-owner conformance case.
+The skips cover documentation fields and the deliberate absence of a default structure spec.
+The existing expected failure covers an unresolved field-reader ratchet, not PACT.
+The GLM fused-owner case passes; the earlier missing-dependency failure remains in PB `ac0780c27beb`.
+PB `8ca432821282` exercises the public GLM contract with an explicit KDA layer and the installed pin gate.
+It resolves the real fused owner, bands, cohort, hidden layout, and TP split count.
+PB `a3474080b037` exercises the revised GLM and Qwen3 public contracts and compiles the affected modules.
+It preserves explicit alias precedence, an empty Qwen3 prefix list, and the real GLM KDA owner.
+These CPU results do not qualify model output, serving, or performance.
 
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
