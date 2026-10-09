@@ -588,6 +588,11 @@ def _direct_consumer_activation_contract(qname, *, profile):
     source = qname.removesuffix(".weight")
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
         return None
+    if profile is None:
+        raise ActivationScaleContractError(
+            f"{qname}: a direct-consumer leaf needs the run profile to bind "
+            "its activation contract; profile=None drops the GLM a16/a32 "
+            "contract silently, so it refuses instead.")
     if not _is_glm_direct_consumer_profile(profile):
         return None
     from tessera.serving.dense_ownership import fused_module, role_name
