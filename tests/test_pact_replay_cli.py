@@ -1,4 +1,4 @@
-"""The PACT replay CLI accepts the approved deadline and keeps its bounds."""
+"""The replay CLI keeps its science contract and admits a stall allowance."""
 
 import sys
 from pathlib import Path
@@ -36,7 +36,7 @@ def _fixture():
     return roster, receipt, b"fixture-receipt-bytes"
 
 
-def _args(deadline):
+def _args(allowance):
     return SimpleNamespace(
         band="3:9",
         layer_range="3:9",
@@ -45,11 +45,11 @@ def _args(deadline):
         window_layers=21,
         window_start=3,
         window_stop=24,
-        deadline_seconds=deadline,
+        stall_seconds=allowance,
     )
 
 
-def _public_args(deadline=None):
+def _public_args(allowance=None):
     paths = [
         "--pq-root", "--tessera-src", "--g3-source", "--source-root",
         "--a8-root", "--t8r-root", "--a4-root", "--exl3-root",
@@ -64,44 +64,10 @@ def _public_args(deadline=None):
         "--sample-range", "384:448", "--device", "cpu", "--window-layers", "21",
         "--window-start", "3", "--window-stop", "24", "--weight-source", "A8S",
     ]
-    if deadline is not None:
-        argv.append("--deadline-seconds=" + str(deadline))
+    if allowance is not None:
+        argv.append("--stall-seconds=" + str(allowance))
     return cli_parser().parse_args(argv)
 
-
-def test_default_deadline_stays_1700():
-    args = _public_args()
-    roster, receipt, raw = _fixture()
-    run = resolve_cli_run(args, receipt, raw, roster)
-    assert args.deadline_seconds == 1700
-    assert run["plan"] == [
-        {"window_start": 3, "window_stop": 24},
-        {"window_start": 24, "window_stop": 45},
-    ]
-
-
-def test_approved_deadline_passes():
-    roster, receipt, raw = _fixture()
-    run = resolve_cli_run(_args(3500), receipt, raw, roster)
-    assert (run["band_start"], run["band_stop"]) == (3, 9)
-    assert (run["replay_start"], run["replay_stop"]) == (3, 45)
-
-
-@pytest.mark.parametrize("deadline", [1, 100, 1699, 1700, 1701, 3499, 3500])
-def test_valid_legacy_and_approved_deadlines_pass(deadline):
-    roster, receipt, raw = _fixture()
-    run = resolve_cli_run(_args(deadline), receipt, raw, roster)
-    assert run["window_start"] == 3
-    assert run["window_stop"] == 24
-
-
-@pytest.mark.parametrize(
-    "deadline", [0, -1, -3500, 3501, 3600, 7200, float("nan"), float("inf")]
-)
-def test_invalid_deadlines_refuse(deadline):
-    roster, receipt, raw = _fixture()
-    with pytest.raises(ValueError, match="bounded deadline"):
-        resolve_cli_run(_args(deadline), receipt, raw, roster)
 
 
 def test_science_inputs_match_canonical_resolution():
@@ -131,9 +97,9 @@ def test_science_refusals_stay():
         resolve_cli_run(bad_window, receipt, raw, roster)
 
 
-@pytest.mark.parametrize("deadline", [1, 100, 1700, 3500])
-def test_public_cli_resolves_valid_deadlines(deadline):
-    args = _public_args(deadline)
+@pytest.mark.parametrize("allowance", [0.01, 1, 1800, 3500, 3501, 7200])
+def test_public_cli_resolves_positive_stall_allowances(allowance):
+    args = _public_args(allowance)
     roster, receipt, raw = _fixture()
     run = resolve_cli_run(args, receipt, raw, roster)
     assert (run["band_start"], run["band_stop"], run["replay_stop"]) == (3, 9, 45)
@@ -141,17 +107,15 @@ def test_public_cli_resolves_valid_deadlines(deadline):
     assert run["manifest_streams"][0]["stream_id"] == "null"
 
 
-@pytest.mark.parametrize("deadline", ["nan", "inf", "-inf"])
-def test_public_cli_refuses_nonfinite_deadlines(deadline, capsys):
-    with pytest.raises(SystemExit) as refusal:
-        _public_args(deadline)
-    assert refusal.value.code == 2
-    assert "invalid int value" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("deadline", [0, -1, 3501])
-def test_public_cli_refuses_invalid_bounds(deadline):
-    args = _public_args(deadline)
+@pytest.mark.parametrize("allowance", [0, -1, "nan", "inf", "-inf"])
+def test_public_cli_refuses_invalid_stall_allowances(allowance):
+    args = _public_args(allowance)
     roster, receipt, raw = _fixture()
-    with pytest.raises(ValueError, match="bounded deadline"):
+    with pytest.raises(ValueError, match="positive finite stall allowance"):
         resolve_cli_run(args, receipt, raw, roster)
+
+
+def test_cli_uses_the_approved_provisional_stall_policy():
+    args = _public_args()
+    assert args.stall_seconds == 1800
+

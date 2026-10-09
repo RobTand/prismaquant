@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 REPLAY_ROOT = Path(__file__).resolve().parents[1] / "experiments" / "pact_replay"
 MANIFEST = REPLAY_ROOT / "DEPENDENCY_MANIFEST.json"
@@ -34,8 +35,12 @@ def test_provenance_references_manifest_digest():
     assert provenance["dependency_manifest_sha256"] == digest
 
 
-def test_imported_source_bytes_match_provenance():
+def test_imported_baseline_bytes_match_provenance():
     provenance = json.loads(PROVENANCE.read_bytes())
     root = REPLAY_ROOT.parents[1]
+    baseline = "fc518e4897f88982b6ff49bf9293eea5d76ecd46"
     for path, expected in provenance["imported_files"].items():
-        assert hashlib.sha256((root / path).read_bytes()).hexdigest() == expected, path
+        raw = subprocess.check_output(["git", "show", baseline + ":" + path], cwd=root)
+        assert hashlib.sha256(raw).hexdigest() == expected, path
+        if path != provenance["entry"]:
+            assert hashlib.sha256((root / path).read_bytes()).hexdigest() == expected, path

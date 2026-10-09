@@ -137,5 +137,14 @@
     "projection": "All 95 projected observation rows match the actual raw CLI capture. The module set is unchanged by the path move.",
     "supersedes": "04d03f51d33360ffe6749dbf72343a7ffbc5b40a83aef71091abd99cccb94916 keeps the pre-move equivalence proof."
   },
+  "post_import_changes": {
+    "issue": "prismaquant#2520",
+    "baseline_head": "fc518e4897f88982b6ff49bf9293eea5d76ecd46",
+    "files": ["experiments/pact_replay/multi_stream_replay.py", "experiments/pact_replay/replay_progress.py"],
+    "scope": "Replace the deadline with a stall allowance and append progress history. The import hashes and D38 capture describe the historical baseline.",
+    "science_evidence_action": "f6d4d182bfd7228eb257beddac7e3d94332072d334790a209f3a3bda151b4d58",
+    "science_evidence": "/mnt/shared/tessera-measurements/pq2520-stall-a3/report.json",
+    "science_scope": "The CPU fixture preserves science JSON, all three score journals, and all three checkpoint state payloads byte for byte."
+  },
   "schema": "prismaquant.pact_replay_import_provenance.v1"
 }

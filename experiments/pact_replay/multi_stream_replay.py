@@ -19,6 +19,7 @@ import json
 import os
 from contextlib import ExitStack
 from pathlib import Path
+from replay_progress import DEFAULT_STALL_SECONDS, ReplayProgress, require_stall_seconds, supervise
 
 
 def _isolate(value):
@@ -358,7 +359,6 @@ def production_on_sample(runner, teachers, prepared, check, sid, sample, batch, 
 
 
 TEACHER_STOP = 45
-APPROVED_DEADLINE_SECONDS = 3500
 
 
 def cli_parser():
@@ -373,7 +373,8 @@ def cli_parser():
         help="Teacher validation proof pact.prefixed_teacher_validation.v1 with one SHA-256 per array")
     p.add_argument("--teacher-content-sha256", required=True,
         help="Declared SHA-256 of the teacher validation proof bytes")
-    p.add_argument("--deadline-seconds", type=int, default=1700)
+    p.add_argument("--stall-seconds", type=float, default=DEFAULT_STALL_SECONDS,
+        help="Maximum silence between completed steps, in seconds. No total duration limit.")
     p.add_argument("--window-layers", type=int, default=None,
         help="Committed window stride in layers. Defaults to one window for the whole replay.")
     p.add_argument("--window-start", type=int, required=True)
@@ -429,8 +430,7 @@ def resolve_cli_run(args, receipt_doc, receipt_bytes, roster_doc):
     plan = plan_replay_windows(replay_start, replay_stop, window_layers=window_layers)
     if {"window_start": args.window_start, "window_stop": args.window_stop} not in plan:
         raise ValueError("The CLI window must sit on the planned window grid")
-    if not 0 < args.deadline_seconds <= APPROVED_DEADLINE_SECONDS:
-        raise ValueError("The replay needs a bounded deadline")
+    require_stall_seconds(args.stall_seconds)
     generations = {"receipt_sha256": hashlib.sha256(bytes(receipt_bytes)).hexdigest(),
                    "source_window": [receipt_doc["layer_start"], receipt_doc["layer_stop"]],
                    "start_generation": receipt_doc["start_reference_owner"]["session"],
@@ -442,9 +442,16 @@ def resolve_cli_run(args, receipt_doc, receipt_bytes, roster_doc):
 
 
 def main():
-    from stage1a_energy import setup, actual_cpu, available, guard, progress
-    from band_replay import load_teacher, publish_stream_document
     args = cli_parser().parse_args()
+    require_stall_seconds(args.stall_seconds)
+    if args.dry_run_cpu or args.prepare_readset:
+        return run_replay(args)
+    return supervise(lambda notify: run_replay(args, notify), args.stall_seconds)
+
+
+def run_replay(args, notify=lambda record: None):
+    from stage1a_energy import setup, actual_cpu, available, guard
+    from band_replay import load_teacher, publish_stream_document
     import time
     from strict_leases import strict_input_leases
     with strict_input_leases(lease_scope(args)) as leases:
@@ -491,11 +498,13 @@ def main():
         if type(args.rendered_resident_budget_gib) is not int or args.rendered_resident_budget_gib <= 0:
             raise ValueError("The GPU replay path needs its admitted rendered-resident byte budget")
         began = time.monotonic()
+        progress = ReplayProgress(
+            args.output_dir / ("progress-%02d-%02d.jsonl" % (window_start, window_stop)),
+            args.stall_seconds, notify=notify)
 
         def check(label):
             guard(label)
-            if time.monotonic() - began >= args.deadline_seconds:
-                raise TimeoutError("The band quantum reached its declared deadline")
+            progress.check(label)
 
         teacher = teacher_bindings(teacher_receipt, teacher_content)
         ctx = {"check": check, "runner": None, "renders": renders,

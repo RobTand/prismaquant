@@ -40,6 +40,14 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The diagnostic PACT replay stops on silence instead of total duration (#2520).
+  Replace `--deadline-seconds` with `--stall-seconds`; the CEO-approved provisional default is 1800 seconds.
+  The parent supervisor stops a blocked native call and names the last layer, sequence, and stream.
+  Each completed step appends timestamped history and writes a PrismaBuild progress-v1 record through the shared writer.
+  The D30 memory guard and all scientific contracts remain unchanged.
+  PB `f6d4d182bfd7` proves byte-identical science JSON, score journals, and checkpoint state payloads against the accepted import.
+  The CPU fixture completes through 5400 fake-clock seconds.
+  Historical logs do not establish the longest gap; the first band history supplies that measurement for a follow-up default change.
 - Import the canonical diagnostic replay closure and accept the approved 3500-second deadline (#2482).
   Preserve the 1700-second default, valid legacy deadlines, and all scientific refusals.
   Keep the frozen closure in `experiments/pact_replay`, outside the production package.

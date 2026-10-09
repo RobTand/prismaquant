@@ -1,26 +1,54 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2482): `experiments/pact_replay` contains the canonical diagnostic replay closure.
-Its frozen source is `073646c7293685869b3ad18b261c49b49c4c481a`.
-The public CLI accepts positive deadlines through 3500 seconds. Its default remains 1700 seconds.
-Only the named deadline constant and guard differ from the frozen executable source.
-The cohort, roster, windows, teacher contracts, scientific refusals, and production pipeline remain unchanged.
+Re-stamped 2026-10-09 (PQ #2520): the diagnostic PACT replay stops on a progress stall, not elapsed duration.
+`multi_stream_replay.py` exposes `--stall-seconds`. Its provisional default is 1800 seconds.
+The CLI no longer accepts `--deadline-seconds`.
+The parent starts one numerical process before Torch imports and waits on its progress pipe.
+A completed step resets the monotonic silence clock. A memory check or a repeated record does not reset it.
+The parent stops the isolated process group after a proven stall, even when a native operation blocks.
+The error names the last completed layer, sequence, and stream. The D30 memory guard remains active.
 
-The closure uses standalone imports and explicit campaign pins. It is not a production package.
-The move from `prismaquant/pact_replay` preserves all 31 imported source files byte for byte.
+Each completed sequence and layer-stream step writes a cumulative progress-v1 record through `prismabuild_progress.report`.
+The phase names retain the declared layer and stream. The unit names the layer, sequence, and stream.
+The reporter appends timestamped records to `output-dir/progress-SS-EE.jsonl` and prints each record.
+A start record separates each launch. Monotonic timestamps measure gaps without wall-clock jumps.
+The history includes every completed step, not only PrismaBuild's last observed record.
+
+The CEO approves 1800 seconds as a provisional allowance because the retained attempts last about 1811 seconds or less.
+The retained logs contain no complete progress history, so they cannot establish the longest measured gap.
+The first band window must measure that gap from its new history.
+A follow-up issue must set the default from that measurement.
+The cited attempts are:
+
+- [06:30Z attempt log, `19da023889f6`](/mnt/shared/prismabuild-fleet/pb-queue/attempts/19da023889f64a8dd044f2c15fec8c865a04de5707b77c7ac2214ca46ffd0fc0/b1535add4e44da02164fc2fa42b69a1011af0e58d6cd05be99b5ea38d52650bc/00000001.stdout.46981722a3750c5ad85712d9b417d38a7cea51c65fcd417039bc43902ce6aedc.log).
+- [14:18Z attempt log, `424e6c058153`](/mnt/shared/prismabuild-fleet/pb-queue/attempts/424e6c058153cd0acaab58262fb75017fc4c42b8908aadabe2d08bafdd9d4438/8032863bfc73df1f68c320e02fdb2a5d228b5ee29ac47266681d6addd79a570c/00000001.stdout.1cf9eb2c528c20965069e88516074bad8489448bf76a778e113262d1d22426a8.log).
+
+PB `75864331d211` reproduces the old deadline failure with steady progress.
+PB `2e516560f3e0` verifies the 4800-second fake-clock command, stall errors, native-call termination, and acceptance by PrismaBuild's real progress observer.
+It also verifies progress after a parent delay without a false stall.
+PB `9b074af4232c` executes the final replay API on a short CPU fixture through 5400 fake-clock seconds.
+Its baseline is the accepted import at `fc518e4897f88982b6ff49bf9293eea5d76ecd46`.
+Both runs use band 42:45, three streams, and samples 384 and 385.
+The science JSON, three score journals, and three checkpoint state payloads match byte for byte.
+The final evidence is `/mnt/shared/tessera-measurements/pq2520-stall-a3-final/report.json`.
+This compact-vocabulary CPU fixture does not qualify a GPU, the full model, or performance.
+The action snapshot retains the temporary proof script. Its sealed command is:
+
+```text
+/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python tools/_pq2520_smoke.py --g3-source /mnt/shared/tessera-measurements/g3-v2-rebaseline-20261005/source --output-dir /mnt/shared/tessera-measurements/pq2520-stall-a3-final
+```
+
+
+The cohort, roster, windows, teacher contracts, scientific refusals, and production pipeline remain unchanged.
+The diagnostic closure stays in `experiments/pact_replay`, outside the production package.
+The frozen source is `073646c7293685869b3ad18b261c49b49c4c481a`.
+`IMPORT_PROVENANCE.json` retains the historical import hashes and records the later supervision change separately.
+`D38_IMPORTS.json` retains the historical public CLI capture from PB `a46b541d3e84`; it is not a capture of this change.
+All identity records remain advisory. No runtime identity gate reads them.
+The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
 The production boundary gates and their allowlists remain unchanged.
-The observer uses the shared digest owner without importing a PrismaQuant package into the CLI process.
 The parent issue owns the separate model-profile migration.
 
-The current PB D38 `a46b541d3e84` records actual CLI imports after the move.
-Its capture supplies the current `D38_IMPORTS.json` projection.
-PB `1de88f98ad06` verifies that projection, 94 external source files, and the complete canonical correction delta.
-The retained `daa683c956c2` and `b3498341ca27` runs keep the pre-move CLI proof.
-Both CPU branches pass with seven streams and no GPU replay.
-PB `1de88f98ad06` also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
-`IMPORT_PROVENANCE.json` records exact source identities, the path delta, and CEO replacement authority.
-All identity records remain advisory. No new runtime identity gate reads them.
-The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
