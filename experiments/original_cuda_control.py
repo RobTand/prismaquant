@@ -92,7 +92,7 @@ def artifact_identity(path):
 
 
 def artifact_cas(root):
-    """Use the actual launch-owned SDK4 generation and explicitly sealed CAS."""
+    """Use the actual launch-owned SDK5 generation and explicitly sealed CAS."""
     if root is None:
         raise RuntimeError('actual control publication requires an explicit sealed CAS root')
     from tools.tessera_campaign_container import reader_context_environment
@@ -102,8 +102,8 @@ def artifact_cas(root):
     source=Path(context['PRISMABUILD_READER_HELPER_ROOT'])/'src'
     sys.path.insert(0,str(source))
     from prismabuild import client, core
-    if client.SDK_VERSION!=4:
-        raise RuntimeError('actual artifact publication requires the qualified SDK4 helper')
+    if client.SDK_VERSION!=5:
+        raise RuntimeError('actual artifact publication requires the qualified SDK5 helper')
     if any(not getattr(module,'__file__',None)
            or not Path(module.__file__).resolve().is_relative_to(source)
            for name,module in sys.modules.items()

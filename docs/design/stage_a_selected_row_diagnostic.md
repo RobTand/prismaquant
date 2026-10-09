@@ -147,6 +147,6 @@ mint another generation or adopt old teacher/cotangent/checkpoint data. The
 selected-row marker, non-bandable receipt and one full-N Fisher application
 remain unchanged. Metadata preparation and CPU contract tests do not qualify
 original source transport, numerical measurements, pricing, wire/native
-execution or serving; actual full64, shared SDK4, matched source/root admission,
+execution or serving; actual full64, shared SDK5, matched source/root admission,
 finite envelope and exact GPU GO are still separate prerequisites.
 
