@@ -341,14 +341,15 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry_on_cuda(
 # -- selected fresh captures (--units) -------------------------------------------
 
 def _selected_units_file(tmp_path, source, census):
-    """A v1 --units file with one whole dense ``g:`` group and one whole
-    routed ``s:`` group, from different layers so an interior quantum range
-    holds no selected unit at all."""
+    """A v1 --units file with one whole dense group and one whole routed
+    ``s:`` group, from different layers so an interior quantum range holds no
+    selected unit at all. The dense group is a fused ``g:`` group or a
+    single-unit ``u:`` group, whichever the profile's fused siblings give."""
     groups = census["anchor_groups"]
 
     def _layer(key):
         return {_LAYER.search(name).group(1) for name in groups[key]}
-    dense = [key for key in sorted(groups) if key.startswith("g:")
+    dense = [key for key in sorted(groups) if not key.startswith("s:")
              and _layer(key) == {"0"}]
     routed = [key for key in sorted(groups) if key.startswith("s:")
               and _layer(key) == {"2"}]
