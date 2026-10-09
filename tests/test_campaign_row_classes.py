@@ -37,6 +37,8 @@ ROCM_PYTHON = "/home/rob/ml-venvs/torch-rocm7/bin/python"
 GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
 SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
 SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
+SDK4_TRAIN_PYTHON = "/home/rob/venvs/pq-task-suite-layer-20261008/bin/python"
+SDK5_PYTHON = "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python"
 
 
 def fleet() -> dict:
@@ -430,11 +432,24 @@ def test_active_sdk4_interpreters_validate_explicit_classes(tag):
         "containerized": False, "wire_shared": True, "weights_only": False}]
 
 
+@pytest.mark.parametrize("python", [SDK4_TRAIN_PYTHON, SDK5_PYTHON])
+def test_attested_train_layers_validate_in_certified_mode(python, monkeypatch):
+    """Placement admits both attested train layers without a host lookup."""
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    records = dispatch.validate_row_classes(base_spec(
+        python=python, tags=["dl380g10"], classes={"default": {}}))
+    assert records == [{
+        "class": "default", "isa": "x86_64", "tags": ["dl380g10"],
+        "python": python, "cpus": 4, "containerized": False,
+        "wire_shared": True, "weights_only": False,
+    }]
+
+
 @pytest.mark.parametrize("dev_env", [None, "0"])
 @pytest.mark.parametrize("history, message", [
     (None, "retired_interpreters mapping"),
     ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
-    ({SDK4_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
+    ({SDK4_TRAIN_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
 ])
 def test_invalid_retired_inventory_is_refused(
         tmp_path, history, message, dev_env, monkeypatch):

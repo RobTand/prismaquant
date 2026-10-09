@@ -294,3 +294,34 @@ def test_head_wire_decoder_cache_and_screen_agree(tmp_path, profile, format_name
     assert anchor.activation_contract == "a32" and anchor.activation_quantized is False
     assert anchor.wire_bytes == len(blob)
     assert torch.equal(source, original)
+
+
+def test_direct_consumer_contract_refuses_a_missing_profile():
+    for leaf in ("kv_b_proj", "indexer.weights_proj"):
+        name = P + "3.self_attn." + leaf
+        with pytest.raises(tc.ActivationScaleContractError, match="profile"):
+            tc._direct_consumer_activation_contract(name, profile=None)
+
+
+def test_unrelated_names_keep_a_missing_profile_meaning_no_contract():
+    assert tc._direct_consumer_activation_contract(P + "3.self_attn.q_proj", profile=None) is None
+    assert tc._direct_consumer_activation_contract(P + "3.self_attn.indexer.wk", profile=None) is None
+    assert tc._direct_consumer_activation_contract("lm_head", profile=None) is None
+
+
+def test_measure_anchor_direct_leaf_without_profile_refuses_before_encode(tmp_path):
+    import torch
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    name = P + "3.self_attn.indexer.weights_proj"
+    weight = torch.randn(32, 32, dtype=torch.bfloat16)
+    inputs = torch.randn(2, 32, dtype=torch.bfloat16)
+    cache_dir, wire_dir = tmp_path / "cache", tmp_path / "wire"
+    cache_dir.mkdir()
+    wire_dir.mkdir()
+    cache = ProductionWeightCache(weights={}, levers={}, cache_dir=str(cache_dir), metadata={})
+    with pytest.raises(tc.ActivationScaleContractError, match="profile"):
+        tc._measure_anchor(qname=name, weight=weight, activations=inputs,
+            format_name="TESSERA_E4M3_K1_R1024", cache=cache, wire_dir=wire_dir,
+            hessian_required=False, structure="dense")
+    assert list(wire_dir.glob("*.tessera")) == []
+    assert cache.weights == {}
