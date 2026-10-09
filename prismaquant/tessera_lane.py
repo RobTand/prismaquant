@@ -110,7 +110,12 @@ def parse_format_name(fmt: object):
 # -- candidate admission (allocator_candidates) ------------------------------
 
 def rung_admission(name: str, *, allowability=None, require_allowability=False, **scope):
-    """The pinned runtime and measured geometry share one admission seam."""
+    """The pinned runtime and measured geometry share one admission seam.
+
+    ``scope`` carries ``serving_context`` and ``allowability_scope`` through
+    to :func:`tessera_menu.route_admission` untouched: this seam names no
+    D41 axis of its own.
+    """
     from .tessera_menu import route_admission as admission
     from .tessera_formats import parse_tessera_format_name
 
@@ -243,6 +248,14 @@ def restamp_topology(payload, profile, *, input_sha256=None):
 # module; the code is moved here unchanged, so a run prints, refuses and
 # stamps exactly what it did.
 
+def allocation_allowability_arguments(parser) -> None:
+    """Declare the shared publication and observed-build inputs."""
+    parser.add_argument("--tessera-rung-allowability-root", default=None,
+                        help="D41 publication directory or an explicit immutable index file")
+    parser.add_argument("--tessera-rung-kernel-builds", default=None,
+                        help="Independent observed format-to-kernel_build JSON; required with D41 root")
+
+
 def allocation_arguments(parser) -> None:
     """The lane's allocator flags: the serving scope and the selection request."""
     from .tessera_serving_scope import add_serving_scope_arguments
@@ -251,10 +264,7 @@ def allocation_arguments(parser) -> None:
     parser.add_argument("--tessera-materialization-plan", default=None,
                         help="Write a non-exportable selected-wire request here instead of layer-config; "
                              "finalize through prismaquant.tessera_materialization after selected wires exist")
-    parser.add_argument("--tessera-rung-allowability-root", default=None,
-                        help="D41 publication root containing the current index.json")
-    parser.add_argument("--tessera-rung-kernel-builds", default=None,
-                        help="Independent observed format-to-kernel_build JSON; required with D41 root")
+    allocation_allowability_arguments(parser)
 
 
 def allocation_serving_target(args, *, target_platform):
@@ -271,11 +281,18 @@ def allocation_contexts(serving_target, stats, profile):
     return context_by_unit_from_stats(serving_target, stats, profile)
 
 
-def allocation_unit_context(serving_target, unit, profile):
-    """One unit's serving context, its structure read from the profile grammar."""
-    from .tessera_serving_scope import unit_structure_from_profile
+def allocation_unit_structure(unit, profile, *, stats=None):
+    """Read profile grammar or checked producer topology through the scope owner."""
+    from .tessera_serving_scope import unit_structure_from_profile, unit_structure_from_stats
 
-    return serving_target.context(unit_structure_from_profile(unit, profile))
+    if stats is None:
+        return unit_structure_from_profile(unit, profile)
+    return unit_structure_from_stats(unit, stats, profile)
+
+
+def allocation_unit_context(serving_target, unit, profile):
+    """One unit's serving context, with structure from the declared profile."""
+    return serving_target.context(allocation_unit_structure(unit, profile))
 
 
 def allocation_scope_meta(serving_target, context_by_unit) -> dict:
@@ -761,6 +778,27 @@ def format_subfamily(canonical: str) -> str | None:
     except TesseraFormatError:
         return None
     return None if parsed is None else parsed[0].name
+
+
+# -- model ownership through the declared lane seam -------------------------
+
+def glm_fused_sibling_group(linear_qname: str, *, config=None):
+    """Resolve the GLM fused owner through the runtime's authoritative rule."""
+    from tessera.serving.dense_ownership import fused_module
+
+    source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
+    tensor = source if source.endswith(".weight") else source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration", config=config)
+    return None if fused is None else fused[0]
+
+
+def glm_fused_sibling_leaf_mapping():
+    """Read GLM fused members from the same runtime owner."""
+    from tessera.serving.dense_ownership import GLM_FUSED, fused_module
+
+    owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
+    return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
+            **{target: members for _pattern, target, members in GLM_FUSED}}
 
 
 # -- the pinned serving runtime (serving_profiles) ---------------------------

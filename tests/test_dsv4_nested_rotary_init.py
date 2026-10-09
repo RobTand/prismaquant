@@ -12,6 +12,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+# Own the DSv4 namespace in a shared session: an earlier test that imports
+# transformers' native deepseek_v4 makes register_deepseek_v4() refuse (#2279).
+# The refusal itself stays visible in its own controls.
+pytestmark = pytest.mark.own_process
+
 
 def _tiny_cfg():
     from prismaquant.vendored import register_deepseek_v4

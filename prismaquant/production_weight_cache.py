@@ -2154,6 +2154,7 @@ def _store_rendered_weight_entry(
     tensor: torch.Tensor,
     weight_dtype: torch.dtype,
     durable: bool = False,
+    preserve_fp32: bool = False,
 ) -> None:
     from prismaquant import format_registry as fr
 
@@ -2161,6 +2162,7 @@ def _store_rendered_weight_entry(
     stored = _canonical_rendered_weight_tensor(
         tensor,
         weight_dtype=weight_dtype,
+        preserve_fp32=preserve_fp32,
     )
     if cache_dir_path is not None:
         fname = _cache_weight_filename(qname, fmt)
@@ -2194,6 +2196,7 @@ def _canonical_rendered_weight_tensor(
     tensor: torch.Tensor,
     *,
     weight_dtype: torch.dtype,
+    preserve_fp32: bool = False,
 ) -> torch.Tensor:
     """Return the exact tensor representation a cache shard would contain.
 
@@ -2203,7 +2206,7 @@ def _canonical_rendered_weight_tensor(
     validation/export.
     """
     target_dtype = (
-        weight_dtype if weight_dtype != torch.float32 else torch.bfloat16
+        weight_dtype if preserve_fp32 or weight_dtype != torch.float32 else torch.bfloat16
     )
     return tensor.detach().to(
         dtype=target_dtype,

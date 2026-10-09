@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import os
+
 from pathlib import Path
 
 import pytest
@@ -19,12 +19,10 @@ BUILD = json.loads((FIXTURE / FAMILY / "fixture-t8" / "v0001.json").read_text())
 def publication(tmp_path, monkeypatch):
     root = tmp_path / "publication"
     shutil.copytree(FIXTURE, root)
-    if os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE"):
-        from prismaquant import rung_allowability
-        from _rung_allowability_producer import ExternalProducer
-        assert os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256"), "pin canonical producer bytes"
-        producer = ExternalProducer()
-        monkeypatch.setattr(rung_allowability, "_producer_api", lambda: producer)
+    from prismaquant import rung_allowability
+    from _rung_allowability_producer import ExternalProducer
+    producer = ExternalProducer()
+    monkeypatch.setattr(rung_allowability, "_producer_api", lambda: producer)
     return root
 
 
@@ -144,7 +142,7 @@ def test_table_cannot_bypass_existing_run_table_rule(publication):
                                      expected_kernel_build=BUILD).allows(1024)
 
 
-def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
+def test_metadata_only_reader_keeps_the_serving_pin(publication):
     from prismaquant import tessera_runtime_contract as runtime
     from prismaquant import tessera_serving_runtime_pin as pin
     from prismaquant import rung_allowability
@@ -152,7 +150,6 @@ def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
     table = _load(publication)
     assert table.allows(1024)
     assert runtime.contract_path().read_bytes() == before
-    assert json.loads(before)["contract_version"] == 56
     assert pin.load_tessera_serving_runtime_pin().commit == runtime.TESSERA_DEV_PIN_COMMIT
     producer = rung_allowability._producer_api()
     if hasattr(producer, "evidence"):
@@ -186,16 +183,20 @@ def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
 
 
 def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
-    from prismaquant import allocator, format_registry as registry
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+    from test_glm_mtp_selection import _row, _probe, ROUTED, PARAMS, CONSTANTS
     table = _load(publication)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
-    monkeypatch.setattr(registry, "format_is_producer_eligible", lambda *a, **k: True)
-    eligible = allocator._mtp_rung_attestation(
-        None, None, rung_allowability={FAMILY: table}, target_profile="research")
-    assert eligible("mtp.unit", f"{FAMILY}_R1024")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1025")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1026")
-    assert not eligible("mtp.unit", f"{FAMILY}_R1027")
+    unit = ROUTED[0]
+    names = [f"{FAMILY}_R{rate}" for rate in (1024, 1025, 1026, 1027)]
+    payload = {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
+        "groups": {"g": [unit]}, "params": {unit: PARAMS}, "source_dtype": {unit: "bfloat16"},
+        "costs": {unit: {name: _row(unit, name, [1.0] * 4, _probe()) for name in names}},
+        "wire_bytes": {unit: dict.fromkeys(names, 500)}}
+    selected = select_mtp_rungs(payload, byte_budget=501, constants=CONSTANTS, formats=names,
+        rung_allowability={FAMILY: table}, eligible=lambda _unit, _rung: True)
+    assert selected["assignment"] == {unit: names[0]}
+    assert selected["unattested_rungs"] == dict.fromkeys(names[1:], 1)
 
 
 def test_build_diagnostics_do_not_become_new_identity_seals(publication):

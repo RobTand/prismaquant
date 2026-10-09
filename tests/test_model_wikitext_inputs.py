@@ -277,3 +277,15 @@ def test_overlap_automaton_matches_brute_force_without_crossing_windows():
                         count += 1
                     expected = max(expected, count)
         assert cls(rows).match(query)['longest_match']['length'] == expected
+
+
+@pytest.mark.parametrize("split,fingerprint", [("train", "f54db43fc558c83c"),
+                                              ("test", "a546b4f663437d1a")])
+def test_model_v2_cache_fingerprint_drift_keeps_exact_corpus(split, fingerprint, monkeypatch, capsys):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    observed = {**inputs._expected_dataset(split=split), "fingerprint": fingerprint}
+    assert inputs._model_dataset(observed, split=split) == observed
+    assert "[DEV-MODE]" in capsys.readouterr().out
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(inputs.DSv4WikiTextInputsError, match="dataset fingerprint"):
+        inputs._model_dataset(observed, split=split)

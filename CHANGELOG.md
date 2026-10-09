@@ -2,7 +2,156 @@
 
 ## Unreleased
 
+### Added
+- The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
+  The central processor path writes a valid structure draft without tensor payload reads or profile registration.
+  Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
+  The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
+  Its central processor preflight checks the real runtime arguments without a graphics processor.
+  Native serving qualification and all production defaults stay unchanged.
+
+### Fixed
+- The unknown-deferral test starts its release timer after initial staging and tensor access (#2304).
+  The real mover retains the fixture's normal staging budget; only release uses the 30-second budget.
+  A synthetic 31-second staging delay verifies immediate refusal, zero release retries, zero supported deferrals, and the exact unclassified debt.
+  Production deadlines and fail-closed release behavior remain unchanged.
+  PB `cc59619e6a893b3778cfd0e8863565a6b6dd98e594631114e5210ee8e444dc0f` passes 11 affected tests, the direct delay smoke, and the compile check on x86.
+  The same run retains deterministic staging-timeout and release-budget coverage.
+- A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
+  Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
+  With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
+  The completeness check reported fused units as claimed by no mechanism.
+  Both now raise the lookup error. A working lookup gives the same mapping as before.
+  No format, default, gate threshold or artifact byte changes when the lookup works.
+- The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
+  Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
+  The retained result carries no speed, energy or residency qualification.
+  Certified mode keeps the refusal and the failed status.
+  A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
+  Missing telemetry retains each actual instrument name and its exact error detail.
+  Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
+
 ### Changed
+- The paired expert-dominance menu rule applies only to complete routed layers (#2288).
+  A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
+  The complete-assignment exact filter and the final emission guard still refuse dominant trades.
+  The price arithmetic, strict-half boundary, cancellation, and all-zero behavior stay unchanged.
+- The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
+  Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
+  The commit, read digest, read-byte comparison, contract path, and all other fields remain in the oracle.
+  The retained D13 and v60 outputs produce the same digest in the final CPU check.
+  The applicability and Pareto digests remain unchanged.
+- The Tessera pin moves to `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60 (Tessera #1033, PQ #2426).
+  The serving and development constants, legal-domain provenance, and identity snapshot move in one commit.
+  The generated admission answer remains unchanged.
+  The new producer supplies the attention projection APIs and the canonical rung-allowability API.
+  The contract retains the v56 cells and native-extension rows.
+
+  The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
+  Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
+  No new seal, serving result, or performance result is claimed.
+
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
+
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
+- Tessera export setup derives architecture wiring, census inputs and partitions
+  from profile capabilities and source headers (#2409, D50 item six).
+  The plan writer can emit the metadata plan. The model dispatcher exposes it
+  through a non-submit mode and replaces the fixed-count shard driver.
+  The existing exporter, construction census and native runtime checks remain
+  authoritative. This CPU work grants no runtime or serving qualification.
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Scope cache keys reuse the exact strict and lax JSON profiles from the digest owner.
+  Body and MTP topology use the existing allocation lane protocol and shared scope owner.
+  Synthetic card fixtures declare a compatible Qwen3 MoE profile. Missing-profile refusals remain strict.
+  Constructor repairs remain unchanged. No identity seal is added.
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
+- Mark the task-suite tests for the required layered gate (#2412, #2413).
+  Ordinary runs report explicit skips with the recorded receipt.
+  The task-suite gate must run the marked tests and must report zero skips.
+  Select it with `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+- The forward-recovery proof reader and campaign resolver call the existing
+  digest owners (#2398, references #1301). The capsule tail hash calls
+  `digests.bytes_sha256hex`; the source-record check calls the same bytes
+  owner and the historical trailing-newline roster check calls
+  `digests.text_sha256hex`. File reads, stat fences, limits, JSON parsing,
+  campaign fields, geometry, identities, containment and refusal behavior
+  stay unchanged. The streaming one-MiB reader keeps its own code.
+- The forward-recovery chain tools drop the source-text scan test
+  (#2398, references #1929). The test read the builder source and its
+  string literals instead of consumer behavior. Rendered-launcher
+  identity, invalid-field checks, read bounds and pre-load mismatch
+  checks stay unchanged. No speed change is claimed.
+- The streaming MXFP4 decode builds its lookup from the existing full signed
+  table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
+  code order, the positive zero at code 8, dtype, device, nibble order,
+  scales, chunking, copy behavior and output stay unchanged.
+
+- The allocator and PACT consume canonical v3 scope, qualified chords and
+  reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
+  Actual bytes, native admission and scientific gates remain unchanged.
+  An immutable candidate index requires no active index change.
+  Legacy metadata contracts retain the original producer interface.
+  CPU fixtures do not qualify speed, served loss or serving.
+
+- The shipcard model identity hashes its two canonical JSON texts through the
+  existing text owner (#2384, references #1301). The canonical quant-config
+  digest and the final canonical payload digest call `digests.text_sha256hex`;
+  canonicalization, scope flags, model hashes, errors, auxiliary files,
+  content checks and admission policy stay unchanged.
+
+- The shipcard model identity hashes its raw config bytes through the
+  existing bytes owner (#2394, references #1301). The config digest calls
+  `digests.bytes_sha256hex`; the read position, call count, scope flags,
+  model hashes, errors, auxiliary files, content checks and admission
+  policy stay unchanged.
 
 - The AURA checkpoint manifest writer uses the existing strict, indented
   UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
@@ -19,8 +168,40 @@
   writer from test_footprint (#2388, references #1929). Fixture bytes,
   tensor order, costs and semantic assertions stay unchanged. The
   per-unit-rate file drops its unused writer import.
+- The allocator serve-constraints and serving-lane tests reuse the existing
+  safetensors fixture writer from test_footprint (#2383, references #1929).
+  Fixture bytes, tensor order, costs and semantic assertions stay unchanged.
+  The serve-constraints introduction no longer cites the retired Gridbook
+  lane policy as a live document.
+
+- The native route-histogram test reuses the existing safetensors fixture
+  writer from test_footprint (#2390, references #1929). Fixture bytes,
+  tensor order, costs, route reports and semantic assertions stay unchanged.
+
+- The PACT frontier profile cohort carries the measured-consumer contract
+  (#2423, references #2427). `pact_cohort_from_profile` returns
+  `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
+  the existing adapter, and `glm_paths_identical` rejects a cohort that
+  lacks or changes them. Remaining cohort values, bands, TP rules, defaults,
+  gates and the active index stay unchanged.
 
 ### Added
+
+- **Bounded head walk measurement mode** (#1492, #1247).
+  `tools/profile_stage_b_head.py --mode scoped-walk` walks a slice of the
+  census roster with one explicit I/O worker count. It is read-only: it writes
+  no head checkpoint, verifies no payload and synthesizes no render. One call
+  holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
+  `--sweep-workers`) reads and validates the census-wide metadata once, in
+  the baseline scope, and walks disjoint slices in one process from that
+  state (`metadata_memo` on `load_measured_anchor_input`; a drifted file is
+  read and verified again). The mode leaves the candidate overlay out of the
+  inputs, so no wire payload is hashed. The whole sweep shares the 2,000-unit
+  budget, and the first scope is a one-unit baseline. A guard thread stops the
+  run when the NFS READ round trip exceeds `--stop-read-rtt-ms`. Both guard
+  limits must be positive and finite. A `SIGTERM` stops the run with one
+  report. The tool changes no default. The default worker count stays
+  derived from the CPU reservation until a measurement supports a change.
 
 - **Research-only finer-grained FIT pricing and packed reference wire**
   (#2329). Conditional single-block prices retain the complete baseline
@@ -53,6 +234,27 @@
   and malformed order, digest, geometry and tag refusals. Stored bytes are
   exact; run, launch and shared-memory estimates remain conditional models,
   not measured traffic, occupancy or speed.
+
+- **Explicit GLM projection owners.** The producer reads fused members from Tessera dense_ownership instead of a duplicate profile table.
+  The source config separates KDA queries from standalone MLA queries.
+  Existing pin-lift controls can select the actual bare router parameter owner.
+  The producer keeps its stock forward and uses the existing input capture hook.
+  DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
+  Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
+
+- **Direct head arithmetic.** The DSA head screen uses FP32 inputs without the key projection's A8 activation quantization.
+  The producer reads its decoded weights with the runtime's direct consumer helper.
+  The publication cache keeps the head values in FP32 and charges the actual publication bytes.
+  T-16 retains its folded BF16 weight arithmetic before the head cache cast.
+
+- **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
+  The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
+
+- **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
+  The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
+
+- **Shared-expert roster migration.** The quality population reads census names and the profile fused-owner seam.
+  It no longer reads the removed duplicate fused-group table.
 
 - **Behavioral coverage of persisted multimodal calibration provenance**
   (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
@@ -308,6 +510,18 @@
   this slice.
 
 ### Fixed
+
+- **The nested-rotary meta-skeleton test owns its import process** (Refs
+  #2279, a residual exposure of #2276). `tests/test_dsv4_nested_rotary_init.py`
+  uses the existing `own_process` marker when it shares a pytest session, so a
+  native `transformers.models.deepseek_v4` import in an earlier test cannot make
+  `register_deepseek_v4()` refuse. On main, running
+  `test_streaming_text_only_wrapper_config.py` first failed this test; the
+  reverse order and the test alone passed. The regression runs the real
+  unsupported-configuration predecessor, this test and the native-import
+  refusal control together. Production registration and its native-module
+  refusal are unchanged. The other exposures listed in #2279 are not fixed
+  here, and the issue stays open.
 
 - **Bound paired-rate-trade diagnostic retention to summaries outside the
   emitted assignment** (#2286). Menu, applicability and diagnostic-trace

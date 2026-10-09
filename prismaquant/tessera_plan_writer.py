@@ -715,6 +715,8 @@ def main(argv=None):
     ap.add_argument("--research-selected-moe-json", type=Path, default=None,
                     help="explicit research selected expert execution input; permits its "
                          "reader-legal BF16 expert planning without claiming a production cell")
+    ap.add_argument("--export-setup-json", type=Path,
+                    help="write metadata-only export partitions and construction-census inputs here")
     args = ap.parse_args(argv)
 
     surface = tessera_surface()
@@ -731,6 +733,10 @@ def main(argv=None):
         allow_disagreement=args.allow_fused_disagreement, surface=surface,
         control_rule=args.control_rule, with_control=not args.no_uniform_control,
         research_input=research_input)
+    setup = None
+    if args.export_setup_json is not None:
+        from .tessera_export_lane import export_setup
+        setup = export_setup(args.model, plan)
     provenance["source_layer_config"] = str(args.layer_config.resolve())
     provenance["model"] = str(args.model.resolve())
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -739,6 +745,9 @@ def main(argv=None):
     args.out.write_bytes(indent2_json_file_bytes(plan))
     sidecar = args.out.with_suffix(args.out.suffix + ".provenance.json")
     sidecar.write_text(json.dumps(provenance, indent=2))
+    if setup is not None:
+        args.export_setup_json.parent.mkdir(parents=True, exist_ok=True)
+        args.export_setup_json.write_bytes(indent2_json_file_bytes(setup))
 
     cov = provenance["coverage"]
     print(f"{args.layer_config}")

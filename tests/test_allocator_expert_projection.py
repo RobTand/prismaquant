@@ -343,10 +343,13 @@ def _assignment(fmt=FMT):
     return {DENSE: fmt, **{name: fmt for name in _units()}}
 
 
-def test_block_refuses_a_role_split_stack_and_a_receipt_for_another_rung(tmp_path):
+def test_block_refuses_a_role_split_stack_and_a_receipt_for_another_rung(tmp_path, monkeypatch):
     payload = _cost_payload(tmp_path, formats=(FMT, "TESSERA_E4M3_K1_R768"))
     split = _assignment()
     split[f"{STACK}.0.w2"] = "TESSERA_E4M3_K1_R768"
+    from prismaquant import tessera_runtime_contract as trc
+    monkeypatch.setattr(trc, "packaged_routed_unit_capability",
+                        lambda: (_ for _ in ()).throw(trc.TesseraContractError("requires v57")))
     with pytest.raises(ExpertProjectionError, match="rungs differ across the stack"):
         allocation_expert_projection_block(payload, split)
     # A receipt filed under the selected rung but sealed for another one.

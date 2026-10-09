@@ -801,6 +801,136 @@ def _verify_measured_hessian_identity(name, row, anchor, provenance_hessian,
         _same(value, provenance_hessian.get(key), f"{name}: measured H {key}")
 
 
+def _read_campaign_metadata(inputs, reuse_policy):
+    """Read and validate the census-wide campaign metadata of one load.
+
+    The bound files are hashed and parsed here, and every census-wide gate
+    runs. The result is the state the walk reads from; a caller that walks
+    several scopes in one process keeps it through ``metadata_memo`` (#1492).
+    """
+    from tools.dispatch_tessera_campaign import _require_receipts
+
+    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
+    census = json.loads(paths["census"].read_text())
+    plan = json.loads(paths["campaign_plan"].read_text())
+    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
+    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
+    _same(paths["campaign_receipts"].resolve(),
+          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
+    rows = plan["rows"]
+    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
+    _require_receipts(paths["campaign_plan"].parent, len(rows))
+    owners, groups = {}, {}
+    for row in rows:
+        for name in row["members"]:
+            _require(name not in owners, f"duplicate campaign unit {name}")
+            owners[name] = Path(row["dir"])
+        for group in row["groups"]:
+            _require(group not in groups, f"duplicate campaign group {group}")
+            groups[group] = row["row_id"]
+    names = set(census["unit_shapes"])
+    _same(set(owners), names, "complete census roster")
+    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
+    _same(len(names), inputs["required_source_units"], "declared full source unit count")
+    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
+    for group, members in census["anchor_groups"].items():
+        owner = next(row for row in rows if row["row_id"] == groups[group])
+        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
+
+    payload = pickle.loads(paths["merged_cost"].read_bytes())
+    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
+    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
+    _same(set(payload["costs"]), names, "complete merged cost roster")
+    provenance = payload["provenance"]
+    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
+    _same(provenance.get("model"), census["model"], "campaign model")
+    _same(plan["model"], census["model"], "planned model")
+    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
+    _same(provenance.get("campaign_fanout", {}).get("rows"),
+          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
+
+    manifest = load_json_file(paths["merged_checkpoint"])
+    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
+    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
+    identity = manifest["identity"]
+    declared_seal = manifest.get("identity_sha256")
+    if dev_mode_enabled():
+        # Rob's dev-mode directive (2026-09-19): the seal returns at the
+        # artifact gate, not the run gate. This recompute is the run gate's
+        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
+        # in-process profile on action 282c61140ba7 (2026-09-20) over the
+        # 7.2 GB merged checkpoint -- and the digest it would produce is
+        # already declared by the manifest. The declared value is checked for
+        # 64-hex shape and RECORDED, never silently trusted: the walk still
+        # hands it to every unit envelope below (``_load_unit``), and the run
+        # stays ``dev_uncertified`` through the existing stamp.
+        _require_sha256(declared_seal, "campaign checkpoint seal")
+        dev_warning(
+            "campaign checkpoint seal not recomputed under dev mode; using "
+            f"the manifest's declared identity_sha256 {declared_seal} "
+            "(recorded, not gated)")
+        seal = declared_seal
+    else:
+        # The checkpoint is parsed from JSON, so its identity is already
+        # normalized (string keys, dict/list containers, JSON scalars) and the
+        # seal can stream the canonical bytes into the digest. The generic
+        # helper normalizes first, which holds the encoded text, a second full
+        # graph and the second encoded text at once; on a checkpoint this size
+        # that is the difference between fitting a bounded envelope and being
+        # killed by it. Same digest -- held by
+        # tests/test_canonical_json_normalized.py.
+        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
+        _same(seal, declared_seal, "campaign checkpoint seal")
+    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
+    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
+    _same(set(identity["units"]), names, "complete checkpoint identity roster")
+    listed = [row["qname"] for row in manifest["units"]]
+    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
+    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
+        value = identity.get(key)
+        _require(isinstance(value, str) and len(value) == 64 and
+                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
+    # The one encoder identity a run can re-derive is the installed package's
+    # own. Refuse anything else here -- before the per-cell origin walk reads
+    # or decodes a wire -- unless the plan named that exact digest.
+    from . import tessera_campaign as tc
+    encoder_source_reuse = resolve_encoder_source_reuse(
+        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        reuse_policy, where="joint anchor checkpoint encoder source")
+    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
+    for row in manifest["units"]:
+        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+
+    return SimpleNamespace(paths=paths, census=census, plan=plan, rows=rows, owners=owners, groups=groups, names=names, payload=payload, provenance=provenance, manifest=manifest, identity=identity, declared_seal=declared_seal, seal=seal, encoder_source_reuse=encoder_source_reuse, parts=parts)
+
+
+def _campaign_metadata(inputs, reuse_policy, memo):
+    """The validated campaign metadata, read once per memo (#1492).
+
+    With no memo every load reads and validates the bound files, as before.
+    With a memo the first load does, and each later load reuses that state
+    while the bound records and the stat fence of all five files hold. The
+    digest check on the first load authenticates the bytes; the fence only
+    admits reusing them. A drifted file is read and verified again, and a
+    digest mismatch still refuses (the same contract as ``read_bound``).
+    """
+    if memo is None:
+        return _read_campaign_metadata(inputs, reuse_policy)
+    from .stage_inputs import bound_stat_fence
+    records = tuple((key, inputs[key]["path"], inputs[key]["sha256"])
+                    for key in HEAD_WALK_INPUT_KEYS)
+    key = (records, inputs.get("required_source_units"),
+           inputs.get("required_campaign_groups"), repr(reuse_policy))
+    fence = tuple(bound_stat_fence(Path(path)) for _, path, _ in records)
+    held = memo.get("metadata")
+    if held is not None and held[0] == key and held[1] == fence:
+        return held[2]
+    metadata = _read_campaign_metadata(inputs, reuse_policy)
+    memo["metadata"] = (key, fence, metadata)
+    memo["loads"] = memo.get("loads", 0) + 1
+    return metadata
+
+
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
@@ -810,7 +940,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
                                head_walk_workers=None, head_walk_quantum=None,
-                               progress_allowance_s=None):
+                               progress_allowance_s=None, metadata_memo=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -951,12 +1081,17 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     full-core fan-out); until then this parameter is the producer/consumer
     contract under test, not the production prepare path, which passes
     nothing here.
+
+    ``metadata_memo`` is an optional caller-owned dict. With it the census-
+    wide metadata is read, hashed and validated once and reused by every
+    later load in the process while the bound records and their stat fences
+    hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
+    reused state is read-only for the walk.
     """
     from .production_weight_cache import (
         _cache_weight_filename,
         require_injective_cache_filenames,
     )
-    from tools.dispatch_tessera_campaign import _require_receipts
 
     reuse_policy = normalize_historical_encoder_reuse(historical_encoder_reuse)
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
@@ -999,96 +1134,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     missing = [key for key in HEAD_WALK_INPUT_KEYS if key not in inputs]
     _require(not missing, "campaign chain input(s) not bound in the plan's "
              f"``inputs`` block: {', '.join(missing)}")
-    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
-    census = json.loads(paths["census"].read_text())
-    plan = json.loads(paths["campaign_plan"].read_text())
-    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
-    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
-    _same(paths["campaign_receipts"].resolve(),
-          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
-    rows = plan["rows"]
-    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
-    _require_receipts(paths["campaign_plan"].parent, len(rows))
-    owners, groups = {}, {}
-    for row in rows:
-        for name in row["members"]:
-            _require(name not in owners, f"duplicate campaign unit {name}")
-            owners[name] = Path(row["dir"])
-        for group in row["groups"]:
-            _require(group not in groups, f"duplicate campaign group {group}")
-            groups[group] = row["row_id"]
-    names = set(census["unit_shapes"])
-    _same(set(owners), names, "complete census roster")
-    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
-    _same(len(names), inputs["required_source_units"], "declared full source unit count")
-    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
-    for group, members in census["anchor_groups"].items():
-        owner = next(row for row in rows if row["row_id"] == groups[group])
-        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
-
-    payload = pickle.loads(paths["merged_cost"].read_bytes())
-    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
-    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
-    _same(set(payload["costs"]), names, "complete merged cost roster")
-    provenance = payload["provenance"]
-    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
-    _same(provenance.get("model"), census["model"], "campaign model")
-    _same(plan["model"], census["model"], "planned model")
-    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
-    _same(provenance.get("campaign_fanout", {}).get("rows"),
-          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
-
-    manifest = load_json_file(paths["merged_checkpoint"])
-    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
-    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
-    identity = manifest["identity"]
-    declared_seal = manifest.get("identity_sha256")
-    if dev_mode_enabled():
-        # Rob's dev-mode directive (2026-09-19): the seal returns at the
-        # artifact gate, not the run gate. This recompute is the run gate's
-        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
-        # in-process profile on action 282c61140ba7 (2026-09-20) over the
-        # 7.2 GB merged checkpoint -- and the digest it would produce is
-        # already declared by the manifest. The declared value is checked for
-        # 64-hex shape and RECORDED, never silently trusted: the walk still
-        # hands it to every unit envelope below (``_load_unit``), and the run
-        # stays ``dev_uncertified`` through the existing stamp.
-        _require_sha256(declared_seal, "campaign checkpoint seal")
-        dev_warning(
-            "campaign checkpoint seal not recomputed under dev mode; using "
-            f"the manifest's declared identity_sha256 {declared_seal} "
-            "(recorded, not gated)")
-        seal = declared_seal
-    else:
-        # The checkpoint is parsed from JSON, so its identity is already
-        # normalized (string keys, dict/list containers, JSON scalars) and the
-        # seal can stream the canonical bytes into the digest. The generic
-        # helper normalizes first, which holds the encoded text, a second full
-        # graph and the second encoded text at once; on a checkpoint this size
-        # that is the difference between fitting a bounded envelope and being
-        # killed by it. Same digest -- held by
-        # tests/test_canonical_json_normalized.py.
-        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
-        _same(seal, declared_seal, "campaign checkpoint seal")
-    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
-    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
-    _same(set(identity["units"]), names, "complete checkpoint identity roster")
-    listed = [row["qname"] for row in manifest["units"]]
-    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
-    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
-        value = identity.get(key)
-        _require(isinstance(value, str) and len(value) == 64 and
-                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
-    # The one encoder identity a run can re-derive is the installed package's
-    # own. Refuse anything else here -- before the per-cell origin walk reads
-    # or decodes a wire -- unless the plan named that exact digest.
-    from . import tessera_campaign as tc
-    encoder_source_reuse = resolve_encoder_source_reuse(
-        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
-        reuse_policy, where="joint anchor checkpoint encoder source")
-    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
-    for row in manifest["units"]:
-        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+    metadata = _campaign_metadata(inputs, reuse_policy, metadata_memo)
+    (paths, census, plan, rows, owners, groups, names, payload, provenance,
+     manifest, identity, declared_seal, seal, encoder_source_reuse, parts) = (
+        metadata.paths, metadata.census, metadata.plan, metadata.rows,
+        metadata.owners, metadata.groups, metadata.names, metadata.payload,
+        metadata.provenance, metadata.manifest, metadata.identity,
+        metadata.declared_seal, metadata.seal, metadata.encoder_source_reuse,
+        metadata.parts)
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
