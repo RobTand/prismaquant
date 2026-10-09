@@ -23736,7 +23736,12 @@ Historical counts and max-abs are planning metadata: the existing D32 helper
 stamps drift, and both values and deltas enter the trusted layer/quantum receipt.
 The census has no mean statistic; the manifest explicitly records that absence.
 An expert appearing/vanishing or changing by more than 1 percent stops for CEO
-review. Hessians and prefixes contain only the actual routed rows. Stable publication
+review. That bound is the CEO directive of 2026-10-06 11:42Z, set from layer-3
+gaps of 0.002 to 0.16 percent. The completed layer 40 to 44 fragments of the
+first capture (`research-capture-shared-01`) differ from the census by up to
+8.9 percent, and 1056 of their 5184 routed units exceed 1 percent, so this stop
+refuses those layers until the CEO sets a bound for deep layers. Hessians and
+prefixes contain only the actual routed rows. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
 files relative to the capture root. The research join compares each role
 record (path, own digest, length, count, Hessian/input/prefix geometry) with
