@@ -7407,16 +7407,19 @@ def _main(argv, *, source_scope, waits) -> int:
         # this run requested. A reuse row takes the stored capture's own
         # scope instead: only when its manifest declares a selected scope
         # does the expected identity carry one; a full capture keeps the full
-        # identity, selected run or not. A reuse row hashes its source the
-        # plain way (no recording owner: it reads no payload, and the stored
-        # identity binds the digests it must equal).
+        # identity, selected run or not. A completed OUTPUT hashes its source
+        # the plain way: this row's recording owner read no payload, and the
+        # stored identity binds the digests it must equal. A --calibration-cache
+        # reader keeps the owner it authenticated with, so a selected reader
+        # still hashes only the objects it consumes.
         fresh_unit_names = capture_unit_names \
             if args.capture_calibration_out and args.units else None
         capture_identity = None
         capture_manifest = None
         completed_capture = (Path(args.capture_calibration_out) / "capture_manifest.json"
                              if args.capture_calibration_out else None)
-        if completed_capture is not None and completed_capture.exists():
+        completed_output = completed_capture is not None and completed_capture.exists()
+        if completed_output:
             capture_manifest = calibration_store.require_capture_contract(completed_capture)
         elif args.calibration_cache:
             capture_manifest = calibration_store.require_capture_contract(
@@ -7443,10 +7446,9 @@ def _main(argv, *, source_scope, waits) -> int:
                     raise RuntimeError(
                         f"calibration cache does not cover requested units: {missing}")
             expected_unit_names = stored_units
-        reuse_source = (None if capture_manifest is not None else source_authentication)
         capture_identity = _capture_identity(
             expected_unit_names,
-            source_owner=reuse_source)
+            source_owner=None if completed_output else source_authentication)
     if selected_source:
         manifest = (capture_manifest if capture_manifest is not None else
                     calibration_store.require_capture_contract(args.calibration_cache,
