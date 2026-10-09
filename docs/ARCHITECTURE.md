@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2301, revision 7): `tools/g3job` owns the imported G3 measurement harness.
+Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -132,6 +132,18 @@ Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a7/net
 PB `0bc4c1cc86af` compiles the harness and shared manifest owner on x86.
 This correctness comparison adds no speed, energy, or whole-model residency claim.
 Work per joule remains null.
+
+The revision-8 correction proves the launcher's image seal on the pinned adapter.
+`g3_launch.py` loads teacher-04's pinned `tools/tessera_campaign_container.py` by path.
+That adapter imports `image_content_sha256`, and its `main()` calls the name from its own namespace.
+In default dev mode (D32) the launcher wraps that name.
+A differing image then prints one `[DEV-MODE]` stamp, and the container receives the observed digest.
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) leaves the adapter's own refusal in place.
+The checkout's `tools/tessera_campaign_container.py` binds `_runtime_identity` instead.
+The launcher never loads that file.
+`tests/g3job/test_g3_launch_image_seal.py` starts the real launcher on the real pinned adapter in both modes.
+Only the docker executable is replaced.
+The launcher logic, numerical code, and D32 behavior remain unchanged.
 
 
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.

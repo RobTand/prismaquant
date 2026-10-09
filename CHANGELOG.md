@@ -57,6 +57,11 @@
   The host loads the container adapter from its pinned source file, not the checkout's `tools` package.
   PB `064d872a4635` passes 164 affected CPU cases, including both G3 import and PB boundary guards.
   PB `74f166933103` preserves real logits and both FP64 KL arrays bitwise in the producer container.
+  The next correction tests the launcher's image seal on the pinned adapter.
+  The tests start the real launcher with the real pinned adapter and a replaced docker executable.
+  Default dev mode stamps a differing image and starts the container with the observed digest.
+  Certified mode refuses the same image before any container starts.
+  The pinned adapter binds `image_content_sha256`; the checkout's own adapter binds `_runtime_identity` and is not loaded.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
