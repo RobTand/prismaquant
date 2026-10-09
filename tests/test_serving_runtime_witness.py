@@ -108,6 +108,24 @@ def test_verifier_cli_round_trip(tmp_path):
     assert process.returncode == 0, process.stderr
     assert json.loads(out.read_text())["verdict"] == "pass"
 
+def test_collector_digest_survives_write_and_read(tmp_path):
+    from prismaquant.serving_runtime_witness import witness_sha256
+    from prismaquant.serving_runtime_witness_collect import collect_witness, write_witness
+
+    witness = make_witness()
+    joined = collect_witness(
+        endpoint=witness["endpoint"]["base_url"], served_alias=witness["served_alias"],
+        attempt_id=witness["launch_attempt"]["attempt_id"], image="vllm-node:test",
+        launch_argv=["serve"], ranks=witness["ranks"], artifact=witness["artifact"],
+        tokenizer=witness["tokenizer"])
+    assert joined["witness_sha256"] == witness_sha256(joined)
+    path = write_witness(tmp_path / "witness.json", joined)
+    reread = read_witness(path)
+    assert witness_sha256(reread) == joined["witness_sha256"]
+    assert verify(reread, make_expected(witness))["verdict"] == "pass"
+    assert verify(reread, make_expected(witness))["witness_sha256"] == joined["witness_sha256"]
+
+
 
 def test_verifier_reads_strict_witness_bytes(tmp_path):
     witness = make_witness()

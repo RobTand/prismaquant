@@ -139,9 +139,8 @@ def verify(witness: Mapping[str, Any], expected: Mapping[str, Any]) -> dict[str,
         failures.append("tokenizer content differs from the expected bytes")
     if failures:
         return _refuse("; ".join(failures))
-    digest = hashlib.sha256(json.dumps(
-        witness, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+    from prismaquant.serving_runtime_witness import canonical_witness_bytes
+    digest = hashlib.sha256(canonical_witness_bytes(witness)).hexdigest()
     return {"schema": WITNESS_SCHEMA, "verdict": VERDICT_PASS,
             "witness_sha256": digest,
             "ranks": sorted(wanted),

@@ -135,12 +135,14 @@ def collect_witness(*, endpoint: str, served_alias: str, attempt_id: str,
 
 
 def write_witness(path: str | Path, witness: Mapping[str, Any]) -> Path:
-    """Write ``witness`` atomically. Refuse an existing destination."""
+    """Write ``witness`` without its self-digest. Refuse an existing destination."""
     out = Path(path)
     if out.exists():
         raise ValueError(f"witness output already exists: {out}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(canonical_witness_bytes(witness) + b"\n")
+    stored = dict(witness)
+    stored.pop("witness_sha256", None)
+    out.write_bytes(canonical_witness_bytes(stored) + b"\n")
     return out
 
 
