@@ -34,6 +34,12 @@
   complete helper tree and every native delivery identity must agree. A later
   consumer's resource/session tuple and the distinct launch/selected-attempt
   provenance labels are not substituted for those producer observations.
+  The reader's record of its producer run is a D32 seal: the helper root and
+  generation, the reservation, every delivery claim and launch label, the
+  complete helper tree and the family restamp join go through `seal_check`.
+  Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each one. Default dev mode
+  stamps `[DEV-MODE]` and continues, and it hashes no helper tree. The target,
+  readset, calibration and config joins refuse in both modes.
   Runtime version validation reuses the existing exact SDK owner. This is
   nonactivating source preparation: current SDK4/DC480 fixtures, c437 helpers,
   deployment and GPU/source admission are unchanged; a qualified SDK5 helper

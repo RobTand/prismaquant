@@ -28,6 +28,10 @@ from test_strict_reader_tier_enforcement import _publish_readset_on_the_claim
 
 pytestmark = pytest.mark.own_process
 
+# CEO D32: the suite default is certified mode; a test names the mode it pins.
+CERTIFIED, DEV = '0', '1'
+MODES = pytest.mark.parametrize('mode', [CERTIFIED, DEV], ids=['certified', 'dev'])
+
 
 def _digest(raw):
     return hashlib.sha256(raw).hexdigest()
@@ -218,6 +222,38 @@ def test_original_identity_comparison_reuses_stage_owner_without_changing_errors
     assert default.value.__cause__ is None and original.value.__cause__ is None
 
 
+def test_original_recorded_comparison_reuses_the_stage_seal_with_the_original_vocabulary(
+        monkeypatch, capsys):
+    """A recorded-versus-selected join is the stage owner's D32 seal.
+
+    Certified mode refuses with this module's exception and message. Dev mode
+    prints one ``[DEV-MODE]`` line and continues.
+    """
+    from prismaquant.stage_inputs import recorded_same
+
+    assert sg._recorded_same.func is recorded_same
+    assert sg._recorded_same.keywords['contract'] is sg._contract
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', CERTIFIED)
+    assert sg._recorded_same({'key': 1}, {'key': 1}, 'source') is None
+    with pytest.raises(ValueError) as default:
+        recorded_same('a', 'b', 'source')
+    with pytest.raises(RuntimeError) as original:
+        sg._recorded_same('a', 'b', 'source')
+    assert str(default.value) == 'source: identity mismatch'
+    assert str(original.value) == 'original generation: source: identity mismatch'
+    assert default.value.__cause__ is None and original.value.__cause__ is None
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', DEV)
+    capsys.readouterr()
+    assert recorded_same('a', 'b', 'source') is None
+    assert sg._recorded_same('a', 'b', 'source') is None
+    out = capsys.readouterr().out.splitlines()
+    assert out == [
+        '[DEV-MODE] seal source differs (Stage A/B recorded versus running provenance): '
+        'expected b, actual a; sealing is off (PQ #1147), continuing with the stored data',
+        '[DEV-MODE] seal source differs (original source qualification): '
+        'expected b, actual a; sealing is off (PQ #1147), continuing with the stored data']
+
+
 def test_original_execution_retains_nullable_mapped_selectors_and_mapping_envelope():
     value = MappingProxyType({'schema': 'prismaquant.joint_aura.source_execution.v1',
         'modules': MappingProxyType({'u': {'attention': None, 'experts': {'é': '\ud800', 'a': None}}})})
@@ -299,12 +335,19 @@ def _forbid_source_work(case, monkeypatch):
     return before
 
 
+@MODES
 @pytest.mark.parametrize('axis', ['schema', 'scope', 'publisher', 'producer', 'source_paths',
                                 'readset', 'calibration', 'source_model_identity', 'source_execution'])
-def test_selected_reader_cannot_substitute_another_target_authority(authority_case, monkeypatch, axis):
-    """Real CPU control inputs; no selected result or qualified source is fabricated."""
+def test_selected_reader_cannot_substitute_another_target_authority(
+        authority_case, monkeypatch, axis, mode):
+    """Real CPU control inputs; no selected result or qualified source is fabricated.
+
+    The target, readset, calibration and model joins say which data the proof
+    is about. They are correctness joins, not seals, and refuse in both modes.
+    """
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
     reader_authority = copy.deepcopy(case['authority'])
     if axis in ('schema', 'scope'):
         reader_authority[axis] += '.other'
@@ -419,15 +462,35 @@ def _selected_reader_producer_fixtures(case):
     return receipt, context, result
 
 
+def _seal(monkeypatch, capsys, mode, join, refusal):
+    """Run one D32 seal under ``mode``; return the ``[DEV-MODE]`` output it printed.
+
+    Certified mode refuses with ``refusal`` and prints no stamp. Dev mode
+    completes the join and stamps the mismatch instead (CEO D32).
+    """
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    capsys.readouterr()
+    if mode == CERTIFIED:
+        with pytest.raises(RuntimeError, match=refusal):
+            join()
+        assert '[DEV-MODE]' not in capsys.readouterr().out
+        return ''
+    assert join() is None
+    return capsys.readouterr().out
+
+
+@MODES
 @pytest.mark.parametrize('axis', ['queue_root', 'action_key', 'nonce', 'scope_id',
                                   'worker', 'host', 'helper_root'])
 def test_reader_delivery_cannot_substitute_another_selected_producer(
-        authority_case, monkeypatch, axis):
+        authority_case, monkeypatch, capsys, axis, mode):
     """Every delivery joins the actual selected producer, axis by axis.
 
     Each mutation also satisfies the context/result mirrors that precede the
-    delivery join, so the refusal that fires is the delivery identity join
-    itself and not an earlier policy check.
+    delivery join, so the join that fires is the delivery identity join
+    itself and not an earlier policy check. It compares the reader's record
+    of its producer run with the SDK's selection, a D32 seal: certified mode
+    refuses, dev mode stamps the first differing field and continues.
     """
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
@@ -454,16 +517,71 @@ def test_reader_delivery_cannot_substitute_another_selected_producer(
     else:
         context['host'] = 'another-host'
         result['host'] = 'another-host'
-    with pytest.raises(RuntimeError, match='actual reader delivery selected producer'):
-        sg._require_original_reader_producer(receipt, authority, result,
-                                             authority['runtime'])
+    # The worker axis moves two fields; the first one by name is incarnation.
+    field = 'incarnation' if axis == 'worker' else axis
+    out = _seal(monkeypatch, capsys, mode,
+                lambda: sg._require_original_reader_producer(receipt, authority, result,
+                                                             authority['runtime']),
+                'actual reader delivery selected producer')
+    if mode == DEV:
+        assert ('[DEV-MODE] seal actual reader delivery selected producer differs at '
+                f'{field} (original source qualification): expected {context[axis]}, ') in out
     assert case['owner'].receipt() == before
 
 
-@pytest.mark.parametrize('damage', ['provenance', 'semantics', 'reservation', 'worker',
-                                    'incarnation', 'receipt', 'runtime'])
+@MODES
+@pytest.mark.parametrize('axis', ['helper_root', 'helper_generation', 'reservation',
+                                  'launch_provenance'])
+def test_reader_runtime_reservation_and_launch_are_seals_of_the_selected_producer(
+        authority_case, monkeypatch, capsys, axis, mode):
+    """Each is the reader's record of its producer run against the SDK's selection.
+
+    Certified mode refuses by name. Dev mode stamps the one differing value
+    and the join continues with the stored record.
+    """
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    authority = case['authority']
+    if axis in ('helper_root', 'helper_generation'):
+        _, runtime = sg._control(authority['runtime'], 'fixture runtime')
+        runtime = copy.deepcopy(runtime)
+        generation = Path(context['helper_root']).name
+        if axis == 'helper_root':
+            label = 'selected reader actual helper root'
+            recorded, selected = f'/foreign-recorded-helper/{generation}', context['helper_root']
+            runtime['prismabuild']['helper_root'] = recorded
+        else:
+            label = 'selected reader actual helper generation'
+            recorded, selected = 'foreign-recorded-generation', generation
+            runtime['prismabuild']['runtime_generation'] = recorded
+        stamp = f'differs (original source qualification): expected {selected}, actual {recorded};'
+        authority = dict(authority, runtime=_bound(case['tmp'] / f'{axis}-runtime.json', runtime))
+    elif axis == 'reservation':
+        label = 'selected reader actual producer reservation'
+        context['resources'] = {**context['resources'], 'mem_gb': 99}
+        stamp = 'differs at mem_gb (original source qualification): expected 99, actual 1;'
+    else:
+        label = 'actual reader delivery launch provenance'
+        receipt['deliveries'][0]['native_delivery']['claim']['attempt_source'] = (
+            'selected-immutable-attempt')
+        stamp = ('differs (original source qualification): expected launch-env, '
+                 'actual selected-immutable-attempt;')
+    out = _seal(monkeypatch, capsys, mode,
+                lambda: sg._require_original_reader_producer(receipt, authority, result,
+                                                             authority['runtime']),
+                label)
+    if mode == DEV:
+        assert f'[DEV-MODE] seal {label} {stamp}' in out
+    assert case['owner'].receipt() == before
+
+
+@MODES
+@pytest.mark.parametrize('damage', ['provenance', 'semantics', 'worker', 'incarnation',
+                                    'receipt', 'runtime'])
 def test_reader_context_policy_fields_cannot_be_relabelled(
-        authority_case, monkeypatch, damage):
+        authority_case, monkeypatch, damage, mode):
+    """The SDK answer's own mirrors are correctness joins: both modes refuse."""
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
     receipt, context, result = _selected_reader_producer_fixtures(case)
@@ -473,9 +591,6 @@ def test_reader_context_policy_fields_cannot_be_relabelled(
     elif damage == 'semantics':
         context['resources_semantics'] = 'ledger-allowance'
         expected = 'selected reader reservation semantics'
-    elif damage == 'reservation':
-        context['resources'] = {**context['resources'], 'mem_gb': 99}
-        expected = 'selected reader actual producer reservation'
     elif damage == 'worker':
         context['worker'] = 'another-worker'
         expected = 'selected reader full worker identity'
@@ -488,21 +603,113 @@ def test_reader_context_policy_fields_cannot_be_relabelled(
     else:
         context['runtime_sha256'] = 'd' * 64
         expected = 'selected reader attested runtime'
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
     with pytest.raises(RuntimeError, match=expected):
         sg._require_original_reader_producer(receipt, case['authority'], result,
                                              case['authority']['runtime'])
     assert case['owner'].receipt() == before
 
 
-def test_reader_delivery_join_holds_until_the_unshared_helper_tree(authority_case, monkeypatch):
+@MODES
+def test_reader_runtime_config_is_the_source_config_in_both_modes(
+        authority_case, monkeypatch, mode):
+    """The model configuration the proof ran is a target axis, never a stamp."""
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    _, runtime = sg._control(case['authority']['runtime'], 'fixture runtime')
+    runtime = copy.deepcopy(runtime)
+    runtime['config']['independent_other_config'] = True
+    authority = dict(case['authority'], runtime=_bound(case['tmp'] / 'other-config-runtime.json', runtime))
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    with pytest.raises(RuntimeError, match='selected reader runtime source config'):
+        sg._require_original_reader_producer(receipt, authority, result, authority['runtime'])
+    assert case['owner'].receipt() == before
+
+
+def _sealed_helper_generation(root):
+    """A real sealed generation, ``src/prismabuild`` beside other helper files."""
+    package = root / 'src' / 'prismabuild'
+    package.mkdir(parents=True)
+    (package / 'client.py').write_text('SDK_VERSION = 5\n')
+    (root / 'worker.py').write_text('print("worker")\n')
+    return root
+
+
+def _reader_rows_over(case, root):
+    """Claim rows and a runtime record that name ``root`` and the real digests of its tree."""
+    from prismaquant.production_weight_cache import _production_cache_source_sha256
+
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    context['helper_root'] = str(root)
+    for row in receipt['deliveries']:
+        row['native_delivery']['claim']['helper_root'] = str(root)
+    _, runtime = sg._control(case['authority']['runtime'], 'fixture runtime')
+    runtime = copy.deepcopy(runtime)
+    runtime['prismabuild'].update(
+        helper_root=str(root), runtime_generation=root.name,
+        source_tree={'package_sha256': _production_cache_source_sha256(root / 'src' / 'prismabuild'),
+                     'helper_tree_sha256': _production_cache_source_sha256(root)})
+    authority = dict(case['authority'],
+                     runtime=_bound(case['tmp'] / 'sealed-generation-runtime.json', runtime))
+    return receipt, authority, result
+
+
+def test_reader_join_accepts_the_sealed_helper_generation_it_recorded(authority_case, monkeypatch):
+    """Certified mode hashes the tree on disk and finds the digests the reader recorded."""
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    root = _sealed_helper_generation(case['tmp'] / 'runtime-generations' / 'fixture-generation-0')
+    receipt, authority, result = _reader_rows_over(case, root)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', CERTIFIED)
+    assert sg._require_original_reader_producer(receipt, authority, result,
+                                                authority['runtime']) is None
+    assert case['owner'].receipt() == before
+
+
+@MODES
+def test_reader_helper_tree_is_hashed_from_disk_only_in_certified_mode(
+        authority_case, monkeypatch, capsys, mode):
+    """A byte that moved after the reader recorded its tree.
+
+    Certified mode re-hashes the generation and refuses. Dev mode computes no
+    digest over existing data: it stamps ``not computed`` beside the recorded
+    tree and the helper tree is never read.
+    """
+    from prismaquant import production_weight_cache
+
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    root = _sealed_helper_generation(case['tmp'] / 'runtime-generations' / 'fixture-generation-0')
+    receipt, authority, result = _reader_rows_over(case, root)
+    (root / 'src' / 'prismabuild' / 'client.py').write_text('SDK_VERSION = 5\n# moved\n')
+
+    def hashed(*args, **kwargs):
+        pytest.fail('dev mode hashed the helper tree to seal a run')
+    if mode == DEV:
+        monkeypatch.setattr(production_weight_cache, '_production_cache_source_sha256', hashed)
+    out = _seal(monkeypatch, capsys, mode,
+                lambda: sg._require_original_reader_producer(receipt, authority, result,
+                                                             authority['runtime']),
+                'selected reader actual complete helper tree')
+    if mode == DEV:
+        assert out.count('[DEV-MODE]') == 1
+        assert ('[DEV-MODE] seal selected reader actual complete helper tree not computed '
+                '(original source qualification): recorded ') in out
+    assert case['owner'].receipt() == before
+
+
+@MODES
+def test_reader_delivery_join_holds_until_the_unshared_helper_tree(
+        authority_case, monkeypatch, capsys, mode):
     """The real claim rows satisfy every producer join this consumer owns.
 
-    The unmutated join runs to its final check and stops only at the sealed
-    helper-tree proof: the fixture's launch helper root is the fleet
-    generation while the SDK is the test-injected install, so the two never
-    share one root and the complete-tree digest cannot agree. That refusal
-    is the honest current boundary; a sealed SDK5 generation (PB #1485 and
-    the separately authorized helper selection) is the positive prerequisite.
+    The unmutated join runs to its final check. Certified mode stops there: the
+    fixture's launch helper root is the fleet generation while the SDK is the
+    test-injected install, so the two never share one root and the complete-tree
+    digest cannot agree. That refusal is the honest current boundary; a sealed
+    SDK5 generation (PB #1485 and the separately authorized helper selection) is
+    the positive prerequisite. Dev mode completes with that one tree stamp.
     """
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
@@ -511,18 +718,27 @@ def test_reader_delivery_join_holds_until_the_unshared_helper_tree(authority_cas
     # environment, not a sealed src/ generation, so the source-digest owner
     # refuses to read it; on a sealed generation the digest join itself
     # refuses instead. Either named refusal is the honest boundary.
-    with pytest.raises(RuntimeError, match='selected reader actual complete helper tree|'
-                                            'cannot read package root'):
-        sg._require_original_reader_producer(receipt, case['authority'], result,
-                                             case['authority']['runtime'])
+    out = _seal(monkeypatch, capsys, mode,
+                lambda: sg._require_original_reader_producer(receipt, case['authority'], result,
+                                                             case['authority']['runtime']),
+                'selected reader actual complete helper tree|cannot read package root')
+    if mode == DEV:
+        assert out.count('[DEV-MODE]') == 1
+        assert 'seal selected reader actual complete helper tree not computed' in out
     assert case['owner'].receipt() == before
 
 
+@MODES
 @pytest.mark.parametrize('damage', [None, 'foreign-node', 'restamped-snapshot',
                                     'null-compatibility', 'target-source', 'target-runtime'])
 def test_reader_source_snapshot_cannot_bridge_family_acceptance(
-        authority_case, monkeypatch, damage):
-    """The reader's executed snapshot binds through the same family owner."""
+        authority_case, monkeypatch, capsys, damage, mode):
+    """The reader's executed snapshot binds through the same family owner.
+
+    The restamp join compares the row's recorded source with the family's
+    accepted old source, a D32 seal: dev mode stamps it. The family, node,
+    compatibility and target joins are correctness joins and refuse in both modes.
+    """
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
     runtime = case['packet']['runtime']
@@ -540,7 +756,10 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
     accepted = {'tests/original-source-admission-reader': family}
     reader = {'node_id': 'tests/original-source-admission-reader',
               'source_snapshot': snapshot_parent, 'compatibility': family['compatibility']}
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    capsys.readouterr()
     assert sg._require_original_qualified_source(reader, request, accepted, runtime) is None
+    assert '[DEV-MODE]' not in capsys.readouterr().out
     if damage is None:
         assert case['owner'].receipt() == before
         return
@@ -550,7 +769,7 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
     elif damage == 'restamped-snapshot':
         # The executed request and the reader row both claim the foreign
         # snapshot; only the family's accepted old_source stays real, so the
-        # refusal that fires is the family restamp join.
+        # join that fires is the family restamp join.
         reader['source_snapshot'] = 'e' * 40
         request['params']['checkout_snapshot']['parent'] = 'e' * 40
         expected = 'original executed member source is not restamped'
@@ -563,8 +782,16 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
     else:
         accepted[reader['node_id']] = dict(family, target_runtime_sha256='0' * 64)
         expected = 'qualified member actual target runtime'
-    with pytest.raises(RuntimeError, match=expected):
-        sg._require_original_qualified_source(reader, request, accepted, runtime)
+    join = lambda: sg._require_original_qualified_source(reader, request, accepted, runtime)
+    if damage == 'restamped-snapshot':
+        out = _seal(monkeypatch, capsys, mode, join, expected)
+        if mode == DEV:
+            assert ('[DEV-MODE] seal original executed member source is not restamped differs '
+                    f'(original source qualification): expected {snapshot_parent}, '
+                    f'actual {"e" * 40};') in out
+    else:
+        with pytest.raises(RuntimeError, match=expected):
+            join()
     assert case['owner'].receipt() == before
 
 

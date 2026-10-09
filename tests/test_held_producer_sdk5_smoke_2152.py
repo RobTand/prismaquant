@@ -110,7 +110,8 @@ def _claim_receipt(claim):
         claim, attempt_source="launch-env", map_path="/held/producer/map")}}]}
 
 
-def test_held_producer_context_authenticates_and_joins(installed_client_sdk, tmp_path):
+def test_held_producer_context_authenticates_and_joins(
+        installed_client_sdk, tmp_path, monkeypatch, capsys):
     """Read the held attempt through the installed SDK5; never rerun it.
 
     The test depends on the fleet queue retaining the held attempt's terminal
@@ -139,13 +140,15 @@ def test_held_producer_context_authenticates_and_joins(installed_client_sdk, tmp
     # sealed request bytes — not params.command asserted alone.
     installed_client_sdk.bind_standard_capture_command(result["request"])
     # The consumer delivery join accepts the genuine context identity and
-    # then stops at the sealed helper-tree check: the held c437 helper is
-    # not the installed SDK5 tree, and the real on-disk digests cannot agree
-    # with this control's placeholders. That named refusal is the boundary.
+    # then stops at the sealed helper-tree check in certified mode: the held
+    # c437 helper is not the installed SDK5 tree, and the real on-disk digests
+    # cannot agree with this control's placeholders. That named refusal is the
+    # boundary.
     claim = {key: context[key] for key in ("queue_root", "action_key", "nonce",
                                            "scope_id", "worker", "host",
                                            "incarnation", "helper_root")}
     authority = _producer_authority(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     with pytest.raises(RuntimeError, match="selected reader actual complete helper tree"):
         sg._require_original_reader_producer(
             _claim_receipt(claim), authority, result, authority["runtime"])
@@ -156,3 +159,19 @@ def test_held_producer_context_authenticates_and_joins(installed_client_sdk, tmp
         with pytest.raises(RuntimeError, match="actual reader delivery selected producer"):
             sg._require_original_reader_producer(
                 _claim_receipt(foreign), authority, result, authority["runtime"])
+    # CEO D32: dev mode hashes no helper tree to seal a run. The same genuine
+    # context completes the join with one `not computed` stamp, and a foreign
+    # producer axis is stamped instead of refused.
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    capsys.readouterr()
+    assert sg._require_original_reader_producer(
+        _claim_receipt(claim), authority, result, authority["runtime"]) is None
+    out = capsys.readouterr().out
+    assert out.count("[DEV-MODE]") == 1
+    assert "seal selected reader actual complete helper tree not computed" in out
+    foreign = dict(claim, nonce="f" * 32)
+    assert sg._require_original_reader_producer(
+        _claim_receipt(foreign), authority, result, authority["runtime"]) is None
+    out = capsys.readouterr().out
+    assert "seal actual reader delivery selected producer differs at nonce" in out
+    assert "seal selected reader actual complete helper tree not computed" in out

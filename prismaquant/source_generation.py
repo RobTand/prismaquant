@@ -20,16 +20,22 @@ import re
 from typing import TypedDict
 
 from .schemas import Contract, strict_json_loads
+from .dev_mode import NOT_COMPUTED, dev_mode_enabled
 from .digests import (
     DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, canonical_json_sha256, is_sha256hex,
 )
-from .stage_inputs import read_bound, require_source_identity, same
+from .stage_inputs import read_bound, recorded_same, require_source_identity, same
 from .memory_management import reserve_allocation
 
 
 _contract = Contract(RuntimeError, 'original generation: ')
 _require = _contract.require
+#: A correctness join: two things that must agree to be comparable. It refuses in every mode.
 _same = partial(same, contract=_contract)
+#: A D32 seal: a producer run's record against the identity selected for it.
+#: Certified mode (PRISMAQUANT_DEV_MODE=0) refuses as ``_same`` does; dev mode
+#: prints one [DEV-MODE] line and continues with the stored record.
+_recorded_same = partial(recorded_same, contract=_contract, where='original source qualification')
 
 
 _GIT_OBJECT_ID = re.compile(r'[0-9a-f]{40}\Z')
@@ -945,7 +951,8 @@ def _require_original_qualified_source(row, request, accepted, target_runtime):
     family = accepted.get(row['node_id'])
     _require(family is not None, 'qualified member lacks independently selected source-family acceptance')
     _same(row['compatibility'], family['compatibility'], 'original source-family proof binding')
-    _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
+    _recorded_same(row['source_snapshot'], family['old_source'],
+                   'original executed member source is not restamped')
     _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
           'qualified member actual target source implementation')
     _same(family['target_runtime_sha256'], canonical_json_sha256(target_runtime, where='actual original target runtime'),
@@ -962,6 +969,14 @@ def _require_original_reader_target(reader_authority, authority):
     for key in ('schema', 'scope', 'publisher', 'producer', 'source_paths', 'readset',
                 'calibration', 'source_model_identity', 'source_execution'):
         _same(reader_authority[key], authority[key], f'qualified reader target {key}')
+
+
+def _helper_tree(helper_root):
+    """The package and complete tree digests of the helper generation on disk."""
+    from .production_weight_cache import _production_cache_source_sha256
+
+    return {'package_sha256': _production_cache_source_sha256(helper_root / 'src' / 'prismabuild'),
+            'helper_tree_sha256': _production_cache_source_sha256(helper_root)}
 
 
 def _require_original_reader_producer(receipt, reader_authority, result, expected_runtime_input):
@@ -990,25 +1005,28 @@ def _require_original_reader_producer(receipt, reader_authority, result, expecte
     runtime = _validate_original_source_runtime(runtime, expected_runtime, sdk_version=expected_pb['sdk_version'])
     _same(runtime['config'], reader_authority['source_model_identity']['config'],
           'selected reader runtime source config')
-    _same(runtime['prismabuild']['helper_root'], context['helper_root'], 'selected reader actual helper root')
+    # From here on the reader's record of its producer run meets the identity
+    # the SDK selected for it: D32 seals, stamped in dev mode.
+    _recorded_same(runtime['prismabuild']['helper_root'], context['helper_root'],
+                   'selected reader actual helper root')
     helper_root = Path(context['helper_root'])
-    _same(runtime['prismabuild']['runtime_generation'], helper_root.name, 'selected reader actual helper generation')
+    _recorded_same(runtime['prismabuild']['runtime_generation'], helper_root.name,
+                   'selected reader actual helper generation')
     _, resources = _control(reader_authority['resources'], 'selected reader observed resources')
     resources = _resources(resources)
-    _same(resources['claim_demand'], context['resources'], 'selected reader actual producer reservation')
+    _recorded_same(resources['claim_demand'], context['resources'],
+                   'selected reader actual producer reservation')
     identity_keys = ('queue_root', 'action_key', 'nonce', 'scope_id', 'worker', 'host',
                      'incarnation', 'helper_root')
     for row in receipt['deliveries']:
         claim = row['native_delivery']['claim']
-        _same({key: claim[key] for key in identity_keys},
-              {key: context[key] for key in identity_keys}, 'actual reader delivery selected producer')
-        _same(claim['attempt_source'], 'launch-env', 'actual reader delivery launch provenance')
-    from .production_weight_cache import _production_cache_source_sha256
+        _recorded_same({key: claim[key] for key in identity_keys},
+                       {key: context[key] for key in identity_keys},
+                       'actual reader delivery selected producer')
+        _recorded_same(claim['attempt_source'], 'launch-env', 'actual reader delivery launch provenance')
+    _recorded_same(NOT_COMPUTED if dev_mode_enabled() else _helper_tree(helper_root),
+                   runtime['prismabuild']['source_tree'], 'selected reader actual complete helper tree')
 
-    _same(runtime['prismabuild']['source_tree'], {
-        'package_sha256': _production_cache_source_sha256(helper_root / 'src' / 'prismabuild'),
-        'helper_tree_sha256': _production_cache_source_sha256(helper_root),
-    }, 'selected reader actual complete helper tree')
 
 
 _CUDA_CASES = frozenset({

@@ -1796,6 +1796,27 @@ which holds PrismaBuild `027103d9` and Tessera `fca4c6ce`. The guard passes in
 PB action `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`.
 PB #1485 still owns the portable Python 3.12 pack.
 
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455, CEO D32): the Original reader
+qualification (`source_generation._require_original_reader_producer` and
+`_require_original_qualified_source`) splits its joins by kind. A seal compares
+the reader's record of its producer run with the identity the SDK selected. A
+correctness join checks that two things are comparable. The seals go through
+`dev_mode.seal_check` (`source_generation._recorded_same`): the reader runtime's
+helper root and generation, the producer reservation, every native delivery
+claim and its launch label, the complete helper-tree digests, and the restamp
+join of the unchanged-family owner. Certified mode (`PRISMAQUANT_DEV_MODE=0`)
+refuses each seal with its earlier message. Default dev mode prints one
+`[DEV-MODE]` line per mismatch and continues. Dev mode computes no helper-tree
+digest: it passes `NOT_COMPUTED` and stamps it beside the recorded tree. The
+reader's target (publisher, producer, source paths, readset, calibration,
+source model, dispatch), the model config, the SDK answer's own mirrors, the
+exact SDK policy and the target source and runtime refuse in both modes. The
+strict result request still passes `require_native_producer_context=True`, and
+the SDK refuses a result without a native producer context in both modes.
+`tests/test_no_new_seals.py` counts the two kinds of join in each function.
+Tests: `tests/test_original_source_admission.py` and
+`tests/test_held_producer_sdk5_smoke_2152.py`.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready
