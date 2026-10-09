@@ -123,5 +123,8 @@ def test_pb_charges_cache_gib_plus_each_scratch_reservation():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     runner = importlib.import_module("tools.tessera_campaign_container")
     cache_gib = fixture_mod.FIXTURE["pb_cache_gib"]
-    declared = {runner.CONTAINER_CACHE_SCRATCH_ENV[1]: str(cache_gib * (1 << 30))}
+    names = runner.CONTAINER_CACHE_SCRATCH_ENV
+    root = "/pq-fixture-cache-charge-1091/compile"
+    declared = {names[0]: root, names[1]: str(cache_gib * (1 << 30)),
+                runner.LOCAL_SCRATCH_PAIRS_ENV: f"{names[0]}:{names[1]}"}
     assert scratch_terms(declared) == {"spool_gb": cache_gib}
