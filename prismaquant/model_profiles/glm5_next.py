@@ -175,7 +175,7 @@ from __future__ import annotations
 
 import re
 
-from .base import ModelProfile
+from .base import ModelProfile, _read_config_alias_with_fallback
 
 # Body-indexed nextn/MTP block. transformers refuses these keys
 # (modeling_glm5_next.py:1359), so the skeleton has no home for them.
@@ -193,6 +193,30 @@ _HC_ATTN_RE = re.compile(r"\.hc_attn_(fn|base|scale)$")
 _HC_FFN_RE = re.compile(r"\.hc_ffn_(fn|base|scale)$")
 
 _VISUAL_PREFIX = "model.visual."
+
+# Exact consumer contract of the running GLM measurement (D50 item 3).
+# These are the values the measurement uses today. Keep them unchanged
+# while those runs finish. Calibration rows and teacher payloads stay
+# explicit inputs; this states prefix, vocab, scored, token and
+# prefix-row handling only.
+_GLM_PACT_COHORT = {
+    "sample_range": (384, 448),
+    "raw_tokens_per_sequence": 512,
+    "prefix_ids": (154822, 154824),
+    "local_prefix_rows": "excluded",
+    "input_contract": "prefixed_514",
+    "global_original_tokens": 32768,
+    "scored_positions_per_sequence": 511,
+    "vocab_size": 154880,
+}
+
+
+def _config_entry(config, name):
+    """First present config value. Walk nested text_config."""
+    from .base import _read_config_value
+
+    return _read_config_value(config, name)
+
 
 # KDA leaves whose fused owner comes from the lane config-gated rule.
 # The lane reads the declared checkpoint config to mark KDA layers. A name
@@ -253,6 +277,58 @@ class Glm5NextProfile(ModelProfile):
         # internal name must come from the spec, not from an assumption.
         # DSv4 and hy_v3 both sit in exactly this state.
         return None
+    # ------------------------------------------------------------
+    # PACT scope (issue 2427)
+    # ------------------------------------------------------------
+    def pact_layer_count(self, config: dict | None) -> int | None:
+        """Decoder layer count for the running GLM measurement.
+
+        Explicit config wins, then the declared detection config.
+        A config that states neither raises: the draft range is
+        not guessed.
+        """
+        count = super().pact_layer_count(config)
+        if count is not None:
+            return count
+        raise ValueError(
+            "glm5_next: no config states num_hidden_layers; "
+            "the PACT layer count cannot be derived"
+        )
+
+
+    def pact_cohort_values(self, config: dict | None) -> dict:
+        """Measured-consumer cohort for the running GLM measurement.
+
+        Returns the exact prefix ids, vocab, scored positions,
+        raw tokens, prefix-row exclusion and input contract the
+        measurement uses. Calibration rows and teacher payloads
+        stay explicit inputs: this states the consumer contract
+        only. An explicit config value wins over the declared
+        detection config; anything unstated keeps the exact
+        running value.
+        """
+        declared = self._declared_config
+        values = dict(_GLM_PACT_COHORT)
+        prefix = _read_config_alias_with_fallback(
+            config, declared, "prefix_ids", "serving_prefix_ids"
+        )
+        if prefix is not None:
+            values["prefix_ids"] = prefix
+        for key in (
+            "vocab_size",
+            "scored_positions_per_sequence",
+            "raw_tokens_per_sequence",
+        ):
+            explicit = _config_entry(config, key)
+            if explicit is not None:
+                values[key] = explicit
+                continue
+            stated = _config_entry(declared, key)
+            if stated is not None:
+                values[key] = stated
+        values["prefix_ids"] = list(values["prefix_ids"])
+        return values
+
 
     @staticmethod
     def _fused_ownership_lane():

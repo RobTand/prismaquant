@@ -632,8 +632,25 @@ def _launch_refusal(table: EligibilityTable, scope: ShapeTableScope, *, structur
             continue
         # Ask the one lane decision about THIS launch only: a cell that names
         # a compact and a fused launch together is otherwise decided by
-        # whichever lane it lists first.
-        admits, why = cell_lane_admits(replace(cell, executes=(lane.as_pair(),)), rate, table.lanes)
+        # whichever lane it lists first. The scope travels with the pair: a
+        # v12 launch covers only the census rungs its own scope names, so a
+        # row at another rung of the same cell is not this launch.
+        index = cell.executes.index(lane.as_pair())
+        if not cell.launch_covers_rate(index, rate):
+            reasons.append(
+                f"cell {cell.id!r} names launch {lane.as_pair()} outside rung "
+                f"{rate}: the launch covers only its own rungs_q256 scope")
+            continue
+        scopes = tuple(getattr(cell, "launch_rungs_q256", ()) or ())
+        scope = scopes[index] if index < len(scopes) else None
+        narrowed = replace(
+            cell, executes=(lane.as_pair(),),
+            launch_rungs_q256=(scope,),
+            launch_covered_rungs_q256=(
+                (cell.launch_covered_rungs_q256[index],)
+                if index < len(tuple(getattr(
+                    cell, "launch_covered_rungs_q256", ()) or ())) else (None,)))
+        admits, why = cell_lane_admits(narrowed, rate, table.lanes)
         if admits:
             return cell.id, None
         reasons.append(why)

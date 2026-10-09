@@ -166,6 +166,7 @@ from .digests import file_sha256hex
 #: same wire format published by the retired Gridbook codebook lane. That lane
 #: was removed with Rob's decision to put Tessera in PrismaQuant and remove
 #: Gridbook; see ``archive/gridbook_lane_2026-09-02/README.md``.
+LANE_ELIGIBILITY_SCHEMA_TESSERA_V12 = "tessera.lane-eligibility.v12"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V11 = "tessera.lane-eligibility.v11"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V10 = "tessera.lane-eligibility.v10"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V9 = "tessera.lane-eligibility.v9"
@@ -191,6 +192,7 @@ LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
 #: widened the PLATFORM entry and left every cell byte-identical, which is
 #: why it belongs in this set and in each evidence set below.
 SCOPED_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V5,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
@@ -207,6 +209,7 @@ SCOPED_LANE_SCHEMAS = frozenset({
 #: set and not an ``== V6`` so that the NEXT bump cannot silently demote the
 #: grammar it succeeds to "publishes no evidence".
 EVIDENCE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
@@ -215,6 +218,7 @@ EVIDENCE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ATTRIBUTED_SMOKE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
@@ -222,6 +226,7 @@ ATTRIBUTED_SMOKE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
@@ -237,6 +242,7 @@ ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
 #: record too -- a set v10 were missing from would read an attested cell as
 #: one that publishes no evidence.
 RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
@@ -251,6 +257,7 @@ RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
 #: measured platform fact principle 9's carve-out turns on, and the reason
 #: this bump is not additive.
 PLATFORM_AXIS_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
@@ -284,6 +291,7 @@ PLATFORM_EXECUTES_UNSTATED = "unstated"
 #: repository was not handed, and an unlisted version is not treated as a
 #: subset of either supported grammar (see ``_parse_table``).
 LANE_ELIGIBILITY_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
@@ -302,6 +310,13 @@ TESSERA_EXECUTION_MODES = frozenset({"eager", "compiled"})
 _LAUNCH_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V4,
 } | SCOPED_LANE_SCHEMAS)
+#: The schemas whose cells derive rule coverage from an ``allowable_rungs``
+#: window rule (v11) and keep that coverage beside the census rungs. v12
+#: inherits the rule and adds per-launch census scopes beside it.
+_RULE_COVERAGE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V12,
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
+})
 _DIGEST_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9._/-]*[a-z0-9]@sha256:[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -1690,6 +1705,32 @@ def lane_claims_for_cell(cell: Any, lanes: Sequence[LaneClaim]
                  if claim.requires is not None and claim.decoder in decoders)
 
 
+class _ExecutesView:
+    """A cell narrowed to the launches one rung keeps, for lane claims."""
+
+    __slots__ = ("_cell", "executes")
+
+    def __init__(self, cell: Any, executes: tuple[tuple[str, str], ...]) -> None:
+        self._cell = cell
+        self.executes = executes
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cell, name)
+
+
+def _launch_covers(cell: Any, index: int, rate_q256: int) -> bool:
+    """Whether the launch at ``executes[index]`` covers ``rate_q256``."""
+    covers = getattr(cell, "launch_covers_rate", None)
+    if callable(covers):
+        return bool(covers(index, rate_q256))
+    scopes = tuple(getattr(cell, "launch_rungs_q256", ()) or ())
+    scope = scopes[index] if index < len(scopes) else None
+    if scope is None:
+        covers_rate = getattr(cell, "covers_rate", None)
+        return bool(covers_rate(rate_q256)) if callable(covers_rate) else True
+    return rate_q256 in scope
+
+
 def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
                        ) -> tuple[bool, str, tuple[tuple[str, str], ...]]:
     """The launches a cell makes for THIS producer's plan at one rung.
@@ -1699,12 +1740,15 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
     derives it that way (``contract._validate_cell_executes`` narrows
     ``scheme.route_launches`` by the lanes each rung reaches), and a launch
     through a lane happens only at a rung that lane's published predicate
-    admits.  So at one rung the cell launches through every lane-free decoder
-    it names and through each lane whose predicate this producer's planned
-    wire satisfies; a launch through a lane that refuses the plan is not made
-    there.  The cell admits the unit when at least one launch is left, and
-    ``launches`` is that set -- what the serve runs for these bytes, which a
-    route record stamps instead of the union.
+    admits. Under lane schema v12 a launch with its own ``rungs_q256`` scope
+    joins only at a rung that scope covers; a launch without one keeps the
+    scope of its cell. So at one rung the cell launches through every
+    in-scope lane-free decoder it names and through each in-scope lane whose
+    predicate this producer's planned wire satisfies; a launch through a lane
+    that refuses the plan is not made there. The cell admits the unit when
+    at least one launch is left, and ``launches`` is that set -- what the
+    serve runs for these bytes, which a route record stamps instead of the
+    union.
 
     Until contract v41 every lane-gated cell launched ONLY through its lane,
     so a refusing lane left nothing and the cell refused; that case still
@@ -1745,7 +1789,23 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
     without a rung, is refused with the reason, never passed.
     """
     executes = tuple(getattr(cell, "executes", ()))
-    claims = lane_claims_for_cell(cell, lanes)
+    scopes = tuple(getattr(cell, "launch_rungs_q256", ()) or ())
+    if scopes and len(scopes) != len(executes):
+        raise LaneEligibilityError(
+            f"cell {getattr(cell, 'id', getattr(cell, 'cell_id', '?'))!r} names "
+            f"{len(executes)} launches and {len(scopes)} launch scopes; the "
+            "two move together or the scope is unreadable")
+    if rate_q256 is not None and scopes:
+        executes = tuple(
+            pair for index, pair in enumerate(executes)
+            if _launch_covers(cell, index, int(rate_q256)))
+        if not executes:
+            scoped_id = getattr(cell, "id", getattr(cell, "cell_id", "?"))
+            return False, (
+                f"cell {scoped_id!r} names no launch covering rung {rate_q256}; "
+                "its launches each cover only the census rungs their "
+                "rungs_q256 scope names"), ()
+    claims = lane_claims_for_cell(_ExecutesView(cell, executes), lanes)
     if not claims:
         return True, "", executes
     cell_id = getattr(cell, "id", getattr(cell, "cell_id", "?"))
@@ -1922,6 +1982,32 @@ def _cell_rule_coverage(payload: Mapping[str, Any],
     return tuple(want), covered
 
 
+def _launch_rule_coverage(
+    scopes: tuple[tuple[int, ...] | None, ...],
+    allowable: Mapping[int, tuple[int, ...]] | None,
+    covered: tuple[int, ...],
+) -> tuple[tuple[int, ...] | None, ...]:
+    """Per-launch derived rule coverage, in ``executes`` order.
+
+    Each scoped launch covers the allowable run-table rungs its census rungs
+    derive: a rung the cell's rule covers whose run table is one of the
+    launch's census tables. An unscoped launch carries ``None`` and keeps
+    the cell's own coverage. Without a rule (no ``allowable`` map) every
+    scoped launch carries ``()``: census rungs alone decide.
+    """
+    if allowable is None:
+        return tuple(None if scope is None else () for scope in scopes)
+    covered_tables = {q: allowable[q] for q in covered if q in allowable}
+    out: list[tuple[int, ...] | None] = []
+    for scope in scopes:
+        if scope is None:
+            out.append(None)
+            continue
+        want = {allowable[q] for q in scope if q in allowable}
+        out.append(tuple(q for q in covered
+                         if covered_tables.get(q) in want and q not in scope))
+    return tuple(out)
+
 
 @dataclass(frozen=True)
 class EligibilityCell:
@@ -1965,7 +2051,16 @@ class EligibilityCell:
     is_trellis: bool = False
     #: v4's published launches, retained as pairs rather than inferred from IDs.
     executes: tuple[tuple[str, str], ...] = ()
-    #: Parsed from the v4 cell's explicit TESSERA_SERVE_MODE flag.
+    #: v12's per-launch census scope, in ``executes`` order. Each entry is the
+    #: launch's ``rungs_q256`` tuple, or ``None`` when the launch names none
+    #: and keeps the scope of its cell. An empty tuple never appears: the
+    #: parser refuses an empty list, so ``()`` cannot mean "no scope".
+    launch_rungs_q256: tuple[tuple[int, ...] | None, ...] = ()
+    #: v12's per-launch derived rule coverage, in ``executes`` order. Each
+    #: entry holds the allowable run-table rungs the launch's census rungs
+    #: derive, or ``None`` when the launch names no scope. Evaluated once at
+    #: parse beside the cell's own coverage, from the same rule.
+    launch_covered_rungs_q256: tuple[tuple[int, ...] | None, ...] = ()
     residency_modes: tuple[str, ...] = ()
     runtime_image: str = ""
     execution_modes: tuple[str, ...] = ()
@@ -2000,6 +2095,7 @@ class EligibilityCell:
         residency_modes: Sequence[str] = (),
         covered_rungs_q256: tuple[int, ...] = (),
         run_tables: tuple[tuple[int, ...], ...] | None = None,
+        allowable: Mapping[int, tuple[int, ...]] | None = None,
     ) -> "EligibilityCell":
         if not isinstance(payload, Mapping):
             raise LaneEligibilityError(f"{where} must be a JSON object")
@@ -2030,7 +2126,7 @@ class EligibilityCell:
         if has_evidence:
             required.add("evidence")
         _require_keys(payload, where, required=required,
-                      optional=({"run_tables"} if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+                      optional=({"run_tables"} if schema in _RULE_COVERAGE_SCHEMAS
                                 else set()) if is_v4 else {"requires_plugin"})
 
         status = str(payload["route_status"])
@@ -2078,10 +2174,12 @@ class EligibilityCell:
                 f"meaningful on a cell whose route is one of "
                 f"{sorted(LANE_ROUTE_STATUSES)}")
         executes: tuple[tuple[str, str], ...] = ()
+        launch_scopes: tuple[tuple[int, ...] | None, ...] = ()
         cell_modes: tuple[str, ...] = ()
         if is_v4:
-            executes, cell_modes = parse_v4_cell_contract(
-                payload, where, residency_modes=residency_modes)
+            executes, launch_scopes, cell_modes = parse_v4_cell_contract(
+                payload, where, residency_modes=residency_modes, schema=schema,
+                cell_rungs=rungs)
         runtime_image = ""
         execution_modes: tuple[str, ...] = ()
         runtime_vllm = ""
@@ -2128,6 +2226,9 @@ class EligibilityCell:
             predicates=_parse_predicates(payload["predicates"], where),
             is_trellis=is_trellis,
             executes=executes,
+            launch_rungs_q256=launch_scopes,
+            launch_covered_rungs_q256=_launch_rule_coverage(
+                launch_scopes, allowable, covered_rungs_q256),
             residency_modes=cell_modes,
             runtime_image=runtime_image,
             execution_modes=execution_modes,
@@ -2140,6 +2241,24 @@ class EligibilityCell:
             run_tables=run_tables,
             runtime_kernel_build=parse_kernel_build(payload.get("runtime", {}), where),
         )
+
+    def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
+        """Whether the launch at ``executes[index]`` covers ``rate_q256``.
+
+        A launch without a v12 ``rungs_q256`` scope keeps the scope of its
+        cell. A scoped launch covers its census rungs plus the allowable
+        run-table rungs those rungs derive, evaluated once at parse beside
+        the cell's own coverage, so both halves narrow together.
+        """
+        scopes = tuple(getattr(self, "launch_rungs_q256", ()) or ())
+        scope = scopes[index] if index < len(scopes) else None
+        if scope is None:
+            return self.covers_rate(rate_q256)
+        if rate_q256 in scope:
+            return True
+        covered = tuple(getattr(self, "launch_covered_rungs_q256", ()) or ())
+        scope_covered = covered[index] if index < len(covered) else None
+        return scope_covered is not None and rate_q256 in scope_covered
 
     def covers_rate(self, rate_q256: int) -> bool:
         return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
@@ -2189,9 +2308,13 @@ class EligibilityCell:
             # is byte-identical to what it was before this key existed.
             payload["requires_plugin"] = self.requires_plugin
         if self.executes:
+            scopes = tuple(getattr(self, "launch_rungs_q256", ()) or ())
             payload["executes"] = [
-                {"symbol": symbol, "decoder": decoder}
-                for symbol, decoder in self.executes
+                ({"symbol": symbol, "decoder": decoder}
+                 if index >= len(scopes) or scopes[index] is None
+                 else {"symbol": symbol, "decoder": decoder,
+                       "rungs_q256": list(scopes[index])})
+                for index, (symbol, decoder) in enumerate(self.executes)
             ]
         if self.runtime_image:
             payload["runtime"] = {
@@ -3192,7 +3315,7 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
     format_by_family = {str(e["family"]): e for e in formats}
     allowable = ({family: _allowable_rung_tables(entry, f"formats[{family}]")
                   for family, entry in format_by_family.items()}
-                 if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11 else {})
+                 if schema in _RULE_COVERAGE_SCHEMAS else {})
 
     cells_block = block["cells"]
     if not isinstance(cells_block, Sequence) or isinstance(
@@ -3203,13 +3326,14 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
         at = f"{where}.cells[{i}]"
         family = str(cell.get("family", "")) if isinstance(cell, Mapping) else ""
         tables, covered = (None, ())
-        if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11:
+        if schema in _RULE_COVERAGE_SCHEMAS:
             tables, covered = _cell_rule_coverage(
                 cell, allowable.get(family, {}), at)
         cells.append(EligibilityCell.from_dict(
             cell, at, trellis_families=trellis_families, schema=schema,
             residency_modes=family_modes.get(family, ()),
-            covered_rungs_q256=covered, run_tables=tables))
+            covered_rungs_q256=covered, run_tables=tables,
+            allowable=allowable.get(family)))
     cells = tuple(cells)
 
     for cell in cells:
@@ -3457,29 +3581,41 @@ def parse_v4_cell_contract(
     where: str,
     *,
     residency_modes: Sequence[str],
-) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+    schema: str = LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3,
+    cell_rungs: tuple[int, ...] = (),
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[int, ...] | None, ...], tuple[str, ...]]:
     """Parse the v4 launch set and residency selector, without runtime imports.
 
     The runtime owns whether a launch is correct for its route. This consumer
     verifies the published grammar and preserves that claim; it never derives
     a launch from a family name or a cell ID.
+
+    Under lane schema v12 a launch may name ``rungs_q256``: the sorted census
+    rungs it covers. A launch without the key keeps the scope of its cell.
+    Under every earlier schema the key is refused, because a reader that
+    accepted it and ignored its meaning would read a scoped launch at every
+    rung of its cell.
     """
     raw_executes = payload.get("executes")
     if not isinstance(raw_executes, list) or not raw_executes:
         raise LaneEligibilityError(
             f"{where}.executes must be a non-empty JSON array of "
             "{symbol, decoder} objects")
+    scoped_schema = schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V12
     launches: list[tuple[str, str]] = []
+    scopes: list[tuple[int, ...] | None] = []
     for i, launch in enumerate(raw_executes):
         spot = f"{where}.executes[{i}]"
         if not isinstance(launch, Mapping):
             raise LaneEligibilityError(f"{spot} must be a JSON object")
-        _require_keys(launch, spot, required={"symbol", "decoder"}, optional=set())
+        _require_keys(launch, spot, required={"symbol", "decoder"},
+                      optional={"rungs_q256"} if scoped_schema else set())
         if any(not isinstance(launch[key], str) or not launch[key].strip()
                for key in ("symbol", "decoder")):
             raise LaneEligibilityError(
                 f"{spot}.symbol and decoder must be non-empty strings")
         launches.append((launch["symbol"], launch["decoder"]))
+        scopes.append(_parse_launch_rungs(launch, spot, cell_rungs, scoped_schema))
     if len(set(launches)) != len(launches):
         raise LaneEligibilityError(
             f"{where}.executes must not repeat a (symbol, decoder) pair")
@@ -3505,8 +3641,53 @@ def parse_v4_cell_contract(
         raise LaneEligibilityError(
             f"{where}.requires_serve_flags residency {list(modes)} exceeds "
             f"the family's published residency_modes {list(residency_modes)}")
-    return tuple(launches), modes
+    return tuple(launches), tuple(scopes), modes
 
+def _parse_launch_rungs(launch: Mapping[str, Any], spot: str,
+                        cell_rungs: tuple[int, ...], scoped_schema: bool,
+                        ) -> tuple[int, ...] | None:
+    """One launch's ``rungs_q256`` scope, or ``None`` for the cell's scope.
+
+    Under lane schema v12 the key is optional: absent means the launch covers
+    the full scope of its cell. Present means a sorted, non-empty list of
+    unique integer census rungs inside the cell's own rung list. The checks
+    are strict by design: an empty, unsorted, duplicated, non-integer or
+    out-of-cell list would silently narrow or widen the launch, and a reader
+    that normalized it instead of refusing would read a different scope than
+    the publisher attested. Under every earlier schema any key is refused.
+    """
+    if "rungs_q256" not in launch:
+        return None
+    if not scoped_schema:
+        raise LaneEligibilityError(
+            f"{spot}.rungs_q256 names a per-launch scope, but this table's "
+            "lane schema publishes no per-launch scope; a scoped launch read "
+            "under an earlier grammar would run at every rung of its cell")
+    raw = launch["rungs_q256"]
+    if not isinstance(raw, list) or isinstance(raw, (str, bytes)):
+        raise LaneEligibilityError(f"{spot}.rungs_q256 must be a JSON array")
+    if not raw:
+        raise LaneEligibilityError(
+            f"{spot}.rungs_q256 must name at least one rung; an empty launch "
+            "scope covers nothing and would silently drop its launch")
+    out: list[int] = []
+    for i, item in enumerate(raw):
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise LaneEligibilityError(
+                f"{spot}.rungs_q256[{i}] must be an integer rung, got {item!r}")
+        out.append(int(item))
+    if len(set(out)) != len(out):
+        raise LaneEligibilityError(f"{spot}.rungs_q256 must not repeat a rung")
+    if out != sorted(out):
+        raise LaneEligibilityError(
+            f"{spot}.rungs_q256 must list its rungs in ascending order")
+    outside = sorted(set(out) - set(cell_rungs))
+    if outside:
+        raise LaneEligibilityError(
+            f"{spot}.rungs_q256 names {outside}, which this cell's own "
+            f"rungs_q256 {sorted(cell_rungs)} does not publish; a launch "
+            "covers rungs of its cell, never rungs beside them")
+    return tuple(out)
 
 def _parse_rungs(payload: Any, where: str) -> tuple[int, ...]:
     if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
@@ -3621,6 +3802,7 @@ __all__ = [
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_V7",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_V8",
     "LANE_ELIGIBILITY_SCHEMA_TESSERA_V9",
+    "LANE_ELIGIBILITY_SCHEMA_TESSERA_V12",
     "LANE_ELIGIBILITY_SCHEMAS",
     "LANE_BODIES",
     "LANE_FIELDS",
