@@ -23770,7 +23770,9 @@ unit scope/shapes, prefix and batch counts still compare strictly. Completed
 initialization witnesses must retain valid observed grammar and coverage; their
 recorded-versus-running identity uses the existing dev-mode stamp at join and
 finish. Actual unit tensor geometry, counts and own-byte checks remain hard.
-Certified mode retains identity refusals.
+Certified mode retains identity refusals. The entry's `--mode preflight` runs a
+tiny two-layer GLM control on `--device` (default `cpu`); on `cuda` the quanta
+forward and accumulate on the GPU, which a CUDA-gated test pins.
 `plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default

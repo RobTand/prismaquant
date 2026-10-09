@@ -34,6 +34,8 @@
   and prints one `research_quantum_replay` line that names the changed fields.
   Historical census counts/maxima use D32 stamps with explicit deltas; actual
   routing, per-role projection agreement and tokens-times-top-k stay hard checks.
+  `--mode preflight --device cuda` runs its toy control on the GPU; a CUDA-gated
+  test pins that the quanta forward and accumulate on the device.
 
 - **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
   version metadata does not reapply an identity seal after source admission.

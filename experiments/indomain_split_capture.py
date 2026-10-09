@@ -23,9 +23,10 @@ One runnable experiment entry with four modes over ONE capture root:
   NOT call the automatic ``chain.join``: no ordinary capture manifest is
   published and no provider qualification is claimed.
 * ``preflight``-- small real-metadata reads with no GPU, then the actual
-  tiny one-layer GLM CPU control end-to-end (census -> prep -> quantum ->
+  tiny two-layer GLM control end-to-end (census -> prep -> quantum ->
   join) through the existing toy helpers, demonstrating split roles, full
-  counts and boundary forward.
+  counts and boundary forward. The control runs on ``--device`` (default
+  ``cpu``); ``--device cuda`` forwards and accumulates the quanta on the GPU.
 
 Authorization: CEO decision dec-1006-042211-25de option 1 -- explicitly
 owner-recorded (``record_capture_source``) Stage-1 RESEARCH capture only.
@@ -1031,9 +1032,17 @@ def verified_roles_carry_counts(fragment) -> bool:
         for record in units.values())
 
 
-def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1) -> dict:
-    """The actual tiny one-layer GLM CPU control: census, prep, quantum, join."""
+def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1, device="cpu") -> dict:
+    """The actual tiny GLM control on ``device``: census, prep, quantum, join.
+
+    Both devices use the torch reference attention kernels, so the control
+    isolates the capture path from the device rather than from the kernels.
+    """
     import pytest
+    if device not in ("cpu", "cuda"):
+        raise ResearchRefused(f"the toy control runs on cpu or cuda, not {device!r}")
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ResearchRefused("the toy control was asked for cuda and this process sees none")
     tests = ROOT / "tests"
     if str(tests) not in sys.path:
         sys.path.insert(0, str(tests))
@@ -1120,7 +1129,7 @@ def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1
                 corpus_text=str(corpus), model=str(source),
                 source_snapshot_root=None, total_samples=4, fit_stop=2,
                 max_prefix_rows=4, max_act_rows=7,
-                attention_implementation="eager", device="cpu",
+                attention_implementation="eager", device=device,
                 cache_dir=str(directory / "quantum-cache"),
                 streaming_cache_slots=2, streaming_prefetch_workers=1,
                 streaming_cache_headroom_gb=0.0, **extra)
@@ -1162,7 +1171,7 @@ def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1
 
 
 def mode_preflight(args, guard) -> dict:
-    """Real metadata reads with no GPU, then the tiny CPU control."""
+    """Real metadata reads with no GPU, then the tiny control on ``--device``."""
     guard("research preflight startup")
     result = {"metadata": None, "toy": None}
     from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV, producer_plan_tool
@@ -1177,7 +1186,7 @@ def mode_preflight(args, guard) -> dict:
         print(json.dumps({"research_preflight_metadata":
                               "skipped: not all real inputs were given"}), flush=True)
     with tempfile.TemporaryDirectory(prefix="indomain-split-preflight-") as tmp:
-        result["toy"] = _toy_control_preflight(Path(tmp), guard, layers=2)
+        result["toy"] = _toy_control_preflight(Path(tmp), guard, layers=2, device=args.device)
     print(json.dumps({"research_preflight": result}), flush=True)
     return result
 

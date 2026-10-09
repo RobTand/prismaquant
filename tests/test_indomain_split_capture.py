@@ -105,6 +105,43 @@ def test_prepared_multi_layer_range_drains_each_layers_moments(tmp_path, monkeyp
     assert finished == [{0}, {1}]
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA; certifies nothing when skipped")
+def test_prepared_multi_layer_range_forwards_and_accumulates_on_the_cuda_device(tmp_path, monkeypatch):
+    """The CUDA control: a silent CPU fallback fails here, and the roles still publish as CPU float32."""
+    built, accumulated = [], set()
+    real_build, real_consume = capture.build_streamed_causal_lm, capture.DisjointRowMoments.consume
+
+    def build(*args, **kwargs):
+        built.append(kwargs["device"].type)
+        return real_build(*args, **kwargs)
+
+    def consume(self, names, flat):
+        accumulated.add(flat.device.type)
+        return real_consume(self, names, flat)
+
+    monkeypatch.setattr(capture, "build_streamed_causal_lm", build)
+    monkeypatch.setattr(capture.DisjointRowMoments, "consume", consume)
+    capture._toy_control_preflight(tmp_path, lambda _label: None, layers=2, quantum_layers=2, device="cuda")
+    assert built == ["cuda"]
+    assert accumulated == {"cuda"}
+    for layer in range(2):
+        manifest = json.loads((tmp_path / f"capture/layers/L{layer:03d}/manifest.json").read_text())
+        assert manifest["units"]
+        for roles in manifest["units"].values():
+            for role in ("fit", "heldout"):
+                payload = torch.load(tmp_path / "capture" / roles[role]["file"], weights_only=True)
+                assert payload["hessian"].device.type == "cpu"
+                assert payload["hessian"].dtype == torch.float32
+
+
+def test_toy_control_names_its_device_or_refuses(tmp_path, monkeypatch):
+    with pytest.raises(capture.ResearchRefused, match="cpu or cuda"):
+        capture._toy_control_preflight(tmp_path, lambda _label: None, device="mps")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(capture.ResearchRefused, match="sees none"):
+        capture._toy_control_preflight(tmp_path, lambda _label: None, device="cuda")
+
+
 def _resume_args(directory):
     return SimpleNamespace(
         capture_root=str(directory / "capture"), calibration_census=str(directory / "census.json"),
