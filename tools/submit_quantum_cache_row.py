@@ -76,7 +76,7 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "python3", "-m", "tools.tessera_campaign_container",
         "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
         "--",
-        "python3", "-m", "tools.measure_container_cache_quantum_row",
+        "python3", "-u", "-m", "tools.measure_container_cache_quantum_row",
         "--cache-root", cache,
         "--workspace", spill,
         "--out", spill + "/receipt.json",
@@ -106,6 +106,7 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "--priority", "0",
         "--timeout-s", "1500",
         "--container-image", IMAGE,
+        "--progress-phase", "row=600",
     ]
     for key, value in env.items():
         argv += ["--env", f"{key}={value}"]
