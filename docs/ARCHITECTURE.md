@@ -3018,6 +3018,37 @@ and refuses undeclared or inconsistent scope. GLM-5.3-Flash resolves to the exac
 (`glm_paths_identical`). Calibration rows and teacher payloads stay explicit inputs.
 No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_frontier_profile_adapter.py`.
 
+The CPU evidence uses `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` on x86.
+Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
+Its installed PrismaBuild commit is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
+The `pbtest` dependency guard verifies both Git identities and installed package bytes before pytest.
+The Tessera package supplies `tessera.serving.dense_ownership`; no fallback or test exemption replaces that owner.
+
+Run the affected CPU population with:
+
+```bash
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout /path/to/prismaquant \
+  --python /home/rob/venvs/pq-pin-fca4c6ce0/bin/python \
+  --tag x86 --tmpdir /tmp --shards 4 \
+  --workers-per-shard 1 --threads-per-shard 1 --mem-gb 4 \
+  --timeout-s 600 --wait-s 300 \
+  --pytest-args '["-m", "not integration and not slow"]' \
+  tests/test_pact_frontier_profile_adapter.py tests/test_model_structure.py \
+  tests/test_spec_match_profile.py tests/test_model_profile_conformance.py \
+  tests/test_name_projection.py tests/test_profile_detection_and_calibration.py \
+  tests/test_profile_name_remap_validation.py tests/test_qwen3_profile.py
+```
+
+PB actions `8b6da86ec9b9`, `b69df9dffdfb`, `b8d6a1d78a42`, and `5c2fd3921c9c` pass this population on source `72ebedaf33de`.
+They report 843 passes, 12 skips, one expected failure, and 60 deselected integration or slow cases.
+The skips cover documentation fields and the deliberate absence of a default structure spec.
+The existing expected failure covers an unresolved field-reader ratchet, not PACT.
+The GLM fused-owner case passes; the earlier missing-dependency failure remains in PB `ac0780c27beb`.
+PB `8ca432821282` exercises the public GLM contract with an explicit KDA layer and the installed pin gate.
+It resolves the real fused owner, bands, cohort, hidden layout, and TP split count.
+These CPU results do not qualify model output, serving, or performance.
+
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
