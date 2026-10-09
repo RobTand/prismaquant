@@ -1553,9 +1553,19 @@ EXL3; #1921 is full-gamut PACT work and does not block A8S. CPU regression:
 synthetic contract/cost/source evidence, mixed tower/merger choices, coverage
 refusals, attribution and the uniform control; it is not a GPU measurement.
 
-Re-stamped 2026-10-01 (PQ #1930): the trusted-base `linked issue` metadata
-check keeps native same-repository closing references and also accepts an
-explicit `Refs #N` or `Part of #N` directive to an OPEN same-repository Issue.
+Re-stamped 2026-10-09 (PQ #2518): the trusted-base `linked issue` metadata
+check keeps native same-repository closing references and explicit
+`Refs #N` or `Part of #N` directives to an OPEN same-repository Issue.
+For pull requests created at or after `2026-10-09T17:00:00Z`, the head branch must use
+`prismaquant-<issue>` or `prismaquant-<issue>-<word>`.
+The suffix must match `[a-z0-9][a-z0-9-]*`.
+The branch issue must match a verified same-repository closing reference or an open parent reference.
+The check can match a later parent or an open parent beside a different closing issue.
+Head branches with `ig/` or `release` prefixes retain branch exemptions.
+Earlier pull requests also retain branch exemptions.
+These exemptions do not bypass the issue-link check.
+PrismaBuild action `e0087aafc8cd` passes all 62 behavioral cases on x86.
+Action `4a11ec1d4a68` passes a direct gate smoke and both syntax checks with a simulated GitHub API.
 The parent is fetched from GitHub using query variables; contributor body text
 is data, not code. Closed/cross-repository/non-issue parents, quoted examples
 and missing links fail. Partial slices do not require new bookkeeping issues.
