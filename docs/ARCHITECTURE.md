@@ -1,5 +1,48 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2449): the repository now supplies the accepted native D44 controller.
+`tools/d44_native/next_wave.py` retains the exact bytes from standalone head `fa3775151f77dc713fd78882daf6e147ab471243`.
+Its SHA-256 is `563a7a2ea1550e15370985a5e427ed0e948c61ad5cdea5fed4150a42b13c7869`.
+`tools/d44_native/source-evidence.json` records the accepted bundle, retained CPU receipts, and Opus review `rev-1009-021827-0c9d`.
+The inherited source counter remains one. This delivery adds no dispatcher and changes no accepted numerical method.
+
+The existing `RoutedWave` controller owns native admission, completion resume, and cleanup custody.
+`--autonomous` waits through the native completion owner and retains each cleanup tombstone as live custody.
+The controller checkpoints immutable attempt charges and live reservations in `lifetime-cost.json`.
+Restart and duplicate results cannot add a charge twice. Unknown costs or ambiguous native evidence stop admission.
+The next child's maximum charge must fit the 110 GPU-hour lifetime ceiling before `child_record`.
+The retained `lifetime-seed.json` preserves the closed balance of 21.187425203522047 GPU-hours, prior failures, and already-charged native keys.
+Its separate 24-hour after-L40 continuation gate remains unchanged. This delivery grants no continuation authority.
+
+Each child needs fresh D1 evidence for all possible hosts and the shared output filesystem.
+The controller checks the complete ship queue before D1 and again before native admission.
+PACT priority 10 and other priority-zero GPU work block D44 admission. D44 children retain priority zero.
+The global live-child limit remains one. Native plan, publication, membership, and owner checks remain enforced.
+The logical request still selects the existing D30 worker guard. This delivery does not replace that guard or its numerical dependencies.
+HELD scoring, other layers, G3, general speed, and serving remain outside this release.
+
+Use the repository entry with the current logical request and existing native state:
+
+```sh
+PYTHONPATH=. python3 tools/d44_native/next_wave.py \
+  --routed-plan "$D44_PLAN" --state-dir "$D44_STATE" --wait-file "$D44_WAIT" \
+  --l40 --autonomous --ledger-seed tools/d44_native/lifetime-seed.json \
+  --disk-need-gb "$D44_CHILD_OUTPUT_GIB"
+```
+
+Preserve the existing state and ledger on resume. Do not start a second controller for the same phase.
+The command requires approved phase authority and the unchanged current-manifest request. Source delivery does not grant GPU or scientific authority.
+The default D1 tool remains `/home/rob/fleet/ceo/bin/fleet-diskcheck`. The execution owner must provide that tool before production adoption.
+The CPU proof uses the unchanged `proof_autonomous_phase.py` and `proof_disk_client.py` with a temporary, read-only D1 service.
+
+Retained PB `4eac174152ca` exposes missing completion resume, lifetime accounting, and D1 before the repair.
+Retained PB `24bde1c19be9` passes 27 behavior tests and the actual autonomous CLI in both development and certified modes.
+PB `f086b5bfd5ac` executes the repository entry and compiles its three Python files on x86.
+It completes eight native CPU children after restart, passes eight fresh actual D1 checks, and preserves a maximum of one live child.
+Duplicate resume exits zero. The native group receipt retains all eight results. The isolated queue and CAS roots are removed.
+The terminal payload is `cas:sha256:46532b28a08a4ffceb235a5377ef37eb84f226183c13c72c9344bf7170771322`.
+These CPU proofs establish control behavior only. They qualify no GPU arithmetic, accepted science, or production deployment.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.

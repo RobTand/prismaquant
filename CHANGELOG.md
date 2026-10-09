@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- The repository supplies the accepted native D44 controller and its retained lifetime seed (#2449).
+  The controller source remains byte-identical to reviewed standalone head `fa3775151f77dc713fd78882daf6e147ab471243`.
+  Native completion resume, exact-once attempt charges, the 110 GPU-hour reservation, and fresh per-child D1 remain code-owned.
+  Complete ship checks, priority zero, D30, native validation, and the live-child limit one remain unchanged.
+  The retained seed preserves prior failures and the separate 24-hour continuation gate.
+  PB `f086b5bfd5ac` proves eight autonomous native CPU children, duplicate resume, eight fresh D1 checks, and complete fixture cleanup.
+  Source counter one and Opus exact-head review remain retained. This delivery authorizes no GPU work or scientific replay.
+
 - The fleet registry attests both x86 merge-train layers for the SDK4 and SDK5 vehicles (#2467).
   The SDK5 entry names `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`, not its base interpreter.
   PB `975efe59c9d63ae5de43a3a001b1b9a8d5369da9a82d1e6bc5dc3dc1a56243cd` verifies the non-editable PB `027103d9` and Tessera `fca4c6ce` installs.

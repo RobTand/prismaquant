@@ -1,0 +1,64 @@
+{
+  "schema": "fleet.d44.native_phase_ledger_seed.v1",
+  "at": "2026-10-09T01:20:46.519541+00:00",
+  "source_record": "/home/rob/fleet/records/eng-d44-execution.json",
+  "source_record_updated_at": "2026-10-09T00:57:36.045740+00:00",
+  "source_record_sha256": "b14cc3494d334cf10b6260ab72541c3d35fc0c48481c0d4fc66a06a7fcfb569a",
+  "authoritative_seed_GPU_hours": 21.187425203522047,
+  "seed_kind": "Closed lifetime balance before the new autonomous phase. Preserve it exactly; never start from zero.",
+  "historical_component_scope": "Historical calibration/grid component figures are rounded observations. Do not recompute the accepted closed balance from their displayed sum.",
+  "retained_cost_components": {
+    "calibration": 0.46,
+    "encode_cost": 0.03,
+    "native_qualification_D38_a435": 0.008094842102792528,
+    "native_qualification_b2b35c5f9e26": 0.013054856724209255,
+    "next_current_L40_c70c8366e0c3": 0.012514228489663866,
+    "rate_quantum_continuation_3344": 0.012511089113023547,
+    "rate_quantum_failed_04a4": 0.04125018709235721,
+    "run_L040": 8.54,
+    "rx_L040": 1.82,
+    "sub_grid": 10.26,
+    "total": 21.187425203522047
+  },
+  "already_charged_native_action_keys": [
+    "b2b35c5f9e267353183045fac2999da8c760ddf460c762f1e21f7d16c8444194",
+    "c70c8366e0c3d9dce5aa0c2d8f6e5e2ca4a44b4e89df87a5705aa4b44efbc703"
+  ],
+  "already_charged_preflight_action_keys": [
+    "a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0"
+  ],
+  "already_charged_known_historical_action_keys": [
+    "04a4c4b8d869de0ef9339fb4d7a1f7e6f4b5f05a4d943fcaf1f364386ce7fbb4",
+    "3344e9732d5a271265860ce4159d92d0c24836afe26326f72f5d3d5a049794f2"
+  ],
+  "retained_charge_evidence": [
+    {
+      "action": "a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0",
+      "GPU_hours": 0.008094842102792528,
+      "receipt_id": "5a5917ab5b9e49cb3a0559c830318cbc143463e69603c1121f5468bee47f5090",
+      "harvest": "/home/rob/fleet/ceo/exec/eng-d44-execution-sol/native-qualification-b929a3dc-actual-container-D38-harvest.json"
+    },
+    {
+      "action": "b2b35c5f9e267353183045fac2999da8c760ddf460c762f1e21f7d16c8444194",
+      "GPU_hours": 0.013054856724209255,
+      "receipt_id": "b8823d369f9b6213d415187d1926dfb8807a9ce433cc34a5fb1cad0070720cc7",
+      "harvest": "/home/rob/fleet/ceo/exec/eng-d44-execution-sol/native-qualification-b929a3dc-native-harvest.json"
+    },
+    {
+      "action": "c70c8366e0c3d9dce5aa0c2d8f6e5e2ca4a44b4e89df87a5705aa4b44efbc703",
+      "GPU_hours": 0.012514228489663866,
+      "receipt_id": "06eb10d899a73f94ab3514c7dbdf71dd34c69bd414a5d1aca1a9393be8f2aed3",
+      "harvest": "/home/rob/fleet/ceo/exec/eng-d44-execution-sol/one-child-resume-2026-10-09T002654064Z-native-harvest.json"
+    }
+  ],
+  "prior_controller_cost_limit_record": "/home/rob/fleet/ceo/exec/eng-d44-execution-sol/budget-110-decision.json",
+  "source_current_catalogue": "/mnt/shared/tessera-measurements/eng-ldlq-indomain-20261006/frozen-method-01/campaign-01/native-qualification-b929a3dc-20261008-01/controller-state/catalog.json",
+  "approved_controller_head": "b929a3dcfff487231b7d5d45ba2a52a1d2a4a1b1",
+  "retained_manifest_sha256": "53317106b3acb13f93bda25c54bd333da27571f4d5d66f8e0becae1859a8f48b",
+  "global_ceiling_GPU_hours": 110,
+  "after_L40_continuation_gate_GPU_hours": 24,
+  "global_live_child_limit": 1,
+  "GPU_hour_multiplier": 1,
+  "scope": "Only the remaining 855 current-manifest L40 encodes. No HELD, other layers, G3 or serving.",
+  "deduplication_rule": "Existing successful/failed/partial attempt charges remain included. Do not add a seeded native action again after CAS recovery."
+}
