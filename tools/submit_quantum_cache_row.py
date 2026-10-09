@@ -67,12 +67,12 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
     cache = f"/home/rob/pb-scratch-pq2463q/{row}/cache"
     spill = f"/home/rob/pb-scratch-pq2463q/{row}/spill/row-tmp"
     payload = [
-        "python3", "-m", "tools.tessera_campaign_container",
-        "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
-        "--",
         "python3", "-m", "tools.run_with_scratch_dirs",
         "--dir", f"/home/rob/pb-scratch-pq2463q/{row}/cache",
         "--dir", f"/home/rob/pb-scratch-pq2463q/{row}/spill",
+        "--",
+        "python3", "-m", "tools.tessera_campaign_container",
+        "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
         "--",
         "python3", "-m", "tools.measure_container_cache_quantum_row",
         "--cache-root", cache,
