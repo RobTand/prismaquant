@@ -55,9 +55,9 @@ def sealed_spec(row: str) -> dict:
                 str(cache_gib * (1 << 30)),
             "PRISMAQUANT_TMPDIR":
                 f"/home/rob/pb-scratch-pq2463q/{row}/spill/row-tmp",
-            "PRISMAQUANT_STAGE_B_SPILL_ROOT":
+            "PRISMAQUANT_STAGE_B_COTANGENT_ROOT":
                 f"/home/rob/pb-scratch-pq2463q/{row}/spill",
-            "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES":
+            "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES":
                 str(WORKSPACE_GIB * (1 << 30)),
         },
     }
@@ -87,15 +87,15 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "PRISMAQUANT_CONTAINER_CACHE_ROOT": cache,
         "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES":
             str(CACHE_GIB[row] * (1 << 30)),
-        "PRISMAQUANT_STAGE_B_SPILL_ROOT":
+        "PRISMAQUANT_STAGE_B_COTANGENT_ROOT":
             f"/home/rob/pb-scratch-pq2463q/{row}/spill",
-        "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES":
+        "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES":
             str(WORKSPACE_GIB * (1 << 30)),
         "PRISMABUILD_LOCAL_SCRATCH_PAIRS": (
             "PRISMAQUANT_CONTAINER_CACHE_ROOT:"
             "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES,"
-            "PRISMAQUANT_STAGE_B_SPILL_ROOT:"
-            "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES"),
+            "PRISMAQUANT_STAGE_B_COTANGENT_ROOT:"
+            "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES"),
     }
     argv = [
         sys.executable, "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
