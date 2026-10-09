@@ -5422,7 +5422,12 @@ def _start_projected_unit_check(name, unit, *, live, model_path, source,
 def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
                                     model_path, source, release_source_pages,
                                     source_authentication, cancelled=lambda:False):
-    """CPU preparation only; the caller owns authenticated whole-file residency."""
+    """CPU preparation only; the caller owns authenticated whole-file residency.
+
+    The source read stages straight into page-locked memory (PQ #2039), so a
+    pinned source tensor is adopted with no second host copy; any other read
+    keeps the one private ``pinned.copy_(weight)`` the check always performed.
+    """
     import torch
     from concurrent.futures import CancelledError
     weight = pinned = release = None
@@ -5431,15 +5436,18 @@ def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
             raise CancelledError('projected preparation cancelled before source read')
         weight, release = _read_projected_unit(name, unit, model_path=model_path,
             source=source, release_source_pages=release_source_pages,
-            source_authentication=source_authentication)
+            source_authentication=source_authentication, pinned_host=True)
         description = (f"{name} (live {tuple(live_shape)} {live_dtype} vs source "
             f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
         if live_dtype != weight.dtype or tuple(live_shape) != tuple(weight.shape):
             return _UnitCheck(description, differs=True)
         if cancelled():
             raise CancelledError('projected preparation cancelled before private copy')
-        pinned = torch.empty_like(weight, pin_memory=True)
-        pinned.copy_(weight)
+        if weight.is_pinned() and weight.is_contiguous():
+            pinned = weight
+        else:
+            pinned = torch.empty_like(weight, pin_memory=True)
+            pinned.copy_(weight)
         weight = None
         if cancelled():
             raise CancelledError('projected preparation cancelled after private copy')
@@ -5449,7 +5457,6 @@ def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
         weight = pinned = None
         if release is not None:
             release()
-
 
 def _launch_prepared_projected_check(check, live):
     """The ordered coordinator alone enqueues CUDA work."""
@@ -5691,7 +5698,7 @@ def _settle_projected_unit_checks(checks) -> list:
 
 
 def _read_projected_unit(name, unit, *, model_path, source, release_source_pages=False,
-                         source_authentication=None):
+                         source_authentication=None, pinned_host=False):
     """The producer's source tensor for one projected unit, and its page release.
 
     Returns ``(weight, release)``: ``weight`` is ``source_unit_weight``'s own
@@ -5700,6 +5707,10 @@ def _read_projected_unit(name, unit, *, model_path, source, release_source_pages
     does nothing). The serial byte check compares this tensor with a snapshot
     view; the stream head prices it directly on a reader thread, so there is
     no second view to compare (PQ #1654).
+
+    With ``pinned_host`` the read stages into page-locked memory for the
+    device check, which adopts it with no second host copy (PQ #2039). Host
+    consumers keep the pageable default.
     """
     from .tessera_expert_projection import ExpertProjectionError, source_unit_weight
 
@@ -5713,7 +5724,7 @@ def _read_projected_unit(name, unit, *, model_path, source, release_source_pages
             path = Path(model_path)/source['tensors'][unit['source_tensor']]
             source_stat = (path.stat() if source_authentication is None
                            else source_authentication.file_stat(path))
-        weight = source_unit_weight(model_path, source, unit,
+        weight = source_unit_weight(model_path, source, unit, pin_memory=pinned_host,
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
     except ExpertProjectionError as exc:
         raise RuntimeError(

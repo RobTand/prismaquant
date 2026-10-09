@@ -469,7 +469,7 @@ def carried_units(carried: Any) -> tuple[dict, dict[str, dict], dict[str, str]]:
 # The source bytes the producer will read
 # ---------------------------------------------------------------------------
 def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: Mapping[str, Any],
-                       *, source_authentication=None):
+                       *, source_authentication=None, pin_memory: bool = False):
     """Read the unit's whole source tensor from the shard the producer hashed.
 
     The exporter re-reads exactly this tensor (``packed_expert_weight`` on an
@@ -482,6 +482,13 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     row's layer loads do, with the same declared-file fallback (PQ #1529).
     With no map that seam hands back ``safe_open`` itself, so the unmapped read
     is the call it always was.
+
+    With ``pin_memory`` the returned tensor is page-locked for the device
+    check (PQ #2039): under a staged map the payload lands in the pinned
+    buffer itself with no second host copy, while the pool read and the
+    qualified-original owner pin their tensor with the same single copy the
+    device check always performed. Host consumers (stream head, export,
+    materialization) keep the pageable default.
     """
     from .layer_streaming import _source_safe_open
 
@@ -491,10 +498,17 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     except KeyError:
         raise ExpertProjectionError(f"{tensor}: not in the producer's hashed tensor roster")
     path = Path(model_path) / file
-    context = (_source_safe_open(str(path), framework="pt", device="cpu")
+    # The qualified-original owner serves the sealed whole file and refuses
+    # any opener argument beyond framework/device, so the pin request never
+    # reaches it: its tensor is pinned below like the pool read (PQ #2039).
+    pin_after_read = (source_authentication is not None
+                      and getattr(source_authentication,
+                                  'is_qualified_original_material', False))
+    extra = {'pinned_host': True} if pin_memory and not pin_after_read else {}
+    context = (_source_safe_open(str(path), framework="pt", device="cpu", **extra)
                if source_authentication is None else
                _source_safe_open(path, source_authentication=source_authentication,
-                                 framework="pt", device="cpu"))
+                                 framework="pt", device="cpu", **extra))
     with context as handle:
         if tensor not in handle.keys():
             raise ExpertProjectionError(f"{tensor}: absent from {path}")
@@ -503,7 +517,10 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
         raise ExpertProjectionError(
             f"{tensor}: source shape {list(weight.shape)} disagrees with the projection "
             f"[{unit['rows']}, {unit['cols']}]")
-    return weight.contiguous()
+    weight = weight.contiguous()
+    if pin_memory and not weight.is_pinned():
+        weight = weight.pin_memory()
+    return weight
 
 
 # ---------------------------------------------------------------------------
