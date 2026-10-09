@@ -31,8 +31,11 @@ def _load_delivery():
     if not candidate.is_file():
         return None
     name = 'prismaquant_d44_guard_source_delivery'
-    found = sys.modules.get(name)
-    if found is not None:
+    found = sys.modules.get(name, 'absent')
+    # A test disables delivery by binding the module name to None.
+    if found is None:
+        return None
+    if found != 'absent':
         return found
     module_spec = importlib.util.spec_from_file_location(name, candidate)
     if module_spec is None or module_spec.loader is None:
@@ -48,10 +51,20 @@ def _load_delivery():
 
 
 _DELIVERY = _load_delivery()
+def _delivered_owners():
+    """Select the bound owners directory. Refuse drift before D30 loads."""
+    if _DELIVERY is None:  # pragma: no cover - standalone tree without the package
+        import stage1 as _stage
+        return _stage.OWNERS
+    override = os.environ.get('D44_DELIVERED_OWNERS_DIR')
+    owners = _DELIVERY.owners_dir(override=Path(override) if override else None)
+    _DELIVERY.verify_external_bindings(owners_dir=owners)
+    _DELIVERY.check_d30_binding(owners_dir=owners)
+    return owners
 import stage1
 import stage1 as S
 
-OWNER = stage1.OWNERS
+OWNER = _delivered_owners()
 sys.path.insert(0, str(OWNER))
 spec = importlib.util.spec_from_file_location('stage1_d30_owner', OWNER/'v2_launch.py')
 D30 = importlib.util.module_from_spec(spec)
@@ -196,12 +209,28 @@ def route_plan(path, out):
     index = next((i for i, token in enumerate(argv) if Path(token).name == 'encode_launch.py'), None)
     S.require(index is not None, 'Plan has no encode_launch.py entry')
     if _DELIVERY is not None:
-        argv[index] = str(_DELIVERY.stage_tree(Path(argv[index]).parent))
+        staged_argv = list(argv)
+        staged_argv[index] = '<d44-delivered-guard>'
+        if '--stage' not in staged_argv:
+            staged_argv[index + 1:index + 1] = ['--stage', 'encode']
+        S.require(staged_argv[staged_argv.index('--stage') + 1] in ENTRY, 'Plan has an unsupported guard stage')
+        _validate_routed_residencies(plan)
+        argv[index] = str(_DELIVERY.stage_fresh())
     else:  # pragma: no cover - standalone tree without the package
         argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))
     if '--stage' not in argv:
         argv[index + 1:index + 1] = ['--stage', 'encode']
     S.require(argv[argv.index('--stage') + 1] in ENTRY, 'Plan has an unsupported guard stage')
+    _validate_routed_residencies(plan)
+    sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/src')
+    from prismabuild.decomposition import validate_logical_request
+    validate_logical_request(plan)
+    S.save(out, plan)
+    print(json.dumps({'plan': str(path), 'argv': argv}), flush=True)
+
+
+def _validate_routed_residencies(plan):
+    """Map residency identifiers. Refuse a collision before any write."""
     tasks = plan['roster']['tasks']
     residencies = plan['batch_policy']['residencies']
     keys = [task['residency_key'] for task in tasks] + [row['key'] for row in residencies]
@@ -216,11 +245,6 @@ def route_plan(path, out):
         task['residency_key'] = mapping[task['residency_key']]
     for row in residencies:
         row['key'] = mapping[row['key']]
-    sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/src')
-    from prismabuild.decomposition import validate_logical_request
-    validate_logical_request(plan)
-    S.save(out, plan)
-    print(json.dumps({'plan': str(path), 'argv': argv}), flush=True)
 
 
 def start_container_client(argv):
@@ -258,14 +282,17 @@ def main():
     S.require(valid_owner(owner), f'{OWNER_ENV} must be the 64-hex PB owner; refusing to start a container')
     args.root.mkdir(parents=True, exist_ok=True)
     S.require(D30.available() >= 8*2**30, 'D30 available below 8GiB start floor')
+    if _DELIVERY is not None:
+        override = os.environ.get('D44_DELIVERED_OWNERS_DIR')
+        owners = _DELIVERY.owners_dir(override=Path(override) if override else None)
+        _DELIVERY.check_d30_binding(owners_dir=owners)
+        _DELIVERY.require_container_residency(owners_dir=owners)
     launch = S.load(D30.TEMPLATE)
     container = launch['spec']
     for mount in container['container']['mounts']:
         if mount['target'] == '/out':
             mount['source'] = str(args.root)
     container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})
-    if _DELIVERY is not None:
-        _DELIVERY.require_container_residency()
     from g3_residency import container_contract
     mounts, env = container_contract()
     container['container']['mounts'].extend(mounts)

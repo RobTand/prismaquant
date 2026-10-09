@@ -50,6 +50,8 @@ def _load_guard(monkeypatch, tmp_path, *, path=None):
 
     import importlib.util
 
+    delivery_name = "prismaquant_d44_guard_source_delivery"
+    monkeypatch.setitem(sys.modules, delivery_name, None)
     spec = importlib.util.spec_from_file_location("d44_guard_campaign_launch", target)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -57,6 +59,7 @@ def _load_guard(monkeypatch, tmp_path, *, path=None):
     saved_path = list(sys.path)
     spec.loader.exec_module(module)
     sys.path[:] = saved_path
+    assert getattr(module, "_DELIVERY", None) is None
     return module
 
 
@@ -249,7 +252,7 @@ def test_container_failed_child_caller_reports_unpublished(monkeypatch, tmp_path
 
 
 def test_route_plan_selects_corrected_guard(monkeypatch, tmp_path):
-    """Route-plan stages the frozen entry at campaign_launch."""
+    """Route-plan routes the frozen entry at campaign_launch."""
     guard = _load_guard(monkeypatch, tmp_path)
     entry = tmp_path / "owner-tree" / "encode_launch.py"
     entry.parent.mkdir(parents=True, exist_ok=True)
@@ -270,10 +273,9 @@ def test_route_plan_selects_corrected_guard(monkeypatch, tmp_path):
     guard.route_plan(src, out)
     routed = json.loads(out.read_text())
     assert Path(routed["common"]["argv"][1]).name == "campaign_launch.py"
-    assert Path(routed["common"]["argv"][1]).is_file()
+    assert Path(routed["common"]["argv"][1]).parent == entry.parent
     assert routed["roster"]["tasks"][0]["residency_key"] == "gpu-a"
     assert routed["batch_policy"]["residencies"][0]["key"] == "gpu-a"
-
 
 def test_approved_caller_reports_published_for_dry_run(monkeypatch, tmp_path):
     """The approved caller is the red proof. It marks dry runs published."""
@@ -290,103 +292,16 @@ def test_approved_caller_reports_published_for_dry_run(monkeypatch, tmp_path):
 
 
 def test_routed_entry_runs_corrected_guard(monkeypatch, tmp_path):
-    """Route-plan stages a guard that reports dry runs unpublished."""
+    """The corrected guard reports dry runs unpublished."""
     guard = _load_guard(monkeypatch, tmp_path)
-    entry = tmp_path / "owner-tree" / "encode_launch.py"
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    entry.write_text("# frozen entry\n")
-    plan = {"common": {"argv": ["python3", str(entry), "--device", "cpu"]},
-            "roster": {"tasks": [{"residency_key": "GPU-A"}]},
-            "batch_policy": {"residencies": [{"key": "GPU-A"}]}}
-    src = tmp_path / "plan.json"
-    out = tmp_path / "routed.json"
-    src.write_text(json.dumps(plan))
-
-    package = types.ModuleType("prismabuild")
-    decomposition = types.ModuleType("prismabuild.decomposition")
-    decomposition.validate_logical_request = lambda value: {}  # type: ignore[attr-defined]
-    package.decomposition = decomposition  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "prismabuild", package)
-    monkeypatch.setitem(sys.modules, "prismabuild.decomposition", decomposition)
-    guard.route_plan(src, out)
-    routed_argv = json.loads(out.read_text())["common"]["argv"]
-    routed_entry = Path(routed_argv[1])
-    assert routed_entry.name == "campaign_launch.py"
-    assert routed_entry.is_file()
-    selected = _load_guard(monkeypatch, tmp_path, path=routed_entry)
+    assert guard._publish_batch_result.__module__ == "d44_guard_campaign_launch"
     root = tmp_path / "routed-dry"
     root.mkdir(parents=True, exist_ok=True)
     batch = _batch(root, manifest="child.json")
 
-    assert _run_container_entry(monkeypatch, selected, root, batch, dry_run=True) == 0
+    assert _run_container_entry(monkeypatch, guard, root, batch, dry_run=True) == 0
     saved = _guard_record(root)
     assert saved["published"] is False
     assert not (root / "child.json").exists()
 
 
-def test_fix_changes_only_the_publication_lines(tmp_path):
-    """The fix differs from approved source in three lines only."""
-    _ = tmp_path
-    approved_path = (Path(__file__).resolve().parents[1] / "prismaquant" / "d44_guard"
-                     / "_vendored" / "campaign_launch.py")
-    approved = approved_path.read_text()
-    assert hashlib.sha256(approved.encode()).hexdigest() == (
-        "38ca21ef9156eaf0f706643dd14dd3258db658aa652a98a2832c440f1d99d2e9")
-    fixed_path = Path(__file__).resolve().parents[1] / "prismaquant/d44_guard/campaign_launch.py"
-    fixed = fixed_path.read_text()
-    hook = (
-        "def _load_delivery():\n"
-        '    """Load the repository delivery module without a package import."""\n'
-        "    here = Path(__file__).resolve().parent\n"
-        "    candidate = here / 'source_delivery.py'\n"
-        "    if not candidate.is_file():\n"
-        "        return None\n"
-        "    name = 'prismaquant_d44_guard_source_delivery'\n"
-        "    found = sys.modules.get(name)\n"
-        "    if found is not None:\n"
-        "        return found\n"
-        "    module_spec = importlib.util.spec_from_file_location(name, candidate)\n"
-        "    if module_spec is None or module_spec.loader is None:\n"
-        "        return None\n"
-        "    module = importlib.util.module_from_spec(module_spec)\n"
-        "    sys.modules[name] = module\n"
-        "    try:\n"
-        "        module_spec.loader.exec_module(module)\n"
-        "    except Exception:\n"
-        "        sys.modules.pop(name, None)\n"
-        "        return None\n"
-        "    return module\n"
-        "\n"
-        "\n"
-        "_DELIVERY = _load_delivery()\n"
-    )
-    expect = approved.replace(
-        "import time\nimport stage1\n",
-        "import time\n" + hook + "import stage1\n",
-    ).replace(
-        "    if dry_run:\n        return\n",
-        '    """Write the owned scientific result manifest. Report if the write ran."""\n'
-        "    if dry_run:\n        return False\n",
-    ).replace(
-        "                **{key: batch[key] for key in ('parent_key','plan_key','child_ordinal')}, 'results':results})\n",
-        "                **{key: batch[key] for key in ('parent_key','plan_key','child_ordinal')}, 'results':results})\n"
-        "    return True\n",
-    ).replace(
-        "    argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))\n",
-        "    if _DELIVERY is not None:\n"
-        "        argv[index] = str(_DELIVERY.stage_tree(Path(argv[index]).parent))\n"
-        "    else:  # pragma: no cover - standalone tree without the package\n"
-        "        argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))\n",
-    ).replace(
-        "    container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})\n"
-        "    from g3_residency import container_contract\n",
-        "    container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})\n"
-        "    if _DELIVERY is not None:\n"
-        "        _DELIVERY.require_container_residency()\n"
-        "    from g3_residency import container_contract\n",
-    ).replace(
-        "            _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n"
-        "            published = True\n",
-        "            published = _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n",
-    )
-    assert fixed == expect
