@@ -480,7 +480,7 @@ def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
     static_input_scale: "float | None" = None, publisher=None,
-    structure: "str | None" = None,
+    structure: "str | None" = None, profile=None,
 ):
     """Render one rung, price it as served, and store the wire beside it.
 
@@ -517,7 +517,7 @@ def _measure_anchor(
         qname=qname, format_name=format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required, static_input_scale=static_input_scale,
-        structure=structure)
+        structure=structure, profile=profile)
     started = time.time()
     render, blob = _encode_and_render(
         weight, format_name, recipe=prepared["wire"],
@@ -526,7 +526,7 @@ def _measure_anchor(
     return _finish_anchor(qname=qname, weight=weight, activations=activations,
         format_name=format_name, cache=cache, wire_dir=wire_dir,
         prepared=prepared, render=render, blob=blob, elapsed=time.time() - started,
-        publisher=publisher)
+        publisher=publisher, profile=profile)
 
 
 #: The context the campaign's pricing seam names when it binds the served
@@ -574,9 +574,26 @@ def _bind_served_quantizer(qname, format_name):
               f"{record.get('dequant_kernel')}", flush=True)
 
 
-def _direct_consumer_activation_contract(qname):
+def _is_glm_direct_consumer_profile(profile) -> bool:
+    """Use the declared architecture before the undeclared profile identity."""
+    if profile is None:
+        return False
+    architectures = profile.declared_architectures()
+    if architectures:
+        return architectures == ("Glm5NextForConditionalGeneration",)
+    return profile.name == "glm5_next"
+
+
+def _direct_consumer_activation_contract(qname, *, profile):
     source = qname.removesuffix(".weight")
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return None
+    if profile is None:
+        raise ActivationScaleContractError(
+            f"{qname}: a direct-consumer leaf needs the run profile to bind "
+            "its activation contract; profile=None drops the GLM a16/a32 "
+            "contract silently, so it refuses instead.")
+    if not _is_glm_direct_consumer_profile(profile):
         return None
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_activation_contract
@@ -586,9 +603,9 @@ def _direct_consumer_activation_contract(qname):
 
 
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
-                    hessian_required, static_input_scale, structure=None):
+                    hessian_required, static_input_scale, structure=None, profile=None):
     """Admit each unit's Hessian and served activation contract before encode."""
-    direct_contract = _direct_consumer_activation_contract(qname)
+    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
     if direct_contract is None:
         _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
@@ -669,10 +686,12 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 hessian_required=hessian_required)
 
 
-def _direct_consumer_memory_bytes(qname, family, shape):
+def _direct_consumer_memory_bytes(qname, family, shape, *, profile):
     """Charge each direct cache once through its source member."""
     source = qname.removesuffix(".weight")
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return 0
+    if not _is_glm_direct_consumer_profile(profile):
         return 0
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_resident_bytes
@@ -703,7 +722,7 @@ def _direct_consumer_render(blob, qname, family, device):
 
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
                    prepared, render, blob, elapsed, encoding_batch_size=1,
-                   publisher=None):
+                   publisher=None, profile=None):
     """Score decoded bytes and publish the existing cache/wire entries.
 
     ``publisher``, when given, is a
@@ -722,7 +741,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
         "activation_qdq", "input_scale"))
-    direct_contract = _direct_consumer_activation_contract(qname)
+    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
     preserve_fp32 = direct_contract == "a32"
     cache_dtype = torch.float32 if preserve_fp32 else torch.bfloat16
     if direct_contract is not None:
@@ -819,7 +838,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # allocator's UCB hedge.  Reported as zero and named as such.
         dloss_stderr=0.0,
         memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
-                      + _direct_consumer_memory_bytes(qname, family, weight.shape)),
+                      + _direct_consumer_memory_bytes(qname, family, weight.shape, profile=profile)),
         bits_per_param=float(bits) / max(1, int(weight.numel())),
         activation_contract=prepared.get("activation_contract", str(spec.act_dtype_name or "a16")),
         activation_quantized=bool(quantized),
@@ -834,7 +853,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
 def _measure_anchor_batch(*, qnames, weights, activations, format_name,
                           cache, wire_dir, activation_kwargs_for=None,
                           hessian_required=True, static_input_scales=None,
-                          publisher=None, structures=None):
+                          publisher=None, structures=None, profile=None):
     """One producer batch, with the scalar path's per-unit gates and storage.
 
     ``structures`` maps a unit to its serving structure, as ``structure`` does
@@ -851,7 +870,7 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required,
         static_input_scale=(static_input_scales or {}).get(name),
-        structure=(structures or {}).get(name)) for name in qnames]
+        structure=(structures or {}).get(name), profile=profile) for name in qnames]
     # The producer call takes ONE recipe and ONE Hessian requirement for the
     # whole batch, from its first entry.  Both derive from (family, rung,
     # structure) only, so a batch built by ``_anchor_batches`` agrees by
@@ -877,7 +896,7 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
     return [_finish_anchor(qname=name, weight=weight, activations=acts,
         format_name=format_name, cache=cache, wire_dir=wire_dir, prepared=entry,
         render=render, blob=blob, elapsed=elapsed,
-        encoding_batch_size=len(qnames), publisher=publisher)
+        encoding_batch_size=len(qnames), publisher=publisher, profile=profile)
         for name, weight, acts, entry, (render, blob) in zip(
             qnames, weights, activations, prepared, encoded)]
 
@@ -3225,7 +3244,7 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
                                 static_scales, projected_units=None, bound_unit=None,
-                                structure=None, check_scoring_metadata: bool = True):
+                                structure=None, check_scoring_metadata: bool = True, profile=None):
     """The resumed row's inputs, as this run's producer would stamp them.
 
     A unit in ``projected_units`` (``{qname: producer unit record}``) is a
@@ -3272,7 +3291,7 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     if bool(anchor.hessian_applied) != (activation is not None):
         raise RuntimeError("checkpoint anchor Hessian applicability disagrees with the producer")
     _require_resumable_anchor(anchor, static_scales,
-                             check_scoring_metadata=check_scoring_metadata)
+                             check_scoring_metadata=check_scoring_metadata, profile=profile)
     api = _checkpoint_identity_api()
     projected = (projected_units or {}).get(anchor.qname)
     if bound_unit is not None:
@@ -3636,7 +3655,7 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
                          *, want_hessian: bool = False, profile=None,
                          boundary_consumer=None, forward_batch=None, resource_check=None,
                          shared_packed_inputs: bool = False, on_forwards_complete=None,
-                         expected_shared_input_groups=None):
+                         expected_shared_input_groups=None, row_consumer=None):
     """One model forward per batch, for dense and declared packed projections.
 
     Returns ``(rows, hessians, token_counts, max_abs)``. Counts describe every
@@ -3657,6 +3676,15 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
     share internal accumulation. The existing store retains private, bounded
     FP32 device prefixes until output materialization; returned CPU H/X tensors
     remain independent for every qname. This is not a new activation cache.
+
+    ``row_consumer(unit_names, flat_rows)`` is an optional, default-off research
+    seam. When given, it is called on the UNCAPPED flat rows of every unique
+    input group -- dense pre-hook or routed derivation, both feed ``accumulate``
+    -- once per group per batch, with the tuple of exact unit names sharing that
+    input (``group_members``). The call happens before the scoring-prefix cap
+    and independently of ``want_hessian``; zero-row calls never reach it. The
+    consumer owns its own copies; the collector retains no consumer state and
+    the default ``None`` keeps the historical behavior bit-identical.
 
     Three different things come out of the same hook, and they have different
     row budgets on purpose:
@@ -3731,6 +3759,12 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
         # Python max(previous, NaN) preserves previous. fmax keeps that exact
         # policy while avoiding a device-to-host scalar read on every batch.
         amax[name] = torch.fmax(previous_max, batch_max)
+        if row_consumer is not None:
+            # Research seam: the full uncapped rows, once per unique input
+            # group, before any scoring-prefix cap and regardless of
+            # ``want_hessian``.  The consumer must own its bytes; the flat
+            # tensor may still alias a source/derived activation plane.
+            row_consumer(tuple(group_members[name]), flat)
         if want_hessian:
             # Every row, before any cap: see the docstring.
             f32 = flat.to(dtype=torch.float32)
@@ -4666,6 +4700,53 @@ def select_anchor_groups(selection: Mapping, resolved: Mapping[str, list[str]],
             raise RuntimeError(f"{where}: anchor group {key!r} selected twice")
         keys.append(key)
     return keys
+
+
+def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
+    """The exact unit scope one full-group ``--units`` fresh capture may take.
+
+    A streamed capture today takes whole anchor groups, so a selection that
+    prices a part of its groups refuses. A sampled or audited group prices a
+    draw under inclusion probabilities, an expert partition prices a
+    deterministic subset of each stack's experts, and an exact member prices
+    one unit: each measures exactly what it names, and none is the whole
+    group a capture would otherwise have to record. Both the prep (which has
+    no model, so it resolves against the census's ``anchor_groups``) and the
+    model rows (which resolve against the scope they loaded) call this one
+    authority; :func:`select_anchor_groups` holds the selection to the
+    resolved grouping member for member before a unit name is derived.
+    ``args`` supplies the campaign's model and layer stride, which the
+    selection file itself must declare.
+    """
+    where = f"--units {getattr(args, 'units', None)}"
+    if (selection.get("model", args.model) != args.model
+            or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
+        raise StackSampleError("--units model/layer_stride disagrees with this campaign")
+    if getattr(args, "research_exact_member", None) is not None:
+        raise RuntimeError(
+            f"{where}: --research-exact-member prices one member, not the "
+            "whole group a fresh capture records")
+    for entry in selection["groups"]:
+        if entry.get("sampled") or entry.get("audit") or entry.get("inclusion_probability"):
+            raise RuntimeError(
+                f"{where}: group {entry['key']!r} prices a sample of its "
+                "members under inclusion probabilities; a fresh capture "
+                "records whole groups")
+        if entry.get("partition") is not None or entry.get("stack_samples"):
+            raise RuntimeError(
+                f"{where}: group {entry['key']!r} prices an expert partition "
+                "of its stack; a fresh capture records whole groups")
+    selected_groups = select_anchor_groups(selection, resolved, where=where)
+    priced, _audit, _pi = selection_priced_units(selection)
+    unit_names = sorted({name for key in selected_groups for name in resolved[key]})
+    if priced != set(unit_names):
+        raise RuntimeError(
+            f"{where}: the selection prices {len(priced)} of the "
+            f"{len(unit_names)} units of its groups; a fresh capture takes a "
+            "whole group or none of it")
+    if not unit_names:
+        raise RuntimeError(f"{where}: the selection names no unit")
+    return unit_names
 
 
 def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], *,
@@ -5936,7 +6017,7 @@ def _tessera_route_memo():
 
 
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
-                              check_scoring_metadata: bool = True) -> None:
+                              check_scoring_metadata: bool = True, profile=None) -> None:
     """Refuse a resumed anchor priced under a different activation contract.
 
     This is the per-row half of the resume identity rule, shared by pre-link
@@ -5988,7 +6069,7 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
     # The same declaration _finish_anchor stamps on a fresh measured row.
     # Producer wire/input integrity does not authenticate scoring metadata.
     # Direct consumers use the same contract as the measured row.
-    direct_contract = _direct_consumer_activation_contract(anchor.qname)
+    direct_contract = _direct_consumer_activation_contract(anchor.qname, profile=profile)
     expected_contract = direct_contract or str(spec.act_dtype_name or "a16")
     if anchor.activation_contract != expected_contract:
         raise ActivationScaleContractError(
@@ -6211,12 +6292,16 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 
 
 def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_implementation,
-                               guard=None, release_read_pages=None, source_authentication=None):
+                               guard=None, release_read_pages=None, source_authentication=None,
+                               unit_names=None):
     """The canonical capture identity of this draw over the census's source.
 
     Through a streamed capture's recording owner (PQ #1896) this is the
     traversal identity: nothing is hashed here, and the capture binds the
-    digests of the bytes it read at its seal.
+    digests of the bytes it read at its seal. A full-scope capture passes no
+    ``unit_names`` and takes the unchanged full identity; a selected capture
+    passes its explicit full-group unit scope, and the identity carries
+    ``unit_scope="selected"`` with exactly those units' shape map.
     """
     from . import tessera_calibration_cache as store
     if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
@@ -6231,6 +6316,7 @@ def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_i
     return store.capture_identity(args.calibration_census, calibration=calibration,
         max_act_rows=args.max_act_rows, model_load_contract=census['model_load_contract'],
         attention_implementation=attention_implementation,
+        **({} if unit_names is None else {'unit_names': unit_names}),
         resource_check=None if guard is None else guard.check,
         release_read_pages=guard is not None if release_read_pages is None else release_read_pages,
         source_authentication=source_authentication)
@@ -6258,6 +6344,15 @@ def _run_capture_chain_bookends(args, saved_calibration):
         return 0
     from . import tessera_calibration_cache as store
     census = load_calibration_census(args.calibration_census, args=args)
+    # The prep has no model: the selected scope is derived from the census's
+    # own anchor groups, through the same helper the model rows confirm with.
+    unit_names = None
+    if args.units:
+        unit_names = selected_capture_unit_names(
+            load_unit_selection(args.units), args=args,
+            resolved=census["anchor_groups"])
+        print(f"[campaign] --units full-group capture takes {len(unit_names)} "
+              "units of the census scope", flush=True)
     tokens, corpus_text = (saved_calibration if saved_calibration is not None else
                            _calibration_tokens(args.model, args.nsamples, args.seqlen, args.seed))
     # The prep reads no payload (PQ #1896): it seals the traversal identity,
@@ -6268,7 +6363,7 @@ def _run_capture_chain_bookends(args, saved_calibration):
             boundary_storage=args.capture_chain_boundary_storage,
             identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
                 attention_implementation=args.attention_implementation,
-                source_authentication=source))
+                source_authentication=source, unit_names=unit_names))
     print(f"[campaign] prepped streamed calibration capture chain: {record['path']}", flush=True)
     return 0
 
@@ -6307,9 +6402,20 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     modules = dict(runner.model.named_modules())
     # Meta views are used only for shape/menu/projection planning. Live views
     # are refreshed from the shared loader at each layer's consumption.
+    # A selected capture narrows ``targets`` but not ``population.members``:
+    # only the selected units' meta views are bound, so shapes, menus, the
+    # resource plan and the producer check stay at the selected scope, while
+    # the full population still binds the census's producer projection.
+    selected_expert_targets = set(expert_targets)
+    selected_members = [member for member in population.members
+                        if member.qname in selected_expert_targets]
     weights = {name: modules[name].weight for name in dense_targets}
-    weights.update({member.qname: member.weight for member in population.members})
+    weights.update({member.qname: member.weight for member in selected_members})
     shapes = {name: list(weight.shape) for name, weight in weights.items()}
+    # The capture's unit scope is the whole selection's, before a quantum
+    # narrows ``targets`` to its own layer range: the prep sealed exactly
+    # this identity, and every quantum must re-derive the same one.
+    capture_unit_names = sorted(targets) if getattr(args, 'units', None) else None
     names_by_layer = {}
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
@@ -6358,9 +6464,10 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         if not getattr(source, 'is_recording', False):
             raise RuntimeError('a streamed capture reads its source through its recording owner')
         identity = _streamed_capture_identity(args, census, tokens, corpus_text,
-            attention_implementation=attention_implementation, source_authentication=source)
+            attention_implementation=attention_implementation, source_authentication=source,
+            unit_names=capture_unit_names)
         if quantum is not None:
-            quantum.require_identity(identity, n_batches=len(tokens))
+            identity = quantum.require_identity(identity, n_batches=len(tokens))
         writer = store.CaptureWriter(args.capture_calibration_out,
             census_path=args.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
@@ -6872,8 +6979,16 @@ def _main(argv, *, source_scope, waits) -> int:
         except (ImportError, ValueError) as error:
             ap.error(f'canonical H references need a compatible producer and valid load policy: {error}')
     if args.streaming and not selected_source and (
-            not (args.census_out or args.capture_calibration_out) or args.units):
-        ap.error("--streaming requires full-scope census/capture or --units with a hash-bound complete calibration cache")
+            not (args.census_out or args.capture_calibration_out) or
+            (args.units and not (args.capture_calibration_out or args.calibration_cache))):
+        # Streaming prices a whole scope, or an explicit scope that is
+        # itself a whole priced object: a --units fresh capture (validated
+        # full-group before the model loads) or a --units reuse of a
+        # hash-bound complete capture. A census-out run is never narrowed,
+        # and unsupported streaming pricing without one of those refuses.
+        ap.error("--streaming requires full-scope census/capture, a --units "
+                 "full-group fresh capture, or --units with a hash-bound "
+                 "complete calibration cache")
     if args.streaming and (args.streaming_cache_slots < 2 or args.streaming_prefetch_workers < 1):
         ap.error("streaming calibration requires at least two cache slots and one prefetch worker")
     if (args.census_out or args.capture_calibration_out or args.calibration_cache) and not args.attention_implementation:
@@ -6883,8 +6998,8 @@ def _main(argv, *, source_scope, waits) -> int:
     if args.capture_calibration_out or args.calibration_cache:
         if not args.calibration_census or args.census_out or args.hessian != "require":
             ap.error("capture/reuse requires --calibration-census and --hessian require")
-        if args.capture_calibration_out and (args.units or args.calibration_cache):
-            ap.error("--capture-calibration-out requires the full scope and cannot also reuse")
+        if args.capture_calibration_out and args.calibration_cache:
+            ap.error("--capture-calibration-out cannot also reuse; a fresh capture and a reuse read are different rows")
         if args.max_act_rows < 1:
             ap.error("capture/reuse requires positive --max-act-rows")
     if args.capture_chain is not None:
@@ -7010,6 +7125,25 @@ def _main(argv, *, source_scope, waits) -> int:
             # under this GPU reservation (PQ #1497).
             source_authentication.adopt_identity_proof_or_hash(
                 args.source_identity_cache, args.source_identity_cache_sha256)
+
+    # A selected fresh capture is held to the census's own anchor groups
+    # before the model loads: the selection file's model/layer_stride and the
+    # exact group memberships are checked against the census here, so a plan
+    # written against another scope refuses before any source is opened. The
+    # prep row (no model) makes the same call through the same helper, and the
+    # model rows confirm it against the grouping they loaded.
+    selected_capture_census = None
+    capture_unit_names = None
+    if args.capture_calibration_out and args.units:
+        if acquisition is not None:
+            ap.error("--acquisition-request narrows the run's priced scope; a "
+                     "--units fresh capture takes exactly the selection's whole groups")
+        selected_capture_census = load_calibration_census(args.calibration_census, args=args)
+        capture_unit_names = selected_capture_unit_names(
+            load_unit_selection(args.units), args=args,
+            resolved=selected_capture_census["anchor_groups"])
+        print(f"[campaign] --units full-group capture takes {len(capture_unit_names)} "
+              "units of the census scope", flush=True)
 
     capture_guard = None
     if args.streaming and args.capture_calibration_out:
@@ -7154,8 +7288,9 @@ def _main(argv, *, source_scope, waits) -> int:
     partition_menu_targets = None
     partition_unit_records = {}
     full_expert_members = expert_members
-    census = (None if not args.calibration_census
-              else load_calibration_census(args.calibration_census, args=args))
+    census = (selected_capture_census if selected_capture_census is not None else
+              (None if not args.calibration_census
+               else load_calibration_census(args.calibration_census, args=args)))
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -7191,6 +7326,16 @@ def _main(argv, *, source_scope, waits) -> int:
             priced = {exact_member_scope["member"]}
             audit_units = set()
             inclusion_probability = {}
+        if args.capture_calibration_out:
+            # The census-derived scope the pre-model check derived; the run's
+            # own grouping must resolve the selection to exactly that set.
+            confirmed = selected_capture_unit_names(selection, args=args,
+                                                    resolved=scope_groups)
+            if confirmed != capture_unit_names:
+                raise RuntimeError(
+                    f"--units {args.units}: this run's grouping resolves the "
+                    f"selection to {confirmed} but its census to "
+                    f"{capture_unit_names}; the scope is not exact")
         # The group's membership was already checked whole; what the sample
         # narrows is only which of those members this run encodes. Keeping the
         # two separate is what lets a sampled run stay identity-honest: the
@@ -7282,10 +7427,17 @@ def _main(argv, *, source_scope, waits) -> int:
                              for member in population.members})
         if census["unit_shapes"] != scope_shapes:
             raise RuntimeError("calibration census geometry differs from the loaded model")
-    if runner is not None and not selected_source:
+    completed_capture_reuse = bool(args.capture_calibration_out and args.capture_chain is None
+        and (Path(args.capture_calibration_out) / "capture_manifest.json").is_file())
+    if completed_capture_reuse and runner is not None:
+        # Reuse expects the recorded full witness; no new traversal is claimed.
+        model_load_contract = census["model_load_contract"]
+        runner.shutdown()
+        runner = None
+    if runner is not None and not selected_source and not completed_capture_reuse:
         try:
             return _run_streamed_calibration(args, runner, profile, mode=mode, population=population,
-                dense_targets=census_dense_targets, expert_targets=census_expert_targets,
+                dense_targets=dense_targets, expert_targets=expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
                 capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,
@@ -7361,16 +7513,67 @@ def _main(argv, *, source_scope, waits) -> int:
             corpus_text, tokens, fit_tokens=hi,
             **_campaign_calibration_parameters(args), fit_tokens_min=lo)
         require_census_draw(census, bound_calibration, where="calibration capture")
-        capture_identity = calibration_store.capture_identity(
-            args.calibration_census, calibration=bound_calibration,
-            max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,
-            **({'source_authentication': source_authentication} if source_authentication is not None else {}),
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_read_pages=True) if selected_source else {}))
+
+        def _capture_identity(unit_names=None, *, source_owner=None):
+            return calibration_store.capture_identity(
+                args.calibration_census, calibration=bound_calibration,
+                max_act_rows=args.max_act_rows, model_load_contract=model_load_contract,
+                attention_implementation=attention_implementation,
+                **({} if unit_names is None else {'unit_names': unit_names}),
+                **({'source_authentication': source_owner}
+                   if source_owner is not None else {}),
+                **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                        release_read_pages=True) if selected_source else {}))
+        # A fresh selected capture carries the census/model-validated scope
+        # this run requested. A reuse row takes the stored capture's own
+        # scope instead: only when its manifest declares a selected scope
+        # does the expected identity carry one; a full capture keeps the full
+        # identity, selected run or not. A completed OUTPUT hashes its source
+        # the plain way: this row's recording owner read no payload, and the
+        # stored identity binds the digests it must equal. A --calibration-cache
+        # reader keeps the owner it authenticated with, so a selected reader
+        # still hashes only the objects it consumes.
+        fresh_unit_names = capture_unit_names \
+            if args.capture_calibration_out and args.units else None
+        capture_identity = None
+        capture_manifest = None
+        completed_capture = (Path(args.capture_calibration_out) / "capture_manifest.json"
+                             if args.capture_calibration_out else None)
+        completed_output = completed_capture is not None and completed_capture.exists()
+        if completed_output:
+            capture_manifest = calibration_store.require_capture_contract(completed_capture)
+        elif args.calibration_cache:
+            capture_manifest = calibration_store.require_capture_contract(
+                args.calibration_cache, expected_sha256=args.calibration_cache_sha256)
+        expected_unit_names = fresh_unit_names
+        if capture_manifest is not None:
+            stored_units = (sorted(capture_manifest['identity']['units'])
+                            if capture_manifest['identity'].get('unit_scope') == 'selected'
+                            else None)
+            # A completed capture is reused only for the scope it actually
+            # published: a run requesting units the stored capture does not
+            # cover -- a different selection, or the full scope over a
+            # selected capture -- refuses here, before any forward.
+            if completed_capture is not None and fresh_unit_names != stored_units:
+                raise RuntimeError(
+                    f"scope mismatch: the completed capture at "
+                    f"{completed_capture} published "
+                    f"{'the whole census scope' if stored_units is None else sorted(stored_units)} "
+                    f"and this run requests "
+                    f"{'the whole census scope' if fresh_unit_names is None else sorted(fresh_unit_names)}")
+            if args.calibration_cache:
+                missing = sorted(set(targets) - set(capture_manifest['entries']))
+                if missing:
+                    raise RuntimeError(
+                        f"calibration cache does not cover requested units: {missing}")
+            expected_unit_names = stored_units
+        capture_identity = _capture_identity(
+            expected_unit_names,
+            source_owner=None if completed_output else source_authentication)
     if selected_source:
-        manifest = calibration_store.require_capture_contract(args.calibration_cache,
-            expected_sha256=args.calibration_cache_sha256)
+        manifest = (capture_manifest if capture_manifest is not None else
+                    calibration_store.require_capture_contract(args.calibration_cache,
+                        expected_sha256=args.calibration_cache_sha256))
         if manifest['identity'] != capture_identity:
             raise RuntimeError('selected source capture identity differs from the canonical census')
         try:
@@ -7415,7 +7618,7 @@ def _main(argv, *, source_scope, waits) -> int:
         if completed_capture.exists():
             _values, record = calibration_store.prefetch_capture(
                 completed_capture, expected_identity=capture_identity,
-                census=census, names=census_targets, device="cpu")
+                census=census, names=sorted(capture_identity['units']), device="cpu")
             print(f"[campaign] complete calibration capture reused: {record}", flush=True)
             return 0
     if args.calibration_cache:
@@ -7922,7 +8125,7 @@ def _main(argv, *, source_scope, waits) -> int:
         on_menu = {entry.format_name for entry in menus[name]}
         for row in state["anchors"]:
             if row["format_name"] in on_menu:
-                _require_resumable_anchor(CampaignAnchor(**row), static_scales)
+                _require_resumable_anchor(CampaignAnchor(**row), static_scales, profile=profile)
         if acquisition_schedule is not None:
             for row in state["anchors"]:
                 _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
@@ -8026,7 +8229,7 @@ def _main(argv, *, source_scope, waits) -> int:
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
                 calibration_source=source, static_scales=static_scales,
-                projected_units=projected_units,
+                projected_units=projected_units, profile=profile,
                 structure=(encode_structure or {}).get(name), **bound)
             existing = state["wire_records"][anchor.format_name]
             if deferred is not None:
@@ -8658,7 +8861,7 @@ def _main(argv, *, source_scope, waits) -> int:
                         activation_kwargs_for=(
                             ((_activation_kwargs_for if row_stream is None
                               else row_stream.encoder_kwargs) if want_h else None)),
-                        hessian_required=want_h, publisher=publisher)
+                        hessian_required=want_h, publisher=publisher, profile=profile)
                     if len(batch) == 1:
                         name = names[0]
                         anchors = [_measure_anchor(
@@ -8722,13 +8925,14 @@ def _main(argv, *, source_scope, waits) -> int:
                             anchor, weights=weights, menus=menus,
                             calibration_source=entry.source if want_h else None,
                             static_scales=static_scales, projected_units=projected_units,
-                            bound_unit=entry.holder,
+                            bound_unit=entry.holder, profile=profile,
                             structure=(encode_structure or {}).get(anchor.qname)))
                         continue
                     identity_of = functools.partial(
                         _checkpoint_anchor_identity, anchor, weights=weights,
                         menus=menus, calibration_source=calibration_source,
                         static_scales=static_scales, projected_units=projected_units,
+                        profile=profile,
                         structure=(encode_structure or {}).get(anchor.qname))
                     if bound_checkpoint_units:
                         # Derived from the unit's sealed template: a deepcopy
