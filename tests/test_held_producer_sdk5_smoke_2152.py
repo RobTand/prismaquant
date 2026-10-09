@@ -111,7 +111,16 @@ def _claim_receipt(claim):
 
 
 def test_held_producer_context_authenticates_and_joins(installed_client_sdk, tmp_path):
+    """Read the held attempt through the installed SDK5; never rerun it.
+
+    The test depends on the fleet queue retaining the held attempt's terminal
+    record. A box with no fleet queue mounted skips by name. A mounted queue
+    that no longer holds the attempt fails loudly: that is lost evidence, not
+    a missing prerequisite.
+    """
     require_prismabuild_sdk()
+    if not Path(QUEUE_ROOT).is_dir():
+        pytest.skip(f"fleet queue not mounted: {QUEUE_ROOT}")
     assert installed_client_sdk.SDK_VERSION == PB_CLIENT_SDK_VERSION == 5
     result = installed_client_sdk.read_verified_action_result(
         installed_client_sdk.PoolQueue(QUEUE_ROOT), ACTION_KEY,
