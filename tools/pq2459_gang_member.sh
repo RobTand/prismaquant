@@ -57,7 +57,7 @@ FABRIC=(
   -e "GLOO_SOCKET_IFNAME=enp1s0f0np0"
   -e "RAY_memory_monitor_refresh_ms=0"
 )
-mapfile -t -O "${#FABRIC[@]}" FABRIC < <(printf '%s\n' ${RUNTIME_IMAGE_CONTAINER_ENV:-})
+while IFS= read -r kv; do [ -n "$kv" ] && FABRIC+=(-e "$kv"); done <<<"${RUNTIME_IMAGE_CONTAINER_ENV:-}"
 
 PREPARE='
 inc="$(python3 -c "import glob; p=sorted(glob.glob(\"/usr/local/lib/python3*/dist-packages/nvidia/cu*/include\")); print(p[0] if p else \"\")")"
