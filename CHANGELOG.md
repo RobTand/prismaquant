@@ -37,8 +37,8 @@
   Preserve its source bytes and every production boundary gate.
   Use the shared digest owner for actual public CLI module observations.
   The affected replay, boundary, and architecture tests pass 64 cases without skips.
-  Retained PB `b3498341ca27` passes the x86 CPU dry branch before the path move, with no GPU replay.
-  PB `04d03f51d333` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
+  PB `a46b541d3e84` passes the x86 CPU dry branch after the path move, with no GPU replay.
+  PB `1de88f98ad06` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
   Preserve the frozen execution source and require final artifact review before replacement.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.

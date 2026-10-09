@@ -12,12 +12,12 @@ The production boundary gates and their allowlists remain unchanged.
 The observer uses the shared digest owner without importing a PrismaQuant package into the CLI process.
 The parent issue owns the separate model-profile migration.
 
-The retained PB D38 `daa683c956c2` records actual CLI imports before the move.
+The current PB D38 `a46b541d3e84` records actual CLI imports after the move.
 Its capture supplies the current `D38_IMPORTS.json` projection.
-PB `b3498341ca27` repeats that public CLI after the main merge.
+PB `1de88f98ad06` verifies that projection, 94 external source files, and the complete canonical correction delta.
+The retained `daa683c956c2` and `b3498341ca27` runs keep the pre-move CLI proof.
 Both CPU branches pass with seven streams and no GPU replay.
-PB `04d03f51d333` verifies 94 external source files and the complete canonical correction delta.
-It also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
+PB `1de88f98ad06` also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
 `IMPORT_PROVENANCE.json` records exact source identities, the path delta, and CEO replacement authority.
 All identity records remain advisory. No new runtime identity gate reads them.
 The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.

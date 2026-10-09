@@ -46,13 +46,13 @@
     "parent-lease-data.json"
   ],
   "dependency_manifest": "experiments/pact_replay/DEPENDENCY_MANIFEST.json",
-  "dependency_manifest_sha256": "e2926a079c55aab6f1e1a7fb67794258fddaef35c58ac8db4aac2774b468e652",
+  "dependency_manifest_sha256": "16bec4f263e046670e095250d9882e711255640d8285feaa8d622f1c8f5da13d",
   "dependency_closure": "The inventory records 94 external source files. D38_IMPORTS.json projects 95 observed module names from the actual public CLI capture.",
   "observed_d38": {
-    "action": "daa683c956c2612febbbff4a3eeb01a1b76cf91dd7b77eb76b9539e0ceedb062",
-    "source_head": "bd3ff7791d41d1dcd4d242949ed056abfa4557bb",
+    "action": "a46b541d3e849559057461edaafe943b8523e2ffb285528d20f3e47db6eefba1",
+    "source_head": "c9260081766ec8a47e7a0f357432833a4d3b1cb6",
     "capture": "D38_IMPORTS.json",
-    "raw_capture_sha256": "297ddd9b52804cad92481727a6543a46655ead86413fd7f52b48b0d01d84d306",
+    "raw_capture_sha256": "6fc32dc80ba3a3d3c5662859d47be669893298f398262e55e261b30c3792d246",
     "scope": "Seventeen replay module names and 78 external module names remain present after main returns. This does not prove each function executes.",
     "inferred_scope": "Unobserved source files remain inferred dependencies. The CLI reads no identity refusal gate from this record."
   },
@@ -129,12 +129,13 @@
     "snapshot_diff": "snapshot adds only .pbrun-closure.b10b94b6292fa143.json over the frozen head"
   },
   "source_verification": {
-    "action": "04d03f51d33360ffe6749dbf72343a7ffbc5b40a83aef71091abd99cccb94916",
-    "report": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/pq2482-source-equivalence-a4.json",
-    "sha256": "3314ac425c2620ba8a6458e9ae267c801c5c1fe50e110fcb5ae1f6caea89970e",
-    "scope": "All 31 imported files match the frozen tree except the named deadline constant and guard. All 94 external source files match their records.",
-    "equivalence": "The default and deadlines 1, 100, 1699, and 1700 resolve equally. Eight invalid deadlines and four scientific mutations refuse equally.",
-    "projection": "All projected observation rows match the actual raw CLI capture."
+    "action": "1de88f98ad06b1f64732347ac46ae6fb0928dabd863e70cf3fb8e65f38d122b0",
+    "report": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/pq2482-source-equivalence-a8.json",
+    "sha256": "76bb6c75f1d79c8cef81b848d7493b4f5fd35e18f5f8e336ab9e5852b5f294c2",
+    "scope": "All 31 relocated files match the frozen tree except the named deadline constant and guard. All 94 external source files match their records.",
+    "equivalence": "The default and deadlines 1, 100, 1699, and 1700 resolve equally. Nine invalid deadlines and four scientific mutations refuse equally.",
+    "projection": "All 95 projected observation rows match the actual raw CLI capture. The module set is unchanged by the path move.",
+    "supersedes": "04d03f51d33360ffe6749dbf72343a7ffbc5b40a83aef71091abd99cccb94916 keeps the pre-move equivalence proof."
   },
   "schema": "prismaquant.pact_replay_import_provenance.v1"
 }

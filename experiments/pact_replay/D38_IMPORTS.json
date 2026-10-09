@@ -1,8 +1,9 @@
 {
-  "action_key": "daa683c956c2612febbbff4a3eeb01a1b76cf91dd7b77eb76b9539e0ceedb062",
-  "source_head": "bd3ff7791d41d1dcd4d242949ed056abfa4557bb",
+  "action_key": "a46b541d3e849559057461edaafe943b8523e2ffb285528d20f3e47db6eefba1",
+  "source_head": "c9260081766ec8a47e7a0f357432833a4d3b1cb6",
   "returncode": 0,
-  "entry": {"origin":"/home/rob/tmp/prismabuild-checkouts/daa683c956c2.juoh83hw/checkout/prismaquant/pact_replay/multi_stream_replay.py","sha256":"c661efc8228545b91e97b6c5d50bf5d35f922a1ca47e3b0e00ff081c142a1eaf"},
+  "entry": {"origin":"/home/rob/tmp/prismabuild-checkouts/a46b541d3e84.oqvqcgvh/checkout/experiments/pact_replay/multi_stream_replay.py","sha256":"c661efc8228545b91e97b6c5d50bf5d35f922a1ca47e3b0e00ff081c142a1eaf"},
+  "deadline_arguments": ["--deadline-seconds", "3500", "--dry-run-cpu"],
   "modules": {
     "__mp_main__": ["pact-replay","multi_stream_replay.py","c661efc8228545b91e97b6c5d50bf5d35f922a1ca47e3b0e00ff081c142a1eaf"],
     "accepted": ["pact-replay","accepted/__init__.py","864771bc09b4736dfe75317471391f3c41ea56ce3954783dda30b457f777da3c"],
