@@ -55,6 +55,9 @@ def capture_cli(entry, arguments, roots, output, source_head):
                 non_file[name] = origin
                 continue
             path = Path(origin).resolve()
+            if not path.is_file():
+                non_file[name] = {"origin": origin, "reason": "The module origin has no file."}
+                continue
             record = file_record(path)
             record["loaded_before_cli"] = name in before
             all_modules[name] = record

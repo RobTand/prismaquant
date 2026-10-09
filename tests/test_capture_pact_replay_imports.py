@@ -61,3 +61,20 @@ def test_observer_keeps_cli_failure(tmp_path, failure):
     if "ValueError" in failure:
         assert capture["error"] == {"type": "ValueError", "message": "science refusal"}
         assert "science refusal" in result.stderr
+
+
+def test_observer_records_virtual_module_without_a_byte_claim(tmp_path):
+    entry = tmp_path / "entry.py"
+    entry.write_text(
+        "import sys, types\n"
+        "module = types.ModuleType('virtual_origin')\n"
+        "module.__file__ = 'torch-git'\n"
+        "sys.modules['virtual_origin'] = module\n"
+    )
+    result, capture = _observe(tmp_path, entry, [])
+    assert result.returncode == 0, result.stderr
+    raw = Path(capture["all_modules"]["file"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == capture["all_modules"]["sha256"]
+    library = json.loads(raw)
+    assert library["non_file_modules"]["virtual_origin"]["origin"] == "torch-git"
+    assert "virtual_origin" not in library["modules"]
