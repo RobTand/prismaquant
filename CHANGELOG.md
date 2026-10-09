@@ -34,7 +34,7 @@
 - Import the canonical diagnostic replay closure and accept the approved 3500-second deadline (#2482).
   Preserve the 1700-second default, valid legacy deadlines, and all scientific refusals.
   Record actual public CLI module origins instead of synthetic import claims.
-  PB `daa683c956c2` passes the x86 CPU dry branch with seven streams and no GPU replay.
+  PB `b3498341ca27` passes the x86 CPU dry branch with seven streams and no GPU replay after the main merge.
   PB `04d03f51d333` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
   The affected replay tests and architecture provenance test pass 37 cases without skips.
   Preserve the frozen execution source and require final artifact review before replacement.
