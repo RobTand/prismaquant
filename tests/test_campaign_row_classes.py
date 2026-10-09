@@ -18,6 +18,7 @@ Three properties, in the order they matter.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 import sys
 
@@ -30,6 +31,7 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 import dispatch_tessera_campaign as dispatch  # noqa: E402
+from resolve_tessera_dev_pin import resolve_literal_pin  # noqa: E402
 import tessera_campaign_container as container_tool  # noqa: E402
 
 
@@ -37,12 +39,58 @@ ROCM_PYTHON = "/home/rob/ml-venvs/torch-rocm7/bin/python"
 GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
 SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
 SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
+SDK4_TRAIN_PYTHON = "/home/rob/venvs/pq-task-suite-layer-20261008/bin/python"
+SDK4_TRAIN_BASELINE = "/home/rob/venvs/pq-pin-fca4c6ce0"
 SDK5_PYTHON = "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python"
 SDK5_BASELINE = "/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9"
+SDK4_TRAIN_ATTESTED_BY = "6ae7bb235555502193e14fdc8398d751346a1cd0751ea615f659a0de1521ac11"
 SDK4_ATTESTED_BY = "204b35146fab0c7c135781d594c4c15890b83fe74c9ec3d7463f802863700209"
 SDK4_PB_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
 SDK5_PB_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
 TESSERA_COMMIT = "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+
+
+def installed_commit(python, dist):
+    """The Git commit one interpreter sees for one distribution."""
+    script = (
+        "import importlib.metadata as m, json; "
+        f"d = m.distribution({dist!r}); "
+        "print(json.loads(d.read_text('direct_url.json') or '{}')"
+        ".get('vcs_info', {}).get('commit_id', '<unknown>'))"
+    )
+    done = subprocess.run(
+        [python, "-c", script], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def single_owner(python, module):
+    """The count of distributions that own one module under one interpreter."""
+    script = (
+        "import importlib.metadata as m; "
+        f"print(len(m.packages_distributions().get({module!r}, [])))"
+    )
+    done = subprocess.run(
+        [python, "-c", script], capture_output=True, text=True, check=True)
+    return int(done.stdout.strip())
+
+
+def guard_reports(python, dist, module, expected):
+    """The pbtest identity verdict for one install on this checkout."""
+    observed = installed_commit(python, dist)
+    return observed == expected and single_owner(python, module) == 1
+
+
+def vehicle_pins():
+    """The PB and Tessera commits this checkout demands of its interpreter."""
+    pins = {
+        "prismabuild": resolve_literal_pin(
+            ROOT / "prismaquant" / "staged_lease.py",
+            "PB_READER_LEASE_PIN_COMMIT"),
+        "tessera-quant": resolve_literal_pin(
+            ROOT / "prismaquant" / "tessera_runtime_contract.py",
+            "TESSERA_DEV_PIN_COMMIT"),
+    }
+    return pins
 
 
 def fleet() -> dict:
@@ -435,26 +483,37 @@ def test_active_sdk4_interpreters_validate_explicit_classes(tag):
         "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
         "containerized": False, "wire_shared": True, "weights_only": False}]
 
-def test_merge_train_interpreters_cover_vehicles_with_and_without_pr2216():
+
+def test_merge_train_layers_match_vehicle_pins_on_this_checkout():
+    """Each train layer passes the guard identity check its vehicle demands."""
+    pins = vehicle_pins()
+    assert pins["prismabuild"] == SDK4_PB_COMMIT
+    assert pins["tessera-quant"] == TESSERA_COMMIT
     table = dispatch.load_fleet_interpreters()["tags"]["dl380g10"][
         "interpreters"]
-    assert table[SDK4_PYTHON]["attested_by"] == SDK4_ATTESTED_BY
-    assert SDK4_PB_COMMIT in table[SDK4_PYTHON]["observed"]
-    assert len(table[SDK5_PYTHON]["attested_by"]) == 64
-    observed = table[SDK5_PYTHON]["observed"]
-    assert SDK5_BASELINE in observed
-    assert SDK5_PB_COMMIT in observed
-    assert TESSERA_COMMIT in observed
-    for python in (SDK4_PYTHON, SDK5_PYTHON):
+    assert table[SDK4_TRAIN_PYTHON]["attested_by"] == SDK4_TRAIN_ATTESTED_BY
+    assert SDK4_TRAIN_BASELINE in table[SDK4_TRAIN_PYTHON]["observed"]
+    assert SDK4_PB_COMMIT in table[SDK4_TRAIN_PYTHON]["observed"]
+    assert TESSERA_COMMIT in table[SDK4_TRAIN_PYTHON]["observed"]
+    assert guard_reports(
+        SDK4_TRAIN_PYTHON, "prismabuild", "prismabuild", pins["prismabuild"])
+    assert guard_reports(
+        SDK4_TRAIN_PYTHON, "tessera-quant", "tessera", pins["tessera-quant"])
+    for python in (SDK4_TRAIN_PYTHON, SDK5_PYTHON):
         records = dispatch.validate_row_classes(base_spec(
             python=python, tags=["dl380g10"], classes={"default": {}}))
         assert records[0]["python"] == python
 
 
-def test_active_sdk5_interpreter_validates_on_dl380g10():
-    record = dispatch.load_fleet_interpreters()["tags"]["dl380g10"][
-        "interpreters"][SDK5_PYTHON]
-    assert len(record["attested_by"]) == 64
+def test_sdk5_layer_carries_the_sdk5_pin_pair():
+    """The SDK5 layer reports the PB commit PR 2216 demands, not this one."""
+    pins = vehicle_pins()
+    assert installed_commit(
+        SDK5_PYTHON, "prismabuild") == SDK5_PB_COMMIT != pins["prismabuild"]
+    assert installed_commit(
+        SDK5_PYTHON, "tessera-quant") == pins["tessera-quant"] == TESSERA_COMMIT
+    assert SDK5_BASELINE in dispatch.load_fleet_interpreters()["tags"][
+        "dl380g10"]["interpreters"][SDK5_PYTHON]["observed"]
     records = dispatch.validate_row_classes(base_spec(
         python=SDK5_PYTHON, tags=["dl380g10"], classes={"default": {}}))
     assert records[0]["python"] == SDK5_PYTHON
@@ -464,7 +523,7 @@ def test_active_sdk5_interpreter_validates_on_dl380g10():
 @pytest.mark.parametrize("history, message", [
     (None, "retired_interpreters mapping"),
     ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
-    ({SDK4_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
+    ({SDK4_TRAIN_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
 ])
 def test_invalid_retired_inventory_is_refused(
         tmp_path, history, message, dev_env, monkeypatch):
