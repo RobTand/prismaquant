@@ -103,7 +103,7 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "--cpus", "4",
         "--priority", "0",
         "--timeout-s", "1500",
-        "--container-image", "content:sha256:" + CONTENT_SHA256,
+        "--container-image", IMAGE,
     ]
     for key, value in env.items():
         argv += ["--env", f"{key}={value}"]
