@@ -1,0 +1,467 @@
+{
+  "action_key": "02da0e85bb7472fc6f2ba0a5df2940fd046449475cbc5977585b8dc72cc94a4e",
+  "action_nonce": "1f7ca44386ae4dc0b11e7ce1639286db",
+  "byte_convention": "allocated bytes count 512 * st_blocks for each unique device/inode, directories included; apparent bytes sum st_size",
+  "cache_env": {
+    "HF_HOME": "/home/rob/pb-scratch-pq2463q/r2/cache/hf",
+    "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES": "1073741824",
+    "PRISMAQUANT_CONTAINER_CACHE_ROOT": "/home/rob/pb-scratch-pq2463q/r2/cache",
+    "PRISMAQUANT_TMPDIR": "/home/rob/pb-scratch-pq2463q/r2/spill/row-tmp",
+    "TORCHINDUCTOR_CACHE_DIR": "/home/rob/pb-scratch-pq2463q/r2/cache/inductor",
+    "TRITON_CACHE_DIR": "/home/rob/pb-scratch-pq2463q/r2/cache/triton",
+    "XDG_CACHE_HOME": "/home/rob/pb-scratch-pq2463q/r2/cache/xdg"
+  },
+  "command": [
+    "/usr/bin/python3",
+    "-m",
+    "tools.measure_container_cache_quantum_row",
+    "--cache-root",
+    "/home/rob/pb-scratch-pq2463q/r2/cache",
+    "--workspace",
+    "/home/rob/pb-scratch-pq2463q/r2/spill/row-tmp",
+    "--out",
+    "/home/rob/pb-scratch-pq2463q/r2/spill/row-tmp/receipt.json",
+    "--device",
+    "cuda"
+  ],
+  "device": "cuda",
+  "failure": null,
+  "host": "b753d3939555",
+  "initial_state": {
+    "exists": true,
+    "subdirs": {},
+    "totals": {
+      "allocated_bytes": 4096,
+      "apparent_bytes": 0,
+      "dirs": 1,
+      "errors": [],
+      "files": 0
+    }
+  },
+  "measurement": {
+    "errors": [],
+    "final_allocated_bytes": 3596288,
+    "gaps": [],
+    "incomplete_scan": false,
+    "peak_allocated_bytes": 3596288,
+    "peak_sample_index": 26,
+    "sample_count": 27,
+    "sample_interval_s": 0.25,
+    "samples": [
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 0,
+        "scan_duration_s": 0.00014853477478027344,
+        "unix": 1791542243.7048895
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 1,
+        "scan_duration_s": 8.96453857421875e-05,
+        "unix": 1791542243.9554145
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 2,
+        "scan_duration_s": 0.00011086463928222656,
+        "unix": 1791542244.205683
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 3,
+        "scan_duration_s": 0.00011301040649414062,
+        "unix": 1791542244.4559853
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 4,
+        "scan_duration_s": 6.985664367675781e-05,
+        "unix": 1791542244.7062666
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 5,
+        "scan_duration_s": 9.059906005859375e-05,
+        "unix": 1791542244.95651
+      },
+      {
+        "allocated_bytes": 4096,
+        "apparent_bytes": 0,
+        "dirs": 1,
+        "errors": [],
+        "files": 0,
+        "index": 6,
+        "scan_duration_s": 0.00011372566223144531,
+        "unix": 1791542245.2068021
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 7,
+        "scan_duration_s": 0.00014209747314453125,
+        "unix": 1791542245.4571934
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 8,
+        "scan_duration_s": 0.00011563301086425781,
+        "unix": 1791542245.7075005
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 9,
+        "scan_duration_s": 0.00012493133544921875,
+        "unix": 1791542245.9578788
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 10,
+        "scan_duration_s": 0.00013136863708496094,
+        "unix": 1791542246.2081933
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 11,
+        "scan_duration_s": 0.00014591217041015625,
+        "unix": 1791542246.4587772
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 12,
+        "scan_duration_s": 0.00011134147644042969,
+        "unix": 1791542246.7091057
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 13,
+        "scan_duration_s": 0.00010585784912109375,
+        "unix": 1791542246.9594762
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 14,
+        "scan_duration_s": 0.00010561943054199219,
+        "unix": 1791542247.209753
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 15,
+        "scan_duration_s": 0.00011205673217773438,
+        "unix": 1791542247.4601276
+      },
+      {
+        "allocated_bytes": 8192,
+        "apparent_bytes": 0,
+        "dirs": 2,
+        "errors": [],
+        "files": 0,
+        "index": 16,
+        "scan_duration_s": 0.00012040138244628906,
+        "unix": 1791542247.7104034
+      },
+      {
+        "allocated_bytes": 16384,
+        "apparent_bytes": 0,
+        "dirs": 4,
+        "errors": [],
+        "files": 0,
+        "index": 17,
+        "scan_duration_s": 0.0001819133758544922,
+        "unix": 1791542247.9606855
+      },
+      {
+        "allocated_bytes": 94208,
+        "apparent_bytes": 77256,
+        "dirs": 4,
+        "errors": [],
+        "files": 1,
+        "index": 18,
+        "scan_duration_s": 0.00018405914306640625,
+        "unix": 1791542248.2110322
+      },
+      {
+        "allocated_bytes": 237568,
+        "apparent_bytes": 183207,
+        "dirs": 9,
+        "errors": [],
+        "files": 12,
+        "index": 19,
+        "scan_duration_s": 0.00040793418884277344,
+        "unix": 1791542248.4613698
+      },
+      {
+        "allocated_bytes": 1323008,
+        "apparent_bytes": 1186290,
+        "dirs": 17,
+        "errors": [],
+        "files": 39,
+        "index": 20,
+        "scan_duration_s": 0.0009071826934814453,
+        "unix": 1791542248.7123516
+      },
+      {
+        "allocated_bytes": 1548288,
+        "apparent_bytes": 1397204,
+        "dirs": 18,
+        "errors": [],
+        "files": 44,
+        "index": 21,
+        "scan_duration_s": 0.0009796619415283203,
+        "unix": 1791542248.9635274
+      },
+      {
+        "allocated_bytes": 2121728,
+        "apparent_bytes": 1938637,
+        "dirs": 19,
+        "errors": [],
+        "files": 56,
+        "index": 22,
+        "scan_duration_s": 0.0011067390441894531,
+        "unix": 1791542249.2146814
+      },
+      {
+        "allocated_bytes": 2207744,
+        "apparent_bytes": 2014951,
+        "dirs": 20,
+        "errors": [],
+        "files": 59,
+        "index": 23,
+        "scan_duration_s": 0.0011506080627441406,
+        "unix": 1791542249.4660583
+      },
+      {
+        "allocated_bytes": 2867200,
+        "apparent_bytes": 2643265,
+        "dirs": 22,
+        "errors": [],
+        "files": 72,
+        "index": 24,
+        "scan_duration_s": 0.0013427734375,
+        "unix": 1791542249.7173684
+      },
+      {
+        "allocated_bytes": 3334144,
+        "apparent_bytes": 3082888,
+        "dirs": 23,
+        "errors": [],
+        "files": 83,
+        "index": 25,
+        "scan_duration_s": 0.0014798641204833984,
+        "unix": 1791542249.9688728
+      },
+      {
+        "allocated_bytes": 3596288,
+        "apparent_bytes": 3333071,
+        "dirs": 23,
+        "errors": [],
+        "files": 88,
+        "index": 26,
+        "scan_duration_s": 0.001562356948852539,
+        "unix": 1791542250.243292
+      }
+    ],
+    "valid": true
+  },
+  "peak_rss_kib": 2150904,
+  "power": {
+    "error": null,
+    "samples": [
+      4.8,
+      7.11,
+      12.45,
+      12.24,
+      12.23,
+      12.26,
+      13.35
+    ],
+    "summary": {
+      "gpu_joules": 74.44,
+      "gpu_power_w_max": 13.35,
+      "gpu_power_w_p50": 12.24,
+      "gpu_power_w_p95": 12.45,
+      "interval_s": 1.0,
+      "sample_count": 7
+    },
+    "times": [
+      1791542243.8942451,
+      1791542244.8721921,
+      1791542245.8767898,
+      1791542246.8818786,
+      1791542247.8726244,
+      1791542248.8774385,
+      1791542249.8728817
+    ]
+  },
+  "proc_io_delta": {
+    "cancelled_write_bytes": 1204224,
+    "rchar": 600639180,
+    "read_bytes": 425984,
+    "syscr": 11515,
+    "syscw": 635,
+    "wchar": 297722044,
+    "write_bytes": 298184704
+  },
+  "profile_top": [
+    "         9032971 function calls (8256437 primitive calls) in 7.375 seconds",
+    "",
+    "   Ordered by: internal time",
+    "   List reduced from 9847 to 30 due to restriction <30>",
+    "",
+    "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+    "     12/7    0.814    0.068    0.824    0.118 operator_schemas.py:98(_torchscript_schema_to_signature_impl)",
+    "      457    0.597    0.001    0.597    0.001 {built-in method builtins.compile}",
+    "       17    0.459    0.027    0.459    0.027 {built-in method posix.waitpid}",
+    "     52/4    0.290    0.006    0.006    0.002 serialization.py:1976(_load)",
+    "       50    0.257    0.005    0.257    0.005 {built-in method torch._C._nn.linear}",
+    "13846/13839    0.237    0.000    0.237    0.000 {method 'update' of '_hashlib.HASH' objects}",
+    "  897/307    0.207    0.000    1.090    0.004 <frozen importlib._bootstrap>:480(_call_with_frames_removed)",
+    "       10    0.166    0.017    0.175    0.017 joint_aura.py:877(_observe_rows)",
+    "       21    0.163    0.008    0.163    0.008 registry.py:922(eager_router)",
+    "       10    0.138    0.014    0.138    0.014 {built-in method triton._C.libtriton.llvm.optimize_module}",
+    "     12/0    0.128    0.011    0.000          {method 'readline' of '_io.TextIOWrapper' objects}",
+    "        7    0.116    0.017    0.116    0.017 {built-in method triton._C.libtriton.llvm.link_extern_libs}",
+    "       10    0.112    0.011    0.112    0.011 {built-in method triton._C.libtriton.llvm.translate_to_asm}",
+    "        1    0.110    0.110    0.110    0.110 async_compile.py:381(wakeup)",
+    "1321834/1311465    0.103    0.000    0.121    0.000 {built-in method builtins.isinstance}",
+    "   1601/0    0.099    0.000    0.000          code_generator.py:1542(visit)",
+    "   5541/2    0.078    0.000    0.000    0.000 contextlib.py:132(__enter__)",
+    "  228/193    0.057    0.000    0.053    0.000 {built-in method posix.fsync}",
+    "4602/3913    0.053    0.000    0.021    0.000 {method 'read' of '_io.BufferedReader' objects}",
+    "     5494    0.043    0.000    0.104    0.000 facts.py:599(deduce_all_facts)",
+    " 3796/995    0.039    0.000    0.346    0.000 assumptions.py:509(_ask)",
+    "260051/259131    0.038    0.000    0.050    0.000 {built-in method builtins.getattr}",
+    "11567/2341    0.038    0.000    0.011    0.000 {built-in method posix.stat}",
+    "       10    0.037    0.004    0.037    0.004 {built-in method torch.embedding}",
+    "8380/8056    0.036    0.000    0.205    0.000 sym_node.py:1458(binary_magic_impl)",
+    "     66/4    0.036    0.001    0.002    0.000 _weights_only_unpickler.py:315(load)",
+    "80988/53964    0.035    0.000    0.655    0.000 cache.py:69(wrapper)",
+    "353574/353550    0.034    0.000    0.038    0.000 {method 'get' of 'dict' objects}",
+    "73727/42221    0.033    0.000    0.061    0.000 expr.py:432(is_number)",
+    "   302/52    0.032    0.000    0.015    0.000 perturbed_x_cache.py:1013(_activation_file_signature)",
+    "",
+    ""
+  ],
+  "row_output": "/home/rob/pb-scratch-pq2463q/r2/spill/row-tmp/row-output-1f7ca44386ae4dc0b11e7ce1639286db",
+  "runtime": {
+    "cuda_available": true,
+    "device_capability": [
+      12,
+      1
+    ],
+    "device_name": "NVIDIA GB10",
+    "schema": "prismaquant.container_cache_quantum_row.v1",
+    "torch": "2.13.0+cu130",
+    "torch_cuda": "13.0",
+    "transformers": "5.16.1",
+    "triton": "3.7.1"
+  },
+  "schema": "prismaquant.container_cache_quantum_row.v1",
+  "wall_s": 7.301,
+  "workload": {
+    "checkpoints": [
+      2
+    ],
+    "formats": [
+      "FP8_E4M3",
+      "NVFP4A16",
+      "BF16"
+    ],
+    "layer": 1,
+    "n_probes": 2,
+    "row": "stage_a_capture_plus_stage_b_quantum",
+    "seed_base": 7000,
+    "served_compile": {
+      "device": "cuda:0",
+      "kda_probe": {
+        "compiled": [
+          "gram_bwd_cols_inclusive",
+          "gram_bwd_cols_strict",
+          "gram_bwd_rows_inclusive",
+          "gram_bwd_rows_strict",
+          "gram_fwd_inclusive",
+          "gram_fwd_strict"
+        ],
+        "probe_s": 1.224,
+        "sha256": "844e6ad2f98c481dcb6de63099428b7d49fa6b464da2f89dc4edf2afd6235f45",
+        "shape": [
+          1,
+          128,
+          2,
+          128
+        ],
+        "status": "ran"
+      },
+      "output_mean": 0.0002096290118061006,
+      "quantise_s": 3.538,
+      "quantiser": "fp4_e2m1/g16",
+      "seed": 2463,
+      "shape": [
+        64,
+        256
+      ]
+    },
+    "units": [
+      "model.layers.1.proj"
+    ],
+    "windows": 1
+  }
+}

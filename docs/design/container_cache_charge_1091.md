@@ -58,12 +58,45 @@ local sweeper, `finally` cleanup, or produced-output retirement is substituted.
 
 CPU tests cover declaration/pricing, command forwarding, containment,
 conflicting/partial/ASCII bounds, mount safety, symlink refusal and unchanged
-legacy cases. GPU acceptance still requires an immutable nonsealed fixture,
-recorded exact command/resources, before/after in-process profiles and both-
-Spark Netdata, observed peak cache bytes versus reservation, and recovery from
-worker/launcher loss through the eventual public lifetime contract. No GPU
-measurement, work-per-joule result, speedup, quota enforcement or cleanup pass
-is established by these CPU policy tests.
+legacy cases. PQ #2463 measured the workload-specific ceiling: two GPU rows
+of a complete Stage B quantum peaked at 3596288 bytes each, and the
+fixture `tests/fixtures/container_cache_ceiling_2463.py` derives the 1 GiB
+ceiling from that peak with declared headroom. Receipts live in
+`docs/measurements/container_cache_quantum_row1_2463.json`,
+`container_cache_quantum_row2_2463.json` and
+`container_cache_quantum_row1_netdata_2463.json`; the report is
+`docs/measurements/container_cache_peak_2463.md`. Recovery from
+worker/launcher loss through the eventual public lifetime contract, quota
+enforcement and cleanup still need proof under #1091 and PB #1360. No
+work-per-joule result or speedup follows from this measurement.
+
+## Sampler lifecycle requirements
+
+The sampler confirms its first complete scan before the row can start.
+The child appends that sample before it sends the startup confirmation.
+A missing confirmation, failed initial scan, or dead child prevents row execution.
+
+The parent requests the final scan after the row ends.
+The child records the final scan and exits with code zero.
+The parent checks the exit code, sample sequence, and both row boundaries.
+An early exit, signal, failed final scan, or row exception invalidates the evidence.
+An active sampler cannot report a complete row.
+Both measurement commands return a nonzero status for an invalid receipt.
+
+The control pipe has no shared process lock.
+A killed child cannot hold the parent's stop request on an abandoned event lock.
+The existing scan-error and sample-gap checks still apply.
+The retained GPU receipts predate these lifecycle checks; this repair does not add fields to those immutable receipts.
+The CPU repair evidence appears in the measurement report.
+
+The IO engine starts the isolated scan process.
+The sampler still owns its control pipe, samples, and child exit checks.
+A refused process launch closes the control pipe and removes the sampler's temporary directory.
+Both commands reuse one compilation probe and one runtime reader.
+The probe uses the existing KDA qualification API.
+Receipt publication reuses the existing profile writer and digest owners.
+The Netdata collector and observer share one validator.
+No frozen allowlist or duplication baseline expands.
 
 This extends the existing container/scratch adapter. It adds no rendered-
 weight/activation cache, model arithmetic, wire format, serving gate, runtime
