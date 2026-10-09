@@ -25,7 +25,7 @@ if [ ! -f "$TS_Q/pyproject.toml" ] || [ ! -d "$TS_Q/src/tessera/serving" ]; then
 fi
 echo "[pq2459] head tree ready at $TS_Q"
 if ! ssh -o BatchMode=yes -o ConnectTimeout=15 "$WORKER" \
-    "rm -rf '$TS_Q' && mkdir -p '$TS_Q' && git --git-dir=/home/rob/tessera/.git archive '$COMMIT' | tar -x -C '$TS_Q' && test -f '$TS_Q/pyproject.toml' && test -d '$TS_Q/src/tessera/serving'" \
+    "test -f '$TS_Q/pyproject.toml' && test -d '$TS_Q/src/tessera/serving' || (rm -rf '$TS_Q' && mkdir -p '$TS_Q' && git --git-dir=/home/rob/tessera/.git archive '$COMMIT' | tar -x -C '$TS_Q' && test -f '$TS_Q/pyproject.toml' && test -d '$TS_Q/src/tessera/serving')" \
     </dev/null; then
   echo "[pq2459] REFUSED: cannot stage $TS_Q on $WORKER" >&2
   exit 2
