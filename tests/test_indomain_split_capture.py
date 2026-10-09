@@ -243,19 +243,25 @@ def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeyp
     assert fragment["capture_binding"]["max_prefix_rows"] == args.max_prefix_rows
 
 
-def _published_toy_layer_with_moved_census(tmp_path):
-    """A published toy layer, and its census statistics moved one row and 1.0 off the observed forward."""
+def _published_toy_layer(tmp_path):
+    """A published toy layer: its capture root, census, manifest and the role records it holds."""
     capture._toy_control_preflight(tmp_path, lambda _label: None)
     root = tmp_path / "capture"
     census_path = tmp_path / "census.json"
     census = json.loads(census_path.read_text())
     manifest = json.loads((root / "layers/L000/manifest.json").read_text())
-    records = {role: {} for role in ("fit", "heldout")}
-    for name, roles in manifest["units"].items():
+    records = {role: {name: torch.load(root / roles[role]["file"], weights_only=True)
+                      for name, roles in manifest["units"].items()}
+               for role in ("fit", "heldout")}
+    return root, census_path, census, manifest, records
+
+
+def _published_toy_layer_with_moved_census(tmp_path):
+    """The same layer, with its census statistics moved one row and 1.0 off the observed forward."""
+    root, census_path, census, manifest, records = _published_toy_layer(tmp_path)
+    for name in manifest["units"]:
         census["counts"][name] += 1
         census["max_abs"][name] += 1.0
-        for role in records:
-            records[role][name] = torch.load(root / roles[role]["file"], weights_only=True)
     return root, census_path, census, manifest, records
 
 
