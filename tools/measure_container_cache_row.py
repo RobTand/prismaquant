@@ -135,6 +135,12 @@ def main(argv=None) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
     if args.profile_out is not None:
         args.profile_out.parent.mkdir(parents=True, exist_ok=True)
+    # The initial inventory is captured BEFORE the sampler starts and before
+    # the workload runs: a row that starts on a warm root must record it.
+    # A receipt whose initial totals equal the final ones on a cold row is
+    # correct only when the root starts empty; the regression test pins a
+    # warm start where they differ.
+    initial_state = peak_mod.describe_initial_state(cache_root)
     command = [sys.executable, "-m", "tools.measure_container_cache_row",
                "--cache-root", str(cache_root), "--workspace", str(workspace),
                "--out", str(args.out)]
@@ -179,7 +185,7 @@ def main(argv=None) -> int:
             "XDG_CACHE_HOME", "PRISMAQUANT_TMPDIR",
             "PRISMAQUANT_CONTAINER_CACHE_ROOT",
             "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")},
-        "initial_state": peak_mod.describe_initial_state(cache_root),
+        "initial_state": initial_state,
         "measurement": measurement,
         "workload": workload if failure is None else {"failure": failure},
         "profile_top": profile_text.splitlines()[:40],

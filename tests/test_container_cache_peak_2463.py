@@ -1,13 +1,14 @@
 """The measured cache ceiling derives from the recorded peak (PQ #2463)."""
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
+import json
 import math
 import sys
 import time
 from pathlib import Path
-
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -42,6 +43,23 @@ def test_peak_exceeds_final_size_on_grow_then_shrink_workload(tmp_path):
     assert measurement["sample_count"] >= 2
     assert measurement["peak_allocated_bytes"] > measurement["final_allocated_bytes"]
     assert measurement["final_allocated_bytes"] == 0
+
+
+def test_initial_inventory_is_captured_before_the_row_runs(tmp_path):
+    """The receipt's initial state is the pre-row inventory, not the final one."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    warm = cache / "warm.bin"
+    warm.write_bytes(b"\x5a" * 200000)
+    before = peak_mod.describe_initial_state(cache)
+    assert before["totals"]["files"] == 1
+    receipt = peak_mod.measure_around(
+        _growth_workload(cache, 600000), cache, interval_s=0.02)
+    initial = receipt["initial_state"]["totals"]
+    assert initial["allocated_bytes"] == before["totals"]["allocated_bytes"]
+    assert initial["files"] == before["totals"]["files"] == 1
+    assert receipt["measurement"]["final_allocated_bytes"] == 0
+    assert receipt["measurement"]["peak_allocated_bytes"] >= initial["allocated_bytes"]
 
 
 def test_failed_scan_invalidates_the_evidence(tmp_path):
@@ -105,6 +123,25 @@ def test_fixture_binds_peak_inputs_ceiling_and_pb_reservation():
     assert fixture["pb_cache_gib"] == math.ceil(
         fixture["ceiling_bytes"] / peak_mod.GIB_BYTES)
     assert "measurement_digest" in fixture and fixture["measurement_digest"]
+    root = Path(__file__).resolve().parents[1] / "docs" / "measurements"
+    for key in ("measurement_digest", "repeat_digest"):
+        receipt_path = root / fixture[{"measurement_digest": "measurement_receipt",
+                                       "repeat_digest": "repeat_receipt"}[key]]
+        raw = receipt_path.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == fixture[key]
+        receipt = json.loads(raw)
+        peak = receipt["measurement"]["peak_allocated_bytes"]
+        assert receipt["measurement"]["valid"], receipt["measurement"]["errors"]
+        assert not receipt["measurement"]["gaps"]
+        assert not receipt["measurement"]["incomplete_scan"]
+        assert peak == fixture[{"measurement_digest": "peak_allocated_bytes",
+                                "repeat_digest": "repeat_peak_allocated_bytes"}[key]]
+    samples = json.loads((root / fixture["measurement_receipt"]).read_bytes())["measurement"]["samples"]
+    growths = [later["allocated_bytes"] - earlier["allocated_bytes"]
+               for earlier, later in zip(samples, samples[1:])
+               if later["allocated_bytes"] > earlier["allocated_bytes"]]
+    assert growths, "no recorded cache growth justifies headroom"
+    assert fixture["headroom_bytes"] >= 4 * max(growths), fixture["headroom_basis"]
 
 
 def test_both_peaks_must_fit_the_ceiling_or_it_is_rejected():
@@ -114,6 +151,11 @@ def test_both_peaks_must_fit_the_ceiling_or_it_is_rejected():
     assert fixture["repeat_peak_allocated_bytes"] <= ceiling
     assert max(fixture["peak_allocated_bytes"],
                fixture["repeat_peak_allocated_bytes"]) <= ceiling
+    recomputed = peak_mod.derive_cache_ceiling(
+        max(fixture["peak_allocated_bytes"],
+            fixture["repeat_peak_allocated_bytes"]),
+        headroom_bytes=fixture["headroom_bytes"])
+    assert recomputed["ceiling_bytes"] == ceiling
     with pytest.raises(ValueError):
         peak_mod.derive_cache_ceiling(-1, headroom_bytes=0)
 

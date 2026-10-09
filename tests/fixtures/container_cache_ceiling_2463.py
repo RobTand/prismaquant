@@ -33,6 +33,8 @@ from __future__ import annotations
 FIXTURE = {
     "schema": "prismaquant.container_cache_ceiling.v1",
     "issue": "prismaquant#2463",
+    "measurement_receipt": "container_cache_peak_row1_2463.json",
+    "repeat_receipt": "container_cache_peak_row2_2463.json",
     "measurement_digest":
         "4acc1cfe81cba1a0c4c9dc84101ffe84ad1c278461da60643390c074c4d001b0",
     "repeat_digest":
