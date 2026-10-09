@@ -46,7 +46,14 @@ def test_dry_run_emits_the_exact_head_argv(tmp_path):
     assert argv[argv.index("--max-num-batched-tokens") + 1] == "2049"
     assert argv[argv.index("--tensor-parallel-size") + 1] == "2"
     assert argv[argv.index("--distributed-executor-backend") + 1] == "ray"
+    assert argv[argv.index("--gpu-memory-utilization") + 1] == "0.5"
+    assert argv[argv.index("--kv-cache-memory-bytes") + 1] == "1073741824"
+    assert argv[argv.index("--kv-cache-dtype") + 1] == "fp8_ds_mla"
+    assert argv[argv.index("--moe-backend") + 1] == "triton"
+    assert "--trust-remote-code" in argv
+    assert "--language-model-only" in argv
     assert manifest["engine_scope"]["prompt_tokens"] == 2048
+    assert manifest["engine_scope"]["gpu_memory_utilization"] == 0.5
     assert manifest["head_trace"].endswith("trace-head.json")
 
 

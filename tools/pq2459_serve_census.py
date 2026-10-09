@@ -95,7 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-model-len", type=int, default=2049)
     ap.add_argument("--max-num-seqs", type=int, default=1)
     ap.add_argument("--max-num-batched-tokens", type=int, default=2049)
-    ap.add_argument("--gpu-memory-utilization", type=float, default=0.3)
+    ap.add_argument("--gpu-memory-utilization", type=float, default=0.5)
+    ap.add_argument("--kv-cache-memory-bytes", type=int, default=1073741824)
+    ap.add_argument("--kv-cache-dtype", default="fp8_ds_mla")
+    ap.add_argument("--moe-backend", default="triton")
+    ap.add_argument("--kernel-config", default='{"enable_flashinfer_autotune": false}')
+    ap.add_argument("--trust-remote-code", action="store_true", default=True)
+    ap.add_argument("--language-model-only", action="store_true", default=True)
     return ap
 
 
@@ -166,8 +172,20 @@ def check_engine_scope(args: argparse.Namespace) -> None:
         raise SystemExit("max sequences must be 1 for this census")
     if args.max_num_batched_tokens != 2049:
         raise SystemExit("max batched tokens must be 2049 for this census")
-    if not 0.0 < args.gpu_memory_utilization <= 1.0:
-        raise SystemExit("GPU memory use must sit in (0, 1]")
+    if args.gpu_memory_utilization != 0.5:
+        raise SystemExit("GPU memory use must be 0.5 for this census")
+    if args.kv_cache_memory_bytes != 1073741824:
+        raise SystemExit("KV cache bytes must be 1 GiB for this census")
+    if args.kv_cache_dtype != "fp8_ds_mla":
+        raise SystemExit("KV cache dtype must be fp8_ds_mla for this census")
+    if args.moe_backend != "triton":
+        raise SystemExit("MoE backend must be triton for this census")
+    if json.loads(args.kernel_config) != {"enable_flashinfer_autotune": False}:
+        raise SystemExit("kernel config must disable flashinfer autotune")
+    if not args.trust_remote_code:
+        raise SystemExit("trust remote code must stay on for this census")
+    if not args.language_model_only:
+        raise SystemExit("language model only must stay on for this census")
 
 
 def check_no_single_node_env() -> None:
@@ -200,7 +218,7 @@ def seal_commit(commit: str) -> bool:
 
 def census_argv(args: argparse.Namespace, *, trace_path: str) -> list[str]:
     """The exact census argv the head runs inside its container."""
-    return [
+    argv = [
         "python3", "tools/tessera_route_census.py", args.model, args.out,
         "--runtime-image", args.runtime_image,
         "--tessera-commit", args.tessera_commit,
@@ -211,7 +229,16 @@ def census_argv(args: argparse.Namespace, *, trace_path: str) -> list[str]:
         "--max-num-seqs", str(args.max_num_seqs),
         "--max-num-batched-tokens", str(args.max_num_batched_tokens),
         "--gpu-memory-utilization", str(args.gpu_memory_utilization),
+        "--kv-cache-memory-bytes", str(args.kv_cache_memory_bytes),
+        "--kv-cache-dtype", args.kv_cache_dtype,
+        "--moe-backend", args.moe_backend,
+        "--kernel-config", args.kernel_config,
     ]
+    if args.trust_remote_code:
+        argv.append("--trust-remote-code")
+    if args.language_model_only:
+        argv.append("--language-model-only")
+    return argv
 
 
 def head_env(args: argparse.Namespace, runs: Path) -> dict[str, str]:
@@ -256,6 +283,12 @@ def run_dry_run(args: argparse.Namespace, out: Path) -> int:
             "max_num_seqs": args.max_num_seqs,
             "max_num_batched_tokens": args.max_num_batched_tokens,
             "gpu_memory_utilization": args.gpu_memory_utilization,
+            "kv_cache_memory_bytes": args.kv_cache_memory_bytes,
+            "kv_cache_dtype": args.kv_cache_dtype,
+            "moe_backend": args.moe_backend,
+            "kernel_config": json.loads(args.kernel_config),
+            "trust_remote_code": args.trust_remote_code,
+            "language_model_only": args.language_model_only,
         },
         "profiles": {
             name: {
