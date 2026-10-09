@@ -1391,6 +1391,23 @@ class IOEngine:
                     max_workers=self.width, thread_name_prefix="pq-io")
             return self._pool.submit(fn, *args)
 
+    def start_scan_process(self, target, *, args, name):
+        """Start an isolated filesystem scan before threads or CUDA work.
+
+        The caller owns the control pipe, joins the child, and closes it.
+        A separate GIL keeps compilation from delaying filesystem samples.
+        """
+        import multiprocessing
+
+        process = multiprocessing.get_context("fork").Process(
+            target=target, args=args, name=name, daemon=True)
+        try:
+            process.start()
+        except BaseException:
+            process.close()
+            raise
+        return process
+
     def read_stream(self, entries: Iterable[ReadEntry], *, budget: ReadBudget,
                     ready: Callable[[Hashable, threading.Event], bool] | None = None,
                     lease_counters: dict | None = None) -> ReadStream:

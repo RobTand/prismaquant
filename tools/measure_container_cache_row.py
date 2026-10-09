@@ -24,9 +24,7 @@ from __future__ import annotations
 
 import argparse
 import cProfile
-import hashlib
 import io
-import json
 import os
 import pstats
 import socket
@@ -37,8 +35,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import container_cache_peak as peak_mod  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX  # noqa: E402
+from prismaquant.stage_b_workspace_profile import write_profile  # noqa: E402
 from prismaquant.io_spans import (  # noqa: E402
     GpuPowerSampler,
+    counter_delta,
     read_proc_io,
     read_proc_status,
     stage_span_log,
@@ -50,8 +51,8 @@ TENSOR_SHAPE = (64, 256)
 TENSOR_SEED = 2463
 
 
-def _runtime_versions() -> dict:
-    versions = {"schema": SCHEMA}
+def runtime_versions(schema: str) -> dict:
+    versions = {"schema": schema}
     try:
         import torch
 
@@ -79,7 +80,7 @@ def _runtime_versions() -> dict:
     return versions
 
 
-def _run_compilation_workload() -> dict:
+def run_compilation_workload() -> dict:
     """Compile and run the served quantiser; probe the KDA kernel on CUDA."""
     import torch
 
@@ -97,20 +98,17 @@ def _run_compilation_workload() -> dict:
                 "seed": TENSOR_SEED, "quantise_s": round(quantise_s, 3),
                 "output_mean": float(result.float().mean()),
                 "device": str(result.device)}
-    try:
-        from prismaquant.kernels import kda_chunk
-    except ImportError as exc:
-        workload["kda_probe"] = {"status": "missing", "error": str(exc)}
-        return workload
     if not torch.cuda.is_available():
         workload["kda_probe"] = {"status": "skipped_no_cuda"}
         return workload
+    from prismaquant.glm_kda_capture_kernel import qualification_candidate
     started = time.time()
-    digest = kda_chunk.probe_digest("cuda")
+    candidate = qualification_candidate("cuda")
+    digest = candidate["probe"]
     workload["kda_probe"] = {"status": "ran", "sha256": digest["sha256"],
                              "shape": digest["shape"],
                              "probe_s": round(time.time() - started, 3),
-                             "compiled": sorted(kda_chunk.compiled_kernels())}
+                             "compiled": sorted(candidate["compiled"])}
     return workload
 
 
@@ -155,7 +153,7 @@ def main(argv=None) -> int:
     with spans.span("row"), sampler:
         try:
             profile.enable()
-            workload = _run_compilation_workload()
+            workload = run_compilation_workload()
             profile.disable()
         except BaseException as exc:  # noqa: BLE001 - receipt records it
             failure = f"{type(exc).__name__}: {exc}"
@@ -178,7 +176,7 @@ def main(argv=None) -> int:
         "schema": SCHEMA,
         "command": command,
         "host": socket.gethostname().split(".")[0],
-        "runtime": _runtime_versions(),
+        "runtime": runtime_versions(SCHEMA),
         "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
         "cache_env": {name: os.environ.get(name) for name in (
             "HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",
@@ -189,8 +187,8 @@ def main(argv=None) -> int:
         "measurement": measurement,
         "workload": workload if failure is None else {"failure": failure},
         "profile_top": profile_text.splitlines()[:40],
-        "proc_io_delta": _delta_io(io_before, read_proc_io()),
-        "peak_rss_kib": _peak_rss_kib(),
+        "proc_io_delta": counter_delta(read_proc_io(), io_before),
+        "peak_rss_kib": read_proc_status().get("VmHWM", 0) // 1024 or None,
         "wall_s": round(time.time() - wall_before, 3),
         "power": {"summary": power_summary,
                   "samples": list(power.samples), "times": list(power.times),
@@ -200,24 +198,14 @@ def main(argv=None) -> int:
                             "apparent bytes sum st_size"),
         "failure": failure,
     }
-    digest = peak_mod.write_receipt(args.out, receipt)
-    print(json.dumps({"receipt": str(args.out), "sha256": digest,
-                      "peak_allocated_bytes": measurement["peak_allocated_bytes"],
-                      "valid": measurement["valid"]}, sort_keys=True))
+    digest = write_profile(args.out, receipt)
+    print(DIRECT_ASCII_SPACED_LAX.text(
+        {"receipt": str(args.out), "sha256": digest,
+         "peak_allocated_bytes": measurement["peak_allocated_bytes"],
+         "valid": measurement["valid"]}))
     return 0 if measurement["valid"] else 1
 
 
-def _delta_io(before: dict, after: dict) -> dict:
-    return {key: (after.get(key) - before.get(key)
-                  if isinstance(after.get(key), int)
-                  and isinstance(before.get(key), int) else None)
-            for key in set(before) | set(after)}
-
-
-def _peak_rss_kib() -> int | None:
-    status = read_proc_status()
-    peak = status.get("VmHWM")
-    return None if peak is None else peak // 1024
 
 
 if __name__ == "__main__":

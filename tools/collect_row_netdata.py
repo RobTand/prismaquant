@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import shlex
 import socket
 import subprocess
@@ -26,14 +25,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX  # noqa: E402
+from tools.pq_profile_artifact import validate_netdata_window  # noqa: E402
+
 REQUIRED_CONTEXTS = {"system.cpu", "system.ram", "system.io",
                      "nvidia_smi.gpu_power_draw"}
 HOSTS = ("sparklina", "sparky")
 
 
-def _command(args: list[str], timeout: int = 15) -> str:
-    return subprocess.run(args, check=True, capture_output=True, text=True,
-                          timeout=timeout).stdout
 
 
 def fetch(host: str, endpoint: str) -> dict:
@@ -42,34 +41,13 @@ def fetch(host: str, endpoint: str) -> dict:
     if host == local:
         with urllib.request.urlopen(url, timeout=8) as response:
             return json.load(response)
-    raw = _command(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-                    host, "curl -fsS --max-time 8 " + shlex.quote(url)])
+    raw = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+         host, "curl -fsS --max-time 8 " + shlex.quote(url)],
+        check=True, capture_output=True, text=True, timeout=15).stdout
     return json.loads(raw)
 
 
-def validate_window(data: dict, *, after: float, before: float) -> None:
-    labels, rows = data.get("labels"), data.get("data")
-    if (not isinstance(labels, list) or len(labels) < 2 or labels[0] != "time"
-            or any(not isinstance(label, str) or not label for label in labels)
-            or len(set(labels)) != len(labels)
-            or not isinstance(rows, list) or not rows):
-        raise RuntimeError("netdata labels or samples are missing")
-    measured = set()
-    for row in rows:
-        if not isinstance(row, list) or len(row) != len(labels):
-            raise RuntimeError("netdata sample has malformed dimensions")
-        stamp = row[0]
-        if (type(stamp) not in (int, float) or not math.isfinite(stamp)
-                or not after <= stamp <= before):
-            raise RuntimeError("netdata sample is outside its window")
-        for index, value in enumerate(row[1:], 1):
-            if value is None:
-                continue
-            if type(value) not in (int, float) or not math.isfinite(value):
-                raise RuntimeError("netdata sample is not finite numeric")
-            measured.add(index)
-    if measured != set(range(1, len(labels))):
-        raise RuntimeError("netdata dimensions have no measured samples")
 
 
 def main(argv=None) -> int:
@@ -100,12 +78,12 @@ def main(argv=None) -> int:
                 points=max(10, int(args.before - args.after) + 4),
                 group="average", format="json", options="seconds"))
             data = fetch(host, "data?" + query)
-            validate_window(data, after=args.after, before=args.before)
+            validate_netdata_window(data, after=args.after, before=args.before)
             series[chart] = {"points": len(data["data"]),
                              "labels": data["labels"],
                              "data": data["data"]}
         document["hosts"][host] = {"charts": charts, "series": series}
-    print(json.dumps(document, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(document))
     return 0
 
 

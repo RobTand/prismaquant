@@ -14,10 +14,12 @@ box cannot attest an accelerator.
 from __future__ import annotations
 
 import argparse
-import json
 import runpy
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant.digests import indent2_json_file_bytes  # noqa: E402
 
 FLEET_PROBE = Path(
     "/mnt/shared/prismabuild-fleet/repo/tools/fleet/pbevidence.py")
@@ -32,8 +34,7 @@ def main(argv=None) -> int:
     packet = module["collect_packet"](
         **({"recorder_python": args.recorder_python}
            if args.recorder_python is not None else {}))
-    raw = (json.dumps(packet, sort_keys=True, indent=2,
-                      allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(packet)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         tmp = args.out.with_name(args.out.name + ".tmp")

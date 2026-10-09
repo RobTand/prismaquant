@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import cProfile
-import hashlib
 import io
 import json
 import os
@@ -41,8 +40,16 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import container_cache_peak as peak_mod  # noqa: E402
+from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_SPACED_LAX, file_sha256hex, text_sha256hex,
+)
+from prismaquant.stage_b_workspace_profile import write_profile  # noqa: E402
+from tools.measure_container_cache_row import (  # noqa: E402
+    run_compilation_workload, runtime_versions,
+)
 from prismaquant.io_spans import (  # noqa: E402
     GpuPowerSampler,
+    counter_delta,
     read_proc_io,
     read_proc_status,
     stage_span_log,
@@ -54,40 +61,6 @@ WORKLOAD_SEED = 85
 N_PROBES = 2
 SEED_BASE = 7000
 FORMATS = ("FP8_E4M3", "NVFP4A16", "BF16")
-HEX = "0123456789abcdef"
-
-
-def _hex(char: str) -> str:
-    return char * 64
-
-
-def _runtime_versions() -> dict:
-    versions = {"schema": SCHEMA}
-    try:
-        import torch
-
-        versions["torch"] = str(torch.__version__)
-        versions["torch_cuda"] = str(torch.version.cuda)
-        versions["cuda_available"] = bool(torch.cuda.is_available())
-        if torch.cuda.is_available():
-            versions["device_name"] = torch.cuda.get_device_name(0)
-            versions["device_capability"] = list(
-                torch.cuda.get_device_capability(0))
-    except ImportError:
-        versions["torch"] = None
-    try:
-        import triton
-
-        versions["triton"] = str(triton.__version__)
-    except ImportError:
-        versions["triton"] = None
-    try:
-        import transformers
-
-        versions["transformers"] = str(transformers.__version__)
-    except ImportError:
-        versions["transformers"] = None
-    return versions
 
 
 def _operator_policy() -> dict:
@@ -105,13 +78,6 @@ def _operator_policy() -> dict:
                 workspace_reserve_bytes=1024 * 1024,
                 max_replay_cotangent_bytes=1024 * 1024,
                 prefetch_workers=min(2, workers))
-
-
-class _DenseLayer:
-    """One width-16 dense layer (mirrors the streamed cost tests)."""
-
-    def __init__(self, module):
-        self._module = module
 
 
 def _build_tiny_fixture():
@@ -198,7 +164,7 @@ def _build_tiny_fixture():
             self.active.clear()
 
     def model_identity(label: str):
-        shard_digest = hashlib.sha256(label.encode()).hexdigest()
+        shard_digest = text_sha256hex(label)
         value = {
             "config": {"fixture": True},
             "weight_map": {"fixture.weight": "fixture.weight"},
@@ -220,43 +186,6 @@ def _build_tiny_fixture():
     return TinyLM, FakeContext, model_identity, StreamedCausalLM, DefaultProfile
 
 
-TENSOR_SHAPE = (64, 256)
-TENSOR_SEED = 2463
-
-
-def _run_served_compile_probe() -> dict:
-    """Compile and run the served quantiser; probe the KDA kernel on CUDA."""
-    import torch
-
-    from prismaquant.format_registry import _make_rtn
-
-    torch.manual_seed(TENSOR_SEED)
-    quantise = _make_rtn("fp4_e2m1", 16)
-    tensor = torch.randn(*TENSOR_SHAPE)
-    if torch.cuda.is_available():
-        tensor = tensor.to("cuda")
-    started = time.time()
-    result = quantise(tensor)
-    quantise_s = time.time() - started
-    workload = {"quantiser": "fp4_e2m1/g16", "shape": list(TENSOR_SHAPE),
-                "seed": TENSOR_SEED, "quantise_s": round(quantise_s, 3),
-                "output_mean": float(result.float().mean()),
-                "device": str(result.device)}
-    try:
-        from prismaquant.kernels import kda_chunk
-    except ImportError as exc:
-        workload["kda_probe"] = {"status": "missing", "error": str(exc)}
-        return workload
-    if not torch.cuda.is_available():
-        workload["kda_probe"] = {"status": "skipped_no_cuda"}
-        return workload
-    started = time.time()
-    digest = kda_chunk.probe_digest("cuda")
-    workload["kda_probe"] = {"status": "ran", "sha256": digest["sha256"],
-                             "shape": digest["shape"],
-                             "probe_s": round(time.time() - started, 3),
-                             "compiled": sorted(kda_chunk.compiled_kernels())}
-    return workload
 
 
 def _preview_reserves(device: str) -> tuple:
@@ -266,7 +195,7 @@ def _preview_reserves(device: str) -> tuple:
     live guard the quantum will hold: its physical cap is the plan's
     bound, and the runtime reserve covers the live committed baseline
     (torch/CUDA runtime) plus headroom for Stage A and later imports.
-    Runs before the sampler starts so its allocations never starve it.
+    Runs before the row starts, while the sampler observes its allocations.
     """
     import torch
 
@@ -363,7 +292,7 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
         )
 
         proofs[key] = _cb_cache_tensor_identity(tensor)
-        file_shas[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        file_shas[key] = file_sha256hex(path)
     cache.weights = files
     cache.enable_lru(1 << 20)
     cache.metadata = {
@@ -418,8 +347,8 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
         runner, calib, execution=execution,
         output_root=stage_root, stride=2,
         source_model_identity=model_identity("joint-source"),
-        unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
-        prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
+        unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
+        prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
         implementation_sha256=aura._aura_source_sha256())
     layer = 1
     adjoint_slice = stage_a_slice(json.loads(json.dumps(receipt)), layer)
@@ -433,14 +362,14 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
         "quantum_id": f"layer-{layer:03d}",
         "layer": layer,
         "campaign": {
-            "plan_path": "plan.json", "plan_sha256": _hex("d"),
-            "prepared_path": "prepared.json", "prepared_sha256": _hex("e"),
-            "read_manifest_sha256": _hex("f"),
+            "plan_path": "plan.json", "plan_sha256": "d" * 64,
+            "prepared_path": "prepared.json", "prepared_sha256": "e" * 64,
+            "read_manifest_sha256": "f" * 64,
             "campaign_scope": {"fixture": True},
-            "unit_roster_sha256": _hex("a"),
+            "unit_roster_sha256": "a" * 64,
         },
         "read_set": {
-            "manifest_path": "slice.json.gz", "manifest_sha256": _hex("b"),
+            "manifest_path": "slice.json.gz", "manifest_sha256": "b" * 64,
             "entry_count": 1, "total_bytes": 100,
             "source_phase": {"name": f"layer-{layer:03d}",
                              "start_bytes": 0, "end_bytes": 100},
@@ -493,7 +422,7 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
     # the sampler would record an empty cache. Run the served activation
     # quantiser compile and the KDA capture-kernel probe exactly as the
     # probe tool does, after the quantum, under the same sampler.
-    compile_workload = _run_served_compile_probe()
+    compile_workload = run_compilation_workload()
     return {
         "row": "stage_a_capture_plus_stage_b_quantum",
         "layer": layer,
@@ -597,7 +526,7 @@ def main(argv=None) -> int:
         "schema": SCHEMA,
         "command": command,
         "host": socket.gethostname().split(".")[0],
-        "runtime": _runtime_versions(),
+        "runtime": runtime_versions(SCHEMA),
         "device": args.device,
         "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
         "action_nonce": os.environ.get("PRISMABUILD_ACTION_NONCE"),
@@ -611,8 +540,8 @@ def main(argv=None) -> int:
         "measurement": measurement,
         "workload": workload if failure is None else {"failure": failure},
         "profile_top": profile_text.splitlines()[:40],
-        "proc_io_delta": _delta_io(io_before, read_proc_io()),
-        "peak_rss_kib": _peak_rss_kib(),
+        "proc_io_delta": counter_delta(read_proc_io(), io_before),
+        "peak_rss_kib": read_proc_status().get("VmHWM", 0) // 1024 or None,
         "wall_s": round(time.time() - wall_before, 3),
         "power": {"summary": power_summary,
                   "samples": list(power.samples), "times": list(power.times),
@@ -622,27 +551,17 @@ def main(argv=None) -> int:
                             "apparent bytes sum st_size"),
         "failure": failure,
     }
-    digest = peak_mod.write_receipt(args.out, receipt)
-    print(json.dumps({"receipt": str(args.out), "sha256": digest,
-                      "peak_allocated_bytes": measurement["peak_allocated_bytes"],
-                      "valid": measurement["valid"]}, sort_keys=True))
+    digest = write_profile(args.out, receipt)
+    print(DIRECT_ASCII_SPACED_LAX.text(
+        {"receipt": str(args.out), "sha256": digest,
+         "peak_allocated_bytes": measurement["peak_allocated_bytes"],
+         "valid": measurement["valid"]}))
     # The receipt file lives on the worker's local disk. Print the full
     # canonical bytes to stdout so the PB log carries the evidence.
     print(args.out.read_bytes().decode())
     return 0 if measurement["valid"] else 1
 
 
-def _delta_io(before: dict, after: dict) -> dict:
-    return {key: (after.get(key) - before.get(key)
-                  if isinstance(after.get(key), int)
-                  and isinstance(before.get(key), int) else None)
-            for key in set(before) | set(after)}
-
-
-def _peak_rss_kib() -> int | None:
-    status = read_proc_status()
-    peak = status.get("VmHWM")
-    return None if peak is None else peak // 1024
 
 
 if __name__ == "__main__":

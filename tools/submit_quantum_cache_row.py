@@ -13,11 +13,14 @@ Without ``--submit`` it prints the sealed spec and the pbrun argv
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_SPACED_LAX, JsonProfile,
+)
 
 CACHE_GIB = {"r1": 2, "r2": 1}
 WORKSPACE_GIB = 8
@@ -64,7 +67,6 @@ def sealed_spec(row: str) -> dict:
 
 
 def pbrun_argv(row: str, spec: dict) -> list[str]:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
     cache = f"/home/rob/pb-scratch-pq2463q/{row}/cache"
     spill = f"/home/rob/pb-scratch-pq2463q/{row}/spill/row-tmp"
@@ -128,9 +130,12 @@ def main(argv=None) -> int:
 
     validate_container(spec)
     scratch = local_scratch_environment(spec, spec["env"])
-    print(json.dumps({"spec": spec, "scratch": scratch,
-                      "pairs": scratch.get("PRISMABUILD_LOCAL_SCRATCH_PAIRS")},
-                     indent=1, sort_keys=True))
+    display = JsonProfile(
+        "cache-row-display", ensure_ascii=True, allow_nan=True,
+        separators=(",", ": "), indent=1)
+    print(display.text(
+        {"spec": spec, "scratch": scratch,
+         "pairs": scratch.get("PRISMABUILD_LOCAL_SCRATCH_PAIRS")}))
     print("CACHE_GIB:", CACHE_GIB[args.row], "WORKSPACE_GIB:", WORKSPACE_GIB)
     if not args.submit:
         return 0

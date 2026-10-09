@@ -125,6 +125,22 @@ def test_child_failure_before_first_scan_prevents_row_start(tmp_path, monkeypatc
     assert result["incomplete_scan"]
 
 
+
+def test_sampler_launch_failure_releases_control_resources(tmp_path, monkeypatch):
+    from prismaquant.io_engine import ENGINE
+
+    def refuse_launch(*_args, **_kwargs):
+        raise OSError("process launch refused")
+
+    monkeypatch.setattr(ENGINE, "start_scan_process", refuse_launch)
+    sampler = peak_mod.CachePeakSampler(tmp_path)
+    with pytest.raises(OSError, match="process launch refused"):
+        with sampler:
+            pytest.fail("a failed launch must prevent row execution")
+    assert sampler._tmpdir is None
+    assert sampler._control.closed
+    assert not sampler.result()["valid"]
+
 @pytest.mark.parametrize("exit_kind", ["nonzero", "zero", "signal"])
 def test_early_child_exit_cannot_certify_final_only_peak(
         tmp_path, monkeypatch, exit_kind):
@@ -238,7 +254,7 @@ def test_row_cli_rejects_receipt_after_sampler_child_failure(
         monkeypatch.setattr(runner, "_run_complete_row", row)
         args += ["--device", "cpu"]
     else:
-        monkeypatch.setattr(runner, "_run_compilation_workload", row)
+        monkeypatch.setattr(runner, "run_compilation_workload", row)
     assert runner.main(args) == 1
     receipt = json.loads(out.read_bytes())
     assert receipt["workload"]["status"] == "complete"

@@ -32,6 +32,8 @@ import os
 import time
 from pathlib import Path
 
+from .digests import DIRECT_ASCII_SPACED_LAX
+
 #: GiB in bytes: the ceiling granularity PrismaBuild charges.
 GIB_BYTES = 1073741824
 #: Default sampler interval in seconds (250 ms per the plan).
@@ -124,7 +126,7 @@ def _sample_loop(root: str, interval_s: float, out_path: str,
             line = {"index": index, "unix": started, "phase": phase,
                     "scan_duration_s": time.time() - started, **totals}
             with open(out_path, "a") as handle:
-                handle.write(json.dumps(line, sort_keys=True) + "\n")
+                handle.write(DIRECT_ASCII_SPACED_LAX.text(line) + "\n")
             if index == 0:
                 # Confirm only after the complete sample reaches the log.
                 control.send(not totals["errors"])
@@ -183,6 +185,7 @@ class CachePeakSampler:
         import multiprocessing
         import tempfile
         from multiprocessing.connection import wait
+        from .io_engine import ENGINE
 
         if self._tmpdir is not None or self._started_unix is not None:
             raise RuntimeError("sampler cannot start twice")
@@ -193,12 +196,11 @@ class CachePeakSampler:
         context = multiprocessing.get_context("fork")
         receiver, sender = context.Pipe(duplex=True)
         self._control = receiver
-        self._process = context.Process(
-            target=_sample_loop,
-            args=(str(self.root), self.interval_s, self._out_path, sender),
-            name="container-cache-peak", daemon=True)
         try:
-            self._process.start()
+            self._process = ENGINE.start_scan_process(
+                _sample_loop,
+                args=(str(self.root), self.interval_s, self._out_path, sender),
+                name="container-cache-peak")
             sender.close()
             available = wait([receiver, self._process.sentinel], timeout=30)
             try:
@@ -248,27 +250,27 @@ class CachePeakSampler:
                 self.peak_sample_index = index
 
     def stop(self):
-        if self._process is None:
+        if self._tmpdir is None:
             return
         self._finished_unix = time.time()
-        if not self._process.is_alive():
-            self.errors.append("sampler child exited before the row ended")
-        else:
-            try:
-                self._control.send("stop")
-            except OSError as exc:
-                self.errors.append(f"sampler stop request failed: {exc}")
-        if self._process.pid is not None:
+        if self._process is not None:
+            if not self._process.is_alive():
+                self.errors.append("sampler child exited before the row ended")
+            else:
+                try:
+                    self._control.send("stop")
+                except OSError as exc:
+                    self.errors.append(f"sampler stop request failed: {exc}")
             self._process.join(timeout=30)
             if self._process.is_alive():
                 self._process.terminate()
                 self._process.join(timeout=30)
                 self.errors.append("sampler child did not exit; terminated")
-        self._child_exitcode = self._process.exitcode
-        if self._child_exitcode != 0:
-            self.errors.append(f"sampler child exit code: {self._child_exitcode}")
-        self._process.close()
-        self._process = None
+            self._child_exitcode = self._process.exitcode
+            if self._child_exitcode != 0:
+                self.errors.append(f"sampler child exit code: {self._child_exitcode}")
+            self._process.close()
+            self._process = None
         self._control.close()
         self._collect()
         if self._started_unix is not None and len(self.samples) >= 2:
@@ -330,16 +332,6 @@ def derive_cache_ceiling(first_peak_bytes, *, headroom_bytes) -> dict:
             "formula": "C = G * ceil((P + H) / G)"}
 
 
-def write_receipt(path, receipt: dict) -> str:
-    """Write ``receipt`` as canonical JSON and return its SHA-256 hex."""
-    from .cost_stage_checkpoint import atomic_write_bytes
-    from .digests import bytes_sha256hex
-
-    raw = (json.dumps(receipt, sort_keys=True, indent=2, allow_nan=False,
-                      default=str) + "\n").encode()
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(Path(path), raw)
-    return bytes_sha256hex(raw)
 
 
 def measure_around(run, root, *, interval_s=SAMPLE_INTERVAL_S) -> dict:

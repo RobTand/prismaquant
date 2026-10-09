@@ -89,6 +89,15 @@ The existing scan-error and sample-gap checks still apply.
 The retained GPU receipts predate these lifecycle checks; this repair does not add fields to those immutable receipts.
 The CPU repair evidence appears in the measurement report.
 
+The IO engine starts the isolated scan process.
+The sampler still owns its control pipe, samples, and child exit checks.
+A refused process launch closes the control pipe and removes the sampler's temporary directory.
+Both commands reuse one compilation probe and one runtime reader.
+The probe uses the existing KDA qualification API.
+Receipt publication reuses the existing profile writer and digest owners.
+The Netdata collector and observer share one validator.
+No frozen allowlist or duplication baseline expands.
+
 This extends the existing container/scratch adapter. It adds no rendered-
 weight/activation cache, model arithmetic, wire format, serving gate, runtime
 pin, kernel, production recipe default, stage graph or agent scheduler.

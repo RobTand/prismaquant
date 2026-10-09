@@ -163,3 +163,132 @@ This CPU smoke proves lifecycle behavior, not the GPU ceiling.
 The CPU runtime has no Triton or NVIDIA power tool.
 The repair changes no production default, cache declaration, quota, cleanup contract, or crash-recovery claim.
 Keep PQ #2463 open for the pipeline's independent check.
+
+## Integration correction: 2026-10-09
+
+The train's isolated action `7098c9795fea404ad3d952959c253d9049564b6ae7930c841a4fe54265a519b0` reported nine failures and two passes.
+The failures included copied helpers, new digest sites, a new process site, and unresolved KDA imports.
+Three quantum cases also reached an unbound `stage_b_spill_config` import.
+The PB and private Tessera boundary tests passed in that isolated action.
+The correction uses that evidence; it does not repeat the old failure run.
+
+The correction keeps the first-sample handshake and both row boundaries.
+The IO engine now starts the isolated scan process.
+The sampler retains control of its pipe and child lifetime.
+Both commands share the compilation probe and runtime reader.
+The probe uses `glm_kda_capture_kernel.qualification_candidate`, not an optional direct kernel import.
+The commands reuse `io_spans.counter_delta` and the existing profile writer.
+All new JSON and file digests use the digest owners.
+The Netdata collector and observer share the existing validator through `pq_profile_artifact`.
+The quantum imports `stage_b_spill_config` before every branch that reads it.
+The correction changes no allowlist, duplication baseline, GPU receipt, ceiling fixture, or production default.
+
+### Launch refusal regression
+
+PB `d535168a51a15e5877dfa00c6cf1f91d6be8944e9b91aae71e36ab8a19ae8939` records one expected failure before the resource-release fix.
+The test injects a process launch refusal.
+The old path leaves the control pipe and sampler directory open.
+The fixed path releases both resources and prevents row execution.
+PB `3940dc17f622` passes that case and all retained sampler cases.
+
+### Targeted verification
+
+All jobs use priority zero, class `x86`, two CPUs, and four GiB of memory.
+Pytest and ordinary temporary files use `/tmp`.
+The interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python`.
+The suite verifies the installed PB and Tessera pins before pytest.
+
+| Test file | PB action | Result |
+|---|---|---|
+| `test_container_cache_peak_2463.py` | `3940dc17f622a044b2821a33f6310fdcc6a00f8fbe666b6f52dfd6de5912d6ba` | 23 passed |
+| `test_container_cache_charge_1091.py` | `21e6c01e40d87367cd88ec98423f437c883684e86ef4e117e26dc36c8628c037` | 30 passed |
+| `test_container_cache_roots_1072.py` | `55b62a8bf3c33200911dacdc86e97b26f0d983ee32e30f59074142b14e941d75` | 10 passed |
+| `test_duplication_baseline.py` | `60743d90b5bc643575abd1070054fb06429d74a035a28490cac3a597209fbecb` | 7 passed |
+| `test_io_site_freeze.py` | `227a06f15a1bbd5eeb61642ab2b77d69dec7c67c1d2138bf53086879091993d7` | 2 passed |
+| `test_prismabuild_boundary.py` | `105862c039920e7a8df28656f97d07cd3c0bfda4eeef95a0582f61421eb26675` | 2 passed |
+| `test_tessera_core_boundary.py` | `943de367556c0fde4e2c6238efbe1eee887a9bd652abb881e4afce004aae1486` | 4 passed |
+| `test_tool_imports_1304.py` (affected tools) | `872df2f90e6211be286aa1181a6c56447540477275c90983391162e51c7c5937` | 7 passed |
+| `test_quantum_executable_readset.py` | `e956cdfa2935107a7f22d9445a5b7dad1b0bee2343ea2dcf214aab203ef281fa` | 22 passed |
+| `test_observer_completeness_1899.py` | `464dd447c8bd7922d0c49b52cbe3813518394bfd8761b869de3256d9d719d2f0` | 18 passed |
+| `test_profile_observer_bootstrap_1942.py` | `f0fdd203027b4e3d799d38672098a45faa59c7f31af199eabac85264099493bb` | 1 passed |
+| `test_io_engine.py` | `5972b59ff9d793bd7b31b8bce0614f37decdac67d05a009616078fe47796af7d` | 33 passed |
+| `test_staged_wait_phase_1166.py` | `a782e857bcef46e15834f6bbdaf6399d9d3292d668924630ec56ee5e3716e8b1` | 1 passed; 1 DIO prerequisite skip |
+
+The affected windowed chain test passes.
+An earlier broad run, `1d3edf9c649036257a42c5410d76e2b4b135033cfd12fe9b5d62dc7ed2ca6321`, passed that case but refused the additional spill case on tmpfs.
+The later run uses the existing `PQ_STAGE_B_SPILL_TEST_ROOT` declaration on local NVMe btrfs.
+Its spill case skips because the filesystem lacks the required statx direct-I/O support.
+This skip provides no spill qualification.
+The cache pricing check does not skip.
+
+The suite command is:
+
+```sh
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout /home/rob/wt/ig/prismaquant-2463 \
+  --python /home/rob/venvs/pq-pin-fca4c6ce0/bin/python \
+  --tmpdir /tmp --tag x86 --priority 0 --mem-gb 4 \
+  --timeout-s 900 --wait-s 1800 \
+  --pytest-args '["-k", "not test_tool_resolves_its_prismaquant_imports or measure_container_cache or collect_class_evidence or collect_row_netdata or submit_quantum_cache_row or pq_profile_artifact or pq_row_profile_observer"]' \
+  --json /home/rob/fleet/ceo/exec/ig-pq-2463-l1-a5/final-pb.json \
+  tests/test_container_cache_peak_2463.py tests/test_container_cache_charge_1091.py \
+  tests/test_container_cache_roots_1072.py tests/test_duplication_baseline.py \
+  tests/test_io_site_freeze.py tests/test_prismabuild_boundary.py \
+  tests/test_tessera_core_boundary.py tests/test_tool_imports_1304.py \
+  tests/test_quantum_executable_readset.py tests/test_staged_wait_phase_1166.py \
+  tests/test_observer_completeness_1899.py tests/test_profile_observer_bootstrap_1942.py
+```
+
+The IO engine run uses the same pbtest options with a 300-second deadline and `tests/test_io_engine.py`.
+The separate phase test command is:
+
+```sh
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd /home/rob/wt/ig/prismaquant-2463 --tag x86 --cpus 2 \
+  --demand mem_gb=4 --priority 0 --timeout-s 300 --wait-s 1800 \
+  --env TMPDIR=/tmp --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+  --env OPENBLAS_NUM_THREADS=1 \
+  --env PQ_STAGE_B_SPILL_TEST_ROOT=/home/rob/pb-scratch-pq2463-tests -- \
+  /home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m pytest -q \
+  tests/test_staged_wait_phase_1166.py --basetemp /tmp/pq2463-qualified-spill-tests
+```
+
+### Actual command smoke
+
+PB `0b941e0e4132877007c8ae3b92cd33af836e097e5b1afdea353789f3e9ce1731` passes the temporary revision smoke.
+The grow-then-delete workload records 11 samples, a 393216-byte peak, and a zero-byte final size.
+The child-kill scenario records an incomplete, invalid receipt with exit code minus nine.
+Both actual measurement commands run on CPU, retain process profiles, and finish with a zero child exit code.
+The compilation command records 86 samples.
+The complete quantum command records 90 samples and completes the Stage A capture and Stage B unit.
+Both commands observe a 405504-byte CPU cache peak.
+These CPU values do not change the GPU ceiling.
+
+| Artifact | SHA-256 |
+|---|---|
+| PB CAS receipt | `95842c4f9b1cc3d5225f80b6a498518993c1b6a53e12edc39877c21c84338dca` |
+| PB CAS payload | `e0db1ca4bd99a321ba93dd776f1869a3671c6262901d76627a1ae1b8235626d7` |
+| Compilation command receipt | `7bd01da32e3297a3bfdc6c0ee68874f6b364d622ce9c88a596fbf98f9e8054e3` |
+| Compilation command profile | `97849dadef3e19d1c4899d1ae8fc528ef04bb0c0e90f815dfc7a45e1f4316bb0` |
+| Quantum command receipt | `39b31818236c409c93d6b2a866e55938f3abe8464435d5ec235bd2852db597e6` |
+| Quantum command profile | `d41ebcef0e756d2955bb9c475aa2f4a6ca668371eeb1c99a43ce1cf442c96b2e` |
+
+The smoke command is:
+
+```sh
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd /home/rob/wt/ig/prismaquant-2463 --tag x86 --cpus 2 \
+  --demand mem_gb=4 --priority 0 --timeout-s 600 --wait-s 1800 \
+  --env TMPDIR=/tmp --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+  --env OPENBLAS_NUM_THREADS=1 --env PRISMAQUANT_DEV_MODE=1 \
+  --env PRISMAQUANT_DETERMINISTIC=1 -- \
+  /home/rob/venvs/pq-pin-fca4c6ce0/bin/python -u \
+  -m tools._container_cache_revision_smoke
+```
+
+The PB snapshot retains the temporary smoke source.
+The branch removes it after verification.
+The CPU runtime has no Triton or NVIDIA power tool.
+No new GPU job runs for this correction.
+The original workload scope, GPU evidence, and 1 GiB derivation remain unchanged.
+
