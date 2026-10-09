@@ -221,23 +221,25 @@ def test_real_router_uses_the_existing_dense_capture_without_a_model_change():
     assert torch.equal(router.weight, original_weight)
 
 
-def test_direct_consumer_prices_charge_the_final_buffer_once():
+def test_direct_consumer_prices_charge_the_final_buffer_once(profile):
     from prismaquant.tessera_formats import get_tessera_family
     family = get_tessera_family("TESSERA_E4M3_K1")
     prefix = P + "3.self_attn."
-    assert tc._direct_consumer_memory_bytes(prefix + "indexer.weights_proj", family, (32, 64)) == 32 * 64 * 4
-    assert tc._direct_consumer_memory_bytes(prefix + "indexer.wk", family, (64, 64)) == 0
-    assert tc._direct_consumer_memory_bytes(prefix + "kv_b_proj", family, (128, 64)) == 128 * 64 * 2
+    assert tc._direct_consumer_memory_bytes(prefix + "indexer.weights_proj", family, (32, 64), profile=profile) == 32 * 64 * 4
+    assert tc._direct_consumer_memory_bytes(prefix + "indexer.wk", family, (64, 64), profile=profile) == 0
+    assert tc._direct_consumer_memory_bytes(prefix + "kv_b_proj", family, (128, 64), profile=profile) == 128 * 64 * 2
 
 
-def test_t8_head_screen_does_not_quantize_its_fp32_input():
+def test_t8_head_screen_does_not_quantize_its_fp32_input(profile):
     import torch
     from prismaquant.production_weight_cache import _local_forward_render_score
     prefix = P + "3.self_attn.indexer."
     head = tc._prepare_anchor(qname=prefix + "weights_proj", format_name="TESSERA_E4M3_K1_R1024",
-        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense")
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense",
+        profile=profile)
     key = tc._prepare_anchor(qname=prefix + "wk", format_name="TESSERA_E4M3_K1_R1024",
-        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense")
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense",
+        profile=profile)
     x = torch.linspace(0.013, 1.073, 32).reshape(1, 32)
     weight = torch.eye(32)
     head_score = _local_forward_render_score(reference_weight=weight, rendered_weight=weight,
@@ -266,7 +268,7 @@ def test_explicit_fp32_cache_keeps_the_direct_head_values():
 @pytest.mark.parametrize("format_name, route_family", [
     ("TESSERA_E4M3_K1_R1024", "TESSERA_FP8"),
     ("TESSERA_BF16_K1_R1792", "TESSERA_BF16")])
-def test_head_wire_decoder_cache_and_screen_agree(tmp_path, format_name, route_family):
+def test_head_wire_decoder_cache_and_screen_agree(tmp_path, profile, format_name, route_family):
     import torch
     from prismaquant.production_weight_cache import ProductionWeightCache, _local_forward_render_score
     from tessera.serving.projection_routes import direct_consumer_weight
@@ -279,7 +281,7 @@ def test_head_wire_decoder_cache_and_screen_agree(tmp_path, format_name, route_f
     wire_dir.mkdir()
     cache = ProductionWeightCache(weights={}, levers={}, cache_dir=str(cache_dir), metadata={})
     anchor = tc._measure_anchor(qname=name, weight=source, activations=inputs, format_name=format_name,
-        cache=cache, wire_dir=wire_dir, hessian_required=False, structure="dense")
+        cache=cache, wire_dir=wire_dir, hessian_required=False, structure="dense", profile=profile)
     blob = next(wire_dir.glob("*.tessera")).read_bytes()
     decoded = direct_consumer_weight(blob, P + "3.self_attn.indexer.wk_weights_proj",
                                     "weights_proj", route_family)
