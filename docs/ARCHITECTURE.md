@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2301, revision 6): `tools/g3job` owns the imported G3 measurement harness.
+Re-stamped 2026-10-09 (PQ #2301, revision 7): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -109,6 +109,27 @@ PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, em
 The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a6-corrected/real-arm-ig-a6-corrected/comparison.json`.
 Both Torch traces reside beside it under `source-read/` and `omission/`.
 Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a6/netdata-power.json`.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
+
+The revision-7 merge retains `origin/main` at `0a3f9df953`.
+The G3 reader calls only PB's public client for maps, queue records, and leases.
+Its admitted context supplies the claimed manifest to the shared `staged_lease.load_claimed_manifest` byte reader.
+The normal production entry point retains its exact SDK pin and discovery checks.
+The host loads the container adapter from the pinned source file.
+It does not read the checkout adapter's changed image-digest API.
+The omission rule, phase batches, digest checks, numerical code, and D32 behavior remain unchanged.
+PB `064d872a4635` passes all 164 selected CPU cases, with no skips.
+The suite includes the G3 import checks, PB boundary checks, shared manifest checks, and complete harness population.
+PB `74f166933103` repeats the real container comparison on Sparklina at priority zero.
+Both passes verify 876 replacements; logits and both FP64 KL arrays match bitwise.
+The source-read pass records three map parses and four phase acquisitions.
+The omission pass records two map parses and four phase acquisitions.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a7-public-client/real-arm-ig-a7-public-client/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a7/netdata-power.json`.
+PB `0bc4c1cc86af` compiles the harness and shared manifest owner on x86.
 This correctness comparison adds no speed, energy, or whole-model residency claim.
 Work per joule remains null.
 

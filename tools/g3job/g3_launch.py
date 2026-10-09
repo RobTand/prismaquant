@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import runpy
 import sys
 from pathlib import Path
 
@@ -152,18 +153,19 @@ print(json.dumps(launch), flush=True)
 if args.preflight or args.qualify_then_score:
     cmd = ["python3", "/workspace/tools/g3job/g3_v1_preflight.py", json.dumps(cmd)] + (["--qualify-then-score"] if args.qualify_then_score else [])
 sys.path.insert(0, PQ)
-from tools import tessera_campaign_container as adapter
+adapter = runpy.run_path(str(Path(PQ) / "tools" / "tessera_campaign_container.py"))["main"]
+adapter_globals = adapter.__globals__
 from g3_pq_policy.dev_mode import dev_mode_enabled, seal_check
 if dev_mode_enabled():
     # The adapter still observes/publishes the actual image digest. Only its
     # recorded-versus-running image seal is converted to the central stamp.
     expected_image = spec["container"].pop("content_sha256")
-    original_image_digest = adapter.image_content_sha256
+    original_image_digest = adapter_globals["image_content_sha256"]
     def image_metadata(inspected):
         actual = original_image_digest(inspected)
         seal_check("producer image content", expected_image, actual, where="G3 launch",
                    refusal=RuntimeError(f"Docker image content differs for {IMAGE!r}: "
                                         f"expected {expected_image}, observed {actual}"))
         return actual
-    adapter.image_content_sha256 = image_metadata
-raise SystemExit(adapter.main(["--spec", json.dumps(spec), "--"] + cmd))
+    adapter_globals["image_content_sha256"] = image_metadata
+raise SystemExit(adapter(["--spec", json.dumps(spec), "--"] + cmd))

@@ -43,13 +43,13 @@ class StagedReader:
     def __init__(self):
         helper = os.environ['PRISMABUILD_READER_HELPER_ROOT']
         sys.path.insert(0, str(Path(helper) / 'src'))
-        from prismabuild import reader_lease, residency_map, pool
-        self.lease, self.maps = reader_lease, residency_map
-        context = reader_lease.injected_context(env=os.environ)
+        from prismabuild import client
+        self.lease, self.maps = client, client
+        context = client.injected_context(env=os.environ)
         if not context['ok']:
             raise RuntimeError(f'PB staged reader context: {context["refusal"]}')
         self.ctx = context['ctx']
-        self.queue = pool.PoolQueue(self.ctx['queue_root'])
+        self.queue = client.PoolQueue(self.ctx['queue_root'])
         self.root = Path(self.ctx['queue_root']) / 'residency'
         self.stats = {"staged_bytes": 0, "staged_reads": 0, "read_s": 0.0, "tiers": {},
                       "map_parses": 0, "phase_acquires": 0}
@@ -78,7 +78,7 @@ class StagedReader:
         if identity != self.map_identity:
             # RAM overlays can change without a new fragment-count generation.
             # Cache the atomic file identity, not only mapping["generation"].
-            self.mapping = self.maps.read_map(self.ctx["map_path"])
+            self.mapping = self.maps.read_residency_map(self.ctx["map_path"])
             self.map_identity = identity
             self.stats["map_parses"] = self.stats.get("map_parses", 0) + 1
         return self.mapping
@@ -210,20 +210,15 @@ def close_reader():
 
 
 def launch_read_plan():
-    """Read the admitted action's sealed manifest through its PB CAS owner."""
+    """Read the claimed manifest through the public, admitted PB client."""
+    from g3_pq_policy.staged_lease import load_claimed_manifest
     helper = os.environ["PRISMABUILD_READER_HELPER_ROOT"]
     sys.path.insert(0, str(Path(helper) / "src"))
-    from prismabuild import core, pool, reader_lease
-    context = reader_lease.injected_context(env=os.environ)
+    from prismabuild import client
+    context = client.injected_context(env=os.environ)
     if not context["ok"]:
         raise RuntimeError(f'PB staged reader context: {context["refusal"]}')
-    ctx = context["ctx"]
-    queue = pool.PoolQueue(ctx["queue_root"])
-    row = json.loads(queue.item_path(pool.CLAIMED, ctx["action_key"]).read_bytes())
-    cas = core.PrismaBuildCAS(row["cas_root"])
-    action = cas.read_action_request(ctx["action_key"])
-    manifest, _ = core.read_data_manifest(cas.input_path(action["params"]["data_manifest"]["input"]))
-    return manifest
+    return load_claimed_manifest(client, context["ctx"])
 
 
 def container_contract():

@@ -27,7 +27,7 @@ def reader_fixture(tmp_path):
     events, live, descriptors = [], {}, []
     parses = []
 
-    def read_map(path):
+    def read_residency_map(path):
         parses.append(path)
         return json.loads(Path(path).read_bytes())
 
@@ -56,7 +56,7 @@ def reader_fixture(tmp_path):
         return True
 
     reader = R.StagedReader.__new__(R.StagedReader)
-    reader.maps = SimpleNamespace(residency_map_key=lambda p, o: f"{o}:{p}", read_map=read_map)
+    reader.maps = SimpleNamespace(residency_map_key=lambda p, o: f"{o}:{p}", read_residency_map=read_residency_map)
     reader.lease = SimpleNamespace(covers_for_keys=covers, acquire_for=acquire,
                                    open_pinned=pinned, release=release)
     reader.ctx = {"map_path": str(map_path), "action_key": "a" * 64}

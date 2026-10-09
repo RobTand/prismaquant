@@ -234,7 +234,7 @@ def test_named_range_pin_outlives_descriptor_and_integrity_never_falls_back(tmp_
     digest = "0" * 64 if corrupt else hashlib.sha256(b"staged").hexdigest()
     reader = residency.StagedReader.__new__(residency.StagedReader)
     reader.maps = SimpleNamespace(residency_map_key=lambda p, o: f"{o}:{p}",
-        read_map=lambda _: {"tier_id": "stage", "manifest_sha256": "a" * 64,
+        read_residency_map=lambda _: {"tier_id": "stage", "manifest_sha256": "a" * 64,
                             "entries": {"7:/host/file": {"bytes": 6, "sha256": digest}}})
     reader.lease = SimpleNamespace(covers_for_keys=lambda *a, **k: {"ok": True, "covers": []},
                                   acquire_for=acquire, open_pinned=pinned, release=release)

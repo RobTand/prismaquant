@@ -51,6 +51,12 @@
   The shared lease owner classifies each refusal; integrity and unknown refusals still fail.
   PB `35251b1db6f4` reproduces the old RAM refusal; PB `7b2fd0569f8c` passes all 117 affected CPU cases.
   PB `36269dbc3563` completes the real comparison on Sparklina with bitwise logits and FP64 KL equality.
+  The next correction uses PB's public client instead of internal modules.
+  Both manifest entry points share the existing bounded byte checks and PB decoder.
+  The normal production entry point retains its exact SDK pin.
+  The host loads the container adapter from its pinned source file, not the checkout's `tools` package.
+  PB `064d872a4635` passes 164 affected CPU cases, including both G3 import and PB boundary guards.
+  PB `74f166933103` preserves real logits and both FP64 KL arrays bitwise in the producer container.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
