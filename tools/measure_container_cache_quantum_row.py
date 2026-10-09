@@ -107,6 +107,119 @@ def _operator_policy() -> dict:
                 prefetch_workers=min(2, workers))
 
 
+class _DenseLayer:
+    """One width-16 dense layer (mirrors the streamed cost tests)."""
+
+    def __init__(self, module):
+        self._module = module
+
+
+def _build_tiny_fixture():
+    """Two decoder layers, width 16, on a fake streaming context.
+
+    Inlined from ``tests/test_streamed_cost_checkpoints.py`` so the GPU
+    container needs no pytest install: the campaign image ships no test
+    tooling. The shapes, seeds and identities match the runtime tests.
+    """
+    import torch
+    import torch.nn as nn
+
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.cost_streaming import (
+        STREAMED_MODEL_IDENTITY_SCHEMA,
+        StreamedCausalLM,
+    )
+    from prismaquant.model_profiles.default import DefaultProfile
+
+    class DenseLayer(nn.Module):
+        def __init__(self, width=16):
+            super().__init__()
+            self.proj = nn.Linear(width, width, bias=False)
+
+        def forward(self, hidden_states, **_kwargs):
+            if getattr(self, "_fixture_requires_stream_residency", False):
+                assert getattr(self, "_fixture_stream_resident", False)
+            return torch.tanh(self.proj(hidden_states))
+
+    class TinyLM(nn.Module):
+        def __init__(self, state=None, vocab=23, width=16):
+            super().__init__()
+            self.model = nn.Module()
+            self.model.config = SimpleNamespace(layer_types=())
+            self.model.embed_tokens = nn.Embedding(vocab, width)
+            self.model.layers = nn.ModuleList(
+                [DenseLayer(width) for _ in range(2)])
+            self.model.norm = nn.Identity()
+            self.lm_head = nn.Linear(width, vocab, bias=False)
+            if state is not None:
+                self.load_state_dict(state)
+
+        def forward(self, input_ids):
+            hidden = self.model.embed_tokens(input_ids)
+            for layer in self.model.layers:
+                hidden = layer(hidden)
+            return SimpleNamespace(
+                logits=self.lm_head(self.model.norm(hidden)))
+
+    class FakeContext:
+        def __init__(self, model, device):
+            self.model = model
+            self.base_model = model.model
+            self.layers = model.model.layers
+            self.layers_prefix = "model.layers."
+            self.num_layers = len(self.layers)
+            self.device = torch.device(device)
+            self.dtype = next(model.parameters()).dtype
+            self.active = set()
+            self.max_active = 0
+            self.install_calls = 0
+
+        def install(self, layer, *, require_prefetched=False,
+                    prefetch_following=True):
+            self.install_calls += 1
+            self.active.add(int(layer))
+            self.layers[int(layer)]._fixture_stream_resident = True
+            self.max_active = max(self.max_active, len(self.active))
+            return "fixture"
+
+        def unload(self, layer):
+            self.active.discard(int(layer))
+            self.layers[int(layer)]._fixture_stream_resident = False
+            return 0
+
+        def schedule_prefetch(self, layer):
+            return None
+
+        def observe_source_waits(self, sink):
+            assert callable(sink)
+            return nullcontext()
+
+        def shutdown(self):
+            self.active.clear()
+
+    def model_identity(label: str):
+        shard_digest = hashlib.sha256(label.encode()).hexdigest()
+        value = {
+            "config": {"fixture": True},
+            "weight_map": {"fixture.weight": "fixture.weight"},
+            "shards": [{
+                "path": f"/fixture/{label}.safetensors",
+                "size": 1,
+                "sha256": shard_digest,
+            }],
+        }
+        return {
+            "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
+            "source": label,
+            "resolved_commit": None,
+            "content_sha256": canonical_json_sha256(
+                value, where="fixture streamed model identity"),
+            **value,
+        }
+
+    return TinyLM, FakeContext, model_identity, StreamedCausalLM, DefaultProfile
+
+
 def _run_complete_row(*, output_root: Path, device: str) -> dict:
     """Stage A capture then one layer quantum on the tiny fixture."""
     import torch
@@ -137,19 +250,13 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
     from prismaquant.model_profiles.default import DefaultProfile
     from prismaquant.production_weight_cache import ProductionWeightCache
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
-    from test_streamed_cost_checkpoints import (
-        _DenseTinyLM,
-        _FakeStreamingContext,
-        _model_identity,
-    )
+    TinyLM, FakeContext, model_identity, StreamedCausalLM, DefaultProfile = (
+        _build_tiny_fixture())
 
-    state = _DenseTinyLM().eval().state_dict()
-    model = _DenseTinyLM(state).eval()
-    context = _FakeStreamingContext(model)
-    install = context.install
-    context.install = lambda layer, *, require_prefetched=False, prefetch_following=True: install(
-        layer, require_prefetched=require_prefetched)
+    torch.manual_seed(WORKLOAD_SEED)
+    state = TinyLM().eval().state_dict()
+    model = TinyLM(state).eval()
+    context = FakeContext(model, device)
     context.settle_prefetch_layers = lambda layers: None
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
@@ -187,7 +294,7 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
     cache.weights = files
     cache.enable_lru(1 << 20)
     cache.metadata = {
-        "source_model_identity": _model_identity("joint-source"),
+        "source_model_identity": model_identity("joint-source"),
         "calib_hash": "fixture-calibration",
         "verified_cells": {
             key: {"rendered_weight": value,
@@ -230,7 +337,7 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
     receipt = run_adjoint_capture_core(
         runner, calib, execution=execution,
         output_root=stage_root, stride=2,
-        source_model_identity=_model_identity("joint-source"),
+        source_model_identity=model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
         implementation_sha256=aura._aura_source_sha256())
