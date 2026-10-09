@@ -2144,47 +2144,94 @@ def test_a_receipt_without_the_deferred_own_key_is_surfaced_not_decided(
         "would claim a decision was made")
 
 
+@pytest.mark.parametrize("staging_delay_s", [0.0, 31.0],
+                         ids=["ordinary-staging", "staging-over-30s"])
 def test_an_unrecognised_deferral_reason_is_surfaced_not_waited_on(
-        tmp_path, monkeypatch):
-    """A deferral this lane cannot name is visible, never sat on.
+        tmp_path, monkeypatch, staging_delay_s):
+    """An unknown receipt fails closed without a release retry or wait.
 
-    The inverse fail-open of the missing key, and the more expensive one:
-    ``if receipt.get("deferred_own"):`` would read ANY non-empty list as
-    "PrismaBuild will clear this", and then spend the whole staging budget
-    waiting for something that was never that. The wait is licensed by one
-    known reason -- the evicted mover's own in-flight copy, which ordinary
-    retry returns -- and by nothing else.
-
-    Driven through the REAL release path. The malformed shape (a
-    ``deferred_own`` that is not a list) takes the same branch and is
-    covered at the classifier, because what differs there is the receipt,
-    not the handling.
+    The real subprocess mover uses the fixture's normal staging budget.
+    A synthetic clock adds 31 seconds to one pending staging receipt.
+    Only release uses the 30-second budget and timer, after tensor access.
+    The malformed receipt shape has separate classifier coverage.
     """
 
     from prismaquant.stage_a_produced_output import BoundaryEgressUnclassified
 
+    release_budget_s = 30.0
     storage, publication, q, env, pb_repo, references = _staged_group(
-        tmp_path, monkeypatch, staging_timeout_s=30.0)
+        tmp_path, monkeypatch)
+    real_monotonic = time.monotonic
+    clock = {"delay": 0.0}
+    monkeypatch.setattr(
+        time, "monotonic", lambda: real_monotonic() + clock["delay"])
+    real_await = publication.await_materialized
+    real_state = publication.materialization_state
+
+    def delayed_await(**kwargs):
+        first = True
+
+        def delayed_state(**state_kwargs):
+            nonlocal first
+            state = real_state(**state_kwargs)
+            if first and staging_delay_s:
+                first = False
+                clock["delay"] += staging_delay_s
+                # Keep one receipt pending while the synthetic delay passes.
+                return {**state, "mover_receipt_complete": None,
+                        "mover_queue_state": "claimed"}
+            return state
+
+        with monkeypatch.context() as patch:
+            patch.setattr(publication, "materialization_state", delayed_state)
+            return real_await(**kwargs)
+
+    monkeypatch.setattr(publication, "await_materialized", delayed_await)
+    retirement_calls = []
+    release_sleeps = []
+    outcome = _incomplete(deferred_own=["frobnicated-hold"])
+
+    def unknown_receipt(batch_id, **kwargs):
+        retirement_calls.append(batch_id)
+        return outcome
+
+    def unexpected_sleep(seconds):
+        release_sleeps.append(seconds)
+        pytest.fail("An unknown deferral reason must not cause a release wait.")
+
     with _fleet(q, tmp_path):
         _strict(monkeypatch, env, pb_repo, q)
-        started = time.monotonic()
-        with pytest.raises(BoundaryEgressUnclassified) as caught:
-            with storage.prefetch(references) as window:
-                storage.get(window, references[0])
-                monkeypatch.setattr(
-                    publication, "retire",
-                    lambda batch_id, **kwargs: _incomplete(
-                        deferred_own=["frobnicated-hold"]))
-        elapsed = time.monotonic() - started
+        with monkeypatch.context() as release_patch:
+            with pytest.raises(BoundaryEgressUnclassified) as caught:
+                with storage.prefetch(references) as window:
+                    storage.get(window, references[0])
+                    storage._produced_plan["staging_timeout_s"] = release_budget_s
+                    release_patch.setattr(publication, "retire", unknown_receipt)
+                    release_patch.setattr(time, "sleep", unexpected_sleep)
+                    # Exclude initial staging and tensor access from release.
+                    started = time.monotonic()
+            elapsed = time.monotonic() - started
     assert caught.value.kind == "egress-deferral-unrecognised"
     assert "frobnicated-hold" in str(caught.value)
-    assert elapsed < 30.0, (
-        "it must not have spent the deferral budget on a reason it cannot "
-        "name", elapsed)
+    assert caught.value.outcome == outcome
+    assert retirement_calls == [caught.value.batch_id], (
+        "The unknown receipt must stop release after one retirement.")
+    assert release_sleeps == []
+    assert storage.telemetry["produced_group_release_retries"] == 0
+    assert clock["delay"] == staging_delay_s
+    assert storage.telemetry["produced_group_stage_wait_s"] >= staging_delay_s
+    assert elapsed < release_budget_s, (
+        "Release must not spend the deferral budget on an unknown reason.",
+        elapsed)
     assert storage.telemetry["produced_group_release_deferrals"] == 0, (
         "nothing here is a deferral this lane waits on")
-    assert storage.produced_release_debt()["unclassified"], (
-        "reported in its own bucket: no decision was made about it")
+    debt = storage.produced_release_debt()
+    assert not debt["pending"] and not debt["abandoned"], debt
+    assert debt["unclassified"] == {
+        caught.value.batch_id: {
+            "refusal": outcome["refusal"], "step": None,
+            "receipt": outcome["receipt"]}}, debt
+    assert storage.produced_group_records()[0]["retired"] is False
 
 
 def test_a_deferred_own_receipt_that_turns_into_a_foreign_pin_stops_waiting(
