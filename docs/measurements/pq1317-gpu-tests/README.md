@@ -225,8 +225,8 @@ Node outcomes and the per-node CUDA flag agree between run1 and run2 for all 136
 Development actions include a run of the same dense suite on sparklina under another file-to-worker rule.
 It passed 65 nodes. It and the MoE run on sparklina corroborate across hosts but do not count as qualification.
 Two preflights failed on purpose: they caught a defect in the probe's own self-test (pytest elides long values in an assertion text). The fix is in the harness.
-One diagnostic run found why an earlier probe missed libraries: the extension directory sits on NFS, and NFS renames a busy library
-to `.nfsXXXX` when another worker rebuilds it. The final harness gives each worker its own directory.
+One diagnostic run showed why an earlier probe missed libraries. The extension directory sits on NFS.
+NFS renames a busy library to `.nfsXXXX` when another worker rebuilds it. The final harness gives each worker its own directory.
 
 ## How to check
 
@@ -234,8 +234,9 @@ to `.nfsXXXX` when another worker rebuilds it. The final harness gives each work
 python3 -m pytest tests/test_pq1317_gpu_qualification_package.py -q
 ```
 
-The test recomputes every node outcome from the retained `junit.xml` files, checks the digests of every retained log,
-the roster, the correction map, the identity chain and the native-library records. External facts to recheck by hand:
+The test recomputes every node outcome from the retained `junit.xml` files.
+It also checks the digest of every retained log, the roster, the correction map, the identity chain and the native-library records.
+External facts to recheck by hand:
 
 ```
 gh issue view 610 -R RobTand/tessera --json state,closedAt
