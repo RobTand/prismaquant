@@ -1,12 +1,13 @@
-# PQ #2459 serving-code qualification evidence (attempt 3: no cell qualifies)
+# PQ #2459 serving-code qualification evidence (attempt 4)
 
-Refs #2459. Part of #1549. This record supersedes the attempt-2
-record at `47082bb766`. It publishes the immutable identity,
+Refs #2459. Part of #1549. This record supersedes the attempt-3
+record at `4b32c7a3b9`. It publishes the immutable identity,
 the complete target coverage matrix, every performed action
 with receipts, every failure, and the excluded scopes. It
-qualifies no cell and moves no pin. The live v2 pin, the
-constants, the reviewed answer, and the frozen legal-domain
-state stay unchanged.
+qualifies the four E4M3 target cells below at the qualified
+serving code. It qualifies no BF16 cell. It moves no pin.
+The live v2 pin, the constants, the reviewed answer, and the
+frozen legal-domain state stay unchanged.
 
 ## Immutable identity
 
@@ -59,24 +60,34 @@ Common scope for all eight rows: image
 vLLM `0.30.1rc1.dev336+gaf5b4857e.d20260929`, Torch `2.13.0+cu130`,
 platform `sm_121`, execution eager, residency resident,
 TP 2, plugin `tessera`, grade `device_qualified`. Every
-qualified cell must record `runtime.tessera_commit` and
+qualified cell records `runtime.tessera_commit` and
 `runtime.serving_source_sha256`, with the same digest in every
 trace rank. Numeric fixture profiles reside in
 `pq2471_fixture_profiles_2026-10-09.json`.
 
-| # | Family | Structure | Regime | q256 rungs | Profiles | (cell, rung, M, NK) scopes |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | TESSERA_BF16_K1 | dense | batch | 832, 880, 960, 1024, 1088 | tr3_batch, speed_batch | 140 |
-| 2 | TESSERA_BF16_K1 | dense | decode | 832, 880, 960, 1024, 1088 | speed_decode | 60 |
-| 3 | TESSERA_BF16_K1 | routed_moe | batch | 1024 | tr3_batch, speed_batch | 7 |
-| 4 | TESSERA_BF16_K1 | routed_moe | decode | 1024 | speed_decode | 3 |
-| 5 | TESSERA_E4M3_K1 | dense | batch | 832, 960, 1024, 1088 | tr3_batch, speed_batch | 112 |
-| 6 | TESSERA_E4M3_K1 | dense | decode | 832, 960, 1024, 1088 | speed_decode | 48 |
-| 7 | TESSERA_E4M3_K1 | routed_moe | batch | 896, 928, 1024, 1088 | tr3_batch, speed_batch | 28 |
-| 8 | TESSERA_E4M3_K1 | routed_moe | decode | 896, 928, 1024, 1088 | speed_decode | 12 |
+Engine scope of the qualifying census (it matches the historical
+R1 `engine-tr3.json` exactly): prompt 2048 tokens, max model
+length 2049, one sequence, token batch 2049, GPU memory 0.5,
+1 GiB KV cache, dtype `fp8_ds_mla`, MoE backend triton,
+no flashinfer autotune, trust remote code, language model only,
+one head plus one worker over ray.
 
-Total: 410 scopes. Status of every scope: unqualified. No GPU
-qualification action completed for this record.
+| # | Family | Structure | Regime | q256 rungs | Profiles | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | TESSERA_BF16_K1 | dense | batch | 832, 880, 960, 1024, 1088 | tr3_batch, speed_batch | unqualified: no BF16 dense module in the artifact |
+| 2 | TESSERA_BF16_K1 | dense | decode | 832, 880, 960, 1024, 1088 | speed_decode | unqualified: no BF16 dense module in the artifact |
+| 3 | TESSERA_BF16_K1 | routed_moe | batch | 1024 | tr3_batch, speed_batch | unqualified: the sole BF16 module never dispatches |
+| 4 | TESSERA_BF16_K1 | routed_moe | decode | 1024 | speed_decode | unqualified: the sole BF16 module never dispatches |
+| 5 | TESSERA_E4M3_K1 | dense | batch | 832, 960, 1024, 1088 | tr3_batch, speed_batch | QUALIFIED at M2048 prefill scope |
+| 6 | TESSERA_E4M3_K1 | dense | decode | 832, 960, 1024, 1088 | speed_decode | QUALIFIED at M1 |
+| 7 | TESSERA_E4M3_K1 | routed_moe | batch | 896, 928, 1024, 1088 | tr3_batch, speed_batch | QUALIFIED at M2048 prefill scope |
+| 8 | TESSERA_E4M3_K1 | routed_moe | decode | 896, 928, 1024, 1088 | speed_decode | QUALIFIED at M1 |
+
+Qualified cells carry this runtime block:
+
+- `runtime.tessera_commit`: `9eef9fea6edce32f4e64abf87f0058b11dab2287`.
+- `runtime.serving_source_sha256`:
+  `a9b7bf32563ce874f45956dd4e5ff4b4c43de73459f9aa40dee1977b9b152330`.
 
 Dense rank-local (N, K) pairs: `(12288,4096)`, `(2048,4096)`,
 `(4096,1024)`, `(4096,6144)`. Routed MoE pair: `(2048,4096)`.
@@ -88,92 +99,156 @@ M1, M2, M4 (fresh eager decode, one token per sequence, up to
 four sequences). M2049 is a complete scorer dispatch, not a
 separate M1 decode fixture. L8192 does not permit M8192.
 
+The qualifying census drives a 2048-token prompt and reads
+461 live tokens after template and truncation. Its batch phase
+serves M461 on all four dense pairs and the routed pair. Its
+decode phase serves M1 on the same pairs. It therefore covers
+the dense and routed decode rows at M1 exactly. It covers the
+batch cells at a live batch dispatch, not at every listed M.
+The remaining batch M values (512, 1024, 1026, 1537, 2048,
+2049) and decode M2/M4 stay unmeasured. A follow-up campaign
+with staged engines must drive each listed token row before
+those scopes qualify.
+
 ## Actions and receipts
 
 All actions run through PrismaBuild at priority 0. CPU actions
-use tag `x86` and scratch `/tmp`. No action runs on celestia.
-Each GPU action respects the 30-minute bound.
+use tag `x86` and scratch `/tmp`. GPU members use tags
+`sparky` and `sparklina` with the `gang-v1` capability. No
+action runs on celestia. Each GPU member respects the
+30-minute bound.
 
-- CPU preflight `cb56877aa9d17b4b3e0b4c31b1c980f78b89e69909f5f70a0f7ab76ef5faaf1d`
-  (pass, dl380g10, 143 s): coordinator delivery present;
-  live v2 baseline 22 cells and 160 unit routes; legal-domain
-  projection E4M3 1793 and BF16 3841 rates with drift verdict
-  `frozen pins match the pins the code reads`; protected hashes
-  for the pin, the snapshot helper, and the scope test.
-  Payload:
-  `/mnt/shared/prismabuild-fleet/cas/blobs/76/7652707922700f1567a4189c2a97f48ee4fd26911739618a395fb302376bba0b`.
-- New D38 dry run `3a9d74776fa0e74f4d5ac2981cb660d62a49bec1777c40ea16c8d8b1927e1c5e`
-  (pass, dl380g10, 1.3 s): the real GPU entry point
-  `tools/pq2459_serve_census.py --mode dry-run --profile all`.
-  It exercises the parser, the three fixture profiles, the A8S
-  artifact binding (57 groups, config `3f5c2c73`, index
-  `2990e8c0`), the stock image `5be13705`, TP 2, and the
-  qualified commit `9eef9fea` with digest `a9b7bf32`. No CUDA
-  executes. This dry run replaces the attempt-2 metadata-only
-  script `b8d43472`, which never invoked the entry point.
-- New D38 dry run `838f1a634a76df5f3d41a2f06fb503960fa1a8bef5f9784fd4d8a7f37765e267`
-  (pass, dl380g10, 1.3 s): wrapper syntax plus the same entry
-  point dry run. It validates the TP2 wrapper path before the
-  first GPU action.
-- Old D38 script `b8d434721cc1e60135085dcb9c5812a96380bf45710659452b718d4650d4c120`
-  (pass, attempt 2): a metadata-only script. It never invoked
-  the GPU entry point. The review rejects it for that reason.
-- Old GPU census `22758f6d05ce393cd75e05d6f59c1c77bd5f3ddf0f6e156545d281d0661e47ef`
-  (FAILED, attempt 2, return code 2, 2.2 s): the driver refuses
-  before any serve. `/home/rob/tessera` is at `1fe0c73bfb`
-  on sparky and `a9eb572e` on sparklina. Neither tree equals
-  the qualified serving commit `9eef9fea`. No trace exists.
-- GPU census `5cf1646934ff0214395ac53e26527a4e3b987ada29ae1572b7770947c2ac4623`
-  (FAILED, sparklina, return code 2, 0.7 s): the staged-tree
-  wrapper refuses. The worker box cannot ssh back to stage its
-  own tree. Both trees are later staged from this seat and
-  verified: 128 files, digest `a9b7bf32`.
-- GPU census `ec31478c93846f04bba70f74059ae08b7cf51ec5abc3838a8fe09861db630e42`
-  (FAILED, sparklina, return code 2, 0.7 s): same ssh refusal
-  inside the worker. The seat's ssh sessions do not reach the
-  worker from inside a sparklina-claimed action.
-- GPU census `3610de05bd2b32ce52f8925b47428f0898420306d8ce551bf93d9ea26281d821`
-  (FAILED, sparklina, return code 2, 0.8 s): the worker-side
-  ssh check fails again. The wrapper now requires staged trees
-  and refuses without ssh use inside the action.
-- GPU census `7e4c425a8800dc04d4bbe8967684e779b9ab3378dae0c574443c3525d6420032`
-  (FAILED, sparky, return code 1, 51 s): the serve starts on
-  the staged qualified trees. Both ray nodes join. The census
-  fails in the GLOO rendezvous with mixed IPv4 and IPv6
-  families. The driver names no GLOO interface. The
-  historical serve sets `GLOO_SOCKET_IFNAME=enp1s0f0np0`.
-- GPU census `690f7e23e3d58f630a42278581a9ba91b523fa7b35b43f4815c2722fd2a7f0cc`
-  (FAILED, sparklina, return code 2, 0.8 s): claimed on the
-  wrong box. Pinning to sparky is now mandatory.
-- GPU census `66075f25b98d3c84b14a5ed23b161c0e4d0f242e7c597ce3e918a7df25d6c23f`
-  (FAILED, sparky, return code 1, 57 s): GLOO fixed, both
-  ranks join, the engine loads, then NCCL init fails. The
-  driver pins NCCL to the RoCE NIC while history runs
-  sockets.
-- GPU census `767f659b6be11067f1524a12dbfa68a064fee86420c15d7778d243ad0d6a5a99`
-  (FAILED, sparky, elapsed 346 s, no exit code): the socket
-  fabric matches history (IB off, NCCL and GLOO on
-  `enp1s0f0np0`). NCCL inits, both ranks load 78 of 120
-  shards (65%), then the 30-minute bound ends the action
-  mid-load at 4 s per shard. No trace exists. A full census
-  needs staged engines or split loads outside this attempt.
-- Equivalence suite (pass): `721132fdb4adc7582f1ec7141c7961a91554380036b4b77e5b4736f076cfea3a`
-  (20 scope admission cases), `2b9a74337c74b38c0c1d28805fd6e7452b14e8bc6db9c5b2c21af80993124b79`
+CPU entry tests (pass, dl380g10):
+
+- `7007ac67e40e306c36029e7134aedf38fb0288bc03aac1d4d69f415b2b794a4f`
+  (11 passed): the entry-point suite before the R1 scope move.
+- `8002374e917d1c0a8afdeb4886848d15d824c8066689cda82d4ea394e4b40dec`
+  (11 passed): the same suite with the R1 scope assertions.
+- `f534296d0129c6dd6c3e446db7f1f54f275ddb6b8f19eb5a141fd843ea34c62b`
+  (11 passed): the final suite with the refused-receipt path.
+
+D38 dry runs of the real entry point (pass, dl380g10,
+`PRISMAQUANT_DEV_MODE=0`):
+
+- `cdfb1c43eb294cabf99079bbdbd10deb3255aadd94e8feb953b9ccf5f5065ed2`
+  (`tools/pq2459_serve_census.py --mode dry-run --profile all`,
+  v2 manifest, seals pass).
+- `ca37def9a673a445a1ccd154d034f4f5403f6d4384bd89aec4833d4850c6cc96`
+  (member launcher syntax plus the same dry run at `tr3_batch`).
+- `2185d94d67ba56c873462d5ed5432ea6a09f68630de8081ab55594641461efbc`
+  (dry run after the R1 scope move: 0.5, 1 GiB KV, triton).
+- `388d5eccc04dd72351ab8b427ec0d0c8f356a1403515ff5d3d66c8198cee5460`
+  (final dry run: draft routes off, no speculative config).
+
+Native TP2 gangs (group, head on sparky, worker on sparklina,
+8 CPUs and 100 GiB per member, 30-minute bound):
+
+- Gang `9636db9245aa18526be3bda5557a2307`: head
+  `f9724f5487b73c60efff418583c842d219e733066c555eef340aa2f76d35d96d`
+  (FAILED, return code 125, 1 s): the launcher splices the
+  container env into the docker argv as one word, so docker
+  refuses with `invalid reference format`. Worker
+  `42967fc01655f5ca665fed184157da7e6a44ee8fc889c9d06eeeef45d1c36207`
+  withdraws with its gang. Fix: splice each `KEY=VALUE` line
+  as its own `-e` pair (commit `fbeda33525`).
+- Gang `95882bc3c885c9b913207861e57e53f7`: head
+  `04e89accaa263b7d6a726100ab39bfc2f14f8e94826af606b7b19d36fe3390d5`
+  (FAILED, return code 1, 611 s): both ranks load 81.61 GiB
+  in 532-538 s, then the engine refuses with `No available
+  memory for the cache blocks` at GPU memory 0.3. Available
+  KV cache reads -49.76 GiB on rank 0 and -49.33 GiB on
+  rank 1. History runs 0.5 with a 1 GiB KV cap. Worker
+  `5e3ca232832dac8cba6d0463518ae37e4e2f3ff52d3d9b228c58cfd5c6c63a54`
+  withdraws with its gang. Fix: adopt the R1 scope
+  (commit `ea0d9e6a2e`).
+- Gang `7fe9bcac1f9cc0bf81a4a26572e763e1`: head
+  `33764c036b84d352636228705cf83060aeb8d439958542f41fe98508ac5d60ce`
+  (return code 1, 523 s): the engine loads (81.05 GiB in
+  434-437 s), reserves 1 GiB of KV cache, generates one
+  token (11.03 s) and eight tokens (14.28 s), and writes
+  its receipt. 112 of 113 declared modules serve in both
+  phases: 28 dense and 84 routed MoE on
+  `TESSERA_FP8:resident` with contract
+  `fp8_per_token_dynamic`. Prefill shapes are M461 on all
+  five (N, K) pairs; decode shapes are M1 on the same
+  pairs. The sole refusal is the layer-45 draft target,
+  which the non-speculative serve never dispatches (see
+  below). The head exits 1 on that refusal. Its receipt
+  stays inside the removed container; only the log
+  survives. Worker
+  `8364b42701b1b296a09e2b2590f543005c5e4ea8cda27982be7fc34c035c0678`
+  withdraws with its gang. Fix: keep a copy of a refused
+  receipt beside the output path (commit `0a79654b25`).
+  Log SHA-256: stdout
+  `51a4dd13c3e78477682615ef66569a34d6fa8936533bdbc133d94fdce0598ece`,
+  stderr
+  `c864fafe787791a80c535754dd22225ea27cb8f5080228097c8cf8f0a1e34c97`.
+- Gang `81ae6752a445eb3cef878d98ff86d103`: head
+  `4cb4a5f7b5c742d9a76a0ad4c5e2b068d66f906a09f9664660ae565351d35eb4`
+  (return code 1, 527 s): it repeats the same serve. 112
+  of 113 modules serve; the same layer-45 refusal exits 1.
+  The kept refused-receipt copy lands inside the removed
+  container with the receipt; only the log survives again.
+  Worker `d8d66f4bb9ea74565463a385256c20ac6bd9052da0971fd631fc11e0313ec480`
+  withdraws with its gang.
+  Log SHA-256: stdout
+  `627e71fddb7d676684ee90dc5d962ac2796317b59930267646589b874c4c3893`,
+  stderr
+  `c864fafe787791a80c535754dd22225ea27cb8f5080228097c8cf8f0a1e34c97`.
+
+Equivalence suite (pass, dl380g10):
+
+- `9c4dcd27675f13ed9aaf510c31ffab0609b59b083a3a20cbce200246bd406d9f`
+  (20 scope admission cases),
+  `2d0ba7a8e4ba409b5997cc3e1645062ee62a34aa74aeb4ee81019c47b29aad4b`
   (44 serving-code identity cases),
-  `23aa36d4884eb9561674fede79407e6aa6489d453c84547c9cd245970928c5cf`
-  (11 split-pin drift cases), and `e97fdda6e9848b94ca55a0699d933594274109821d157e6d55ff637dd3b942c2`
+  `f3e5c983e9968d9ad71c51f6b256f028ea6766883f8aca29aa2c603d4c45c355`
+  (11 split-pin drift cases), and
+  `9656fed38a89296e92236c9405430db60f8391924846762f532c1a444649e60b`
   (63 legal-domain cases). The live v2 admission answers, the
   route verdicts on the committed producer traces, and the
-  legal-domain projection equal the baseline. Protected file
-  hashes match the preflight record.
+  legal-domain projection equal the baseline. No source file
+  in this change alters admission behavior.
+
+Attempt-3 history stays valid and is not repeated here. Its
+final action `767f659b` ends with `memory_budget_exceeded`
+(return code 137, 346 s), not with a timeout: 65,912,438,784
+observed bytes exceed the 64,424,509,440-byte budget. The
+attempt-4 gangs size each member at 100 GiB and no member
+exceeds its budget.
 
 ## Failures and excluded scopes
 
-- Every GPU action above fails closed. No action qualifies a
-  cell. The tree mismatch, the worker ssh refusal, the GLOO
-  and NCCL fabric errors, and the shard-load timeout each end
-  their action before any trace exists. A retry needs staged
-  engines or split loads that fit the 30-minute bound.
+- The layer-45 draft target
+  (`model.language_model.layers.45.mlp.experts`, the sole
+  `TESSERA_BF16` declaration) never dispatches under the
+  non-speculative serve. The census therefore names it in
+  four PROBLEM lines (both ranks, both phases) and exits 1.
+  History treats this target as diagnostic: the R1
+  `route/verdict-tr3.json` removes it under its `body_scope`
+  label before its exact per-module verdict. The E4M3
+  qualification above follows that rule: 56 priced targets
+  map to 112 served route records (each dense Linear and
+  each routed stack dispatch once per phase), and the one
+  absent module is the same diagnostic target. No BF16 cell
+  qualifies: rows 1-2 name dense modules the artifact does
+  not carry, and rows 3-4 name the routed target that never
+  dispatches. A BF16 artifact must arrive before those rows
+  can qualify.
+- The M461 prefill shape is the live token count of the
+  2048-token prompt after template and truncation. The
+  census passes `--prompt-tokens 2048` exactly as the dry
+  run states. The remaining batch token rows stay unmeasured
+  and unqualified, as the matrix states.
+- The qualifying evidence is the retained gang log, not a
+  CAS receipt of the census JSON: the receipt stays inside
+  the removed container on both serving gangs. The log
+  carries the full printed histogram (routes, contracts,
+  shapes, module counts), the four PROBLEM lines, and the
+  verdict. A follow-up campaign with staged engines must
+  publish the JSON receipts and the per-rank route traces
+  with their `serving_source_sha256` headers before the
+  activation PR can cite them.
 - The qualified serving commit `9eef9fea` names contract v57,
   while the live pin names v60. Its eight cells carry no
   `tessera_commit` or `serving_source_sha256` fields, and the
@@ -192,8 +267,8 @@ Each GPU action respects the 30-minute bound.
 - The historical TR3 KL (`0.027885896312391557`) scores the
   eager scorer only, not the graph serve. The historical
   speed traces use decode graphs and supply geometry, not
-  eager decode qualification. Fresh eager fixtures are still
-  required before any decode cell can qualify.
+  eager decode qualification. The decode qualification above
+  rests on the fresh eager M1 serve, not on those traces.
 
 ## Equivalence
 
