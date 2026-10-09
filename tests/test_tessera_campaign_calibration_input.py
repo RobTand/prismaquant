@@ -276,11 +276,17 @@ def test_census_and_capture_reuse_keep_saved_draw_identity(monkeypatch, tmp_path
     seen = []
     def identity(_path, *, calibration, **kwargs):
         seen.append(calibration)
-        return {"fixture": "capture", "calibration": calibration}
+        # Every real identity names its units; the reuse row prefetches exactly those.
+        return {"fixture": "capture", "calibration": calibration, "units": {UNIT: [1, 1]}}
     monkeypatch.setattr(store, "capture_identity", identity)
     capture_dir = tmp_path / "capture"
     capture_dir.mkdir()
     (capture_dir / "capture_manifest.json").write_text("{}")
+    # The campaign reads the completed manifest's scope before it asks for the
+    # expected identity. This wiring test stubs the store, so its manifest is
+    # a stub full-scope one; the contract itself is covered with real manifests.
+    monkeypatch.setattr(store, "require_capture_contract",
+                        lambda path, expected_sha256=None: {"identity": {}, "entries": {}})
     def prefetch(_path, *, expected_identity, **kwargs):
         assert expected_identity["calibration"] == seen[0]
         return {}, {"fixture": "reused"}

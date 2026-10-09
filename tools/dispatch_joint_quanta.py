@@ -3162,7 +3162,7 @@ class Gateway:
         return {"action_key": answer["action_key"], "status": answer.get("status", "")}
 
     def read_verified_result(self, selector):
-        """The exact generation's verified result, through the public SDK4.
+        """The exact generation's verified result, through the pinned public SDK.
 
         ``selector`` is a :class:`PilotSelector`; a missing SDK surface or a
         refused/absent/ambiguous result raises :class:`PilotRefused`, never a
@@ -3175,7 +3175,7 @@ class Gateway:
             sdk = client_sdk()
         except Exception as exc:  # LeaseRefused subclass; a named availability gap
             raise PilotRefused(
-                f"the PB SDK4 verified-result reader is unavailable: {exc}") from exc
+                f"the PB verified-result reader is unavailable: {exc}") from exc
         if not hasattr(sdk, "read_verified_action_result") or not hasattr(
                 sdk, "bind_standard_capture_command"):
             raise PilotRefused(

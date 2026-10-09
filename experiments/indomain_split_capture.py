@@ -1,0 +1,1257 @@
+"""Stage-1 research entry point: same-pass disjoint FIT/HELDOUT split-H capture.
+
+One runnable experiment entry with four modes over ONE capture root:
+
+* ``prep``     -- reads the saved actual calibration IDs, stamps the fixed
+  384/128 split (role hashes + provenance, ``split-manifest.json``), and
+  records the existing v2 chain prep (``prismaquant.capture_layer_chain``)
+  through an explicit ``record_capture_source`` owner. No automatic
+  admission call is made or patched.
+* ``quantum``  -- builds the existing streamed runner through
+  :func:`prismaquant.capture_layer_chain.authenticate_quantum_source` and
+  drives ``_collect_activations`` with ``want_hessian=False, max_rows=0,
+  shared_packed_inputs=True, row_consumer=moments.consume`` so both split
+  roles accumulate in the SAME forward pass. Every source layer in the
+  range forwards, even a layer with no selected unit. Both roles are
+  persisted once per layer and verified (file bytes/sha, tensor geometry,
+  counts, fit+heldout == observed forward) before ``ChainQuantum.complete`` carries
+  the role receipts in its verified unit map. A prepared range that is already
+  complete is refused, replayed or adopted, as :func:`mode_quantum` states.
+* ``join``     -- research metadata verification only: the existing ranges /
+  owner / fragment checks, the witness merge against the census contract,
+  the recorded source digest union, and the role-manifest union. It does
+  NOT call the automatic ``chain.join``: no ordinary capture manifest is
+  published and no provider qualification is claimed.
+* ``preflight``-- small real-metadata reads with no GPU, then the actual
+  tiny two-layer GLM control end-to-end (census -> prep -> quantum ->
+  join) through the existing toy helpers, demonstrating split roles, full
+  counts and boundary forward. The control runs on ``--device`` (default
+  ``cpu``); ``--device cuda`` forwards and accumulates the quanta on the GPU.
+
+Authorization: CEO decision dec-1006-042211-25de option 1 -- explicitly
+owner-recorded (``record_capture_source``) Stage-1 RESEARCH capture only.
+``require_automatic_capture_source_recording`` is neither called nor
+monkeypatched, and no immutable-provider qualification is claimed.
+
+Memory guard: startup and live ``MemAvailable`` must stay >= 2 GiB; the
+guard aborts cleanly (moments closed, runner shut down, source owner
+closed, GPU/CPU buffers released) before propagating.
+
+Both the ``prismaquant`` package and split-moment helper are loaded from this
+checkout, so PrismaBuild carries the complete runnable research source.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import tempfile
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
+
+import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from prismaquant import capture_layer_chain as chain  # noqa: E402
+from prismaquant import tessera_campaign as campaign  # noqa: E402
+from prismaquant import tessera_calibration_cache as store  # noqa: E402
+from prismaquant import tessera_hessian as th  # noqa: E402
+from prismaquant.cost_streaming import (  # noqa: E402
+    build_streamed_causal_lm,
+    check_boundary_storage,
+)
+from prismaquant.routed_experts import (  # noqa: E402
+    declared_shared_capture_groups,
+    ProfileRoutedExpertClassifier,
+    refresh_packed_expert_projections,
+)
+from prismaquant.dev_mode import seal_check  # noqa: E402
+from prismaquant.read_traffic import resolve_routing_factor  # noqa: E402
+from experiments.indomain_split_stats import HELDOUT, FIT, DisjointRowMoments  # noqa: E402
+
+
+SPLIT_MANIFEST_SCHEMA = "prismaquant.research_split_manifest.v1"
+LAYER_MANIFEST_SCHEMA = "prismaquant.research_split_layer_manifest.v1"
+RESEARCH_JOIN_SCHEMA = "prismaquant.research_split_join.v1"
+ROLE_RECEIPT_SCHEMA = "prismaquant.research_split_role_receipt.v1"
+CENSUS_VIEW_SCHEMA = "prismaquant.research_census_source_view.v1"
+DEFAULT_MEMFLOOR_BYTES = 2 * (1 << 30)
+
+
+class ResearchRefused(RuntimeError):
+    """The research split capture refuses by name."""
+
+
+# -- memory guard ----------------------------------------------------------------
+
+def _mem_available_bytes() -> int:
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) * 1024
+    raise ResearchRefused("/proc/meminfo has no MemAvailable row")
+
+
+def make_memory_guard(floor_bytes: int):
+    def guard(label: str) -> None:
+        available = _mem_available_bytes()
+        if available < floor_bytes:
+            raise ResearchRefused(
+                f"{label}: MemAvailable is {available} bytes, below the "
+                f"{floor_bytes}-byte research floor; clean abort")
+    return guard
+
+
+# -- hashing and layout ----------------------------------------------------------
+
+def _sha256_file(path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _canonical_sha256(value) -> str:
+    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    return canonical_json_sha256(value, where="research stamp")
+
+
+def research_dir(capture_root) -> Path:
+    return Path(capture_root)
+
+
+def split_manifest_path(capture_root) -> Path:
+    return research_dir(capture_root) / "split-manifest.json"
+
+
+def join_document_path(capture_root) -> Path:
+    return research_dir(capture_root) / "join.json"
+
+
+def census_view_path(capture_root) -> Path:
+    return research_dir(capture_root) / "census-source-view.json"
+
+
+def split_stamp(manifest: dict) -> str:
+    """Canonical split body identity, excluding its own digest field."""
+    return _canonical_sha256({key: value for key, value in manifest.items()
+                              if key != "split_sha256"})
+
+
+def campaign_args(args, census) -> SimpleNamespace:
+    """The minimal argument namespace the existing campaign helpers read."""
+    model = args.model if args.model is not None else str(census["model"])
+    receipt = census.get("calibration_input")
+    return SimpleNamespace(
+        model=model, nsamples=int(census["nsamples"]), seqlen=int(census["seqlen"]),
+        seed=int(census["seed"]), layer_stride=int(census["layer_stride"]),
+        calibration_census=args.calibration_census,
+        calibration_input_receipt=receipt,
+        max_act_rows=int(args.max_act_rows),
+        attention_implementation=args.attention_implementation,
+        units=args.units, research_exact_member=None,
+        allow_pinned=None, pinned_roster_only=False,
+    )
+
+
+def effective_census_path(args, capture_root) -> Path:
+    """The census the whole chain reads: the original, or the snapshot view.
+
+    A source snapshot root supplies a byte-identical model view under another
+    path; the derived census view points the census's ``model`` at it while
+    preserving the original source/content stamps verbatim (no new seal and
+    no immutable-provider claim). Prep, quanta and join must all use the SAME
+    view, because the traversal identity binds the census bytes it read.
+    """
+    path = Path(args.calibration_census)
+    if args.source_snapshot_root is None:
+        return path
+    view = census_view_path(capture_root)
+    if view.is_file():
+        return view
+    original = json.loads(path.read_text())
+    document = dict(original)
+    document["model"] = str(Path(args.source_snapshot_root).resolve())
+    document["research_source_view"] = {
+        "schema": CENSUS_VIEW_SCHEMA,
+        "original_model": str(original["model"]),
+        "original_census_path": str(path),
+        "original_census_sha256": _sha256_file(path),
+        "snapshot_root": document["model"],
+    }
+    view.parent.mkdir(parents=True, exist_ok=True)
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+    from prismaquant.digests import indent2_json_file_bytes
+    atomic_write_bytes(view, indent2_json_file_bytes(document))
+    return view
+
+
+def load_census(args, capture_root):
+    """Load and draw-check the census through the existing loader."""
+    path = effective_census_path(args, capture_root)
+    namespace = campaign_args(args, json.loads(path.read_text()))
+    census = campaign.load_calibration_census(path, args=namespace)
+    return path, census, namespace
+
+
+def load_draw(args, census):
+    """The saved actual calibration IDs, byte-checked against the census.
+
+    Positive explicit comparisons: the tokens file's sha256 against the
+    census receipt's artifact digest, the corpus text sha against the
+    census's ``text_sha256``, the tensor's dtype/geometry against the
+    receipt, and the sample geometry against the census draw.
+    """
+    receipt = census["calibration_input"]
+    tokens_path = Path(args.calibration_tokens)
+    corpus_path = Path(args.corpus_text)
+    actual = _sha256_file(tokens_path)
+    if actual != receipt["artifact_sha256"]:
+        raise ResearchRefused(
+            f"{tokens_path}: sha256 {actual} is not the census draw's "
+            f"{receipt['artifact_sha256']}")
+    corpus_bytes = corpus_path.read_bytes()
+    if hashlib.sha256(corpus_bytes).hexdigest() != str(census["text_sha256"]):
+        raise ResearchRefused(
+            f"{corpus_path}: text sha is not the census draw's "
+            f"{census['text_sha256']}")
+    corpus_text = corpus_bytes.decode("utf-8")
+    from safetensors.torch import load_file
+    tensors = load_file(str(tokens_path))
+    if len(tensors) != 1:
+        raise ResearchRefused(f"{tokens_path}: expected exactly one id tensor")
+    (name, ids), = tensors.items()
+    if ids.ndim != 2:
+        raise ResearchRefused(f"{tokens_path}: id tensor {name} is not 2-D")
+    total, seqlen = (int(value) for value in ids.shape)
+    nsamples = int(census["nsamples"])
+    if total != nsamples or seqlen != int(census["seqlen"]):
+        raise ResearchRefused(
+            f"{tokens_path}: draw is [{total}, {seqlen}], the census draw is "
+            f"[{nsamples}, {census['seqlen']}]")
+    if str(ids.dtype) != str(receipt["dtype"]):
+        raise ResearchRefused(
+            f"{tokens_path}: dtype {ids.dtype} is not the receipt's "
+            f"{receipt['dtype']}")
+    return ids, [ids[index:index + 1].contiguous() for index in range(total)], corpus_text
+
+
+def selected_units(args, census, namespace) -> list:
+    """The parent's selected capture targets, through the existing authority."""
+    selection = campaign.load_unit_selection(args.units)
+    names = campaign.selected_capture_unit_names(
+        selection, args=namespace, resolved=census["anchor_groups"])
+    missing = sorted(set(names) - set(census["counts"]))
+    if missing:
+        raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")
+    return names
+
+
+def require_split_geometry(args, tokens, census) -> None:
+    if args.total_samples != len(tokens):
+        raise ResearchRefused(
+            f"--total-samples {args.total_samples} but the draw holds {len(tokens)} samples")
+    if args.fit_stop <= 0 or args.total_samples <= args.fit_stop:
+        raise ResearchRefused(
+            f"the fixed split needs 0 < fit_stop < total_samples, got "
+            f"{args.fit_stop}/{args.total_samples}")
+    if int(tokens[0].shape[1]) != int(census["seqlen"]):
+        raise ResearchRefused("a calibration sample is not the census's seqlen")
+
+
+def _write_atomic_json(path: Path, document: dict) -> None:
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+    from prismaquant.digests import indent2_json_file_bytes
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(path, indent2_json_file_bytes(document))
+
+
+# -- prep ------------------------------------------------------------------------
+
+def build_split_manifest(args, census, ids) -> dict:
+    """The fixed disjoint split's hashes and provenance (parent contract)."""
+    seqlen = int(ids.shape[1])
+    fit_ids, held_ids = ids[:args.fit_stop], ids[args.fit_stop:]
+    fit_digest = th.token_ids_sha256([row for row in fit_ids])
+    held_digest = th.token_ids_sha256([row for row in held_ids])
+    provenance = (census.get("calibration_input") or {}).get("provenance") or {}
+    draw_seed = int(provenance.get("seed", census["seed"]))
+    return {
+        "schema": SPLIT_MANIFEST_SCHEMA,
+        "seed": draw_seed,
+        "sample_count": int(ids.shape[0]),
+        "tokens_per_sample": seqlen,
+        "same_forward_pass": True,
+        "fit_stop": int(args.fit_stop),
+        "source_draw": {
+            "path": str(Path(args.calibration_tokens)),
+            "sha256": _sha256_file(args.calibration_tokens),
+            "provenance": (census.get("calibration_input") or {}).get("provenance"),
+            "shape": [int(value) for value in ids.shape],
+            "dtype": str(ids.dtype),
+        },
+        "roles": {
+            FIT: {
+                "sample_range": [0, int(args.fit_stop)],
+                "token_ids_sha256": fit_digest,
+                "token_count": int(args.fit_stop) * seqlen,
+                "hessian_role": "fit",
+                "provenance": {
+                    "model": str(census["model"]), "seed": draw_seed,
+                    "nsamples": int(args.fit_stop), "seqlen": seqlen,
+                    "fit_tokens": int(args.fit_stop) * seqlen,
+                    "text_sha256": str(census["text_sha256"]),
+                    "fit_ids_sha256": fit_digest,
+                    "hessian_role": "fit",
+                    "source": "fixed disjoint stage-1 research split of the census draw",
+                },
+            },
+            HELDOUT: {
+                "sample_range": [int(args.fit_stop), int(ids.shape[0])],
+                "token_ids_sha256": held_digest,
+                "token_count": int(ids.shape[0] - args.fit_stop) * seqlen,
+                "hessian_role": "held-out",
+                "provenance": {
+                    "model": str(census["model"]), "seed": draw_seed,
+                    "nsamples": int(ids.shape[0] - args.fit_stop), "seqlen": seqlen,
+                    "heldout_tokens": int(ids.shape[0] - args.fit_stop) * seqlen,
+                    "text_sha256": str(census["text_sha256"]),
+                    "fit_ids_sha256": held_digest,
+                    "fit_tokens": int(ids.shape[0] - args.fit_stop) * seqlen,
+                    "hessian_role": "held-out",
+                    "source": "fixed disjoint stage-1 research split of the census draw",
+                },
+            },
+        },
+    }
+
+
+def require_persisted_split(capture_root, args, census, ids) -> str:
+    """Bind running row coordinates to the saved split before any forward."""
+    recorded = json.loads(split_manifest_path(capture_root).read_text())
+    actual = build_split_manifest(args, census, ids)
+    for field in ("schema", "seed", "sample_count", "tokens_per_sample",
+                  "same_forward_pass", "fit_stop"):
+        if recorded.get(field) != actual[field]:
+            raise ResearchRefused(f"split {field} differs from the actual running draw")
+    for field in ("sha256", "shape", "dtype"):
+        if recorded["source_draw"].get(field) != actual["source_draw"][field]:
+            raise ResearchRefused(f"split source_draw.{field} differs from actual draw bytes")
+    if set(recorded["roles"]) != {FIT, HELDOUT}:
+        raise ResearchRefused("split roles must cover fit and heldout exactly")
+    for role in (FIT, HELDOUT):
+        expected, observed = recorded["roles"][role], actual["roles"][role]
+        for field in ("sample_range", "token_ids_sha256", "token_count", "hessian_role"):
+            if expected.get(field) != observed[field]:
+                raise ResearchRefused(f"split {role}.{field} differs from actual row coordinates")
+        for field in ("fit_ids_sha256", "fit_tokens", "text_sha256", "hessian_role"):
+            if expected["provenance"].get(field) != observed["provenance"][field]:
+                raise ResearchRefused(f"split {role}.provenance.{field} is not the running role")
+    digest = split_stamp(recorded)
+    if recorded.get("split_sha256") != digest:
+        raise ResearchRefused("split manifest body digest does not match its own data")
+    return digest
+
+def mode_prep(args, guard) -> dict:
+    """The prep row: fixed-split stamps plus the existing v2 chain prep."""
+    guard("research prep startup")
+    capture_root = Path(args.capture_root).resolve()
+    census_path, census, namespace = load_census(args, capture_root)
+    ids, tokens, corpus_text = load_draw(args, census)
+    require_split_geometry(args, tokens, census)
+    unit_names = selected_units(args, census, namespace)
+    manifest = build_split_manifest(args, census, ids)
+    manifest["split_sha256"] = split_stamp(manifest)
+    manifest_path = split_manifest_path(capture_root)
+    _write_atomic_json(manifest_path, manifest)
+    print(json.dumps({"research_split_manifest": {
+        "path": str(manifest_path), "split_sha256": manifest["split_sha256"],
+        "fit_samples": int(args.fit_stop),
+        "heldout_samples": int(len(tokens) - args.fit_stop),
+        "units": len(unit_names)}}), flush=True)
+    if args.capture_chain_ranges is None or args.boundary_storage is None:
+        raise ResearchRefused("research prep needs --capture-chain-ranges and --boundary-storage")
+    ranges = chain.parse_layer_ranges(args.capture_chain_ranges)
+    storage_text = args.boundary_storage if args.boundary_storage.lstrip().startswith("{") \
+        else Path(args.boundary_storage).read_text()
+    boundary_storage = json.loads(storage_text)
+    check_boundary_storage(boundary_storage)
+    # Explicit owner, exactly like the campaign's prep bookend: no automatic
+    # admission call is made, patched or bypassed.
+    with store.record_capture_source(census_path, model=namespace.model) as source:
+        record = chain.prepare(
+            capture_root, census_path=census_path, ranges=ranges,
+            n_batches=len(tokens), boundary_storage=boundary_storage,
+            identity=lambda: campaign._streamed_capture_identity(
+                namespace, census, tokens, corpus_text,
+                attention_implementation=args.attention_implementation,
+                source_authentication=source, unit_names=unit_names))
+    print(json.dumps({"research_prep": record["path"],
+                      "sha256": record["sha256"]}), flush=True)
+    return record
+
+
+# -- quantum ---------------------------------------------------------------------
+
+class SampleIndexer:
+    """The monotonic global single-sample index over the quantum's forwards.
+
+    The calibration draw is exactly one sample per forward; any mixed or
+    reordered batch is refused, never guessed into a role. The global index
+    increases by one per forward across the whole range; each layer's first
+    forward continues it at a sample-aligned offset, so within a layer the
+    sample coordinate is ``global_index % total_samples`` and both readings
+    agree.
+    """
+
+    def __init__(self, moments, *, total_samples, seqlen, guard):
+        self.moments = moments
+        self.total_samples = int(total_samples)
+        self.seqlen = int(seqlen)
+        self.guard = guard
+        self.global_index = 0
+        self.layer = None
+        self.in_layer = 0
+
+    def wrapper(self, layer, forward_batch):
+        def forward(batch):
+            if batch.ndim != 2 or int(batch.shape[0]) != 1:
+                raise ResearchRefused(
+                    f"layer {layer}: a research forward takes exactly one "
+                    f"[1, {self.seqlen}] sample, got {tuple(batch.shape)}")
+            if int(batch.shape[1]) != self.seqlen:
+                raise ResearchRefused(
+                    f"layer {layer}: a calibration sample is {self.seqlen} "
+                    f"tokens, got {tuple(batch.shape)}")
+            if self.layer != layer:
+                if self.layer is not None and self.in_layer != self.total_samples:
+                    raise ResearchRefused(
+                        f"layer {self.layer} forwarded {self.in_layer} of "
+                        f"{self.total_samples} samples")
+                self.layer, self.in_layer = layer, 0
+            sample = self.in_layer
+            if sample != self.global_index % self.total_samples:
+                raise ResearchRefused(
+                    f"layer {layer}: non-monotonic sample index {sample} for "
+                    f"global forward {self.global_index}")
+            self.guard(f"research forward layer {layer} sample {sample}")
+            self.moments.set_sample(sample)
+            value = forward_batch(batch)
+            self.in_layer += 1
+            self.global_index += 1
+            return value
+        return forward
+
+
+def _write_and_verify_role_file(directory: Path, qname: str, role: str, record: dict,
+                                census_count: int, unit_shape) -> dict:
+    """Write one role file and verify its own bytes, sha and tensor geometry."""
+    path = directory / f"{qname}.{role}.pt"
+    payload = {"name": qname, "role": role, "hessian": record["hessian"],
+               "inputs": record["inputs"], "count": int(record["count"]),
+               "max_abs": float(record["max_abs"]),
+               "prefix_sample_ids": record["prefix_sample_ids"]}
+    torch.save(payload, path)
+    digest = _sha256_file(path)
+    loaded = torch.load(path, weights_only=True)
+    if loaded["name"] != qname or loaded["role"] != role:
+        raise ResearchRefused(f"{path}: role file does not name its own unit/role")
+    if loaded["hessian"].dtype != torch.float32 or loaded["hessian"].device.type != "cpu":
+        raise ResearchRefused(f"{path}: the role Hessian is not a CPU float32 tensor")
+    dimension = int(unit_shape[1])
+    if list(loaded["hessian"].shape) != [dimension, dimension]:
+        raise ResearchRefused(
+            f"{path}: Hessian geometry {list(loaded['hessian'].shape)} is not "
+            f"the census unit geometry [{dimension}, {dimension}]")
+    if loaded["inputs"] is not None:
+        if loaded["inputs"].dtype != torch.float32 or loaded["inputs"].device.type != "cpu":
+            raise ResearchRefused(f"{path}: the role inputs are not CPU float32")
+        if int(loaded["inputs"].shape[1]) != dimension:
+            raise ResearchRefused(f"{path}: role inputs disagree with the unit geometry")
+    if loaded["prefix_sample_ids"] is not None and loaded["prefix_sample_ids"].dtype != torch.int64:
+        raise ResearchRefused(f"{path}: role prefix sample ids are not int64")
+    if int(loaded["count"]) <= 0:
+        raise ResearchRefused(f"{path}: role count is not positive")
+    return {
+        "schema": ROLE_RECEIPT_SCHEMA, "name": qname, "role": role,
+        "file": path.name,
+        "bytes": path.stat().st_size, "sha256": digest, "count": int(loaded["count"]),
+        "hessian_shape": list(loaded["hessian"].shape),
+        "inputs_shape": None if loaded["inputs"] is None else list(loaded["inputs"].shape),
+        "prefix_sample_ids_shape": None if loaded["prefix_sample_ids"] is None
+        else list(loaded["prefix_sample_ids"].shape),
+        "max_abs": float(loaded["max_abs"]),
+        "census_count": int(census_count),
+    }
+
+
+def _role_file_records(receipt: dict) -> dict:
+    return {
+        "file": receipt["file"], "bytes": int(receipt["bytes"]),
+        "sha256": receipt["sha256"], "count": int(receipt["count"]),
+        "hessian_shape": [int(v) for v in receipt["hessian_shape"]],
+        "inputs_shape": None if receipt["inputs_shape"] is None
+        else [int(v) for v in receipt["inputs_shape"]],
+        "prefix_sample_ids_shape": None if receipt["prefix_sample_ids_shape"] is None
+        else [int(v) for v in receipt["prefix_sample_ids_shape"]],
+    }
+
+
+def require_observed_routing(rows, records, profile, config, *, fit_tokens, heldout_tokens, census):
+    """Current-forward conservation is correctness; historical routing is planning."""
+    classifier = ProfileRoutedExpertClassifier(profile)
+    routed = {}
+    projections = {name for param in profile.packed_expert_param_names()
+                   for name in profile.packed_expert_projection_names(param)}
+    for name, count in rows.items():
+        match = classifier.classify(name)
+        if match is None:
+            if count != fit_tokens + heldout_tokens:
+                raise ResearchRefused(f"{name}: dense rows do not cover this forward")
+            for role, expected in ((FIT, fit_tokens), (HELDOUT, heldout_tokens)):
+                if records[role][name]["count"] != expected:
+                    raise ResearchRefused(f"{name}.{role}: rows do not cover its sample partition")
+            continue
+        parts = name.rsplit(".", 2)
+        if len(parts) != 3 or not parts[1].isdigit() or not match.regex_declared:
+            raise ResearchRefused(f"{name}: routed expert has no declared numeric identity")
+        routed.setdefault(parts[0], {}).setdefault(int(parts[1]), {})[match.projection_name] = name
+    if not routed:
+        return
+    factor = resolve_routing_factor(config, context="research split capture")
+    for group, experts in routed.items():
+        if set(experts) != set(range(factor.n_routed_experts)):
+            raise ResearchRefused(f"{group}: current routing does not cover the declared expert population")
+        totals = {FIT: 0, HELDOUT: 0}
+        for expert, names in experts.items():
+            if set(names) != projections:
+                raise ResearchRefused(f"{group}.{expert}: current routing omits an expert projection")
+            observed = {int(rows[name]) for name in names.values()}
+            if len(observed) != 1:
+                raise ResearchRefused(f"{group}.{expert}: gate/up/down current routed counts differ")
+            actual = observed.pop()
+            for role in totals:
+                role_counts = {int(records[role][name]["count"]) for name in names.values()}
+                if len(role_counts) != 1:
+                    raise ResearchRefused(f"{group}.{expert}.{role}: gate/up/down sample partition counts differ")
+                totals[role] += role_counts.pop()
+            planned = int(census["counts"][next(iter(names.values()))])
+            if (planned == 0) != (actual == 0) or abs(actual - planned) * 100 > planned:
+                raise ResearchRefused(
+                    f"{group}.{expert}: routing requires CEO review: census {planned}, observed {actual}; "
+                    "expert appeared/vanished or changed by more than 1 percent")
+        for role, tokens in ((FIT, fit_tokens), (HELDOUT, heldout_tokens)):
+            expected = tokens * factor.num_experts_per_tok
+            if totals[role] != expected:
+                raise ResearchRefused(f"{group}.{role}: routed rows {totals[role]} != tokens times top-k {expected}")
+
+
+def _census_comparison(census, name, observed, maximum):
+    planned = int(census["counts"][name])
+    planned_max = float(census["max_abs"][name])
+    comparison = {
+        "count": {"census": planned, "observed": observed, "delta": observed - planned,
+                  "relative_delta": (observed - planned) / planned if planned else None},
+        "max_abs": {"census": planned_max, "observed": maximum, "delta": maximum - planned_max},
+        "mean": {"census": None, "observed": None, "status": "not recorded by the census"}}
+    agree = seal_check("research_census_statistics",
+                       {"count": planned, "max_abs": planned_max},
+                       {"count": observed, "max_abs": maximum}, where=name,
+                       refusal=ResearchRefused)
+    comparison["stamp"] = "matching" if agree else "[DEV-MODE]"
+    return comparison
+
+
+def persist_split_records(capture_root, census, census_path, records, seen,
+                          split_sha256, guard) -> dict:
+    """Persist both roles once per layer; verify every file and every count."""
+    counts = census["counts"]
+    by_layer = {}
+    for role in (FIT, HELDOUT):
+        if role not in records:
+            raise ResearchRefused(f"the split moments returned no {role} role")
+    for role_records in (records[FIT], records[HELDOUT]):
+        for qname in role_records:
+            match = chain.DOTTED_LAYER_QNAME.search(qname)
+            if match is None:
+                raise ResearchRefused(f"{qname}: a research unit names no decoder layer")
+            by_layer.setdefault(int(match.group(1)), set()).add(qname)
+    verified = {}
+    layers_dir = research_dir(capture_root) / "layers"
+    for layer in sorted(by_layer):
+        directory = layers_dir / f"L{layer:03d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        layer_manifest = {
+            "schema": LAYER_MANIFEST_SCHEMA, "layer": layer,
+            "split_sha256": split_sha256,
+            "source_root": str(census["model"]),
+            "read_contract_stamp": {
+                "model_load_contract_sha256":
+                    _canonical_sha256(census["model_load_contract"]),
+                "census_sha256": _sha256_file(census_path)},
+            "full_counts": {}, "units": {}, "census_comparison": {}}
+        for qname in sorted(by_layer[layer], key=lambda name: (name not in PRIORITY_UNITS, name)):
+            census_count = int(counts[qname])
+            observed = int(seen.get(qname, 0))
+            if observed <= 0:
+                raise ResearchRefused(f"{qname}: this forward observed no rows")
+            layer_manifest["full_counts"][qname] = observed
+            split_total = 0
+            units_entry = {}
+            unit_maximum = float("-inf")
+            role_records = {FIT: records[FIT].get(qname),
+                            HELDOUT: records[HELDOUT].get(qname)}
+            for role in (FIT, HELDOUT):
+                record = role_records.get(role)
+                if record is None:
+                    raise ResearchRefused(f"{qname}: the split left no {role} record")
+                receipt = _write_and_verify_role_file(
+                    directory, qname, role, record, observed,
+                    census["unit_shapes"][qname])
+                split_total += receipt["count"]
+                units_entry[role] = _role_file_records(receipt)
+                units_entry[role]["file"] = str((directory / receipt["file"]).relative_to(research_dir(capture_root)))
+                unit_maximum = max(unit_maximum, float(record["max_abs"]))
+            if split_total != observed:
+                raise ResearchRefused(
+                    f"{qname}: fit + heldout rows {split_total} != observed {observed}; "
+                    "the split dropped or duplicated rows")
+            comparison = _census_comparison(census, qname, observed, unit_maximum)
+            layer_manifest["census_comparison"][qname] = comparison
+            verified[qname] = {
+                "schema": ROLE_RECEIPT_SCHEMA, "name": qname, "layer": layer,
+                FIT: units_entry[FIT], HELDOUT: units_entry[HELDOUT],
+                "census_count": census_count, "observed_rows": observed,
+                "max_abs": unit_maximum, "census_comparison": comparison}
+            layer_manifest["units"][qname] = units_entry
+            if qname in PRIORITY_UNITS:
+                guard(f"research priority unit {qname}")
+                _write_atomic_json(directory / "manifest.json", layer_manifest)
+                print(json.dumps({"research_priority_unit": {
+                    "name": qname, "manifest": str(directory / "manifest.json"),
+                    "roles": units_entry}}), flush=True)
+        guard(f"research layer manifest {layer}")
+        _write_atomic_json(directory / "manifest.json", layer_manifest)
+    return verified
+
+
+def _new_layer_moments(args, census, guard):
+    return DisjointRowMoments(
+        fit_stop=int(args.fit_stop), total_samples=int(args.total_samples),
+        tokens_per_sample=int(census["seqlen"]),
+        max_prefix_rows=int(args.max_prefix_rows), resource_check=guard)
+
+
+def _capture_request_binding(args, unit_names):
+    return {"selection_sha256": _sha256_file(args.units), "units": sorted(unit_names),
+            "max_act_rows": int(args.max_act_rows), "max_prefix_rows": int(args.max_prefix_rows)}
+
+
+def _changed_binding_fields(stored, requested) -> list:
+    """The request-binding fields on which a stored fragment differs from this request.
+
+    A fragment that carries no binding (or a malformed one) differs as a whole.
+    """
+    if not isinstance(stored, dict):
+        return ["capture_binding"]
+    absent = object()
+    return sorted(key for key in stored.keys() | requested.keys()
+                  if stored.get(key, absent) != requested.get(key, absent))
+
+
+def _run_prepared_quantum(args, guard, *, recompute=False) -> dict:
+    """One layer-range quantum: same-pass split moments over the chain owner."""
+    guard("research quantum startup")
+    capture_root = Path(args.capture_root).resolve()
+    census_path, census, namespace = load_census(args, capture_root)
+    ids, tokens, corpus_text = load_draw(args, census)
+    require_split_geometry(args, tokens, census)
+    unit_names = selected_units(args, census, namespace)
+    split_sha256 = require_persisted_split(capture_root, args, census, ids)
+    start, stop = chain.parse_layer_range(args.capture_layer_range)
+    contract = census.get("model_load_contract") or {}
+    num_layers = int(contract.get("num_layers", 0))
+    if num_layers <= 0:
+        raise ResearchRefused("the census names no source layer depth")
+
+
+    with ExitStack() as scope:
+
+        source = scope.enter_context(chain.authenticate_quantum_source(
+            capture_root, census_path=census_path, model=namespace.model,
+            resource_check=guard))
+        quantum = chain.ChainQuantum(capture_root, (start, stop),
+                                     num_layers=num_layers, source_authentication=source, recompute=recompute)
+        identity = campaign._streamed_capture_identity(
+            namespace, census, tokens, corpus_text,
+            attention_implementation=args.attention_implementation,
+            source_authentication=source, unit_names=unit_names)
+        identity = quantum.require_identity(identity, n_batches=len(tokens))
+
+
+        from prismaquant.model_profiles import detect_profile
+        profile = detect_profile(namespace.model)
+        cache_dir = Path(args.cache_dir) if args.cache_dir else capture_root / "quantum-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        runner = build_streamed_causal_lm(
+            namespace.model, device=torch.device(args.device), dtype=torch.bfloat16,
+            profile=profile, offload_folder=str(cache_dir / "source-offload"),
+            max_cache_slots=int(args.streaming_cache_slots),
+            prefetch_workers=args.streaming_prefetch_workers,
+            cache_headroom_gb=float(args.streaming_cache_headroom_gb),
+            prefetch_min_available_gb=float(args.streaming_cache_headroom_gb),
+            prefetch_lookahead=int(args.streaming_cache_slots) - 1,
+            require_prefetched_residency=True,
+            attn_implementation=args.attention_implementation,
+            source_authentication=source)
+        scope.callback(runner.shutdown)
+        if runner.num_layers != num_layers:
+            raise ResearchRefused(
+                f"the source has {runner.num_layers} layers; the census names {num_layers}")
+        runner.context.begin_source_initialization_audit()
+        population = campaign._require_campaign_population(
+            runner.model, profile, namespace.layer_stride)
+        modules = dict(runner.model.named_modules())
+        weights = {name: modules[name].weight for name in unit_names if name in modules}
+        weights.update({member.qname: member.weight for member in population.members
+                        if member.qname in set(unit_names)})
+        carried = None
+        if population.declared:
+            if not census.get("expert_projection"):
+                raise ResearchRefused(
+                    "the census carries no producer expert projection to reuse "
+                    "(PrismaQuant #183); refusing to price a projected population")
+            # The census already asked the producer for exactly this scope;
+            # binding it here is the check. Per-layer live views are re-checked
+            # inside the visitor, exactly as the campaign's capture does.
+            carried, _units = campaign._project_expert_population(
+                population, weights=weights, menus={}, model_path=namespace.model,
+                cache_dir=cache_dir, measured=set(),
+                projection=census["expert_projection"], resource_check=guard,
+                source_authentication=source)
+        del weights, modules
+
+        names_by_layer = {}
+        for name in unit_names:
+            names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
+        shapes = {name: list(census["unit_shapes"][name]) for name in unit_names}
+        indexer = SampleIndexer(None, total_samples=args.total_samples,
+                                seqlen=int(census["seqlen"]), guard=guard)
+        seen, verified, telemetry = {}, {}, []
+
+        def visit(layer, forward_batch):
+            names = names_by_layer.get(layer, [])
+            members = [member for member in population.members if member.qname in names]
+            live = refresh_packed_expert_projections(members, profile)
+            if live:
+                campaign._checked_projected_units(
+                    carried["stacks"], weights={m.qname: m.weight for m in live},
+                    model_path=namespace.model, source=carried["producer"]["source"],
+                    measured={m.qname for m in live}, resource_check=guard,
+                    source_authentication=source)
+            del live
+            expected = declared_shared_capture_groups(
+                {name: shapes[name] for name in names}, profile)
+            moments = _new_layer_moments(args, census, guard)
+            indexer.moments = moments
+            records = None
+            try:
+                checked = indexer.wrapper(layer, forward_batch)
+                _acts, _hessians, rows, _amax = campaign._collect_activations(
+                    runner.model, names, tokens, 0, runner.device,
+                    want_hessian=False, profile=runner.profile, forward_batch=checked,
+                    shared_packed_inputs=True, expected_shared_input_groups=expected,
+                    resource_check=guard, row_consumer=moments.consume)
+                if set(rows) != set(names) or any(value <= 0 for value in rows.values()):
+                    raise ResearchRefused(f"layer {layer}: selected row coverage is incomplete")
+                records = moments.finish()
+                require_observed_routing(
+                    rows, records, profile, runner.model.config.to_dict(),
+                    fit_tokens=args.fit_stop * int(census["seqlen"]),
+                    heldout_tokens=(args.total_samples - args.fit_stop) * int(census["seqlen"]),
+                    census=census)
+                verified.update(persist_split_records(
+                    capture_root, census, census_path, records, rows, split_sha256, guard))
+                seen.update(rows)
+                telemetry.append({"layer": layer, "units": len(names)})
+            finally:
+                records = None
+                moments.close()
+                indexer.moments = None
+                if runner.device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+        try:
+            with quantum.owner():
+                runner.visit_layer_batches(tokens, visit, start=quantum.frontier(),
+                                           stop_layer=quantum.stop,
+                                           boundary_consumer=quantum.boundary_consumer())
+                targets = [name for name in unit_names
+                           if start <= runner.layer_index_for_qname(name) < stop]
+                if set(seen) != set(targets) or any(v <= 0 for v in seen.values()):
+                    raise ResearchRefused(
+                        "the research quantum did not observe every selected unit of its layers")
+
+                fragment = quantum.complete(
+                    witness=runner.context.source_selected_initialization_witness(
+                        range(quantum.start, quantum.stop)),
+                    verified=verified, capture_binding=_capture_request_binding(args, unit_names))
+        except BaseException:
+            if runner.device.type == "cuda":
+                torch.cuda.empty_cache()
+            raise
+    print(json.dumps({"research_quantum": {
+        "layers": [quantum.start, quantum.stop], "fragment": str(fragment),
+        "units": len(verified), "forwards": indexer.global_index,
+        "telemetry": telemetry}}), flush=True)
+    return {"fragment": str(fragment), "units": len(verified)}
+
+
+PRIORITY_UNITS = frozenset((
+    "model.language_model.layers.3.mlp.experts.0.up_proj",
+    "model.language_model.layers.28.mlp.shared_experts.up_proj",
+    "model.language_model.layers.44.mlp.experts.0.up_proj",
+))
+
+
+def _verified_layer_publication(root, manifest_path, manifest, verified, census, split_sha256):
+    """Accept role metadata only as the completed quantum verified its bytes."""
+    if manifest.get("schema") != LAYER_MANIFEST_SCHEMA:
+        raise ResearchRefused(f"{manifest_path}: invalid verified layer schema")
+    layer = manifest["layer"]
+    if manifest_path.parent.name != f"L{layer:03d}" or manifest["split_sha256"] != split_sha256:
+        raise ResearchRefused(f"{manifest_path}: verified layer or split differs")
+    expected = {name: row for name, row in verified.items() if row["layer"] == layer}
+    if set(manifest["units"]) != set(expected) or set(manifest["full_counts"]) != set(expected):
+        raise ResearchRefused(f"{manifest_path}: verified unit coverage differs")
+    for name, roles in manifest["units"].items():
+        receipt = expected[name]
+        count = int(receipt["observed_rows"])
+        if (manifest["full_counts"][name] != count or set(roles) != {FIT, HELDOUT}):
+            raise ResearchRefused(f"{name}: verified forward counts or roles differ")
+        if "census_comparison" in receipt and manifest.get("census_comparison", {}).get(name) != receipt["census_comparison"]:
+            raise ResearchRefused(f"{name}: verified census comparison differs")
+        for role in (FIT, HELDOUT):
+            if roles[role] != receipt[role]:
+                raise ResearchRefused(f"{name}.{role}: published data differs from verified receipt")
+            path = root / receipt[role]["file"]
+            if path.stat().st_size != receipt[role]["bytes"]:
+                raise ResearchRefused(f"{path}: verified role length differs")
+            if _sha256_file(path) != receipt[role]["sha256"]:
+                raise ResearchRefused(f"{path}: own bytes differ from verified digest")
+        if sum(receipt[role]["count"] for role in (FIT, HELDOUT)) != count:
+            raise ResearchRefused(f"{name}: verified role counts do not cover this forward")
+    return set(expected)
+
+
+def mode_quantum(args, guard) -> dict:
+    """Run adjacent prepared quanta in one action; each layer stays bounded and durable.
+
+    A prepared range whose owner is already complete ends in one of three ways:
+
+    * **Refuse.** The request is another measurement than the prep sealed: a different
+      unit set, scoring prefix (``--max-act-rows``), draw, split boundary or batch count,
+      a missing selection file, or a published role record that differs from the verified
+      receipt. Nothing runs and nothing is reused.
+    * **Replay.** The prep identity matches, but the fragment's ``capture_binding``
+      (selection file digest, ``--max-prefix-rows``) differs from this request, or the
+      fragment carries no binding. This is another request over the same prepared
+      traversal, not a corruption, so the quantum runs again (``recompute=True``) and
+      publishes new role files. It never refuses; one ``research_quantum_replay`` line
+      names the changed fields.
+    * **Adopt.** The binding matches and every publication matches its verified receipt.
+      No source forward runs.
+    """
+    root = Path(args.capture_root).resolve()
+    prep = chain.read_prep(root)
+    start, stop = chain.parse_layer_range(args.capture_layer_range)
+    ranges = [tuple(pair) for pair in prep["ranges"] if start <= pair[0] and pair[1] <= stop]
+    if not ranges or ranges[0][0] != start or ranges[-1][1] != stop:
+        raise ResearchRefused("batch range must cover whole adjacent prepared quanta")
+    chain.require_layer_tiling([(lo-start, hi-start) for lo, hi in ranges], num_layers=stop-start)
+    census_path, census, namespace = load_census(args, root)
+    ids, tokens, corpus_text = load_draw(args, census)
+    require_split_geometry(args, tokens, census)
+    unit_names = selected_units(args, census, namespace)
+    split_sha256 = require_persisted_split(root, args, census, ids)
+    binding = _capture_request_binding(args, unit_names)
+    with chain.authenticate_quantum_source(
+            root, census_path=census_path, model=namespace.model, resource_check=guard) as source:
+        requested = campaign._streamed_capture_identity(
+            namespace, census, tokens, corpus_text, attention_implementation=args.attention_implementation,
+            source_authentication=source, unit_names=unit_names)
+        chain.require_prep_identity(prep, requested, n_batches=len(tokens), label=f"capture-batch-{start}:{stop}")
+    results = []
+    from prismaquant.prismabuild_progress import commit
+    for completed, (lo, hi) in enumerate(ranges, 1):
+        guard(f"research prepared quantum {lo}:{hi}")
+        owner = chain._owner_status(prep, lo, hi)
+        if owner is not None and owner.get("status") == "complete":
+            chain.require_owner_complete(prep, lo, hi)
+            fragment = chain.read_fragment(root, prep, lo, hi)
+            changed = _changed_binding_fields(fragment.get("capture_binding"), binding)
+            if changed:
+                print(json.dumps({"research_quantum_replay": {"layers": [lo, hi], "changed": changed}}),
+                      flush=True)
+                options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
+                result = _run_prepared_quantum(options, guard, recompute=True)
+            else:
+                for layer in range(lo, hi):
+                    names = {name for name, row in fragment["units"].items() if row["layer"] == layer}
+                    if names:
+                        path = root / "layers" / f"L{layer:03d}" / "manifest.json"
+                        _verified_layer_publication(root, path, json.loads(path.read_text()),
+                                                    fragment["units"], census, split_sha256)
+                result = {"fragment": str(chain.fragment_path(root, lo, hi)),
+                          "units": len(fragment["units"])}
+        else:
+            options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
+            result = _run_prepared_quantum(options, guard)
+        results.append(result)
+        commit(completed, chain.range_label(lo, hi), "prepared_quanta")
+    summary = {"layers": [start, stop], "fragments": [row["fragment"] for row in results],
+               "units": sum(row["units"] for row in results)}
+    print(json.dumps({"research_quantum_batch": summary}), flush=True)
+    return summary
+
+
+# -- join ------------------------------------------------------------------------
+
+def mode_join(args, guard) -> dict:
+    """Research metadata verification: ranges, witness merge, role-manifest union."""
+    guard("research join startup")
+    capture_root = Path(args.capture_root).resolve()
+    census_path, census, namespace = load_census(args, capture_root)
+    prep = chain.read_prep(capture_root)
+    ranges = chain.require_layer_tiling(prep["ranges"])
+    identity = prep["identity"]
+    for start, stop in ranges:
+        chain.require_owner_complete(prep, start, stop)
+    fragments = [chain.read_fragment(capture_root, prep, start, stop)
+                 for start, stop in ranges]
+    depths = {fragment["num_layers"] for fragment in fragments}
+    if len(depths) != 1:
+        raise ResearchRefused("the quanta ran over sources of different depth")
+    chain.require_layer_tiling(ranges, num_layers=depths.pop())
+    chain.require_source_fingerprints(prep["source_fingerprints"], prep["source_root"],
+                                      where="research split join")
+    from prismaquant.streaming_model import merge_selected_initialization_witnesses
+
+    merged = merge_selected_initialization_witnesses(
+        [fragment["witness"] for fragment in fragments])
+    try:
+        store.require_capture_initialization_contract(identity["model_load_contract"], merged)
+    except RuntimeError as error:
+        raise ResearchRefused(str(error)) from error
+    recorded = chain.recorded_source_digests(prep, fragments)
+    verified = {}
+    for fragment in fragments:
+        repeated = sorted(set(verified) & set(fragment["units"]))
+        if repeated:
+            raise ResearchRefused(f"two quanta verified one unit: {repeated[:8]}")
+        verified.update(fragment["units"])
+    if set(verified) != set(identity["units"]):
+        missing = sorted(set(identity["units"]) - set(verified))
+        raise ResearchRefused(f"the quanta verified no role receipt for {missing[:8]}")
+    # Role manifest union: every layer manifest is read back, its split stamp
+    # held uniform, and every role file re-hashed against its receipt. Counts
+    # are held to the census; no provider qualification is claimed here.
+    split_sha256 = split_stamp(json.loads(split_manifest_path(capture_root).read_text()))
+    counts = census["counts"]
+    covered = {}
+    for manifest_path in sorted((research_dir(capture_root) / "layers").glob("L*/manifest.json")):
+        manifest = json.loads(manifest_path.read_text())
+        names = _verified_layer_publication(research_dir(capture_root), manifest_path,
+                                            manifest, verified, census, split_sha256)
+        for qname in names:
+            if qname in covered:
+                raise ResearchRefused(f"{qname}: two layer manifests record one verified unit")
+            covered[qname] = manifest_path.parent.name
+    if set(covered) != set(identity["units"]):
+        missing = sorted(set(identity["units"]) - set(covered))
+        raise ResearchRefused(f"the layer manifests cover no record for {missing[:8]}")
+    from prismaquant.cost_stage_checkpoint import (
+        atomic_write_bytes, canonical_json_bytes, canonical_json_sha256)
+    body = {"schema": RESEARCH_JOIN_SCHEMA, "prep_sha256": prep["prep_sha256"],
+            "census_sha256": _sha256_file(census_path),
+            "ranges": [list(pair) for pair in ranges],
+            "witness_merged_sha256": _canonical_sha256(merged),
+            "recorded_source_files": len(recorded),
+            "role_units": len(covered), "split_sha256": split_sha256,
+            "unit_layers": covered,
+            "note": "research metadata verification only; no capture manifest is published"}
+    document = {**body, "join_sha256": canonical_json_sha256(
+        body, where="research split join")}
+    atomic_write_bytes(join_document_path(capture_root),
+                       canonical_json_bytes(document, where="research split join") + b"\n")
+    print(json.dumps({"research_join": {
+        "path": str(join_document_path(capture_root)), "units": len(covered),
+        "ranges": [list(pair) for pair in ranges]}}), flush=True)
+    return document
+
+
+# -- preflight -------------------------------------------------------------------
+
+def _real_metadata_preflight(args, guard) -> dict:
+    """Small real-metadata reads with no GPU and no payload forward."""
+    path = Path(args.calibration_census)
+    census = json.loads(path.read_text())
+    namespace = campaign_args(args, census)
+    checked = campaign.load_calibration_census(path, args=namespace)
+    selection = campaign.load_unit_selection(args.units)
+    names = campaign.selected_capture_unit_names(
+        selection, args=namespace, resolved=checked["anchor_groups"])
+    missing = sorted(set(names) - set(checked["counts"]))
+    if missing:
+        raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")
+    ids, tokens, _corpus_text = load_draw(args, checked)
+    require_split_geometry(args, tokens, checked)
+    guard("research preflight metadata")
+    return {"census": {"model": str(checked["model"]),
+                       "units": len(checked["counts"]),
+                       "groups": len(checked["anchor_groups"])},
+            "units": {"selected": len(names)},
+            "draw": {"samples": int(ids.shape[0]), "seqlen": int(ids.shape[1]),
+                     "fit_stop": int(args.fit_stop)}}
+
+
+def verified_roles_carry_counts(fragment) -> bool:
+    units = fragment.get("units") or {}
+    return bool(units) and all(
+        isinstance(record.get(FIT), dict) and isinstance(record.get(HELDOUT), dict)
+        and int(record[FIT]["count"]) > 0 and int(record[HELDOUT]["count"]) > 0
+        and int(record[FIT]["count"]) + int(record[HELDOUT]["count"])
+        == int(record["census_count"])
+        for record in units.values())
+
+
+def _toy_control_preflight(directory: Path, guard, *, layers=1, quantum_layers=1, device="cpu") -> dict:
+    """The actual tiny GLM control on ``device``: census, prep, quantum, join.
+
+    Both devices use the torch reference attention kernels, so the control
+    isolates the capture path from the device rather than from the kernels.
+    """
+    import pytest
+    if device not in ("cpu", "cuda"):
+        raise ResearchRefused(f"the toy control runs on cpu or cuda, not {device!r}")
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ResearchRefused("the toy control was asked for cuda and this process sees none")
+    tests = ROOT / "tests"
+    if str(tests) not in sys.path:
+        sys.path.insert(0, str(tests))
+    from test_glm5_next_streamed_forward_parity import (
+        _build_model, _tiny_config, _torch_only_causal_conv1d)
+    from test_glm_campaign_streaming import write_original_layout_checkpoint
+
+    torch.manual_seed(20261001)
+    config = _tiny_config()
+    text = config.text_config
+    text.hidden_size = 64
+    text.intermediate_size = 128
+    text.num_hidden_layers = layers
+    text.layer_types = ["linear_attention"] * layers
+    text.mlp_layer_types = ["dense"] * layers
+    text.indexer_types = ["full"] * layers
+    text.first_k_dense_replace = layers
+    config.vision_config.out_hidden_size = 64
+    toy_config = type(config).from_dict(config.to_dict())
+    model = _build_model(toy_config).to(torch.bfloat16)
+
+    source = directory / "source"
+    write_original_layout_checkpoint(model, source)
+    ids = torch.randint(2, 120, (4, 8),
+                        generator=torch.Generator().manual_seed(20261001))
+    from safetensors.torch import save_file
+    save_file({"input_ids": ids}, str(directory / "tokens.safetensors"))
+    corpus = directory / "corpus.txt"
+    corpus.write_text("tiny GLM frozen research preflight draw\n")
+    tokens = [ids[index:index + 1].contiguous() for index in range(ids.shape[0])]
+
+    # The toy draw replaces the wikitext fetch for this preflight only; the
+    # census, prep, quantum and join below are the real code paths.
+    original_tokens = campaign._calibration_tokens
+    campaign._calibration_tokens = lambda *_args: (tokens, corpus.read_text())
+    kernels = pytest.MonkeyPatch()
+    try:
+        _torch_only_causal_conv1d.__wrapped__(kernels)
+        census_path = directory / "census.json"
+        common = ["--model", str(source), "--out", str(directory / "unused.pkl"),
+                  "--menu-mode", "research", "--nsamples", "4", "--seqlen", "8",
+                  "--max-act-rows", "7", "--attention-implementation", "eager",
+                  "--streaming", "--streaming-cache-headroom-gb", "0"]
+        if campaign.main([*common, "--cache-dir", str(directory / "census-cache"),
+                          "--census-out", str(census_path)]) != 0:
+            raise ResearchRefused("the toy census run failed")
+        census = json.loads(census_path.read_text())
+        # The toy draw's own receipt, computed from the toy artifacts: the
+        # census a wikitext run writes carries the receipt; a plain toy
+        # census does not, so the control stamps the draw it actually used.
+        if "calibration_input" not in census:
+            hi = max(int(value) for value in census["counts"].values())
+            identity = th.calibration_identity(
+                corpus.read_text(), tokens, fit_tokens=hi,
+                model=str(census["model"]), seed=int(census["seed"]),
+                nsamples=int(census["nsamples"]), seqlen=int(census["seqlen"]),
+                split_role="calibration", source="indomain split preflight toy draw")
+            provenance = {key: value for key, value in identity.items()
+                          if key not in ("calibration_input",)}
+            census["calibration_input"] = {
+                "artifact_sha256": _sha256_file(directory / "tokens.safetensors"),
+                "calibration_sha256": identity["fit_ids_sha256"],
+                "dtype": str(ids.dtype), "shape": [int(v) for v in ids.shape],
+                "provenance": provenance}
+            _write_atomic_json(census_path, census)
+        selection = {"schema": "prismaquant.tessera_campaign_units.v1",
+                     "model": str(source), "layer_stride": 1,
+                     "groups": [{"key": key, "members": members}
+                                for key, members in sorted(census["anchor_groups"].items())]}
+        selection_path = directory / "units.json"
+        selection_path.write_text(json.dumps(selection))
+        root = directory / "capture"
+        storage = {"schema": "prismaquant.aura.boundary_storage.v2",
+                   "capture_order": "layer_major",
+                   "directory": str(directory / "boundaries"),
+                   "max_resident_bytes": 64 << 20, "max_auxiliary_bytes": 1 << 20,
+                   "max_artifact_bytes": 1 << 30, "prefetch_batches": 1}
+
+        def toy_args(**extra):
+            return argparse.Namespace(
+                capture_root=str(root), calibration_census=str(census_path),
+                units=str(selection_path),
+                calibration_tokens=str(directory / "tokens.safetensors"),
+                corpus_text=str(corpus), model=str(source),
+                source_snapshot_root=None, total_samples=4, fit_stop=2,
+                max_prefix_rows=4, max_act_rows=7,
+                attention_implementation="eager", device=device,
+                cache_dir=str(directory / "quantum-cache"),
+                streaming_cache_slots=2, streaming_prefetch_workers=1,
+                streaming_cache_headroom_gb=0.0, **extra)
+
+        mode_prep(toy_args(capture_chain_ranges=",".join(
+            f"{i}:{min(i+quantum_layers, layers)}" for i in range(0, layers, quantum_layers)),
+                           boundary_storage=json.dumps(storage)), guard)
+        mode_quantum(toy_args(capture_layer_range=f"0:{layers}"), guard)
+        document = mode_join(toy_args(), guard)
+        prep = chain.read_prep(root)
+        for start, stop in chain.require_layer_tiling(prep["ranges"]):
+            chain.require_owner_complete(prep, start, stop)
+            fragment = chain.read_fragment(root, prep, start, stop)
+            if not verified_roles_carry_counts(fragment):
+                raise ResearchRefused("the toy fragment carries no role counts")
+        manifests = sorted((research_dir(root) / "layers").glob("L*/manifest.json"))
+        if len(manifests) != layers:
+            raise ResearchRefused("the toy split did not publish every layer manifest")
+        published = {}
+        for path in manifests:
+            manifest = json.loads(path.read_text())
+            published.update(manifest["units"])
+        if set(published) != set(census["counts"]):
+            raise ResearchRefused("the toy split did not cover the toy census scope")
+        for qname, roles in published.items():
+            total = sum(int(roles[role]["count"]) for role in (FIT, HELDOUT))
+            if total != int(census["counts"][qname]):
+                raise ResearchRefused(f"{qname}: toy split rows differ from census")
+            if roles[FIT]["count"] == 0 or roles[HELDOUT]["count"] == 0:
+                raise ResearchRefused(f"{qname}: a toy role observed no rows")
+        print(json.dumps({"research_preflight_toy": {
+            "units": len(published),
+            "join": str(join_document_path(root)),
+            "boundary_forward": True}}), flush=True)
+        return {"schema": document["schema"], "units": len(published)}
+    finally:
+        campaign._calibration_tokens = original_tokens
+        kernels.undo()
+
+
+def mode_preflight(args, guard) -> dict:
+    """Real metadata reads with no GPU, then the tiny control on ``--device``."""
+    guard("research preflight startup")
+    result = {"metadata": None, "toy": None}
+    from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV, producer_plan_tool
+    if os.environ.get(PRODUCER_PYTHON_ENV):
+        tool = producer_plan_tool()
+        print(json.dumps({"research_producer_preflight": {
+            "python": os.environ[PRODUCER_PYTHON_ENV], "module": tool}}), flush=True)
+    if all((args.calibration_census, args.units, args.calibration_tokens,
+            args.corpus_text)):
+        result["metadata"] = _real_metadata_preflight(args, guard)
+    else:
+        print(json.dumps({"research_preflight_metadata":
+                              "skipped: not all real inputs were given"}), flush=True)
+    with tempfile.TemporaryDirectory(prefix="indomain-split-preflight-") as tmp:
+        result["toy"] = _toy_control_preflight(Path(tmp), guard, layers=2, device=args.device)
+    print(json.dumps({"research_preflight": result}), flush=True)
+    return result
+
+
+# -- CLI -------------------------------------------------------------------------
+
+MODES = ("prep", "quantum", "join", "preflight")
+CAPTURE_INPUTS = ("--calibration-census", "--units", "--calibration-tokens", "--corpus-text")
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--mode", choices=MODES, required=True)
+    parser.add_argument("--capture-root")
+    parser.add_argument("--data-manifest", default=None,
+                        help="the actual PB read-set file whose own digest binds staged reads")
+    parser.add_argument("--calibration-census")
+    parser.add_argument("--units")
+    parser.add_argument("--calibration-tokens")
+    parser.add_argument("--corpus-text")
+    parser.add_argument("--model", default=None,
+                        help="defaults to the census's source model")
+    parser.add_argument("--source-snapshot-root", default=None,
+                        help="optional byte-identical source view; not an added gate")
+    parser.add_argument("--capture-chain-ranges", default=None)
+    parser.add_argument("--boundary-storage", default=None,
+                        help="inline JSON or a path to the boundary-storage config")
+    parser.add_argument("--capture-layer-range", default=None)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--cache-dir", default=None)
+    parser.add_argument("--streaming-cache-slots", type=int, default=2)
+    parser.add_argument("--streaming-prefetch-workers", default=1)
+    parser.add_argument("--streaming-cache-headroom-gb", type=float, default=0.0)
+    parser.add_argument("--fit-stop", type=int, default=384)
+    parser.add_argument("--total-samples", type=int, default=512)
+    parser.add_argument("--max-prefix-rows", dest="max_prefix_rows", type=int, default=512)
+    parser.add_argument("--max-act-rows", type=int, default=1,
+                        help="the identity's scoring prefix, not the research rows")
+    parser.add_argument("--attention-implementation", default="eager")
+    parser.add_argument("--memfloor-gib", type=float, default=2.0)
+    args = parser.parse_args(argv)
+    if args.data_manifest is not None:
+        from prismaquant.residency_map import bind_residency_manifest
+        bind_residency_manifest(_sha256_file(args.data_manifest))
+    guard = make_memory_guard(int(args.memfloor_gib * (1 << 30)))
+    if args.mode == "preflight":
+        mode_preflight(args, guard)
+        return 0
+    if not args.capture_root:
+        parser.error(f"--mode {args.mode} needs --capture-root")
+    missing = [flag for flag, value in zip(CAPTURE_INPUTS, (
+        args.calibration_census, args.units, args.calibration_tokens,
+        args.corpus_text)) if not value]
+    if missing:
+        parser.error(f"--mode {args.mode} needs {', '.join(missing)}")
+    if args.mode == "prep":
+        mode_prep(args, guard)
+    elif args.mode == "quantum":
+        if not args.capture_layer_range:
+            parser.error("--mode quantum needs --capture-layer-range")
+        mode_quantum(args, guard)
+    else:
+        mode_join(args, guard)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

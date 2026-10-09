@@ -149,10 +149,20 @@ def capture_source_files(root):
                   if path.is_file())
 
 
+def require_capture_initialization_contract(expected, actual):
+    """Validate observed witness grammar, then stamp recorded initializer identity."""
+    from prismaquant import validate_source_initialization_contract
+    expected = validate_source_initialization_contract(expected)
+    actual = validate_source_initialization_contract(actual)
+    seal_check("capture initialization witness", expected, actual,
+               where="capture initialization", refusal=lambda: RuntimeError(
+                   "actual capture initialization differs from the census"))
+
+
 def capture_identity(census_path, *, calibration, max_act_rows,
                      model_load_contract, attention_implementation,
                      resource_check=None, release_read_pages=False,
-                     source_authentication=None):
+                     source_authentication=None, unit_names=None):
     """Preserve full identity; selected readers authenticate consumed objects.
 
     Without an owner, canonical capture hashes every source file. A
@@ -164,7 +174,9 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     streamed capture's (PQ #1896): its source digests are the digests of the
     bytes the capture reads, recorded as it reads them, so they do not exist
     yet. The identity it returns carries no ``source_files``; the capture
-    binds them at its seal (:func:`bind_capture_source`).
+    binds them at its seal (:func:`bind_capture_source`). Explicit ``unit_names``
+    selects fresh full-draw statistics for those census units only; the default
+    remains a complete census capture with its existing identity unchanged.
     """
     import importlib.metadata
     import torch
@@ -172,6 +184,19 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     census_raw = census_path.read_bytes()
     census = json.loads(census_raw)
     census_digest = bytes_sha256hex(census_raw)
+    if unit_names is None:
+        names = sorted(census['unit_shapes'])
+    else:
+        if isinstance(unit_names, (str, bytes)):
+            raise ValueError('capture unit scope must be a collection of names')
+        names = tuple(unit_names)
+        if (not names or any(not isinstance(name, str) or not name for name in names)
+                or len(set(names)) != len(names)):
+            raise ValueError('capture unit scope needs nonempty unique unit names')
+        missing = set(names) - set(census['unit_shapes'])
+        if missing:
+            raise ValueError(f'capture unit scope names unknown units: {sorted(missing)}')
+        names = sorted(names)
     if type(max_act_rows) is not int or max_act_rows < 1:
         raise ValueError('capture scoring prefix must have positive max_act_rows')
     from prismaquant import validate_source_initialization_contract
@@ -201,7 +226,10 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                   census_sha256=census_digest, capture_runtime=runtime,
                   calibration=dict(calibration), max_act_rows=int(max_act_rows),
                   storage_source=SOURCE,
-                  units={name: list(shape) for name, shape in sorted(census['unit_shapes'].items())})
+                  units={name: list(census['unit_shapes'][name]) for name in names})
+    if unit_names is not None:
+        fields['unit_scope'] = 'selected'
+        _capture_scope_names(census, fields)
     if getattr(source_authentication, 'is_recording', False):
         if not isinstance(source_authentication, CaptureSourceAuthentication):
             raise TypeError('a recording source owner must be the capture descriptor owner')
@@ -1647,6 +1675,24 @@ def _require_verified_entry(path, name, record, verified):
         raise RuntimeError(f'{name}: capture entry changed since its writer or quantum verified it')
 
 
+def _capture_scope_names(census, identity):
+    """Validate complete coverage of the explicitly requested census units."""
+    names = sorted(identity['units'])
+    scope = identity.get('unit_scope')
+    if scope is None:
+        if set(names) != set(census['counts']):
+            raise RuntimeError('calibration capture scope differs from the full census')
+    elif scope == 'selected':
+        if not names or not set(names) <= set(census['counts']):
+            raise RuntimeError('calibration capture unit scope differs from census')
+        for name in names:
+            if identity['units'][name] != census['unit_shapes'].get(name):
+                raise RuntimeError(f'{name}: capture unit shape differs from census')
+    else:
+        raise RuntimeError('calibration capture unit scope is invalid')
+    return names
+
+
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                     counts=None, maxima=None, existing_entries=None,
                     release_file_pages=False, resource_check=None,
@@ -1678,11 +1724,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
     else:
         sealed_identity = bind_capture_source(identity, source_files)
     execution = _load_execution(verified_load_policy, sealed_identity, load_execution)
-    names = sorted(identity['units'])
+    names = _capture_scope_names(census, identity)
     if len({activation_cache_filename(n) for n in names}) != len(names):
         raise RuntimeError('calibration unit filenames collide')
-    if set(names) != set(census['counts']):
-        raise RuntimeError('calibration capture must cover the full census scope')
     if existing_entries is None and any(set(values or {}) != set(names)
                                        for values in (acts,hessians,counts,maxima)):
         raise RuntimeError('calibration capture arrays must cover the complete census')
@@ -1766,9 +1810,7 @@ class CaptureWriter:
         self.resource_check = resource_check
         self.load_execution = _load_execution(verified_load_policy, identity)
         self.seal_load_execution = None
-        self.names = sorted(identity['units'])
-        if set(self.names) != set(self.census['counts']):
-            raise RuntimeError('calibration writer scope differs from census')
+        self.names = _capture_scope_names(self.census, identity)
         import shutil
         from .perturbed_x_cache import activation_cache_filename
         self.root.mkdir(parents=True, exist_ok=True)
@@ -1877,10 +1919,8 @@ class CaptureWriter:
 
     def finish(self, *, model_load_contract, verified=None, source_files=None):
         """Seal the capture; a traversal identity binds ``source_files`` here (PQ #1896)."""
-        from prismaquant import validate_source_initialization_contract
-        actual = validate_source_initialization_contract(model_load_contract)
-        if actual != self.identity['model_load_contract']:
-            raise RuntimeError('actual capture initialization differs from the census')
+        require_capture_initialization_contract(
+            self.identity['model_load_contract'], model_load_contract)
         held = dict(verified or {})
         for name, record in self.verified.items():
             if held.setdefault(name, record) != record:
@@ -2043,6 +2083,7 @@ def validate_capture_contract(manifest):
     if (identity.get('schema') != SCHEMA or
             identity.get('attention_implementation') not in ('eager','sdpa') or
             (identity.get('capture_runtime') or {}).get('transformers') != contract['transformers_version'] or
+            identity.get('unit_scope') not in (None, 'selected') or
             not identity.get('source_files') or not identity.get('units') or
             set(manifest.get('entries',{})) != set(identity['units'])):
         raise RuntimeError('canonical capture runtime, source or completeness is invalid')
@@ -2219,7 +2260,8 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
     try:
         actual = capture_identity(census_path, calibration=canonical['calibration'],
             max_act_rows=max_act_rows, model_load_contract=census.get('model_load_contract'),
-            attention_implementation=attention_implementation, source_authentication=owner)
+            attention_implementation=attention_implementation, source_authentication=owner,
+            unit_names=canonical['units'] if canonical.get('unit_scope') == 'selected' else None)
         seal_check('selected source capture identity', canonical, actual, where=str(census_path),
             refusal=lambda: RuntimeError('selected source capture identity differs from the canonical census'))
         return owner
