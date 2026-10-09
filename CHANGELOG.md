@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
+  A launch with `rungs_q256` joins a unit only at a rung its scope covers;
+  a launch without the key keeps the scope of its cell. The scope covers
+  census rungs plus the allowable run-table rungs those rungs derive.
+  The launch scope joins the cell record and the contract answer, so a
+  scope-only change moves the dev-pin answer. No pin moves: the serving
+  and export pins stay at lane schema v11 until a later change bumps
+  them. The v66 routed fixture proves R768 selects only the class
+  decoder and R832 to R1088 select only the historical decoders.
 - The fleet registry attests both x86 merge-train layers for the SDK4 and SDK5 vehicles (#2467).
   The SDK5 entry names `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`, not its base interpreter.
   PB `975efe59c9d63ae5de43a3a001b1b9a8d5369da9a82d1e6bc5dc3dc1a56243cd` verifies the non-editable PB `027103d9` and Tessera `fca4c6ce` installs.
