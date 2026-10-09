@@ -265,6 +265,35 @@ def _published_toy_layer_with_moved_census(tmp_path):
     return root, census_path, census, manifest, records
 
 
+def test_priority_units_publish_their_role_pair_before_the_rest_of_their_layer(tmp_path, monkeypatch, capsys):
+    """The layer manifest first holds only the priority unit, atomically; the rest follow in the same capture."""
+    root, census_path, census, manifest, records = _published_toy_layer(tmp_path)
+    names = sorted(manifest["units"])
+    assert len(names) >= 2
+    priority = names[-1]  # last by name: only the priority rule can publish it first
+    monkeypatch.setattr(capture, "PRIORITY_UNITS", frozenset({priority}))
+    snapshots = []
+    real_write = capture._write_atomic_json
+
+    def spy(path, document):
+        if Path(path).name == "manifest.json":
+            snapshots.append(list(document["units"]))
+        return real_write(path, document)
+
+    monkeypatch.setattr(capture, "_write_atomic_json", spy)
+    capsys.readouterr()
+    capture.persist_split_records(
+        root, census, census_path, records, manifest["full_counts"], manifest["split_sha256"],
+        lambda _label: None)
+    announced = [json.loads(line)["research_priority_unit"]
+                 for line in capsys.readouterr().out.splitlines()
+                 if line.startswith('{"research_priority_unit"')]
+    assert [row["name"] for row in announced] == [priority]
+    assert set(announced[0]["roles"]) == {"fit", "heldout"}
+    assert snapshots[0] == [priority]
+    assert snapshots[-1] == [priority, *[name for name in names if name != priority]]
+
+
 def test_publication_sizes_roles_from_observed_forward_not_planning_census(tmp_path, monkeypatch):
     """Dev mode, the entry's default: a moved census statistic is stamped and never sizes a role (D32)."""
     root, census_path, census, manifest, records = _published_toy_layer_with_moved_census(tmp_path)
