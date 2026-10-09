@@ -72,7 +72,6 @@ import threading
 import time
 
 import torch
-import xxhash
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .joint_aura import (
@@ -1556,6 +1555,7 @@ class StageBReplaySpill:
         consecutive tensors that abut in the file share one run.
         """
         started = time.time()
+        import xxhash
         if arena.event is not None:
             arena.event.synchronize()
         probe, view = arena.probe, arena.view
@@ -1803,6 +1803,7 @@ class StageBReplaySpill:
         parallel. Explicit research ``scatter_reads`` additionally joins
         physical adjacency with permuted destinations using bounded readv.
         """
+        import xxhash
         owner, (_records, new, gradients, _used) = item
         block = self._block
         pieces = []
