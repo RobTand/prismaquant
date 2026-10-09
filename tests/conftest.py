@@ -732,8 +732,8 @@ TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
 TASK_SUITE_SKIP_REASON = (
     "task_suite: run the required layered gate with -m task_suite or "
     "PQ_TASK_SUITE_TESTS=1; recorded 76 passed, 0 skipped; "
-    "action 5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859; "
-    "receipt 1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb")
+    "action 20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6; "
+    "receipt 0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913")
 
 
 class _ExplicitMarkerSelection:

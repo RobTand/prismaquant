@@ -61,10 +61,10 @@
   install or fallback. The strict original-source result read now requires the
   selected immutable attempt's native producer context; runtime documents,
   `original_cuda_control`'s launch-owned helper check and the fixture
-  provenance pins follow the same owner-resolved identities. The separately
-  qualified SDK5 interpreter and portable pack (PB #1485), fleet helper-runtime
-  selection and live deployment remain separate and unchanged; no capability,
-  admission or serving claim rides the pin.
+  provenance pins follow the same owner-resolved identities. The portable SDK5
+  pack (PB #1485), fleet helper-runtime selection and live deployment remain
+  separate and unchanged; no capability, admission or serving claim rides the
+  pin.
 
 - **The shared connected-fixture pin moves to an immutable SDK5 source bundle**
   (Refs #2152, #2455). The reader pin had moved to SDK5 while
@@ -77,7 +77,12 @@
   the consumer still refuses it by exact version. No runtime, default,
   numerical or serving behavior changes. The pbtest pin guard refuses a shard
   whose interpreter lacks a non-editable Git install of the reader pin, so
-  the SDK5 interpreter delivery (PB #1485) must come before this change lands.
+  every PrismaQuant pbtest run now needs an SDK5 interpreter and the SDK4
+  interpreters are refused. The x86 interpreter is
+  `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` (#2467).
+  The required task-suite gate runs on it and reports 76 passes and zero
+  skips (PB `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`).
+  The gate record in `tests/conftest.py` and `docs/ARCHITECTURE.md` follows.
 
 - The paired expert-dominance menu rule applies only to complete routed layers (#2288).
   A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.

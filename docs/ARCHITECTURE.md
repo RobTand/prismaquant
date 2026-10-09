@@ -1788,8 +1788,13 @@ archive by version. A census of 121 test files showed 255 such failures.
 The SDK4 archive stays on the mount. The consumer still refuses it by exact
 version. Source qualification is independent of live worker activation. The
 pbtest pin guard reads the reader pin. It refuses a shard when the interpreter
-has no non-editable Git install of that commit. PB #1485 owns that interpreter
-delivery.
+has no non-editable Git install of that commit. Every PrismaQuant pbtest run
+now needs an SDK5 interpreter, and the SDK4 interpreters are refused. The x86
+interpreter is `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`
+(PQ #2467). It is a layer over `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9`,
+which holds PrismaBuild `027103d9` and Tessera `fca4c6ce`. The guard passes in
+PB action `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`.
+PB #1485 still owns the portable Python 3.12 pack.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -26651,8 +26656,10 @@ Serving-backed Tessera task support with its vLLM plugin remains a production pr
 
 The four task-suite test modules carry the `task_suite` marker.
 Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
-The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
-Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
+The required gate uses `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+The SDK5 reader pin (PQ #2152) makes the pbtest pin guard refuse the earlier layer `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`, which holds PrismaBuild `dc4803da`.
+Its recorded action is `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`; receipt `0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913` reports 76 passes and zero skips.
+The earlier layer recorded action `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859` with the same counts before the repin.
 An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
