@@ -259,7 +259,39 @@ def _run_served_compile_probe() -> dict:
     return workload
 
 
-def _run_complete_row(*, output_root: Path, device: str) -> dict:
+def _preview_reserves(device: str) -> tuple:
+    """The retained budget's bound, margin and runtime reserve for the row.
+
+    A real dispatch prices the plan for its box. This preview reads the
+    live guard the quantum will hold: its physical cap is the plan's
+    bound, and the runtime reserve covers the live committed baseline
+    (torch/CUDA runtime) plus headroom for Stage A and later imports.
+    Runs before the sampler starts so its allocations never starve it.
+    """
+    import torch
+
+    if torch.device(device).type != "cuda":
+        return 50 << 20, 1 << 20, 1 << 20
+    from prismaquant.joint_retained_window_plan import (
+        OBSERVED_BASELINE_KEY,
+    )
+    from prismaquant.joint_statistics_replay import (
+        check_operator_allocation,
+        operator_window_guard,
+    )
+
+    preview = operator_window_guard(device)
+    physical_limit = int(preview.physical_cap_bytes)
+    safety_margin = int(preview.margin_bytes)
+    observed = check_operator_allocation(
+        preview, "quantum_row_baseline", reserve_bytes=0)
+    baseline = int(observed[OBSERVED_BASELINE_KEY])
+    del preview
+    runtime_reserve = ((baseline + (1 << 31) - 1) // (1 << 30)) * (1 << 30) + (1 << 30)
+    return physical_limit, safety_margin, runtime_reserve
+
+
+def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
     """Stage A capture then one layer quantum on the tiny fixture."""
     import torch
 
@@ -355,32 +387,11 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
     }
     # The retained budget's physical bound must match the row's live guard:
     # a 50 MiB fixture plan cannot run under a 34 GiB container guard.
-    # A real dispatch prices the plan for its box; this row reads the
+    # A real dispatch prices the plan for its box; the preview reads the
     # guard the quantum will hold and states that bound. The runtime
     # reserve covers the live committed baseline (torch/CUDA runtime);
     # the other reserves stay the tiny fixture's sealed numbers.
-    if torch.device(device).type == "cuda":
-        from prismaquant.joint_retained_window_plan import (
-            OBSERVED_BASELINE_KEY,
-        )
-        from prismaquant.joint_statistics_replay import (
-            check_operator_allocation,
-            operator_window_guard,
-        )
-
-        preview = operator_window_guard(device)
-        physical_limit = int(preview.physical_cap_bytes)
-        safety_margin = int(preview.margin_bytes)
-        observed = check_operator_allocation(
-            preview, "quantum_row_baseline", reserve_bytes=0)
-        baseline = int(observed[OBSERVED_BASELINE_KEY])
-        del preview
-        # Round up with headroom: Stage A and later imports allocate
-        # ~0.4 GiB after the preview reading.
-        runtime_reserve = ((baseline + (1 << 31) - 1) // (1 << 30)) * (1 << 30) + (1 << 30)
-    else:
-        physical_limit, safety_margin, runtime_reserve = (
-            50 << 20, 1 << 20, 1 << 20)
+    physical_limit, safety_margin, runtime_reserve = reserves
     execution = {
         "n_probes": N_PROBES,
         "seed_base": SEED_BASE,
@@ -519,8 +530,29 @@ def main(argv=None) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
     if args.profile_out is not None:
         args.profile_out.parent.mkdir(parents=True, exist_ok=True)
-    # The initial inventory is captured BEFORE the sampler starts and before
-    # the row runs: a warm root must record its start state.
+    # A retry lands on the same host scratch: clear the cache root so the
+    # row measures a cold compile. The root is this row's private scratch;
+    # no concurrent attempt shares it.
+    import shutil
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(cache_root.iterdir()):
+        if entry.is_symlink() or entry.is_file():
+            entry.unlink()
+        else:
+            shutil.rmtree(entry)
+    # Fork the sampler BEFORE the preview: fork carries only this thread,
+    # and the preview initializes CUDA. The child only reads the
+    # filesystem, but it must be forked first regardless.
+    sampler = peak_mod.CachePeakSampler(cache_root, interval_s=args.interval_s)
+    sampler.__enter__()
+    try:
+        reserves = _preview_reserves(args.device)
+    except BaseException:
+        sampler.stop()
+        raise
+    # The initial inventory is captured BEFORE the row runs, on the
+    # cleared root, with the sampler already watching.
     initial_state = peak_mod.describe_initial_state(cache_root)
     # A retry lands on the same host workspace: a stale row-output from an
     # earlier attempt would read as another run's chain state and refuse.
@@ -530,7 +562,6 @@ def main(argv=None) -> int:
     command = [sys.executable, "-m", "tools.measure_container_cache_quantum_row",
                "--cache-root", str(cache_root), "--workspace", str(workspace),
                "--out", str(args.out), "--device", str(args.device)]
-    sampler = peak_mod.CachePeakSampler(cache_root, interval_s=args.interval_s)
     power = GpuPowerSampler().start()
     spans = stage_span_log("container-cache-quantum-row", power_sampler=power)
     io_before = read_proc_io()
@@ -538,11 +569,12 @@ def main(argv=None) -> int:
     profile = cProfile.Profile()
     failure = None
     workload = {}
-    with spans.span("row"), sampler:
+    with spans.span("row"):
         try:
             profile.enable()
             workload = _run_complete_row(
-                output_root=attempt_root, device=args.device)
+                output_root=attempt_root, device=args.device,
+                reserves=reserves)
             profile.disable()
         except BaseException as exc:  # noqa: BLE001 - receipt records it
             failure = f"{type(exc).__name__}: {exc}"
