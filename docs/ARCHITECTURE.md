@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2482): `experiments/pact_replay` contains the canonical diagnostic replay closure.
+Its frozen source is `073646c7293685869b3ad18b261c49b49c4c481a`.
+The public CLI accepts positive deadlines through 3500 seconds. Its default remains 1700 seconds.
+Only the named deadline constant and guard differ from the frozen executable source.
+The cohort, roster, windows, teacher contracts, scientific refusals, and production pipeline remain unchanged.
+
+The closure uses standalone imports and explicit campaign pins. It is not a production package.
+The move from `prismaquant/pact_replay` preserves all 31 imported source files byte for byte.
+The production boundary gates and their allowlists remain unchanged.
+The observer uses the shared digest owner without importing a PrismaQuant package into the CLI process.
+The parent issue owns the separate model-profile migration.
+
+The current PB D38 `a46b541d3e84` records actual CLI imports after the move.
+Its capture supplies the current `D38_IMPORTS.json` projection.
+PB `1de88f98ad06` verifies that projection, 94 external source files, and the complete canonical correction delta.
+The retained `daa683c956c2` and `b3498341ca27` runs keep the pre-move CLI proof.
+Both CPU branches pass with seven streams and no GPU replay.
+PB `1de88f98ad06` also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
+`IMPORT_PROVENANCE.json` records exact source identities, the path delta, and CEO replacement authority.
+All identity records remain advisory. No new runtime identity gate reads them.
+The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
