@@ -480,7 +480,7 @@ def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
     static_input_scale: "float | None" = None, publisher=None,
-    structure: "str | None" = None,
+    structure: "str | None" = None, profile=None,
 ):
     """Render one rung, price it as served, and store the wire beside it.
 
@@ -517,7 +517,7 @@ def _measure_anchor(
         qname=qname, format_name=format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required, static_input_scale=static_input_scale,
-        structure=structure)
+        structure=structure, profile=profile)
     started = time.time()
     render, blob = _encode_and_render(
         weight, format_name, recipe=prepared["wire"],
@@ -526,7 +526,7 @@ def _measure_anchor(
     return _finish_anchor(qname=qname, weight=weight, activations=activations,
         format_name=format_name, cache=cache, wire_dir=wire_dir,
         prepared=prepared, render=render, blob=blob, elapsed=time.time() - started,
-        publisher=publisher)
+        publisher=publisher, profile=profile)
 
 
 #: The context the campaign's pricing seam names when it binds the served
@@ -574,9 +574,21 @@ def _bind_served_quantizer(qname, format_name):
               f"{record.get('dequant_kernel')}", flush=True)
 
 
-def _direct_consumer_activation_contract(qname):
+def _is_glm_direct_consumer_profile(profile) -> bool:
+    """Use the declared architecture before the undeclared profile identity."""
+    if profile is None:
+        return False
+    architectures = profile.declared_architectures()
+    if architectures:
+        return architectures == ("Glm5NextForConditionalGeneration",)
+    return profile.name == "glm5_next"
+
+
+def _direct_consumer_activation_contract(qname, *, profile):
     source = qname.removesuffix(".weight")
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return None
+    if not _is_glm_direct_consumer_profile(profile):
         return None
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_activation_contract
@@ -586,9 +598,9 @@ def _direct_consumer_activation_contract(qname):
 
 
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
-                    hessian_required, static_input_scale, structure=None):
+                    hessian_required, static_input_scale, structure=None, profile=None):
     """Admit each unit's Hessian and served activation contract before encode."""
-    direct_contract = _direct_consumer_activation_contract(qname)
+    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
     if direct_contract is None:
         _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
@@ -669,10 +681,12 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 hessian_required=hessian_required)
 
 
-def _direct_consumer_memory_bytes(qname, family, shape):
+def _direct_consumer_memory_bytes(qname, family, shape, *, profile):
     """Charge each direct cache once through its source member."""
     source = qname.removesuffix(".weight")
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return 0
+    if not _is_glm_direct_consumer_profile(profile):
         return 0
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_resident_bytes
@@ -703,7 +717,7 @@ def _direct_consumer_render(blob, qname, family, device):
 
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
                    prepared, render, blob, elapsed, encoding_batch_size=1,
-                   publisher=None):
+                   publisher=None, profile=None):
     """Score decoded bytes and publish the existing cache/wire entries.
 
     ``publisher``, when given, is a
@@ -722,7 +736,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
         "activation_qdq", "input_scale"))
-    direct_contract = _direct_consumer_activation_contract(qname)
+    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
     preserve_fp32 = direct_contract == "a32"
     cache_dtype = torch.float32 if preserve_fp32 else torch.bfloat16
     if direct_contract is not None:
@@ -819,7 +833,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # allocator's UCB hedge.  Reported as zero and named as such.
         dloss_stderr=0.0,
         memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
-                      + _direct_consumer_memory_bytes(qname, family, weight.shape)),
+                      + _direct_consumer_memory_bytes(qname, family, weight.shape, profile=profile)),
         bits_per_param=float(bits) / max(1, int(weight.numel())),
         activation_contract=prepared.get("activation_contract", str(spec.act_dtype_name or "a16")),
         activation_quantized=bool(quantized),
@@ -834,7 +848,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
 def _measure_anchor_batch(*, qnames, weights, activations, format_name,
                           cache, wire_dir, activation_kwargs_for=None,
                           hessian_required=True, static_input_scales=None,
-                          publisher=None, structures=None):
+                          publisher=None, structures=None, profile=None):
     """One producer batch, with the scalar path's per-unit gates and storage.
 
     ``structures`` maps a unit to its serving structure, as ``structure`` does
@@ -851,7 +865,7 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required,
         static_input_scale=(static_input_scales or {}).get(name),
-        structure=(structures or {}).get(name)) for name in qnames]
+        structure=(structures or {}).get(name), profile=profile) for name in qnames]
     # The producer call takes ONE recipe and ONE Hessian requirement for the
     # whole batch, from its first entry.  Both derive from (family, rung,
     # structure) only, so a batch built by ``_anchor_batches`` agrees by
@@ -877,7 +891,7 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
     return [_finish_anchor(qname=name, weight=weight, activations=acts,
         format_name=format_name, cache=cache, wire_dir=wire_dir, prepared=entry,
         render=render, blob=blob, elapsed=elapsed,
-        encoding_batch_size=len(qnames), publisher=publisher)
+        encoding_batch_size=len(qnames), publisher=publisher, profile=profile)
         for name, weight, acts, entry, (render, blob) in zip(
             qnames, weights, activations, prepared, encoded)]
 
@@ -3225,7 +3239,7 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
                                 static_scales, projected_units=None, bound_unit=None,
-                                structure=None, check_scoring_metadata: bool = True):
+                                structure=None, check_scoring_metadata: bool = True, profile=None):
     """The resumed row's inputs, as this run's producer would stamp them.
 
     A unit in ``projected_units`` (``{qname: producer unit record}``) is a
@@ -3272,7 +3286,7 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     if bool(anchor.hessian_applied) != (activation is not None):
         raise RuntimeError("checkpoint anchor Hessian applicability disagrees with the producer")
     _require_resumable_anchor(anchor, static_scales,
-                             check_scoring_metadata=check_scoring_metadata)
+                             check_scoring_metadata=check_scoring_metadata, profile=profile)
     api = _checkpoint_identity_api()
     projected = (projected_units or {}).get(anchor.qname)
     if bound_unit is not None:
@@ -5936,7 +5950,7 @@ def _tessera_route_memo():
 
 
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
-                              check_scoring_metadata: bool = True) -> None:
+                              check_scoring_metadata: bool = True, profile=None) -> None:
     """Refuse a resumed anchor priced under a different activation contract.
 
     This is the per-row half of the resume identity rule, shared by pre-link
@@ -5988,7 +6002,7 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
     # The same declaration _finish_anchor stamps on a fresh measured row.
     # Producer wire/input integrity does not authenticate scoring metadata.
     # Direct consumers use the same contract as the measured row.
-    direct_contract = _direct_consumer_activation_contract(anchor.qname)
+    direct_contract = _direct_consumer_activation_contract(anchor.qname, profile=profile)
     expected_contract = direct_contract or str(spec.act_dtype_name or "a16")
     if anchor.activation_contract != expected_contract:
         raise ActivationScaleContractError(
@@ -7922,7 +7936,7 @@ def _main(argv, *, source_scope, waits) -> int:
         on_menu = {entry.format_name for entry in menus[name]}
         for row in state["anchors"]:
             if row["format_name"] in on_menu:
-                _require_resumable_anchor(CampaignAnchor(**row), static_scales)
+                _require_resumable_anchor(CampaignAnchor(**row), static_scales, profile=profile)
         if acquisition_schedule is not None:
             for row in state["anchors"]:
                 _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
@@ -8026,7 +8040,7 @@ def _main(argv, *, source_scope, waits) -> int:
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
                 calibration_source=source, static_scales=static_scales,
-                projected_units=projected_units,
+                projected_units=projected_units, profile=profile,
                 structure=(encode_structure or {}).get(name), **bound)
             existing = state["wire_records"][anchor.format_name]
             if deferred is not None:
@@ -8658,7 +8672,7 @@ def _main(argv, *, source_scope, waits) -> int:
                         activation_kwargs_for=(
                             ((_activation_kwargs_for if row_stream is None
                               else row_stream.encoder_kwargs) if want_h else None)),
-                        hessian_required=want_h, publisher=publisher)
+                        hessian_required=want_h, publisher=publisher, profile=profile)
                     if len(batch) == 1:
                         name = names[0]
                         anchors = [_measure_anchor(
@@ -8722,13 +8736,14 @@ def _main(argv, *, source_scope, waits) -> int:
                             anchor, weights=weights, menus=menus,
                             calibration_source=entry.source if want_h else None,
                             static_scales=static_scales, projected_units=projected_units,
-                            bound_unit=entry.holder,
+                            bound_unit=entry.holder, profile=profile,
                             structure=(encode_structure or {}).get(anchor.qname)))
                         continue
                     identity_of = functools.partial(
                         _checkpoint_anchor_identity, anchor, weights=weights,
                         menus=menus, calibration_source=calibration_source,
                         static_scales=static_scales, projected_units=projected_units,
+                        profile=profile,
                         structure=(encode_structure or {}).get(anchor.qname))
                     if bound_checkpoint_units:
                         # Derived from the unit's sealed template: a deepcopy

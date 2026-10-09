@@ -337,7 +337,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         batch_names = [item[0] for item in batch]
         fmt = group['assignment'][batch_names[0]]
         common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
-                      activation_kwargs_for=kwargs, hessian_required=want_h)
+                      activation_kwargs_for=kwargs, hessian_required=want_h, profile=profile)
         if len(batch) == 1:
             name = batch_names[0]
             anchors = [tc._measure_anchor(qname=name, weight=weights[name].to(device),

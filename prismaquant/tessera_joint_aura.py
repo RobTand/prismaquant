@@ -1567,7 +1567,7 @@ def calibrated_maxima(data, profile):
 def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_source,
                          projected_unit, static_scales, bound_unit=None, reader=None,
                          release_file_pages=False, wire_blob=None, wire_sha256=None,
-                         encoder_source_reuse=None):
+                         encoder_source_reuse=None, profile=None):
     """Re-derive encoder inputs from actual source/H and compare decoded bytes.
 
     Two legs, and they do not establish the same thing. ``verify_cached_unit``
@@ -1616,7 +1616,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         # export intake reads its structure by (tessera#662); its receipt
         # stamps the wire a routed stack is served on (#1502). An unprojected
         # unit keeps the unstructured spelling, which is the dense one.
-        structure=None if projected_unit is None else "routed_moe",
+        structure=None if projected_unit is None else "routed_moe", profile=profile,
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
     reuse = require_encoder_source_reuse_record(
         encoder_source_reuse, where=f"{name}@{fmt} encoder reuse")
@@ -2271,7 +2271,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                                                 calibration_source=calibration_source,
                                                 projected_unit=projected.get(name), static_scales=scales,
                                                 bound_unit=bound_unit, reader=reader, wire_blob=blob,
-                                                wire_sha256=wire_sha256,
+                                                wire_sha256=wire_sha256, profile=runner.profile,
                                                 # ``MeasuredAnchorInput`` always carries this;
                                                 # a caller that hands this seam a duck-typed
                                                 # roster is treated as naming no reuse, which
