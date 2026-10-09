@@ -35,6 +35,19 @@ The CPU proof deliberately refuses an incomplete child argument before numerical
 It proves source selection, not a scientific result, GPU execution, or container execution.
 The active campaign tree, retained receipts, and action `a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0` remain outside this delivery.
 
+Re-stamped 2026-10-09 (PQ #2481, merge proof): reviewed head `9afd1efee890` already contains the current base `0a3f9df9531b`.
+Its parents are approved source head `94c4fa0ee666` and that base.
+The retained merge resolution keeps both document additions.
+No further source correction is required for the three findings at `3bbecb5d2584`.
+PB `f1ba86d85911` passes all 24 delivery cases.
+PB `9fe6f5474779` passes all 12 publication cases.
+PB `74121d828e61` passes 13 architecture cases; PB `c35cba7a7f34` passes six documentation cases.
+PB `b3bc8f968a92` executes the actual route and all three delivered CPU child parsers.
+It verifies 14 frozen entries and eight external bindings, including the template.
+It also compiles 17 files and proves native refusal before output.
+Each child refuses an incomplete argument before numerical work.
+These proofs retain the reviewed guard digest and do not replace source files.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.

@@ -38,6 +38,9 @@
   Apply D32 to external source, template, and module identities.
   PrismaBuild CPU proofs cover the real route, child argument parsers, and unchanged publication rules.
   No GPU work or scientific replay ran.
+  The reviewed merge head already contains the current base and both document additions.
+  PB `f1ba86d85911` and `9fe6f5474779` pass all 36 delivery and publication cases after the merge.
+  PB `b3bc8f968a92` executes all three delivered CPU child parsers and compiles 17 files.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
