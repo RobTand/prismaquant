@@ -1924,7 +1924,6 @@ def run_layer_quantum_core(
         normalize_replay_regime,
         replay_regime_identity,
     )
-    from .joint_replay_spill import stage_b_spill_config
     try:
         replay_regime = normalize_replay_regime(execution.get("replay_regime"))
     except ReplayRegimeRefused as exc:
