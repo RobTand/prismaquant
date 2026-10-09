@@ -26685,11 +26685,12 @@ The shared HF capability guard refuses unsupported declared formats before prefl
 The HF backend does not load Tessera serving bytes and cannot prove native task quality.
 Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
-The four task-suite test modules carry the `task_suite` marker.
-Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
+Re-stamped 2026-10-09 (PQ #2458, parent #2430): the kernels serving producer publishes one versioned task-consumable runtime witness (`prismaquant.serving_runtime_witness/1`) and the standalone CPU verifier CLI (`python -m prismaquant.serving_runtime_verifier`). Kernels owns production; PrismaQuant consumes only the public witness and verifier. The witness joins the observed endpoint, served alias, launch attempt, actual rank set, loaded artifact byte evidence, and server tokenizer evidence. Each rank carries byte evidence from its own load with explicit coverage and representation changes. The tokenizer evidence names source bytes and effective settings. The producer joins all facts to one launch attempt. The CLI takes the witness plus explicit expected endpoint, alias, artifact, tokenizer, attempt, and ranks, returns a machine-readable verdict with nonzero status on refusal, and checks evidence bytes, complete rank coverage, and cross-fact agreement with no model inference and no runtime import. It refuses alias-only, size-only, absent, incomplete, and inconsistent evidence. A pass proves the recorded launch, not current endpoint state. The collector (`python -m prismaquant.serving_runtime_witness_collect`) runs beside the serving ranks and starts no rank. The consumer (`prismaquant.served_task_backend`, backend `served`) binds a served task through that witness and verifier only, with no rank start, no serving runtime import, and no identity seal. HF behavior is unchanged. Tessera #1056 stays the producer prerequisite before consumer source work.
+
+The five task-suite test modules carry the `task_suite` marker.
 The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
 Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
-An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
+An ordinary skip does not replace that required gate. The gate must run all five modules and report zero skips.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
 The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
