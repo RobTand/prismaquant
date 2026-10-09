@@ -5,7 +5,8 @@ It records, for each test process:
 * the Tessera native libraries (``tessera_*.so``) the process had mapped after
   each test, read from ``/proc/self/maps``, each with its sha256; and
 * the evaluated text of each passing assertion that holds a floating-point
-  value, through pytest's ``pytest_assertion_pass`` hook.
+  value or names a launch (a symbol, a decoder or a ``tessera::`` op), through
+  pytest's ``pytest_assertion_pass`` hook.
 
 Load it with ``-p native_probe -o enable_assertion_pass_hook=true`` and set
 ``PQ1317_PROBE_DIR``. Each process appends JSON lines to
@@ -26,6 +27,8 @@ MAX_TEXT = 600
 MAX_ASSERTIONS_PER_TEST = 64
 #: A float literal or an exponent in the evaluated text: the assertion holds a number.
 HAS_FLOAT = re.compile(r"\d+\.\d+|\d[eE][-+]?\d+")
+#: The assertion names a launch: the route's symbol and decoder, or a Tessera op.
+NAMES_LAUNCH = re.compile(r"symbol|decoder|launch_pair|tessera::|DENSE_")
 
 _digests: dict[str, str] = {}
 _assertions: dict[str, list[dict]] = {}
@@ -95,7 +98,7 @@ def pytest_configure(config):
 def pytest_assertion_pass(item, lineno, orig, expl):
     try:
         text = expl if isinstance(expl, str) else str(expl)
-        if not HAS_FLOAT.search(text):
+        if not (HAS_FLOAT.search(text) or NAMES_LAUNCH.search(text) or NAMES_LAUNCH.search(str(orig))):
             return
         bucket = _assertions.setdefault(item.nodeid, [])
         if len(bucket) >= MAX_ASSERTIONS_PER_TEST:

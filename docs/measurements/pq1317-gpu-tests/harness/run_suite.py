@@ -111,6 +111,18 @@ def triton_kernels(out: Path) -> dict:
     return inventory
 
 
+def image_identity(image: str) -> dict:
+    """What the box's Docker says about the image the action named."""
+    try:
+        text = captured(["docker", "image", "inspect", "--format",
+                         "{{.Id}}|{{json .RepoDigests}}|{{.Created}}|{{.Architecture}}", image])
+    except (OSError, subprocess.CalledProcessError) as error:
+        return {"reference": image, "error": repr(error)}
+    image_id, digests, created, architecture = text.split("|", 3)
+    return {"reference": image, "id": image_id, "repo_digests": json.loads(digests),
+            "created": created, "architecture": architecture}
+
+
 def gpu_identity() -> dict:
     query = "name,uuid,driver_version,compute_cap,memory.total"
     try:
@@ -160,6 +172,7 @@ def main(argv: list[str]) -> int:
     }
     manifest["source"] = fetch_source(args.source_url, candidate["tessera_commit"], source)
     manifest["gpu"] = gpu_identity()
+    manifest["image_inspect"] = image_identity(candidate["image_digest"])
 
     command = docker_command(args, out, source, candidate, nodes_path)
     manifest["docker_command"] = command

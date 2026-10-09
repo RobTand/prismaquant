@@ -10,6 +10,8 @@
 4. self-test the probe plugin on two synthetic tests under xdist;
 5. collect the suite's nodes and compare them with the roster, exactly;
 6. in ``run`` mode only: run the suite under ``--strict-cuda`` and merge the probe records.
+   ``--dist loadfile`` fixes which worker runs which file, so process-level evidence
+   (the mapped native libraries) belongs to one file.
 
 Exit codes: 0 ok, 3 roster mismatch, 4 identity refused, 5 probe self-test failed;
 in ``run`` mode a pytest failure returns pytest's own code.
@@ -75,7 +77,9 @@ def bind_source(source: Path, candidate: str, contract_sha256: str) -> dict:
 
 def runtime_facts() -> dict:
     facts: dict = {"python": sys.version.split()[0], "machine": platform.machine(),
-                   "uid": os.getuid(), "gid": os.getgid()}
+                   "uid": os.getuid(), "gid": os.getgid(),
+                   "tessera_environment": {k: v for k, v in sorted(os.environ.items())
+                                           if k.startswith("TESSERA_")}}
     import torch
 
     facts.update(torch=torch.__version__, torch_cuda=torch.version.cuda,
@@ -126,11 +130,14 @@ def selftest_probe(out: Path) -> dict:
     tests = {r["nodeid"]: r for r in records if r.get("kind") == "test"}
     float_test = tests.get("probe_selftest.py::test_a_float_assertion_is_recorded", {})
     int_test = tests.get("probe_selftest.py::test_an_integer_assertion_is_not_recorded", {})
+    pair_test = tests.get("probe_selftest.py::test_a_launch_pair_assertion_is_recorded", {})
+    pair_text = " ".join(a["evaluated"] for a in pair_test.get("assertions", []))
     workers = sorted({r["worker"] for r in records if r.get("kind") == "test"})
     ok = (done.returncode == 0
           and len(float_test.get("assertions", [])) == 1
           and all(number in float_test["assertions"][0]["evaluated"] for number in ("0.125", "0.25"))
           and int_test.get("assertions") == []
+          and "tessera::fused_window_dense" in pair_text and "native_fused_window_dense" in pair_text
           and all(r.get("kind") != "error" for r in records))
     return {"ok": ok, "returncode": done.returncode, "workers": workers,
             "float_assertion": (float_test.get("assertions") or [None])[0],
@@ -166,10 +173,10 @@ def compare_roster(collected: list[str], expected: list[str]) -> dict:
 
 def run_suite(files: list[str], out: Path) -> int:
     command = pytest_command(
-        out, "-p", "xdist.plugin", "-p", "native_probe", "-n", str(WORKERS), "--dist", "worksteal",
+        out, "-p", "xdist.plugin", "-p", "native_probe", "-n", str(WORKERS), "--dist", "loadfile",
         "--durations=20", "--strict-cuda", "--surface-json", str(out / "surface.json"),
         "--basetemp", str(out / "tmp" / "pytest"), "--junitxml", str(out / "junit.xml"),
-        "-o", "enable_assertion_pass_hook=true", "-rP", *files)
+        "-o", "enable_assertion_pass_hook=true", "-o", "log_level=INFO", "-rP", *files)
     env = {**os.environ, "PQ1317_PROBE_DIR": str(out / "probe")}
     say("PQ1317_PYTEST_COMMAND", command)
     with (out / "pytest.log").open("w", encoding="utf-8") as log:
