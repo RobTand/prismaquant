@@ -11,6 +11,11 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
+  The error names the missing `config.json` document.
+  The lane still owns every fused-group result when the config exists.
+  Shared-expert MLP, MLA, indexer, and standalone attention queries retain their config-independent behavior.
+  Tests cover both model prefixes and both `f_a_proj` spellings.
 - The unknown-deferral test starts its release timer after initial staging and tensor access (#2304).
   The real mover retains the fixture's normal staging budget; only release uses the 30-second budget.
   A synthetic 31-second staging delay verifies immediate refusal, zero release retries, zero supported deferrals, and the exact unclassified debt.
