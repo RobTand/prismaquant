@@ -107,6 +107,8 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "--timeout-s", "1500",
         "--container-image", IMAGE,
         "--progress-phase", "row=600",
+        "--progress-phase", "head=600",
+        "--progress-phase", "layer-001-chunk-000=600",
     ]
     for key, value in env.items():
         argv += ["--env", f"{key}={value}"]

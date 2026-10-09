@@ -594,6 +594,9 @@ def main(argv=None) -> int:
     print(json.dumps({"receipt": str(args.out), "sha256": digest,
                       "peak_allocated_bytes": measurement["peak_allocated_bytes"],
                       "valid": measurement["valid"]}, sort_keys=True))
+    # The receipt file lives on the worker's local disk. Print the full
+    # canonical bytes to stdout so the PB log carries the evidence.
+    print(args.out.read_bytes().decode())
     return 0
 
 
