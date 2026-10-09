@@ -2,7 +2,7 @@
   "accepted_bundle": "/home/rob/fleet/ceo/exec/eng-pact-profiling-repair/profiling-progress-073646c-with-base.bundle",
   "accepted_bundle_base": "1acddd867682ee0c481de0829689dc30da331176",
   "accepted_bundle_sha256": "3753ccc2633efdfe49c88a096066b7c236a98af61303b3c18c6d63dbe6ddf975",
-  "accepted_bundle_state": "recorded-unreadable-from-dl380g10",
+  "accepted_bundle_state": "SHA-256 and frozen bundle reference verified on the control seat",
   "correction": {
     "after": "0 < args.deadline_seconds <= APPROVED_DEADLINE_SECONDS (3500)",
     "before": "0 < args.deadline_seconds <= 1700",
@@ -34,8 +34,7 @@
     "proof": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-deadline-3500-02-pq2482/proof.json",
     "proof_sha256": "0a5c68acf4bf671f0585c0b40495d67ab66381e98bd6e6471642421851711ca5",
     "proof_schema": "pact.same_entry_real_cpu_proof.v2",
-    "energy_rows_sha256": "422890d96a5a744bc7c666272b33369becf4572cb3a60312a26c2eeb4ae44cdf",
-    "resolved_origins": "prismaquant/pact_replay/DEPENDENCY_MANIFEST.json resolved_origins: 92 modules with origin tags and byte digests for this action"
+    "energy_rows_sha256": "422890d96a5a744bc7c666272b33369becf4572cb3a60312a26c2eeb4ae44cdf"
   },
   "entry": "prismaquant/pact_replay/multi_stream_replay.py",
   "excluded_run_state": [
@@ -47,8 +46,8 @@
     "parent-lease-data.json"
   ],
   "dependency_manifest": "prismaquant/pact_replay/DEPENDENCY_MANIFEST.json",
-  "dependency_manifest_sha256": "86669bd258d7e1a470af3f8b5b6028d9a1d5d0716de9b6ec058ef01f9aa6afeb",
-  "dependency_closure": "92 external modules: 7 g3-source, 56 pq-owner, 29 tessera-pin. 75 executed in the D38 dry chain, 17 latent with per-module reasons. D32 advisory; no refusal gate reads these digests.",
+  "dependency_manifest_sha256": "53fbd736ecab5d6622d0750c359c693a476774a3a8d4da80f5558a7db90ed9bc",
+  "dependency_closure": "The manifest records inferred external dependencies with exact source identities. The earlier D38 did not capture module origins.",
   "external_pins": {
     "g3_source": "/mnt/shared/tessera-measurements/g3-v2-rebaseline-20261005/source",
     "g3_source_head": "a23165b979a90536e060a2c99ea26930d5445a59",
@@ -60,6 +59,13 @@
     "tessera_pin": "/mnt/shared/tessera-pins/b40c93cb73745097e57a1ba4cf5b9eee166c759a/src",
     "tessera_pin_commit": "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
     "tessera_pin_tree_sha256": "1e93c8eecff2f2389e2d07647ade6de681d5bd7a9f78292d396c5a986dbc7462"
+  },
+  "replacement_authority": {
+    "decisions": ["dec-1009-071459-9147", "dec-1009-071701-e118"],
+    "evidence": "https://github.com/RobTand/prismaquant/issues/2427#issuecomment-6076441955",
+    "condition": "Campaign refused the concurrent split in rep-1009-072446-6c50.",
+    "scope": "The CEO permits the minimal 3500-second correction, independent exact-head review, and a fresh public-entry D38.",
+    "execution_boundary": "The frozen bundle and private execution copy remain unchanged. No GPU replacement executes in this issue."
   },
   "frozen_head": "073646c7293685869b3ad18b261c49b49c4c481a",
   "frozen_head_subject": "Document duplicate diagnostic records after a crash replay",
