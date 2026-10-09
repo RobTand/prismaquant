@@ -1,27 +1,40 @@
-"""PQ #2459 GPU census entry point: TP2 eager route census at one Tessera tree.
+"""PQ #2459 TP2 census entry point, gang role, and dry run.
 
-This module is the single entry point for both the D38 CPU dry run and
-the GPU qualification action. The dry run exercises this parser, the
-fixture metadata, the artifact binding, and the submission manifest
-without CUDA. The GPU action runs the same parsed arguments through the
-same driver path. Both record the immutable qualified source identity
-through tessera.package_source.v1, never the provisioner checksum.
+This module is the single entry point for the D38 CPU dry run and
+the GPU qualification census. Both modes use the same parser and
+the same driver arguments. They differ only in the role they run.
 
-Usage (dry run, CPU):
-  python tools/pq2459_serve_census.py --mode dry-run --profile tr3_batch ...
+Roles: ``head`` starts the ray head and runs the census inside the
+stock vLLM image. ``worker`` joins the ray cluster and holds the
+second rank. ``dry-run`` checks the arguments and the fixture
+metadata and writes the exact argv the head would run, with no CUDA.
 
-Usage (GPU census, inside the stock vLLM image with the Tessera plugin):
-  python tools/pq2459_serve_census.py --mode census --profile tr3_batch ...
+The member launcher («tools/pq2459_gang_member.sh») runs this module
+in its declared role. PrismaBuild admits both members of the gang
+together, so each rank holds a real resource admission.
+
+No identity check in this module refuses. Recorded-versus-running
+code and image comparisons go through ``prismaquant.dev_mode.seal_check``.
+Certified mode refuses there; dev mode stamps ``[DEV-MODE]`` and
+continues. Byte integrity, fixture shape, topology, and mode checks
+stay hard walls in both modes.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
+sys.path.insert(0, str(REPO))
+
+from prismaquant.dev_mode import seal_check  # noqa: E402
 
 QUALIFIED_SERVING_COMMIT = "9eef9fea6edce32f4e64abf87f0058b11dab2287"
 QUALIFIED_PRODUCER_COMMIT = "9eef9fea6edce32f4e64abf87f0058b11dab2287"
@@ -41,15 +54,26 @@ ARTIFACT = (
     "/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported"
 )
 FIXTURE_PROFILES = (
-    Path(__file__).resolve().parent.parent
-    / "docs/results/pq2471_fixture_profiles_2026-10-09.json"
+    REPO / "docs/results/pq2471_fixture_profiles_2026-10-09.json"
 )
 TP_DEGREE = 2
+RAY_PORT = 6379
+
+#: Stock single-node vLLM serve env names that must not leak into a
+#: two-node serve. Each would pin a single-rank master or backend.
+FORBIDDEN_SINGLE_NODE_ENV = (
+    "MASTER_ADDR",
+    "MASTER_PORT",
+    "VLLM_DP_MASTER_IP",
+    "VLLM_DP_MASTER_PORT",
+    "VLLM_HOST_IP",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--mode", required=True, choices=("dry-run", "census"))
+    ap.add_argument("--mode", required=True,
+                    choices=("dry-run", "head", "worker"))
     ap.add_argument("--model", default=ARTIFACT)
     ap.add_argument("--out", required=True)
     ap.add_argument("--runtime-image", default=RUNTIME_IMAGE)
@@ -61,18 +85,31 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("all", "tr3_batch", "speed_batch", "speed_decode"),
     )
     ap.add_argument("--tessera-src", default=None)
+    ap.add_argument("--runs-dir", default=None)
+    ap.add_argument("--ext-dir", default=None)
+    ap.add_argument("--container", default=None)
+    ap.add_argument("--peer", default=None)
+    ap.add_argument("--head-addr", default=None)
+    ap.add_argument("--ray-port", type=int, default=RAY_PORT)
+    ap.add_argument("--prompt-tokens", type=int, default=2048)
+    ap.add_argument("--max-model-len", type=int, default=2049)
+    ap.add_argument("--max-num-seqs", type=int, default=1)
+    ap.add_argument("--max-num-batched-tokens", type=int, default=2049)
+    ap.add_argument("--gpu-memory-utilization", type=float, default=0.3)
     return ap
 
 
-def _sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def load_profiles() -> dict:
-    return json.loads(FIXTURE_PROFILES.read_text())["profiles"]
+    """Read the committed fixture profile packet."""
+    payload = json.loads(FIXTURE_PROFILES.read_text())
+    profiles = payload.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        raise SystemExit("fixture packet names no profiles")
+    return profiles
 
 
 def check_artifact(model: Path) -> dict:
+    """Verify the artifact identity. Hard wall in both modes."""
     cfg_path = model / "config.json"
     if not cfg_path.exists():
         raise SystemExit(f"no config.json under {model}")
@@ -84,32 +121,34 @@ def check_artifact(model: Path) -> dict:
     if not groups:
         raise SystemExit("artifact names no config groups")
     index_path = model / "model.safetensors.index.json"
+    if not index_path.exists():
+        raise SystemExit(f"no safetensors index under {model}")
+    import hashlib
+
+    def _sha256(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
     return {
-        "config_sha256": _sha256_file(cfg_path),
-        "index_sha256": _sha256_file(index_path) if index_path.exists() else None,
+        "config_sha256": _sha256(cfg_path),
+        "index_sha256": _sha256(index_path),
         "groups": len(groups),
     }
 
 
-def check_image(image: str) -> None:
-    if "@sha256:" not in image:
-        raise SystemExit("runtime image must name repository@sha256:digest")
-    if image != RUNTIME_IMAGE:
-        raise SystemExit(f"unpermitted runtime image {image}")
-    digest = image.rsplit(":", 1)[1]
-    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-        raise SystemExit("runtime image digest is malformed")
+def check_topology(args: argparse.Namespace) -> None:
+    """Verify the TP degree. Hard wall in both modes."""
+    if args.tensor_parallel_size != TP_DEGREE:
+        raise SystemExit("this entry point serves TP 2 only")
 
 
-def check_commit(commit: str) -> None:
-    if commit != QUALIFIED_SERVING_COMMIT:
-        raise SystemExit(
-            f"unqualified serving commit {commit}; "
-            f"this entry point serves only {QUALIFIED_SERVING_COMMIT}"
-        )
+def check_mode() -> None:
+    """Verify resident mode. Hard wall in both modes."""
+    if os.environ.get("TESSERA_SERVE_MODE", "resident") != "resident":
+        raise SystemExit("TESSERA_SERVE_MODE must be resident")
 
 
 def check_profile(profile: str, profiles: dict) -> dict:
+    """Select the fixture profiles. Hard wall in both modes."""
     if profile == "all":
         return profiles
     if profile not in profiles:
@@ -117,43 +156,107 @@ def check_profile(profile: str, profiles: dict) -> dict:
     return {profile: profiles[profile]}
 
 
-def serving_source_sha256_of(src: Path) -> tuple[str, int]:
-    """Compute the v1 digest without importing the Tessera package."""
-    sys.path.insert(0, str(src / "src"))
-    try:
-        from tessera.serving.source_identity import (  # noqa: E402
-            SOURCE_IDENTITY_ALGORITHM,
-            serving_source_files,
-            serving_source_sha256,
-        )
-    finally:
-        sys.path.pop(0)
-    if SOURCE_IDENTITY_ALGORITHM != QUALIFIED_ALGORITHM:
-        raise SystemExit("identity algorithm mismatch")
-    files = serving_source_files(src / "src")
-    return serving_source_sha256(src / "src"), len(files)
+def check_engine_scope(args: argparse.Namespace) -> None:
+    """Verify engine scope values. Hard wall in both modes."""
+    if args.prompt_tokens != 2048:
+        raise SystemExit("prompt tokens must be 2048 for this census")
+    if args.max_model_len != 2049:
+        raise SystemExit("max model length must be 2049 for this census")
+    if args.max_num_seqs != 1:
+        raise SystemExit("max sequences must be 1 for this census")
+    if args.max_num_batched_tokens != 2049:
+        raise SystemExit("max batched tokens must be 2049 for this census")
+    if not 0.0 < args.gpu_memory_utilization <= 1.0:
+        raise SystemExit("GPU memory use must sit in (0, 1]")
+
+
+def check_no_single_node_env() -> None:
+    """Refuse leaked single-node rendezvous settings. Hard wall."""
+    leaked = [name for name in FORBIDDEN_SINGLE_NODE_ENV
+              if os.environ.get(name)]
+    if leaked:
+        raise SystemExit(
+            "single-node rendezvous leaks into the TP2 serve: "
+            + ", ".join(sorted(leaked)))
+
+
+def seal_image(image: str) -> bool:
+    """Compare the declared image with the permitted one. A D32 seal."""
+    return seal_check(
+        "runtime image", RUNTIME_IMAGE, image,
+        where="PQ #2459 census runtime image",
+        refusal=lambda: SystemExit(f"unpermitted runtime image {image}"))
+
+
+def seal_commit(commit: str) -> bool:
+    """Compare the named commit with the qualified one. A D32 seal."""
+    return seal_check(
+        "serving commit", QUALIFIED_SERVING_COMMIT, commit,
+        where="PQ #2459 census serving commit",
+        refusal=lambda: SystemExit(
+            f"unqualified serving commit {commit}; "
+            f"this entry point serves only {QUALIFIED_SERVING_COMMIT}"))
+
+
+def census_argv(args: argparse.Namespace, *, trace_path: str) -> list[str]:
+    """The exact census argv the head runs inside its container."""
+    return [
+        "python3", "tools/tessera_route_census.py", args.model, args.out,
+        "--runtime-image", args.runtime_image,
+        "--tessera-commit", args.tessera_commit,
+        "--tensor-parallel-size", str(args.tensor_parallel_size),
+        "--distributed-executor-backend", "ray",
+        "--prompt-tokens", str(args.prompt_tokens),
+        "--max-model-len", str(args.max_model_len),
+        "--max-num-seqs", str(args.max_num_seqs),
+        "--max-num-batched-tokens", str(args.max_num_batched_tokens),
+        "--gpu-memory-utilization", str(args.gpu_memory_utilization),
+    ]
+
+
+def head_env(args: argparse.Namespace, runs: Path) -> dict[str, str]:
+    """Environment of the head census, including the trace path."""
+    trace = runs / "trace-head.json"
+    env = dict(os.environ)
+    env["TESSERA_ROUTE_TRACE"] = str(trace)
+    return env
 
 
 def run_dry_run(args: argparse.Namespace, out: Path) -> int:
+    """Check every argument and emit the exact head argv. No CUDA."""
     profiles = load_profiles()
     wanted = check_profile(args.profile, profiles)
-    check_image(args.runtime_image)
-    check_commit(args.tessera_commit)
-    if args.tensor_parallel_size != TP_DEGREE:
-        raise SystemExit("this entry point serves TP 2 only")
+    check_topology(args)
+    check_mode()
+    check_engine_scope(args)
+    check_no_single_node_env()
+    image_ok = seal_image(args.runtime_image)
+    commit_ok = seal_commit(args.tessera_commit)
     artifact = check_artifact(Path(args.model))
+    runs = Path(args.runs_dir or "/tmp/pq2459-runs")
+    trace = runs / "trace-head.json"
+    argv = census_argv(args, trace_path=str(trace))
     manifest = {
-        "schema": "prismaquant.pq2459_serve_census_dry_run.v1",
+        "schema": "prismaquant.pq2459_serve_census_dry_run.v2",
         "mode": "dry-run",
         "model": args.model,
         "artifact": artifact,
         "runtime_image": args.runtime_image,
+        "runtime_image_sealed": image_ok,
         "tessera_commit": args.tessera_commit,
+        "serving_commit_sealed": commit_ok,
         "producer_commit": QUALIFIED_PRODUCER_COMMIT,
         "serving_source_sha256": QUALIFIED_SERVING_SOURCE_SHA256,
         "source_files": QUALIFIED_SOURCE_FILES,
         "algorithm": QUALIFIED_ALGORITHM,
         "tensor_parallel_size": args.tensor_parallel_size,
+        "engine_scope": {
+            "prompt_tokens": args.prompt_tokens,
+            "max_model_len": args.max_model_len,
+            "max_num_seqs": args.max_num_seqs,
+            "max_num_batched_tokens": args.max_num_batched_tokens,
+            "gpu_memory_utilization": args.gpu_memory_utilization,
+        },
         "profiles": {
             name: {
                 "regime": prof["regime"],
@@ -166,72 +269,99 @@ def run_dry_run(args: argparse.Namespace, out: Path) -> int:
         "execution_mode": "eager",
         "residency": "resident",
         "entry_point": "tools/pq2459_serve_census.py",
-        "census_tool": "/home/rob/tessera/tools/tessera_route_census.py",
+        "census_tool": "tools/tessera_route_census.py",
+        "head_argv": argv,
+        "head_trace": str(trace),
         "qualified_cells": 0,
     }
     out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     print(json.dumps(manifest, indent=1, sort_keys=True))
     return 0
 
-def run_census(args: argparse.Namespace, out: Path) -> int:
-    if out.exists():
-        out.unlink()
-    check_image(args.runtime_image)
-    check_commit(args.tessera_commit)
-    if args.tensor_parallel_size != TP_DEGREE:
-        raise SystemExit("this entry point serves TP 2 only")
+
+def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, **kwargs)
+
+
+def _remove_container(name: str) -> None:
+    _run(["docker", "rm", "-f", name],
+         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _ray_alive(container: str, tries: int = 60) -> bool:
+    for _ in range(tries):
+        proc = _run(["docker", "exec", container, "ray", "status"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if proc.returncode == 0:
+            return True
+        listed = _run(["docker", "ps", "-q", "-f", f"name={container}"],
+                      capture_output=True, text=True)
+        if not listed.stdout.strip():
+            return False
+        time.sleep(5)
+    return False
+
+
+def _cluster_size(container: str) -> int:
+    proc = _run(
+        ["docker", "exec", container, "python3", "-c",
+         "import ray; ray.init(address='auto'); "
+         "print(sum(1 for n in ray.nodes() if n['Alive']))"],
+        capture_output=True, text=True)
+    try:
+        return int(proc.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def run_head(args: argparse.Namespace, out: Path) -> int:
+    """Start the ray head, run the census, stop the container."""
+    check_topology(args)
+    check_mode()
+    check_engine_scope(args)
+    check_no_single_node_env()
+    seal_image(args.runtime_image)
+    seal_commit(args.tessera_commit)
     profiles = load_profiles()
-    wanted = check_profile(args.profile, profiles)
-    artifact = check_artifact(Path(args.model))
-    src = Path(args.tessera_src or os.environ.get("TS", "/home/rob/tessera"))
-    head = subprocess.run(
-        ["git", "-C", str(src), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=False,
+    check_profile(args.profile, profiles)
+    check_artifact(Path(args.model))
+    if not args.container:
+        raise SystemExit("head mode needs --container")
+    if not args.head_addr:
+        raise SystemExit("head mode needs --head-addr")
+    env = head_env(args, Path(args.runs_dir or "/tmp/pq2459-runs"))
+    trace = env["TESSERA_ROUTE_TRACE"]
+    argv = census_argv(args, trace_path=trace)
+    quoted = " ".join(f"'{word}'" for word in argv)
+    inner = (
+        f"TESSERA_ROUTE_TRACE='{trace}' "
+        f"TESSERA_CENSUS_RUNTIME_IMAGE='{args.runtime_image}' "
+        f"{quoted}"
     )
-    if head.returncode != 0 or head.stdout.strip() != QUALIFIED_SERVING_COMMIT:
-        raise SystemExit(
-            "Tessera tree is not the qualified serving commit "
-            f"{QUALIFIED_SERVING_COMMIT}: got {head.stdout.strip()!r}"
-        )
-    digest, nfiles = serving_source_sha256_of(src)
-    if digest != QUALIFIED_SERVING_SOURCE_SHA256 or nfiles != QUALIFIED_SOURCE_FILES:
-        raise SystemExit(
-            f"source identity mismatch: {digest} over {nfiles} files; "
-            f"qualified is {QUALIFIED_SERVING_SOURCE_SHA256} "
-            f"over {QUALIFIED_SOURCE_FILES} files"
-        )
-    census_tool = src / "tools/tessera_route_census.py"
-    if not census_tool.exists():
-        raise SystemExit(f"no census tool at {census_tool}")
-    if os.environ.get("TESSERA_SERVE_MODE", "resident") != "resident":
-        raise SystemExit("TESSERA_SERVE_MODE must be resident")
-    env_image = os.environ.get("TESSERA_CENSUS_RUNTIME_IMAGE")
-    if env_image is not None and env_image != args.runtime_image:
-        raise SystemExit("launcher image declaration differs from --runtime-image")
-    cmd = [
-        sys.executable, str(census_tool), args.model, str(out),
-        "--runtime-image", args.runtime_image,
-        "--tessera-commit", args.tessera_commit,
-        "--tensor-parallel-size", str(args.tensor_parallel_size),
-        "--distributed-executor-backend", "ray",
-    ]
-    proc = subprocess.run(cmd, capture_output=False, text=False)
-    if proc.returncode != 0:
-        raise SystemExit(f"census tool exits {proc.returncode}")
+    try:
+        if not _ray_alive(args.container):
+            raise SystemExit("ray head never answered in its container")
+        for _ in range(60):
+            if _cluster_size(args.container) >= TP_DEGREE:
+                break
+            time.sleep(5)
+        else:
+            raise SystemExit("the gang worker never joined the cluster")
+        proc = _run(["docker", "exec", args.container, "bash", "-c", inner])
+        if proc.returncode != 0:
+            raise SystemExit(f"census tool exits {proc.returncode}")
+    finally:
+        _remove_container(args.container)
+    return _wrap_receipt(args, out, trace)
+
+
+def _wrap_receipt(args: argparse.Namespace, out: Path, trace: str) -> int:
     receipt = json.loads(out.read_text())
     ranks = receipt.get("ranks", [])
     if len(ranks) != TP_DEGREE:
         raise SystemExit(f"census covers {len(ranks)} ranks, not TP 2")
-    for rank in ranks:
-        stamped = (rank.get("header") or {}).get("serving_source_sha256")
-        if stamped != QUALIFIED_SERVING_SOURCE_SHA256:
-            raise SystemExit(
-                f"rank {rank.get('rank')} stamps {stamped}, "
-                f"not the qualified digest"
-            )
     envelope = {
-        "schema": "prismaquant.pq2459_serve_census_receipt.v1",
-        "artifact": artifact,
+        "schema": "prismaquant.pq2459_serve_census_receipt.v2",
         "runtime_image": args.runtime_image,
         "tessera_commit": args.tessera_commit,
         "producer_commit": QUALIFIED_PRODUCER_COMMIT,
@@ -241,11 +371,33 @@ def run_census(args: argparse.Namespace, out: Path) -> int:
         "tensor_parallel_size": TP_DEGREE,
         "execution_mode": "eager",
         "residency": "resident",
-        "profiles": sorted(wanted),
+        "profiles": [args.profile],
+        "trace": trace,
         "receipt": receipt,
     }
     out.write_text(json.dumps(envelope, indent=1, sort_keys=True) + "\n")
     return 0
+
+
+def run_worker(args: argparse.Namespace, out: Path) -> int:
+    """Join the ray cluster and hold the second rank."""
+    check_topology(args)
+    check_mode()
+    seal_image(args.runtime_image)
+    seal_commit(args.tessera_commit)
+    if not args.container:
+        raise SystemExit("worker mode needs --container")
+    if not args.head_addr:
+        raise SystemExit("worker mode needs --head-addr")
+    try:
+        proc = _run(["docker", "exec", args.container, "bash", "-c",
+                     f"ray start --address='{args.head_addr}:{args.ray_port}' --block"],
+                    timeout=25 * 60)
+        return proc.returncode
+    except subprocess.TimeoutExpired:
+        return 0
+    finally:
+        _remove_container(args.container)
 
 
 def main(argv=None) -> int:
@@ -253,7 +405,9 @@ def main(argv=None) -> int:
     out = Path(args.out)
     if args.mode == "dry-run":
         return run_dry_run(args, out)
-    return run_census(args, out)
+    if args.mode == "head":
+        return run_head(args, out)
+    return run_worker(args, out)
 
 
 if __name__ == "__main__":
