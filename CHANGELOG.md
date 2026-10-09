@@ -36,7 +36,7 @@
   Record actual public CLI module origins instead of synthetic import claims.
   PB `daa683c956c2` passes the x86 CPU dry branch with seven streams and no GPU replay.
   PB `04d03f51d333` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
-  The affected CPU suite passes 36 tests without skips.
+  The affected replay tests and architecture provenance test pass 37 cases without skips.
   Preserve the frozen execution source and require final artifact review before replacement.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
