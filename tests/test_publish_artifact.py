@@ -202,7 +202,12 @@ def _close_all_slots(model_dir, *, passed=True, spec=False):
                 sha, source=str(model_dir), passed=passed))
             continue
         if slot.startswith("native_export."):
-            fill_slot(path, slot, _native_record(slot, sha, passed=passed))
+            record = _native_record(slot, sha, passed=passed)
+            if slot == "native_export.graph" and passed:
+                from test_shipcard import _graph_receipt_metrics
+
+                record["metrics"].update(_graph_receipt_metrics(model_dir))
+            fill_slot(path, slot, record)
             continue
         is_gold = slot in GOLD_SLOTS
         fill_slot(path, slot, make_record(

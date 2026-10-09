@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #1586, `ig/1586-no-tessera-glm-card-can-be-published-nat`): `native_export.graph` verifies only against a Tessera `graph_equals_eager.v2` receipt from its own serve.
+The verifier checks receipt bytes, v2 schema, numeric equality, and scope.
+Image and model scope refuse on mismatch.
+Only the Tessera source pin stamps through `seal_check`.
+
+No eager waiver exists.
+The research refusal stays in force.
+CPU verification is not a serving qualification.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
@@ -3126,7 +3135,7 @@ build block carries `research_only: true` — the stamp
 (§4.5, research replay) — naming the field and its source, and the only
 path past it is the recorded `--force-unverified` override. Research
 standing was previously stamped and read by nothing that refuses. The
-`native_export.graph` half of #1586 is unchanged and still open.
+The `native_export.graph` half now verifies receipts on CPU. It still needs the controlled TP2 socket equality receipt.
 
 Re-stamped 2026-09-28 (PQ #1274, `claude/tessera-pin-v42-1274`): the exact
 Tessera pin is `38e960127478b651e42c14d52acf2274b54bca38`, Tessera master
@@ -26872,7 +26881,7 @@ and its metadata. Use `--score-positions all`; a final-position screen cannot cl
 | `offline.g3` | `python -m prismaquant.g3_v2 --config FILE --output JSON` | Paired teacher panel, bound candidate and explicit criteria |
 | `task_suite` | `python -m prismaquant.task_suite --config FILE --output JSON` | Current HF-loadable artifact, tokenizer, tasks, sampling and explicit criteria |
 | `native_export.eager` | Lane eager producer; native compressed-tensors uses `validate_native_export --shipcard` | Actual eager generation record |
-| `native_export.graph` | Lane graph producer; native compressed-tensors uses `validate_native_export --no-enforce-eager --shipcard` | Actual graph record under the lane contract |
+| `native_export.graph` | Lane graph producer; native compressed-tensors uses `validate_native_export --no-enforce-eager --shipcard --graph-receipt <receipt.json>` | Actual graph record with a byte-bound v2 equality receipt under the lane contract |
 | `ship_gate` | `validate_quantized_model --base-url URL --model-name NAME --artifact-dir DIR --shipcard CARD` | Numeric and boundary ledger from the bound live endpoint |
 | `gold.kl` | Runner-owned `measure_vllm_full_kl` student entry point | Stored teacher, metadata, all-position protocol and observed no-spec execution |
 | `gold.ppl` | Runner-owned `measure_vllm_wikitext_ppl` | Generic token payload and independent file hash |
@@ -26996,6 +27005,46 @@ prerequisite source-integrity/fold-fidelity transition completed before `run-pip
 quantized-artifact promotion result. Once its `VERIFIED` record exists, the build pipeline only
 replays that record and the current source bytes. The ordinary build/serve boundary remains
 physical, so its contract is a **record**, not CI.
+
+**Graph equality receipt (#1586).** Every `native_export.graph` record carries `metrics.graph_receipt_path`, `metrics.graph_receipt_sha256`, and `metrics.serve_scope`.
+The verifier reads the named bytes once.
+It checks SHA-256 against those bytes.
+It refuses any schema other than `tessera.graph_equals_eager.v2`.
+A v1 receipt cannot attest this card.
+The scope carries nine fields:
+
+- `image`, `model_config_sha256`, `tessera_src_sha256`.
+- `compilation_config`, `speculative_tokens`, `max_model_len`.
+- `max_num_seqs`, `tensor_parallel_size`, `fabric`.
+
+Image and model config are measurement conditions.
+A receipt from another image or model refuses.
+Tessera `verify` reports the mismatch.
+The source pin is identity.
+It stamps through `seal_check` and replays with the receipt value.
+Compilation, speculation, lengths, parallelism, and fabric pass unchanged.
+Any mismatch refuses.
+Fabric is `none` at one rank.
+Above one rank the launch request maps `NCCL_IB_DISABLE=1` to `socket` and `0` to `roce`.
+Tessera observes fabric from NCCL banners.
+An unhonoured request refuses as fabric mismatch.
+The producer observes scope rather than taking caller identity.
+Image comes from container RepoDigests.
+Config hash reads `config.json` before load.
+Tessera source hashes installed sources by the #702 recipe.
+Compilation config is the exact passed JSON.
+Lengths and parallelism read resolved engine configs.
+Absent speculation derives zero tokens.
+Missing numeric scope refuses.
+Missing identity stamps `NOT_COMPUTED` and records it.
+The card re-hashes artifact `config.json` at verify time.
+A mismatch refuses.
+A missing model dir or unreadable config refuses.
+The eager slot is unchanged.
+This change adds no waiver, pin bump, or serving qualification.
+It needs the controlled TP2 socket receipt.
+That receipt remains outstanding.
+
 
 **Sampled whole-stack proposal validation is deliberately narrower than an
 artifact gate.** The adapter supplies complete per-sequence held-out losses

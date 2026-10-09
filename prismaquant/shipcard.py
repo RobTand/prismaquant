@@ -21,7 +21,7 @@ Base slots (required for every artifact):
 | Slot | Filled by |
 |---|---|
 | `native_export.eager` | `validate_native_export.py --shipcard` (eager arm) |
-| `native_export.graph` | `validate_native_export.py --shipcard --no-enforce-eager` |
+| `native_export.graph` | `validate_native_export.py --shipcard --no-enforce-eager --graph-receipt <receipt.json>` |
 | `ship_gate` | `validate_quantized_model.py --shipcard` |
 | `gold.kl` | `python -m prismaquant.shipcard_cli fill --slot gold.kl --record <full_kl json>` |
 | `gold.ppl` | `python -m prismaquant.shipcard_cli fill --slot gold.ppl --record <ppl json>` |
@@ -1824,7 +1824,8 @@ def verify(
             # The slot-name check above compares `record["slot"]` to the slot
             # key; nothing compared `metrics.arm` to the slot suffix, so a
             # fabricated or mislabeled arm record passed. Replay it here.
-            problems.extend(_verify_native_export_record(slot, record))
+            problems.extend(_verify_native_export_record(
+                slot, record, model_dir=model_dir))
         # Lane-scoped slots whose replay core owns run through the verifier
         # the slot names in LANE_SLOT_VERIFIERS (#162): a fourth lane's novel
         # slot is replayed the moment its verifier is registered, and a
@@ -2101,9 +2102,64 @@ def verify_gold_producer_record(
 
 
 
+def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
+    """Keep measurement comparability and integrity; stamp only the source pin."""
+    slot = "native_export.graph"
+    path = metrics.get("graph_receipt_path")
+    if not isinstance(path, str) or not path:
+        return [f"{slot}: missing graph_receipt_path"]
+    digest = metrics.get("graph_receipt_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return [f"{slot}: missing or malformed graph_receipt_sha256"]
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        return [f"{slot}: graph_receipt_path cannot be read: {exc}"]
+    from .digests import bytes_sha256hex
+
+    if bytes_sha256hex(raw) != digest:
+        return [f"{slot}: graph_receipt_sha256 differs from the current receipt bytes"]
+    serve = metrics.get("serve_scope")
+    if not isinstance(serve, Mapping):
+        return [f"{slot}: missing structured serve_scope"]
+    try:
+        from tessera import graph_receipt
+    except ImportError as exc:
+        return [f"{slot}: tessera.graph_receipt is unavailable from the installed "
+                f"Tessera; the serving pin must carry it: {exc}"]
+    try:
+        receipt = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        return [f"{slot}: malformed graph receipt: {exc}"]
+    if not isinstance(receipt, dict):
+        return [f"{slot}: malformed graph receipt: expected a JSON object"]
+    if receipt.get("schema") != "tessera.graph_equals_eager.v2":
+        return [f"{slot}: graph receipt schema {receipt.get('schema')!r} is not "
+                "tessera.graph_equals_eager.v2"]
+    scope = dict(serve)
+    from .dev_mode import seal_check
+
+    try:
+        recorded_source = receipt["tessera"]["src_sha256"]
+    except (KeyError, TypeError) as exc:
+        return [f"{slot}: malformed graph receipt identity: {exc}"]
+    seal_check("tessera_src_sha256", recorded_source,
+               scope.get("tessera_src_sha256"), where=slot)
+    scope["tessera_src_sha256"] = recorded_source
+    try:
+        reason = graph_receipt.verify(receipt, scope)
+    except Exception as exc:
+        return [f"{slot}: graph receipt unreadable: {type(exc).__name__}: {exc}"]
+    return ([f"{slot}: graph equality receipt refused: {reason}"]
+            if reason is not None else [])
+
+
+
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
+    *,
+    model_dir: str | os.PathLike | None = None,
 ) -> list[str]:
     """Replay the smoke arm's own stamped metrics against the slot it closes.
 
@@ -2166,6 +2222,28 @@ def _verify_native_export_record(
             f"{slot}: max_new_tokens={max_new_tokens!r} is not a positive "
             "integer"
         )
+    if arm == "graph":
+        problems.extend(_verify_graph_receipt(metrics))
+        if model_dir is None:
+            problems.append(
+                f"{slot}: cannot verify serve_scope.model_config_sha256 "
+                "without the artifact model_dir")
+        else:
+            from .digests import file_sha256hex
+
+            try:
+                config_sha256 = file_sha256hex(Path(model_dir) / "config.json")
+            except (OSError, ValueError) as exc:
+                problems.append(
+                    f"{slot}: cannot read artifact config.json for "
+                    f"serve_scope.model_config_sha256: {exc}")
+            else:
+                scope = metrics.get("serve_scope")
+                if isinstance(scope, Mapping) and scope.get(
+                    "model_config_sha256") != config_sha256:
+                    problems.append(
+                        f"{slot}: serve_scope.model_config_sha256 differs "
+                        "from the artifact config.json sha256")
     return problems
 
 

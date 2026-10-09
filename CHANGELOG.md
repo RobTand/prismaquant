@@ -31,6 +31,13 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- **Graph ship slots verify Tessera equality receipts** (#1586).
+  The native graph arm requires `--graph-receipt` and records its path, byte SHA-256, and observed scope.
+  Ship-card verification checks receipt bytes, v2 schema, and numeric equality.
+  Image, model, compilation, speculation, lengths, parallelism, and fabric mismatches refuse.
+  The artifact `config.json` re-hash must match the recorded scope digest.
+  Only the Tessera source pin stamps through `seal_check`.
+  No eager waiver exists, the research refusal stays, and CPU evidence is not serving qualification.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
