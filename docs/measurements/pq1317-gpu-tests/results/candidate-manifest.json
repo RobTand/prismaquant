@@ -13,7 +13,7 @@
   "results/moe.json": "5bc0ed8cafcef63b3ae3d4438d59c669118a41c09d887ff00910fd83a1d6eade",
   "results/dense.json": "f22b0d63041cac1d6320e92c67d35cc7c0db17c1f97083dcccf11302d7d4e0b9",
   "results/pb-receipts.json": "a2191fbcb18ad5642e3fb9ce845cb4a2ee1fc60099e382c7ad7a37e4c2bfbfb9",
-  "results/log-digests.json": "1b504fceae41f94769c5b29c50b3c6303f70d15500c35439654122ba0ac5c0e8"
+  "results/log-digests.json": "37cf3aa74f913d654c30df6e5c4ec365168550e1e4aaf8f6a084f6e6e8f14af7"
  },
  "result_files": [
   "results/moe.json",

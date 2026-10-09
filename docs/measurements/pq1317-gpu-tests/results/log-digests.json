@@ -37,6 +37,10 @@
    "sha256": "4cdbb0ca68ed86b52978887ffe46a93daacdd4b5c7dd7a9b3f18227cf10f1088",
    "bytes": 13510
   },
+  "results/logs/run1-moe/native-so.sha256": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
+  },
   "results/logs/run1-moe/pytest.log": {
    "sha256": "32feef62d439f6625f70c9a7b962fdaaee4e991a69d9230db240306e1a9750f3",
    "bytes": 5633
@@ -112,6 +116,10 @@
   "results/logs/run2-moe/junit.xml": {
    "sha256": "a0df60275b6b3e3d04c2f894af99b9b926b31f984f83d1407fe6b18f36083b47",
    "bytes": 13510
+  },
+  "results/logs/run2-moe/native-so.sha256": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
   },
   "results/logs/run2-moe/probe-summary.json": {
    "sha256": "03e51e0b1cded01bf75ed4e7da71cfc91aac28dc19036b4930d185eecac0585d",
