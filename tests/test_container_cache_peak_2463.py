@@ -111,8 +111,11 @@ def test_both_peaks_must_fit_the_ceiling_or_it_is_rejected():
     fixture = fixture_mod.FIXTURE
     ceiling = fixture["ceiling_bytes"]
     assert fixture["peak_allocated_bytes"] <= ceiling
-    repeat_peak = ceiling + 1
-    assert repeat_peak > ceiling
+    assert fixture["repeat_peak_allocated_bytes"] <= ceiling
+    assert max(fixture["peak_allocated_bytes"],
+               fixture["repeat_peak_allocated_bytes"]) <= ceiling
+    with pytest.raises(ValueError):
+        peak_mod.derive_cache_ceiling(-1, headroom_bytes=0)
 
 
 def test_pb_charges_cache_gib_plus_each_scratch_reservation():

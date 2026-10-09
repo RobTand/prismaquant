@@ -58,12 +58,17 @@ local sweeper, `finally` cleanup, or produced-output retirement is substituted.
 
 CPU tests cover declaration/pricing, command forwarding, containment,
 conflicting/partial/ASCII bounds, mount safety, symlink refusal and unchanged
-legacy cases. GPU acceptance still requires an immutable nonsealed fixture,
-recorded exact command/resources, before/after in-process profiles and both-
-Spark Netdata, observed peak cache bytes versus reservation, and recovery from
-worker/launcher loss through the eventual public lifetime contract. No GPU
-measurement, work-per-joule result, speedup, quota enforcement or cleanup pass
-is established by these CPU policy tests.
+legacy cases. PQ #2463 measured the workload-specific ceiling: two GPU rows
+of the Stage B compile workload peaked at 3596288 bytes each, and the
+fixture `tests/fixtures/container_cache_ceiling_2463.py` derives the 1 GiB
+ceiling from that peak with declared headroom. Receipts live in
+`docs/measurements/container_cache_peak_row1_2463.json`,
+`container_cache_peak_row2_2463.json` and
+`container_cache_row1_netdata_2463.json`; the report is
+`docs/measurements/container_cache_peak_2463.md`. Recovery from
+worker/launcher loss through the eventual public lifetime contract, quota
+enforcement and cleanup still need proof under #1091 and PB #1360. No
+work-per-joule result or speedup follows from this measurement.
 
 This extends the existing container/scratch adapter. It adds no rendered-
 weight/activation cache, model arithmetic, wire format, serving gate, runtime
