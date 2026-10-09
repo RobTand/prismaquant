@@ -177,6 +177,9 @@
      "sha256": "0c6f47459d7f15590f59c0c7ebdc79cb2a8eb7ee4873669e07b1be7d2e0a1324",
      "git_blob": "d1e98024cd7398d353cc86c804dd2b4c53d2bcbb"
     },
+    "prismaquant/model_profiles/spec_profile.py": {
+     "sha256": "1d841087100cb5de0fe216bbba6c3b6c867d4731204f43194fe276388cf00e95"
+    },
     "prismaquant/model_profiles/structure.py": {
      "sha256": "8f2225129929f346a45d221a113717f30c09980bf3e1b8515ba0af78b864f06c",
      "git_blob": "e706e46e67af042af3ebfcebb960416e6151667d"
@@ -204,6 +207,9 @@
     "prismaquant/nvfp4_cb_formats.py": {
      "sha256": "9f886165d4495f8e93615ac3804b41d87a69c8c4526833c196817366147d23d1",
      "git_blob": "827fa0dc8d9ee2e69633337313315191aa0f315d"
+    },
+    "prismaquant/perturbed_x_cache.py": {
+     "sha256": "ba24707e627b794d74d9719ad97e220282d244af0cc8f87b928d2a1f44ed4587"
     },
     "prismaquant/production_weight_cache.py": {
      "sha256": "99d8c281976962b60aa0e71425de3feda66ae456691df686eed2e6fb8e9df62b",
@@ -376,6 +382,30 @@
     }
    }
   }
+ },
+ "cli_capture": {
+  "file": "D38_IMPORTS.json",
+  "sha256": "48d1432271666974e28445ccc6f7648b74a2cb81d78fd5806e6360c0b66c9729",
+  "projection_columns": ["source", "path", "sha256"],
+  "raw_file": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-observed-a4-v2/capture/cli-imports.json",
+  "raw_sha256": "297ddd9b52804cad92481727a6543a46655ead86413fd7f52b48b0d01d84d306",
+  "all_modules_file": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-observed-a4-v2/capture/all-modules.json",
+  "all_modules_sha256": "86dbb30f4a7c891d72248ed6da83fa12fa5b8d1d8af2747518ac1e4dc17f6699",
+  "scope": "The projection contains all observed project module names, source tags, relative paths, and byte digests.",
+  "limit": "The raw capture retains absolute origins, CLI argv, and the initial module search path. Non-file module origins have no byte claim."
+ },
+ "d38_evidence": {
+  "action": "daa683c956c2612febbbff4a3eeb01a1b76cf91dd7b77eb76b9539e0ceedb062",
+  "snapshot_parent": "bd3ff7791d41d1dcd4d242949ed056abfa4557bb",
+  "snapshot_commit": "5110bf3c1154051a106558b569b49c5fcc8350dd",
+  "host": "dl380g10",
+  "returncode": 0,
+  "command": "The raw capture records the full normal public CLI argv. The sealed request records the observer invocation.",
+  "stdout": "D38_CPU_passed true; seven streams; full_band_measured false",
+  "proof": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-observed-a4-v2/proof.json",
+  "proof_sha256": "693ff6b49316133fe4319bf2be1c7f590e23f0b45e32085b475629e199b21073",
+  "energy_rows_sha256": "422890d96a5a744bc7c666272b33369becf4572cb3a60312a26c2eeb4ae44cdf",
+  "replacement_authority": ["dec-1009-071459-9147", "dec-1009-071701-e118"]
  },
  "inferred_scope": "The source files above include CPU and latent device paths. Their presence does not prove a D38 import.",
  "superseded_claim": {

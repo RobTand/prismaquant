@@ -20,13 +20,12 @@ def test_observed_imports_match_cli_capture():
     assert capture["source_head"] == manifest["d38_evidence"]["snapshot_parent"]
     assert capture["returncode"] == 0
     assert capture["entry"]["sha256"] == provenance["correction"]["corrected_sha256"]
-    for name, observation in capture["modules"].items():
-        if observation["source"] == "pact-replay":
-            expected = provenance["imported_files"]["prismaquant/pact_replay/" + observation["path"]]
+    for name, (tag, path, digest) in capture["modules"].items():
+        if tag == "pact-replay":
+            expected = provenance["imported_files"]["prismaquant/pact_replay/" + path]
         else:
-            source = manifest["sources"][observation["source"]]
-            expected = source["files"][observation["path"]]["sha256"]
-        assert observation["sha256"] == expected, name
+            expected = manifest["sources"][tag]["files"][path]["sha256"]
+        assert digest == expected, name
 
 
 def test_provenance_references_manifest_digest():

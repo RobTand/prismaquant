@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2482): `prismaquant/pact_replay` contains the canonical diagnostic replay closure from frozen source `073646c7293685869b3ad18b261c49b49c4c481a`.
+The public CLI accepts positive deadlines through 3500 seconds. Its default remains 1700 seconds.
+Only the named deadline constant and guard differ from the frozen executable source.
+The cohort, roster, windows, teacher contracts, scientific refusals, and production pipeline remain unchanged.
+
+PB `daa683c956c2` executes the normal public CLI on x86 with `--deadline-seconds 3500 --dry-run-cpu`.
+The CPU branch passes with seven streams. It does not execute GPU replay.
+The observer records actual module origins and byte digests after `main` returns.
+`D38_IMPORTS.json` projects 95 observed module names from that capture.
+The separate dependency inventory includes latent sources. It does not label them as observed imports.
+PB `04d03f51d333` verifies the projection, 94 external source files, and the complete canonical correction delta.
+It also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
+`IMPORT_PROVENANCE.json` records the capture digests, exact source identities, and CEO replacement authority.
+All identity records remain advisory. No new runtime identity gate reads them.
+The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
+
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
