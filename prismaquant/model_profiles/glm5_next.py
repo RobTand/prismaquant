@@ -194,6 +194,19 @@ _HC_FFN_RE = re.compile(r"\.hc_ffn_(fn|base|scale)$")
 
 _VISUAL_PREFIX = "model.visual."
 
+# KDA leaves whose fused owner comes from the lane config-gated rule.
+# The lane reads the declared checkpoint config to mark KDA layers. A name
+# with one of these leaves needs the declared config. Other names (MLP
+# gate/up, MLA, indexer) resolve without it.
+_CONFIG_GATED_KDA_LEAVES = frozenset({
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "b_proj",
+    "f_a_proj",
+    "g_a_proj",
+})
+
 
 class Glm5NextProfile(ModelProfile):
     """Zhipu GLM-5.3-Flash / glm5_next family."""
@@ -250,7 +263,17 @@ class Glm5NextProfile(ModelProfile):
             raise LookupError("No declared lane provides GLM fused ownership")
         return owner
 
+    def _needs_declared_config(self, linear_qname: str) -> bool:
+        leaf = linear_qname.rsplit(".", 1)[-1]
+        if leaf not in _CONFIG_GATED_KDA_LEAVES:
+            return False
+        return ".self_attn." in linear_qname or linear_qname.startswith("self_attn.")
+
     def fused_sibling_group(self, linear_qname: str) -> str | None:
+        if self._declared_config is None and self._needs_declared_config(linear_qname):
+            raise ValueError(
+                f"glm5_next: {linear_qname!r} needs the declared config.json document; "
+                "a hand-built profile declares none")
         owner = self._fused_ownership_lane()
         return owner.glm_fused_sibling_group(linear_qname, config=self._declared_config)
 
