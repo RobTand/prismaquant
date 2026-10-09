@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import ExitStack
 import io
 import json
 import os
@@ -60,7 +61,7 @@ import torch  # noqa: E402
 
 from g3_pq_policy import g3_exl3
 import g3_lib as L  # noqa: E402
-from g3_residency import read_g3_input, receipt as residency_receipt
+from g3_residency import read_g3_input, receipt as residency_receipt, finish_phase, close_reader
 from g3_readset import SourceReads, source_indices
 # G3 uses this checkout's shared policy files at its harness seams.
 # The pinned numerical package needs no module overlay.
@@ -486,6 +487,7 @@ class Substitution:
             self.remove_hooks()
             self.remove_hooks = None
         self.records.append(rec)
+        finish_phase(f"layer-{layer:02d}")
         emit_g3_progress(f"layer {layer}: units={rec['units']} sub={rec['substitution_s']:.1f}s "
             f"(src {rec['source_copy_s']:.1f}, dec {rec.get('decode_s', 0):.1f}, wirewait {rec.get('wire_wait_s', 0):.1f}, "
             f"hashdrain {rec['hash_drain_s']:.1f}) fwd={rec['forward_s']:.1f}s verified={rec['hashes_verified']}")
@@ -562,6 +564,17 @@ class Teachers:
                     future.result()
         finally:
             self.futures.clear()
+
+
+def close_arm_inputs(runner, hash_pool, teachers, wire_readers):
+    """Join every reader before phase leases release, also after an input error."""
+    with ExitStack() as cleanup:
+        cleanup.callback(close_reader)
+        cleanup.callback(teachers.close)
+        cleanup.callback(hash_pool.close)
+        for reader in wire_readers:
+            cleanup.callback(reader.close)
+        cleanup.callback(runner.shutdown)
 
 
 # ------------------------------------------------------------------ pilot (G0)
@@ -748,6 +761,7 @@ def run_arm(args, m, by_layer, manifest_sha, decoder):
         if runner.num_layers != 45:
             raise SystemExit(f"runner has {runner.num_layers} decoder layers, manifest 45")
         emit_g3_progress("runner ready", result["resident_plan"], "experts", experts_impl)
+        finish_phase("setup")
 
         def consume(index, logits):
             if tuple(logits.shape) != (1, CONTEXT_LENGTH, VOCAB_SIZE) or logits.device.type != "cuda":
@@ -785,7 +799,7 @@ def run_arm(args, m, by_layer, manifest_sha, decoder):
         seal_check('source execution', source_execution, source_execution_identity(runner.model), where='G3',
                    refusal=SystemExit('source execution changed during the run'))
     finally:
-        runner.shutdown()
+        close_arm_inputs(runner, sub.hash, teachers, [sub.reader] if sub.reader else [])
     elapsed = time.monotonic() - started
     for name, rows in kl_rows.items():
         allk = np.concatenate(rows).astype(np.float64)
@@ -1141,6 +1155,7 @@ def multi_visit_layer(layer, forward_batch, profiler, *, runner, inst, keeper, b
     rec["cuda_memory_reserved"] = reserved()
     rec["wire_pending_layers"] = inst.pending_layers()
     layer_records.append(rec)
+    finish_phase(f"layer-{layer:02d}")
     sp = rec["src_prefetch"]
     emit_g3_progress(f"layer {layer}: src {rec['source_gate_s']:.1f}s | " + " | ".join(
         f"{a['arm']} dec {a['decoded']} {a['install_s']:.1f}s fwd {a['forward_s']:.1f}s" for a in rec["arms"])
@@ -1235,6 +1250,7 @@ def run_multi(args, arms, m, by_layer, manifest_sha, decoder):
         if runner.num_layers != 45:
             raise SystemExit(f"runner has {runner.num_layers} decoder layers, manifest 45")
         emit_g3_progress("runner ready", base["resident_plan"], "arms", arms)
+        finish_phase("setup")
         inst.prefetch_first()
         last = runner.num_layers - 1
         try:
@@ -1303,7 +1319,7 @@ def run_multi(args, arms, m, by_layer, manifest_sha, decoder):
         seal_check('source execution', source_execution, source_execution_identity(runner.model), where='G3',
                    refusal=SystemExit('source execution changed during the run'))
     finally:
-        runner.shutdown()
+        close_arm_inputs(runner, inst.hash, teachers, inst.readers.values())
     elapsed = time.monotonic() - started
     write_g3_record({"layers": layer_records, "elapsed_seconds": elapsed, "wire_bytes_read": inst.wire_bytes,
                  "profile_error": None}, out / "layers.json")

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from g3_progress_launch import select_arms
+from g3_progress_launch import select_arms, comparison_phases
 
 
 def main():
@@ -20,6 +20,8 @@ def main():
     launch = args.launch_args[1:] if args.launch_args[:1] == ["--"] else args.launch_args
     arms = select_arms(launch)
     phases = ["setup", *(f"layer-{i:02d}" for i in range(45)), "teachers"] if arms else ["smoke"]
+    if "--real-arm-smoke" in launch:
+        phases = comparison_phases()
     root = Path(__file__).resolve().parents[2]
     command = [sys.executable, "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
                "--cwd", str(root), "--tag", "gb10", "--gpu", "--priority", "0",

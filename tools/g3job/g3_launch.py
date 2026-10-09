@@ -40,6 +40,7 @@ g.add_argument("--arm")
 g.add_argument("--pilot", action="store_true")
 g.add_argument("--arms", help="comma-separated arms for one multi-arm source pass (null first)")
 g.add_argument('--reader-smoke', help='JSON for one staged-range CUDA correctness smoke; no quality arm')
+g.add_argument("--real-arm-smoke", help="JSON for the real four-layer, one-window omission comparison")
 p.add_argument("--run-tag", default="cold1")
 p.add_argument('--manifest-sha256')
 p.add_argument("--manifest-name", default="unit_manifest_v2.json")
@@ -52,7 +53,7 @@ p.add_argument("--qualify-then-score", action="store_true")
 p.add_argument("--source-preparation")
 p.add_argument("--source-preparation-sha256")
 args = p.parse_args()
-if not args.reader_smoke and not args.manifest_sha256:
+if not args.reader_smoke and not args.real_arm_smoke and not args.manifest_sha256:
     p.error('a scorer requires --manifest-sha256')
 
 HOST = os.uname().nodename
@@ -62,7 +63,8 @@ if not args.pilot and not args.reader_smoke and args.source_preparation:
     source_proof = read_prepared_source_json(args.source_preparation, args.source_preparation_sha256)
     source_proof_root = Path(args.source_preparation).resolve().parent
 
-name = ('reader-smoke-' + args.run_tag if args.reader_smoke else
+name = ('real-arm-' + args.run_tag if args.real_arm_smoke else
+        'reader-smoke-' + args.run_tag if args.reader_smoke else
         'pilot-' + args.run_tag if args.pilot else
         f'multi-{args.run_tag}' if args.arms else f'{args.arm}-{args.run_tag}')
 runs = Path(args.output_root)
@@ -105,9 +107,18 @@ pb_mounts, pb_env = container_contract()
 spec["container"]["mounts"].extend(pb_mounts)
 spec["env"].update(pb_env)
 spec["env"]["G3_HOST_MOUNTS"] = json.dumps({target: source for source, target in mounts})
+if pb_env:
+    from g3_residency import launch_read_plan
+    read_plan_path = runs / f"{name}.read-plan.json"
+    with read_plan_path.open("x") as stream:
+        json.dump(launch_read_plan(), stream, separators=(",", ":"))
+    spec["env"]["G3_READ_PLAN"] = f"/out/{read_plan_path.name}"
 if "PRISMAQUANT_DEV_MODE" in os.environ:
     spec["env"]["PRISMAQUANT_DEV_MODE"] = os.environ["PRISMAQUANT_DEV_MODE"]
-if args.reader_smoke:
+if args.real_arm_smoke:
+    cmd = ["python3", "/workspace/tools/g3job/g3_real_arm_smoke.py", "--spec", args.real_arm_smoke,
+           "--out", f"/out/{name}"]
+elif args.reader_smoke:
     cmd = ['python3', '/workspace/tools/g3job/g3_residency_smoke.py', '--spec', args.reader_smoke,
            '--out', f'/out/{name}.json']
 else:

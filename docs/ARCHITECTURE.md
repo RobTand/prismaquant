@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2301): `tools/g3job` owns the imported G3 measurement harness.
+Re-stamped 2026-10-09 (PQ #2301, revision 4): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -28,7 +28,10 @@ Pass the launch arguments after `--`.
 The submitter uses PB stage residency, share auto, RAM auto, and priority zero.
 PB admission and its published RAM policy remain the qualification authority.
 The container retains the admitted helper, environment, writable queue, and read-only input mounts.
-A named range retains its lease until its descriptor closes.
+Each phase holds batched leases for its published ranges, grouped by tier and RAM epoch.
+The reader caches the map by atomic file identity, including same-generation RAM updates.
+Newly published ranges use another batch; tensor reads do not repeat cover lookups or pin cycles.
+The source, wire, and teacher readers close their descriptors before phase leases release.
 Its RAM epoch and own digest must agree before the reader returns bytes.
 Completed layer and window events advance matching progress phases.
 The phased launcher refuses `--pilot` because that mode has no arm completion plan.
@@ -54,6 +57,32 @@ Its result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke-fina
 Its two traces reside beside that result in `reader-smoke-ig-a3-final.one-arm/`.
 No speed, energy, whole-model residency gain, serving, or promotion claim follows from these checks.
 Netdata power has a ten-second native interval, which cannot resolve the tiny comparison for work per joule.
+
+The real-runner correction uses `tools/g3job/g3_real_arm_smoke.py`, not the tiny Linear as its correctness evidence.
+Its manifest builder reuses `g3_readset.build_manifest` for both diagnostic passes.
+PB `40d6777d7f0c` constructs their 12-phase union with 2,124 declared ranges.
+PB `a5b0cd9de3ca` exposes the former premature phase release in the new regression.
+PB `37f2a621460a` passes all 94 selected harness and source-contract cases, with no skips.
+PB `9db4949220b2` compiles the harness.
+
+PB `7e53e8a836b9` compares one original TR3 window through four real GLM layers on Sparky.
+PB `9466fc282260` repeats the comparison through `g3_submit` and the producer container on Sparklina.
+Both actions use priority zero, the pinned source loader, `SourceReads.install`, expert packing, and `unit_view`.
+The comparison retains the original 2,048 tokens, candidate artifacts, teachers, head, and FP64 KL arithmetic.
+It reads all source tensors in one pass and omits complete replacements in the other.
+Each pass installs and verifies 876 candidate units, including 867 units in the first routed layer.
+The actual logits and both 2,047-position KL arrays match bitwise between the two passes.
+These are truncated diagnostic logits, not full-model quality or promotion evidence.
+
+The final result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a4-final/real-arm-ig-a4-final/comparison.json`.
+The two in-process traces are `source-read/runner.trace.json` and `omission/runner.trace.json` beside that result.
+The reader records three map parses per pass, versus 2,009 and 1,220 staged reads.
+It records three and six phase acquisitions; partial publication can require another batch.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a4/netdata-power.json`.
+Their native interval is ten seconds.
+Work per joule remains null because this correctness smoke is not a controlled energy comparison.
+No speed, energy, whole-model residency gain, serving, or promotion claim follows from this comparison.
+
 
 
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names

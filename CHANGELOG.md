@@ -16,6 +16,11 @@
   Used source tensors retain their byte-integrity checks.
   The manifest follows setup, decoder layers, and teacher reads through the profile's layer names.
   The consumers retain Docker mounts, the PB environment, reader leases, and RAM epochs.
+  The map cache follows atomic publication, including RAM updates at the same fragment count.
+  Phase leases batch published ranges by tier instead of each tensor.
+  The real four-layer comparison uses the pinned source loader, expert packing, and original panel window.
+  Its logits and both FP64 KL arrays match bitwise with omission on and off.
+  This diagnostic does not qualify full-model quality, performance, or promotion.
   Hash batches use the shared IO engine and preserve their digests.
   Development mode retains identity stamps without a new promotion gate.
   The pinned `/pq` package and action `1cb0d64a` remain unchanged.

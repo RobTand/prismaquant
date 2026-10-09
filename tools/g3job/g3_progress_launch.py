@@ -66,11 +66,44 @@ class ReadProgress:
         return {'phase': phase, 'units_completed': self.units, 'unit': kind, 'evidence': line.strip()}
 
 
+def comparison_phases():
+    return [f"{mode}-{phase}" for mode in ("source-read", "omission")
+            for phase in ("setup", *(f"layer-{i:02d}" for i in range(4)), "teachers")]
+
+
+class ComparisonProgress:
+    def __init__(self):
+        self.phases = comparison_phases()
+        self.index, self.units = 0, 0
+        self.scored = set()
+
+    @property
+    def complete(self):
+        return self.index == len(self.phases) and len(self.scored) == 2
+
+    def observe(self, line):
+        if not line.startswith("G3_COMPARE_PROGRESS "):
+            return None
+        event = json.loads(line.removeprefix("G3_COMPARE_PROGRESS "))
+        phase = event["phase"]
+        if event.get("scored"):
+            if not phase.endswith("-teachers") or phase in self.scored or self.index == 0 or phase != self.phases[self.index - 1]:
+                raise ValueError("comparison scored an unrequested or repeated window")
+            self.scored.add(phase)
+        else:
+            if self.index >= len(self.phases) or phase != self.phases[self.index]:
+                raise ValueError("comparison phase sequence changed")
+            self.index += 1
+        self.units += 1
+        return {"phase": phase, "units_completed": self.units, "unit": "real_arm_comparison",
+                "evidence": line.strip()}
+
+
 def select_arms(args):
     """The phased arms this launch scores; the pilot has no arm completion plan."""
     if "--pilot" in args:
         raise SystemExit("--pilot has no phased read plan; G3 progress phases are arm completion events")
-    if "--reader-smoke" in args:
+    if "--reader-smoke" in args or "--real-arm-smoke" in args:
         return []
     if "--arms" in args:
         return args[args.index("--arms") + 1].split(",")
@@ -84,7 +117,8 @@ def main():
     out = Path(args[args.index('--output-root') + 1])
     out.mkdir(parents=True, exist_ok=True)
     smoke = "--reader-smoke" in args
-    progress = ReadProgress(arms, num_layers=0 if smoke else 45)
+    comparison = "--real-arm-smoke" in args
+    progress = ComparisonProgress() if comparison else ReadProgress(arms, num_layers=0 if smoke else 45)
     with (out / 'semantic-progress.jsonl').open('x') as ledger:
         child = subprocess.Popen([sys.executable, str(Path(__file__).with_name('g3_launch.py')), *args],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -104,8 +138,10 @@ def main():
             child.wait()
             raise
         status = child.wait()
-    if status == 0 and ((smoke and progress.units != 1) or (not smoke and
-            (len(progress.layers) != 45 or len(progress.windows) != 25 * len(arms)))):
+    incomplete = (not progress.complete if comparison else
+                  progress.units != 1 if smoke else
+                  len(progress.layers) != 45 or len(progress.windows) != 25 * len(arms))
+    if status == 0 and incomplete:
         raise ValueError("child exited without its complete requested population")
     return status
 

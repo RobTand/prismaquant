@@ -241,13 +241,20 @@ def test_named_range_pin_outlives_descriptor_and_integrity_never_falls_back(tmp_
     reader.ctx = {"map_path": "map", "action_key": "a" * 64}
     reader.queue, reader.root, reader.lock = None, tmp_path, threading.Lock()
     reader.stats = {"staged_bytes": 0, "staged_reads": 0, "read_s": 0.0, "tiers": {}}
+    map_path = tmp_path / "map.json"
+    map_path.write_text("{}")
+    reader.ctx["map_path"] = str(map_path)
+    reader.mapping, reader.map_identity = None, None
+    reader.windows, reader.closed_phases = {}, set()
+    reader.phase_keys, reader.key_phases = {}, {}
     if corrupt:
         with pytest.raises(RuntimeError, match="own digest"):
             reader.read("/host/file", 7, 6)
     else:
         assert reader.read("/host/file", 7, 6) == b"staged"
-    assert events == ["acquire", "open", "release-after-close"]
     assert reader.read("/not-in-map", 0, 3) is None
+    reader.close()
+    assert events == ["acquire", "open", "release-after-close"]
 
 
 def test_d32_does_not_suspend_two_data_digest_comparability(tmp_path, monkeypatch):
