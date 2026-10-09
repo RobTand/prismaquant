@@ -704,3 +704,29 @@ def test_the_route_travels_with_the_price_and_it_needs_the_plane():
         assert kernel["materialises"] is False
         assert kernel["terminal_format"] is None
         assert kernel["activation_contract"] == "w?a16-tessera-kernel-decode"
+
+
+def test_current_bf16_default_reach_metadata_round_trips_at_partial_shape():
+    wire = tessera_wire_recipe("TESSERA_BF16_K1", 1024)
+    out = tessera_tensor_payload_breakdown((8192, 128),
+        family="TESSERA_BF16_K1", body_rate_q256=1024, recipe=wire)
+    assert out["channel_sigma"] == wire.channel_sigma
+    assert validate_tessera_tensor_payload_breakdown(out) == out
+    candidate = build_tessera_allocator_candidate("kda", (8192, 128),
+        family="TESSERA_BF16_K1", body_rate_q256=1024, layout="tight",
+        schedule=None, alphabets=None, predicted_dloss=1.0, target_profile="research")
+    assert candidate.memory_bytes == out["total_bytes"]
+
+
+@pytest.mark.parametrize("seed,window_sigma,channel_sigma",
+    [(0, None, None), (7, None, None), (7, 0.5, None), (0, None, 1.0), (7, 0.5, 1.0)])
+def test_recorded_window_reach_fields_survive_exact_byte_revalidation(seed, window_sigma, channel_sigma):
+    from prismaquant.tessera_formats import recipe_from_wire_names
+    wire = recipe_from_wire_names(1, "channel", "window", 14,
+        window_seed=seed, window_sigma=window_sigma, channel_sigma=channel_sigma)
+    out = tessera_tensor_payload_breakdown((256, 256),
+        family="TESSERA_BF16_K1", body_rate_q256=1024, recipe=wire)
+    assert out["window_seed"] == seed
+    assert out["window_sigma"] == window_sigma
+    assert out["channel_sigma"] == channel_sigma
+    assert validate_tessera_tensor_payload_breakdown(out) == out

@@ -11,15 +11,14 @@ import triton
 import triton.language as tl
 
 from prismaquant import format_registry as fr
+from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 from prismaquant.memory_management import (
     enforce_gpu_memory_budget,
     env_flag_enabled,
 )
 
 
-_FP4_E2M1_MAX = 6.0
 _NVFP4_GROUP_SIZE = 16
-_FP4_E2M1_POS = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 _NVFP4_FUSED_WARMUP_STATE = {
     "attempted": False,
     "compiled": False,
@@ -45,7 +44,7 @@ def _indices_from_signed_e2m1_values(values: torch.Tensor) -> torch.Tensor:
     that code instead of jumping to the NEXT one (the old
     bucketize-on-codes behavior, a full-step error).
     """
-    pos = torch.tensor(_FP4_E2M1_POS, device=values.device, dtype=torch.float32)
+    pos = torch.tensor(_E2M1_POSITIVE, device=values.device, dtype=torch.float32)
     midpoints = (pos[1:] + pos[:-1]) / 2.0
     abs_idx = torch.bucketize(
         values.abs().float().contiguous(), midpoints,
@@ -119,7 +118,7 @@ def nvfp4_dequantize_weight(
     lo = (w_packed & 0xF).long()
     hi = ((w_packed >> 4) & 0xF).long()
     idx = torch.stack((lo, hi), dim=-1).reshape(rows, cols)
-    pos = torch.tensor(_FP4_E2M1_POS, device=w_packed.device, dtype=torch.float32)
+    pos = torch.tensor(_E2M1_POSITIVE, device=w_packed.device, dtype=torch.float32)
     abs_vals = pos[idx & 0x7]
     sign = torch.where((idx & 0x8) != 0, -1.0, 1.0)
     scale = (

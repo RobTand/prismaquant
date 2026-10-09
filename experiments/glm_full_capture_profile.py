@@ -164,24 +164,69 @@ class CaptureObserver:
             self.threads.append(thread)
         return self
 
+    def observation_error(self, error, *, instrument='anchor_profiler', cleanup=False):
+        row = dict(instrument=instrument, error=repr(error))
+        if cleanup:
+            row['failure_kind'] = 'cleanup'
+        self.result['errors'].append(row)
+
+    def cleanup_failed(self):
+        return any(row.get('instrument') == 'shutdown' or row.get('failure_kind') == 'cleanup'
+                   for row in self.result['errors'])
+
     def __exit__(self, error_type, error, tb):
+        # Measurement completion and evidence completeness are distinct facts
+        # (PQ #2315). A finished campaign with only profiler/telemetry gaps
+        # keeps its result in development mode, stamped dev_uncertified with
+        # the missing instruments named. Certified mode keeps the refusal. A
+        # real campaign exception, and a monitor that never stopped, stay
+        # failures in both modes: safety is never a warning.
         self.stopped.set()
         for thread in self.threads:
             thread.join(timeout=12)
             if thread.is_alive():
                 self.result['errors'].append(dict(instrument='shutdown', error='monitor did not stop'))
         self.validate_result()
+        errors = self.result['errors']
+        cleanup_failed = self.cleanup_failed()
+        if error is not None or cleanup_failed:
+            self.result.update(finished_unix=time.time(),
+                status='failed',
+                campaign_error=None if error is None else repr(error))
+            final = json.dumps(self.result, indent=2)+'\n'
+            (self.out/'result.json').write_text(final)
+            (self.out/'progress.json').write_text(final)
+            if error is None:
+                # Name the failing recorder entries: result.json may live in a
+                # temporary directory that is gone before anyone can read it.
+                raise RuntimeError('campaign completed but required profiler evidence is incomplete: '
+                                   + describe_errors(errors))
+            return False
+        if errors:
+            from prismaquant import dev_mode as _dev_mode
+            if _dev_mode.dev_mode_enabled():
+                instruments = sorted({str(row.get('instrument', '?')) for row in errors})
+                self.result.update(_dev_mode.dev_stamp(),
+                    evidence_complete=False, incomplete_instruments=instruments,
+                    finished_unix=time.time(), status='complete', campaign_error=None)
+                final = json.dumps(self.result, indent=2)+'\n'
+                (self.out/'result.json').write_text(final)
+                (self.out/'progress.json').write_text(final)
+                _dev_mode.dev_warning('campaign completed but required profiler evidence is incomplete: '
+                                      + describe_errors(errors)
+                                      + ' -- result retained as complete without speed, energy or residency qualification')
+                return False
         self.result.update(finished_unix=time.time(),
-            status='failed' if error or self.result['errors'] else 'complete',
-            campaign_error=None if error is None else repr(error))
+            status='failed' if errors else 'complete',
+            campaign_error=None)
         final = json.dumps(self.result, indent=2)+'\n'
         (self.out/'result.json').write_text(final)
         (self.out/'progress.json').write_text(final)
-        if error is None and self.result['errors']:
+        if errors:
             # Name the failing recorder entries: result.json may live in a
             # temporary directory that is gone before anyone can read it.
             raise RuntimeError('campaign completed but required profiler evidence is incomplete: '
-                               + describe_errors(self.result['errors']))
+                               + describe_errors(errors))
 
     def validate_result(self):
         pass
@@ -228,13 +273,28 @@ class AnchorObserver(CaptureObserver):
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
 
-    def observation_error(self, error):
-        self.result['errors'].append(dict(instrument='anchor_profiler', error=repr(error)))
+    @contextmanager
+    def profiler_lifetime(self, profiler):
+        def stop(error_info):
+            try:
+                return profiler.__exit__(*error_info)
+            except BaseException as error:
+                self.observation_error(error, cleanup=True)
+                raise
+
+        profiler.__enter__()
+        try:
+            yield
+        except BaseException:
+            if not stop(sys.exc_info()):
+                raise
+        else:
+            stop((None, None, None))
 
     @contextmanager
     def collection_window(self, profiler, record):
         if self.window_seconds is None:
-            with profiler:
+            with self.profiler_lifetime(profiler):
                 yield
             return
         cancel = threading.Event()
@@ -251,7 +311,7 @@ class AnchorObserver(CaptureObserver):
                 # is thread-local. One owner starts AND drains/stops the CUDA-only
                 # profiler. Stop drains pending CUDA activity instead of toggling
                 # it off before finalization. The anchor stays on its calling thread.
-                with profiler:
+                with self.profiler_lifetime(profiler):
                     started = time.monotonic()
                     ready.set()
                     returned = cancel.wait(self.window_seconds)
@@ -312,7 +372,11 @@ class AnchorObserver(CaptureObserver):
                     size = path.stat().st_size
                     if not 0 < size <= self.trace_max_bytes:
                         record['rejected_trace_bytes'] = size
-                        path.unlink()
+                        try:
+                            path.unlink()
+                        except BaseException as error:
+                            self.observation_error(error, cleanup=True)
+                            raise
                         raise RuntimeError('anchor trace exceeded its exported byte cap or was empty')
                     record['cuda_events'] = sum(
                         event.device_type == torch.autograd.DeviceType.CUDA
@@ -358,7 +422,7 @@ class AnchorObserver(CaptureObserver):
         if self.result['anchor_calls']:
             for kind in ('netdata', 'python_sampler'):
                 if not self.result[kind].get('samples'):
-                    self.observation_error(RuntimeError(f'no {kind} sample was recorded'))
+                    self.observation_error(RuntimeError(f'no {kind} sample was recorded'), instrument=kind)
 
 
 def selected_anchor_command(command):

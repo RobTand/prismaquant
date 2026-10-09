@@ -6,6 +6,7 @@ import gc
 import hashlib
 import json
 from pathlib import Path
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 import torch
@@ -130,6 +131,160 @@ def authority_case(original_runner, original_model, tmp_path):
                session=authority['session'], entries_path=Path(policy['directory']) / authority['session']['generation'] / 'entries',
                base=base, prepared=prepared, execution=execution, claim_path=claim_path,
                final=final, final_input=final_input, tmp=tmp_path)
+
+
+@pytest.mark.parametrize("owner", ["static", "preparation", "session"])
+def test_original_owners_keep_the_512_by_512_draw(authority_case, owner):
+    case = authority_case
+    preparation = copy.deepcopy(case["prepared"])
+    calibration = preparation["calibration"]
+    # Same flat token payload/digest and same token count, different shape.
+    calibration["shape"] = [128, 2048]
+    calibration["provenance"]["nsamples"] = 128
+    calibration["provenance"]["seqlen"] = 2048
+    with pytest.raises(RuntimeError, match="full calibration shape"):
+        if owner == "static":
+            authority = {key: copy.deepcopy(case["authority"][key])
+                         for key in sg.ORIGINAL_STATIC_AUTHORITY_KEYS}
+            authority["calibration"] = calibration
+            sg.normalize_original_source_static_authority(authority)
+        elif owner == "preparation":
+            sg.normalize_original_diagnostic_preparation(preparation)
+        else:
+            sg.original_diagnostic_session_identity(
+                base_plan=case["base"], base_plan_sha256="a" * 64, prepared=preparation,
+                execution_sha256=case["base"]["execution"]["sha256"])
+
+
+def test_original_draw_requires_its_minimum_fit_tokens(authority_case):
+    preparation = copy.deepcopy(authority_case["prepared"])
+    del preparation["calibration"]["provenance"]["fit_tokens_min"]
+    with pytest.raises(RuntimeError, match="provenance fields"):
+        sg.normalize_original_diagnostic_preparation(preparation)
+
+
+@pytest.mark.parametrize("dev_mode", ["1", "0"])
+def test_session_identity_directly_compares_shape_after_preparation_validation(
+        authority_case, monkeypatch, dev_mode):
+    case = authority_case
+    preparation = copy.deepcopy(case["prepared"])
+    # Isolate the session join: upstream preparation validation has its own
+    # original-shape tests above. Keep the actual flat tensor digest unchanged.
+    preparation["calibration"]["shape"] = [128, 2048]
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    monkeypatch.setattr(sg, "normalize_original_diagnostic_preparation", sg._snapshot)
+    with pytest.raises(RuntimeError, match="prepared/base full calibration shape"):
+        sg.original_diagnostic_session_identity(
+            base_plan=case["base"], base_plan_sha256="a" * 64, prepared=preparation,
+            execution_sha256=case["base"]["execution"]["sha256"])
+
+
+def test_original_json_snapshot_keeps_direct_order_unicode_and_owned_values():
+    value = {10: ['café', '\ud800', -0.0], 9: (True, None, 1.0)}
+    expected = json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+    snapshot = sg._snapshot(value)
+    assert snapshot == expected
+    assert list(snapshot) == ['9', '10']
+    assert type(snapshot['9']) is list
+    snapshot['10'].append('independent mutation')
+    assert value[10] == ['café', '\ud800', -0.0]
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), float('-inf'),
+                                  {'mixed': 1, 2: 'key'}, {'not_json': object()}])
+def test_original_json_snapshot_keeps_stdlib_strict_error(value):
+    with pytest.raises((TypeError, ValueError)) as previous:
+        json.dumps(value, sort_keys=True, allow_nan=False)
+    with pytest.raises(type(previous.value)) as current:
+        sg._snapshot(value)
+    assert str(current.value) == str(previous.value)
+    assert current.value.__cause__ is None
+
+
+def test_original_identity_comparison_reuses_stage_owner_without_changing_errors():
+    from prismaquant.stage_inputs import same
+
+    assert sg._same.func is same
+    assert sg._same.keywords == {'contract': sg._contract}
+    assert same({'key': 1}, {'key': 1}, 'source') is None
+    assert sg._same({'key': 1}, {'key': 1}, 'source') is None
+    with pytest.raises(ValueError) as default:
+        same('a', 'b', 'source')
+    with pytest.raises(RuntimeError) as original:
+        sg._same('a', 'b', 'source')
+    assert str(default.value) == 'source: identity mismatch'
+    assert str(original.value) == 'original generation: source: identity mismatch'
+    assert default.value.__cause__ is None and original.value.__cause__ is None
+
+
+def test_original_execution_retains_nullable_mapped_selectors_and_mapping_envelope():
+    value = MappingProxyType({'schema': 'prismaquant.joint_aura.source_execution.v1',
+        'modules': MappingProxyType({'u': {'attention': None, 'experts': {'é': '\ud800', 'a': None}}})})
+    assert sg._source_execution(value) is value
+
+
+@pytest.mark.parametrize(('modules', 'message'), [
+    ([], 'original execution modules must be an object'),
+    ({}, 'original execution has no resolved selectors'),
+    ({2: {'attention': 'eager'}}, 'invalid original execution selector'),
+    ({'u': {}}, 'invalid original execution selector'),
+    ({'u': {'unknown': 'eager'}}, 'invalid original execution selector'),
+    ({'u': {'attention': True}}, 'original execution u.attention needs resolved selector values'),
+    ({'u': {'attention': float('nan')}}, 'original execution u.attention needs resolved selector values'),
+    ({'u': {'attention': {'x': 1}}}, 'original execution u.attention needs resolved selector values'),
+    ({'u': {'attention': {1: 'eager'}}}, 'original execution u.attention needs resolved selector values'),
+    ({'u': {'attention': {'x': ''}}}, 'original execution u.attention needs resolved selector values'),
+    ({'u': {'experts': []}}, 'original execution u.experts needs resolved selector values'),
+    ({'u': {'experts': ''}}, 'original execution u.experts needs resolved selector values'),
+    ({'u': {'experts': {}}}, 'original execution u.experts needs resolved selector values'),
+])
+def test_original_execution_retains_exact_selector_refusals(modules, message):
+    value = {'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': modules}
+    with pytest.raises(RuntimeError) as caught:
+        sg._source_execution(value)
+    assert str(caught.value) == 'original generation: ' + message
+    assert caught.value.__cause__ is None
+
+
+def test_original_execution_retains_exact_string_types():
+    class Selector(str):
+        pass
+
+    for modules, message in [
+        ({Selector('u'): {'attention': 'eager'}}, 'invalid original execution selector'),
+        ({'u': {'attention': Selector('eager')}}, 'original execution u.attention needs resolved selector values'),
+        ({'u': {'attention': {Selector('a'): 'eager'}}}, 'original execution u.attention needs resolved selector values'),
+    ]:
+        value = {'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': modules}
+        with pytest.raises(RuntimeError) as caught:
+            sg._source_execution(value)
+        assert str(caught.value) == 'original generation: ' + message
+
+
+def test_source_execution_identity_keeps_direct_ascii_snapshot_and_selector_ownership():
+    selectors = {10: 'é', 9: ['\ud800', None, -0.0]}
+    model = torch.nn.Module()
+    model.config = SimpleNamespace(_attn_implementation=selectors, _experts_implementation='grouped_mm')
+    identity = source_execution_identity(model)
+    expected = json.loads(json.dumps(selectors, sort_keys=True, allow_nan=False))
+    assert identity == {'schema': 'prismaquant.joint_aura.source_execution.v1',
+                        'modules': {'': {'attention': expected, 'experts': 'grouped_mm'}}}
+    assert list(identity['modules']['']['attention']) == ['9', '10']
+    selectors[9].append('caller mutation')
+    assert identity['modules']['']['attention'] == expected
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), float('-inf'), object(),
+                                  {'mixed': 1, 2: 'key'}])
+def test_source_execution_identity_keeps_direct_json_refusal(value):
+    model = torch.nn.Module()
+    model.config = SimpleNamespace(_attn_implementation=value)
+    with pytest.raises((TypeError, ValueError)) as previous:
+        json.dumps(value, sort_keys=True, allow_nan=False)
+    with pytest.raises(type(previous.value)) as current:
+        source_execution_identity(model)
+    assert str(current.value) == str(previous.value)
+    assert current.value.__cause__ is None
 
 
 def _forbid_source_work(case, monkeypatch):

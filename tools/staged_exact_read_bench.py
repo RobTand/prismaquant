@@ -881,6 +881,7 @@ CHILDREN = {"paths": child_paths, "ceiling": child_ceiling,
 
 
 def child_main(args) -> int:
+
     slice_doc = load_slice(args.slice, args.slice_sha256)
     result = CHILDREN[args.child](args, slice_doc)
     result["tree"] = str(Path(__import__("prismaquant").__file__).resolve().parents[1])

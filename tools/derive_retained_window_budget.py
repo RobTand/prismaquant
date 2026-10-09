@@ -25,11 +25,8 @@ import json
 import os
 from pathlib import Path
 import pickle
-import re
 import sys
 import time
-
-_LAYER = re.compile(r'^.*\.layers\.(\d+)(?:\.|$)')
 
 
 def _sha256(path):
@@ -73,6 +70,7 @@ def main(argv=None):
         normalize_retained_execution, targets_from_statistics_plan,
     )
     from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
+    from prismaquant.qnames import LAYER_QNAME
 
     if args.out.resolve() == args.plan.resolve():
         raise SystemExit('refusing to overwrite the input plan')
@@ -103,7 +101,7 @@ def main(argv=None):
         measured = tuple(fmt for fmt in menu if fmt not in _ZERO_COST_FORMATS)
         if not measured:
             raise SystemExit(f'{name}: prepared menu has no measured candidate')
-        match = _LAYER.match(name)
+        match = LAYER_QNAME.match(name)
         if match is None:
             raise SystemExit(f'{name}: no decoder layer owns this target')
         formats_by_name[name] = measured

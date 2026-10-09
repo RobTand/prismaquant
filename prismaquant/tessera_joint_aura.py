@@ -801,6 +801,136 @@ def _verify_measured_hessian_identity(name, row, anchor, provenance_hessian,
         _same(value, provenance_hessian.get(key), f"{name}: measured H {key}")
 
 
+def _read_campaign_metadata(inputs, reuse_policy):
+    """Read and validate the census-wide campaign metadata of one load.
+
+    The bound files are hashed and parsed here, and every census-wide gate
+    runs. The result is the state the walk reads from; a caller that walks
+    several scopes in one process keeps it through ``metadata_memo`` (#1492).
+    """
+    from tools.dispatch_tessera_campaign import _require_receipts
+
+    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
+    census = json.loads(paths["census"].read_text())
+    plan = json.loads(paths["campaign_plan"].read_text())
+    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
+    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
+    _same(paths["campaign_receipts"].resolve(),
+          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
+    rows = plan["rows"]
+    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
+    _require_receipts(paths["campaign_plan"].parent, len(rows))
+    owners, groups = {}, {}
+    for row in rows:
+        for name in row["members"]:
+            _require(name not in owners, f"duplicate campaign unit {name}")
+            owners[name] = Path(row["dir"])
+        for group in row["groups"]:
+            _require(group not in groups, f"duplicate campaign group {group}")
+            groups[group] = row["row_id"]
+    names = set(census["unit_shapes"])
+    _same(set(owners), names, "complete census roster")
+    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
+    _same(len(names), inputs["required_source_units"], "declared full source unit count")
+    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
+    for group, members in census["anchor_groups"].items():
+        owner = next(row for row in rows if row["row_id"] == groups[group])
+        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
+
+    payload = pickle.loads(paths["merged_cost"].read_bytes())
+    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
+    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
+    _same(set(payload["costs"]), names, "complete merged cost roster")
+    provenance = payload["provenance"]
+    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
+    _same(provenance.get("model"), census["model"], "campaign model")
+    _same(plan["model"], census["model"], "planned model")
+    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
+    _same(provenance.get("campaign_fanout", {}).get("rows"),
+          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
+
+    manifest = load_json_file(paths["merged_checkpoint"])
+    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
+    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
+    identity = manifest["identity"]
+    declared_seal = manifest.get("identity_sha256")
+    if dev_mode_enabled():
+        # Rob's dev-mode directive (2026-09-19): the seal returns at the
+        # artifact gate, not the run gate. This recompute is the run gate's
+        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
+        # in-process profile on action 282c61140ba7 (2026-09-20) over the
+        # 7.2 GB merged checkpoint -- and the digest it would produce is
+        # already declared by the manifest. The declared value is checked for
+        # 64-hex shape and RECORDED, never silently trusted: the walk still
+        # hands it to every unit envelope below (``_load_unit``), and the run
+        # stays ``dev_uncertified`` through the existing stamp.
+        _require_sha256(declared_seal, "campaign checkpoint seal")
+        dev_warning(
+            "campaign checkpoint seal not recomputed under dev mode; using "
+            f"the manifest's declared identity_sha256 {declared_seal} "
+            "(recorded, not gated)")
+        seal = declared_seal
+    else:
+        # The checkpoint is parsed from JSON, so its identity is already
+        # normalized (string keys, dict/list containers, JSON scalars) and the
+        # seal can stream the canonical bytes into the digest. The generic
+        # helper normalizes first, which holds the encoded text, a second full
+        # graph and the second encoded text at once; on a checkpoint this size
+        # that is the difference between fitting a bounded envelope and being
+        # killed by it. Same digest -- held by
+        # tests/test_canonical_json_normalized.py.
+        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
+        _same(seal, declared_seal, "campaign checkpoint seal")
+    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
+    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
+    _same(set(identity["units"]), names, "complete checkpoint identity roster")
+    listed = [row["qname"] for row in manifest["units"]]
+    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
+    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
+        value = identity.get(key)
+        _require(isinstance(value, str) and len(value) == 64 and
+                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
+    # The one encoder identity a run can re-derive is the installed package's
+    # own. Refuse anything else here -- before the per-cell origin walk reads
+    # or decodes a wire -- unless the plan named that exact digest.
+    from . import tessera_campaign as tc
+    encoder_source_reuse = resolve_encoder_source_reuse(
+        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        reuse_policy, where="joint anchor checkpoint encoder source")
+    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
+    for row in manifest["units"]:
+        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+
+    return SimpleNamespace(paths=paths, census=census, plan=plan, rows=rows, owners=owners, groups=groups, names=names, payload=payload, provenance=provenance, manifest=manifest, identity=identity, declared_seal=declared_seal, seal=seal, encoder_source_reuse=encoder_source_reuse, parts=parts)
+
+
+def _campaign_metadata(inputs, reuse_policy, memo):
+    """The validated campaign metadata, read once per memo (#1492).
+
+    With no memo every load reads and validates the bound files, as before.
+    With a memo the first load does, and each later load reuses that state
+    while the bound records and the stat fence of all five files hold. The
+    digest check on the first load authenticates the bytes; the fence only
+    admits reusing them. A drifted file is read and verified again, and a
+    digest mismatch still refuses (the same contract as ``read_bound``).
+    """
+    if memo is None:
+        return _read_campaign_metadata(inputs, reuse_policy)
+    from .stage_inputs import bound_stat_fence
+    records = tuple((key, inputs[key]["path"], inputs[key]["sha256"])
+                    for key in HEAD_WALK_INPUT_KEYS)
+    key = (records, inputs.get("required_source_units"),
+           inputs.get("required_campaign_groups"), repr(reuse_policy))
+    fence = tuple(bound_stat_fence(Path(path)) for _, path, _ in records)
+    held = memo.get("metadata")
+    if held is not None and held[0] == key and held[1] == fence:
+        return held[2]
+    metadata = _read_campaign_metadata(inputs, reuse_policy)
+    memo["metadata"] = (key, fence, metadata)
+    memo["loads"] = memo.get("loads", 0) + 1
+    return metadata
+
+
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
@@ -810,7 +940,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
                                head_walk_workers=None, head_walk_quantum=None,
-                               progress_allowance_s=None):
+                               progress_allowance_s=None, metadata_memo=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -951,9 +1081,17 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     full-core fan-out); until then this parameter is the producer/consumer
     contract under test, not the production prepare path, which passes
     nothing here.
+
+    ``metadata_memo`` is an optional caller-owned dict. With it the census-
+    wide metadata is read, hashed and validated once and reused by every
+    later load in the process while the bound records and their stat fences
+    hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
+    reused state is read-only for the walk.
     """
-    from .production_weight_cache import _cache_weight_filename
-    from tools.dispatch_tessera_campaign import _require_receipts
+    from .production_weight_cache import (
+        _cache_weight_filename,
+        require_injective_cache_filenames,
+    )
 
     reuse_policy = normalize_historical_encoder_reuse(historical_encoder_reuse)
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
@@ -988,96 +1126,22 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # that reads as a verified campaign input.
     _require(unit_scope is None or not verify_payloads,
              "a scoped read cannot also verify the complete campaign payload")
-    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
-    census = json.loads(paths["census"].read_text())
-    plan = json.loads(paths["campaign_plan"].read_text())
-    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
-    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
-    _same(paths["campaign_receipts"].resolve(),
-          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
-    rows = plan["rows"]
-    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
-    _require_receipts(paths["campaign_plan"].parent, len(rows))
-    owners, groups = {}, {}
-    for row in rows:
-        for name in row["members"]:
-            _require(name not in owners, f"duplicate campaign unit {name}")
-            owners[name] = Path(row["dir"])
-        for group in row["groups"]:
-            _require(group not in groups, f"duplicate campaign group {group}")
-            groups[group] = row["row_id"]
-    names = set(census["unit_shapes"])
-    _same(set(owners), names, "complete census roster")
-    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
-    _same(len(names), inputs["required_source_units"], "declared full source unit count")
-    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
-    for group, members in census["anchor_groups"].items():
-        owner = next(row for row in rows if row["row_id"] == groups[group])
-        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
-
-    payload = pickle.loads(paths["merged_cost"].read_bytes())
-    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
-    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
-    _same(set(payload["costs"]), names, "complete merged cost roster")
-    provenance = payload["provenance"]
-    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
-    _same(provenance.get("model"), census["model"], "campaign model")
-    _same(plan["model"], census["model"], "planned model")
-    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
-    _same(provenance.get("campaign_fanout", {}).get("rows"),
-          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
-
-    manifest = load_json_file(paths["merged_checkpoint"])
-    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
-    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
-    identity = manifest["identity"]
-    declared_seal = manifest.get("identity_sha256")
-    if dev_mode_enabled():
-        # Rob's dev-mode directive (2026-09-19): the seal returns at the
-        # artifact gate, not the run gate. This recompute is the run gate's
-        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
-        # in-process profile on action 282c61140ba7 (2026-09-20) over the
-        # 7.2 GB merged checkpoint -- and the digest it would produce is
-        # already declared by the manifest. The declared value is checked for
-        # 64-hex shape and RECORDED, never silently trusted: the walk still
-        # hands it to every unit envelope below (``_load_unit``), and the run
-        # stays ``dev_uncertified`` through the existing stamp.
-        _require_sha256(declared_seal, "campaign checkpoint seal")
-        dev_warning(
-            "campaign checkpoint seal not recomputed under dev mode; using "
-            f"the manifest's declared identity_sha256 {declared_seal} "
-            "(recorded, not gated)")
-        seal = declared_seal
-    else:
-        # The checkpoint is parsed from JSON, so its identity is already
-        # normalized (string keys, dict/list containers, JSON scalars) and the
-        # seal can stream the canonical bytes into the digest. The generic
-        # helper normalizes first, which holds the encoded text, a second full
-        # graph and the second encoded text at once; on a checkpoint this size
-        # that is the difference between fitting a bounded envelope and being
-        # killed by it. Same digest -- held by
-        # tests/test_canonical_json_normalized.py.
-        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
-        _same(seal, declared_seal, "campaign checkpoint seal")
-    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
-    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
-    _same(set(identity["units"]), names, "complete checkpoint identity roster")
-    listed = [row["qname"] for row in manifest["units"]]
-    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
-    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
-        value = identity.get(key)
-        _require(isinstance(value, str) and len(value) == 64 and
-                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
-    # The one encoder identity a run can re-derive is the installed package's
-    # own. Refuse anything else here -- before the per-cell origin walk reads
-    # or decodes a wire -- unless the plan named that exact digest.
-    from . import tessera_campaign as tc
-    encoder_source_reuse = resolve_encoder_source_reuse(
-        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
-        reuse_policy, where="joint anchor checkpoint encoder source")
-    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
-    for row in manifest["units"]:
-        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+    # The walk's own admission, one refusal naming every unbound key: read
+    # with a subscript a missing chain key was a bare ``KeyError`` deep in the
+    # read, on a plan the grammar should have refused (PQ #1293).
+    _require(bool(inputs), "the campaign chain ``inputs`` block binds nothing; "
+             f"it must bind {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    missing = [key for key in HEAD_WALK_INPUT_KEYS if key not in inputs]
+    _require(not missing, "campaign chain input(s) not bound in the plan's "
+             f"``inputs`` block: {', '.join(missing)}")
+    metadata = _campaign_metadata(inputs, reuse_policy, metadata_memo)
+    (paths, census, plan, rows, owners, groups, names, payload, provenance,
+     manifest, identity, declared_seal, seal, encoder_source_reuse, parts) = (
+        metadata.paths, metadata.census, metadata.plan, metadata.rows,
+        metadata.owners, metadata.groups, metadata.names, metadata.payload,
+        metadata.provenance, metadata.manifest, metadata.identity,
+        metadata.declared_seal, metadata.seal, metadata.encoder_source_reuse,
+        metadata.parts)
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
@@ -1092,6 +1156,34 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # per cell, and the join reaches the same file the walk verifies.
     owner_roots = {str(directory): Path(directory).resolve()
                    for directory in set(map(str, owners.values()))}
+    # Only measured formats name render reads. Share this set with the walk's
+    # anchor coverage check so cost-only rows cannot widen the refusal (#2231).
+    measured_formats_by_name = {
+        name: {fmt for fmt, row in payload["costs"][name].items()
+               if row.get("output_mse_measured") is True}
+        for name in names
+    }
+    # #2219: the walk reads each unit's renders from its owner row's cache
+    # directory under the mangled leaf, and the payload is the bare tensor, so
+    # a colliding roster would point two units' cells at one render. Refuse
+    # per owner root before the walk reads anything. Group by the RESOLVED
+    # owner root, not the directory string as spelled (#2231): two rows
+    # naming one cache directory through different spellings are one cache,
+    # and a pair colliding across them must not reach the walk unrefused.
+    names_by_owner: dict[Path, list[str]] = {}
+    for _name, _directory in owners.items():
+        names_by_owner.setdefault(
+            owner_roots[str(_directory)], []).append(_name)
+    for _root, _owned in sorted(
+            names_by_owner.items(), key=lambda item: str(item[0])):
+        require_injective_cache_filenames(
+            (
+                (_name, fmt)
+                for _name in _owned
+                for fmt in measured_formats_by_name[_name]
+            ),
+            where=f"joint aura render cache @ {_root}",
+        )
     mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)
     if unit_scope is not None:
@@ -1240,9 +1332,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         anchors = {anchor["format_name"]: anchor for anchor in state["anchors"]}
         _require(anchors and len(anchors) == len(state["anchors"]) and
                  set(anchors) == set(state["wire_records"]), f"{name}: anchor/receipt coverage differs")
-        measured = {fmt for fmt, row in payload["costs"][name].items()
-                    if row.get("output_mse_measured") is True}
-        _same(set(anchors), measured, f"{name}: measured payload/journal coverage")
+        _same(set(anchors), measured_formats_by_name[name], f"{name}: measured payload/journal coverage")
         unit = identity["units"][name]
         _same(unit["weight"]["shape"], census["unit_shapes"][name], f"{name}: census source shape")
         unit_cells, fences, events = {}, {}, []
@@ -1438,7 +1528,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             stat = path.stat()
             return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
         before = [signature(p) for p in (wire, render)]
-        _same(_sha(wire), cell["record"]["blob_sha256"], f"{pair}: wire checksum")
+        _require(_sha(wire) == cell["record"]["blob_sha256"], f"{pair}: wire checksum changed")
         digest = None if defer_render_hashes else _sha(render)
         after = [signature(p) for p in (wire, render)]
         _same(after, before, f"{pair}: input files changed while hashing")
@@ -1795,7 +1885,38 @@ def _qualification_cells_sha256(cells):
         rows(), prefix=QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
 
 
-def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
+def default_file_load_workers() -> int:
+    """The prepare's render-file load pool width, bounded by assigned CPUs.
+
+    One derivation for one knob: ``prepare_cache``'s own ``file_load_workers``
+    default and the joint plan's omitted ``file_hash_workers`` (which sizes the
+    prepare's render loads and, under ``verify_payloads``, the anchor file-hash
+    pool). Four threads is the measured PWC load curve
+    (``ProductionWeightCache.prefetch``: 496 entries, ~25 s serial -> ~6 s at
+    4); the width never exceeds the CPUs PrismaBuild assigned, the same bound
+    an explicit plan value must pass (RobTand/prismaquant#1382). No
+    storage-derived default is claimed.
+    """
+    return max(1, min(4, len(os.sched_getaffinity(0))))
+
+
+def resolve_file_hash_workers(config: Mapping) -> int:
+    """The joint prepare's render-file/hash pool width for one plan.
+
+    An explicit ``file_hash_workers`` wins and keeps the refusals it always
+    had; an omitted key takes ``prepare_cache``'s own default derivation
+    instead of loading renders serially (RobTand/prismaquant#1382).
+    """
+    if "file_hash_workers" not in config:
+        return default_file_load_workers()
+    value = config["file_hash_workers"]
+    _require(type(value) is int and value > 0, "positive file_hash_workers required")
+    _require(value <= len(os.sched_getaffinity(0)),
+             "file_hash_workers exceeds PB-assigned CPU affinity")
+    return value
+
+
+def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=None,
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
                   qualification_guard=None, qualification_journal=None,
@@ -1824,6 +1945,11 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from . import format_registry as fr
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
+    _require(file_load_workers is None or
+             (type(file_load_workers) is int and file_load_workers > 0),
+             "positive file_load_workers required")
+    if file_load_workers is None:
+        file_load_workers = default_file_load_workers()
     _require(type(progress_base) is int and progress_base >= 0,
              "progress_base must be the non-negative count the run already reported")
     policy = normalize_qualification_window(qualification_window)
@@ -1882,7 +2008,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         journal, journal_sha, completed = prepare_journal(
             qualification_journal, stage=QUALIFICATION_STAGE,
             resume=qualification_resume, identity=identity,
-            qnames=sorted(data.formats_by_qname))
+            qnames=sorted(data.formats_by_qname), seal_fields={'implementation_sha256'})
         if sealed_replay is not None:
             from .joint_replay_frontier import ROSTER_KEY, require_replay_matches
             _require(prewarm_phase_starts is not None,
@@ -2317,6 +2443,44 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     # A plan that names a historical encoder seal is the only place one may be
     # admitted; the strict default is the same as before this field existed.
     normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
+    # The campaign chain block is the one input every command reads
+    # (``load_measured_anchor_input``, the census read under ``synthesize``).
+    # Read with a subscript it surfaced as a bare ``KeyError: 'inputs'``
+    # raised inside the GPU action, after the projection prewarm had already
+    # allocated -- indistinguishable from an admitted plan that failed later
+    # (PQ #1293, preserved run-01 S3). Stated here it is the cheap input
+    # refusal the plan grammar owes: by name, before any command, before any
+    # device. Only keys that ARE bound are shape-checked, shape-only, with no
+    # read behind the binding: a Stage B quantum plan binds a subset (PQ
+    # #1024), and a catalog extension binds inputs beyond the head walk's.
+    _require(isinstance(config.get("inputs"), dict),
+             "joint anchor plan: the campaign chain ``inputs`` block is required; "
+             f"it binds {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    # Partial binding is legal here (a Stage B quantum plan binds a subset,
+    # PQ #1024, and a catalog extension binds keys beyond the head walk's);
+    # only the walk loader (``load_measured_anchor_input``) requires the
+    # complete chain. A binding's vocabulary is closed -- exactly
+    # ``{path, sha256}``, the shape the campaign scope compares
+    # (``SCOPE_ARTIFACT_BINDINGS``) -- so a binding with extra metadata keys
+    # is refused rather than silently carried.
+    for key in HEAD_WALK_INPUT_KEYS:
+        if key in config["inputs"]:
+            binding = config["inputs"][key]
+            _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
+                     and isinstance(binding["path"], str)
+                     and isinstance(binding["sha256"], str),
+                     f"campaign chain input {key}: exactly a bound path/SHA256 "
+                     "pair is required")
+    # Required, not newly: every prepare arm reads ``canonical_capture`` bare
+    # (``_prepare_source_owner``, ``prepare_cache``) and a campaign scope's
+    # artifact bindings always name it, so a plan without one never executed
+    # -- it died later, after the projection prewarm had allocated (PQ #1293,
+    # run-01 S3). Stating it at admission names the field the grammar owes.
+    _require(isinstance(config.get("canonical_capture"), dict)
+             and set(config["canonical_capture"]) == {"path", "sha256"}
+             and isinstance(config["canonical_capture"]["path"], str)
+             and isinstance(config["canonical_capture"]["sha256"], str),
+             "canonical capture: exactly a bound path/SHA256 pair is required")
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
@@ -2354,10 +2518,19 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
         _require(Path(execution['boundary_storage']['directory']).resolve().is_relative_to(
                  Path(config['output_root']).resolve()),
                  'diagnostic joint boundaries must be owned by pilot output root')
+    if config.get("joint_eval_draw") is not None:
+        from .tessera_joint_eval_panel import evaluation_execution
+        evaluation_execution(config)
+        _require(execution.get("operator_windows") is not None,
+                 "independent joint evaluation requires operator observation windows")
+        _require(Path(execution["boundary_storage"]["directory"]).resolve().is_relative_to(
+            Path(config["output_root"]).resolve()),
+            "independent joint boundaries must be owned by the research output root")
     if config.get("head_walk_workers") is not None:
         _head_walk_worker_count(config["head_walk_workers"])
-    _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
-             "positive file_hash_workers required")
+    if "file_hash_workers" in config:
+        _require(type(config["file_hash_workers"]) is int and config["file_hash_workers"] > 0,
+                 "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
                           ("probe_microbatch", 1), ("n_probes", 2)):
         _require(type(execution.get(name)) is int and execution[name] >= minimum,
@@ -2518,23 +2691,18 @@ def seed_source_identity_cache(config, root):
     if source.resolve() == destination.resolve():
         return destination
     if destination.exists():
-        _same(_sha(destination), binding["sha256"],
-              "existing output source identity cache")
+        _require(_sha(destination) == binding["sha256"],
+                 "existing output source identity cache: artifact checksum changed")
     else:
         atomic_write_bytes(destination, source.read_bytes())
-        _same(_sha(destination), binding["sha256"],
-              "seeded source identity cache")
+        _require(_sha(destination) == binding["sha256"],
+                 "seeded source identity cache: artifact checksum changed")
     return destination
 
 
-#: The prepared-record bindings that name DIGESTS of things a dev iteration
-#: legitimately changes: which plan the prepare ran under, and which producer
-#: package made it, plus the projection backend's numerical qualification.
-#: In dev mode these are records: ``seal_check`` prints the difference and
-#: reuses the existing preparation without rewriting its completion or cache.
-#: Model identity, calibration, roster and reader remain walls in both modes.
-#: A changed projection backend requires deliberate fresh measurement when it
-#: changes numerics; recording this seal never certifies an old measurement.
+#: Plan/package/backend digests retain their recorded-versus-running shortcut.
+#: Actual calibration, coordinate, shape and dtype joins remain both-mode
+#: comparability checks; owned wire/render/control bytes keep their digests.
 _DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256", "projection_backend")
 
 
@@ -2643,20 +2811,13 @@ def _apply_device_envelope(device, device_bytes, *, where):
     return enforce_device_envelope(device, device_bytes, where=where)
 
 
-def _restores_activation_scale_env(function):
-    """Scope ``execute``'s activation-scale write to the call that makes it.
+def restores_activation_scale_env(function):
+    """Restore the caller's activation-scale environment on every exit.
 
-    ``execute`` sets ``PRISMAQUANT_PROD_ACT_SCALES`` from the admitted plan so
-    the render path it drives reads the campaign's value.  As a process entry
-    point that is right; called in-process it leaves the value behind.  Every
-    admitted plan carries ``"0"`` (``load_joint_anchor_plan``), and that is the input
-    which turns the render scorer's activation clip OFF for everything that
-    runs afterwards (``production_weight_cache.py``, in
-    ``_local_forward_render_score``).  Plenty of code outside ``execute``
-    reads the key -- the render scorer is exactly that code, which is why the
-    leak bites -- but nothing needs THIS command's value to still be set after
-    ``execute`` has returned.  So restoring it on the way out leaves the
-    campaign byte-identical and leaves the process as it was found.
+    Joint execution, adjoint capture and layer quantum entry points set the
+    admitted plan's policy for their own render workload. No caller needs that
+    policy after return. The shared finally preserves an unset key, an empty
+    value or any prior value, including when setup or the workload raises.
     """
     absent = object()
 
@@ -2676,7 +2837,7 @@ def _restores_activation_scale_env(function):
     return wrapper
 
 
-@_restores_activation_scale_env
+@restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None,
             data_manifest_sha256=None):
@@ -2808,9 +2969,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     if profiler is not None:
         profiler.enable()
     try:
-        file_hash_workers = config.get("file_hash_workers", 1)
-        _require(type(file_hash_workers) is int and 0 < file_hash_workers <= len(os.sched_getaffinity(0)),
-                 "file_hash_workers exceeds PB-assigned CPU affinity")
+        file_hash_workers = resolve_file_hash_workers(config)
         # Every capture-free identity gate runs first: an unqualified runtime,
         # kernel source digest, build flag or binary sha256 is refused in
         # seconds rather than after hours of measured anchor input (#553).
@@ -2912,10 +3071,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
-        from .tessera_joint_eval_panel import select_panel
-        eval_ids, eval_panel = select_panel(ids, calibration, config.get('joint_eval'))
+        from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+        if command == "prepare":
+            eval_ids, eval_calibration, eval_panel = ids, calibration, None
+        else:
+            eval_ids, eval_calibration, eval_panel = select_evaluation(ids, calibration, config)
+            execution = evaluation_execution(config)
         if eval_panel is not None:
-            result['joint_eval'] = eval_panel
+            result["joint_eval"] = eval_panel
+            result["evaluation_calibration_input"] = eval_calibration
         if command == "prepare":
             if config.get("qualification_window") is not None:
                 from .memory_management import CaptureMemoryGuard
@@ -3056,9 +3220,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 max_file_bytes=_prepare_file_read_bound(data,
                     max_render_bytes=config["max_render_bytes"]))
             result["wire_validation"] = HISTORICAL_WIRE_VALIDATION
-            _live_targets(runner, data.formats_by_qname)
-            formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
-            expected_rows = data.formats_by_qname
+            from .tessera_joint_eval_panel import evaluation_formats
+            measurement_formats = evaluation_formats(config, data.formats_by_qname)
+            _live_targets(runner, measurement_formats)
+            formats = list(dict.fromkeys(fmt for values in measurement_formats.values() for fmt in values))
+            expected_rows = measurement_formats
             if config.get("source_scope") == "mtp":
                 # The MTP layer is priced on its own head's self-KL, not the body's
                 # end KL (PQ #1353), from the same qualified cache.
@@ -3086,14 +3252,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                     **({"operator_windows": operator_policy} if operator_policy is not None else {}),
                     **({"source_transition": source_transition} if source_transition is not None else {}),
                     include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
-                    min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
+                    min_free_gib=config["min_free_gib"], formats_by_qname=measurement_formats,
                     checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
                     model_identity=source, profile=runner.profile,
                     **({'retained_operator_windows': execution['retained_operator_windows'],
                         'device_envelope_bytes': declared_device_bytes}
                        if execution.get('retained_operator_windows') is not None else {}),
                     checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
-                        "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
+                        "prepared_anchor_sha256": prepared["sha256"], "calibration_input": eval_calibration,
+                        "encoding_calibration_input": calibration,
                         **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                         "reader_identity": reader_identity})
             _same(set(payload["costs"]), set(expected_rows), "complete joint output roster")
@@ -3103,7 +3270,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                     _require(validate_joint_aura_entry(row), f"{name}: invalid measured joint cost")
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
-                "calibration_input": calibration, "measured_cells": len(data.cells),
+                "calibration_input": eval_calibration, "encoding_calibration_input": calibration,
+                "measured_cells": len(data.cells),
                 **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                 "wire_validation": HISTORICAL_WIRE_VALIDATION,
                 **render_census}
@@ -3173,9 +3341,11 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
     reservation it does not use: measured, 125,144 shards at 2.6 cells/s on
     one core while the reserved GB10 sat at 5 W of 140 W (#549).
 
-    This is the same function, addressable on its own: a unit range, no
-    model, no capture, no GPU required, and idempotent -- a cell whose shard
-    exists is skipped, the origin marker is published before the shard, and
+    This is the same function, addressable on its own: a unit range, no model
+    or capture payload is loaded, and no GPU is required. The command still
+    takes a complete admitted campaign plan, including the shape-only
+    canonical capture binding. It is idempotent: a cell whose shard exists
+    is skipped, the origin marker is published before the shard, and
     staging names are unique per writer. PrismaBuild owns the fan-out; rows
     carry disjoint ``sorted(names)[lo:hi]`` ranges cut from the census, so no
     two rows ever address the same cell and a retried row re-reads rather
@@ -3192,6 +3362,10 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
              "publishing into the campaign row caches requires explicit authorization")
     _require(mirror_root is not None or not compare,
              "a byte comparison needs a mirror to compare against the campaign's shards")
+    # Named, not subscripted: a plan without the census binding is a plan the
+    # grammar should refuse, and the refusal says which key is absent (PQ #1293).
+    _require("census" in config["inputs"],
+             "campaign chain input census is not bound in the plan's ``inputs`` block")
     census = json.loads(_bound(config["inputs"]["census"], "census").read_text())
     scope = parse_unit_scope(units, len(census["unit_shapes"]))
     reader = load_declared_reader(config.get("reader"))

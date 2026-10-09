@@ -3,25 +3,70 @@
   "_why": "What a placement tag means to a campaign row: which instruction set its boxes execute, which GPU runtime a container there attaches with, and which host interpreters have actually been observed running work on it. A dispatcher row names a tag and an absolute interpreter path, and until this file existed nothing connected the two -- a spec could send a row to a box whose filesystem has no such interpreter, and the row failed at exec with the fleet's admission already spent. Every interpreter entry names the PrismaBuild action key that ran it there, so an entry is a receipt rather than a claim (CLAUDE.md principle 14). An entry is added by running something on the box and citing the key, never by asserting that a path exists.",
   "_isa_why": "The ISA is a placement fact with a measured consequence: a Tessera Hessian-aware wire encoded on gfx1201 is NOT bit-comparable with one encoded on sm121. First divergence is torch.linalg.cholesky (cuSOLVER vs rocSOLVER, one fp32 epsilon); 53.78% of differing rendered elements are explained by ldl and a further 15.28% by the encoder's own consumption of it, and 54.0% of rendered elements differ overall with max |delta| 9.48e-3 -- a different quantization, not a rounding wobble (RobTand/tessera#472, docs/measurements/tessera-gfx1201-hessian-divergence-2026-09-13.md on Tessera master). Weights-only encodes ARE byte-identical across the two: the wire the reference Viterbi produced there matched GB10's on both of its paths, digest for digest. So a row class whose bytes must equal a GB10 campaign's may only carry tags of one ISA, and cross-ISA capacity is reachable only for weights-only work.",
   "_gpu_runtime_why": "How a container on this tag reaches its GPU. `nvidia` is `--gpus all`, which is what the NVIDIA container runtime consumes. `rocm-wsl` is `--device /dev/dxg` plus a read-only `/usr/lib/wsl/lib` mount: WSL2 has no amdgpu driver and no NVIDIA runtime, so `--gpus all` attaches nothing there and `/dev/dxg` does not exist on a GB10. The value is per tag because it is a property of the box, not of the image.",
+  "_retired_interpreters_why": "Only interpreters are current placement attestations. Optional retired_interpreters mappings retain historical action keys and observations, never active qualification. A path cannot be active and retired on the same tag. Missing or retired host attestation stamps [DEV-MODE] and continues with the spec by default through the existing seal_check; only PRISMAQUANT_DEV_MODE exactly 0 refuses. This does not establish runtime SDK or API compatibility.",
   "tags": {
+    "dl380g10": {
+      "isa": "x86_64",
+      "gpu_runtime": "none",
+      "boxes": ["dl380g10"],
+      "retired_interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "7a04916aeba9efe77a01bea5717ca254b144c7ae8e2d4d8f4c3cae516bf2bbfa",
+          "observed": "PB action done, rc 0, on dl380g10. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this Python 3.14 environment. CPU-only host; no GPU runtime. This is a package-pin attestation, not binary or numerics equivalence with the Sparks."
+        }
+      },
+      "interpreters": {
+        "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python": {
+          "attested_by": "204b35146fab0c7c135781d594c4c15890b83fe74c9ec3d7463f802863700209",
+          "observed": "PB action done, rc 0, on dl380g10: shard 0 of the six-shard 52-test doc smoke under this interpreter (all six shards green, 0 skipped; record testcost-dl-sdk4-common-path-20261004, v2 provisioning 7b0ff61725e60d5443b6e6a5e2317b6c990275ecb55878815bfe4bbf03bbcbe4). Layered source-parent overlay: a fresh Python 3.14.4 venv plus one .pth into the reviewed baseline, so exactly one prismabuild (dc4803daaf09b6426083d2d36bd2a2da3d6832fe, SDK4, non-editable Git install) and one tessera-quant (b40c93cb73745097e57a1ba4cf5b9eee166c759a) distribution are visible -- the pin guard refuses the duplicate-distribution shape the superseded v1 briefly had. CPU-only host: torch 2.11.0+cpu, transformers 5.17.0; attestation f91485aea2000d2204f765e7adc0326e596d6b51c4fbd34ac1129221e3dcc249 re-asserted every pin 2026-10-04. Structure differs from the Sparks' full-copy overlays by design: commits attest identical, binaries and Python minor versions do not."
+        }
+      }
+    },
     "gb10": {
       "isa": "sm121",
       "gpu_runtime": "nvidia",
       "boxes": ["sparky", "gx10-6b77"],
-      "interpreters": {},
-      "_interpreters_why": "No host interpreter is attested here yet. The GLM-5.3 campaign's rows run through tools/tessera_campaign_container.py, so their interpreter lives in the image and is attested by the image digest the container spec pins, not by a path on the box. A class that wants to run a bare host interpreter on this tag adds it here with the PrismaBuild action key that ran it."
+      "interpreters": {
+        "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python": {
+          "attested_by": "697c5eb5b89af4e07d33cd1b9bce71f3c14fcec8cd5175677fb07f714998443a",
+          "observed": "PB action done, rc 0, on sparklina under --tag gb10, needs_gpu cpu=1,mem_gb=8,gpu=1: prismaquant's native GLM projection tests entered both their CUDA cases under this interpreter and passed 2/0 skipped, the stdout names it (python=3.12.3, torch=2.11.0+cu130, transformers=5.16.1), and the CAS receipt attests compute_capability 12.1 on the GB10. The same path is provisioned and 52-test doc-smoked on both boxes of this tag (sparky shard e79b43507e0d3c0a136a32b8852fb6a4f3eaa4efad1de993eff9e1cc7ef8777c, sparklina shard 4108d6c9c8028316730fc04ae498dab0f9271751001fb7dfa608d3963d900461) and was re-verified live 2026-10-04. Package-pin attestation, not binary or numeric equivalence."
+        }
+      },
+      "_interpreters_why": "The GLM-5.3 campaign's rows run through tools/tessera_campaign_container.py, so their interpreter lives in the image and is attested by the image digest the container spec pins, not by a path on the box. The SDK4 entry here is the bare-host path suites use when they run directly on these boxes (pbtest --python); the SDK3-era entries on dl380g10 and the spark* tags are kept only under retired_interpreters as non-active history."
     },
     "sparky": {
       "isa": "sm121",
       "gpu_runtime": "nvidia",
       "boxes": ["sparky"],
-      "interpreters": {}
+      "retired_interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "2df7647146a0397e81c5cb210e96e743e6964ebbca3f6d3ef658d44d9e4e85ab",
+          "observed": "PB action done, rc 0, on sparky under --tag sparky, cpu=2,mem_gb=4. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this native aarch64 Python 3.12 environment. Copied from pq-pb059953bc-tessera-b40c93cb without modifying that parent; package pins match dl380g10, but interpreter binaries and Python minor versions do not."
+        }
+      },
+      "interpreters": {
+        "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python": {
+          "attested_by": "e79b43507e0d3c0a136a32b8852fb6a4f3eaa4efad1de993eff9e1cc7ef8777c",
+          "observed": "PB action done, rc 0, on sparky: shard 0 of the six-shard 52-test doc smoke under this interpreter (all six shards green, 0 skipped; record testcost-sdk4-sparky-20261004, provisioning 530239b821ef6eb4656f07409864d0622e511280ee7e6804c8c0436d16403980 asserted via version + direct_url + RECORD fingerprints that exactly one distribution moved, to the non-editable Git install of dc4803daaf09b6426083d2d36bd2a2da3d6832fe (SDK4) with Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a retained immutably; full copy of the SDK3 overlay, base untouched). Live re-check 2026-10-04: native aarch64 Python 3.12.3, torch 2.11.0+cu130 (CUDA 13.0 build) with the GB10 device visible, transformers 5.16.1. The smoke is CPU-only; placing CUDA shards on this interpreter is pbtest/merge-queue placement (STANDING D8), not this entry."
+        }
+      }
     },
     "sparklina": {
       "isa": "sm121",
       "gpu_runtime": "nvidia",
-      "boxes": ["gx10-6b77"],
-      "interpreters": {}
+      "boxes": ["sparklina"],
+      "retired_interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "3b997e2020a4877c5b19c01116c4760d922e5d70b72a3c620a70f6a6c0c4e169",
+          "observed": "PB action done, rc 0, on sparklina under --tag sparklina, cpu=2,mem_gb=4. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this native aarch64 Python 3.12 environment. PB action 2f3c551bcd010b6f0c93d3ec2401df6a980ad3e55c6731b76fbc9e2643d20832 first fetched the missing source clone/commit; initial action ac071bc4c51f4e67d512fb591e3b91863b65a88e92790f20502484bc36dbc88d remains failed. Copied from pq-pb059953bc-tessera-b40c93cb without modifying that parent; no binary or numerics equivalence with dl380g10 is claimed."
+        }
+      },
+      "interpreters": {
+        "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python": {
+          "attested_by": "4108d6c9c8028316730fc04ae498dab0f9271751001fb7dfa608d3963d900461",
+          "observed": "PB action done, rc 0, on sparklina: shard 0 of the six-shard 52-test doc smoke under this interpreter (all six shards green, 0 skipped; record testcost-sdk4-sparklina-20261004, provisioning 4abf3eaa39dfacea6197bb699a16acb82c6014a90a9afef59699ca0a6c077469 installed the non-editable Git build of dc4803daaf09b6426083d2d36bd2a2da3d6832fe (SDK4) with Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a retained immutably). A real CUDA case also ran under this exact interpreter on this host: action 697c5eb5b89af4e07d33cd1b9bce71f3c14fcec8cd5175677fb07f714998443a (needs_gpu, 2 passed / 0 skipped, sm121 receipt). Live re-check 2026-10-04: native aarch64 Python 3.12.3, torch 2.11.0+cu130, transformers 5.16.1, GB10 visible. Package-pin attestation, not binary or numeric equivalence."
+        }
+      }
     },
     "gx10-6b77": {
       "isa": "sm121",

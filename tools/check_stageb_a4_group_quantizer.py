@@ -1,6 +1,6 @@
 """Real registered-op comparison of whole-stage and routed-slice A4 QDQ."""
-import argparse
 import json
+import argparse
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 from prismaquant import format_registry
 from prismaquant.joint_aura import activation_identity
+
 from prismaquant.joint_cost_quantum import bind_joint_served_quantizer
 from prismaquant.joint_served_activation import FORMAT, verify_policy, activate_policy, joint_activation_maxima
 from prismaquant.perturbed_x_cache import _activation_qdq

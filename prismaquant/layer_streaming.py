@@ -32,9 +32,11 @@ import torch.nn as nn
 
 from .autoscale import declared_expert_dtype_covers, declared_fp4_expert_dtype
 from .io_spans import mem_available_bytes
+from .mxfp4_widen import E2M1_VALUES
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
+    safetensors_prefix_length,
     select_source_tensors,
 )
 
@@ -189,6 +191,24 @@ def _safe_open_kwargs(device: torch.device) -> dict:
     return {"framework": "pt"}
 
 
+def _checkpoint_weight_map(model_path, *, source_authentication=None, source_reads=None):
+    """Checkpoint names from the loader's indexed or single-file source owner."""
+    index = os.path.join(model_path, "model.safetensors.index.json")
+    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index):
+        if source_reads is not None:
+            return json.loads(source_reads.whole(index, where="checkpoint index"))["weight_map"]
+        return _source_json(index, source_authentication)["weight_map"]
+    single = os.path.join(model_path, "model.safetensors")
+    if not os.path.exists(single):
+        raise FileNotFoundError(f"no safetensors under {model_path}")
+    if source_reads is not None:
+        from .source_read_plan import read_safetensors_header
+        header, _base, _size = read_safetensors_header(single, source_reads=source_reads)
+        return {name: single for name in header if name != "__metadata__"}
+    with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as handle:
+        return {name: single for name in handle.keys()}
+
+
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
                       live_name=None, profile=None,
@@ -224,15 +244,7 @@ def _build_weight_map(model_path: str, *,
     if profile is None:
         profile = _source_profile(model_path, source_authentication)
 
-    index_file = os.path.join(model_path, "model.safetensors.index.json")
-    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index_file):
-        raw = _source_json(index_file, source_authentication)["weight_map"]
-    else:
-        single = os.path.join(model_path, "model.safetensors")
-        if not os.path.exists(single):
-            raise FileNotFoundError(f"no safetensors under {model_path}")
-        with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
-            raw = {k: single for k in f.keys()}
+    raw = _checkpoint_weight_map(model_path, source_authentication=source_authentication)
     return live_weight_map(
         raw, model_path,
         live_name if live_name is not None else
@@ -258,7 +270,7 @@ def _live_tree_head_extras(profile) -> bool:
 
 
 def streaming_source_plan(model_path: str, *, layers_prefix: str,
-                          layers, source_reads=None) -> dict:
+                          layers, source_reads=None, root=None) -> dict:
     """The streaming loader's source reads, enumerated without a GPU (PQ #1095).
 
     The same selection the loader reads: the checkpoint index mapped to live
@@ -295,9 +307,9 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     (profile detection opens it), the index whole, then each shard's length
     prefix and header.
 
-    A profile whose head extras come from the live module tree (its
-    ``head_resident_extra_prefixes`` reads ``root``) cannot be enumerated
-    without a skeleton, and refuses.
+    Profiles with live-tree head extras use the caller's actual meta skeleton
+    in root, or construct the loader's meta skeleton when it is omitted.
+    Indexed and unindexed sources share the loader's checkpoint-map owner.
     """
     from .model_profiles import detect_profile
     from .source_read_plan import (
@@ -313,29 +325,24 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         profile = detect_profile(model_path, config=staged_config)
     else:
         profile = detect_profile(model_path)
-    if _live_tree_head_extras(profile):
-        raise ValueError(
-            f"profile {profile.name} derives its resident head from the live "
-            "module tree; its source reads cannot be enumerated without a "
-            "skeleton: refusing")
+    if root is None and _live_tree_head_extras(profile):
+        from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+        config = load_streaming_auto_config(model_path, model_path, local_files_only=True)
+        root = build_streaming_skeleton(config,
+            multimodal=construction_multimodal(profile, False))
     multimodal = construction_multimodal(profile, False)
     index_path = os.path.normpath(
         os.path.join(model_path, "model.safetensors.index.json"))
-    if source_reads is None:
-        with open(index_path, "rb") as handle:
-            index_raw = handle.read()
-    else:
-        index_raw = source_reads.whole(index_path, where="checkpoint index")
-    raw = json.loads(index_raw.decode("utf-8"))["weight_map"]
+    raw = _checkpoint_weight_map(model_path, source_reads=source_reads)
     model_to_shard, model_to_ckpt = live_weight_map(
         raw, model_path,
         lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
     fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
                                    raw_weight_map=raw, profile=profile,
                                    config=staged_config)
-    head_prefixes = resident_head_prefixes(
-        base_prefix_of_layers(layers_prefix),
-        profile.head_resident_extra_prefixes(None))
+    base_prefix = base_prefix_of_layers(layers_prefix)
+    head_prefixes = (_head_prefixes(root, base_prefix) if root is not None
+                     else resident_head_prefixes(base_prefix))
     selections = {"head": select_source_tensors(
         model_to_shard, model_to_ckpt, head_prefixes)}
     for layer in layers:
@@ -375,7 +382,8 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
                    for layer, selection in selections.items() if layer != "head"}
     metadata_reads = ([(config_path, 0, os.path.getsize(config_path))]
                       if os.path.isfile(config_path) else [])
-    metadata_reads.append((index_path, 0, len(index_raw)))
+    if os.path.exists(index_path):
+        metadata_reads.append((index_path, 0, os.path.getsize(index_path)))
     header_reads = [*metadata_reads,
                     *((path, 0, base) for path, (_h, base, _s)
                       in sorted(headers.items()))]
@@ -1004,9 +1012,10 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
     # element plane (~13 B per packed byte, see below) that would dwarf the
     # decoded output if the whole expert stack were gathered at once.
     if mxfp4_names:
+        # Codes 0 and 8 stay positive zero: the shared signed table
+        # materializes +0.0 at code 8 (see mxfp4_widen.E2M1_VALUES).
         lut = torch.tensor(
-            [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-             0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+            E2M1_VALUES,
             dtype=torch.float32, device=device)
         # (256, 2) byte LUT: byte -> (low-nibble, high-nibble) element
         # pair; low nibble is the even logical element, so flattening the
@@ -1729,9 +1738,10 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
             if any(getattr(source_stat, k) != getattr(expected_stat, k) for k in fields):
                 raise RuntimeError('source changed before consumed-page release')
         raw_size = os.pread(fd, 8, 0)
-        header_size = int.from_bytes(raw_size, 'little')
-        if len(raw_size) != 8 or not 0 < header_size <= min(100_000_000, source_stat.st_size - 8):
-            raise ValueError('invalid safetensors header for consumed-page release')
+        header_size = safetensors_prefix_length(
+            raw_size, source_stat.st_size, max_bytes=100_000_000,
+            short_error='invalid safetensors header for consumed-page release',
+            range_error='invalid safetensors header for consumed-page release')
         header = json.loads(os.pread(fd, header_size, 8))
         base = 8 + header_size
         page = os.sysconf('SC_PAGE_SIZE')

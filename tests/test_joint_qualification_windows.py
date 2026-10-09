@@ -323,6 +323,8 @@ def test_replay_reads_only_completed_capture_entries_before_resume(tmp_path, mon
                                      'capture', 'wire', 'render', 'symlink_wire',
                                      'symlink_render'])
 def test_qualification_replay_refuses_changed_upstream(tmp_path, monkeypatch, changed):
+    if changed == 'implementation':
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     runner, data, capture, events, _live, _observed = fixture(
         tmp_path, monkeypatch, fail_unit='model.layers.0.b')
     options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
@@ -775,3 +777,32 @@ def test_a_scoped_source_walks_only_its_own_layers(tmp_path, monkeypatch):
     # issued; no in-range layer outside the scope is ever scheduled.
     assert [layer for layer in scheduled if layer < runner.num_layers] == [2]
     assert all(set(event[1]) <= {2} for event in events if event[0] == 'settled')
+
+
+
+def test_qualification_journal_resumes_moved_producer_without_requalification(tmp_path, monkeypatch, capsys):
+    from prismaquant.cost_stage_checkpoint import unit_path
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    runner, data, capture, events, _live, observed = fixture(tmp_path, monkeypatch)
+    journal = tmp_path / "qualification"
+    options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,
+                   qualification_window=policy(), qualification_journal=journal,
+                   qualification_identity={"plan_sha256": "p" * 64,
+                                           "implementation_sha256": "old producer"})
+    bridge.prepare_cache(runner, data, **options)
+    manifest = (journal / "manifest.json").read_bytes()
+    shards = {name: unit_path(journal, name).read_bytes() for name in data.formats_by_qname}
+    observed.clear()
+    events.clear()
+    capsys.readouterr()
+    options["qualification_identity"]["implementation_sha256"] = "new producer"
+    cache = bridge.prepare_cache(runner, data, **options, qualification_resume=True)
+    assert set(cache.metadata["verified_cells"]) == set(data.cells)
+    assert not any(row[0] == "verify" for row in observed)
+    assert not any(row[0] == "capture" for row in events)
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[DEV-MODE]")]
+    assert len(lines) == 1
+    assert all(text in lines[0] for text in ("implementation_sha256", "old producer", "new producer"))
+    assert (journal / "manifest.json").read_bytes() == manifest
+    assert all(unit_path(journal, name).read_bytes() == blob for name, blob in shards.items())
+

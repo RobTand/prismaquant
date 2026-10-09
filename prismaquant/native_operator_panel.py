@@ -7,7 +7,6 @@ becomes a complete measured-runtime allocation table by itself.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -17,7 +16,7 @@ from typing import Mapping
 from . import record_fields
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
-from .digests import DIRECT_ASCII_STRICT, is_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, is_sha256hex
 
 INPUT_SCHEMA = "prismaquant.native_dense_inputs.v1"
 PANEL_SCHEMA = "tessera.native_dense_panel.v1"
@@ -350,7 +349,7 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
         "shape": list(source_weight.shape), "source_weight": _cb_cache_tensor_identity(source_weight),
         "rendered_weight": _cb_cache_tensor_identity(rendered), "activation": activation,
         "calibration": calibration_receipt, "activation_rows": _cb_cache_tensor_identity(activation_rows),
-        "wire": {"blob_sha256": hashlib.sha256(wire_blob).hexdigest(), "blob_bytes": len(wire_blob),
+        "wire": {"blob_sha256": bytes_sha256hex(wire_blob), "blob_bytes": len(wire_blob),
                  "record": wire_record}, "numerics": dict(numerics),
         "numerics_derivation": derivation,
         "activation_quantizer_attestation": attestation,
@@ -500,7 +499,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     coverage; this bridge does not fabricate that table or its missing prices.
     """
     raw = Path(path).read_bytes()
-    _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "receipt"), "receipt file")
+    _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_dense_late_binding.v1":
         from .native_execution_binding import resolve_execution_binding

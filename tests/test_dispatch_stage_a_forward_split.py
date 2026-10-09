@@ -128,6 +128,7 @@ def test_the_prep_stages_the_head_and_each_quantum_the_forward_walk(tmp_path):
         "source_bytes"]
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_the_forward_manifests_pass_the_prismabuild_validator(tmp_path):
     from test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()

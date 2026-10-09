@@ -11,20 +11,25 @@ import inspect
 import json
 import math
 import platform
+import os
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from types import MappingProxyType
 import re
 from typing import TypedDict
 
 from .schemas import Contract, strict_json_loads
-from .digests import is_sha256hex
-from .stage_inputs import read_bound, require_source_identity
+from .digests import (
+    DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, canonical_json_sha256, is_sha256hex,
+)
+from .stage_inputs import read_bound, require_source_identity, same
 from .memory_management import reserve_allocation
 
 
 _contract = Contract(RuntimeError, 'original generation: ')
 _require = _contract.require
+_same = partial(same, contract=_contract)
 
 
 _GIT_OBJECT_ID = re.compile(r'[0-9a-f]{40}\Z')
@@ -110,7 +115,7 @@ class OriginalSourceAuthority(TypedDict):
 
 def _snapshot(value):
     """An independent JSON mapping, never a mutable adopted control object."""
-    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+    return json.loads(DIRECT_ASCII_SPACED_STRICT.text(value))
 
 
 def _exact(value, keys, label):
@@ -124,20 +129,11 @@ def _binding(value, label):
     return value
 
 
-def _same(actual, expected, label):
-    _require(actual == expected, f'{label}: identity mismatch')
-
-
-def _canonical_sha256(value, label):
-    from .cost_stage_checkpoint import canonical_json_sha256
-
-    return canonical_json_sha256(value, where=label)
-
-
 def original_authority_static_sha256(authority):
     _exact(authority, ORIGINAL_AUTHORITY_KEYS, 'original source authority')
-    return _canonical_sha256({key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS},
-                             'original static source authority')
+    return canonical_json_sha256(
+        {key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS},
+        where='original static source authority')
 
 
 def _session(value):
@@ -149,13 +145,17 @@ def _session(value):
 
 
 def _source_execution(value):
-    _exact(value, {'schema', 'modules'}, 'original source execution')
-    _same(value['schema'], 'prismaquant.joint_aura.source_execution.v1', 'original execution schema')
+    from .joint_aura import (
+        SOURCE_EXECUTION_KEYS, SOURCE_EXECUTION_SCHEMA, _source_execution_selectors,
+    )
+
+    _exact(value, SOURCE_EXECUTION_KEYS, 'original source execution')
+    _same(value['schema'], SOURCE_EXECUTION_SCHEMA, 'original execution schema')
     modules = _contract.mapping(value['modules'], where='original execution modules')
     _require(bool(modules), 'original execution has no resolved selectors')
     for name, selectors in modules.items():
-        _require(type(name) is str and isinstance(selectors, dict) and selectors and
-                 set(selectors) <= {'attention', 'experts'}, 'invalid original execution selector')
+        _require(type(name) is str and _source_execution_selectors(selectors),
+                 'invalid original execution selector')
         for key, selector in selectors.items():
             _require(selector is None or (type(selector) is str and selector) or
                      (isinstance(selector, dict) and selector and all(
@@ -165,24 +165,33 @@ def _source_execution(value):
     return value
 
 
-def _full_calibration(value):
+def _full_calibration(value, *, shape=(512, 512)):
+    """Keep the original draw pinned; only Fisher explicitly passes shape=None."""
     _exact(value, {'schema', 'artifact_sha256', 'calibration_sha256', 'shape', 'dtype',
                    'provenance'}, 'original full calibration')
     _same(value['schema'], 'prismaquant.calibration_input.v1', 'full calibration schema')
-    _require(isinstance(value['shape'], list) and all(type(dim) is int for dim in value['shape']),
-             'full calibration shape must retain integer dimensions')
-    _same(value['shape'], [512, 512], 'full calibration shape')
-    _same(value['dtype'], 'torch.int64', 'full calibration dtype')
+    _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
+             and all(type(dim) is int and dim > 0 for dim in value["shape"]),
+             "full calibration shape must retain two positive integer dimensions")
+    if shape is not None:
+        _same(value["shape"], list(shape), "full calibration shape")
+    rows, seqlen = value["shape"]
+    _same(value["dtype"], "torch.int64", "full calibration dtype")
     for key in ('artifact_sha256', 'calibration_sha256'):
         _contract.sha256(value[key], where=f'full calibration {key}')
-    provenance = _exact(value['provenance'], {'fit_ids_sha256', 'fit_tokens', 'fit_tokens_min', 'model',
-        'nsamples', 'seed', 'seqlen', 'source', 'split_role', 'text_sha256'}, 'full calibration provenance')
-    for key, expected in (('nsamples', 512), ('seqlen', 512), ('fit_tokens', 262144)):
+    required = {"fit_ids_sha256", "fit_tokens", "model", "nsamples", "seed",
+                "seqlen", "source", "split_role", "text_sha256"}
+    provenance = value["provenance"]
+    expected_keys = (required, required | {"fit_tokens_min"}) if shape is None else (required | {"fit_tokens_min"},)
+    _require(isinstance(provenance, dict) and set(provenance) in expected_keys,
+             "full calibration provenance fields differ")
+    for key, expected in (("nsamples", rows), ("seqlen", seqlen), ("fit_tokens", rows * seqlen)):
         _require(type(provenance.get(key)) is int and provenance[key] == expected,
-                 f'full calibration provenance {key} differs')
+                 f"full calibration provenance {key} differs from the actual tensor shape")
     for key in ('fit_ids_sha256', 'text_sha256'):
         _contract.sha256(provenance.get(key), where=f'full calibration provenance {key}')
-    _contract.integer(provenance['fit_tokens_min'], where='full calibration minimum fit tokens', minimum=1)
+    if "fit_tokens_min" in provenance:
+        _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
     _contract.integer(provenance['seed'], where='full calibration draw seed', minimum=0)
     for key in ('model', 'source', 'split_role'):
         _contract.string(provenance[key], where=f'full calibration provenance {key}')
@@ -460,6 +469,17 @@ def _environment_matches(runtime):
     return sdk, claim
 
 
+def original_checkpoint_description(source_model, owner):
+    """Read checkpoint metadata only from the existing qualified original owner."""
+    from .tessera_calibration_cache import CaptureSourceAuthentication
+
+    if not isinstance(owner, CaptureSourceAuthentication) or not owner.is_qualified_original_material:
+        raise RuntimeError("original identity requires the qualified existing original owner")
+    if os.path.abspath(str(source_model)) != str(owner.root):
+        raise RuntimeError("original identity source root differs from its owner")
+    return owner.original_checkpoint_descriptor()
+
+
 def original_source_runtime(runner, owner):
     """Observe the live model/context and installed source axes; no expected echo."""
     import torch
@@ -590,6 +610,29 @@ def normalize_original_diagnostic_execution(document):
     return _snapshot(document)
 
 
+def normalize_original_fisher_execution(document, calibration):
+    """Generate the full Fisher execution from its real, independently loaded draw.
+
+    This is not the selected-row diagnostic: its one-probe scope remains
+    unchanged. Native Stage A/B execute these returned row/context/probe
+    fields on the actual tensor, never an old draw relabelled as a new one.
+    """
+    draw = _full_calibration(calibration, shape=None)
+    rows, seqlen = draw["shape"]
+    for key, expected in (("n_calib_samples", rows), ("calib_seqlen", seqlen)):
+        _require(type(document.get(key)) is int and document[key] == expected,
+                 f"Fisher execution {key} differs from the actual calibration tensor")
+    _contract.integer(document.get("n_probes"), where="Fisher execution n_probes", minimum=2)
+    _contract.integer(document.get("seed_base"), where="Fisher execution seed_base", minimum=0)
+    _contract.integer(document.get("probe_microbatch"), where="Fisher execution probe_microbatch", minimum=1)
+    _same(document.get("token_scope"), "all", "Fisher execution token scope")
+    _require(type(document.get("temperature")) in (int, float) and document["temperature"] == 1,
+             "Fisher execution temperature differs from the defined objective")
+    _require(draw["provenance"]["split_role"] == "calibration",
+             "Fisher execution cannot tune on held-out or final benchmark tokens")
+    return _snapshot(document)
+
+
 def original_diagnostic_session_identity(*, base_plan, base_plan_sha256, prepared, execution_sha256):
     """Identity the existing artifact owner hashes before it mints a generation."""
     base = normalize_original_diagnostic_base_plan(base_plan)
@@ -603,6 +646,10 @@ def original_diagnostic_session_identity(*, base_plan, base_plan_sha256, prepare
     diagnostic = base['selected_row_diagnostic']
     _same(diagnostic['calibration_tensor_sha256'], preparation['calibration']['calibration_sha256'],
           'prepared/base full calibration tensor')
+    # The tensor digest alone cannot distinguish [128, 2048] from [512, 512]
+    # (both 262144 tokens): compare the shapes the records declare.
+    _same(preparation['calibration']['shape'], diagnostic['calibration_shape'],
+          'prepared/base full calibration shape')
     return {
         'schema': 'prismaquant.original_diagnostic_session_identity.v1',
         'static_authority_sha256': base['static_authority_sha256'],
@@ -750,7 +797,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
         execution_sha256=bindings['execution']['sha256'])
     _exact(identity, ORIGINAL_SESSION_IDENTITY_KEYS, 'original session identity')
     _same(identity, admitted_execution['session_identity'], 'independently owning original session identity')
-    _same(_canonical_sha256(identity, 'original source session identity'),
+    _same(canonical_json_sha256(identity, where='original source session identity'),
           authority['session']['run_identity_sha256'], 'owning original session digest')
     if owner is not None:
         from .tessera_calibration_cache import CaptureSourceAuthentication
@@ -846,8 +893,7 @@ def _original_artifact_publication(payload, *, node_id, roles):
     _exact(publication, {'schema', 'node_id', 'artifacts'}, 'selected artifact publication')
     _same(publication['schema'], 'prismaquant.original_source_artifact_publication.v1', 'actual artifact publication schema')
     _same(publication['node_id'], node_id, 'actual artifact publication selected node')
-    _same(lines[0], json.dumps(publication, sort_keys=True, separators=(',', ':'),
-                              allow_nan=False).encode(), 'canonical actual artifact publication')
+    _same(lines[0], DIRECT_ASCII_STRICT.encoded(publication), 'canonical actual artifact publication')
     artifacts = _exact(publication['artifacts'], roles, 'actual published artifact roles')
     paths = set()
     for role, artifact in artifacts.items():
@@ -902,7 +948,7 @@ def _require_original_qualified_source(row, request, accepted, target_runtime):
     _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
     _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
           'qualified member actual target source implementation')
-    _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+    _same(family['target_runtime_sha256'], canonical_json_sha256(target_runtime, where='actual original target runtime'),
           'qualified member actual target runtime')
 
 
@@ -1090,7 +1136,7 @@ def _require_original_source_proofs(authority, resource_check):
             _contract.string(family[key], where=f'unchanged-family {key}', pattern=_GIT_OBJECT_ID)
         _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
               'unchanged-family actual target source implementation')
-        _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+        _same(family['target_runtime_sha256'], canonical_json_sha256(target_runtime, where='actual original target runtime'),
               'unchanged-family actual target runtime')
         _control(family['compatibility'], 'independently accepted unchanged source compatibility')
         _require(isinstance(family['controls'], list) and family['controls'], 'unchanged-family accepted controls missing')

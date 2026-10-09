@@ -23,13 +23,13 @@ at zero cost and two bytes per parameter (principle 11: never synthesized).
 from __future__ import annotations
 
 import json
-import hashlib
 import math
 import pickle
 from pathlib import Path
 from typing import Mapping
 
 from .schemas import Contract
+from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 RECORD_SCHEMA = "prismaquant.glm_mtp_selection.v1"
@@ -84,15 +84,19 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
     for index, payload in enumerate(payloads):
         if set(payload["costs"]) != set(costs):
             raise ValueError(f"MTP cost part {index} prices a different unit set")
+        if set(payload["wire_bytes"]) != set(costs):
+            raise ValueError(f"MTP cost part {index} serializes a different unit set")
         for unit, by_rung in payload["costs"].items():
-            if set(payload["wire_bytes"].get(unit, {})) != set(by_rung):
-                raise ValueError(f"MTP cost part {index}, unit {unit}: wire bytes and costs "
-                                 "name different rungs")
             twice = sorted(set(by_rung) & set(costs[unit]))
             if twice:
                 raise ValueError(f"MTP unit {unit}: rung(s) {twice} priced by more than one part")
             costs[unit].update(by_rung)
-            wire[unit].update(payload["wire_bytes"][unit])
+            by_wire = payload["wire_bytes"][unit]
+            repeated_wires = sorted(set(by_wire) & set(wire[unit]))
+            if repeated_wires:
+                raise ValueError(f"MTP unit {unit}: wire rung(s) {repeated_wires} serialized by more than one part")
+            wire[unit].update({rung: _STORAGE.integer(value, where=f"wire_bytes[{unit}][{rung}]", minimum=1)
+                               for rung, value in by_wire.items()})
     return {
         "schema": SCHEMA,
         "mtp_layer": first["mtp_layer"],
@@ -106,6 +110,7 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
             "probe_identity_sha256": probes[0],
             "parts": [{**({"source": sources[index]} if sources else {}),
                        "rungs": sorted({rung for rows in payload["costs"].values() for rung in rows}),
+                       "wire_rungs": sorted({rung for rows in payload["wire_bytes"].values() for rung in rows}),
                        "provenance": payload.get("provenance", {})}
                       for index, payload in enumerate(payloads)],
         },
@@ -150,6 +155,7 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
     bindings = {name: {} for name in payload["costs"]}
     projection = None
     seen = set()
+    seen_wires = set()
     for index, part in enumerate(parts):
         m4_ref = part.get("source")
         m4 = _bound_payload(m4_ref, label=f"MTP M4 part {index}")
@@ -163,6 +169,9 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
         rungs = sorted({fmt for by_fmt in m4["costs"].values() for fmt in by_fmt})
         if rungs != part.get("rungs"):
             raise ValueError(f"MTP M4 part {index} rung roster differs from merged cost")
+        wire_rungs = sorted({fmt for by_fmt in m4.get("wire_bytes", {}).values() for fmt in by_fmt})
+        if wire_rungs != part.get("wire_rungs"):
+            raise ValueError(f"MTP M4 part {index} wire roster differs from merged cost")
         anchors = m4["provenance"].get("tessera_joint_anchors", {})
         m3 = _bound_payload(anchors.get("inputs", {}).get("merged_cost"),
                             label=f"MTP M3 price {index}")
@@ -186,17 +195,23 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
                 if cell in seen:
                     raise ValueError(f"MTP {name}@{fmt} is priced by multiple parts")
                 seen.add(cell)
-                if (payload["costs"].get(name, {}).get(fmt) != row
-                        or payload["wire_bytes"].get(name, {}).get(fmt) !=
-                        m4.get("wire_bytes", {}).get(name, {}).get(fmt)):
+                if payload["costs"].get(name, {}).get(fmt) != row:
                     raise ValueError(f"MTP {name}@{fmt} differs from bound M4 price")
-                if (m3.get("costs", {}).get(name, {}).get(fmt, {}).get("wire_bytes") !=
-                        m4["wire_bytes"][name][fmt]):
+        for name, by_fmt in m4["wire_bytes"].items():
+            if name not in payload["costs"]:
+                raise ValueError(f"MTP M4 part {index} serializes an unknown unit")
+            for fmt, wire_bytes in by_fmt.items():
+                cell = (name, fmt)
+                if cell in seen_wires:
+                    raise ValueError(f"MTP {name}@{fmt} wire is bound by multiple parts")
+                seen_wires.add(cell)
+                wire_bytes = _STORAGE.integer(wire_bytes, where=f"wire_bytes[{name}][{fmt}]", minimum=1)
+                if payload["wire_bytes"].get(name, {}).get(fmt) != wire_bytes:
+                    raise ValueError(f"MTP {name}@{fmt} differs from bound M4 wire")
+                if m3.get("costs", {}).get(name, {}).get(fmt, {}).get("wire_bytes") != wire_bytes:
                     raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
                 if name not in units:
-                    # Dense/shared rows are priced by the same M3 source but
-                    # are not members of its routed expert projection. Their
-                    # selected BF16 passthrough needs no producer wire.
+                    # A selected dense BF16 passthrough needs no expert wire.
                     continue
                 parsed = parse_tessera_format_name(fmt)
                 if parsed is None:
@@ -210,16 +225,16 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
                     tep.locate_expert_wire(checked, name=name, wire_dir=Path(root))
                 except tep.ExpertProjectionError as exc:
                     raise ValueError(f"MTP {name}@{fmt} lacks its priced wire: {exc}") from exc
-                if (m4["wire_bytes"][name][fmt] !=
-                        checked["blob_bytes"]):
+                if wire_bytes != checked["blob_bytes"]:
                     raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
                 receipts[name][fmt] = checked
                 wire_roots[name][fmt] = root
                 bindings[name][fmt] = {"m4": dict(m4_ref),
                                        "m3": dict(anchors["inputs"]["merged_cost"])}
-    if seen != {(name, fmt) for name, by_fmt in payload["costs"].items()
-                for fmt in by_fmt}:
+    if seen != {(name, fmt) for name, by_fmt in payload["costs"].items() for fmt in by_fmt}:
         raise ValueError("MTP bound parts do not cover the merged priced cells")
+    if seen_wires != {(name, fmt) for name, by_fmt in payload["wire_bytes"].items() for fmt in by_fmt}:
+        raise ValueError("MTP bound parts do not cover the merged wire cells")
     return {**payload, "mtp_expert_projection": projection,
             "mtp_expert_wires": receipts, "mtp_expert_wire_roots": wire_roots,
             "mtp_expert_source_bindings": bindings,
@@ -279,13 +294,46 @@ def _unit_storage(payload, unit):
     return wire, params
 
 
-def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
-    """``{unit: {rung: (E, bytes)}}`` and the priced rungs the runtime does not attest.
+def add_mtp_scope_arguments(parser) -> None:
+    """Declare the MTP workload independently of the body's workload."""
+    parser.add_argument("--mtp-regime", type=int, default=None,
+                        help="Actual MTP token-row regime M for canonical admission")
+    parser.add_argument("--mtp-tensor-parallel", type=int, default=1,
+                        help="Serving tensor parallel size for the MTP rank-local shape")
+    parser.add_argument("--mtp-routing", default=None,
+                        help="Actual routing coordinate for scoped MTP experts")
 
-    BF16 passthrough is added where the source is BF16. A priced rung that
-    ``eligible(unit, rung)`` refuses is not offered; it is returned as
-    ``{rung: [units]}`` so the narrowing is recorded, not inferred.
-    """
+
+def _mtp_allowability_scope(unit, rung, measured, stats, context, owners, *, m, tensor_parallel):
+    """Derive scope from validated source operators through the shared owner."""
+    from .allocator_candidates import unit_allowability_scope
+    row = measured.get(rung)
+    if row is not None:
+        shape = row["joint_operator_identity"]["source_weight"]["shape"]
+    else:
+        shapes = {tuple(anchor["joint_operator_identity"]["source_weight"]["shape"])
+                  for anchor in measured.values()}
+        shape = next(iter(shapes)) if len(shapes) == 1 else ()
+    actual = dict(stats or {})
+    # Caller metadata can supply topology, but not replace the measured shape.
+    actual.pop("out_features", None)
+    actual.pop("in_features", None)
+    if len(shape) >= 2:
+        actual.update(out_features=shape[-2], in_features=shape[-1])
+    return unit_allowability_scope(rung, unit, actual, context, owners,
+                                  m=m, tensor_parallel=tensor_parallel)
+
+
+def _unit_rows(payload, eligible=None, *, rung_allowability=None, quality_prices=None,
+               quality_provenance=None, scope_provenance=None, stats=None, context_by_unit=None,
+               target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> tuple[dict, dict]:
+    """Price the exact wire menu from measured anchors or bound proposals."""
+    from .rung_allowability import owner_for_format
+    from .allocator_candidates import candidate_rung_admission
+    from .lane_spec import family_hook
+    from .serving_profiles import load_serving_profile
+    from . import format_registry as fr
+    production = not load_serving_profile(target_profile).emulation_only
     groups = payload["groups"]
     units = [unit for members in groups.values() for unit in members]
     if set(units) != set(payload["costs"]) or len(units) != len(set(units)):
@@ -293,19 +341,80 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
     rows, unattested = {}, {}
     for unit in units:
         wire, params = _unit_storage(payload, unit)
-        if set(wire) != set(payload["costs"][unit]):
+        measured = payload["costs"][unit]
+        proposals = (quality_prices or {}).get(unit, {})
+        if set(wire) != set(measured) and rung_allowability is None and not proposals:
             raise ValueError(f"MTP unit {unit}: wire bytes and costs name different rungs")
-        if _BF16 in payload["costs"][unit]:
+        if _BF16 in measured or _BF16 in wire:
             raise ValueError(f"MTP unit {unit}: BF16 is passthrough, not a priced row")
         rows[unit] = {}
-        for rung, row in payload["costs"][unit].items():
+        for rung in wire:
             if eligible is not None and not eligible(unit, rung):
                 unattested.setdefault(rung, []).append(unit)
                 continue
-            rows[unit][rung] = (float(row["predicted_dloss"]), wire[rung])
+            owner = owner_for_format(rung_allowability, rung)
+            if rung_allowability is not None or production:
+                context = None if context_by_unit is None else context_by_unit.get(unit)
+                unit_scope = _mtp_allowability_scope(unit, rung, measured,
+                    (stats or {}).get(unit), context, rung_allowability,
+                    m=allowability_m, tensor_parallel=allowability_tensor_parallel)
+                if owner is not None and owner.scoped:
+                    required = ("kernel_kind", "rows", "columns", "m")
+                    if (unit_scope is None or any(unit_scope.get(axis) is None for axis in required)
+                            or (unit_scope["kernel_kind"] in ("routed_moe", "routed")
+                                and unit_scope.get("routing") is None)):
+                        unattested.setdefault(rung, []).append(unit)
+                        continue
+                admission = candidate_rung_admission(rung, target_profile=target_profile,
+                    serving_context=context, rung_allowability=rung_allowability,
+                    allowability_scope=unit_scope)
+                family = fr.format_family_of(fr.canonical_format_name(rung))
+                if admission is not None and (
+                        (rung_allowability is not None and owner is None)
+                        or not admission.admits(family_hook(family, "menu_mode_in_force")(None))):
+                    unattested.setdefault(rung, []).append(unit)
+                    continue
+                if scope_provenance is not None and unit_scope is not None:
+                    scope_provenance[(unit, rung)] = unit_scope
+            price = (owner.chord_cost(rung, unit=unit, costs=measured)
+                     if owner is not None else proposals.get(rung, measured.get(rung)))
+            if price is None:
+                unattested.setdefault(rung, []).append(unit)
+                continue
+            if quality_provenance is not None and price.get("canonical_quality") is not None:
+                quality_provenance.setdefault(unit, {})[rung] = price["canonical_quality"]
+            rows[unit][rung] = (float(price["predicted_dloss"]), wire[rung])
         if payload["source_dtype"][unit] == "bfloat16":
             rows[unit][_BF16] = (0.0, 2 * params)
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
+
+def _recompute_recorded_quality(payload, recorded):
+    """Recompute proposal prices from their actual bound anchors before export."""
+    from .rung_allowability import (_producer_api, qualified_cost_scope,
+                                   qualified_rung_quality, require_quality_result_matches)
+    from .tessera_formats import parse_tessera_format_name
+    prices = {}
+    producer = None
+    for unit, by_rung in recorded.items():
+        for name, expected in by_rung.items():
+            family, rung = parse_tessera_format_name(name)
+            lower, upper = expected["anchors"]
+            rows = payload["costs"][unit]
+            left, right = rows[family.format_name(lower)], rows[family.format_name(upper)]
+            if producer is None:
+                producer = _producer_api()
+            actual = qualified_rung_quality(producer, family.name, rung,
+                lower_rung=lower, upper_rung=upper,
+                lower_value=left["predicted_dloss"], upper_value=right["predicted_dloss"],
+                lower_scope=qualified_cost_scope(left, family=family.name, unit=unit,
+                                                format_name=family.format_name(lower)),
+                upper_scope=qualified_cost_scope(right, family=family.name, unit=unit,
+                                                format_name=family.format_name(upper)))
+            require_quality_result_matches(actual, expected, where="MTP quality price")
+            if actual["provenance"]["unit"] != unit:
+                raise ValueError("MTP canonical quality differs from its actual bound unit")
+            prices.setdefault(unit, {})[name] = {"predicted_dloss": actual["value"]}
+    return prices
 
 
 class MtpMenuRefused(ValueError):
@@ -361,15 +470,19 @@ def _restrict_to_declared(rows: dict, declared) -> tuple[dict, dict, list]:
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                      acceptance_points=(), k: int = 1, eligible=None,
                      fixed_formats: Mapping[str, str] | None = None,
-                     formats=None) -> dict:
+                     formats=None, rung_allowability=None, stats=None, context_by_unit=None,
+                     target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
     (``t_ms``, ``d0_ms``, ``c_ms_per_bit`` and a ``source``); they are
     recorded, and with no ``acceptance_points`` they cannot move the choice:
     the selector is degenerate and returns the lowest-E rung within the budget.
-    ``eligible(unit, rung)``, when given, is the pinned runtime's attestation
-    (principle 14); a priced rung it refuses is left off the menu and recorded.
+    Canonical owners enforce admission independently of the native callback.
+    Callers supply per-unit topology in stats or context_by_unit, plus regime M.
+    The shared scope owner derives rank-local geometry from validated source shapes.
+    Missing or unresolved v3 scope removes the option, never broadens admission.
+    The native eligible callback remains an additional gate.
     ``fixed_formats`` restricts named whole groups to one format, intersected
     with that same eligible menu. A missing or unpriced group format refuses.
     ``formats``, when given, declares the layer's menu (PQ #1692), the MTP
@@ -386,7 +499,11 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         raise ValueError(f"MTP cost payload must be {SCHEMA}")
     byte_budget = _STORAGE.integer(byte_budget, where="byte_budget", minimum=0)
     probe_sha256, probe = _mtp_probe(payload)
-    rows, unattested = _unit_rows(payload, eligible)
+    quality_provenance, scope_provenance = {}, {}
+    rows, unattested = _unit_rows(payload, eligible, rung_allowability=rung_allowability,
+        quality_provenance=quality_provenance, scope_provenance=scope_provenance,
+        stats=stats, context_by_unit=context_by_unit, target_profile=target_profile,
+        allowability_m=allowability_m, allowability_tensor_parallel=allowability_tensor_parallel)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
     declared_record = {}
     if formats is not None:
@@ -465,7 +582,13 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "selection": result.provenance,
         **({"fixed_formats": dict(sorted(fixed_formats.items()))}
            if fixed_formats is not None else {}),
+        **({"rung_allowability_scopes": {unit: scope_provenance[(unit, fmt)]
+               for unit, fmt in assignment.items() if (unit, fmt) in scope_provenance},
+            "rung_allowability": {family: owner.provenance()
+                for family, owner in rung_allowability.items()}}
+           if rung_allowability is not None else {}),
         "assignment": assignment,
+        **({"canonical_quality": quality_provenance} if quality_provenance else {}),
         **selected_wires,
     }
 
@@ -480,7 +603,7 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
     from . import mtp_rung_selection as canon
 
     cost_raw = Path(cost_path).read_bytes()
-    cost_sha256 = hashlib.sha256(cost_raw).hexdigest()
+    cost_sha256 = bytes_sha256hex(cost_raw)
     cost = pickle.loads(cost_raw) if not str(cost_path).endswith(".json") else json.loads(cost_raw)
     payload = enrich_mtp_cost_wires(cost)
     meta = layer_config.get("__prismaquant__", {})
@@ -508,7 +631,8 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
                   for unit in members}
     if len(assignment) != len(payload["costs"]) or set(assignment) != set(payload["costs"]):
         raise ValueError("MTP selection groups do not partition the bound cost")
-    rows, _unattested = _unit_rows(payload)
+    quality_prices = _recompute_recorded_quality(payload, record.get("canonical_quality", {}))
+    rows, _unattested = _unit_rows(payload, quality_prices=quality_prices)
     menu, _incomplete = canon.group_product_menu(
         {group: tuple(members) for group, members in payload["groups"].items()},
         rows, params=payload["params"])
@@ -553,7 +677,7 @@ def _main() -> None:
     raw = (json.dumps(result, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if not publish_new_bytes(Path(args.output), raw):
         parser.error("output already exists; refusing overwrite")
-    print(json.dumps({"output": args.output, "sha256": hashlib.sha256(raw).hexdigest(),
+    print(json.dumps({"output": args.output, "sha256": bytes_sha256hex(raw),
                       "selected_expert_wires": len(result["__prismaquant__"]["mtp_selection"][
                           "mtp_expert_wires"])}))
 

@@ -58,7 +58,6 @@ import hashlib
 import json
 import os
 import re
-import struct
 import subprocess
 import sys
 import time
@@ -115,6 +114,8 @@ def slice_records(slice_doc, *, layer, batches):
 
 def _safetensors_spans(model_dir: Path, names) -> list[dict]:
     """Byte ranges of ``names`` and each shard's header, adjacent ranges merged."""
+    from prismaquant.source_read_plan import read_safetensors_header
+
     index = json.loads((model_dir / "model.safetensors.index.json").read_text())
     by_shard = defaultdict(list)
     for name in names:
@@ -122,10 +123,7 @@ def _safetensors_spans(model_dir: Path, names) -> list[dict]:
     entries = []
     for shard in sorted(by_shard):
         path = model_dir / shard
-        with open(path, "rb") as handle:
-            (length,) = struct.unpack("<Q", handle.read(8))
-            header = json.loads(handle.read(length))
-        base = 8 + length
+        header, base, _size = read_safetensors_header(str(path))
         spans = sorted((base + header[name]["data_offsets"][0],
                         base + header[name]["data_offsets"][1])
                        for name in by_shard[shard])
@@ -188,6 +186,12 @@ def cmd_manifest(args) -> int:
 # -- spec (host) -------------------------------------------------------------------
 
 def cmd_spec(args) -> int:
+    # Host-side spec generation does not initialize the scientific package.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
     spec = json.loads(Path(args.base_spec).read_text())
     spool = spec["env"].get("PRISMABUILD_PRODUCED_SPOOL_ROOT")
     spec["env"] = {key: value for key, value in spec["env"].items()
@@ -198,7 +202,7 @@ def cmd_spec(args) -> int:
         mounts.append({"source": args.py_spy, "target": "/opt/bench/py-spy",
                        "readonly": True})
     spec["container"]["mounts"] = mounts
-    print(json.dumps(spec, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(spec))
     return 0
 
 
@@ -210,8 +214,8 @@ def cmd_host(args) -> int:
     if base.exists():
         raise SystemExit(f"{base} exists: use a fresh --label")
     base.mkdir(parents=True)
-    # ``tools`` too: prismaquant imports a few of its modules
-    # (``glm_source_derivative`` reads ``tools.container_runtime_identity``).
+    # Keep ``tools`` too: historical GLM baseline revisions imported their
+    # container identity helper from that source directory.
     archive = subprocess.run(["git", "-c", "safe.directory=*", "archive", args.base_ref,
                               "prismaquant", "tools"], check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(base)], input=archive, check=True)
@@ -333,6 +337,7 @@ def _drop_client_cache(resolver, paths) -> int:
 
 
 def cmd_child(args) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     import inspect
 
     import torch
@@ -461,8 +466,7 @@ def cmd_child(args) -> int:
                 storage.retire(reference)
                 grad_outs[probe][batch] = None
         result["payload_sha256"] = digests
-        result["plane_sha256"] = hashlib.sha256(json.dumps(
-            digests, sort_keys=True).encode()).hexdigest()
+        result["plane_sha256"] = DIRECT_ASCII_SPACED_LAX.sha256(digests)
         result["storage_telemetry"] = {key: value for key, value in storage.telemetry.items()
                                        if isinstance(value, (int, float))}
         mark("digested")

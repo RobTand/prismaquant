@@ -84,6 +84,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from .source_read_plan import safetensors_prefix_length
+
 SCHEMA = "prismaquant.shipcard/1"
 
 #: Every slot all serving lanes must close before an artifact is shippable.
@@ -267,6 +269,11 @@ FULL_KL_TEACHER_EVIDENCE_SCHEMA = "prismaquant.full_kl_teacher_evidence/1"
 WIKITEXT_GOLD_CALIBRATION_SCHEMA = "prismaquant.wikitext_gold_calibration/1"
 WIKITEXT_PPL_CALIBRATION_SCHEMA = "prismaquant.wikitext_ppl_calibration/1"
 GOLD_PRODUCER_IDENTITY_SCHEMA = "prismaquant.gold_producer_identity/1"
+GOLD_PRODUCER_RECORD_SCHEMA = "prismaquant.gold_record/1"
+# Keep the live producer interchange. Its measurement path does not change.
+GOLD_PRODUCER_RECORD_SCHEMAS = frozenset({
+    GOLD_PRODUCER_RECORD_SCHEMA, "prismaquant.glm_tr3_gold_record.v1",
+})
 TOPK_COVERAGE_POLICY_SCHEMA = "prismaquant.topk_tail_coverage_policy/1"
 
 
@@ -309,28 +316,20 @@ MAX_CONTROL_RELATIVE_SLACK = Fraction(1, 1000)
 #: own ``gold.kl`` record carries them.  Driven by the candidate rather than
 #: by a fixed list so the control cannot dodge a key by omitting it: the
 #: candidate side is the card's published gold number and is gated separately.
+UNIFORM_CONTROL_EXACT_CONTRACT_KEYS = (
+    "measurement_fidelity", "calibration_contract_sha256", "teacher_evidence",
+)
 UNIFORM_CONTROL_CONTRACT_KEYS = (
     "n_samples",
     "seqlen",
     "n_positions",
     "score_positions",
     "corpus_sha256",
-)
+) + UNIFORM_CONTROL_EXACT_CONTRACT_KEYS
 #: Which gold metric the two arms are compared on.  Both must quote the same
 #: one, and it must be a KL: the gate's whole point is the serving metric.
 UNIFORM_CONTROL_METRIC_KEYS = ("kl_mean", "kl_confident_mean")
 WIKITEXT_REVISION = "b08601e04326c79dfdd32d625aee71d232d685c3"
-DSV4_WIKITEXT_DATASET_FINGERPRINT = "7ccd6deaa4fc56e5"
-DSV4_WIKITEXT_CORPUS_SHA256 = (
-    "c5b5caea5bd655cb221545a484f2f0f59d35092a17a66840d7b9513d0b99687d"
-)
-DSV4_WIKITEXT_TOTAL_TOKENS = 287_597
-DSV4_WIKITEXT_SELECTED_TOKEN_IDS_SHA256 = (
-    "6c23cefbd78c327d6edac566a5c6b419871021b6cf9890ec830713c1de704961"
-)
-DSV4_TOKENIZER_IDENTITY_SHA256 = (
-    "9f7ee7cb93b58bf30f278965547e7584b89c848e76c3adfeb92c070a88492de0"
-)
 _CB_FORMAT_RE = re.compile(r"^(?:NVFP4_CB|FP8_CB)_[KS][0-9]+$")
 _FP8_SOURCE_W8A16_WIRE_IDS = frozenset({
     "fp8_e4m3_ue8m0_block128",
@@ -375,13 +374,15 @@ def compute_model_sha(
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
     before the card figures (``CARD_FIGURE_FILENAMES``) joined the exclusion.
     """
+    from .digests import bytes_sha256hex, text_sha256hex
+
     root = Path(model_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"model dir does not exist: {root}")
     payload: dict[str, Any] = {}
     cfg = root / "config.json"
     if cfg.is_file():
-        payload["config_sha"] = hashlib.sha256(cfg.read_bytes()).hexdigest()
+        payload["config_sha"] = bytes_sha256hex(cfg.read_bytes())
     quant_cfg = root / "quant_config.json"
     raw_quant_cfg: dict[str, Any] | None = None
     canonical_quant_cfg: dict[str, Any] | None = None
@@ -413,9 +414,9 @@ def compute_model_sha(
         ) if isinstance(raw_quant_cfg.get("provenance"), dict) else None
         if manifest is not None:
             _validate_weight_content_manifest(manifest, weights, where=quant_cfg)
-        payload["quant_config_sha"] = hashlib.sha256(
-            _canonical_json(canonical_quant_cfg).encode("utf-8")
-        ).hexdigest()
+        payload["quant_config_sha"] = text_sha256hex(
+            _canonical_json(canonical_quant_cfg)
+        )
     codebooks = {
         p.name: {
             "bytes": p.stat().st_size,
@@ -481,7 +482,7 @@ def compute_model_sha(
         }
         if auxiliary:
             payload["auxiliary_files"] = auxiliary
-    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+    return text_sha256hex(_canonical_json(payload))
 
 
 def accepted_model_shas(model_dir: str | os.PathLike) -> tuple[str, ...]:
@@ -771,13 +772,10 @@ def _verify_open_safetensors_fd(
     raw_length, read_calls = _read_exact_fd(
         fd, 8, digest=full_digest, capture=True
     )
-    header_length = int.from_bytes(raw_length, byteorder="little", signed=False)
-    if (
-        header_length <= 0
-        or header_length > _MAX_SAFETENSORS_HEADER_BYTES
-        or header_length > int(initial_stat.st_size) - 8
-    ):
-        raise ValueError(f"{name}: invalid safetensors header length {header_length}")
+    header_length = safetensors_prefix_length(
+        raw_length, int(initial_stat.st_size), max_bytes=_MAX_SAFETENSORS_HEADER_BYTES,
+        short_error="truncated safetensors content during verification",
+        range_error=lambda length: f"{name}: invalid safetensors header length {length}")
     raw_header, calls = _read_exact_fd(
         fd, header_length, digest=full_digest, capture=True
     )
@@ -2082,6 +2080,27 @@ def _verify_gold_record(
     return problems
 
 
+def verify_gold_producer_record(
+    record: Mapping[str, Any], *, slot: str, model_dir: str | os.PathLike,
+) -> list[str]:
+    """Replay a supported producer record before attaching it to a card."""
+    problems = []
+    if record.get("measurement_schema") not in GOLD_PRODUCER_RECORD_SCHEMAS:
+        problems.append("unsupported gold producer record schema")
+    if slot not in GOLD_SLOTS or record.get("slot") != slot:
+        problems.append("gold producer record slot differs")
+    if record.get("passed") is not True or record.get("spec_decode_detected") is not False:
+        problems.append("gold producer record did not observe a passing no-spec serve")
+    if record.get("model_sha") != compute_model_sha(model_dir):
+        problems.append("gold producer record artifact identity differs")
+    measured = record.get("measured_model")
+    if not isinstance(measured, str) or Path(measured).resolve() != Path(model_dir).resolve():
+        problems.append("gold producer record measured_model differs from the control path")
+    problems.extend(_verify_gold_record(slot, record, model_dir=model_dir))
+    return problems
+
+
+
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
@@ -2178,7 +2197,7 @@ def _verify_native_export_record(
 #
 # How the record gets here:
 #   1. Tessera builds and prices the control:
-#        python experiments/uniform_control.py plan --plan-json <candidate plan>
+#        python -m tessera.uniform_control plan <candidate plan> --model <source>
 #      then serves it, and `verify` re-asserts the byte match on the two
 #      exported manifests.
 #   2. The SAME KL tool that filled `gold.kl` is run on the control checkpoint
@@ -2347,8 +2366,8 @@ def _replay_control_arms(
     """Bind both arms to the serving metric, structurally.
 
     The candidate arm is not accepted as a number at all: it must BE the
-    card's own ``gold.kl``, which is already gated to exact full-vocab
-    KL-vs-BF16 with ``score_positions=all`` on a no-spec-decode serve.  So a
+    card's own ``gold.kl``, which is already gated to served KL
+    with ``score_positions=all`` on a no-spec-decode serve. So a
     last-token hook screen or a weight-space error cannot reach this slot
     through the candidate leg, and a block measured on some other allocation
     cannot be pasted onto this artifact -- its candidate KL would not be this
@@ -2463,7 +2482,21 @@ def _replay_control_arms(
             continue
         want = gold_metrics.get(contract_key)
         got = arm_metrics.get(contract_key)
-        if got != want:
+        same = got == want
+        if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
+            from .digests import DIRECT_ASCII_STRICT
+
+            try:
+                same = (contract_key in arm_metrics
+                        and DIRECT_ASCII_STRICT.text(got) == DIRECT_ASCII_STRICT.text(want))
+            except (TypeError, ValueError):
+                same = False
+        if not same:
+            if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
+                problems.append(
+                    f"{slot}: control arm: missing or different {contract_key}; "
+                    "the arms did not run the same measurement contract")
+                continue
             problems.append(
                 f"{slot}: control arm: {contract_key}={got!r} but the "
                 f"candidate's gold.kl says {want!r} — the arms did not run "

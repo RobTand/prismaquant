@@ -18,6 +18,7 @@ These tests pin the three properties that make that honest:
 import math
 import os
 import pathlib
+from functools import lru_cache
 
 import pytest
 
@@ -68,11 +69,16 @@ def _anchor(qname, family, rung, dloss, *, bytes_=1000):
     )
 
 
-def _menu(qname, family, rungs):
+@lru_cache(maxsize=1)
+def _research_menu_rows():
+    """Derive immutable rows once; each pricing consumer owns its containers."""
     from prismaquant.tessera_menu import expand_tessera_menu, MENU_RESEARCH
 
-    rows = expand_tessera_menu((2048, 1024), mode=MENU_RESEARCH)
-    return {qname: [r for r in rows
+    return tuple(expand_tessera_menu((2048, 1024), mode=MENU_RESEARCH))
+
+
+def _menu(qname, family, rungs):
+    return {qname: [r for r in _research_menu_rows()
                     if r.family == family and r.body_rate_q256 in rungs]}
 
 
@@ -622,7 +628,10 @@ def test_the_hessian_applies_exactly_where_tessera_says_it_does():
     source = activation_source(
         {"q": hessian_from_rows(rows)},
         calibration_identity("corpus", [torch.arange(4)], fit_tokens=64))
-    weight = torch.randn(64, 256)
+    # Every derived wire still gets a real encode with at least two complete
+    # arity/span groups; activation draws and the full-width Hessian stay fixed.
+    weight_rows = 2 * math.lcm(*(spec.arity * wire.span for spec, _, wire in reps))
+    weight = torch.randn(weight_rows, 256)
 
     verdicts = {}
     for spec, rung, wire in reps:

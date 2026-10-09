@@ -172,6 +172,7 @@ def _render_key(path: str):
 
 
 def run_window(args):
+
     import torch
     fixture = json.loads(Path(args.fixture_json).read_text())
     _attach_strict(fixture)
@@ -456,6 +457,7 @@ def _trees(args, out: Path):
 
 def _quantum_identity(out: Path, trees: dict, me: list) -> dict:
     """The joint quantum on each tree; the fix tree twice, as a run-to-run control."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     quantum = {}
     for arm in ('base', 'fix', 'fix-control'):
         tree = trees['fix' if arm.startswith('fix') else 'base']
@@ -469,7 +471,7 @@ def _quantum_identity(out: Path, trees: dict, me: list) -> dict:
     shutil.rmtree(out / 'quantum-scratch', ignore_errors=True)
     result = {
         'payload_identical': len({q['payload_sha256'] for q in quantum.values()}) == 1,
-        'files_identical': len({json.dumps(q['files'], sort_keys=True)
+        'files_identical': len({DIRECT_ASCII_SPACED_LAX.text(q['files'])
                                 for q in quantum.values()}) == 1,
         'leaves': _compare_leaves(quantum),
         **{arm: {'payload_sha256': q['payload_sha256'], 'costs': q['costs'],

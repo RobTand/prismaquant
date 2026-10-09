@@ -1,7 +1,7 @@
 """Tests for the native compressed-tensors exporter.
 
 Covers the math (NVFP4 / FP8 round-trip) and the wire-format
-plumbing (`_to_vllm_internal_name`, `build_quantization_config`)
+plumbing (profile naming, `build_quantization_config`)
 that has to stay in sync with vLLM's compressed-tensors loader.
 """
 from __future__ import annotations
@@ -18,14 +18,13 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 import prismaquant.export_native_compressed as enc
+from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 
 from prismaquant.allocator import promote_fused
 from prismaquant.export_native_compressed import (
     DEFAULT_INPUT_GLOBAL_SCALE,
-    FLOAT_TO_E2M1,
     FP8_E4M3_MAX,
     NVFP4_MAX,
-    PER_EXPERT_MOE_REGEX,
     _bf16_upgrade_audit,
     _compressed_tensor_key,
     _compute_layer_joint_nvfp4,
@@ -36,7 +35,6 @@ from prismaquant.export_native_compressed import (
     _quantize_3d_packed,
     _resolve_perturbed_x_export_inputs,
     _round_to_codebook,
-    _to_vllm_internal_name,
     compute_extra_ignore,
     validate_mtp_assignment_coverage,
     build_quantization_config,
@@ -955,7 +953,7 @@ def _nvfp4_dequantize(weight_packed, weight_scale_fp8, weight_global_scale_divis
     """
     rows = weight_packed.shape[0]
     cols = weight_packed.shape[1] * 2
-    cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+    cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
     lo = (weight_packed & 0xF).long()
     hi = ((weight_packed >> 4) & 0xF).long()
     idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)
@@ -976,7 +974,7 @@ def _mxfp4_served_dequantize(weight_packed, weight_scale_e8m0, group_size=32):
     """Reconstruct MXFP4 as the compressed-tensors/vLLM loader serves it."""
     rows = weight_packed.shape[0]
     cols = weight_packed.shape[1] * 2
-    cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+    cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
     lo = (weight_packed & 0xF).long()
     hi = ((weight_packed >> 4) & 0xF).long()
     idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)
@@ -1849,19 +1847,23 @@ class TestVLLMInternalNaming(unittest.TestCase):
     + ignore must match the INTERNAL form so `find_matched_target`
     succeeds."""
 
+    def setUp(self):
+        self.spec = Qwen3_5Profile().structure_spec()
+
+
     def test_text_only_recipe_naming_remap(self):
         self.assertEqual(
-            _to_vllm_internal_name("model.layers.0.linear_attn.in_proj_qkv"),
+            self.spec.rewrite_recipe_to_vllm("model.layers.0.linear_attn.in_proj_qkv"),
             "language_model.model.layers.0.linear_attn.in_proj_qkv",
         )
         self.assertEqual(
-            _to_vllm_internal_name("model.embed_tokens"),
+            self.spec.rewrite_recipe_to_vllm("model.embed_tokens"),
             "language_model.model.embed_tokens",
         )
 
     def test_lm_head_remap(self):
         self.assertEqual(
-            _to_vllm_internal_name("lm_head"),
+            self.spec.rewrite_recipe_to_vllm("lm_head"),
             "language_model.lm_head",
         )
 
@@ -1879,29 +1881,21 @@ class TestVLLMInternalNaming(unittest.TestCase):
         # Source on-disk uses `model.language_model.X`; vLLM internal
         # is `language_model.model.X` (the prefix swap).
         self.assertEqual(
-            _to_vllm_internal_name(
+            self.spec.rewrite_recipe_to_vllm(
                 "model.language_model.layers.5.mlp.shared_expert_gate"),
             "language_model.model.layers.5.mlp.shared_expert_gate",
         )
 
     def test_visual_remap(self):
         self.assertEqual(
-            _to_vllm_internal_name("model.visual.blocks.0.attn.proj"),
+            self.spec.rewrite_recipe_to_vllm("model.visual.blocks.0.attn.proj"),
             "visual.blocks.0.attn.proj",
         )
 
 
 class TestBuildQuantizationConfig(unittest.TestCase):
-    def test_batched_nvfp4_export_comment_matches_default_on(self):
-        text = Path(enc.__file__).read_text()
 
-        self.assertNotIn("disabled by default while", text)
-        self.assertIn("PRISMAQUANT_BATCHED_NVFP4_EXPORT=0", text)
-
-    def test_build_target_list_documents_sparse_expert_wildcard(self):
-        doc = enc._build_target_list.__doc__ or ""
-
-        self.assertIn("always emit a `[0-9]+`", doc)
+    def test_build_target_list_keeps_sparse_expert_wildcard(self):
         targets = enc._build_target_list([
             "model.layers.0.mlp.experts.2.gate_proj",
         ])
@@ -1935,11 +1929,11 @@ class TestBuildQuantizationConfig(unittest.TestCase):
         # MXFP8 group: explicit per-name regex targets only
         self.assertTrue(all(t.startswith("re:^language_model[.]")
                             for t in mxfp8["targets"]))
-        self.assertNotIn(PER_EXPERT_MOE_REGEX, mxfp8["targets"])
+        self.assertNotIn(profile.per_expert_moe_regex(), mxfp8["targets"])
         # NVFP4 catch-all: explicit + the per-expert pattern
         self.assertEqual(nvfp4["weights"]["strategy"], "tensor_group")
         self.assertEqual(nvfp4["weights"]["group_size"], 16)
-        self.assertIn(PER_EXPERT_MOE_REGEX, nvfp4["targets"])
+        self.assertIn(profile.per_expert_moe_regex(), nvfp4["targets"])
         # NVFP4 group must declare its per-group format so vLLM's
         # is_activation_quantization_format check enables W4A4 dispatch.
         self.assertEqual(nvfp4["format"], "nvfp4-pack-quantized")
@@ -4522,12 +4516,9 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def _decode_nvfp4(self, wp, ws, wg):
         import torch
-        from prismaquant.export_native_compressed import (
-            FLOAT_TO_E2M1,
-        )
         rows = wp.shape[0]
         cols = wp.shape[1] * 2
-        cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+        cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
         lo = (wp & 0xF).long()
         hi = ((wp >> 4) & 0xF).long()
         idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)

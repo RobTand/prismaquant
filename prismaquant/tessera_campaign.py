@@ -74,6 +74,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_STRICT,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
+)
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -85,7 +92,6 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import strict_json_loads
 
 __all__ = [
@@ -568,10 +574,23 @@ def _bind_served_quantizer(qname, format_name):
               f"{record.get('dequant_kernel')}", flush=True)
 
 
+def _direct_consumer_activation_contract(qname):
+    source = qname.removesuffix(".weight")
+    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return None
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_activation_contract
+    tensor = source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    return direct_consumer_activation_contract(source if fused is None else fused[0], role_name(tensor))
+
+
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                     hessian_required, static_input_scale, structure=None):
     """Admit each unit's Hessian and served activation contract before encode."""
-    _bind_served_quantizer(qname, format_name)
+    direct_contract = _direct_consumer_activation_contract(qname)
+    if direct_contract is None:
+        _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
     from .tessera_formats import (
         parse_tessera_format_name, tessera_served_wire_recipe, tessera_serving_route,
@@ -624,6 +643,8 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
     else:
         input_scale = None
         activation_qdq = spec.activation_quantize_dequantize
+    if direct_contract is not None:
+        activation_qdq = fr.get_format("BF16").activation_quantize_dequantize
     activation_kwargs = None
     # Whether an H can be applied is a property of the RUNG'S WIRE, not of the
     # run, and it is DERIVED from what the pinned ActivationSource emits for
@@ -643,8 +664,41 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 "must not fall through to a weights-only encode.")
     return dict(spec=spec, family=family, rung=rung, wire=wire, structure=structure,
                 activation_qdq=activation_qdq, input_scale=input_scale,
+                activation_contract=direct_contract or str(spec.act_dtype_name or "a16"),
                 activation_kwargs=activation_kwargs,
                 hessian_required=hessian_required)
+
+
+def _direct_consumer_memory_bytes(qname, family, shape):
+    """Charge each direct cache once through its source member."""
+    source = qname.removesuffix(".weight")
+    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return 0
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_resident_bytes
+    from tessera.serving.scheme import ROUTES
+    tensor = source + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    owner = source if fused is None else fused[0]
+    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
+    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
+    rows, columns = map(int, shape)
+    extra = direct_consumer_resident_bytes(owner, route_family, rows, columns,
+                                           [(role_name(tensor), rows)])
+    return extra["resident_bytes_resident_mode"]
+
+
+def _direct_consumer_render(blob, qname, family, device):
+    """Use the runtime owner's direct decoder for the priced source unit."""
+    from tessera.serving.dense_ownership import fused_module, role_name
+    from tessera.serving.projection_routes import direct_consumer_weight
+    from tessera.serving.scheme import ROUTES
+    tensor = qname.removesuffix(".weight") + ".weight"
+    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
+    owner = tensor.removesuffix(".weight") if fused is None else fused[0]
+    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
+    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
+    return direct_consumer_weight(blob, owner, role_name(tensor), route_family, device=str(device))
 
 
 def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
@@ -668,6 +722,12 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
     activation_qdq, input_scale = (prepared[key] for key in (
         "activation_qdq", "input_scale"))
+    direct_contract = _direct_consumer_activation_contract(qname)
+    preserve_fp32 = direct_contract == "a32"
+    cache_dtype = torch.float32 if preserve_fp32 else torch.bfloat16
+    if direct_contract is not None:
+        render = _direct_consumer_render(blob, qname, family, weight.device)
+    publication_bytes = render.numel() * (4 if preserve_fp32 else 2) + len(blob)
     score, metric, quantized, _clipped = _local_forward_render_score(
         reference_weight=weight,
         rendered_weight=render,
@@ -686,10 +746,9 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     # writer will own, so the budget has to admit it BEFORE it exists: charging
     # it after the fact would leave this thread holding one artifact more than
     # the bound allows, every time the writer is behind.  The size is known
-    # without making it -- one BF16 element per render element, plus the blob
-    # the encoder already returned.
+    # without a copy: the declared cache dtype sets each element's bytes.
     if publisher is not None:
-        publisher.reserve(render.numel() * 2 + len(blob))
+        publisher.reserve(publication_bytes)
     try:
         # The device-to-host copy stays on the thread that owns the device
         # work, whichever way the bytes are written.
@@ -699,10 +758,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # it always stored.  Staging it here is what gives the writer thread
         # bytes nobody else owns.
         staged = _canonical_rendered_weight_tensor(
-            render, weight_dtype=torch.bfloat16)
+            render, weight_dtype=cache_dtype, preserve_fp32=preserve_fp32)
     except BaseException:
         if publisher is not None:
-            publisher.release(render.numel() * 2 + len(blob))
+            publisher.release(publication_bytes)
         raise
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
@@ -710,17 +769,22 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     wire_path = _wire_path(wire_dir, qname, format_name)
 
     def _publish():
+        # Check on the writer thread as well as at batch admission, so queued
+        # publications see every earlier durable coordinate before any write.
+        _require_injective_anchor_filenames(
+            cache, wire_dir, ((qname, format_name),))
         _store_rendered_weight_entry(
             weights=cache.weights,
             qname=qname,
             fmt=format_name,
             tensor=staged,
             cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-            weight_dtype=torch.bfloat16,
+            weight_dtype=cache_dtype, preserve_fp32=preserve_fp32,
         )
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, wire_path)
+        _campaign_wire_coordinates(cache, wire_dir).add((qname, format_name))
         if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
             # The existing PWC entry is already disk-backed. Completed anchor
             # files must not accumulate an unbounded page-cache owner across
@@ -736,10 +800,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         _publish()
     else:
         # The reservation above was taken for exactly these bytes; the
-        # element count is the render's and the dtype is BF16 either way.
+        # The selected direct head cache keeps FP32; other caches keep BF16.
         publisher.submit(PublicationJob(
             key=(FILES_JOB, qname, format_name),
-            charged_bytes=(staged.numel() * staged.element_size()) + len(blob),
+            charged_bytes=publication_bytes,
             publish=_publish,
         ))
 
@@ -754,9 +818,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         # zero, and inventing one would put a fabricated uncertainty into the
         # allocator's UCB hedge.  Reported as zero and named as such.
         dloss_stderr=0.0,
-        memory_bytes=int(spec.memory_bytes_for_shape(tuple(weight.shape))),
+        memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
+                      + _direct_consumer_memory_bytes(qname, family, weight.shape)),
         bits_per_param=float(bits) / max(1, int(weight.numel())),
-        activation_contract=str(spec.act_dtype_name or "a16"),
+        activation_contract=prepared.get("activation_contract", str(spec.act_dtype_name or "a16")),
         activation_quantized=bool(quantized),
         wire_bytes=len(blob),
         seconds=elapsed,
@@ -799,6 +864,8 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
             raise ValueError(
                 f"anchor batch {format_name}: {name} prepares a different wire "
                 f"recipe or Hessian requirement than {qnames[0]}")
+    _require_injective_anchor_filenames(
+        cache, wire_dir, ((name, format_name) for name in qnames))
     started = time.time()
     encoded = encode_tessera_units(
         weights, format_name, recipe=prepared[0]["wire"],
@@ -895,10 +962,173 @@ def _stale_served_wire(anchor, record, *, structure) -> "str | None":
             f"served on {served} at this rung (#1502); re-priced, not adopted")
 
 
+def _load_campaign_acquisition(args, parser):
+    """Authenticate opt-in work before any campaign preparation has side effects."""
+    binding = (args.acquisition_request, args.acquisition_request_sha256)
+    if all(value is None for value in binding):
+        return None
+    if not all(binding):
+        parser.error("--acquisition-request and --acquisition-request-sha256 go together")
+    if args.menu_mode != "research" or args.max_rounds != 1:
+        parser.error("acquisition requires explicit --menu-mode research and --max-rounds 1")
+    if (args.rate_band is not None or args.exhaustive_rate_grid or args.census_out
+            or args.capture_calibration_out or args.capture_chain
+            or args.research_exact_member is not None):
+        parser.error("acquisition refuses rate-band, exhaustive, capture-only and partial-member modes")
+    # Selection metadata is small and must refuse partial/audit work before
+    # calibration intake, profile discovery, source pools or output creation.
+    if args.units:
+        selection = load_unit_selection(args.units)
+        if any(any(field in entry for field in
+                   ("partition", "sampled", "audit", "inclusion_probability", "stack_samples"))
+               for entry in selection["groups"]):
+            parser.error("acquisition refuses sampled, audit and expert partition selections")
+    from .tessera_full_domain_acquisition import load_joint_campaign_acquisition
+    return load_joint_campaign_acquisition(binding={"path": binding[0], "sha256": binding[1]})
+
+
+def _campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
+    """Require every real atomic member and exactly the requested scope."""
+    requests, sources = acquisition["requests"], acquisition["source_weights"]
+    flat = [name for members in scope_groups.values() for name in members]
+    known = set(flat)
+    if len(flat) != len(known):
+        raise ValueError("acquisition actual atomic scope overlaps or repeats members")
+    if not requests or set(requests) - known:
+        raise ValueError("acquisition names empty or unknown unit scope")
+    keys = [key for key, members in sorted(scope_groups.items()) if set(members) & set(requests)]
+    expanded = {name for key in keys for name in scope_groups[key]}
+    if set(requests) != expanded or set(sources) != expanded:
+        raise ValueError("acquisition requires request and source identity for every atomic member")
+    if selected is not None and set(selected) != expanded:
+        raise ValueError("acquisition selected scope differs from requested atomic-expanded scope")
+    return keys, expanded
+
+
+def _campaign_acquisition_row_scope(acquisition, scope_groups, *, selected=None):
+    """Project only an explicit complete actual --units selection after full validation."""
+    keys, expanded = _campaign_acquisition_scope(acquisition, scope_groups)
+    if selected is None:
+        return acquisition, keys, expanded
+    if isinstance(selected, (str, bytes)):
+        raise ValueError("acquisition row selection requires explicit unit names, not a string")
+    listed = list(selected)
+    selected = set(listed)
+    if len(listed) != len(selected):
+        raise ValueError("acquisition row selection repeats a unit")
+    row_keys = [key for key in keys if selected.intersection(scope_groups[key])]
+    row_members = {name for key in row_keys for name in scope_groups[key]}
+    if not selected or row_members != selected or not selected <= expanded:
+        raise ValueError("acquisition row selection must contain complete requested actual atomic groups")
+    from .tessera_full_domain_acquisition import project_joint_campaign_acquisition
+    projected = project_joint_campaign_acquisition(acquisition, units=sorted(selected))
+    _campaign_acquisition_scope(projected, scope_groups, selected=selected)
+    return projected, row_keys, row_members
+
+
+def _requested_acquisition_schedule(groups, requests):
+    """Exact atomic-expanded requested work only, not an assertion of legal prices."""
+    result = {}
+    for _key, members in sorted(groups.items()):
+        families = sorted({family for name in members for family in requests[name]})
+        union = {family: sorted({q for name in members for q in requests[name].get(family, [])})
+                 for family in families}
+        for name in members:
+            result[name] = {family: list(qs) for family, qs in union.items()}
+    return dict(sorted(result.items()))
+
+
+def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap,
+                                 requests=None, rates_by_unit=None):
+    """One seam for early priming and actual round one; validate the whole plan.
+
+    An acquisition takes the exact union of a group's requested q256s. Empty
+    report families buy no work, and neither endpoints nor an audit add work.
+    """
+    names = {name for members in groups.values() for name in members}
+    schedule = {name: {} for name in sorted(names)}
+    if requests is not None:
+        if set(requests) != names:
+            raise ValueError("acquisition schedule requires every atomic member, no extra units")
+        if (audit_units or getattr(args, "rate_band", None) is not None
+                or args.exhaustive_rate_grid or args.max_rounds != 1):
+            raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
+    requested_schedule = None if requests is None else _requested_acquisition_schedule(groups, requests)
+    for key, members in sorted(groups.items()):
+        if requests is None:
+            families = group_rates[key]
+        else:
+            families = sorted({family for name in members for family in requests[name]})
+        for family in families:
+            allowed = group_rates[key].get(family, [])
+            if requests is None:
+                want = round_one_rates(allowed, band=parse_rate_band(getattr(args, "rate_band", None)),
+                    anchors=args.anchors, snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+                extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
+            else:
+                proposed = [q for name in members for q in requests[name].get(family, [])]
+                # An explicitly deferred report family requests no encode. Its
+                # lack of an admitted grid is evidence to retain, not a reason
+                # to invent work or refuse another family's actual work.
+                if proposed and (rates_by_unit is None or any(
+                        family not in rates_by_unit[name] for name in members)):
+                    raise ValueError(f"acquisition family {family} has no actual atomic-member grid")
+                if any(type(q) is not int or q not in allowed for q in proposed):
+                    raise ValueError(f"acquisition {key}:{family} requests illegal or route-refused q256")
+                want, extra = requested_schedule[members[0]][family], None
+            for name in members:
+                rates = set(want)
+                if extra is not None and name in audit_units:
+                    rates.add(extra)
+                schedule[name][family] = sorted(rates)
+    return schedule
+
+
+def _campaign_acquisition_deferred_families(schedule, menu_families):
+    """Exact deferred producer-menu/request families, never a price claim."""
+    return sorted((set(menu_families) | set(schedule))
+                  - {family for family, qs in schedule.items() if qs})
+
+
+def _campaign_acquisition_origin(acquisition, schedule, menus):
+    return {**acquisition["identity"],
+        "purpose": "actual_scalar_render_journal_and_wire_preparation",
+        "currency": CURRENCY,
+        "expanded_actual_work_count": sum(len(qs) for families in schedule.values() for qs in families.values()),
+        "deferred_domain": {name: _campaign_acquisition_deferred_families(
+            schedule[name], (r.family for r in menus[name])) for name in sorted(schedule)}}
+
+
+def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None):
+    """Compare actual source bytes, never reinterpret a producer's other digest.
+
+    The current producer hashes dtype/shape + NUL + bytes, unlike joint AURA's
+    raw-byte digest. That receipt cannot project its content digest: use the
+    existing joint helper once per unit only when a raw-byte receipt is absent.
+    """
+    if (expected["shape"] != list(weight.shape) or expected["dtype"] != str(weight.dtype)
+            or expected["logical_bytes"] != weight.numel() * weight.element_size()):
+        raise ValueError(f"acquisition source weight identity differs for {name}")
+    fields = {"shape", "dtype", "logical_bytes", "content_sha256"}
+    if isinstance(receipt, Mapping) and fields <= set(receipt):
+        actual = {field: receipt[field] for field in fields}
+    else:
+        from .production_weight_cache import _cb_cache_tensor_identity
+        actual = _cb_cache_tensor_identity(weight)
+    if actual != expected:
+        raise ValueError(f"acquisition source weight identity differs for {name}")
+
+
+def _require_campaign_acquisition_anchor(anchor, schedule):
+    if (anchor.qname not in schedule or anchor.body_rate_q256 not in
+            schedule[anchor.qname].get(anchor.family, [])):
+        raise ValueError("acquisition refuses extra checkpoint/seed anchor work")
+
+
 def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
                               weights, profile, expert_members, encode_structure,
                               projected_units, audit_units, route_cache,
-                              partitioned=False):
+                              partitioned=False, acquisition_requests=None):
     """Overlap a new head's exact first batch; never read ahead of resume gates.
 
     Use the existing group/anchor/batch mechanisms and row-local refusal memo.
@@ -934,26 +1164,15 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
             per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
         rates_by_unit[name] = per_family
     groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
-    band = parse_rate_band(getattr(args, "rate_band", None))
-    pending = []
-    for _key, members in sorted(groups.items()):
-        families = set.intersection(*[set(rates_by_unit[m]) for m in members]) if members else set()
-        for family in sorted(families):
-            shared = set.intersection(*[rates_by_unit[m][family] for m in members])
-            refused = _served_route_refusals(family, shared, members,
-                encode_structure=encode_structure, projected_units=projected_units,
-                route_cache=route_cache)
-            allowed = sorted(shared - {int(rung) for rung in refused})
-            if not allowed:
-                continue
-            want = round_one_rates(allowed, band=band, anchors=args.anchors,
-                                   snap=snap, exhaustive_band=args.exhaustive_rate_grid)
-            extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
-            for name in members:
-                rates = set(want)
-                if extra is not None and name in audit_units:
-                    rates.add(extra)
-                pending.extend((name, family, rate) for rate in sorted(rates))
+    group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
+        encode_structure=encode_structure, projected_units=projected_units,
+        route_cache=route_cache)
+    schedule = _campaign_round_one_schedule(groups, group_rates, args=args,
+        audit_units=audit_units, snap=snap, requests=acquisition_requests,
+        rates_by_unit=rates_by_unit)
+    pending = [(name, family, rate) for key, members in sorted(groups.items())
+               for family in sorted({f for name in members for f in schedule[name]})
+               for name in members for rate in schedule[name].get(family, [])]
     batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
                               structures=encode_structure)
     if batches:
@@ -1911,7 +2130,7 @@ def canonical_refusals(refusals: Sequence[dict]) -> list[dict]:
     """
     return sorted(refusals, key=lambda entry: (
         entry["qname"], entry.get("family", ""), entry.get("format_name", ""),
-        json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)))
+        DIRECT_ASCII_STRICT.text(entry)))
 
 
 def campaign_cost_payload(
@@ -2154,6 +2373,63 @@ def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
     return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
 
 
+def _campaign_wire_coordinates(cache, wire_dir):
+    """The wires this cache owns, independent of its rendered-only entries.
+
+    A pre-existing manifest contributes only destinations already present in
+    the wire directory. Snapshot that roster once: checking existence again
+    after an alias is published would misidentify a dense-only entry as the
+    new wire's owner. Fresh publications and resume/seed admission explicitly
+    add their coordinates, including wires with no rendered-manifest entry.
+    This is process-local campaign ownership, not a cross-process index.
+    """
+    coordinates = getattr(cache, "_campaign_wire_coordinates", None)
+    if coordinates is None:
+        coordinates = {key for key in cache.weights
+                       if _wire_path(wire_dir, *key).exists()}
+        # Batch admission may bootstrap while the ordered writer publishes.
+        # Install only once and adopt the winner's object, so a stale snapshot
+        # can never replace a roster another thread has created or updated.
+        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
+    return coordinates
+
+
+def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
+    """Check actual rendered and wire destinations before either write."""
+    from .production_weight_cache import require_injective_cache_filenames
+
+    coordinates = set(coordinates)
+    if cache.cache_dir:
+        require_injective_cache_filenames(
+            set(cache.weights).union(coordinates), where="campaign rendered weights")
+    _require_injective_wire_filenames(
+        wire_dir, _campaign_wire_coordinates(cache, wire_dir).union(coordinates))
+
+
+def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
+    """Reserve resume/seed wires before their links or receipt reads."""
+    # The roster belongs to the cache object: one cache, one wire_dir.
+    # This check/update is not atomic with the writer; register before publication.
+    coordinates = set(coordinates)
+    owned = _campaign_wire_coordinates(cache, wire_dir)
+    _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
+    owned.update(coordinates)
+
+
+def _require_injective_wire_filenames(wire_dir, coordinates):
+    # Resume and export consume _wire_path: its legacy dot-to-double-
+    # underscore spelling is different from the rendered-weight leaf.
+    owners = {}
+    for coordinate in sorted(coordinates):
+        filename = str(_wire_path(wire_dir, *coordinate).relative_to(wire_dir))
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
+            raise ValueError(
+                f"campaign wire shards: coordinates {previous!r} and "
+                f"{coordinate!r} map to one wire destination {filename!r}; "
+                "the wire shards would silently overwrite each other")
+
+
 def _checkpoint_identity_api():
     try:
         from tessera import cached_unit
@@ -2184,6 +2460,10 @@ def _manifest_unit_receipts(identity, names):
     return receipts
 
 
+#: Producer provenance only; every recipe, input and sampling field still refuses.
+CAMPAIGN_CHECKPOINT_SEAL_FIELDS = frozenset({"prismaquant_source_sha256", "encoder_source_sha256"})
+
+
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
@@ -2212,6 +2492,12 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
 
     api = _checkpoint_identity_api()
     settings = vars(args).copy()
+    # Locations and a duplicate digest are never scheduling identity. Opted-in
+    # origin + exact atomic-expanded schedule below stay bound by value; unset
+    # flags leave the historical settings bytes unchanged.
+    settings.pop("acquisition_request", None)
+    settings.pop("acquisition_request_sha256", None)
+    settings.pop("acquisition_source_weights", None)
     restriction = parse_family_restriction(settings.get("family_restriction"))
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
@@ -2308,6 +2594,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
+                **({"acquisition_source_weight": dict(args.acquisition_source_weights[name])}
+                   if getattr(args, "acquisition_source_weights", None) is not None else {}),
                 # A campaign hold creates this exact producer template once
                 # before journal admission.  The journal retains the same
                 # source/H records the former direct calls made, without a
@@ -2760,8 +3048,7 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     planned, largest_serialization, widest_roster = {}, 0, 0
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
-        projection_bytes = len(json.dumps((projected_units or {}).get(name),
-            sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
+        projection_bytes = len(DIRECT_ASCII_STRICT.encoded((projected_units or {}).get(name)))
         receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
         planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
                          _frozenset_table_bytes(len(menus[name])) +
@@ -3018,12 +3305,28 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
             record = api.make_unit_record(blob, identity, filename=path.name)
         else:
             record = existing
-            api.verify_cached_unit(blob, record, identity)
+            verification_identity = identity
+            producer_field = "encoder_source_sha256"
+            observed = record.get("identity") if isinstance(record, dict) else None
+            if (producer_field in CAMPAIGN_CHECKPOINT_SEAL_FIELDS
+                    and isinstance(observed, dict)
+                    and producer_field in observed and producer_field in identity
+                    and observed[producer_field] != identity[producer_field]):
+                # Defer only this declared producer seal. The real reader still
+                # verifies own bytes, grammar and every comparability field.
+                verification_identity = {**identity, producer_field: observed[producer_field]}
+            api.verify_cached_unit(blob, record, verification_identity)
             if record.get("file") != path.name:
                 raise ValueError("cached wire filename differs from the priced unit/rung")
         # CampaignAnchor.wire_bytes means the full blob, not plane-region bytes.
         if anchor.wire_bytes != record["blob_bytes"]:
             raise ValueError("cached wire length differs from the measured anchor")
+        if existing is not None and verification_identity is not identity:
+            from .dev_mode import seal_check
+
+            seal_check(f"campaign wire {producer_field}", observed[producer_field], identity[producer_field],
+                       where=f"{anchor.qname}@{anchor.format_name}",
+                       refusal=ValueError(f"cached unit {producer_field} identity mismatch"))
         return record
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise RuntimeError(
@@ -3286,7 +3589,8 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         for fmt, record in state.get("wire_records", {}).items():
             if not admits(name, fmt):
                 continue
-            _link_seed_wire(seed_wire, wire_dir, record.get("file"))
+            _link_seed_wire(seed_wire, wire_dir, record.get("file"),
+                            qname=name, format_name=fmt)
         adopt(name, state, where=f"seed checkpoint {manifest}")
         adopted.append(name)
     print(f"[campaign] adopted verified anchors for {len(adopted)} units from "
@@ -3300,10 +3604,22 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     }
 
 
-def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename) -> None:
-    """Put a seed's priced wire where this run's receipt check will read it."""
+def _require_seed_wire_filename(wire_dir: Path, filename, *,
+                                qname: str, format_name: str) -> None:
+    """Refuse a seed receipt whose file name is not its unit/rung destination.
+
+    Pure name arithmetic: callers run it before they read or link the wire.
+    """
     if not isinstance(filename, str) or not filename or "/" in filename:
         raise RuntimeError(f"seed wire receipt names an unusable file: {filename!r}")
+    if filename != _wire_path(wire_dir, qname, format_name).name:
+        raise RuntimeError(f"{qname}: seed wire filename differs from priced unit/rung")
+
+
+def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
+                    qname: str, format_name: str) -> None:
+    """Put a seed's priced wire where this run's receipt check will read it."""
+    _require_seed_wire_filename(wire_dir, filename, qname=qname, format_name=format_name)
     target = wire_dir / filename
     if target.exists():
         return
@@ -3981,8 +4297,6 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     ``permutation``, ``start``, ``size``, ``size_sha256``, ``frame_size``,
     ``random_draws`` and ``method``.
     """
-    import hashlib
-
     names = sorted(weights)
     if not names:
         raise RuntimeError(f"stack {stack}: no unit to sample")
@@ -3991,9 +4305,7 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
         raise RuntimeError(f"stack {stack}: size weights must be finite")
     if any(value < 0.0 for value in sizes.values()):
         raise RuntimeError(f"stack {stack}: a size weight is negative")
-    digest = hashlib.sha256(
-        "|".join(f"{name}={sizes[name]!r}" for name in names).encode()
-    ).hexdigest()
+    digest = text_sha256hex("|".join(f"{name}={sizes[name]!r}" for name in names))
     want = int(n)
     if want < 1:
         raise RuntimeError(f"stack {stack}: --stack-sample must be at least 1")
@@ -5065,6 +5377,84 @@ def _launch_prepared_projected_check(check, live):
     return staged
 
 
+def _projected_cuda_reservation(weights):
+    """Bound native CUDA reserved growth without assuming cache or stream reuse.
+
+    The guard reads segments, not tensor payloads. Charge a fresh segment for
+    EVERY allocation in the pass; a freed mask/staging block can remain cached.
+    Native sizing is from PyTorch c10/core/AllocatorConfig.h and
+    cuda/CUDACachingAllocator.cpp (round_size/get_allocation_size): 512-byte
+    blocks, 2-MiB small segments, 20-MiB medium segments, 2-MiB large rounding.
+    Nondefault allocators/settings need their own reviewed residency bound.
+    """
+    import torch
+
+    eligible = [live for live in weights
+                if live.device.type == 'cuda' and _device_comparable(live.dtype)]
+    if not eligible:
+        return 0
+    refusal = ('parallel projected preparation requires the default native CUDA '
+               'allocator residency model')
+    if torch.cuda.get_allocator_backend() != 'native':
+        raise RuntimeError(refusal)
+    settings = torch.cuda.memory._snapshot().get('allocator_settings', {})
+    # parseArgs("") resets the displayed string, not all effective settings.
+    # Qualified 2.11 snapshot serialization casts SIZE_MAX to signed int64 (-1)
+    # and emits the 16 1-MiB..64-GiB rounding intervals as power-of-two keys.
+    intervals = (64 * 1024**3 // 1024**2).bit_length() - 1
+    defaults = {'PYTORCH_CUDA_ALLOC_CONF': '', 'expandable_segments': False,
+                'max_split_size': -1, 'garbage_collection_threshold': 0.0,
+                'roundup_power2_divisions': {str(1 << i): 0 for i in range(intervals)}}
+    if not isinstance(settings, dict):
+        raise RuntimeError(refusal)
+    for field, default in defaults.items():
+        value = settings.get(field)
+        if type(value) is not type(default) or value != default:
+            raise RuntimeError(f'{refusal}: unpriced effective {field}')
+    # Dict equality alone would accept False in place of the native integer 0.
+    if any(type(value) is not int for value in settings['roundup_power2_divisions'].values()):
+        raise RuntimeError(f'{refusal}: unpriced effective roundup_power2_divisions')
+    # The snapshot omits these sticky sizes. Read them from the executing
+    # libC10 through its public getters; never infer them from configuration text.
+    from .kernels import cuda_allocator_state
+    try:
+        sizing = cuda_allocator_state.sizing()
+    except (ImportError, OSError, RuntimeError) as error:
+        raise RuntimeError(f'{refusal}: effective sizing accessor unavailable') from error
+    if (type(sizing) is not tuple or len(sizing) != 2
+            or any(type(value) is not int for value in sizing)
+            or sizing != (20 * 1024**2, 20 * 1024**2)):
+        raise RuntimeError(f'{refusal}: unpriced effective large-segment/nonsplit sizing')
+
+    def segment(size):
+        if not size:
+            return 0
+        size = ((size + 511) // 512) * 512
+        if size <= 1024**2:
+            return 2 * 1024**2
+        if size < 10 * 1024**2:
+            return 20 * 1024**2
+        return ((size + 2 * 1024**2 - 1) // (2 * 1024**2)) * (2 * 1024**2)
+
+    total = 0
+    counts = {}
+    for live in eligible:
+        elements = live.numel()
+        # A contiguous bool mask's full reduction has one output. Reduce.cuh
+        # bounds its global partials by the input count and uses one int
+        # semaphore. Split 32-bit iterators may allocate scratch repeatedly;
+        # charge each possible slice separately, plus its scalar accumulator.
+        slice_count = max(1, (elements + (2**31 - 2)) // (2**31 - 1))
+        slices = 1 << (slice_count - 1).bit_length()
+        total += segment(elements * live.element_size()) + segment(elements)
+        total += slices * (segment(min(elements, 2**31 - 1)) + segment(4))
+        total += 2 * segment(1)  # verdict plus possible reduction accumulator
+        counts[live.device] = counts.get(live.device, 0) + 1
+    # One stacked bool allocation per device, beside all original verdicts.
+    return total + sum(segment(count) for count in counts.values())
+
+
+
 @contextmanager
 def _parallel_projected_checks(units, *, weights, model_path, source,
                                resource_check, source_authentication,
@@ -5084,11 +5474,10 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         raise RuntimeError('parallel projected preparation requires the shared two-thread read pool')
     rows = list(units.items())
     sizes = [weights[n].numel()*weights[n].element_size() for n,_u in rows]
-    elements = [weights[n].numel() for n,_u in rows]
     if any(size > preparation_max_bytes for size in sizes):
         raise RuntimeError('one projected unit exceeds the private preparation byte cap')
     pin_bound = min(preparation_max_bytes, sum(sorted(sizes, reverse=True)[:4]))
-    gpu_bound = pin_bound + min(pin_bound, sum(sorted(elements, reverse=True)[:4]))
+    gpu_bound = _projected_cuda_reservation([weights[n] for n, _u in rows])
     reserve_allocation(resource_check, 'before_parallel_projected_preparation',
                        cpu_bytes=pin_bound, device_bytes=gpu_bound)
     pool = layer_streaming._layer_read_pool(2, allow_resize=False)
@@ -5102,6 +5491,32 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
     def require_running():
         if cancelled():
             raise CancelledError('projected preparation cancelled')
+    def admit():
+        nonlocal index, held_bytes
+        while index < len(rows) and len(pending)+len(inflight) < 4:
+            name, unit = rows[index]
+            live, size = weights[name], sizes[index]
+            eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
+            # Serial fallbacks never coexist with pending private staging.
+            if not eligible and (pending or inflight):
+                break
+            if held_bytes + size > preparation_max_bytes:
+                break
+            resource_check(f'before_source_projection_check:{name}')
+            if eligible:
+                future = pool.submit(_prepare_device_projected_check, name, unit,
+                    live_shape=tuple(live.shape), live_dtype=live.dtype,
+                    model_path=model_path, source=source,
+                    release_source_pages=release_source_pages,
+                    source_authentication=source_authentication, cancelled=cancelled)
+                futures.append(future)
+            else:
+                future = None
+            pending.append((name, unit, future, size))
+            held_bytes += size
+            index += 1
+            if not eligible:
+                break
     def reap():
         nonlocal held_bytes
         while inflight and inflight[0][2].query():
@@ -5112,30 +5527,7 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         while index < len(rows) or pending:
             require_running()
             reap()
-            while index < len(rows) and len(pending)+len(inflight) < 4:
-                name, unit = rows[index]
-                live, size = weights[name], sizes[index]
-                eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
-                # Serial fallbacks never coexist with pending private staging.
-                if not eligible and (pending or inflight):
-                    break
-                if held_bytes + size > preparation_max_bytes:
-                    break
-                resource_check(f'before_source_projection_check:{name}')
-                if eligible:
-                    future = pool.submit(_prepare_device_projected_check, name, unit,
-                        live_shape=tuple(live.shape), live_dtype=live.dtype,
-                        model_path=model_path, source=source,
-                        release_source_pages=release_source_pages,
-                        source_authentication=source_authentication, cancelled=cancelled)
-                    futures.append(future)
-                else:
-                    future = None
-                pending.append((name, unit, future, size))
-                held_bytes += size
-                index += 1
-                if not eligible:
-                    break
+            admit()
             if not pending:
                 # Event polling grants no progress and never reads a verdict.
                 stop.wait(.001)
@@ -5149,6 +5541,11 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
             else:
                 while True:
                     require_running()
+                    # A launch completed during this wait frees its credit
+                    # here, not at the next loop top: the readers must not
+                    # idle while the ordered head stages.
+                    reap()
+                    admit()
                     try:
                         check = future.result(timeout=.05)
                         break
@@ -5590,18 +5987,20 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
         return
     # The same declaration _finish_anchor stamps on a fresh measured row.
     # Producer wire/input integrity does not authenticate scoring metadata.
-    expected_contract = str(spec.act_dtype_name or "a16")
+    # Direct consumers use the same contract as the measured row.
+    direct_contract = _direct_consumer_activation_contract(anchor.qname)
+    expected_contract = direct_contract or str(spec.act_dtype_name or "a16")
     if anchor.activation_contract != expected_contract:
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} activation contract "
-            f"{anchor.activation_contract!r} differs from the format's {expected_contract!r}")
-    # This flag records whether the actual scoring rows changed, not whether
-    # the format can quantize. Exact input values may survive an A8/A4 route.
+            f"{anchor.activation_contract!r} differs from the expected {expected_contract!r}")
+    # A direct consumer never quantizes its input rows.
+    allows_quantized = direct_contract is None and spec.act_quant_changes_input
     if (type(anchor.activation_quantized) is not bool or
-            (anchor.activation_quantized and not spec.act_quant_changes_input)):
+            (anchor.activation_quantized and not allows_quantized)):
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} activation observation "
-            f"{anchor.activation_quantized!r} is incompatible with its format")
+            f"{anchor.activation_quantized!r} is incompatible with {expected_contract!r}")
 
 
 def _save_hessian_capture_with_page_release(payload, path, *, resource_check=None):
@@ -5768,11 +6167,11 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             # do not leave a half-written .pt.tmp beside them.
             tmp_capture.unlink(missing_ok=True)
             raise
-        tmp_sidecar.write_text(json.dumps({
+        tmp_sidecar.write_text(DIRECT_ASCII_INDENT2_LAX.text({
             **capture_provenance,
             "capture_sha256": capture_sha256,
             "capture_sha256_schema": HESSIAN_CAPTURE_SHA256_SCHEMA,
-        }, indent=2, sort_keys=True) + "\n")
+        }) + "\n")
         if sidecar.exists():
             sidecar.unlink()
         os.replace(tmp_capture, hessian_capture_path)
@@ -6408,7 +6807,12 @@ def _main(argv, *, source_scope, waits) -> int:
                          "refuses leaves every read to hash fresh (PQ #1497).")
     ap.add_argument("--source-identity-cache-sha256", default=None,
                     help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
+    ap.add_argument("--acquisition-request", default=None,
+                    help="Opt-in authenticated joint full-domain acquisition request; schedules exact research render/wire work only.")
+    ap.add_argument("--acquisition-request-sha256", default=None,
+                    help="Independent SHA256 of --acquisition-request; both flags are required together.")
     args = ap.parse_args(argv)
+    acquisition = _load_campaign_acquisition(args, ap)
     calibration_options = (args.calibration_input, args.calibration_input_sha256,
                            args.calibration_corpus)
     if any(value is not None for value in calibration_options) and not all(calibration_options):
@@ -6704,7 +7108,7 @@ def _main(argv, *, source_scope, waits) -> int:
                   _require_campaign_population(model, profile, args.layer_stride))
     # Names only: no module is retained after source teardown.
     roster = campaign_roster(
-        [name for name, module in model.named_modules() if isinstance(module, torch.nn.Linear)],
+        profile.campaign_dense_unit_names(model, allow_pinned=args.allow_pinned),
         profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
     all_dense = list(roster.dense)
     pinned = list(roster.pinned)
@@ -6813,6 +7217,14 @@ def _main(argv, *, source_scope, waits) -> int:
                 f"--units {args.units}: the selection prices no unit")
     elif args.research_exact_member is not None:
         raise RuntimeError("--research-exact-member requires --units")
+
+    if acquisition is not None:
+        acquisition, selected_groups, keep = _campaign_acquisition_row_scope(
+            acquisition, scope_groups, selected=targets if args.units else None)
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items() if name in keep}
+        targets = [*dense_targets, *expert_targets]
 
     context_by_unit = None
     structure_by_unit = None
@@ -7222,6 +7634,25 @@ def _main(argv, *, source_scope, waits) -> int:
             selected_source_preparation['source_authentication'] = source_authentication.receipt()
             source_authentication.close()
 
+    route_cache: dict[tuple, str | None] = {}
+    acquisition_schedule = None
+    if acquisition is not None:
+        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+        acquisition_rates = {name: {} for name in targets}
+        for name in targets:
+            for rung in menus[name]:
+                if args.max_artifact_bpp > 0 and rung.bpp > args.max_artifact_bpp:
+                    continue
+                acquisition_rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
+        acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
+            encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
+        acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
+            args=args, audit_units=audit_units, snap=None, requests=acquisition["requests"],
+            rates_by_unit=acquisition_rates)
+        args.acquisition_schedule = acquisition_schedule
+        args.acquisition_origin = _campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
+        args.acquisition_source_weights = acquisition["source_weights"]
+
     if not streaming_head:
         close_source_authentication()
     elif source_authentication is not None:
@@ -7315,8 +7746,14 @@ def _main(argv, *, source_scope, waits) -> int:
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
+    if acquisition is not None and not streaming_head:
+        for name in sorted(targets):
+            receipt = (bound_checkpoint_units[name].campaign_inputs()["source"]
+                       if bound_checkpoint_units else None)
+            _require_campaign_acquisition_source(name, weights[name],
+                acquisition["source_weights"][name], receipt=receipt)
+
     row_stream = None
-    route_cache: dict[tuple, str | None] = {}
     if streaming_head:
         from .tessera_row_stream import RowStream
         stream_threads = identity_threads
@@ -7355,15 +7792,31 @@ def _main(argv, *, source_scope, waits) -> int:
             release()
             return weight
 
+        acquisition_source_checked = set()
+
+        def bind_stream_unit(name, *, weight, inputs, hessian, source):
+            holder, receipts = _stream_unit_identity(name, weight=weight,
+                inputs=inputs, hessian=hessian, source=source if want_h else None,
+                menu=menus[name], projected_unit=projected_units.get(name),
+                static_scales=static_scales, metadata_bound=window_bounds[name])
+            try:
+                if acquisition is not None and name not in acquisition_source_checked:
+                    _require_campaign_acquisition_source(name, weight,
+                        acquisition["source_weights"][name], receipt=receipts["weight"])
+                    acquisition_source_checked.add(name)
+            except BaseException:
+                if holder is not None:
+                    holder.close()
+                raise
+            # A reread is already bound to the first producer receipt by
+            # RowStream; do not add another full raw-byte hash for that unit.
+            return holder, receipts
+
         row_stream = RowStream(
             capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
             expected_identity=capture_identity, census=census, names=targets,
             policy=args.capture_load_policy, weights=weights, hessian_identity=hessian_identity,
-            bind=lambda name, *, weight, inputs, hessian, source: _stream_unit_identity(
-                name, weight=weight, inputs=inputs, hessian=hessian,
-                source=source if want_h else None, menu=menus[name],
-                projected_unit=projected_units.get(name), static_scales=static_scales,
-                metadata_bound=window_bounds[name]),
+            bind=bind_stream_unit,
             load_unit=load_projected_source if streamed_units else None,
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
@@ -7377,7 +7830,8 @@ def _main(argv, *, source_scope, waits) -> int:
             targets=targets, menus=menus, weights=weights, profile=profile,
             expert_members=expert_members, encode_structure=encode_structure,
             projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
-            partitioned=partition_menu_targets is not None)
+            partitioned=partition_menu_targets is not None,
+            acquisition_requests=None if acquisition is None else acquisition["requests"])
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -7400,7 +7854,7 @@ def _main(argv, *, source_scope, waits) -> int:
         return prepare_journal(
             checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
             stage="Tessera campaign", resume=True, identity=identity,
-            qnames=targets,
+            qnames=targets, seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
         )
 
     # Under the stream head the identity, and so the journal, exist only at
@@ -7443,6 +7897,7 @@ def _main(argv, *, source_scope, waits) -> int:
         stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
             checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
             stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
+            seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
             identity=run_identity(unit_receipts={
                 name: dict.fromkeys(RECEIPT_FIELDS, STREAM_JOURNAL_RECEIPT)
                 for name in weights}))
@@ -7468,6 +7923,19 @@ def _main(argv, *, source_scope, waits) -> int:
         for row in state["anchors"]:
             if row["format_name"] in on_menu:
                 _require_resumable_anchor(CampaignAnchor(**row), static_scales)
+        if acquisition_schedule is not None:
+            for row in state["anchors"]:
+                _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
+            if state.get("unservable"):
+                raise ValueError("acquisition refuses unservable checkpoint/seed anchor work")
+        # Resume does not reconstruct cache.weights; seed wires are linked
+        # before adopt_state reads them. Reserve every admitted coordinate
+        # here, before either path touches those bytes, including stale rows
+        # whose seed files are linked but whose prices are not adopted.
+        _register_campaign_wire_coordinates(
+            cache, wire_dir,
+            ((row["qname"], row["format_name"]) for row in state["anchors"]
+             if row["format_name"] in on_menu))
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -7775,7 +8243,7 @@ def _main(argv, *, source_scope, waits) -> int:
         record = dict(row_stream.execution_record(),
                       finalize_seconds=round(_time.monotonic() - started, 3))
         atomic_write_bytes(cache_dir / EXECUTION_FILENAME,
-                           (json.dumps(record, indent=2, sort_keys=True) + "\n").encode())
+                           DIRECT_ASCII_INDENT2_LAX.encoded(record) + b"\n")
         print(f"[campaign] row head: stream finalized {record['units']} units "
               f"(first batch ready {record['first_batch_ready_seconds']} s, "
               f"reads {record['read_seconds']} s, waited {record['wait_seconds']} s, "
@@ -8023,6 +8491,10 @@ def _main(argv, *, source_scope, waits) -> int:
             return None
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
+    round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
+        args=args, audit_units=audit_units, snap=_snap,
+        requests=None if acquisition is None else acquisition["requests"], rates_by_unit=rates_by_unit)
+
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.
     budget = int(args.anchor_budget)
@@ -8068,15 +8540,8 @@ def _main(argv, *, source_scope, waits) -> int:
                         for m in members}
                     grid = sorted(set.intersection(*member_rates.values())) if members else []
                     if round_index == 1:
-                        want = round_one_rates(allowed, band=rate_band,
-                                               anchors=args.anchors, snap=_snap,
-                                               exhaustive_band=args.exhaustive_rate_grid)
-                        extra = (None if not audit_units else
-                                 audit_extra_rate(allowed, want, snap=_snap))
                         for m in members:
-                            rates = set(want)
-                            if extra is not None and m in audit_units:
-                                rates.add(extra)
+                            rates = set(round_one_schedule[m].get(family, []))
                             have = member_rates[m]
                             pending.extend((m, family, rate)
                                            for rate in sorted(rates - have))
@@ -8378,6 +8843,9 @@ def _main(argv, *, source_scope, waits) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
+            **({"acquisition": args.acquisition_origin,
+                "acquisition_schedule": acquisition_schedule,
+                "acquisition_source_weights": acquisition["source_weights"]} if acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means
             # the default: every render and wire published on the encode
             # thread before the next batch started. Present means one bounded
@@ -8594,8 +9062,14 @@ def _main(argv, *, source_scope, waits) -> int:
             },
         },
     }
+    payload_menus = menus
+    if acquisition_schedule is not None:
+        # This acquisition prepares exactly requested measured wires; a dense
+        # surface must not turn their interior into additional scalar prices.
+        payload_menus = {name: [rung for rung in menus[name] if rung.body_rate_q256 in
+            acquisition_schedule[name].get(rung.family, [])] for name in targets}
     payload = campaign_cost_payload(
-        measured, menus, loo=loo, provenance=provenance,
+        measured, payload_menus, loo=loo, provenance=provenance,
         wire_backed=frozenset(projected_units), stack_samples=stack_samples)
     # Empty menus, failed anchors and interrupted work do not establish a
     # price. Publish coverage only after the cost rows have been constructed.

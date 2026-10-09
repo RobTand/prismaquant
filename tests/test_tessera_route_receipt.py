@@ -35,10 +35,10 @@ def _no_runtime_installed(monkeypatch):
 
     `verify` on an unscoped card asks the installed runtime for its current
     lane table and refuses the flat rows when that table carries the scoped
-    schema (`LANE_ELIGIBILITY_SCHEMA_TESSERA`): current cells attest an
-    image/mode/residency the rows never recorded.  Since the pin moved to a
-    table of that schema (v8) this fires against the installed
-    contract, so the historical comparison is exercised here as it runs on a
+    schema (`SCOPED_LANE_SCHEMAS`): current cells attest an
+    image/mode/residency the rows never recorded. The actual v11 pinned
+    table remains scoped just as earlier supported scoped versions do.
+    The historical comparison is exercised here as it runs on a
     box with no `tessera` at all -- the `ModuleNotFoundError` leg -- rather
     than on whichever table happens to be installed.
     """
@@ -325,7 +325,7 @@ def test_the_current_scoped_table_refuses_a_flat_legacy_receipt_by_name(tmp_path
     the pin packaged a v4 table; it is live at the pin this branch carries.
     """
     from prismaquant import tessera_route_receipt as receipt
-    from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMA_TESSERA
+    from prismaquant.lane_eligibility import SCOPED_LANE_SCHEMAS
     from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
         fill_slot,
@@ -334,7 +334,7 @@ def test_the_current_scoped_table_refuses_a_flat_legacy_receipt_by_name(tmp_path
     )
 
     table, _formats = receipt._current_scoped_contract()
-    assert table.schema == LANE_ELIGIBILITY_SCHEMA_TESSERA, (
+    assert table.schema in SCOPED_LANE_SCHEMAS, (
         "the packaged contract no longer carries the scoped schema; this "
         "test needs the pinned table, not a stand-in")
     model_dir = _tessera_card(tmp_path)
@@ -347,7 +347,7 @@ def test_the_current_scoped_table_refuses_a_flat_legacy_receipt_by_name(tmp_path
     problems = [p for p in verify(load_shipcard(path), model_dir=model_dir)
                 if p.startswith(f"{ROUTE_CENSUS_SLOT}:")]
     assert problems == [
-        f"{ROUTE_CENSUS_SLOT}: current {LANE_ELIGIBILITY_SCHEMA_TESSERA} cells "
+        f"{ROUTE_CENSUS_SLOT}: current {table.schema} cells "
         "cannot attest an unbound legacy flat census; a serve on this runtime "
         "is received as route_census/2 with its binding"], problems
     assert "v5" not in problems[0]
@@ -364,7 +364,7 @@ def test_fill_applies_the_same_flat_census_rule_as_verify(tmp_path, monkeypatch)
     stay fillable, as before.
     """
     from prismaquant import tessera_route_receipt as receipt
-    from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMA_TESSERA
+    from prismaquant.lane_eligibility import SCOPED_LANE_SCHEMAS
     from prismaquant.shipcard import compute_model_sha
     from prismaquant.tessera_shipcard import (
         ROUTE_CENSUS_SLOT,
@@ -373,9 +373,9 @@ def test_fill_applies_the_same_flat_census_rule_as_verify(tmp_path, monkeypatch)
     from prismaquant.shipcard_cli import main as shipcard_cli
 
     table, _formats = receipt._current_scoped_contract()
-    assert table.schema == LANE_ELIGIBILITY_SCHEMA_TESSERA
+    assert table.schema in SCOPED_LANE_SCHEMAS
     model_dir = _tessera_card(tmp_path)
-    expected = (f"current {LANE_ELIGIBILITY_SCHEMA_TESSERA} cells cannot attest "
+    expected = (f"current {table.schema} cells cannot attest "
                 "an unbound legacy flat census; a serve on this runtime is "
                 "received as route_census/2 with its binding")
 

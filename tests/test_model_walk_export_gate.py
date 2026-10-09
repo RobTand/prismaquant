@@ -443,6 +443,8 @@ def test_decided_but_unpriced_contradiction_refuses():
 # ---------------------------------------------------------------- CLI
 
 
+# Own the DSv4 namespace without hiding the native-import refusal in peers.
+@pytest.mark.own_process
 @pytest.mark.slow
 def test_dsv4_real_topology_passes_the_gate_end_to_end():
     """The motivating model, through the whole gate: shrunken real-DSv4

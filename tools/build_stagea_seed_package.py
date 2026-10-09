@@ -47,6 +47,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_layer_quanta import adjoint_chain_phase_name  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.joint_adjoint_slices import checkpoint_manifest_entry  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from prismaquant.stage_a_chain_seed import (  # noqa: E402
@@ -283,7 +284,7 @@ def main(argv=None) -> int:
         compare=(None if args.compare is None
                  else _pin(args.compare, args.compare_sha256, "compare checkpoint")),
         output=args.output, validate=_pb_validate())
-    print(json.dumps(package, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(package))
     return 0
 
 

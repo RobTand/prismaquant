@@ -87,7 +87,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .digests import (
-    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
 )
 
 
@@ -113,6 +116,85 @@ STRUCTURE_DENSE = "dense"
 
 class TesseraExportLaneError(RuntimeError):
     """The Tessera export lane refuses this run.  Always actionable."""
+
+def export_setup(model_path: str | Path, plan: Mapping[str, Any]) -> dict:
+    """Derive export work and census inputs without runtime qualification.
+
+    This reads source headers and profile metadata. The exporter still owns
+    construction, native-route, byte-integrity and serving checks.
+    """
+    from .export_partition import whole_layer_partitions
+    from .model_profiles import detect_profile
+    from .name_projection import NameProjection
+    from .tessera_plan_writer import tessera_surface
+    from tessera import serving_parts
+    from tessera.grammar import require_column_groups
+    from .tessera_render import TESSERA_HALF
+
+    source = Path(model_path).resolve()
+    profile = detect_profile(str(source))
+    if profile.structure_spec() is None:
+        raise TesseraExportLaneError("export setup requires a known model profile")
+    config = json.loads((source / "config.json").read_text())
+    architectures = list(profile.declared_architectures())
+    if not architectures:
+        raise TesseraExportLaneError("export setup requires config architectures for the construction census")
+    inventory = serving_parts.source_inventory(source)
+    surface = tessera_surface()
+    surface.validate_serving_plan(dict(plan))
+    _shards, dense, packed, routed = surface.quantizable(source)
+    stacks = surface.expert_stacks(routed)
+    packed_stacks = surface.packed_expert_stacks(packed)
+    if set(stacks) & set(packed_stacks):
+        raise TesseraExportLaneError("expert stack appears in both source layouts")
+    entries = {name: value for name, value in plan.items() if name != "schema"}
+    stack_entries = {}
+    for name, value in entries.items():
+        if name in stacks or name in packed_stacks:
+            if not isinstance(value, dict):
+                raise TesseraExportLaneError(f"{name}: a stack plan requires its explicit source layout")
+            stack_entries[name] = value
+        elif name not in dense and name not in routed:
+            raise TesseraExportLaneError(f"{name}: unsupported module kind or absent source tensor")
+        elif isinstance(value, dict):
+            if name in routed:
+                raise TesseraExportLaneError(f"{name}: routed units require a stack plan")
+            grid = surface.grid_for_name(value["grid"])
+            if surface.MOE_ROUTER.match(name):
+                raise TesseraExportLaneError(f"{name}: unsupported module kind for quantization: router")
+            try:
+                require_column_groups(dense[name][1], TESSERA_HALF)
+                from .tessera_menu import tessera_shape_legal
+                from .tessera_formats import tessera_family
+                family = tessera_family(grid.name.removesuffix(f"x{grid.arity}"), grid.arity)
+                legal, reason = tessera_shape_legal(family, value["q256"], dense[name])
+            except (ValueError, surface.TesseraError) as exc:
+                raise TesseraExportLaneError(f"{name}: unsupported shape {dense[name]}: {exc}") from exc
+            if not legal:
+                raise TesseraExportLaneError(f"{name}: unsupported shape {dense[name]}: {reason}")
+    # The producer derives expert counts, orientations and canonical slices.
+    projection = surface.project_expert_plan({**dense, **packed, **routed}, config, stack_entries)
+    names = NameProjection(profile)
+    units = []
+    for kind, shapes in (("dense", dense), ("routed_moe", routed), ("packed_routed_moe", packed)):
+        for name, shape in sorted(shapes.items()):
+            units.append({"tensor": name, "shape": list(shape), "kind": kind,
+                          "source_shard": inventory[name],
+                          "recipe_unit": names.recipe_unit(names.checkpoint_to_live(name).target)})
+    partitions = whole_layer_partitions(inventory, serving_parts)
+    from .lane_spec import lane_spec_for_container
+    lane = lane_spec_for_container("tessera")
+    return {"schema": "prismaquant.tessera_export_setup.v1", "scope": "headers_and_profile_only",
+            "profile": profile.name, "wired_architectures": sorted(lane.wired_architectures),
+            "profile_wired": lane.wires(profile.name), "source_tensors": inventory,
+            "units": units, "expert_projection": projection,
+            "partition_count": len(partitions), "partitions": partitions,
+            "construction_census": {"status": "not_run", "repo_env": "TESSERA_REPO",
+                "architectures": architectures, "model": str(source),
+                "argv": ["python3", "tools/tessera_construction_census.py", str(source),
+                         "construction-census.json", "--device", "meta"]},
+            "runtime_qualification": "not_run"}
+
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +388,9 @@ def require_platform_executes_derived_from_contract(declared=None) -> dict:
     if stated != derived:
         raise TesseraExportLaneError(
             "PRINCIPLE 14: lane_specs/tessera.json declares "
-            f"executes_by_platform={json.dumps(stated, sort_keys=True)} but the "
+            f"executes_by_platform={DIRECT_ASCII_SPACED_LAX.text(stated)} but the "
             "pinned runtime's packaged contract publishes "
-            f"{json.dumps(derived, sort_keys=True)}.\n"
+            f"{DIRECT_ASCII_SPACED_LAX.text(derived)}.\n"
             "  What a platform executes is a claim about another runtime, so "
             "it is DERIVED from that runtime's own table or it is refused. "
             "Re-read the table; never edit the map to silence this."
@@ -704,13 +786,17 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     When a projection IS carried, the producer's record is the only
     attestation of the executed unit: every selected routed unit must be a
     projected unit whose source tensor the producer hashed in the shard it
-    actually lives in, each executed stack must be selected whole at one rung
-    (the stamp the allocator wrote must agree), and every selected rung's
-    priced blob must sit in the campaign's wire directory at its receipt's
-    size.  The bytes are not read here: the bundle that comes back is what the
-    exporter's ``--cached-expert-units`` intake consumes, and that intake
-    hashes every blob against its receipt before framing it
-    (``locate_expert_wire``'s contract, PrismaQuant #1378).
+    actually lives in, each executed stack must be selected whole (every
+    projected unit placed), and the selected rungs must agree with the
+    allocation's stamps -- stack-uniform stacks against the allocator's
+    ``tessera_expert_stack_formats`` stamp, and a mixed per-unit stack against
+    the ``tessera_expert_unit_rungs`` stamp the v57 capability makes
+    expressible (PrismaQuant #2319).  Every selected rung's priced blob must
+    sit in the campaign's wire directory at its receipt's size.  The bytes are
+    not read here: the bundle that comes back is what the exporter's
+    ``--cached-expert-units`` intake consumes, and that intake hashes every
+    blob against its receipt before framing it (``locate_expert_wire``'s
+    contract, PrismaQuant #1378).
 
     Returned WITH the bundle, and not derived from it by the caller, is which
     of the two paths this run took (PrismaQuant #222).  The unlock is one
@@ -721,9 +807,10 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     one question, and would read a dense export as a re-encode.
     """
     from .tessera_expert_projection import (
-        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
+        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, UNIT_RUNGS_KEY,
+        UNIT_RUNGS_SCHEMA, WIRE_DIR_KEY,
         ExpertProjectionError, carried_units, check_expert_wire_receipt,
-        locate_expert_wire, require_stack_uniform_assignment,
+        locate_expert_wire, require_unit_assignment,
     )
     from .tessera_formats import parse_tessera_format_name
 
@@ -766,13 +853,25 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
                 raise ExpertProjectionError(
                     f"{name}: the producer hashed {tensor} in shard {hashed!r}, the source "
                     f"checkpoint holds it in {shards.get(tensor)!r}")
-        stack_formats = require_stack_uniform_assignment(selected_routed, stack_of, units)
+        stack_formats, unit_rungs = require_unit_assignment(selected_routed, stack_of, units)
         stamped = meta.get(keys["stack_formats"])
         if stamped is not None and {k: v for k, v in stamped.items()
                 if k in stack_formats} != stack_formats:
             raise ExpertProjectionError(
                 f"the allocation's {keys['stack_formats']} stamp {stamped} disagrees with the "
                 f"selected stack formats {stack_formats}")
+        stamped_units = meta.get(UNIT_RUNGS_KEY)
+        expected_units = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
+        if unit_rungs and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation carries mixed per-unit rungs but its "
+                f"{UNIT_RUNGS_KEY} stamp "
+                f"{stamped_units if stamped_units is not None else '<absent>'} "
+                "does not name them for the selected units")
+        if not unit_rungs and stamped_units is not None and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation's {UNIT_RUNGS_KEY} stamp {stamped_units} "
+                "names mixed per-unit rungs the selection does not carry")
         wire_dir = meta.get(keys["wire_dir"])
         roots = meta.get(roots_key) if roots_key is not None else None
         if roots_key is not None and (not isinstance(roots, Mapping) or
@@ -812,6 +911,7 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     # so ``fallback`` (``no_routed_units``) is the honest answer.
     return (ROUTED_EXPERT_BYTES_PRICED_WIRES if selected_routed else fallback), {
         "source": source, "units": records, "stacks": stack_formats,
+        **({"unit_rungs": unit_rungs} if unit_rungs else {}),
         "wire_dir": wire_dir,
         **({"wire_roots_by_unit": dict(roots)} if roots is not None else {}),
         "geometry": {name: (units[name]["rows"], units[name]["cols"])
@@ -2379,7 +2479,7 @@ def read_cached_unit_bundle(manifest, directory, expected_units, source):
         encoder_source_proof_mode=cached_unit_encoder_source_proof_mode(),
         authority=PRODUCER_AUTHORITY)
     for warning in bundle.warnings:
-        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+        print('[cached-unit warning] ' + DIRECT_ASCII_SPACED_LAX.text(warning),
               file=sys.stderr)
     return bundle
 

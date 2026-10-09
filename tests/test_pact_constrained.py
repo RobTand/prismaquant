@@ -8,6 +8,10 @@ from prismaquant import prefill_frontier
 from prismaquant.digests import bytes_sha256hex
 from prismaquant.layer_config import LAYER_CONFIG_META_KEY, load_assignment
 
+# test_pact_allocator_replay._fixture builds checker-bound rows, so this module needs the
+# same autouse PB reader fixture its replay owner imports.
+from test_shape_runtime_prices import checker_sdk_fixture  # noqa: F401
+
 
 def _unsupported_fixture(tmp_path, monkeypatch, *, units=None):
     import test_pact_allocator_replay as owner

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import re
@@ -103,6 +102,7 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from .tessera_joint_aura import restores_activation_scale_env
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -135,6 +135,111 @@ def _stage_b_kernel_profiler() -> KernelTimeProfiler:
 
 class QuantumIdentityRefused(RuntimeError):
     """A digest, schema or binding mismatch: refuse before writing anything."""
+
+
+class SpillSequenceAttribution:
+    """The #1962 sidecar collector for one quantum's Stage B spill replay.
+
+    Owns the opt-in candidate selector, the caller-owned capture-block
+    geometry and the per-probe per-block components. Its callback runs
+    immediately after each single candidate's ``project`` while that rendered
+    delta is resident: one bounded synchronous re-read of that window's
+    already-captured rows through the spill's own reader lifecycle
+    (``replay_records`` — no second read stream is ever opened), charged to
+    the capture guard, feeding one :class:`JointBlockAttributionLease` per
+    probe and candidate. Nothing here holds a second candidate, a matrix, or
+    the rows themselves; the authoritative totals stay the statistics lease's.
+    """
+
+    def __init__(self, *, config, linears, formats_by_qname, activation_maxima,
+                 projection_backend, spill, guard, n_probes, n_samples, seqlen,
+                 probe_microbatch, capture_batch, token_scope,
+                 calibration_sha256):
+        from .joint_replay_spill import spill_capture_batch_blocks
+
+        self.config = config
+        roster = config["candidates"]
+        self._wants = (None if roster == "all"
+                       else {(name, fmt) for name, fmt in roster})
+        self.gate_relative = config["gate_relative"]
+        self._linears = linears
+        self._formats_by_qname = formats_by_qname
+        self._maxima = activation_maxima
+        self._backend = projection_backend
+        self._spill = spill
+        self._guard = guard
+        self._n_probes = int(n_probes)
+        self._seqlen = int(seqlen)
+        self._n_samples = int(n_samples)
+        self.blocks = spill_capture_batch_blocks(
+            n_samples, seqlen, probe_microbatch=probe_microbatch,
+            capture_batch=capture_batch)
+        self._selected_tokens_per_row = {"all": int(seqlen), "last": 1,
+                                         "causal": int(seqlen) - 1}[token_scope]
+        self._calibration_sha256 = calibration_sha256
+        self._components: dict[tuple[int, tuple[str, str]], list[dict]] = {}
+
+    def __call__(self, *, key, delta, window_index, probe_index):
+        if probe_index is None:
+            raise QuantumIdentityRefused(
+                "sequence attribution requires the one-pass spill reader; the "
+                "windowed replay retains no captured rows to re-read")
+        if self._wants is not None and (key[0], key[1]) not in self._wants:
+            return
+        name, fmt = key
+        from .joint_aura import JointBlockAttributionLease
+        lease = JointBlockAttributionLease(
+            name=name, source_weight=self._linears[name].weight, delta=delta,
+            spec=self._formats_by_qname[name][fmt],
+            activation_max_abs=self._maxima,
+            projection_backend=self._backend, blocks=self.blocks)
+
+        def feed(feed_name, x, gradient, capture_batch):
+            if feed_name == name:
+                lease.observe_invocation(feed_name, self._linears[name].weight,
+                                         x, gradient, capture_batch)
+
+        self._spill.replay_records(window_index, probe_index, feed, charge=self._charge)
+        # Persist scalars only: the lease borrows the current candidate delta
+        # and source weight, so retaining it would retain every candidate.
+        components = self._components.get((probe_index, key))
+        if components is None:
+            self._components[(probe_index, key)] = lease.components
+        else:
+            for accumulated, current in zip(components, lease.components):
+                for component, value in current.items():
+                    accumulated[component] += value
+
+    def _charge(self, host_bytes, device_bytes):
+        if self._guard is not None:
+            from .joint_statistics_replay import check_operator_allocation
+            check_operator_allocation(
+                self._guard, "sequence_attribution_record_replay",
+                reserve_bytes=host_bytes, reserve_device_bytes=device_bytes)
+
+    def row_sidecar(self, key, signed_totals):
+        """Require every requested probe; unselected rows have no sidecar."""
+        if self._wants is not None and key not in self._wants:
+            return None
+        per_probe = [None] * self._n_probes
+        for (probe_index, component_key), components in self._components.items():
+            if component_key == key:
+                per_probe[probe_index] = [dict(value) for value in components]
+        missing = [index for index, probe in enumerate(per_probe) if probe is None]
+        if missing:
+            raise QuantumIdentityRefused(
+                f"sequence_attribution missing requested probes {missing} for {key[0]}@{key[1]}")
+        from .joint_aura import sequence_attribution_sidecar
+        return sequence_attribution_sidecar(
+            blocks=self.blocks, components_per_probe=per_probe,
+            authoritative_totals=signed_totals,
+            gate_relative=self.gate_relative,
+            arithmetic_scope="stage_b_spill_replay_records_per_invocation_contractions",
+            sequence_length=self._seqlen,
+            selected_tokens_per_row=self._selected_tokens_per_row,
+            n_sequences=self._n_samples,
+            calibration_sha256=self._calibration_sha256)
+
 
 
 def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> None:
@@ -182,7 +287,7 @@ def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> N
 
 
 def _digest_of(path: Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return bytes_sha256hex(Path(path).read_bytes())
 
 
 def _require_hex(value: object, label: str) -> str:
@@ -1050,7 +1155,11 @@ def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None)
     replay regime and the KDA capture kernel (PQ #1199) are the launch
     settings ``run_layer_quantum`` resolved; an unset kernel adds no key.
     """
-    execution = dict(config["execution"])
+    from .tessera_joint_eval_panel import evaluation_execution
+    execution = dict(evaluation_execution(config))
+    panel = config.get("joint_eval_draw") or config.get("joint_eval")
+    if panel is not None:
+        execution["joint_eval"] = panel
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     publication_job_limit(execution.get(CHECKPOINT_PUBLICATION_JOBS_SETTING),
                           budget=checkpoint_budget)
@@ -1619,6 +1728,28 @@ def quantum_adjoint_space(record, adjoint_slice, output_root):
     return space
 
 
+def _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution):
+    """Bind production streaming to the current PB claim and strict readers.
+
+    Input authority is checked here; ordinary exact readers retain ownership
+    of residency, open lifetimes, and per-payload digest verification.
+    """
+    from .joint_layer_quanta import check_checkpoint_incoming_readset
+    from .residency_map import ENV_VAR as residency_map_env
+    from .staged_lease import ReadsetUnbound, load_sealed_manifest
+    from .staged_tier_policy import active_policy
+    if active_policy() is None or not os.environ.get(residency_map_env):
+        raise QuantumIdentityRefused("checkpoint incoming staged mode requires strict residency context")
+    try:
+        block = record["executable_readset"]
+        manifest = load_sealed_manifest(block["manifest_sha256"])
+        if manifest["annotations"].get("n_probes") != execution["n_probes"]:
+            raise ValueError("checkpoint incoming launch has a foreign probe count")
+        check_checkpoint_incoming_readset(record, manifest, adjoint_slice)
+    except (ReadsetUnbound, ValueError, KeyError, TypeError) as exc:
+        raise QuantumIdentityRefused(f"checkpoint incoming staged readset: {exc}") from exc
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, adjoint_slice, execution, output_root,
@@ -1662,6 +1793,7 @@ def run_layer_quantum_core(
         activation_identity,
         identity_sha256,
         make_joint_aura_entry,
+        normalize_sequence_attribution,
         source_execution_identity,
         squared_signed,
         validate_joint_aura_entry,
@@ -1689,23 +1821,53 @@ def run_layer_quantum_core(
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
-    incoming_mode = execution.get("checkpoint_incoming_mode")
+    # The #1962 opt-in instrument: normalize once; a requested attribution
+    # binds the run identity and refuses to resume committed no-attribution
+    # rows, and its collector needs the one-pass spill's captured rows.
+    from .joint_replay_spill import stage_b_spill_config
+    attribution_config = normalize_sequence_attribution(
+        execution.get("sequence_attribution"))
+    if attribution_config is not None and stage_b_spill_config() is None:
+        raise QuantumIdentityRefused(
+            f"quantum {record.get('quantum_id', '?')}: sequence_attribution "
+            "requires the one-pass spill reader's captured X/G rows; declare "
+            "PRISMAQUANT_STAGE_B_SPILL_ROOT and PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
+
+    from .joint_layer_quanta import (
+        CHECKPOINT_INCOMING_STAGED,
+        normalize_checkpoint_incoming_mode,
+    )
+    sealed_block = record.get("executable_readset")
+    try:
+        sealed_incoming_mode = normalize_checkpoint_incoming_mode(
+            sealed_block.get("checkpoint_incoming_mode")
+            if isinstance(sealed_block, dict) else None)
+    except ValueError as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
+    incoming_mode = execution.get("checkpoint_incoming_mode", sealed_incoming_mode)
     checkpoint_streaming = incoming_mode is not None
     if checkpoint_streaming:
         from .residency_map import ENV_VAR as residency_map_env
         from .staged_tier_policy import active_policy
-        if type(incoming_mode) is not str or incoming_mode != "stream_once_research":
+        if incoming_mode == CHECKPOINT_INCOMING_STAGED:
+            if incoming_mode != sealed_incoming_mode:
+                raise QuantumIdentityRefused("checkpoint incoming mode is not explicitly sealed")
+            _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution)
+        elif type(incoming_mode) is str and incoming_mode == "stream_once_research":
+            if torch.device(runner.device).type != "cpu":
+                raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
+            if (record.get("executable_readset") is not None
+                    or os.environ.get(residency_map_env) or active_policy() is not None
+                    or any(execution.get(key) is not None for key in (
+                        "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
+                raise QuantumIdentityRefused(
+                    "checkpoint incoming research refuses executable/staged read bindings")
+        else:
             raise QuantumIdentityRefused("checkpoint incoming research selection is invalid")
-        if torch.device(runner.device).type != "cpu":
-            raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
-        if (record.get("executable_readset") is not None
-                or os.environ.get(residency_map_env) or active_policy() is not None
-                or any(execution.get(key) is not None for key in (
-                    "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
-            raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses executable/staged read bindings")
         if adjoint_handoff is not None or handoff_emitter is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses band-serial handoff")
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses band-serial handoff")
+    if sealed_incoming_mode is not None and incoming_mode != sealed_incoming_mode:
+        raise QuantumIdentityRefused("checkpoint incoming launch conflicts with sealed mode")
 
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     checkpoint_jobs = publication_job_limit(
@@ -1797,19 +1959,24 @@ def run_layer_quantum_core(
     pass_profile = pass_profile_request()
     if checkpoint_streaming:
         from .joint_adjoint_slices import checkpoint_is_referenced
-        if (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
-                or replay_regime != DEFAULT_REPLAY_REGIME):
+        research = incoming_mode == "stream_once_research"
+        if ((research or record["adjoint"]["chain_layers"])
+                and (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
+                     or replay_regime != DEFAULT_REPLAY_REGIME)):
             raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses nondefault batching/fusion")
-        if workspace_profile is not None or pass_profile is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses capture/shadow profiles")
+                "checkpoint incoming streaming refuses nondefault batching/fusion")
+        if (workspace_profile is not None
+                or (pass_profile is not None and (
+                    research or pass_profile.capture_probes
+                    or pass_profile.windowed_probe is not None))):
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses capture/shadow profiles")
         if record["adjoint"]["chain_layers"]:
             if not checkpoint_is_referenced(adjoint_slice["checkpoint"]):
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain requires referenced owner entries")
+                    "checkpoint incoming streaming first chain requires referenced owner entries")
         elif stage_b_spill_config() is None:
             raise QuantumIdentityRefused(
-                "checkpoint incoming research chain-empty consumer requires one-pass spill")
+                "checkpoint incoming streaming chain-empty consumer requires one-pass spill")
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -1839,6 +2006,9 @@ def run_layer_quantum_core(
     profile, linears, names = roster.profile, roster.linears, roster.names
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
+    from .joint_aura import (
+        sequence_attribution_candidates, sequence_attribution_run_identity)
+    attribution_keys = sequence_attribution_candidates(attribution_config, render_formats)
     packed_members = roster.packed_members
     unit_topology = roster.unit_topology
     served_quantizer = bind_joint_served_quantizer(unit_formats)
@@ -1937,8 +2107,7 @@ def run_layer_quantum_core(
     joint_probe_identity = {
         "schema": "prismaquant.joint_aura.probes.v2",
         "source_model": model_identity,
-        "calibration_sha256": hashlib.sha256(
-            calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
         "calibration_shape": list(calib_ids.shape),
         "calibration_dtype": str(calib_ids.dtype),
         "n_probes": n_probes, "seed_base": seed_base,
@@ -1997,6 +2166,9 @@ def run_layer_quantum_core(
                 f"prepared render tensor proof differs from the source for {name}@{fmt}: "
                 f"{_render_proof_sides(value, source, side='skeleton')}")
         joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
+    pilot_panel = execution.get("joint_eval")
+    from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
     joint_run_identity = {
         "schema": "prismaquant.joint_aura.run.v2",
         "probe_identity": joint_probe_identity,
@@ -2010,6 +2182,12 @@ def run_layer_quantum_core(
     }
     if served_quantizer is not None:
         joint_run_identity["served_quantizer"] = served_quantizer
+    attribution_run = sequence_attribution_run_identity(attribution_config)
+    if attribution_run is not None:
+        joint_run_identity["sequence_attribution"] = attribution_run
+
+    if pilot_panel is not None:
+        joint_run_identity["joint_eval"] = pilot_panel
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -2081,7 +2259,7 @@ def run_layer_quantum_core(
             collect_col_energy=False, s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src,
             g_trace=g_trace, col_energy={}, diagnostic_weight_mse_pairs=set(),
             weight_mse_diagnostic={}, require_source_weight_identity=False,
-            source_weight_identity={}, observation_counts=None)
+            source_weight_identity={}, observation_counts=observation_counts)
         rows = state.get("joint_aura_rows")
         if not isinstance(rows, Mapping) or set(rows) != set(unit_formats[name]):
             raise RuntimeError(f"joint AURA checkpoint row scope mismatch for {name}")
@@ -2089,13 +2267,18 @@ def run_layer_quantum_core(
             try:
                 if not validate_joint_aura_entry(row):
                     raise ValueError("not a joint row")
+                if (attribution_config is not None
+                        and (attribution_keys is None or (name, fmt) in attribution_keys)
+                        and "sequence_attribution" not in row
+                        and fmt not in _ZERO_COST_FORMATS):
+                    raise QuantumIdentityRefused(
+                        f"quantum {quantum_id}: sequence_attribution cannot "
+                        f"resume committed no-attribution rows for {name}@{fmt}")
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
-                # What the row measured (the calibration draw, the probes)
-                # refuses in both modes; its producer source and arithmetic
-                # (the Stage B resource policy among them) are run seals
-                # (PQ #1147): dev mode prints them and reuses the row.
+                # Stored row coordinates, tokens and units must align. Only
+                # producer/arithmetic/source provenance is a D32 stamp.
                 if probe_identity_walls_differ(joint_probe_identity, row["probe_identity"]):
                     raise ValueError("probe/operator alignment mismatch")
                 seal_check("joint probe identity", probe_identity_seals(joint_probe_identity),
@@ -2230,6 +2413,8 @@ def run_layer_quantum_core(
         if capture_batch > 1:
             counters.replay["capture_groups"] = len(capture_groups)
 
+    attribution_collector = None
+
     # Band-serial (PQ #996): the handoff is the plane this quantum's chain
     # would end on, so the chain below walks no layers.
     chain_layers = ([] if adjoint_handoff is not None else
@@ -2264,7 +2449,7 @@ def run_layer_quantum_core(
         if chain_layers:
             if checkpoint_incoming.session != storage.session:
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain has a foreign owner session")
+                    "checkpoint incoming streaming first chain has a foreign owner session")
             checkpoint_chain_entries = checkpoint_incoming.references()
         else:
             # Reuse the final-pass incoming seam, including all-complete resume.
@@ -2344,7 +2529,9 @@ def run_layer_quantum_core(
                 "max_resident_bytes": int(storage.config["max_resident_bytes"]),
                 "probes": []}
             if checkpoint_streaming:
-                counters.handoff_incoming["source"] = "checkpoint_research"
+                counters.handoff_incoming["source"] = ("checkpoint_staged"
+                                                        if incoming_mode == CHECKPOINT_INCOMING_STAGED
+                                                        else "checkpoint_research")
         if spill is not None and capture_batch > 1:
             # Before the chain: a batched capture merges samples, so every
             # sample's pass state must be empty (no profile shared state, no
@@ -2701,10 +2888,19 @@ def run_layer_quantum_core(
                                   for _ in range(n_probes)]
                 else:
                     components = joint_components[(name, fmt)]
+                sidecar = None
+                if attribution_collector is not None and fmt not in _ZERO_COST_FORMATS:
+                    sidecar = attribution_collector.row_sidecar(
+                        (name, fmt), [value["total"] for value in components])
+                    if sidecar is None and (attribution_keys is None
+                            or (name, fmt) in attribution_keys):
+                        raise QuantumIdentityRefused(
+                            f"sequence_attribution required sidecar missing for {name}@{fmt}")
                 row = make_joint_aura_entry(
                     operator_identity=joint_operators[(name, fmt)],
                     probe_identity=joint_probe,
                     signed_components=components,
+                    sequence_attribution=sidecar,
                 )
                 row["probe_identity"] = joint_probe_identity
                 rows[fmt] = row
@@ -2713,7 +2909,7 @@ def run_layer_quantum_core(
                 name, render_formats[name], s2=s2, s4=s4,
                 x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
                 col_energy={}, weight_mse_diagnostic={},
-                source_weight_identity={}, observation_counts=None),
+                source_weight_identity={}, observation_counts=observation_counts),
                 "joint_aura_rows": joint_rows[name]}
 
         def commit_streamed_units(targets):
@@ -2998,6 +3194,8 @@ def run_layer_quantum_core(
                                                  **window_receipt))
             for name, diagnostic in diagnostics.items():
                 g_trace[name] += diagnostic["g_trace"]
+                if observation_counts is not None:
+                    observe_probe(observation_counts, name, probe_index, diagnostic)
             for key, components in terms.items():
                 joint_components[key].append(components)
                 value = squared_signed(components["total"])
@@ -3400,6 +3598,22 @@ def run_layer_quantum_core(
             handoff_exit.enter_context(handoff_stream)
 
         counters.open()
+        if attribution_config is not None and spill is not None:
+            # Built here, where the capture guard exists: the collector's
+            # bounded record re-reads charge it per chunk.
+            attribution_collector = SpillSequenceAttribution(
+                config=attribution_config,
+                linears={name: linears[name] for name in spill_pending},
+                formats_by_qname={name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
+                                  for name in spill_pending},
+                activation_maxima=joint_activation_maxima(production_cache),
+                projection_backend=projection_backend, spill=spill, guard=guard,
+                n_probes=n_probes, n_samples=len(calib_ids),
+                seqlen=int(calib_ids.shape[1]), probe_microbatch=probe_microbatch,
+                capture_batch=capture_batch, token_scope=token_scope,
+                calibration_sha256=bytes_sha256hex(
+                    calib_ids.detach().cpu().contiguous().numpy().tobytes()))
+            counters.replay["sequence_attribution"] = joint_run_identity["sequence_attribution"]
         try:
             observe_and_project_retained_windows(
                 measured,
@@ -3418,6 +3632,7 @@ def run_layer_quantum_core(
                 before_window=before_window,
                 after_window=after_window,
                 spill=spill_driver,
+                attribution=attribution_collector,
                 # The loader threads hash each render as they load it, so
                 # _record_joint_operator reads a hash (PQ #1192).
                 render_identities=True,
@@ -3503,6 +3718,8 @@ def run_layer_quantum_core(
         s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
         col_energy={}, weight_mse_diagnostic={}, unit_topology=unit_topology)
     payload["costs"] = joint_rows
+    if observation_counts is not None:
+        stamp_observations(payload, observation_counts, pilot_panel)
     probe_identity_sha256 = identity_sha256(joint_probe_identity)
     if probe_identity_sha256 != identity_sha256(joint_probe):
         raise RuntimeError("joint probe identity changed after it was validated")
@@ -3642,7 +3859,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
             cost_path, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
         result["cost"] = {
             "path": str(cost_path),
-            "sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
+            "sha256": bytes_sha256hex(cost_path.read_bytes()),
         }
     result["status"] = status
     result["units_done"] = units_done
@@ -3654,7 +3871,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
         json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     atomic_write_bytes(counters_path, counters_bytes)
     result["counters"] = {"path": str(counters_path),
-                          "sha256": hashlib.sha256(counters_bytes).hexdigest(),
+                          "sha256": bytes_sha256hex(counters_bytes),
                           "bytes": len(counters_bytes)}
     atomic_write_bytes(
         Path(record["output_space"]["results"]),
@@ -3714,6 +3931,7 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
         runner, config["model"], **identity_cache, **proof)
 
 
+@restores_activation_scale_env
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False, adjoint_handoff=None,
@@ -4021,6 +4239,13 @@ def run_layer_quantum(
             identity_cache_bytes = None
             digest_cache_bytes = None
 
+        from .tessera_joint_eval_panel import evaluation_formats, select_evaluation
+        formats_by_qname = evaluation_formats(config, formats_by_qname)
+        result["encoding_calibration_input"] = calibration
+        ids, calibration, eval_panel = select_evaluation(ids, calibration, config)
+        result["calibration_input"] = calibration
+        if eval_panel is not None:
+            result["joint_eval"] = eval_panel
         runner = build_quantum_source_runner(
             config, offload_folder=space / "run" / "offload",
             sealed_head_tensors=((record.get("executable_readset") or {})

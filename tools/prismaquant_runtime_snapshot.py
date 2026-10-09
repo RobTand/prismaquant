@@ -247,7 +247,7 @@ def verify_snapshot(
             )
     for required in (
         root / "prismaquant" / "__init__.py",
-        root / "tools" / "container_runtime_identity.py",
+        root / "prismaquant" / "container_runtime_identity.py",
         root / "tools" / "prismaquant_runtime_snapshot.py",
     ):
         if not required.is_file() or required.is_symlink():

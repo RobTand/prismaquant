@@ -128,7 +128,7 @@ HEAD_PROGRESS_GRACE_S = 1800
 #:
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1986 in
+#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1989 in
 #:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:1052 in
 #:   load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
@@ -143,7 +143,7 @@ LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
 LOAD_PHASE_BOUND = (
     "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
     "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
-    ":1986 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:1052 "
+    ":1989 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:1052 "
     "load_handoff_inputs), so without a PrismaBuild landing record the phase "
     "waits at most W in total, and with one (PB #989) the waits are declared "
     "and exempt. At or above the floor rate the transfer takes at most "
@@ -931,6 +931,19 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} bound replay mode {replay_mode!r} is not "
             "the sealed manifest's: refusing")
+    from prismaquant.joint_layer_quanta import normalize_checkpoint_incoming_mode
+    try:
+        incoming_mode = normalize_checkpoint_incoming_mode(block.get("checkpoint_incoming_mode"))
+    except ValueError as exc:
+        raise ExecutableBindingUnsupported(str(exc)) from exc
+    if incoming_mode != (manifest_doc.get("annotations") or {}).get("checkpoint_incoming_mode"):
+        raise ExecutableBindingUnsupported("checkpoint incoming mode differs from sealed manifest: refusing")
+    if incoming_mode is not None:
+        from prismaquant.joint_layer_quanta import check_checkpoint_incoming_readset
+        try:
+            check_checkpoint_incoming_readset(record, manifest_doc, _read_bound_slice(record))
+        except (ValueError, KeyError, TypeError, DispatchRefused) as exc:
+            raise ExecutableBindingUnsupported(f"checkpoint incoming readset: {exc}") from exc
     by_name = {phase.get("name"): phase for phase in phases
                if isinstance(phase, dict)}
     order = [phase.get("name") for phase in phases
@@ -1150,7 +1163,8 @@ def stage_a_spool_window_bytes(campaign: Mapping,
 
     plan = json.loads(Path(campaign["plan_path"]).read_text())
     try:
-        execution = plan["execution"]
+        from prismaquant.tessera_joint_eval_panel import evaluation_execution
+        execution = evaluation_execution(plan)
         n_probes = int(execution["n_probes"])
         n_rows = int(execution["n_calib_samples"])
         seqlen = int(execution["calib_seqlen"])
@@ -1402,20 +1416,23 @@ _REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
 def phase_work_entries(name: str, fact: Mapping, annotations: Mapping):
     """The entries a phase's pass counts its work by, from its read-plan facts.
 
-    A phase's entry count, less the incoming plane entries a band-serial
-    spill readset moved into it (``annotations.band_serial.streamed_incoming``,
-    PQ #1143): those add read bytes to ``spill-pP``, not capture groups.
+    A phase's entry count, less incoming plane entries moved into it by
+    ``band_serial.streamed_incoming`` or ``checkpoint_incoming.streamed_incoming``:
+    those add read bytes, rather than capture groups or chain batches.
     ``None`` when the plan does not count the phase's entries.
     """
     entries = fact.get("entries") if isinstance(fact, Mapping) else None
-    band = annotations.get("band_serial") if isinstance(annotations, Mapping) else None
-    streamed = band.get("streamed_incoming") if isinstance(band, Mapping) else None
-    moved = streamed.get(name) if isinstance(streamed, Mapping) else None
-    if type(entries) is not int or moved is None:
+    if type(entries) is not int:
         return entries
-    if type(moved) is not int or not 0 <= moved <= entries:
-        return None
-    return entries - moved
+    moved = 0
+    for key in ("band_serial", "checkpoint_incoming"):
+        owner = annotations.get(key) if isinstance(annotations, Mapping) else None
+        streamed = owner.get("streamed_incoming") if isinstance(owner, Mapping) else None
+        count = streamed.get(name, 0) if isinstance(streamed, Mapping) else 0
+        if type(count) is not int or not 0 <= count <= entries:
+            return None
+        moved += count
+    return entries - moved if moved <= entries else None
 
 
 def compute_phase_work(name: str, *, replay_mode: str, entries,
@@ -1934,6 +1951,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     to read it first (the quantum row derives its load grace from the
     spec's staged wait); the wrapper then seals that parse and reads nothing.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     spec = (json.loads(Path(spec_path).read_text()) if spec is None
             else json.loads(json.dumps(spec)))
     if spill_bound is not None:
@@ -1998,7 +2016,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 or float(spec.get("env", {}).get("PRISMAQUANT_MAX_GPU_MEM_GB", -1)) * 1024 ** 3 != limits["gpu_bytes"]):
             raise DispatchRefused("container host/device envelope differs from the bound Stage B resource policy")
     argv = ["python3", "-m", "tools.tessera_campaign_container",
-            "--spec", json.dumps(spec, sort_keys=True),
+            "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
             "--", *payload]
     return argv, admission_image_reference(spec, portable_refusal=DispatchRefused)
 
@@ -3270,8 +3288,9 @@ def _read_state(state_path: Path) -> list[dict]:
 
 
 def _append_state(state_path: Path, event: dict) -> None:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    line = (json.dumps({**event, "unix": time.time()}, sort_keys=True) + "\n").encode()
+    line = (DIRECT_ASCII_SPACED_LAX.text({**event, "unix": time.time()}) + "\n").encode()
     with open(state_path, "ab") as handle:
         handle.write(line)
 
@@ -3859,6 +3878,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
 
 def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
     """Run ``main`` on parsed ``args``; ``report`` receives the dry-run plan."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     gateway = _gateway if _gateway is not None else Gateway()
     if args.spec:
         global SPEC_PATH
@@ -4141,8 +4161,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
         print(json.dumps({"band_serial_pending": waiting["quantum_id"],
                           "reason": waiting["reason"]}, sort_keys=True))
     if not rows:
-        print(json.dumps({"published": [], "note": "nothing publishable"},
-                         sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text({"published": [], "note": "nothing publishable"}))
     return 0
 
 

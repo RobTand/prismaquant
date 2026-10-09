@@ -55,15 +55,16 @@ PrismaQuant module gets it. The rules below are about that module:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
 from .staged_tier_policy import TierPolicyRefused
 
 #: Reviewed PB source pin for the reader lease and the client SDK
@@ -200,6 +201,38 @@ def lease_helper_root() -> str | None:
         if _HELPER_ROOT is not None:
             return _HELPER_ROOT
     return os.environ.get(HELPER_ROOT_ENV_VAR)
+
+#: Launch env vars PrismaBuild publishes for queue discovery (PB #961).
+#: The queue root directly, else the residency map whose parent's parent
+#: is the root. Literal names follow the HELPER_ROOT_ENV_VAR pattern;
+#: the values are the launcher's, never topology guesses.
+QUEUE_ROOT_ENV_VAR = "PRISMABUILD_QUEUE_ROOT"
+RESIDENCY_MAP_ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
+
+
+def discover_launch_queue_root(env: Mapping[str, str] | None = None) -> Path | None:
+    """The queue that launched this action, or ``None`` when unlaunched.
+
+    Distinctly named so the produced-output wrapper that owns the raising
+    contract (:func:`prismaquant.stage_a_produced_output.launch_queue_root`)
+    stays the one ``launch_queue_root`` (PQ #1295: same-name helpers only
+    shrink). PB's own rule (PB #961): the launcher-published queue root
+    first,
+    else the residency-map path's parent's parent, the layout pre-#961
+    generations wrote. The sealed generation resolves first through
+    :func:`_sdk`, so a caller without one refuses
+    ``lease-helper-unavailable`` exactly as a submodule load would;
+    discovery itself reads only the launch context, never topology.
+    """
+    _sdk()
+    source = dict(os.environ) if env is None else dict(env)
+    published = source.get(QUEUE_ROOT_ENV_VAR) or ""
+    if published:
+        return Path(published)
+    map_path = source.get(RESIDENCY_MAP_ENV_VAR) or ""
+    if map_path:
+        return Path(map_path).parent.parent
+    return None
 
 
 def _sdk_accepts_material_namespace(sdk) -> bool:
@@ -699,7 +732,7 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     if len(raw) != size:
         raise ReadsetUnbound(
             f"sealed manifest is {len(raw)} bytes, the claim row says {size}")
-    if hashlib.sha256(raw).hexdigest() != digest:
+    if bytes_sha256hex(raw) != digest:
         raise ReadsetUnbound("sealed manifest does not hash to its digest")
     try:
         payload, _encoding = read_data_manifest(blob)
@@ -709,6 +742,16 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     if not isinstance(entries, list):
         raise ReadsetUnbound("sealed manifest declares no entries")
     return payload
+
+
+def load_sealed_manifest(bound_manifest_sha256: str) -> dict:
+    """Owned manifest metadata, authenticated and decoded by the PB owner.
+
+    For consumers that must bind annotations to immutable phase membership.
+    This establishes input authority only; existing staged readers still
+    acquire and verify every payload range through their normal leases.
+    """
+    return _load_sealed_payload(bound_manifest_sha256)
 
 
 def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
@@ -1449,11 +1492,11 @@ class LeaseWindow:
             if entries[0]['file_id'] != dict(ino=signature[1], size=signature[2],
                     mtime_ns=signature[3], ctime_ns=signature[4]):
                 raise RuntimeError('lease receipt descriptor differs from native pinned object')
-            return json.loads(json.dumps({
+            return json.loads(DIRECT_ASCII_SPACED_STRICT.text({
                 'claim': self._context, 'serving': serving,
                 'ref_id': self._ref_id, 'entry': entries[0],
                 'source_fd_stat': list(signature),
-            }, sort_keys=True, allow_nan=False))
+            }))
 
     # -- open ----------------------------------------------------------
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gc
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant import cost_streaming as cs, layer_streaming as ls
+from prismaquant.source_generation import original_checkpoint_description
 from prismaquant import joint_cost_stage_a as stage_a
 from test_original_streaming_bootstrap_2010 import original_model, _context  # noqa: F401
 from test_capture_original_material import material, _owner, _forget_state  # noqa: F401
@@ -123,3 +125,36 @@ def test_stage_a_original_identity_rejects_legacy_config_cache(original_runner, 
     _no_pool_proof(monkeypatch)
     with pytest.raises(RuntimeError, match='original.*cache'):
         stage_a._stage_a_source_identity(s['runner'], {'model': s['model'], cache: {}}, None)
+
+
+def test_public_original_checkpoint_metadata_uses_actual_owned_bytes(material):
+    """Internal CPU material is real leased metadata, not capture admission."""
+    with _owner(material) as owner:
+        descriptor = original_checkpoint_description(owner.root, owner)
+        assert descriptor["config"] == json.loads(material["raws"]["config.json"])
+        assert descriptor["index"] == json.loads(material["raws"]["model.safetensors.index.json"])
+        assert {row["name"]: row["size"] for row in descriptor["shards"]} == {
+            name: len(raw) for name, raw in material["raws"].items() if name.endswith(".safetensors")}
+        identity = cs.build_source_checkpoint_identity(owner.root, source_authentication=owner)
+        assert identity["schema"] == cs.SOURCE_CHECKPOINT_IDENTITY_SCHEMA
+        assert owner.receipt()["automatic_capture_qualified"] is False
+        with pytest.raises(RuntimeError, match="original identity source root differs from its owner"):
+            original_checkpoint_description(Path(material["paths"]["config.json"]).parent, owner)
+
+
+@pytest.mark.parametrize("owner", [None, SimpleNamespace(is_qualified_original_material=True)])
+def test_public_original_checkpoint_metadata_keeps_exact_class_guard(tmp_path, owner):
+    with pytest.raises(RuntimeError, match="original identity requires the qualified existing original owner"):
+        original_checkpoint_description(tmp_path, owner)
+    with pytest.raises(RuntimeError, match="original identity requires the qualified existing original owner"):
+        cs.build_source_checkpoint_identity(tmp_path, source_authentication=(owner if owner is not None else object()))
+
+
+def test_public_original_checkpoint_metadata_refuses_real_recording_owner(material):
+    from prismaquant.tessera_calibration_cache import CaptureSourceAuthentication
+
+    root = Path(material["paths"]["config.json"]).parent
+    with CaptureSourceAuthentication.recording(root, {}) as owner:
+        assert not owner.is_qualified_original_material
+        with pytest.raises(RuntimeError, match="original identity requires the qualified existing original owner"):
+            original_checkpoint_description(root, owner)

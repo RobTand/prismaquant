@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 from functools import partial
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -80,7 +79,12 @@ from .stage_a_chain_resume import (
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    bytes_sha256hex,
+    file_sha256hex,
+    text_sha256hex,
+)
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -460,11 +464,14 @@ def stage_a_bind_identity(config: dict, prepared: dict) -> dict:
     from .calibration_data import load_calibration_input
     from .cost_streaming import validate_streamed_model_identity
 
-    execution = config["execution"]
-    ids, _ = load_calibration_input(
+    from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+    encoding_execution = config["execution"]
+    ids, calibration = load_calibration_input(
         config["calibration_input"]["path"],
         expected_sha256=config["calibration_input"]["sha256"],
-        n_samples=execution["n_calib_samples"], seqlen=execution["calib_seqlen"])
+        n_samples=encoding_execution["n_calib_samples"], seqlen=encoding_execution["calib_seqlen"])
+    ids, _calibration, _descriptor = select_evaluation(ids, calibration, config)
+    execution = evaluation_execution(config)
     probe_microbatch = int(execution.get("probe_microbatch", 0))
     batch_rows = min(probe_microbatch or len(ids), len(ids))
     partition = None
@@ -651,8 +658,8 @@ def band_from_request(request_path, *, boundary: int, request_sha256: str | None
         # A run that sealed no chain state: rebuild the bind identity from the
         # plan and the prepared completion, as before.
         bind_identity = stage_a_bind_identity(config, prepared)
-        roster = hashlib.sha256("".join(
-            f"{name}\n" for name in sorted(prepared["formats_by_qname"])).encode()).hexdigest()
+        roster = text_sha256hex("".join(
+            f"{name}\n" for name in sorted(prepared["formats_by_qname"])))
     return build_band_receipt(
         output_root=output_root, boundary=boundary,
         plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,
@@ -711,8 +718,8 @@ def main(argv=None) -> int:
     except (BandRefused, AdjointSliceRefused, OSError, KeyError, ValueError) as exc:
         print(f"joint_adjoint_band: refused: {type(exc).__name__}: {exc}", flush=True)
         return 3
-    print(json.dumps(band_summary(band, path=args.output, file_sha256=file_sha256),
-                     sort_keys=True, indent=2))
+    print(DIRECT_ASCII_INDENT2_LAX.text(
+        band_summary(band, path=args.output, file_sha256=file_sha256)))
     return 0
 
 

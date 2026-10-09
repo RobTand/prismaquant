@@ -166,6 +166,7 @@ from .digests import file_sha256hex
 #: same wire format published by the retired Gridbook codebook lane. That lane
 #: was removed with Rob's decision to put Tessera in PrismaQuant and remove
 #: Gridbook; see ``archive/gridbook_lane_2026-09-02/README.md``.
+LANE_ELIGIBILITY_SCHEMA_TESSERA_V11 = "tessera.lane-eligibility.v11"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V10 = "tessera.lane-eligibility.v10"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V9 = "tessera.lane-eligibility.v9"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V8 = "tessera.lane-eligibility.v8"
@@ -175,10 +176,10 @@ LANE_ELIGIBILITY_SCHEMA_TESSERA_V5 = "tessera.lane-eligibility.v5"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V4 = "tessera.lane-eligibility.v4"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3 = "tessera.lane-eligibility.v3"
 
-#: The CURRENT grammar. Every "is this the newest schema?" test used to spell
-#: itself against this name, which made a version bump silently demote the
-#: previous grammar from "scoped" to "legacy unscoped". Scope is a property a
-#: set answers, not a single constant: see :data:`SCOPED_LANE_SCHEMAS`.
+#: The legacy v10 schema alias. It is not the active pin or the accepted
+#: grammar roster. Scope is a property the authoritative set answers, not a
+#: single constant: see :data:`SCOPED_LANE_SCHEMAS`. Keeping an old alias
+#: must never silently demote another supported grammar to unscoped.
 LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
 
 #: The schemas whose cells carry a per-cell runtime scope, so an explicit
@@ -190,6 +191,7 @@ LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
 #: widened the PLATFORM entry and left every cell byte-identical, which is
 #: why it belongs in this set and in each evidence set below.
 SCOPED_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V5,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
@@ -205,6 +207,7 @@ SCOPED_LANE_SCHEMAS = frozenset({
 #: set and not an ``== V6`` so that the NEXT bump cannot silently demote the
 #: grammar it succeeds to "publishes no evidence".
 EVIDENCE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V6,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
@@ -212,12 +215,14 @@ EVIDENCE_LANE_SCHEMAS = frozenset({
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ATTRIBUTED_SMOKE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V7,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
@@ -232,6 +237,7 @@ ENCODER_SCOPED_LANE_SCHEMAS = frozenset({
 #: record too -- a set v10 were missing from would read an attested cell as
 #: one that publishes no evidence.
 RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
@@ -245,6 +251,7 @@ RECORDED_SMOKE_LANE_SCHEMAS = frozenset({
 #: measured platform fact principle 9's carve-out turns on, and the reason
 #: this bump is not additive.
 PLATFORM_AXIS_LANE_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
 })
 
@@ -277,6 +284,7 @@ PLATFORM_EXECUTES_UNSTATED = "unstated"
 #: repository was not handed, and an unlisted version is not treated as a
 #: subset of either supported grammar (see ``_parse_table``).
 LANE_ELIGIBILITY_SCHEMAS = frozenset({
+    LANE_ELIGIBILITY_SCHEMA_TESSERA_V11,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V9,
     LANE_ELIGIBILITY_SCHEMA_TESSERA_V8,
@@ -535,10 +543,11 @@ class ServingContext:
     residency: str
     runtime_image: str
     execution_mode: str
+    kernel_build: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in self.as_dict().items():
-            if not isinstance(value, str) or not value.strip():
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
                 raise LaneEligibilityError(f"serving_context.{name} must be a non-empty string")
         for name, allowed in (("structure", STRUCTURES),
                               ("residency", TESSERA_RESIDENCY_MODES),
@@ -551,10 +560,16 @@ class ServingContext:
                 "serving_context.runtime_image must be an exact repository@sha256:<64 lowercase hex> reference")
 
     def as_dict(self) -> dict[str, str]:
-        return asdict(self)
+        values = asdict(self)
+        if self.kernel_build is None:
+            values.pop("kernel_build")
+        return values
 
     def key(self) -> tuple[str, ...]:
-        return tuple(self.as_dict().values())
+        values = self.as_dict()
+        if self.kernel_build is not None:
+            values.pop("runtime_image")
+        return tuple(values.values())
 
 
 #: The default of every serving-code check: read the tracked pin's digest
@@ -627,7 +642,8 @@ def cell_matches_serving_context(
         cell.platform == context.platform
         and cell.structure == context.structure
         and context.residency in cell.residency_modes
-        and cell.runtime_image == context.runtime_image
+        and ((cell_kernel_build(cell) == context.kernel_build)
+             if context.kernel_build is not None else cell.runtime_image == context.runtime_image)
         and context.execution_mode in cell.execution_modes
         and cell_serving_code_admits(cell, serving_source_sha256)[0]
     )
@@ -637,7 +653,7 @@ def legacy_runtime_scope_refusal(schema: str) -> str:
     """The one refusal for a scoped query a legacy table cannot attest."""
     return (
         f"lane schema {schema!r} carries no per-cell runtime scope; an explicit "
-        f"serving context (runtime-image/execution query) requires one of "
+        f"serving context (runtime-image, kernel-build, or execution query) requires one of "
         f"{sorted(SCOPED_LANE_SCHEMAS)!r}. "
         "Global runtime identity is not a scoped admission."
     )
@@ -1803,6 +1819,110 @@ def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim
     return admits, why
 
 
+def _allowable_rung_tables(entry: Mapping[str, Any], where: str) -> dict[int, tuple[int, ...]]:
+    """Evaluate the publisher's v11 window_rate_set; never infer a new rule."""
+    rule = entry.get("allowable_rungs")
+    if rule is None:
+        return {}
+    at = f"{where}.allowable_rungs"
+    keys = {"rule", "code_arity", "range_q256", "step_q256", "run_tables",
+            "excluded_run_tables", "excluded_q256", "wire", "evidence"}
+    _require_keys(rule, at, required=keys, optional=set())
+    if rule["rule"] != "window_rate_set":
+        raise LaneEligibilityError(f"{at}.rule: unknown allowable rung rule")
+    # This is public producer grid metadata, not a serving import or vendor copy.
+    from tessera.alphabet import SERIALISABLE_GRIDS
+    grid = next((g for g in SERIALISABLE_GRIDS.values()
+                 if g.name == str(entry["grid"])), None)
+    if grid is None:
+        raise LaneEligibilityError(f"{at}: unknown serialisable grid")
+    arity = int(grid.arity)
+    cap = int(entry["native_terminal_q256"]) * arity // 256
+    if type(rule["code_arity"]) is not int or rule["code_arity"] != arity:
+        raise LaneEligibilityError(f"{at}.code_arity differs from the producer grid")
+    rng, step = rule["range_q256"], rule["step_q256"]
+    if (not isinstance(rng, list) or len(rng) != 2
+            or any(type(q) is not int for q in rng)
+            or type(step) is not int or step < 1):
+        raise LaneEligibilityError(f"{at}: invalid range_q256 or step_q256")
+    low, high = entry["reader_rate_range_q256"]
+    reader_step = entry["reader_rate_step_q256"]
+    if (not low <= rng[0] <= rng[1] <= high or step % reader_step
+            or any((q-low) % reader_step for q in rng)):
+        raise LaneEligibilityError(f"{at}: rule is outside the reader grid")
+
+    def tables(value: Any, label: str) -> tuple[tuple[int, ...], ...]:
+        if not isinstance(value, list):
+            raise LaneEligibilityError(f"{at}.{label} must be an array")
+        out = []
+        for table in value:
+            if (not isinstance(table, list) or len(table) not in (1, 2)
+                    or any(type(r) is not int for r in table)
+                    or not 1 <= table[0] <= table[-1] <= cap
+                    or (len(table) == 2 and table[1] != table[0]+1)):
+                raise LaneEligibilityError(f"{at}.{label}: invalid run table")
+            out.append(tuple(table))
+        if out != sorted(set(out)):
+            raise LaneEligibilityError(f"{at}.{label} must be ascending and distinct")
+        return tuple(out)
+
+    allowed = tables(rule["run_tables"], "run_tables")
+    excluded = tables(rule["excluded_run_tables"], "excluded_run_tables")
+    if set(allowed) & set(excluded):
+        raise LaneEligibilityError(f"{at}: a run table is both allowed and excluded")
+    ex_q = rule["excluded_q256"]
+    if (not isinstance(ex_q, list) or any(type(q) is not int for q in ex_q)
+            or ex_q != sorted(set(ex_q))
+            or any(not rng[0] <= q <= rng[1] or (q-rng[0]) % step for q in ex_q)):
+        raise LaneEligibilityError(f"{at}.excluded_q256 is outside the rule grid")
+    reached = {}
+    for q in range(rng[0], rng[1]+1, step):
+        root, remainder = divmod(q*arity, 256)
+        rates = (root, root+1) if remainder else (root,)
+        if not 1 <= rates[0] <= rates[-1] <= cap:
+            raise LaneEligibilityError(f"{at}: rung {q} exceeds the grid's rate cap")
+        reached[q] = rates
+    if set(allowed) - set(reached.values()):
+        raise LaneEligibilityError(f"{at}: run table unreachable from the rule grid")
+    wire_keys = {"body", "span", "plane", "window_bits", "seed", "sigma", "channel_sigma"}
+    wire = rule["wire"]
+    _require_keys(wire, f"{at}.wire", required=wire_keys, optional=set())
+    expected_wire = ("tcq", 2, "lut16") if arity == 2 else ("window", 1, "channel")
+    if ((wire["body"], wire["span"], wire["plane"]) != expected_wire
+            or not isinstance(wire["window_bits"], int)
+            or not isinstance(wire["seed"], int)
+            or any(v is not None and not isinstance(v, (int, float))
+                   for v in (wire["sigma"], wire["channel_sigma"]))):
+        raise LaneEligibilityError(f"{at}.wire: invalid window wire stamp")
+    if not isinstance(rule["evidence"], list) or not rule["evidence"]:
+        raise LaneEligibilityError(f"{at}.evidence must name repository receipts")
+    for path in rule["evidence"]:
+        if (not isinstance(path, str) or not path or path.startswith("/")
+                or ".." in path.split("/") or "\\" in path):
+            raise LaneEligibilityError(f"{at}.evidence: invalid repository path")
+    accepted = {q: rates for q, rates in reached.items()
+                if q not in ex_q and rates in allowed and rates not in excluded}
+    for stamp in entry["attested_wire"]:
+        if stamp["q256"] in accepted and any(stamp[k] != wire[k] for k in wire_keys):
+            raise LaneEligibilityError(f"{at}.wire differs from a covered census stamp")
+    return accepted
+
+
+def _cell_rule_coverage(payload: Mapping[str, Any],
+                        allowable: Mapping[int, tuple[int, ...]], where: str
+                        ) -> tuple[tuple[tuple[int, ...], ...], tuple[int, ...]]:
+    if not isinstance(payload, Mapping):
+        raise LaneEligibilityError(f"{where} must be a JSON object")
+    census = _parse_rungs(payload.get("rungs_q256"), f"{where}.rungs_q256")
+    want = sorted({allowable[q] for q in census if q in allowable})
+    got = payload.get("run_tables", [])
+    if got != [list(t) for t in want]:
+        raise LaneEligibilityError(f"{where}.run_tables differs from its allowable census rungs")
+    covered = tuple(q for q, rates in allowable.items() if rates in want)
+    return tuple(want), covered
+
+
+
 @dataclass(frozen=True)
 class EligibilityCell:
     """One packaged cell: bytes, platform, regime, residency, runtime and launch.
@@ -1864,6 +1984,10 @@ class EligibilityCell:
     #: (:func:`cell_serving_code_admits`). Empty when the cell names no code.
     runtime_tessera_commit: str = ""
     runtime_serving_source_sha256: str = ""
+    #: V11 preserves census rungs separately from derived rule coverage.
+    covered_rungs_q256: tuple[int, ...] = ()
+    run_tables: tuple[tuple[int, ...], ...] | None = None
+    runtime_kernel_build: str = ""
 
     @classmethod
     def from_dict(
@@ -1874,6 +1998,8 @@ class EligibilityCell:
         trellis_families: frozenset[str],
         schema: str = LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3,
         residency_modes: Sequence[str] = (),
+        covered_rungs_q256: tuple[int, ...] = (),
+        run_tables: tuple[tuple[int, ...], ...] | None = None,
     ) -> "EligibilityCell":
         if not isinstance(payload, Mapping):
             raise LaneEligibilityError(f"{where} must be a JSON object")
@@ -1904,7 +2030,8 @@ class EligibilityCell:
         if has_evidence:
             required.add("evidence")
         _require_keys(payload, where, required=required,
-                      optional=set() if is_v4 else {"requires_plugin"})
+                      optional=({"run_tables"} if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+                                else set()) if is_v4 else {"requires_plugin"})
 
         status = str(payload["route_status"])
         if status not in CELL_ROUTE_STATUSES:
@@ -2009,7 +2136,17 @@ class EligibilityCell:
             evidence=evidence,
             runtime_tessera_commit=runtime_commit,
             runtime_serving_source_sha256=runtime_digest,
+            covered_rungs_q256=covered_rungs_q256,
+            run_tables=run_tables,
+            runtime_kernel_build=parse_kernel_build(payload.get("runtime", {}), where),
         )
+
+    def covers_rate(self, rate_q256: int) -> bool:
+        return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
+
+    @property
+    def covered_rates(self) -> tuple[int, ...]:
+        return tuple(sorted(set(self.rungs_q256) | set(self.covered_rungs_q256)))
 
     def covers_rung(self, facts: UnitStructuralFacts) -> bool:
         """Whether this cell's published rung list names the unit's rung.
@@ -2020,7 +2157,7 @@ class EligibilityCell:
         """
         if self.is_trellis:
             return (facts.rate_q256 is not None
-                    and facts.rate_q256 in self.rungs_q256)
+                    and self.covers_rate(facts.rate_q256))
         return facts.k is not None and facts.k in self.rungs
 
     def matches(self, facts: UnitStructuralFacts) -> bool:
@@ -2041,6 +2178,8 @@ class EligibilityCell:
         }
         if self.is_trellis:
             payload["rungs_q256"] = list(self.rungs_q256)
+            if self.run_tables is not None:
+                payload["run_tables"] = [list(t) for t in self.run_tables]
             payload["activation_contract"] = self.activation_contract
         else:
             payload["rungs"] = list(self.rungs)
@@ -2058,6 +2197,8 @@ class EligibilityCell:
             payload["runtime"] = {
                 "image": self.runtime_image, "execution_modes": list(self.execution_modes),
             }
+            if self.runtime_kernel_build:
+                payload["runtime"]["kernel_build"] = self.runtime_kernel_build
             if self.runtime_serving_source_sha256:
                 # Emitted only when the cell names its code, so a cell that
                 # names none serializes exactly as it did before v41.
@@ -2319,6 +2460,7 @@ class RegimeRoute:
     residency: str = ""
     runtime_image: str = ""
     execution_mode: str = ""
+    kernel_build: str = ""
     #: v6 evidence, carried so a shipcard says WHICH grade attested this
     #: regime (principle 12). Recorded, never gated on: see
     #: :func:`cell_evidence_admits`.
@@ -2354,6 +2496,8 @@ class RegimeRoute:
         if self.runtime_image:
             payload["runtime_image"] = self.runtime_image
             payload["execution_mode"] = self.execution_mode
+        if self.kernel_build:
+            payload["kernel_build"] = self.kernel_build
         if self.evidence_grade:
             payload["evidence_grade"] = self.evidence_grade
             payload["evidence_smoke"] = self.evidence_smoke
@@ -2450,6 +2594,7 @@ def resolve_unit_route(
     runtime_image: str | None = None,
     execution_mode: str | None = None,
     serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+    kernel_build: str | None = None,
 ) -> UnitRoute:
     """Resolve one unit's route status against the pinned eligibility table.
 
@@ -2522,7 +2667,8 @@ def resolve_unit_route(
 
     is_v4 = table.schema in _LAUNCH_SCHEMAS
     is_scoped = table.schema in SCOPED_LANE_SCHEMAS
-    if not is_scoped and (runtime_image is not None or execution_mode is not None):
+    if not is_scoped and (
+            runtime_image is not None or execution_mode is not None or kernel_build is not None):
         return UnitRoute(
             facts=facts, route_status=ROUTE_STATUS_UNATTESTED, in_scope=True,
             unattested_reason=legacy_runtime_scope_refusal(table.schema))
@@ -2543,7 +2689,8 @@ def resolve_unit_route(
         try:
             serving_context = ServingContext(
                 platform=platform, structure=facts.structure, residency=residency,
-                runtime_image=runtime_image, execution_mode=execution_mode)
+                runtime_image=runtime_image, execution_mode=execution_mode,
+                kernel_build=kernel_build)
         except LaneEligibilityError as exc:
             return UnitRoute(facts=facts, route_status=ROUTE_STATUS_UNATTESTED,
                              in_scope=True, unattested_reason=str(exc))
@@ -2644,6 +2791,7 @@ def resolve_unit_route(
             residency=str(residency) if is_v4 else "",
             runtime_image=str(runtime_image) if is_scoped else "",
             execution_mode=str(execution_mode) if is_scoped else "",
+            kernel_build=kernel_build or "",
             evidence_grade=best.evidence.grade if best.evidence else "",
             evidence_smoke=best.evidence.smoke_status if best.evidence else "",
             evidence_attribution=(
@@ -3041,18 +3189,28 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
                     f"residencies {sorted(TESSERA_RESIDENCY_MODES)}")
             family_modes[family] = tuple(modes)
 
+    format_by_family = {str(e["family"]): e for e in formats}
+    allowable = ({family: _allowable_rung_tables(entry, f"formats[{family}]")
+                  for family, entry in format_by_family.items()}
+                 if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11 else {})
+
     cells_block = block["cells"]
     if not isinstance(cells_block, Sequence) or isinstance(
             cells_block, (str, bytes)):
         raise LaneEligibilityError(f"{where}.cells must be a JSON array")
-    cells = tuple(
-        EligibilityCell.from_dict(
-            cell, f"{where}.cells[{i}]", trellis_families=trellis_families,
-            schema=schema,
-            residency_modes=(family_modes.get(str(cell.get("family", "")), ())
-                             if isinstance(cell, Mapping) else ()))
-        for i, cell in enumerate(cells_block)
-    )
+    cells = []
+    for i, cell in enumerate(cells_block):
+        at = f"{where}.cells[{i}]"
+        family = str(cell.get("family", "")) if isinstance(cell, Mapping) else ""
+        tables, covered = (None, ())
+        if schema == LANE_ELIGIBILITY_SCHEMA_TESSERA_V11:
+            tables, covered = _cell_rule_coverage(
+                cell, allowable.get(family, {}), at)
+        cells.append(EligibilityCell.from_dict(
+            cell, at, trellis_families=trellis_families, schema=schema,
+            residency_modes=family_modes.get(family, ()),
+            covered_rungs_q256=covered, run_tables=tables))
+    cells = tuple(cells)
 
     for cell in cells:
         if cell.regime not in regimes:
@@ -3152,20 +3310,21 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
                         "launch through an extension is read by that "
                         "extension's lane, and a cell that names another "
                         "decoder for it would escape the lane's predicate")
-        scopes: dict[tuple[str, ...], str] = {}
+        scopes: dict[tuple, str] = {}
         for cell in cells:
             for mode in cell.residency_modes:
                 for execution in cell.execution_modes if is_scoped else ("",):
-                    scope = (cell.platform, cell.family, cell.structure, cell.regime, mode)
-                    if is_scoped:
-                        scope += (cell.runtime_image, execution)
-                    previous = scopes.get(scope)
-                    if previous is not None:
-                        raise LaneEligibilityError(
-                            f"{where}.cells {previous!r} and {cell.id!r} both cover "
-                            f"{scope}; overlapping serving scopes make route "
-                            "resolution depend on cell order")
-                    scopes[scope] = cell.id
+                    base = (cell.platform, cell.family, cell.structure, cell.regime, mode, execution)
+                    keys = (("image", cell.runtime_image, base),
+                            ("build", cell_kernel_build(cell), base)) if is_scoped else (("unscoped", base),)
+                    for scope in keys:
+                        previous = scopes.get(scope)
+                        if previous is not None:
+                            raise LaneEligibilityError(
+                                f"{where}.cells {previous!r} and {cell.id!r} both cover "
+                                f"{scope}; overlapping serving scopes make route "
+                                "resolution depend on cell order")
+                        scopes[scope] = cell.id
 
     return EligibilityTable(
         present=True,
@@ -3182,6 +3341,32 @@ def _parse_table(block: Any, formats: Any, version: str, commit: str, sha: str,
         trellis_families=trellis_families,
         lanes=lanes,
     )
+
+
+def parse_kernel_build(payload: Mapping[str, Any], where: str) -> str:
+    """Read the optional portable build name without a new qualification claim."""
+    if "kernel_build" not in payload:
+        return ""
+    value = payload["kernel_build"]
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise LaneEligibilityError(f"{where}.kernel_build must be a complete non-empty name")
+    return value
+
+
+def _cell_identifier(cell: Any) -> str:
+    return getattr(cell, "id", None) or cell.cell_id
+
+
+def cell_kernel_build(cell: Any) -> str:
+    """Use the same effective build name for lookup and compatibility keys."""
+    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + _cell_identifier(cell)
+
+
+def cell_key_compatibility(cells) -> dict[str, tuple]:
+    """Map historical receipt names to build and module-kind keys."""
+    return {_cell_identifier(cell): (cell_kernel_build(cell), cell.structure,
+            cell.platform, cell.family, cell.regime, cell.residency_modes,
+            cell.execution_modes) for cell in cells}
 
 
 def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = False
@@ -3202,7 +3387,8 @@ def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = Fa
     required = {"image", "execution_modes"}
     if require_versions:
         required |= {"vllm", "torch"}
-    _require_keys(payload, where, required=required, optional=set())
+    _require_keys(payload, where, required=required, optional={"kernel_build"})
+    parse_kernel_build(payload, where)
     image = payload["image"]
     if not isinstance(image, str) or not _DIGEST_IMAGE.fullmatch(image):
         raise LaneEligibilityError(

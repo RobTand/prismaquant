@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-import hashlib
 import math
 import os
 from pathlib import Path
@@ -44,6 +43,7 @@ from .prismasnap_moe import (
     search_packed_up_down_scales,
 )
 from .prismasnap_checkpoint import _require_exact_keys
+from .digests import bytes_sha256hex
 
 
 MOE_PLAN_SCHEMA = "prismaquant.prismasnap.moe_plan.v1"
@@ -405,7 +405,7 @@ def _load_moe_probe(
                 or not np.any(importance > 0)
             ):
                 raise RuntimeError(f"PrismaSnap MoE probe row {qname!r} has invalid importance")
-    return stats, payload["meta"], hashlib.sha256(probe_bytes).hexdigest()
+    return stats, payload["meta"], bytes_sha256hex(probe_bytes)
 
 
 def _dense_importance(row: Mapping[str, object], device: torch.device) -> torch.Tensor:

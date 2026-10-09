@@ -97,6 +97,22 @@ outputs. Exactly two fields change, both inside
 ``__prismaquant__.tessera_dev_pin``: ``contract_version`` (44 to 45) and
 ``reviewed_contract_sha256`` (47b01355 to 0869f326). The allocation, the
 applicability file and the Pareto outputs are byte-identical.
+
+Re-taken for PQ #2264's v56 pin (Tessera 2dbac191). Batch38 observed the new
+normalised ``layer.json`` digest while its three companion digests remained
+unchanged. Source comparison infers three provenance changes inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (45 to 56),
+``reviewed_contract_sha256`` (0869f326 to 47f180ef), and ``native_extensions``
+gaining the E4M3 MMA row. This is not a captured raw before/after metadata
+diff. The digest check and explicit assignment below retain the unchanged
+three-unit E2M1 allocation independently of that provenance inference.
+
+PB f05313eeee06 compares the captured origin/main source with this branch.
+The former uses the unchanged D13 overlay; the latter uses the fca4c6ce0 overlay.
+Only contract_version and reviewed_contract_sha256 differ in the retained fixture outputs.
+The canonical layer digest excludes only those two fields and retains every other field.
+Both retained outputs produce the same digest after that normalization.
+The independent applicability and Pareto digests stay unchanged.
 """
 from __future__ import annotations
 
@@ -141,7 +157,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "d576cf5ac75fc8489f300df6c09c7a8cbb444e4bfa04478e39182bb6937bffb9"
+        "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9"
     ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
@@ -153,8 +169,8 @@ TESSERA_DIGESTS = {
 
 
 def _without_wall_time(value):
-    # ``solve_diagnostics.*.solver_seconds`` is the DP's wall time; every
-    # other byte of the JSON outputs is pinned, key order included.
+    # The solver timer is not deterministic. Keep each other value.
+    # The Tessera layer uses the separate canonical identity normalization below.
     if isinstance(value, dict):
         return {
             key: None if key == "solver_seconds" else _without_wall_time(item)
@@ -165,6 +181,15 @@ def _without_wall_time(value):
     return value
 
 
+def _canonical_tessera_layer(text):
+    payload = _without_wall_time(json.loads(text))
+    identity = payload["__prismaquant__"]["tessera_dev_pin"]
+    for field in ("contract_version", "reviewed_contract_sha256"):
+        del identity[field]
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode()
+
+
 def _digests(root):
     out = {}
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
@@ -172,7 +197,9 @@ def _digests(root):
         if rel.endswith((".pkl",)) or rel.startswith("model/"):
             continue
         text = path.read_bytes().replace(str(root).encode(), b"<TMP>")
-        if rel.endswith(".json"):
+        if rel == "layer.json":
+            text = _canonical_tessera_layer(text)
+        elif rel.endswith(".json"):
             text = json.dumps(_without_wall_time(json.loads(text))).encode()
         out[rel] = hashlib.sha256(text).hexdigest()
     return out
@@ -234,13 +261,14 @@ def test_stock_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
     assert got == STOCK_DIGESTS, json.dumps(got, indent=1, sort_keys=True)
 
 
-def test_tessera_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
+def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeypatch):
     pytest.importorskip("torch")
     from test_tessera_scope_endpoints import (
-        _allocator_inputs, _cli_scope, _v5_contract,
+        DENSE, EXPERT, SHARED, _allocator_inputs, _cli_scope, _v5_contract,
     )
 
     from prismaquant import allocator
+    from prismaquant.layer_config import load_assignment
 
     _v5_contract(monkeypatch)
     argv = _allocator_inputs(tmp_path, "TESSERA_E2M1_K2_R896")
@@ -248,5 +276,15 @@ def test_tessera_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
         "allocator", *argv, "--no-fused-aggregation",
         "--no-packed-aggregation", *_cli_scope()])
     allocator.main()
+    assert load_assignment(tmp_path / "layer.json") == {
+        unit: "TESSERA_E2M1_K2_R896" for unit in (DENSE, EXPERT, SHARED)
+    }
+    from prismaquant import tessera_runtime_contract as runtime
+    from prismaquant import tessera_serving_runtime_pin as pin
+    payload = json.loads((tmp_path / "layer.json").read_text())
+    identity = payload["__prismaquant__"]["tessera_dev_pin"]
+    installed = json.loads(runtime.contract_path().read_bytes())
+    assert identity["contract_version"] == installed["contract_version"]
+    assert identity["reviewed_contract_sha256"] == pin.TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
     got = _digests(tmp_path)
     assert got == TESSERA_DIGESTS, json.dumps(got, indent=1, sort_keys=True)

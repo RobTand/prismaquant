@@ -704,12 +704,11 @@ def check_artifact_completeness(
     claimed_scales: set[str] = set()
 
     # Read the fusion map once: resolving it per unit walks the vLLM registry.
-    try:
-        fused_leaves = (
-            profile.fused_sibling_leaf_mapping() if profile is not None else {}
-        )
-    except Exception:                          # pragma: no cover - defensive
-        fused_leaves = {}
+    # A profile without the getter has no fusion map. A getter that raises
+    # propagates: an empty map would report every fused unit as claimed by no
+    # mechanism, which names the wrong cause (#2443).
+    getter = getattr(profile, "fused_sibling_leaf_mapping", None)
+    fused_leaves = getter() if callable(getter) else {}
 
     # Every unit that ships a weight plane no consumer can read on its own,
     # whether that is an FP8 `.weight` or a coded/packed plane.

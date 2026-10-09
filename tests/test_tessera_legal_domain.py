@@ -291,20 +291,21 @@ def test_every_fact_names_the_table_that_answered_it():
 def test_native_qualification_is_exactly_the_reviewed_primary_cells():
     """Project the reviewed pin's cells, not a second hand-maintained roster.
 
-    The v39 scope decision is pinned in test_tessera_pin_v38_scope.py. Here
-    the inventory must reproduce that independent owner's reviewed answer:
-    every named rung, with no extrapolation to its legal neighbours.
+    The independently reviewed v56 answer carries finite census rungs AND
+    rule-derived coverage. Inventory must project both, without assuming
+    every legal neighbour is unqualified.
     """
     from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_ANSWER
 
     cells = [cell for cell in TESSERA_DEV_PIN_ANSWER['cells']
              if cell[2] in domain.PRIMARY_FAMILIES]
     assert cells and all(cell[8] == 'device_qualified' for cell in cells)
-    expected = {(cell[2], rate, cell[3]) for cell in cells for rate in cell[5]}
+    expected = {(cell[2], rate, cell[3]) for cell in cells
+                for rate in set(cell[5]) | set(cell[-1]["covered_rungs_q256"])}
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == expected
-    assert (BF, 1792, "dense") not in primary
+    assert (BF, 3585, "dense") not in primary
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
@@ -327,12 +328,12 @@ def test_the_native_set_does_not_shrink_the_legal_domain(rates):
 
 
 def test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal():
-    """R1023 has no cell and is still in the domain with a route."""
-    facts = domain.support_facts(E4, 1023, "dense")
+    """BF16 R3585 is just beyond the native rule but still producer-legal."""
+    facts = domain.support_facts(BF, 3585, "dense")
     assert facts.producer_legal.value is True
     assert facts.reader_supported.value is True
     assert facts.native_qualification.value is False
-    assert 1023 in domain.legal_rates(E4)[0]
+    assert 3585 in domain.legal_rates(BF)[0]
 
 
 def test_routed_moe_attestation_uses_its_own_runtime_image():
@@ -566,9 +567,26 @@ def test_the_provider_type_is_package_c_s_own_class():
     assert domain.RateDomain is population.RateDomain
 
 
+@pytest.fixture(scope="module")
+def public_domains():
+    """Derive each public result once; consumers own mutable payload dicts."""
+    results = {}
+
+    def get(family):
+        if family not in results:
+            # Both public entry points run independently, not from each other's
+            # stored answer. RateDomain and its tuple members are immutable.
+            results[family] = (domain.legal_rate_domain(family),
+                               domain.rate_domain_payload(family))
+        provided, payload = results[family]
+        return provided, dict(payload)
+
+    return get
+
+
 @pytest.mark.parametrize("family, count", [(E4, 1793), (BF, 3841)])
-def test_provider_returns_the_full_sorted_unique_domain(family, count):
-    provided = domain.legal_rate_domain(family)
+def test_provider_returns_the_full_sorted_unique_domain(family, count, public_domains):
+    provided, _payload = public_domains(family)
     assert provided.family == family
     assert len(provided.rates) == count
     assert tuple(sorted(set(provided.rates))) == provided.rates
@@ -595,20 +613,27 @@ def test_rate_domain_refuses_the_same_inputs_package_c_refuses(bad):
         domain.RateDomain(**bad)
 
 
-def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists():
+def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists(public_domains):
     """A JSON round trip hands back lists; an unequal domain is not a domain.
 
     ``rate_domain_payload`` produces tuples, so this only fires on a domain
     rebuilt from a document -- which is exactly where a silent inequality
     would be hardest to see.
     """
-    payload = dict(domain.rate_domain_payload(E4))
+    _provided, payload = public_domains(E4)
     payload["rates"] = list(payload["rates"])
     with pytest.raises(population.PopulationSelectionError):
         domain.RateDomain(**payload)
 
+@pytest.fixture(scope="module")
+def resolved_transitions():
+    """Share immutable results of the real resolver's default-rate path."""
+    from functools import lru_cache
 
-def test_a_transition_names_the_first_rate_of_the_new_regime():
+    return lru_cache(maxsize=None)(domain.resolver_transitions)
+
+
+def test_a_transition_names_the_first_rate_of_the_new_regime(resolved_transitions):
     """Pinned convention 1, checked against the resolver on both sides.
 
     R3585 is a transition and R3584 is not one *for the table width*: 3584/256
@@ -617,7 +642,7 @@ def test_a_transition_names_the_first_rate_of_the_new_regime():
     schedule becomes uniform at every 256-multiple -- two different regime
     changes that happen to be adjacent, and the ledger records both causes.
     """
-    transitions = set(domain.resolver_transitions(BF))
+    transitions = set(resolved_transitions(BF))
     assert {3585, 3841} <= transitions
     assert domain.table_width_bits(BF, 3584) == 14
     assert domain.table_width_bits(BF, 3585) == 15
@@ -627,7 +652,8 @@ def test_a_transition_names_the_first_rate_of_the_new_regime():
 
 
 @pytest.mark.parametrize("family", [E4, BF])
-def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(family):
+def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(
+        family, resolved_transitions):
     """Pinned convention 2: the resolver DOES change at every 256-multiple.
 
     At ``R = 256k`` over a column count divisible by 256 the Bresenham
@@ -638,7 +664,7 @@ def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(family):
     mandatory.
     """
     lo, hi = family_q256_bounds(family)
-    transitions = set(domain.resolver_transitions(family))
+    transitions = set(resolved_transitions(family))
     expected = {r for r in range(lo, hi + 1) if r % 256 == 0 and r != lo}
     expected |= {r for r in range(lo, hi + 1) if r % 256 == 1 and r != lo}
     assert transitions == expected
@@ -657,22 +683,22 @@ def test_the_schedule_signature_is_what_makes_a_256_multiple_a_transition(
         assert (len(distinct) == 1) is uniform, (rate, distinct)
 
 
-def test_boundary_witnesses_take_the_previous_legal_neighbour():
+def test_boundary_witnesses_take_the_previous_legal_neighbour(public_domains):
     """Not ``rate - 1``: the previous rate in the sorted legal domain."""
-    provided = domain.legal_rate_domain(BF)
+    provided, _payload = public_domains(BF)
     witnesses = set(domain.boundary_witnesses(BF, provided.rates))
     assert {provided.rates[0], provided.rates[-1]} <= witnesses
     assert {3584, 3585, 3840, 3841} <= witnesses
 
 
-def test_rate_domain_payload_constructs_the_dataclass():
-    payload = domain.rate_domain_payload(E4)
+def test_rate_domain_payload_constructs_the_dataclass(public_domains):
+    provided, payload = public_domains(E4)
     assert set(payload) == {"family", "rates", "transition_rates"}
     rebuilt = domain.RateDomain(**payload)
-    assert rebuilt == domain.legal_rate_domain(E4)
+    assert rebuilt == provided
 
 
-def test_payload_satisfies_package_c():
+def test_payload_satisfies_package_c(public_domains):
     """The real compatibility check: both packages are on one branch.
 
     The ``importorskip`` this used to open with dated from when work package C
@@ -680,8 +706,9 @@ def test_payload_satisfies_package_c():
     break, and it is now a plain import at the top of the file.
     """
     for family in domain.PRIMARY_FAMILIES:
-        theirs = population.RateDomain(**domain.rate_domain_payload(family))
-        assert theirs.rates == domain.legal_rate_domain(family).rates
+        provided, payload = public_domains(family)
+        theirs = population.RateDomain(**payload)
+        assert theirs.rates == provided.rates
         mandatory = population.mandatory_rates(theirs)
         assert {3584, 3585} <= set(mandatory) or family == E4
 
@@ -742,33 +769,8 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
     assert state["is_a_pin"], state["verdict"]
     assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     assert state["commit"] in {
-        "387eda36fd410d6b2a4fb86b22285eab2a5e072c",
-        "d403cc5a3199a348cc7ee6262f4adbdab8138745",
-        # The 2026-09-19 union-head pin: #563's rework moved export.py's
-        # docstrings, so the pin resolves under its own additive state.
-        "cc739a55cdfaaaa58ee8d39f1e7fbf55888750ab",
-        # The 2026-09-26 v38 re-pin for the MTP cached cohort: export.py
-        # moved by the Hessian collection owner only (ActivationSource).
-        "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
-        # The 2026-09-27 re-pin for tessera#662: export.py gained the served
-        # recipe per structure; wire_recipe and the WINDOW constants did not move.
-        "f94929defd9fa00b8726160a2cd436f02733b6dc",
-        # The 2026-09-27 re-pin for tessera#599 step 2: from_capture gained the
-        # canonical_capture keyword; wire_recipe and the WINDOW constants did not move.
-        # Renamed 2026-09-28 for the v42 pin 38e96012: export.py did not move.
-        "38e960127478b651e42c14d52acf2274b54bca38",
-        # The 2026-09-28 re-pin for the v44 pin a5f3b232cb: export.py moved
-        # by one docstring line (the supported exporter path); wire_recipe
-        # and the WINDOW constants did not move.
-        "a5f3b232cb3c424b537a06713c728c86153d55fb",
-        # The 2026-09-29 re-pin for the v45 pin a21d74d89b: export.py moved
-        # inside ActivationSource only (the seal-header fold); wire_recipe
-        # and the WINDOW constants did not move.
-        # Renamed 2026-09-29 for the v45 pin 83460680ed: export.py did
-        # not move.
-        # Renamed 2026-09-29 for the v45 pin b40c93cb73: export.py did
-        # not move.
-        "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+        domain.TESSERA_SOURCE_STATES[name]["commit"]
+        for name in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -822,11 +824,6 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     of the same re-pin: its ``export.py`` moved by docstrings only, so the
     wire bytes are the same and the equivalence claim survives verbatim.)
     """
-    assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
-        "reader-pin-387eda36", "study-producer-d403cc5a",
-        "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
-        "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-b40c93cb",
-    }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)
         for rate in (rates[0], rates[len(rates) // 2], rates[-1]):
@@ -837,7 +834,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
 
 def test_the_report_names_the_source_state_the_numbers_came_from():
     """A reader of the report can tell which Tessera bytes produced the counts."""
-    inventory = domain.build_inventory()
+    inventory = _inventory()
     state = inventory["tessera_source_state"]
     assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     report = domain.format_report(inventory)

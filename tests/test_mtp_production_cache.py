@@ -385,3 +385,240 @@ def test_retired_codebook_mtp_rung_refuses_before_any_render(
     assert "_preflight_weighted_rows" in frames, frames
     assert all(not key[0].startswith("mtp.") for key in cache.weights)
     assert "mtp_render" not in cache.metadata
+
+
+# ---------------------------------------------------------------------------
+# #2231: the MTP append writes through the same non-injective mangled leaf
+# as every other producer, so a colliding ``mtp.*`` roster must refuse at
+# the append open -- before any shard is written -- naming both qnames, and
+# the refusal must span the union with the manifest keys already in the
+# cache when the append opens a real directory.
+# ---------------------------------------------------------------------------
+
+
+class _CollidingMtp(nn.Module):
+    """An MTP sidecar whose roster aliases one shard leaf.
+
+    ``a.b`` and ``a_b`` are distinct Linears (a nested container plus a
+    sibling attribute -- exactly how a real synthesized sidecar nests), but
+    the cache leaf mangles both to ``a_b``.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Module()
+        self.a.b = nn.Linear(4, 4, bias=False)
+        self.a_b = nn.Linear(4, 4, bias=False)
+
+
+class _CollidingMtpProfile(_TinyMtpProfile):
+    name = "colliding_mtp"
+
+    def __init__(self):
+        super().__init__()
+        self.source = {
+            "a.b.weight": (
+                torch.arange(16, dtype=torch.float32).reshape(4, 4) / 32.0
+            ),
+            "a_b.weight": (
+                torch.arange(16, dtype=torch.float32).flip(0).reshape(4, 4)
+                / 24.0
+            ),
+        }
+
+    def build_mtp_module(self, _text_config):
+        return _CollidingMtp()
+
+
+def test_mtp_append_refuses_a_colliding_pair_before_any_write(
+    tmp_path, monkeypatch,
+):
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    rows = torch.randn(3, 4)
+    _write_activation(activation_dir, "mtp.a.b", rows)
+    _write_activation(activation_dir, "mtp.a_b", rows.flip(0))
+    weight_dir = tmp_path / "weights"
+    cache = _empty_cache(weight_dir)
+
+    with pytest.raises(ValueError) as exc_info:
+        fill_profile_mtp_production_cache(
+            cache,
+            "/fake/model",
+            profile=_CollidingMtpProfile(),
+            activation_cache_dir=activation_dir,
+            render_assignment={"mtp.a.b": "FP8_E4M3", "mtp.a_b": "FP8_E4M3"},
+            cache_dir=weight_dir,
+            device="cpu",
+            dtype=torch.float32,
+            progress=False,
+        )
+
+    message = str(exc_info.value)
+    assert "mtp.a.b" in message
+    assert "mtp.a_b" in message
+    assert "mtp_a_b__FP8_E4M3.pt" in message
+    # The refusal precedes every write: the append directory holds no shard
+    # and no sidecar, and the manifest gained no mtp key.
+    assert not any(weight_dir.iterdir())
+    assert all(not key[0].startswith("mtp.") for key in cache.weights)
+
+
+def test_mtp_stripe_refuses_a_pair_split_across_stripes(
+    tmp_path, monkeypatch,
+):
+    # Stripe 1 renders "mtp.a.b" into a real cache directory; stripe 2 asks
+    # for "mtp.a_b", whose shard leaf is the same file. The append open must
+    # refuse over the union of the new names and the manifest keys already
+    # in the cache, and it must refuse BEFORE the #170 append-identity
+    # sidecar runs: on the unfixed code stripe 2 reaches the sidecar and
+    # refuses with the generic rebuild-the-directory mismatch, naming
+    # neither colliding qname.
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    _write_activation(activation_dir, "mtp.a.b", torch.randn(3, 4))
+    _write_activation(activation_dir, "mtp.a_b", torch.randn(3, 4))
+    weight_dir = tmp_path / "weights"
+    cache = _empty_cache(weight_dir)
+
+    rendered = fill_profile_mtp_production_cache(
+        cache,
+        "/fake/model",
+        profile=_CollidingMtpProfile(),
+        activation_cache_dir=activation_dir,
+        render_assignment={"mtp.a.b": "FP8_E4M3"},
+        cache_dir=weight_dir,
+        device="cpu",
+        dtype=torch.float32,
+        progress=False,
+    )
+    assert rendered == 1
+
+    with pytest.raises(ValueError) as exc_info:
+        fill_profile_mtp_production_cache(
+            cache,
+            "/fake/model",
+            profile=_CollidingMtpProfile(),
+            activation_cache_dir=activation_dir,
+            render_assignment={"mtp.a_b": "FP8_E4M3"},
+            cache_dir=weight_dir,
+            device="cpu",
+            dtype=torch.float32,
+            progress=False,
+        )
+
+    message = str(exc_info.value)
+    assert "mtp.a.b" in message
+    assert "mtp.a_b" in message
+    assert "mtp_a_b__FP8_E4M3.pt" in message
+    assert cache.resolve_key("mtp.a.b", "FP8_E4M3") is not None
+
+
+class _CrossFormatMtp(nn.Module):
+    """The alias pair again, at NVFP4's 16-aligned group size."""
+
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Module()
+        self.a.b = nn.Linear(16, 16, bias=False)
+        self.a_b = nn.Linear(16, 16, bias=False)
+
+
+class _CrossFormatMtpProfile(_CollidingMtpProfile):
+    name = "cross_format_mtp"
+
+    def __init__(self):
+        super().__init__()
+        self.source = {
+            "a.b.weight": (
+                torch.arange(256, dtype=torch.float32).reshape(16, 16) / 512.0
+            ),
+            "a_b.weight": (
+                torch.arange(256, dtype=torch.float32).flip(0).reshape(16, 16)
+                / 384.0
+            ),
+        }
+
+    def build_mtp_module(self, _text_config):
+        return _CrossFormatMtp()
+
+
+@pytest.mark.parametrize("second_format", ["FP8_E4M3", "NVFP4"])
+def test_mtp_memory_append_checks_only_its_own_format_coordinates(
+    tmp_path, monkeypatch, second_format,
+):
+    from prismaquant import mtp_production_cache as mtp
+
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    rows = torch.ones(3, 16)
+    _write_activation(activation_dir, "mtp.a.b", rows)
+    _write_activation(activation_dir, "mtp.a_b", rows)
+    cache = _empty_cache()
+    # An outside coordinate aliases the first destination, but no directory
+    # is open: only this append's own pairs belong to the check.
+    cache.weights[("mtp_a_b", "FP8_E4M3")] = torch.zeros(16, 16)
+    before = dict(cache.weights)
+    render = mtp._render_dense_layer
+    render_calls = []
+
+    def checked_render(*args, **kwargs):
+        render_calls.append(kwargs["cache_dir_path"])
+        assert second_format != "FP8_E4M3", "collision reached the renderer"
+        return render(*args, **kwargs)
+
+    monkeypatch.setattr(mtp, "_render_dense_layer", checked_render)
+    kwargs = dict(
+        profile=_CrossFormatMtpProfile(), activation_cache_dir=activation_dir,
+        render_assignment={"mtp.a.b": "FP8_E4M3", "mtp.a_b": second_format},
+        device="cpu", dtype=torch.float32, progress=False,
+    )
+    if second_format == "FP8_E4M3":
+        with pytest.raises(ValueError) as error:
+            fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs)
+        assert "('mtp.a.b', 'FP8_E4M3')" in str(error.value)
+        assert "('mtp.a_b', 'FP8_E4M3')" in str(error.value)
+        assert "mtp_a_b__FP8_E4M3.pt" in str(error.value)
+        assert cache.weights == before
+        assert render_calls == []
+    else:
+        assert fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs) == 2
+        assert render_calls == [None]
+        for coordinate in (("mtp.a.b", "FP8_E4M3"), ("mtp.a_b", "NVFP4")):
+            assert isinstance(cache.weights[coordinate], torch.Tensor)
+        assert cache.weights[("mtp_a_b", "FP8_E4M3")] is before[("mtp_a_b", "FP8_E4M3")]
+    assert cache.cache_dir is None
+    assert list(tmp_path.iterdir()) == [activation_dir]
+
+
+def test_mtp_append_admits_a_cross_format_alias_pair(
+    tmp_path, monkeypatch,
+):
+    # Injectivity is filename-level over (qname, canonical format)
+    # coordinates (#2219): "mtp.a.b" and "mtp.a_b" mangle to one leaf, but
+    # at two formats they name two different shard files, so the append
+    # proceeds and lands both.
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    _write_activation(activation_dir, "mtp.a.b", torch.randn(3, 16))
+    _write_activation(activation_dir, "mtp.a_b", torch.randn(3, 16))
+    weight_dir = tmp_path / "weights"
+    cache = _empty_cache(weight_dir)
+
+    rendered = fill_profile_mtp_production_cache(
+        cache,
+        "/fake/model",
+        profile=_CrossFormatMtpProfile(),
+        activation_cache_dir=activation_dir,
+        render_assignment={"mtp.a.b": "FP8_E4M3", "mtp.a_b": "NVFP4"},
+        cache_dir=weight_dir,
+        device="cpu",
+        dtype=torch.float32,
+        progress=False,
+    )
+
+    assert rendered == 2
+    assert cache.resolve_key("mtp.a.b", "FP8_E4M3") is not None
+    assert cache.resolve_key("mtp.a_b", "NVFP4") is not None
+    assert (weight_dir / "mtp_a_b__FP8_E4M3.pt").is_file()
+    assert (weight_dir / "mtp_a_b__NVFP4.pt").is_file()

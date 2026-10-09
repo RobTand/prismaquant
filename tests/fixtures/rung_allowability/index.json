@@ -1,0 +1,19 @@
+{
+  "schema": "fleet.rung_allowability.index.v1",
+  "formats": {
+    "TESSERA_E4M3_K1": {
+      "kernel_builds": {
+        "fixture-t8": {
+          "current_version": 1,
+          "versions": {
+            "1": {
+              "path": "TESSERA_E4M3_K1/fixture-t8/v0001.json",
+              "table_schema": "fleet.rung_allowability.v1",
+              "table_status": "partial"
+            }
+          }
+        }
+      }
+    }
+  }
+}

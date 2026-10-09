@@ -37,7 +37,7 @@ SOURCE_FILES = ('experiments/selected_source_authentication_ab.py',
     'prismaquant/streaming_model.py', 'prismaquant/tessera_campaign.py',
     'prismaquant/tessera_expert_projection.py', 'prismaquant/memory_management.py',
     'prismaquant/calibration_data.py', 'prismaquant/production_weight_cache.py',
-    'tools/tessera_campaign_container.py', 'tools/container_runtime_identity.py')
+    "tools/tessera_campaign_container.py", "prismaquant/container_runtime_identity.py")
 
 
 def write_json(path, value):

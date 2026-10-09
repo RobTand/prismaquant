@@ -14,6 +14,7 @@ import ast
 import hashlib
 import importlib
 import importlib.util
+import json
 from pathlib import Path, PurePosixPath
 import sys
 
@@ -23,6 +24,7 @@ from prismaquant import cost_stage_checkpoint, digests
 from prismaquant.digests import (
     DIRECT_ASCII_LAX,
     DIRECT_ASCII_LAX_DEFAULT_STR,
+    DIRECT_ASCII_SPACED_STRICT,
     DIRECT_ASCII_STRICT,
     DIRECT_UTF8_STRICT,
     JsonProfile,
@@ -252,6 +254,25 @@ def test_profile_bytes_are_pinned(profile, text, sha256):
         "8dbe545b94a2a86b8de7bfb0dfa7bfbe26a293a727598447a4b290b3dec925a5")
 
 
+@pytest.mark.parametrize("value", GENERIC_INPUTS)
+def test_original_spaced_strict_profile_keeps_direct_bytes_and_errors(value):
+    """Original snapshots/writers keep ASCII spaces, not canonical normalization."""
+    previous = lambda: json.dumps(value, sort_keys=True, allow_nan=False)
+    assert outcome(lambda: DIRECT_ASCII_SPACED_STRICT.text(value)) == outcome(previous)
+    assert outcome(lambda: DIRECT_ASCII_SPACED_STRICT.encoded(value)) == outcome(
+        lambda: previous().encode("utf-8"))
+    assert outcome(lambda: DIRECT_ASCII_SPACED_STRICT.sha256(value)) == outcome(
+        lambda: hashlib.sha256(previous().encode("utf-8")).hexdigest())
+    assert outcome(lambda: json.loads(DIRECT_ASCII_SPACED_STRICT.text(value))) == outcome(
+        lambda: json.loads(previous()))
+
+
+def test_original_spaced_strict_profile_pins_unicode_and_surrogate_bytes():
+    value = {"z": "\ud800", "a": ["café", -0.0, 1.0, None, True]}
+    expected = b'{"a": ["caf\\u00e9", -0.0, 1.0, null, true], "z": "\\ud800"}'
+    assert DIRECT_ASCII_SPACED_STRICT.encoded(value) == expected
+
+
 #: One input per pair of neighbouring profiles on which their bytes differ, so
 #: no two profiles can be merged without changing a stored digest.
 @pytest.mark.parametrize(("left", "right", "value"), (
@@ -261,7 +282,11 @@ def test_profile_bytes_are_pinned(profile, text, sha256):
     (DIRECT_ASCII_STRICT.encoded, DIRECT_ASCII_LAX.encoded, {"x": float("nan")}),
     (DIRECT_ASCII_LAX.encoded, DIRECT_ASCII_LAX_DEFAULT_STR.encoded,
      {"p": PurePosixPath("/x")}),
-), ids=("round-trip-vs-direct", "utf8-vs-ascii", "strict-vs-lax", "lax-vs-default-str"))
+    (DIRECT_ASCII_SPACED_STRICT.encoded, DIRECT_ASCII_STRICT.encoded, {"k": 1}),
+    (DIRECT_ASCII_SPACED_STRICT.encoded, digests.DIRECT_ASCII_SPACED_LAX.encoded,
+     {"x": float("nan")}),
+), ids=("round-trip-vs-direct", "utf8-vs-ascii", "strict-vs-lax", "lax-vs-default-str",
+        "spaced-vs-compact", "spaced-strict-vs-lax"))
 def test_profiles_are_not_interchangeable(left, right, value):
     assert outcome(lambda: left(value)) != outcome(lambda: right(value))
 
@@ -274,7 +299,7 @@ def test_round_trip_and_direct_order_integer_keys_differently():
 
 def test_profile_names_are_unique():
     profiles = [value for value in vars(digests).values() if isinstance(value, JsonProfile)]
-    assert len(profiles) == 8
+    assert len(profiles) == 9
     assert len({profile.name for profile in profiles}) == len(profiles)
 
 

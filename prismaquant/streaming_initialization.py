@@ -32,6 +32,12 @@ _STREAMING_INITIALIZATION_SCHEMA = "prismaquant.streaming_initialization.v1"
 _initialization_digest = DIRECT_ASCII_STRICT.sha256
 
 
+def _prefix_layer_index(name: str, prefix: str) -> int | None:
+    """The decoder-layer index of a ``<prefix><N>.`` state name, else None."""
+    match = re.fullmatch(re.escape(prefix) + r"(\d+)\..+", name)
+    return None if match is None else int(match[1])
+
+
 def validate_streaming_initialization_contract(value):
     """Read completed source-forward coverage; never accept a pending skeleton."""
     keys = {"schema", "scope", "status", "transformers_version", "model_class",
@@ -93,10 +99,10 @@ def validate_streaming_prefix_initialization_contract(value):
             if name.startswith(prefix):
                 raise ValueError("Body state cannot stand in for prefix head coverage")
         else:
-            match = re.fullmatch(re.escape(prefix) + r"(\d+)\..+", name)
-            if match is None or int(match[1]) not in layers:
+            index = _prefix_layer_index(name, prefix)
+            if index is None or index not in layers:
                 raise ValueError("Streaming prefix includes state outside its observed scope")
-            seen.add(int(match[1]))
+            seen.add(index)
         checkpoint += kind == "checkpoint"
         derived += kind == "derived_buffer"
         if kind == "derived_buffer" and not re.fullmatch(r"[0-9a-f]{64}", str(record["sha256"])):
@@ -157,10 +163,10 @@ def validate_streaming_selected_initialization_witness(value):
         if kind == "derived_buffer" and not re.fullmatch(r"[0-9a-f]{64}", str(record["sha256"])):
             raise ValueError("Invalid derived-buffer digest")
         if name not in heads:
-            match = re.fullmatch(re.escape(prefix) + r"(\d+)\..+", name)
-            if match is None or int(match[1]) not in layers:
+            index = _prefix_layer_index(name, prefix)
+            if index is None or index not in layers:
                 raise ValueError("Streaming selected-layer state is outside its observed layers")
-            seen.add(int(match[1]))
+            seen.add(index)
         elif name.startswith(prefix):
             raise ValueError("Body state cannot stand in for head coverage")
         checkpoint += kind == "checkpoint"

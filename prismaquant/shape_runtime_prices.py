@@ -64,15 +64,11 @@ zero (design §3.3).
 
 Rate pools
 ----------
-Pooling across rates is never a default. A table may declare a
-``rate_pools`` entry: these rates of one ``(structure, shape, family)``
-execute on one kernel lane, and their samples are one distribution. Admission
-refuses a pool whose source rows disagree about the lane, and checks every
-pooled rate against the contract as it would a row. The pooled samples are
-the concatenation of the source rows' own samples, so the spread across rates
-flows into :func:`operator_sum_bootstrap` instead of a tolerance deciding
-anything. A pool whose rows sit at one rate measured no cross-rate spread,
-and its record says so.
+Proposal parsing retains declared same-lane pools for analysis. An authenticated
+runtime table cannot carry one: :func:`load_shape_table` refuses every nonempty
+``rate_pools`` entry because no reviewed checker emits a pool. Reload therefore
+cannot lend one rate's samples to an unmeasured rate. Every runtime price needs
+its own checker-bound row; a declared proposal pool is not measured coverage.
 
 Tessera's checker emits ``tessera.shape_time_observation.v1``. Conversion
 requires its explicitly selected PB completion and the independently reviewed
@@ -290,6 +286,8 @@ class PricedTime:
     source_id: str
     source: str  # "row" | "rate_pool"
     pool: Mapping | None = None
+    canonical: Mapping | None = None
+    sample_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -329,7 +327,7 @@ class ShapeRuntimeTable:
                 return pool
         return None
 
-    def lookup(self, key: ShapeKey) -> PricedTime | None:
+    def lookup(self, key: ShapeKey, *, allowability=None) -> PricedTime | None:
         """The time for one key, or ``None`` when the table has no measurement.
 
         A pool that covers the key's rate answers for it (the pool is the
@@ -340,7 +338,7 @@ class ShapeRuntimeTable:
         if pool is None:
             row = rows.get(key)
             if row is None:
-                return None
+                return None if allowability is None else _canonical_lookup(self, key, allowability)
             return PricedTime(key, row.measurement.median_ms, row.measurement.samples_ms,
                               row.kernel_lane, key.label(), "row")
         sources = [rows[source] for source in (replace(key, rate_q256=rate) for rate in pool.rates_q256)
@@ -360,8 +358,92 @@ class ShapeRuntimeTable:
                           "rate_pool", MappingProxyType(record))
 
 
+def canonical_rung_times(allowability, rung: int, *, kernel_kind: str,
+                         rows: int, columns: int, m: int,
+                         routing: str | None = None) -> dict:
+    """Read raw canonical times before reconciliation with operator rows.
+
+    Missing cells withhold the price. These raw times remain separate from
+    the operator samples that anchor a proposal. No time qualifies serving.
+    """
+    if type(rung) is not int:
+        raise ShapeRuntimeError("canonical rung must be an integer")
+    cells = allowability.cells_for(kernel_kind=kernel_kind, rows=rows,
+                                   columns=columns, m=m, routing=routing)
+    times = [allowability.canonical_time(rung, cell_id=cell) for cell in cells]
+    return {"format": allowability.format, "rung": rung,
+            "scope": {"kernel_kind": kernel_kind, "rows": rows,
+                      "columns": columns, "m": m, "routing": routing},
+            "cells": list(cells), "times": times,
+            "provenance": allowability.provenance()}
+
+
+def _canonical_operator_times(allowability, key: ShapeKey, *, require_admission=True) -> tuple[dict, ...]:
+    """Resolve each actual kernel shape of one served operator."""
+    if key.structure == STRUCTURE_DENSE:
+        match = _DENSE_SHAPE.fullmatch(key.rank_local_shape)
+        shapes = ((int(match[1]), int(match[2])),)
+    else:
+        match = _ROUTED_SHAPE.fullmatch(key.rank_local_shape)
+        shapes = ((int(match[2]), int(match[3])), (int(match[4]), int(match[5])))
+    results = []
+    for rows, columns in shapes:
+        scope = allowability.scope_for_unit(f"{key.family}_R{key.rate_q256}",
+            unit="operator", shape=(rows, columns), structure=key.structure, m=key.m)
+        if scope is None or (require_admission and not allowability.allows(key.rate_q256, scope=scope)):
+            return ()
+        resolved = canonical_rung_times(allowability, key.rate_q256,
+            kernel_kind=key.structure, rows=rows, columns=columns, m=key.m)
+        if not resolved["cells"]:
+            return ()
+        for cell_id, timing in zip(resolved["cells"], resolved["times"]):
+            if timing["status"] != "measured":
+                return ()
+            measurement = timing["measurement"]
+            identity = allowability.class_identity(key.rate_q256, measurement)
+            if identity["activation_contract"] != scope["activation_contract"] or identity["recipe"] != scope["recipe"]:
+                return ()
+            results.append({"cell_id": cell_id, "kernel_time_us": measurement["kernel_time_us"],
+                "class_identity": identity, "timing": timing})
+    return tuple(results)
+
+
+def _canonical_lookup(table: ShapeRuntimeTable, key: ShapeKey, allowability) -> PricedTime | None:
+    """Reconcile a class model with actual operator rows before proposal use."""
+    if not table.admitted:
+        return None
+    target = _canonical_operator_times(allowability, key)
+    if not target:
+        return None
+    target_classes = tuple(item["class_identity"] for item in target)
+    donors = []
+    for row in table.rows:
+        if replace(row.key, rate_q256=key.rate_q256) != key:
+            continue
+        source = _canonical_operator_times(allowability, row.key, require_admission=False)
+        if tuple(item["class_identity"] for item in source) != target_classes:
+            continue
+        ratios = [actual["kernel_time_us"] / anchor["kernel_time_us"]
+                  for actual, anchor in zip(target, source)]
+        factor = max(ratios)
+        samples = tuple(value * factor for value in row.measurement.samples_ms)
+        donors.append((median(samples), row, samples, source, factor))
+    if not donors:
+        return None
+    # Preserve the slowest reconciled estimate. No raw kernel time is an operator price.
+    value, row, samples, source, factor = max(donors, key=lambda item: (item[0], item[1].key))
+    provenance = {"status": "proposal_data", "method": "canonical_class_reconciled",
+        "operator_anchor": row.key.label(), "scale": factor,
+        "operator_receipt": row.measurement.receipt_path,
+        "operator_receipt_sha256": row.measurement.receipt_sha256,
+        "canonical_target": list(target), "canonical_anchor": list(source),
+        "numerical_qualification_inherited": False, "serving_qualification_inherited": False}
+    return PricedTime(key, float(value), row.measurement.samples_ms, row.kernel_lane,
+        row.key.label(), "canonical_class", canonical=MappingProxyType(provenance), sample_scale=factor)
+
+
+
 def parse_shape_table(payload: Mapping, *, source_path: str = "") -> ShapeRuntimeTable:
-    """Validate the table's own declarations. Admission is a separate step."""
     try:
         return _parse_shape_table(payload, source_path)
     except ShapeRuntimeError:
@@ -451,10 +533,13 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
 
     A checker receipt is rejoined through the public PB reader and the
     independent reviewed source config, then its projection is compared to
-    the table. Bare panels and observations refuse. Other legacy artifacts
-    retain the digest-only check.
+    the table. Bare panels, observations and unrecognized receipt schemas
+    refuse; a matching digest alone cannot authenticate measurement rows.
     """
     table = parse_shape_table(_json(path), source_path=str(path))
+    if table.rate_pools:
+        raise ShapeRuntimeError(
+            "shape-time rate_pools are not authenticated by PB checker completions")
     for receipt, expected in sorted({(row.measurement.receipt_path, row.measurement.receipt_sha256)
                                      for row in table.rows}):
         receipt_path = Path(receipt)
@@ -463,7 +548,8 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
         receipt_path = receipt_path.resolve()
         try:
             _, raw = ArtifactReader(Path()).bytes(
-                {"path": str(receipt_path), "sha256": expected}, "shape-time receipt")
+                {"path": str(receipt_path), "sha256": expected}, "shape-time receipt",
+                max_bytes=CHECKER_EVIDENCE_MAX_BYTES)
         except (OSError, RuntimePriceError) as exc:
             raise ShapeRuntimeError(f"cannot read shape-time receipt {receipt_path}: {exc}") from exc
         _rebind_shape_row_to_receipt(table, receipt_path, raw)
@@ -497,9 +583,7 @@ def _rebind_shape_row_to_receipt(table: ShapeRuntimeTable, receipt_path: Path, r
                     or row.measurement.warmup_iterations != projection["warmup_iterations"]):
                 raise ShapeRuntimeError("shape row measurement differs from its checker observation")
         return
-    if isinstance(panel, Mapping) and panel.get("schema") in (
-            SHAPE_TIME_PANEL_SCHEMA, SHAPE_TIME_OBSERVATION_SCHEMA):
-        raise ShapeRuntimeError("shape-time receipt requires an authenticated PB checker completion")
+    raise ShapeRuntimeError("shape-time receipt requires an authenticated PB checker completion")
 
 
 # --------------------------------------------------------------------------- #
@@ -530,7 +614,7 @@ def _launch_refusal(table: EligibilityTable, scope: ShapeTableScope, *, structur
                              scope.runtime_image_digest, scope.execution_mode)
     cells = [cell for cell in table.cells
              if cell.family == family and cell.regime == regime and cell.is_trellis
-             and rate in cell.rungs_q256
+             and cell.covers_rate(rate)
              and cell_matches_serving_context(cell, context, serving_source_sha256=None)]
     if not cells:
         return None, (f"no pinned lane cell covers {family} R{rate} {structure} in regime "
@@ -715,6 +799,8 @@ class ShapePricing:
         for gap in self.gaps:
             by_reason[gap["kind"]] = by_reason.get(gap["kind"], 0) + 1
         return {"regime_m": self.regime_m, "priced_options": len(self.resources),
+                "canonical_prices": {f"{unit}@{fmt}": dict(time.canonical)
+                    for (unit, fmt), time in sorted(self.prefill.items()) if time.canonical is not None},
                 "unpriced_options": len(self.gaps), "by_kind": dict(sorted(by_reason.items())),
                 "gaps": [dict(gap) for gap in self.gaps],
                 "reading": ("an unpriced option is absent from the time-aware candidate set and is "
@@ -731,15 +817,23 @@ class ShapePricing:
         priced = self.prefill if axis == "prefill" else self.decode
         counts: dict[str, int] = {}
         samples: dict[str, tuple[float, ...]] = {}
+        scales: dict[str, float] = {}
         for unit, fmt in sorted(assignment.items()):
             time = priced.get((unit, fmt))
             if time is None:
                 raise ShapeRuntimeError(f"{unit}@{fmt} has no {axis} time; it cannot be in a priced sum")
             counts[time.source_id] = counts.get(time.source_id, 0) + 1
-            samples[time.source_id] = time.samples_ms
+            samples.setdefault(time.source_id, time.samples_ms)
+            scales[time.source_id] = scales.get(time.source_id, 0.0) + time.sample_scale
         ids = sorted(counts)
-        result = bootstrap_sum([samples[i] for i in ids], draws=draws, seed=seed, offset_ms=offset_ms,
-                               multiplicities=[counts[i] for i in ids])
+        if all(scales[i] == counts[i] for i in ids):
+            result = bootstrap_sum([samples[i] for i in ids], draws=draws, seed=seed,
+                offset_ms=offset_ms, multiplicities=[counts[i] for i in ids])
+        else:
+            result = bootstrap_sum([[value * scales[i] for value in samples[i]] for i in ids],
+                draws=draws, seed=seed, offset_ms=offset_ms)
+            result["class_model_scales"] = {i: scales[i] for i in ids}
+            result["uncertainty_scope"] = "operator_anchor_samples_conditional_on_class_model"
         result["distinct_measurements"] = len(ids)
         return result
 
@@ -764,7 +858,8 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
                                   option_members: Mapping[tuple[str, str], Mapping[str, str]],
                                   member_shapes: Mapping[str, Sequence[int]],
                                   member_structure: Mapping[str, str], regime_m: int,
-                                  published_formats: Mapping[str, Mapping[str, Any]]) -> ShapePricing:
+                                  published_formats: Mapping[str, Mapping[str, Any]],
+                                  rung_allowability: Mapping | None = None) -> ShapePricing:
     """Price every candidate option from shape rows; leave the unpriced out.
 
     ``option_members`` maps each DP option to the member ``{name: format}`` it
@@ -825,13 +920,15 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
             family, rate = families.pop(), rates.pop()
             if type(candidate.memory_bytes) is not int:
                 raise ShapeRuntimeError(f"{key}: candidate bytes must be an exact integer")
-            found = table.lookup(ShapeKey(structure, operators[unit], family, rate, regime_m))
+            time_key = ShapeKey(structure, operators[unit], family, rate, regime_m)
+            owner = None if rung_allowability is None else rung_allowability.get(family)
+            found = table.lookup(time_key, allowability=owner)
             if found is None:
                 gap(unit, candidate.fmt, "no_time_row",
-                    f"no row or rate pool times {structure} {operators[unit]} {family} R{rate} "
-                    f"at M={regime_m}")
+                    f"no admitted row or reconciled canonical class times {structure} "
+                    f"{operators[unit]} {family} R{rate} at M={regime_m}")
                 continue
-            one = (table.lookup(ShapeKey(structure, operators[unit], family, rate, DECODE_M))
+            one = (table.lookup(replace(time_key, m=DECODE_M), allowability=owner)
                    if DECODE_M in table.context.regimes else None)
             prefill[key] = found
             if one is not None:
@@ -1090,7 +1187,10 @@ def _observation_projection(observation: Mapping) -> dict:
         raise ShapeRuntimeError(f"shape-time observation claims must be exactly {_OBSERVATION_CLAIMS}")
     reader = ArtifactReader(Path())
     panel_path, panel_raw = reader.bytes(top["panel"], "observation.panel")
-    _observation_sha(top["expected_panel_sha256"], "observation.expected_panel_sha256")
+    expected_panel_sha256 = _observation_sha(
+        top["expected_panel_sha256"], "observation.expected_panel_sha256")
+    _equal_strict(top["panel"]["sha256"], expected_panel_sha256,
+                  "observation.expected_panel_sha256")
     panel = _parse_bound_json(panel_raw, panel_path, "observation.panel")
     _equal_strict(panel.get("schema"), SHAPE_TIME_PANEL_SCHEMA, "observation.panel schema")
     if panel.get("status") != "measured":

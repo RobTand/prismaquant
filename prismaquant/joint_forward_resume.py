@@ -19,6 +19,7 @@ import stat
 
 from .dev_mode import seal_check
 from .file_identity import file_stat_signature
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -70,7 +71,7 @@ def _read(path, expected=None):
     raw = path.read_bytes()
     if file_stat_signature(path.lstat()) != file_stat_signature(before):
         raise ForwardRecoveryRefused('recovery proof changed during read')
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if expected is not None and digest != expected:
         raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     document = json.loads(raw)
@@ -104,7 +105,7 @@ def _checked_group(group, *, queue, instance, template, sdk):
     if set(record) != {'export_key', 'manifest_sha256', 'batch_id', 'action'}:
         raise ForwardRecoveryRefused('export record has an invalid shape')
     raw = group['manifest_raw'].encode()
-    if json.loads(raw) != manifest or hashlib.sha256(raw).hexdigest() != record['manifest_sha256']:
+    if json.loads(raw) != manifest or bytes_sha256hex(raw) != record['manifest_sha256']:
         raise ForwardRecoveryRefused('export manifest digest mismatch')
     batch = manifest['batch_id']
     if (manifest['owner'] != instance['owner_action_key'] or
@@ -535,7 +536,7 @@ continues the imported chain.
                        'record': record, 'receipt': _read(path.parent / 'receipt.json')[0]})
     document['groups'] = groups
     records = _verified_chain_records(document, sdk)
-    raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    raw = DIRECT_ASCII_LAX.encoded(document) + b'\n'
     with Path(output).open('xb') as handle:
         handle.write(raw)
         handle.flush()
@@ -546,6 +547,6 @@ continues the imported chain.
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
-    return {'path': str(output), 'sha256': hashlib.sha256(raw).hexdigest(),
+    return {'path': str(output), 'sha256': bytes_sha256hex(raw),
             'groups': len(groups), 'segments': len(chain_documents(document)),
             'entries': sum(len(rows) for rows in records.values())}

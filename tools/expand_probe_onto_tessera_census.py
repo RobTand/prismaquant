@@ -8,9 +8,9 @@ Both inputs are read by their SHA-256; the output is a new file beside a
 """
 from __future__ import annotations
 
+import json
 import argparse
 import hashlib
-import json
 import pickle
 import sys
 from pathlib import Path
@@ -21,6 +21,7 @@ from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.model_profiles.structure import load_structure_spec
 from prismaquant.schemas import validate_probe_payload
 from prismaquant.tessera_census_stats import META_KEY, expand_probe_onto_census
+
 
 
 def _bound(path: str, digest: str, label: str):

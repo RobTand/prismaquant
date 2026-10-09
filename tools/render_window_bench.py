@@ -395,6 +395,11 @@ def _spy_main_shares(path: Path, rate: int):
 
 
 def cmd_analyze(args) -> int:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
     out = Path(args.out)
     results = [json.loads(path.read_text()) for path in sorted(out.glob("*-r*.json"))]
     by_arm = defaultdict(list)
@@ -431,7 +436,7 @@ def cmd_analyze(args) -> int:
     digests = {digest for arm in summary.values() for digest in arm["projection_digests"]}
     report = {"arms": summary, "identical_projections": len(digests) == 1}
     (out / "analysis.json").write_text(json.dumps(report, indent=1, sort_keys=True))
-    print(MARKER + "analysis " + json.dumps(report, sort_keys=True), flush=True)
+    print(MARKER + "analysis " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
     return 0 if len(digests) == 1 else 3
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Make bounded full-domain acquisition requests from existing measured rows.
 
-Run through PrismaBuild. This command is a scalar-output-MSE research adapter;
-it neither needs a Fisher probe nor fabricates one. It produces acquisition
-requests, not an allocation or a replacement for joint AURA. The source tensor
-inventory is the metadata-only header inventory from the campaign coordinator.
+Run through PrismaBuild. Explicit render-score and attested joint-AURA paths
+produce research measurement requests, not prices or an allocation. Joint raw
+signed/probe/operator evidence remains bound to its original run; scalar MSE
+is never converted into Fisher currency. Source inventory is metadata-only.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from prismaquant.cost_currency import require_run_currency
 from prismaquant.tessera_allocator import build_tessera_allocator_candidate
 from prismaquant.tessera_full_domain_acquisition import (
     adaptive_acquisition_from_records, require_measured_recipe_binding,
+    joint_acquisition_from_cost_data,
 )
 from prismaquant.cost_stage_checkpoint import unit_path, _load_unit
 from tessera.cached_unit import encoder_source_sha256
@@ -31,7 +32,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--costs', type=Path, required=True)
     parser.add_argument('--source-tensors', type=Path, required=True)
-    parser.add_argument('--anchor-parts', type=Path, required=True)
+    parser.add_argument('--anchor-parts', type=Path)
+    parser.add_argument('--cost-currency', choices=("render-score", "joint-aura"),
+                        default="render-score", help="Explicit attested research objective; no conversion.")
     parser.add_argument('--unit', action='append', required=True)
     parser.add_argument('--family', action='append', required=True)
     parser.add_argument('--max-new-points', type=int, required=True)
@@ -44,19 +47,37 @@ def main(argv=None):
         parser.error('unit/family selections must be distinct')
     if args.out.exists():
         parser.error('refusing to overwrite prior acquisition output')
+    if args.cost_currency == "render-score" and args.anchor_parts is None:
+        parser.error("render-score acquisition requires --anchor-parts")
+    if args.cost_currency == "joint-aura" and args.anchor_parts is not None:
+        parser.error("scalar --anchor-parts is not a joint run identity")
     raw = args.costs.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     costs = pickle.loads(raw)
     del raw
-    currency = require_run_currency(costs)
-    if currency['expected_currency'] != 'render-score':
-        parser.error('this adapter requires measured scalar render-score costs')
+    joint = args.cost_currency == "joint-aura"
     source_raw = args.source_tensors.read_bytes()
     source = {r['name']: r for r in json.loads(source_raw)}
-    reports = []
-    active_encoder_sha256 = encoder_source_sha256()
+    if joint:
+        missing = [unit for unit in args.unit if unit + ".weight" not in source]
+        if missing:
+            parser.error(f"unit missing from source inventory: {missing}")
+        try:
+            joint_result = joint_acquisition_from_cost_data(
+                costs, {unit: source[unit + ".weight"]["shape"] for unit in args.unit},
+                args.family, max_new_points=args.max_new_points,
+                alpha_loss_per_byte=args.alpha_loss_per_byte, boundary_policy=args.boundary_policy)
+        except (ValueError, RuntimeError) as exc:
+            parser.error(str(exc))
+        reports, currency = joint_result["reports"], joint_result["cost_currency"]
+    else:
+        currency = require_run_currency(costs)
+        if currency['expected_currency'] != 'render-score':
+            parser.error('this adapter requires measured scalar render-score costs')
+        reports = []
+    active_encoder_sha256 = None if joint else encoder_source_sha256()
     journal_bindings = {}
-    for unit in args.unit:
+    for unit in (() if joint else args.unit):
         if unit not in costs['costs'] or unit + '.weight' not in source:
             parser.error(f'unit missing from cost/source intersection: {unit}')
         shape = source[unit + '.weight']['shape']
@@ -130,6 +151,8 @@ def main(argv=None):
         'total_requested_quality_measurements': sum(len(r['proposed_q256']) for r in reports),
         'allocator_payload': False, 'production_qualified': False,
     }
+    if joint:
+        result.update(joint_result)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open('x') as handle:
         json.dump(result, handle, indent=2, sort_keys=True, allow_nan=False)

@@ -13,16 +13,23 @@ torch = pytest.importorskip("torch")
 UNIT = "model.layers.0.proj"
 
 
-def _main_fixture(monkeypatch, tmp_path, *, priced=False):
+def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
+                  format_name="TESSERA_E4M3_K1_R1024"):
     from prismaquant import model_profiles, tessera_campaign, tessera_render
     from prismaquant.model_profiles import DefaultProfile
 
     model = torch.nn.Module()
     model.model = torch.nn.Module()
     model.model.layers = torch.nn.ModuleList([torch.nn.Module()])
-    model.model.layers[0].proj = torch.nn.Linear(256, 32, bias=False, dtype=torch.bfloat16)
+    owner = model.model.layers[0]
+    path = unit.removeprefix("model.layers.0.").split(".")
+    for component in path[:-1]:
+        setattr(owner, component, torch.nn.Module())
+        owner = getattr(owner, component)
+    linear = torch.nn.Linear(256, 32, bias=False, dtype=torch.bfloat16)
+    setattr(owner, path[-1], linear)
     with torch.no_grad():
-        model.model.layers[0].proj.weight.copy_(
+        linear.weight.copy_(
             torch.randn(32, 256, generator=torch.Generator().manual_seed(186)))
     inputs = {
         "tokens": [torch.ones(1, 256, dtype=torch.long)],
@@ -33,8 +40,8 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False):
         # a scoring input of every W4A4 row, bound like the rows themselves.
         "max_abs": 3.0,
         "menu": ([SimpleNamespace(
-            format_name="TESSERA_E4M3_K1_R1024", family="TESSERA_E4M3_K1",
-            body_rate_q256=1024, bpp=4.0)] if priced else []),
+            format_name=format_name, family=format_name.rsplit("_R", 1)[0],
+            body_rate_q256=int(format_name.rsplit("_R", 1)[1]), bpp=4.0)] if priced else []),
     }
     transformers = ModuleType("transformers")
     transformers.AutoModelForCausalLM = SimpleNamespace(
@@ -50,10 +57,10 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False):
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
                         lambda *_args: (inputs["tokens"], inputs["text"]))
     monkeypatch.setattr(tessera_campaign, "_collect_activations", lambda *_args, **kwargs: (
-        {UNIT: inputs["rows"]},
-        {UNIT: inputs["hessian"]} if kwargs["want_hessian"] else {},
-        {UNIT: len(inputs["rows"]) if kwargs["want_hessian"] else 0},
-        {UNIT: float(inputs["max_abs"])},
+        {unit: inputs["rows"]},
+        {unit: inputs["hessian"]} if kwargs["want_hessian"] else {},
+        {unit: len(inputs["rows"]) if kwargs["want_hessian"] else 0},
+        {unit: float(inputs["max_abs"])},
     ))
     monkeypatch.setattr(tessera_campaign, "expand_menus_for_targets",
                         lambda _weights, targets, **_kwargs: {
@@ -233,6 +240,38 @@ def test_main_resumes_identical_cost_and_wire_without_reencoding(
     assert wire.read_bytes() == original_wire
 
 
+def test_main_registers_resumed_wire_before_receipt_read(
+        monkeypatch, tmp_path, priced_campaign):
+    from prismaquant import production_weight_cache as pwc
+
+    (campaign, _checkpoint, argv, _model, inputs), _payload = priced_campaign()
+    caches = []
+    cache_type = pwc.ProductionWeightCache
+    verify = campaign._checkpoint_wire_record
+    expected = {(UNIT, inputs["menu"][0].format_name)}
+
+    def capture_cache(**kwargs):
+        cache = cache_type(**kwargs)
+        caches.append(cache)
+        return cache
+
+    reads = []
+
+    def read_wire(*args, **kwargs):
+        assert caches[-1].weights == {}
+        assert getattr(caches[-1], "_campaign_wire_coordinates", set()) == expected, (
+            "resume did not register its wire before the receipt read")
+        reads.append(args)
+        return verify(*args, **kwargs)
+
+    monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
+    monkeypatch.setattr(campaign, "_checkpoint_wire_record", read_wire)
+    _forbid_reencode(monkeypatch, campaign)
+    assert campaign.main(argv) == 0
+    assert len(reads) == 1
+    assert caches[-1]._campaign_wire_coordinates == expected
+
+
 def test_main_refuses_changed_hessian_values_under_same_draw(
         monkeypatch, tmp_path, priced_campaign):
     (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)
@@ -391,3 +430,132 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
             assert pickle.load(handle)['costs'] == _payload['costs']
         assert list((new_cache/'wire').glob('*.tessera'))
     assert checkpoint.read_bytes() == original_manifest
+
+
+
+@pytest.mark.parametrize("changed", ["producer", "encoder", "mixed", "certified",
+                                     "tampered_wire", "other_wire_identity"])
+def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant.cost_stage_checkpoint import prepare_journal, unit_path, write_unit
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    (campaign, checkpoint, argv, _model, inputs), initial = priced_campaign()
+    original_manifest = checkpoint.read_bytes()
+    root = checkpoint.with_name(checkpoint.name + ".parts")
+    stored_manifest = json.loads(original_manifest)
+    stored = stored_manifest["identity"]
+    if changed == "other_wire_identity":
+        state = prepare_journal(root, stage="Tessera campaign", resume=True,
+            identity=stored, qnames=[UNIT], manifest_path=checkpoint)[2][UNIT]
+        state["wire_records"]["TESSERA_E4M3_K1_R1024"]["identity"]["encoder_fixture_id"] = "other fixture"
+        write_unit(root, stage="Tessera campaign", qname=UNIT,
+                   identity_sha256=stored_manifest["identity_sha256"], state=state)
+    original_shard = unit_path(root, UNIT).read_bytes()
+    if changed == "tampered_wire":
+        wire = next((tmp_path / "cache" / "wire").glob("*.tessera"))
+        blob = bytearray(wire.read_bytes())
+        blob[-1] ^= 1
+        wire.write_bytes(blob)
+    api = campaign._checkpoint_identity_api()
+    verifications = []
+    original_verify = api.verify_cached_unit
+
+    def verify(blob, record, expected):
+        verifications.append((record["identity"], expected))
+        return original_verify(blob, record, expected)
+
+    monkeypatch.setattr(api, "verify_cached_unit", verify)
+    if changed != "encoder":
+        monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "a" * 64)
+    monkeypatch.setattr(api, "encoder_source_sha256", lambda: "b" * 64)
+    _forbid_reencode(monkeypatch, campaign)
+    capsys.readouterr()
+    if changed == "mixed":
+        inputs["rows"][0, 0] += 1
+    elif changed == "certified":
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    if changed in ("producer", "encoder"):
+        assert campaign.main(argv) == 0
+        assert _priced_cost_payload(tmp_path)["costs"] == initial["costs"]
+        assert verifications and all(observed["encoder_source_sha256"] == expected["encoder_source_sha256"]
+                                     for observed, expected in verifications)
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[DEV-MODE]")]
+        journal_lines = [line for line in lines if "Tessera campaign checkpoint" in line]
+        assert len(journal_lines) == 1
+        fields = [("encoder_source_sha256", "b" * 64)]
+        if changed == "producer":
+            fields.append(("prismaquant_source_sha256", "a" * 64))
+        for field, current in fields:
+            assert field in journal_lines[0] and stored[field] in journal_lines[0] and current in journal_lines[0]
+        wire_lines = [line for line in lines if "campaign wire" in line]
+        assert len(wire_lines) == 1
+        assert all(text in wire_lines[0] for text in ("encoder_source_sha256", stored["encoder_source_sha256"], "b" * 64))
+    else:
+        message = {"tampered_wire": "blob size/sha256 mismatch",
+                   "other_wire_identity": "encoder_fixture_id identity mismatch"}.get(changed, "checkpoint identity mismatch")
+        with pytest.raises(RuntimeError, match=message):
+            campaign.main(argv)
+        if changed in ("tampered_wire", "other_wire_identity"):
+            assert verifications, "wire verifier was skipped"
+        else:
+            assert "[DEV-MODE]" not in capsys.readouterr().out
+    assert checkpoint.read_bytes() == original_manifest
+    assert unit_path(root, UNIT).read_bytes() == original_shard
+
+
+
+
+@pytest.mark.parametrize("suffix,contract", [("indexer.weights_proj", "a32"), ("kv_b_proj", "a16")])
+@pytest.mark.parametrize("format_name", ["TESSERA_E4M3_K1_R1024", "TESSERA_BF16_K1_R1792"])
+@pytest.mark.parametrize("dev_mode", ["0", "1"])
+def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
+        monkeypatch, tmp_path, suffix, contract, format_name, dev_mode):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    name = "model.layers.0.self_attn." + suffix
+    campaign, checkpoint, argv, _model, _inputs = _main_fixture(
+        monkeypatch, tmp_path, priced=True, unit=name, format_name=format_name)
+    assert campaign.main(argv) == 0
+    with (tmp_path / "cost.pkl").open("rb") as handle:
+        original_costs = pickle.load(handle)["costs"]
+    price = original_costs[name][format_name]
+    assert price["output_mse_measured"] is True
+    assert price["activation_contract"] == contract
+    assert price["activation_quantized"] is False
+    _forbid_reencode(monkeypatch, campaign)
+    assert campaign.main(argv) == 0
+    with (tmp_path / "cost.pkl").open("rb") as handle:
+        assert pickle.load(handle)["costs"] == original_costs
+    seeded = list(argv)
+    seeded[seeded.index("--checkpoint") + 1] = str(tmp_path / "seeded.anchors.json")
+    seeded[seeded.index("--cache-dir") + 1] = str(tmp_path / "seeded-cache")
+    seeded[seeded.index("--out") + 1] = str(tmp_path / "seeded-cost.pkl")
+    assert campaign.main([*seeded, "--seed-checkpoint", str(checkpoint)]) == 0
+    with (tmp_path / "seeded-cost.pkl").open("rb") as handle:
+        assert pickle.load(handle)["costs"] == original_costs
+    from copy import deepcopy
+    from prismaquant.cost_stage_checkpoint import prepare_journal, write_unit
+
+    root = checkpoint.with_name(checkpoint.name + ".parts")
+    manifest = json.loads(checkpoint.read_text())
+    identity = manifest["identity"]
+    state = prepare_journal(root, stage="Tessera campaign", resume=True,
+        identity=identity, qnames=[name], manifest_path=checkpoint)[2][name]
+    for damage, value in [("activation_contract", "wrong"),
+                          ("activation_quantized", True),
+                          ("activation_quantized", "false")]:
+        invalid = deepcopy(state)
+        invalid["anchors"][0][damage] = value
+        write_unit(root, stage="Tessera campaign", qname=name,
+            identity_sha256=manifest["identity_sha256"], state=invalid)
+        with pytest.raises(campaign.ActivationScaleContractError,
+                           match="activation (contract|observation)"):
+            campaign.main(argv)
+        rejected = list(argv)
+        label = damage + "-" + str(value)
+        rejected[rejected.index("--checkpoint") + 1] = str(tmp_path / (label + ".anchors.json"))
+        rejected[rejected.index("--cache-dir") + 1] = str(tmp_path / (label + "-cache"))
+        rejected[rejected.index("--out") + 1] = str(tmp_path / (label + "-cost.pkl"))
+        with pytest.raises(campaign.ActivationScaleContractError,
+                           match="activation (contract|observation)"):
+            campaign.main([*rejected, "--seed-checkpoint", str(checkpoint)])
+        assert not (tmp_path / (label + "-cost.pkl")).exists()

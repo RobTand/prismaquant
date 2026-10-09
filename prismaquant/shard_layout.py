@@ -29,11 +29,11 @@ after-the-fact repair this module makes unnecessary at the export boundary.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from .digests import DIRECT_UTF8_LAX
 
 __all__ = [
     "DEFAULT_SHARD_BYTES",
@@ -94,12 +94,7 @@ def tensor_payload_identity(
         "schema": TENSOR_PAYLOAD_IDENTITY_SCHEMA,
         "algorithm": "sha256",
         "tensors": len(rows),
-        "payload_sha256": hashlib.sha256(json.dumps(
-            dict(sorted(rows.items())),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")).hexdigest(),
+        "payload_sha256": DIRECT_UTF8_LAX.sha256(dict(sorted(rows.items()))),
     }
     if include_tensor_sha256:
         # Strict release artifacts retain the producer's already-computed

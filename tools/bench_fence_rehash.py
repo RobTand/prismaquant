@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 from pathlib import Path
 import shutil
@@ -73,13 +72,13 @@ def _write_drifted_wires(root, n, mib):
 
 
 class _DigestSpy:
-    """Wrap ``hashlib.file_digest`` as the fence sees it: threads and peak concurrency."""
+    """Observe the shared stdlib digest used by the fence's digests owner."""
 
-    def __init__(self, module):
+    def __init__(self):
         self.lock = threading.Lock()
         self.active = self.peak = self.calls = 0
         self.threads = set()
-        self._module, self._real = module, module.hashlib.file_digest
+        self._real = hashlib.file_digest
 
         def spy(handle, digest):
             with self.lock:
@@ -93,10 +92,10 @@ class _DigestSpy:
                 with self.lock:
                     self.active -= 1
 
-        module.hashlib.file_digest = spy
+        hashlib.file_digest = spy
 
     def restore(self):
-        self._module.hashlib.file_digest = self._real
+        hashlib.file_digest = self._real
 
 
 def main(argv=None):
@@ -158,7 +157,7 @@ def main(argv=None):
                     _fadvise_drop(path)
             jce.FENCE_REHASHED.clear()
             engine_counters.clear()
-            spy = _DigestSpy(jce)
+            spy = _DigestSpy()
             try:
                 started = time.perf_counter()
                 with jce.streamed_fences() as fences:
@@ -184,11 +183,12 @@ def main(argv=None):
 
 
 def _finish(report, root, total):
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     shutil.rmtree(root, ignore_errors=True)
     walls = sorted(r["wall_s"] for r in report["runs"])
     report["median_wall_s"] = walls[len(walls) // 2]
     report["median_bytes_per_s"] = total / report["median_wall_s"]
-    print("BENCH " + json.dumps(report, sort_keys=True))
+    print("BENCH " + DIRECT_ASCII_SPACED_LAX.text(report))
     return 0
 
 

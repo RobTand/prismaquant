@@ -248,7 +248,7 @@ def campaign(tmp_path_factory):
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
              resume=False, label=None, regime=None, emit_handoff=False,
-             guard=None):
+             guard=None, execution_patch=None):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -280,6 +280,8 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     execution = _execution(campaign.root / "exec")
     if regime is not None:
         execution["replay_regime"] = regime
+    if execution_patch:
+        execution.update(execution_patch)
     try:
         # The plan's retained budget is read here, as ``run_layer_quantum``
         # reads it, so a plan the runtime refuses is the run's error.
@@ -1997,3 +1999,206 @@ def test_container_forwards_the_spill_through_an_identity_bind():
         stage_b_spill_environment({"container": {"mounts": []}, "env": {}}, environ)
     with pytest.raises(RuntimeError, match="positive byte ceiling"):
         stage_b_spill_environment(spec, {STAGE_B_SPILL_ENV[0]: "/nvme/scratch/spill"})
+
+
+# ---- #1962 sequence/block attribution sidecar ------------------------------
+
+def test_spill_quantum_sidecar_is_collected_per_sequence(campaign, monkeypatch, tmp_path):
+    from prismaquant import joint_aura as joint_aura_mod
+    _clear_output(campaign, 0)
+
+    payload, state = _quantum(campaign, monkeypatch, layer=0,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              execution_patch={
+                                  "sequence_attribution": {"candidates": "all"}})
+    assert getattr(state, "error", None) is None
+    for name, rows in payload["costs"].items():
+        for fmt, row in rows.items():
+            assert joint_aura_mod.validate_joint_aura_entry(row)
+            if fmt in ("BF16",):
+                assert "sequence_attribution" not in row
+                continue
+            sidecar = row["sequence_attribution"]
+            assert sidecar["scope"] == "per_sequence"
+            assert sidecar["block_geometry"]["n_sequences"] == 4
+            assert len(sidecar["block_geometry"]["blocks"]) == 4
+            assert sidecar["leaveout"]["jackknife_standard_error"] >= 0.0
+
+
+def test_spill_quantum_sidecar_keeps_authoritative_fields_bitwise(campaign, monkeypatch, tmp_path):
+    _clear_output(campaign, 0)
+    off, state = _quantum(campaign, monkeypatch, layer=0,
+                          spill_root=_spill_root(tmp_path), ceiling=1 << 30)
+    assert getattr(state, "error", None) is None
+    _clear_output(campaign, 0)
+    on, state = _quantum(campaign, monkeypatch, layer=0,
+                         spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                         execution_patch={
+                             "sequence_attribution": {"candidates": "all"}})
+    assert getattr(state, "error", None) is None
+    _clear_output(campaign, 0)
+    for name, rows in on["costs"].items():
+        for fmt, row in rows.items():
+            off_row = off["costs"][name][fmt]
+            for field in ("signed_per_probe", "x2_per_probe",
+                          "predicted_dloss", "predicted_dloss_stderr"):
+                assert row[field] == off_row[field], (name, fmt, field)
+            assert "sequence_attribution" not in off_row
+
+
+def test_spill_quantum_attribution_requires_the_spill_reader(campaign, monkeypatch):
+    _clear_output(campaign, 0)
+    _payload, state = _quantum(campaign, monkeypatch, layer=0,
+                               execution_patch={
+                                   "sequence_attribution": {"candidates": "all"}})
+    assert state.error is not None
+    assert "sequence_attribution" in str(state.error)
+
+
+def _attribution_roster(campaign, layer):
+    names = [name for window in campaign.preflight[layer]
+             for name in window.original_full_target_names]
+    return [[sorted(names)[0], RENDER_FORMATS[0]]]
+
+
+@pytest.mark.parametrize("unknown", ["name", "format"])
+def test_spill_attribution_refuses_unknown_roster_before_capture(campaign, monkeypatch,
+                                                               tmp_path, unknown):
+    _clear_output(campaign, 1)
+    root = _spill_root(tmp_path, needs_direct_io=False)
+    pair = (["absent", "FP8_E4M3"] if unknown == "name"
+            else [_attribution_roster(campaign, 1)[0][0], "typo"])
+    captures = []
+    original = spill_mod.StageBReplaySpill.capture
+
+    def capture(self, probe):
+        captures.append(probe)
+        return original(self, probe)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "capture", capture)
+    payload, state = _quantum(campaign, monkeypatch, layer=1, spill_root=root,
+                              ceiling=1 << 30, execution_patch={
+                                  "sequence_attribution": {"candidates": [pair]}})
+    assert payload is None, "unknown attribution roster was admitted"
+    assert "candidate" in _chain(state.error)
+    assert captures == []
+
+
+def test_spill_attribution_roster_interrupted_resume(campaign, monkeypatch, tmp_path):
+    layer = 1
+    root = _spill_root(tmp_path)
+    selector = {"sequence_attribution": {"candidates": _attribution_roster(campaign, layer)}}
+    _clear_output(campaign, layer)
+    expected, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=root,
+                               ceiling=1 << 30, execution_patch=selector)
+    assert expected is not None, _chain(state.error)
+    expected_evidence = _evidence(campaign, layer, expected)
+    _clear_output(campaign, layer)
+    original = spill_mod.StageBReplaySpill.replay
+
+    def interrupt(self, window_index, probe_index, lease):
+        if window_index == 1 and probe_index == 0:
+            raise RuntimeError("attribution interrupted after committed window")
+        return original(self, window_index, probe_index, lease)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay", interrupt)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=root,
+                              ceiling=1 << 30, execution_patch=selector)
+    assert payload is None and "attribution interrupted" in _chain(state.error)
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay", original)
+    actual, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=root,
+                             ceiling=1 << 30, execution_patch=selector, resume=True)
+    assert actual is not None, _chain(state.error)
+    assert _evidence(campaign, layer, actual) == expected_evidence
+    observed = [[name, fmt] for name, rows in actual["costs"].items()
+                for fmt, row in rows.items() if "sequence_attribution" in row]
+    assert observed == selector["sequence_attribution"]["candidates"]
+
+
+@pytest.mark.parametrize("changed", [None, {"candidates": "all"},
+                                      {"candidates": "all", "gate_relative": 0.002}])
+def test_spill_attribution_selector_binds_checkpoint_identity(campaign, monkeypatch,
+                                                             tmp_path, changed):
+    layer = 1
+    _clear_output(campaign, layer)
+    root = _spill_root(tmp_path)
+    selector = {"candidates": _attribution_roster(campaign, layer)}
+    first, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=root,
+                            ceiling=1 << 30, execution_patch={"sequence_attribution": selector})
+    assert first is not None, _chain(state.error)
+    directory = _checkpoint_dir(campaign, layer)
+    manifest = json.loads((directory / "manifest.json").read_text())
+    assert manifest["identity"]["extra"]["joint_aura"]["sequence_attribution"]["selector"]["candidates"] == selector["candidates"]
+    payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=root,
+                              ceiling=1 << 30, resume=True,
+                              execution_patch={"sequence_attribution": changed})
+    assert payload is None, "changed attribution selector reused a committed journal"
+    assert "sequence_attribution" in _chain(state.error)
+
+
+def test_spill_attribution_missing_probe_refuses_before_publication(campaign, monkeypatch,
+                                                                  tmp_path):
+    import prismaquant.joint_cost_quantum as core
+
+    layer = 1
+    _clear_output(campaign, layer)
+    original = core.SpillSequenceAttribution.__call__
+
+    def omit_probe(self, **kwargs):
+        if kwargs["probe_index"] != 1:
+            return original(self, **kwargs)
+
+    monkeypatch.setattr(core.SpillSequenceAttribution, "__call__", omit_probe)
+    payload, state = _quantum(campaign, monkeypatch, layer=layer,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              execution_patch={"sequence_attribution": {"candidates": "all"}})
+    assert payload is None, "missing requested attribution probe was published"
+    assert "sequence_attribution" in _chain(state.error)
+    assert not list((_checkpoint_dir(campaign, layer) / "units").glob("*.pkl"))
+
+
+@pytest.mark.parametrize("admit", [True, False])
+def test_spill_attribution_charges_device_staging_before_allocation(campaign, monkeypatch,
+                                                                  tmp_path, admit):
+    expected = {}
+    original = spill_mod.StageBReplaySpill.replay_records
+
+    def records(self, *args, **kwargs):
+        expected["reservation"] = (self.replay_reserve_host_bytes,
+                                   self.replay_reserve_device_bytes)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay_records", records)
+
+    class DeviceGuard(_RecordingGuard):
+        def __init__(self, device):
+            super().__init__(device)
+            # Exercise the split host/device envelope, not the aggregate fallback.
+            self.device_bytes = self.physical_cap_bytes
+            self.attribution_reservations = []
+
+        def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+            if label == "sequence_attribution_record_replay":
+                assert reserve_device_bytes > 0, "device staging buffer was not reserved"
+                assert (reserve_bytes, reserve_device_bytes) == expected["reservation"]
+                self.attribution_reservations.append((reserve_bytes, reserve_device_bytes))
+                if not admit:
+                    raise RuntimeError("attribution device envelope boundary")
+            return super().check(label, reserve_bytes=reserve_bytes,
+                                 reserve_device_bytes=reserve_device_bytes)
+
+    _clear_output(campaign, 1)
+    guard = DeviceGuard(campaign.device)
+    payload, state = _quantum(campaign, monkeypatch, layer=1,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30, guard=guard,
+                              execution_patch={"sequence_attribution": {"candidates": "all"}})
+    if admit:
+        assert payload is not None, _chain(state.error)
+    else:
+        assert payload is None
+        assert "attribution device envelope boundary" in _chain(state.error)
+        assert not list((_checkpoint_dir(campaign, 1) / "units").glob("*.pkl"))
+    assert guard.attribution_reservations
+    assert all(host > 0 and device > 2 * spill_mod.ADDRESS_ALIGNMENT
+               for host, device in guard.attribution_reservations)
+

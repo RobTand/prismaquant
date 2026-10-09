@@ -90,7 +90,38 @@ conditional on the fixed calibration. Unchanged units cancel from additive
 differences, but remain in the cross terms of `joint_quadratic`. Neither
 objective measures a new background forward pass or fixes background-dependent
 unary ordering. There is no automatic allocator refinement or admission from
-these diagnostics.
+these diagnostics by themselves.
+
+### Explicit paired rate-trade pricing (#2282, Refs #2281)
+
+The allocator's `--cost-baseline-assignment` is the actual caller-owned
+starting assignment, never an inferred menu endpoint. It enables common-probe
+candidate-minus-baseline UCB on the existing additive decision units; mixed-rate
+`PRISMAQUANT_COST_UCB_Z > 0` requires this explicit baseline and matched joint
+rows. The exact mixed-rung fold keeps all combinations until their paired
+statistics are priced, because scalar intermediate dominance can discard a
+combination whose correlated delta uncertainty is lower. Missing baseline,
+matched source/probe/currency, or per-expert attribution refuses by name.
+
+`paired_assignment_difference` owns both the difference hedge and named
+subgroup samples. Prices keep the existing `global_kl_fisher` normalization:
+no additional h-trace, gain, activation correction, token divisor or signed
+sample clipping. The final candidate price is its unhedged unary sum plus
+`z * paired_standard_error`, clamped nonnegative; at zero z the previous
+candidate sum is kept bitwise. Summing decision-unit hedges is conservative
+across units, not an independence assumption; full-assignment paired covariance
+is separately reported and does not silently replace that DP objective.
+
+The profile supplies each projection's routed layer and expert identity.
+Projections aggregate before testing `abs(expert delta) > .5 * abs(layer delta)`.
+Exactly half is allowed, with no tolerance. Nonzero expert deltas cancelling to
+zero net layer change refuse as indeterminate; unchanged assignments and all-zero
+expert terms have no dominance. The menu retains rejected-option provenance,
+and proposal acceptance and final emission check the expanded assignment,
+including aggregation opt-outs. The baseline and selected paired report travel
+in allocator metadata. Legacy unpaired stock/uniform pricing stays unchanged.
+This source policy is not calibration, corrected campaign prices, held-out KL,
+GPU qualification, or closure of the measured #2281 defect.
 
 The existing `aura_additivity_gate` CLI accepts `--comparison-assignment` and
 `--paired-objective` to append this paired report. Its additivity prediction
@@ -108,6 +139,72 @@ uncertainty and stays separate from the probe standard error. The residual
 z-score is descriptive and assumes independent probe and sequence errors;
 this helper does not certify the supplied held-out dataset or estimate
 generalization from probe variance.
+
+## Per-sequence/per-block signed attribution (descriptive, #1962)
+
+The cost row can carry an opt-in `sequence_attribution` sidecar: a
+descriptive decomposition of each projection over whole caller-owned blocks
+of the calibration draw (capture batches; a block is per-sequence only when
+the caller's own geometry proves it is exactly one complete sequence). The
+authoritative whole-draw fields are untouched — bitwise, including the
+flag-off controls — and the price stays `0.5 mean_p(total_p**2)` over the
+whole draw, never a sum of per-block squares.
+
+The sidecar's arithmetic is a separate reconstruction scope: per-invocation
+(or per-record) contractions of the same genuine X/G the leases consumed,
+against the candidate delta while it is resident. Its per-probe residual
+against the authoritative totals is published with the gate it must satisfy
+(default: the issue's 1e-3 relative, denominator `fsum |w|+|a|+|m|` over the
+probe's blocks; a zero-scale probe must reconcile exactly) and with the
+method string that states both. The residual is never distributed onto the
+price, and the attribution `c_i = .5 mean_p a_pi*total_p` — computed against
+the authoritative totals — is not claimed to equal `predicted_dloss` unless
+the reconstruction equals it.
+
+Each signed W, A and mixed projection must also reconcile separately against
+its original whole-draw component, using the stated relative gate on that
+component's own sum of absolute block contributions (zero mass requires an
+exact zero residual). Matching only the combined total cannot hide a transfer
+of price between W and A. Published block coverage and token geometry must
+match the priced probe's calibration shape and token scope when recorded.
+
+Honesty rules, enforced by `validate_joint_aura_entry` for every reader:
+blocks must cover the complete draw, in order without gaps or overlap, using
+integer caller coordinates and whole units. Coordinates inside routed
+flattened calls are never invented; `per_sequence` scope is derived from the
+blocks, never asserted; a cohort binds whole blocks only,
+with its renormalization stated in selected tokens per row for the row's
+token scope. For at least two equal whole blocks covering the draw, the
+sidecar publishes delete-one leaveout prices
+`Nseq/(Nseq-k) * .5 mean_p((t_p - a_pi)**2)` (per-sequence is `k=1`) with
+their jackknife standard error under an explicit exchangeability assumption —
+descriptive and conditional on the fixed calibration probes. A one-block or
+unequal-block scope publishes no standard error rather than a fabricated or
+zeroed one. The probe standard error keeps its existing conditional scope;
+rows published under any other uncertainty label refuse, and legacy rows
+without the field keep their historical reading.
+
+The dense streamed collector notes blocks from the streamed partition's own
+offsets and contracts the resident deltas inline. The Stage B collector
+retains the caller's capture-batch id per spill record at capture time, and
+re-reads a window's captured rows synchronously through the spill's own
+reader lifecycle immediately after each single candidate's `project`, while
+that rendered delta is resident — one bounded, guard-charged read at a time,
+no second read stream, no per-sequence GW matrices. Each callback releases
+its borrowed source and delta immediately; only scalar block components
+persist. Each read charges the spill owner's existing complete host and device
+replay envelopes before allocation, including pinned-buffer capacity and
+aligned device staging. An envelope refusal prevents read and unit publication.
+The normalized selector binds the run identity (never the priced probe
+identity); probe identity separately binds calibration and token geometry.
+Each sidecar reports its reconstruction scope and block membership.
+Both paths resolve the selector against the exact measured roster before
+capture. Resume refuses a changed attribution selector, even in dev mode,
+because reusing another requested measurement surface would ignore the
+instrument request, not merely waive a producer-source seal. Only selected
+rows require sidecars; missing selected probes refuse before unit publication.
+Existing rows remain probe-only. This mechanism does not close #1962's
+estimator question or reprice a model.
 
 ## Runtime input and search
 

@@ -597,6 +597,9 @@ def tessera_tensor_payload_breakdown(
         "trellis_span": span,
         "body_kind": body.name.lower(),
         "window_bits": window_bits,
+        "window_seed": getattr(wire, "window_seed", 0),
+        "window_sigma": getattr(wire, "window_sigma", None),
+        "channel_sigma": getattr(wire, "channel_sigma", None),
         "rate_cap": cap,
         "superblock_weights": SUPERBLOCK_WEIGHTS,
         "schedule_bits_per_code_row": sum(rates),
@@ -808,6 +811,9 @@ def validate_tessera_tensor_payload_breakdown(
             scale_plane=str(copied.get("scale_contract", "s6b")),
             body=str(copied.get("body_kind", "tcq")),
             window_bits=int(copied.get("window_bits", 0)),
+            window_seed=int(copied.get("window_seed", 0)),
+            window_sigma=copied.get("window_sigma"),
+            channel_sigma=copied.get("channel_sigma"),
         ),
     )
     claimed = copied.get("pre_render_recipe_identity_sha256")

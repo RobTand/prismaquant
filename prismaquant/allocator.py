@@ -128,9 +128,20 @@ from .allocator_candidates import (
     serialized_candidate_payload,
     serving_groups_by_key,
     summarize_applicability_masks,
+    summarize_paired_rate_trade,
+    summarize_paired_routed_layer,
     reduce_continuous_menu,
+    _cost_ucb_z,
+    price_paired_rate_trade,
+    reprice_paired_candidates,
 )
-from .digests import file_digest_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_STRICT,
+    bytes_sha256hex,
+    file_digest_sha256hex,
+    file_sha256hex,
+)
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
     is_lm_head_name,
@@ -751,9 +762,18 @@ class _StockAllocationLane:
     def allocation_contexts(serving_target, stats, profile):
         return None
 
+
+    @staticmethod
+    def allocation_rung_allowability(args):
+        return None
+
     @staticmethod
     def allocation_unit_context(serving_target, unit, profile):
         raise LookupError("no lane provides a serving target, so no unit has a serving context")
+
+    @staticmethod
+    def allocation_unit_structure(unit, profile, *, stats=None):
+        raise LookupError("no lane provides unit structure")
 
     @staticmethod
     def allocation_scope_meta(serving_target, context_by_unit) -> dict:
@@ -795,6 +815,13 @@ class _StockAllocationLane:
         raise LookupError("no lane writes a selection request")
 
     @staticmethod
+    def allocation_routed_unit_rates(costs, assignment, *, cost_data,
+                                     per_linear_legal_formats, budget_bytes,
+                                     reserve_bytes, artifact_size_for, canonical_format):
+        raise SystemExit("[alloc] ERROR: no declared allocation lane provides "
+                         "--routed-unit-rates")
+
+    @staticmethod
     def allocation_expert_projection(cost_data, assignment) -> dict:
         return {}
 
@@ -813,26 +840,51 @@ def _allocation_lane():
     return single_lane_plugin("allocation_menu") or _StockAllocationLane
 
 
-def _mtp_rung_attestation(serving_target, profile):
-    """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
+def _mtp_scope_inputs(payload, serving_target, profile, *, routing=None):
+    """Read MTP topology through the existing lane and profile owners."""
+    lane = _allocation_lane()
+    stats, contexts = {}, {}
+    for unit in payload["costs"]:
+        context = (None if serving_target is None else
+                   lane.allocation_unit_context(serving_target, unit, profile))
+        structure = (context.structure if context is not None else
+                     lane.allocation_unit_structure(unit, profile) if profile is not None else None)
+        stats[unit] = {"unit_structure": structure}
+        if structure == "routed_moe" and routing is not None:
+            stats[unit]["routing"] = routing
+        if context is not None:
+            contexts[unit] = context
+    return stats, contexts or None
 
-    The same reader the body menu uses (``format_is_producer_eligible``), asked
-    about one unit's serving context when a Tessera scope is declared. BF16
-    passthrough is not a Tessera route and is always offered.
-    """
+
+def _mtp_rung_attestation(serving_target, profile):
+    """Keep native runtime attestation separate from public API admission."""
     lane = _allocation_lane()
 
     def eligible(unit, rung):
-        if fr.format_family_of(fr.canonical_format_name(rung)) is None:
+        family = fr.format_family_of(fr.canonical_format_name(rung))
+        if family is None:
             return True
-        if serving_target is None:
+        context = None if serving_target is None else lane.allocation_unit_context(
+            serving_target, unit, profile)
+        if context is None:
             return fr.format_is_producer_eligible(rung)
-        context = lane.allocation_unit_context(serving_target, unit, profile)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
 
 
-def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]:
+def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowability, *,
+                              m=None, tensor_parallel=1):
+    """Retain each final unit's exact scope, including fixed and auxiliary units."""
+    from .allocator_candidates import unit_allowability_scope
+    return {name: unit_allowability_scope(fmt, name, stats.get(name, {}),
+                None if context_by_unit is None else context_by_unit.get(name),
+                rung_allowability, m=m, tensor_parallel=tensor_parallel)
+            for name, fmt in assignment.items()}
+
+
+def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
+                target_profile=None) -> tuple[dict, dict]:
     """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
     Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
@@ -857,12 +909,16 @@ def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]
                   if args.mtp_acceptance_points else [])
         fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
                  if getattr(args, "mtp_fixed_formats", None) else None)
+        stats, contexts = _mtp_scope_inputs(payload, serving_target, profile,
+            routing=getattr(args, "mtp_routing", None))
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
                                   eligible=_mtp_rung_attestation(serving_target, profile),
-                                  fixed_formats=fixed,
-                                  formats=(None if declared is None
-                                           else declared.split(",")))
+                                  fixed_formats=fixed, rung_allowability=rung_allowability,
+                                  stats=stats, context_by_unit=contexts, target_profile=target_profile,
+                                  allowability_m=getattr(args, "mtp_regime", None),
+                                  allowability_tensor_parallel=getattr(args, "mtp_tensor_parallel", None) or 1,
+                                  formats=(None if declared is None else declared.split(",")))
     except MtpMenuRefused as exc:
         import sys
 
@@ -973,6 +1029,7 @@ def _validate_assignment_candidate_membership(
         "repair to export and can recreate mixed serving units. Sample:\n"
         f"  {sample}"
     )
+
 
 
 # Role tokens used to bucket the bit-attribution report. Best-effort: anything
@@ -1980,6 +2037,24 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         ),
     )
     ap.add_argument(
+        "--routed-unit-rates",
+        action="store_true",
+        help=(
+            "Research opt-in (PrismaQuant #2319): after the DP's stack-uniform "
+            "body assignment, spend the --target-disk-gb serialized-byte "
+            "headroom on exact per-unit routed-expert price rows "
+            "(the declared allocation lane selector: ascending "
+            "predicted-loss delta per added wire byte until no eligible "
+            "single-unit upgrade fits). Only units of the campaign's carried "
+            "producer projection with exact price rows and a serving-legal "
+            "rung are eligible; dense, shared, stack-only sampled and "
+            "profile-ineligible rows stay grouped. The mixed per-unit "
+            "assignment needs the installed Tessera v57 per-unit capability "
+            "and is carried with exact per-unit receipts. Default off: without "
+            "it the run is byte-identical to today. Requires --target-disk-gb."
+        ),
+    )
+    ap.add_argument(
         "--exclude-source-prefix",
         action="append",
         default=None,
@@ -2165,6 +2240,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "c_ms_per_bit and their source (required with "
                          "--mtp-joint-cost; recorded, and inert without "
                          "acceptance points).")
+    from .glm_mtp_selection import add_mtp_scope_arguments
+    add_mtp_scope_arguments(ap)
     ap.add_argument("--mtp-fixed-formats", default=None,
                     help="Optional JSON file mapping MTP group names to one format "
                          "each; the selector keeps only that rung for the group, "
@@ -2331,7 +2408,17 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--pact-max-transitions", type=int, default=None,
                     help="The selected solver's max_transitions bound (default: "
                          "pact_hull.DEFAULT_MAX_TRANSITIONS).")
+    ap.add_argument("--cost-baseline-assignment", default=None,
+                    help="Actual starting layer-config or canonical assignment for matched "
+                         "candidate-minus-baseline probe UCB and the routed expert-dominance guard. "
+                         "Required for mixed-rate COST_UCB_Z; no menu baseline is inferred.")
     args = ap.parse_args(argv)
+    cost_baseline_assignment = None
+    if args.cost_baseline_assignment is not None:
+        from .layer_config import load_assignment
+        cost_baseline_assignment = load_assignment(args.cost_baseline_assignment)
+        if not cost_baseline_assignment:
+            ap.error("--cost-baseline-assignment must name a nonempty starting assignment")
 
     pact_flags = (("--pact-regime", args.pact_regime),
                   ("--pact-tensor-parallel", args.pact_tensor_parallel),
@@ -2465,6 +2552,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "[alloc] ERROR: --artifact-overhead-reserve-bytes is meaningful "
             "only with --target-disk-gb"
         )
+    if args.routed_unit_rates and args.target_disk_gb is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates spends a serialized-byte "
+            "headroom and needs --target-disk-gb to name the whole-artifact "
+            "cap it is measured from"
+        )
 
     # ---- Hard serving constraints, resolved once (ultraplan P5c) ----
     # Built before any expensive work so a malformed table, an unbalanced
@@ -2562,7 +2655,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             raise SystemExit(
                 f"[alloc] ERROR: rank partition: cannot read {partition_path}: {exc}") from None
         reference = {"path": str(partition_path),
-                     "sha256": hashlib.sha256(partition_bytes).hexdigest()}
+                     "sha256": bytes_sha256hex(partition_bytes)}
         try:
             # The rank reports must name the bytes this table was priced
             # against: its own source model and runtime manifest. The remaining
@@ -2723,13 +2816,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     from .serving_profiles import load_serving_profile
     tessera_serving_target = lane.allocation_serving_target(
         args, target_platform=load_serving_profile(target_profile).target_platform)
+    rung_allowability = lane.allocation_rung_allowability(args)
     _mtp_selection_memo: list = []
 
     def _mtp_selection():
         """``(payload, record)``, selected once: the card and the stamp read one choice."""
         if not _mtp_selection_memo:
             _mtp_selection_memo.append(_select_mtp(
-                args, serving_target=tessera_serving_target, profile=model_profile))
+                args, serving_target=tessera_serving_target, profile=model_profile,
+                rung_allowability=rung_allowability, target_profile=target_profile))
         return _mtp_selection_memo[0]
 
     def _stamped_assignment(body: Mapping[str, str]) -> dict[str, str]:
@@ -2752,7 +2847,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # Authenticate the exact owned bytes parsed below. A later hash
             # read of the mutable file could authenticate a different payload.
             cost_bytes = f.read()
-            if hashlib.sha256(cost_bytes).hexdigest() != expected_cost_sha256:
+            if bytes_sha256hex(cost_bytes) != expected_cost_sha256:
                 raise SystemExit("[alloc] ERROR: cost payload changed after measured runtime admission")
             cost_data = pickle.loads(cost_bytes)
             del cost_bytes
@@ -2920,6 +3015,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     accounting_stats = dict(stats)
     tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
+    if rung_allowability is not None:
+        if any(owner.scoped for owner in rung_allowability.values()):
+            for name, row in accounting_stats.items():
+                row["_allowability_structure"] = lane.allocation_unit_structure(
+                    name, model_profile, stats=row)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
@@ -2933,6 +3033,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         context_by_unit=tessera_context_by_unit)
     fmt_names = menu.formats
     tessera_menu_widths = menu.widths
+    if rung_allowability is not None:
+        tessera_menu_widths["rung_allowability"] = {
+            family: table.provenance() for family, table in rung_allowability.items()}
     try:
         specs = fr.require_producer_formats(
             fmt_names, where="new allocator assignment menu",
@@ -3176,8 +3279,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         bit_precision=float(args.bit_precision),
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
+        rung_allowability=rung_allowability,
+        allowability_m=args.pact_regime,
+        allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
-        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
+        **({"preserve_runtime_frontier": True}
+           if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
@@ -3234,6 +3341,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # absence of body activation transfer explicit.
             activation_pricing=None,
             context_by_unit=tessera_context_by_unit,
+            rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_head_candidates = [
             name for name in head_probe_names
@@ -3321,6 +3431,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             mask_records=candidate_mask_records,
             activation_pricing=activation_pricing,
             context_by_unit=tessera_context_by_unit,
+            rung_allowability=rung_allowability,
+            allowability_m=args.pact_regime,
+            allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
         missing_mtp_candidates = [
             name for name in mtp_names
@@ -3556,7 +3669,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
+            baseline_assignment=cost_baseline_assignment,
+            **({"preserve_runtime_frontier": True}
+               if runtime_frontier_candidates or cost_baseline_assignment is not None else {}))
         sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
         print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
               f"(qkv_proj / gate_up_proj / ...)")
@@ -3586,6 +3701,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                       f"{row['fold_frontier']} -> {row['options']} options",
                       flush=True)
 
+    paired_candidate_report: dict = {}
+    if cost_baseline_assignment is not None:
+        try:
+            candidates = reprice_paired_candidates(
+                stats, cost_data["costs"], candidates, cost_baseline_assignment,
+                profile=model_profile, ucb_z=_cost_ucb_z(), report=paired_candidate_report)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
     candidates = filter_candidates_for_profile(candidates, target_profile)
 
     # The aggregated super items were built one candidate per format NAME,
@@ -3632,6 +3755,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         "costs": str(args.costs),
         "pre_aggregation_candidate_availability": pre_aggregation_availability,
         "post_aggregation_candidate_availability": post_aggregation_availability,
+        **({"paired_rate_trades": paired_candidate_report,
+            "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment)}
+           if cost_baseline_assignment is not None else {}),
         "fixed_format_assignment": {
             "lm_head_format": lm_head_format_canonical,
             "lm_head_mode": (
@@ -3839,7 +3965,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             pact_pricing = build_shape_runtime_resources(
                 shape_table, candidates, option_members=pact_option_members,
                 member_shapes=member_shapes, member_structure=member_structure,
-                regime_m=args.pact_regime, published_formats=pact_formats)
+                regime_m=args.pact_regime, published_formats=pact_formats,
+                rung_allowability=rung_allowability)
             pact_candidates = pact_pricing.time_candidates(candidates)
         except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
             raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
@@ -3997,6 +4124,23 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             assign = dict(assign)
         return assign, achieved_r, total, mutable_total
 
+    def _paired_trade_for_assignment(expanded):
+        if cost_baseline_assignment is None:
+            return None
+        assignment = {n: fmt for n, fmt in expanded.items() if n in per_linear_legal_formats}
+        missing = sorted(assignment.keys() - cost_baseline_assignment.keys())
+        if missing:
+            raise SystemExit(f"[alloc] ERROR: cost baseline_assignment missing members: {missing}")
+        if not assignment:
+            return None
+        try:
+            return price_paired_rate_trade(
+                cost_data["costs"], assignment,
+                {n: cost_baseline_assignment[n] for n in assignment},
+                profile=model_profile, ucb_z=_cost_ucb_z())
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
+
     def _solve_for_target_uncached(target_bits: float):
         requested_target = float(target_bits)
         mutable_target_bits = requested_target
@@ -4074,10 +4218,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                      if name not in fixed_format_assignment}, require_all_stats=True)
                 achieved = float(exact["bits_per_param"])
                 verdict = _serve_feasibility(expanded)
-                feasible = achieved <= requested_target and verdict.feasible
+                trade = _paired_trade_for_assignment(expanded)
+                feasible = (achieved <= requested_target and verdict.feasible
+                            and (trade is None or not trade["refused"]))
                 diag["exact_filter_trace"].append({
                     "exact_assignment_payload_bpp": achieved,
-                    "feasible": feasible, "serve_constraints": verdict.as_dict()})
+                    "feasible": feasible, "serve_constraints": verdict.as_dict(),
+                    **({"paired_rate_trade": summarize_paired_rate_trade(trade)} if trade is not None else {})})
                 if feasible:
                     diag["achieved_bits"] = achieved
                     return (dict(proposal.assignment), achieved,
@@ -4148,6 +4295,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     <= requested_target + args.overshoot_tolerance
                 ),
             })
+            trade = _paired_trade_for_assignment(expanded)
+            if trade is not None:
+                outer_diag["exact_filter_trace"][-1]["paired_rate_trade"] = summarize_paired_rate_trade(trade)
+                if trade["refused"]:
+                    outer_diag["reason"] = "routed_expert_dominance"
+                    outer_diag["exact_filter_trace"][-1]["feasible"] = False
+                    return None, float("nan"), float("inf"), float("inf")
             if exact_achieved <= requested_target + args.overshoot_tolerance:
                 outer_diag["achieved_bits"] = exact_achieved
                 outer_diag["solver_additive_candidate_bpp"] = float(
@@ -4210,10 +4364,68 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             profile=model_profile,
             legal_formats=per_linear_legal_formats,
         )
+        from .allocator_candidates import require_assignment_rung_allowability
+        final_scope_stats = {**accounting_stats, **fixed_stats, **stats}
+        final_scopes = _final_allowability_scopes(
+            assignment_expanded, tessera_context_by_unit, final_scope_stats, rung_allowability,
+            m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel or 1)
+        require_assignment_rung_allowability(assignment_expanded, target_profile=target_profile,
+            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability,
+            allowability_scope_by_unit=final_scopes)
+        if rung_allowability is not None:
+            tessera_menu_widths["rung_allowability_scopes"] = {
+                name: scope for name, scope in final_scopes.items() if scope is not None}
+            tessera_menu_widths["canonical_quality"] = {
+                name: final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})[fmt]
+                for name, fmt in assignment_expanded.items()
+                if fmt in final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})}
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,
         )
+        # --routed-unit-rates (PQ #2319): spend the serialized-byte headroom
+        # left by the stack-uniform body assignment on exact per-unit routed
+        # rows.  This runs AFTER the packed expansion and the serving
+        # promotion above, so neither can collapse the per-unit entries back
+        # into a group format; the carried block and the receipts below close
+        # over exactly these entries.
+        def body_assignment_for_accounting(complete):
+            return {name: fmt for name, fmt in complete.items()
+                    if ((not _is_visual_linear(name, model_profile) or name in visual_decision_names)
+                        and not _is_mtp_linear(name) and name not in fixed_lm_head_names)}
+
+        routed_unit_rates_record = None
+        if args.routed_unit_rates:
+            from . import footprint as _fp_routed_rates
+            routed_unit_rates_record = _allocation_lane().allocation_routed_unit_rates(
+                cost_data.get("costs", {}), assignment_expanded,
+                cost_data=cost_data,
+                per_linear_legal_formats=per_linear_legal_formats,
+                budget_bytes=int(math.floor(
+                    float(args.target_disk_gb) * _fp_routed_rates.GB)),
+                reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
+                artifact_size_for=_artifact_size_for,
+                canonical_format=_canonical_candidate_format,
+            )
+            achieved = float(_assignment_payload_totals(
+                body_assignment_for_accounting(assignment_expanded),
+                require_all_stats=True)["bits_per_param"])
+            try:
+                final_assignment = _stamped_assignment(assignment_expanded)
+                final_size = _artifact_size_for(final_assignment)
+                if final_size is None or selected_whole_artifact_budget_stamp is None:
+                    raise ValueError("routed unit rates require a final whole-artifact price and budget stamp")
+                selected_whole_artifact_budget_stamp = whole_artifact_budget_stamp(
+                    budget_bytes=int(selected_whole_artifact_budget_stamp["budget_bytes"]),
+                    selection_tensor_payload_bytes=int(final_size["artifact_tensor_payload_bytes"]),
+                    selection_non_tensor_reserve_bytes=int(
+                        selected_whole_artifact_budget_stamp["selection_non_tensor_reserve_bytes"]),
+                    selection_assignment=final_assignment,
+                    excluded_source_prefixes=selected_whole_artifact_budget_stamp.get(
+                        "excluded_source_prefixes", ()),
+                )
+            except (ValueError, TypeError) as exc:
+                raise SystemExit(f"[alloc] ERROR: routed unit rates final budget: {exc}") from exc
 
         # Only unmeasured/explicit-uniform visual Linears are auxiliary.
         # Measured visual/merger units keep the solver's per-Linear decision.
@@ -4334,15 +4546,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
                 )
 
-        final_body_assignment = {
-            name: fmt
-            for name, fmt in assignment_expanded.items()
-            if (
-                (not _is_visual_linear(name, model_profile) or name in visual_decision_names)
-                and not _is_mtp_linear(name)
-                and name not in fixed_lm_head_names
-            )
-        }
+        final_body_assignment = body_assignment_for_accounting(assignment_expanded)
+        paired_trade = _paired_trade_for_assignment(final_body_assignment)
+        if paired_trade is not None and paired_trade["refused"]:
+            refusals = {layer: summarize_paired_routed_layer(row)
+                        for layer, row in paired_trade["routed_layers"].items() if row["refused"]}
+            raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         final_body_payload = _assignment_payload_totals(
             final_body_assignment,
             require_all_stats=True,
@@ -4482,6 +4692,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     isinstance(v, dict) and "solver_seconds" in v
                     for v in _solve_diagnostics.values()) else {}),
             **propagated_cost_provenance(research_cost_provenance),
+            **({"paired_rate_trade": paired_trade,
+                "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment),
+                "paired_cost_scope": "sum_of_decision_unit_paired_ucbs; full-assignment covariance reported separately"}
+               if paired_trade is not None else {}),
             "assignment_payload_bits_total": (
                 float(final_assignment_payload["bits_total"])
                 if not final_assignment_payload["missing_stats_names"]
@@ -4496,6 +4710,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             **({
                 "whole_artifact_budget": selected_whole_artifact_budget_stamp,
             } if selected_whole_artifact_budget_stamp is not None else {}),
+            # Only when --routed-unit-rates spent the serialized-byte headroom,
+            # so a default run writes byte-identical layer-config metadata.
+            **({
+                "tessera_routed_unit_rates": routed_unit_rates_record,
+            } if routed_unit_rates_record is not None else {}),
             # Only when the constraint axis actually ran, so an unconstrained run
             # writes byte-identical layer-config metadata (the "constraints were
             # absent" stamp lives in selection.json, which every byte-budget run
@@ -6209,6 +6428,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # floor clears but serving-group promotion overshoots needs a slightly
         # looser target. The solver recorded both; report them.
         d = _solve_diagnostics.get(round(float(args.target_bits), 9), {})
+        if d.get("reason") == "routed_expert_dominance":
+            trade = d["exact_filter_trace"][-1]["paired_rate_trade"]
+            refusals = {layer: summarize_paired_routed_layer(row) for layer, row in trade["routed_layers"].items() if row["refused"]}
+            raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         if measured_runtime_table is not None:
             raise SystemExit(
                 f"[alloc] measured runtime proposal infeasible at target_bits={args.target_bits}: "

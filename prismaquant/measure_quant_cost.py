@@ -58,7 +58,7 @@ def canonical_linear_name(name: str, profile=None) -> str:
     while the probe/cost pipeline historically keys those as:
       experts.gate_up_proj.<eid> / experts.down_proj.<eid>
     """
-    m = re.match(r"^(.+\.experts)\.(\d+)\.([^.]+)$", name)
+    m = _PER_EXPERT_NAME_RE.match(name)
     if not m:
         return name
     prefix, expert_id, proj = m.groups()

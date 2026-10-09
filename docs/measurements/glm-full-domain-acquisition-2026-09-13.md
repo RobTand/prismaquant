@@ -125,3 +125,107 @@ The 42 historical PACT gamut cells and native seven-rung subsets do not define
 the legal q256 domain. Missing native, quality, original-source CUDA and
 construction cells remain repair blockers; scalar screens, historical census
 restamps and the retained TP1 timing pilot cannot authorize production picks.
+
+## Explicit joint acquisition adapter (#2139)
+
+The existing command accepts `--cost-currency joint-aura` without scalar
+`--anchor-parts`. It calls the ordinary `require_run_currency` attestation and
+joint raw-row validator, then checks the exact v2 run/probe, cached rendered
+tensor, activation and per-unit source-weight bindings. Mixed/scalar-only
+tables, missing signed W/A/mixed samples and plausible misbound metadata refuse.
+Every selected joint measurement record is retained unchanged in the request.
+No scalar MSE-to-Fisher conversion or activation multiplier is performed.
+
+The current public writer provides byte estimates only for acquisition-bracket
+ranking, not measured-wire prices. `prices` remains null; the request cannot
+be an allocator payload, interpolation qualification, selected-assignment
+confirmation or production promotion. A wholly unmeasured family retains its
+legal domain and emits endpoint requests without invented joint rows.
+
+The shared shape adapter now retains producer-refused holes and chooses legal
+neighbors on both sides of table-width changes. Existing RD-hull brackets rank
+interior requests; their midpoint is projected to an unmeasured legal point
+inside the same bracket, with lower-q256 ties. Full-grid measurement is not a
+proposal prerequisite; every unknown legal rate remains visible. Exact shipped
+pick confirmation and held-out evaluation remain separate, and original-source
+CUDA/provider plus fresh-global diagnostic prerequisites are not bypassed.
+
+The actual adapter smoke exposed an existing BF16 footprint round-trip defect:
+the writer priced CHANNEL reach sigma, but its recorded footprint/reconstructed
+recipe discarded it, so revalidation differed by 23 bytes and refused the
+candidate. The shared recipe/footprint owners now retain window seed, window
+sigma and channel sigma rather than suppressing the mismatch or subtracting
+bytes. All size claims remain the public writer's; no native admission changes.
+
+## Executing bounded joint requests (#2171)
+
+The existing anchor campaign accepts an explicit `--acquisition-request` and
+`--acquisition-request-sha256` pair. The request is the existing joint acquisition
+JSON, not an allocation, capture or export. Intake authenticates its actual cost
+pickle and revalidates ordinary raw-v2 joint currency, run/probe/source evidence
+and the complete legal domain. Duplicate, illegal, already measured, misbound or
+qualification-claiming proposals refuse before campaign input work.
+
+This explicit path requires research mode and one round, without a global rate
+band, exhaustive-grid mode, audit extras or partial expert-partition semantics.
+Both first-batch priming and round-one execution use the existing atomic groups
+and one exact requested-rate selector: group-member requests are unioned only
+within the actual shared legal grid. No rung is snapped, silently dropped or
+replaced by an endpoint/uniform anchor. Every actual member needs a bound source
+identity; the selected scope must be exactly the requested atomic expansion.
+Actual source bytes are checked before encoding, outside per-anchor failures.
+
+The output remains the normal source/H/recipe-bound scalar anchor journal and
+wire/render cache. These establish candidate bytes, not joint Fisher prices.
+Four-probe Stage B pricing, native prefill/decode context, selected assignment,
+immutable export and held-out quality/serving remain separate actual transitions.
+The original request keeps every deferred legal rate. This wiring does not adopt
+a provider, promote row-zero diagnostics to full-calibration H, move a public or
+private reader pin, or qualify any unsupported native cell.
+
+## Bound per-row intake and control readset (#2195)
+
+`load_joint_campaign_acquisition(binding, units=names)` authenticates the whole
+original request and raw cost table before projecting onto explicit row units.
+An altered unselected report or cost unit cannot escape validation. The pure
+`project_joint_campaign_acquisition` helper accepts only an already authenticated
+intake; it selects whole known units deterministically, retains deferred families
+and empty atomic members, and does not infer groups from names. The runtime still
+requires every actual member of each selected atomic group. An all-deferred row
+contains no measurement work and is not an admitted zero-work execution.
+
+Projection never rewrites the original request, creates another price currency,
+changes its global request/cost/run/probe identity, or snaps requested rates. The
+default `units=None` return remains unchanged.
+
+Both checkpoint and scalar-payload merges validate the exact deferred family
+domain against the producer's already authenticated checkpoint unit menus and
+the original requested schedule. Explicit empty requested families and legitimate
+unrequested menu families remain; unknown extras, active-family insertions and
+dropped unrequested families refuse. The existing merge command authenticates
+checkpoint identities before joining payload provenance. Direct acquisition
+`merge_payloads` callers must supply those `acquisition_unit_identities`; a payload
+alone cannot establish its producer menu. Ordinary non-acquisition merge behavior
+is unchanged, and the shared menu/request derivation introduces no new prices or
+independent domain controller.
+
+The torch-free `tessera_acquisition_inputs` owner provides
+`joint_campaign_acquisition_control_inputs(binding)`, reusing the same strict
+bound JSON owner and declaring the actual whole request and raw cost, in that
+order, with SHA256 and byte lengths. Standalone metadata builders stream-hash
+the cost through the existing digest/stat-identity owners, without importing
+PrismaQuant or Torch. Runtime intake supplies its existing fenced staged reader.
+These are control inputs read before captures or weights, not a scientific-
+admission shortcut: planning still performs complete intake validation. Drift
+after cached reads refuses under the existing bound-byte/stat-fence owner. The
+existing staged readset remains the
+owner of mount, entry and consumption accounting. Candidate journals and decoded
+wire caches still need the separate four-probe joint pricing and production
+qualification transitions above.
+
+The September 13 executed example and its quantizable population, immutable-byte
+count and reserve are historical inputs, not authority for the current original
+GLM5.3-Flash allocation or its EXL3 size comparison. The current campaign needs
+its actual eligible Linear census and immutable serialized footprint; immutable
+BF16/F32 tensors stay outside the quantizable bpp denominator. No reserve,
+tolerance or serving-performance target is inferred from that historical example.

@@ -236,6 +236,14 @@ class ModelProfile(ABC):
         from .vllm_registry import vllm_class_for_architecture
         self._vllm_cls = vllm_class_for_architecture(arch)
 
+    def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
+        """Return actual parameter owners for the existing dense input hooks."""
+        return [name for name, module in model.named_modules() if isinstance(module, nn.Linear)]
+
+    def is_dense_parameter_owner(self, name, module) -> bool:
+        """Identify a source owner that exposes the existing dense weight contract."""
+        return isinstance(module, nn.Linear)
+
     # ------------------------------------------------------------
     # Fused-sibling promotion (allocator.py)
     # ------------------------------------------------------------
@@ -1019,6 +1027,19 @@ class ModelProfile(ABC):
                 continue
             return f"{parent}::__packed_format__:{','.join(group)}"
         return None
+
+    def routed_expert_identity(self, qname: str) -> tuple[str, str] | None:
+        """The routed layer and expert owning a split projection, not its role.
+
+        Packed rows cannot identify an individual expert; callers requiring
+        per-expert attribution must refuse them rather than manufacture one.
+        """
+        parsed = self._packed_expert_projection_leaf(qname)
+        if parsed is None or not parsed[2]:
+            return None
+        parent, _leaf, _split = parsed
+        expert = str(qname).split(".")[len(parent.split("."))]
+        return parent, expert
 
     # ------------------------------------------------------------
     # Source passthrough + text-only staging

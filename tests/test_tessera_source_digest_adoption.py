@@ -1,9 +1,9 @@
 """A retained full hash proof transfers with all original mutation fences."""
-import hashlib,json
+import functools,hashlib,json
 from pathlib import Path
 import pytest
 from prismaquant import cost_streaming as cs
-from prismaquant.tessera_source_digest_adoption import adopt_source_digests
+from prismaquant.tessera_source_digest_adoption import adopt_source_digests, main
 from test_source_identity_validate_derivation import checkpoint,_build_cache,_llama_config_dict
 
 
@@ -13,6 +13,29 @@ def authority(checkpoint,monkeypatch):
     cache,identity=_build_cache(root,shards,config)
     monkeypatch.setattr(cs,'live_streaming_runner_config',lambda _:config)
     return root,shards,cache,identity,{'path':str(cache),'sha256':hashlib.sha256(cache.read_bytes()).hexdigest()}
+
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('change', ['size', 'mtime'])
+def test_adoption_never_launders_old_digest_under_new_fingerprint(authority, tmp_path, monkeypatch, mode, change):
+    import os
+    root, shards, _path, identity, binding = authority
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    shard = next(iter(shards.values()))
+    if change == 'size':
+        shard.write_bytes(shard.read_bytes() + b'changed')
+    else:
+        before = shard.stat()
+        os.utime(shard, ns=(before.st_atime_ns, before.st_mtime_ns + 1))
+    out = tmp_path/'must-not-publish'
+    with pytest.raises((ValueError, RuntimeError)):
+        adopt_source_digests(root, binding, out, expected_content_sha256=identity['content_sha256'],
+                             quiescent_seconds=0)
+    assert not out.exists()
+
 
 
 def test_adopts_original_hashes_without_payload_reads(authority,tmp_path,monkeypatch):
@@ -73,3 +96,36 @@ def test_device_only_portability_is_explicit_and_preserved(authority,tmp_path,mo
     cache=SourceDigestCache(out,source=root)
     for shard in shards.values():cache.sha256(shard)
     assert all(row['writer']['upstream_dev_portable_device'] is True for row in cache.receipt()['shards'])
+
+
+def test_main_prints_the_published_adoption_receipt(authority,tmp_path,capsys,monkeypatch):
+    """The CLI prints exactly the receipt it published, from the real path.
+
+    Runs tool ``main`` end to end over the existing authority fixture: the
+    real adoption, the real validator and Tessera's real byte writes. The
+    only substitution is timing (functools.partial of the real
+    SourceDigestCache with quiescent_seconds=0, plus its original fingerprint
+    staticmethod, in tessera.source_digest_cache), matching the fixture's
+    explicit zero-quiescence setting -- no fake cache, no mocked
+    adopt_source_digests, no mocked receipt.
+    """
+    from tessera import source_digest_cache as tsdc
+    real=tsdc.SourceDigestCache
+    zero_quiescence=functools.partial(real,quiescent_seconds=0)
+    zero_quiescence.fingerprint=real.fingerprint
+    monkeypatch.setattr(tsdc,'SourceDigestCache',zero_quiescence)
+    root,shards,path,identity,binding=authority
+    out=tmp_path/'cli'
+    argv=['--model',str(root),'--source-cache',str(path),'--source-cache-sha256',binding['sha256'],
+          '--expected-content-sha256',identity['content_sha256'],'--out',str(out)]
+    assert main(argv)==0
+    stdout=json.loads(capsys.readouterr().out)
+    receipt=json.loads((out/'adoption-receipt.json').read_text())
+    assert stdout==receipt
+    assert receipt['shards']==len(identity['shards'])
+    # The lazy cache's receipt() reports the keys this instance served, not
+    # every disk entry (same contract the first test in this file follows):
+    # warm each identity shard through cache.sha256 before reading it.
+    cache=real(out,source=root)
+    for row in identity['shards']:assert cache.sha256(Path(row['path']))==row['sha256']
+    assert cache.receipt()['cached_shards']==len(identity['shards'])

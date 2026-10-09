@@ -55,6 +55,7 @@ class ArtifactReader:
     root: Path
 
     def bytes(self, reference, where, *, max_bytes=None):
+        reference = _mapping(reference, where)
         # An owner may bind an exact byte length as well as the digest (the
         # shape-time observation does): a length is a weaker check on its own
         # but kills a truncated or padded artifact the digest already refuses,

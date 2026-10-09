@@ -30,7 +30,6 @@ Prints one JSON document on the line after ``BENCH-JSON``.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import statistics
 import sys
@@ -44,6 +43,7 @@ import torch  # noqa: E402
 from prismaquant import nvfp4_activation_contract as owner  # noqa: E402
 from prismaquant.io_spans import PeriodicSampler  # noqa: E402
 from prismaquant.tensor_digests import tensor_sha256  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 ARMS = {
     "unfused": owner._nvfp4_activation_qdq_registered_op_unfused,
@@ -260,7 +260,7 @@ def main() -> int:
     result["all_digests_equal"] = all(
         r["digests"]["fused"] == r["digests"]["unfused"] for r in result["shapes"].values())
     print("BENCH-JSON")
-    print(json.dumps(result, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0 if result["all_digests_equal"] else 1
 
 

@@ -580,6 +580,8 @@ def _served_route_refusal(spec, rung: int, structure: str, recipe) -> "str | Non
 
 def recipe_from_wire_names(
     span: int, scale_plane: str, body: "str | BodyKind" = "tcq", window_bits: int = 0,
+    *, window_seed: int = 0, window_sigma: float | None = None,
+    channel_sigma: float | None = None,
 ) -> "WireRecipe":
     """Build a ``WireRecipe`` from the string vocabulary this module quotes.
 
@@ -595,7 +597,8 @@ def recipe_from_wire_names(
             raise TesseraFormatError(f"unknown body {body!r}; tcq or window") from exc
     return WireRecipe(
         body=BodyKind(body), span=int(span), scale_plane=kind,
-        window_bits=int(window_bits),
+        window_bits=int(window_bits), window_seed=int(window_seed),
+        window_sigma=window_sigma, channel_sigma=channel_sigma,
     )
 
 
@@ -1788,7 +1791,8 @@ class TesseraRateSurface:
 
     def identity(self) -> str:
         """Canonical JSON of the surface, for provenance stamping."""
-        return json.dumps(
+        from .digests import DIRECT_ASCII_LAX
+        return DIRECT_ASCII_LAX.text(
             {
                 "family": self.family,
                 "mode": self.mode,
@@ -1797,9 +1801,7 @@ class TesseraRateSurface:
                 "anchor_q256": list(self.anchor_q256),
                 "proposed_q256": list(self.proposed_q256),
                 "source_identity_sha256": self.source_identity_sha256,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+            }
         )
 
 

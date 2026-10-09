@@ -3,7 +3,7 @@
 Scoped census v2 retains the producer's complete observations and exact input
 texts. Its replay binds price projections to the independent card build and
 artifact sidecars, then compares each owner's actual launch to the current
-scoped cells (``LANE_ELIGIBILITY_SCHEMA_TESSERA``) at the exact
+scoped cells (``SCOPED_LANE_SCHEMAS``) at the exact
 image/mode/residency. A decoder used as a dense fallback
 may be a legitimate routed-MoE launch only where that cell explicitly says so.
 There is no global substitute veto for scoped rows. Legacy flat rows below
@@ -46,11 +46,11 @@ measured serve, not an argument.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
+from .digests import text_sha256hex
 
 
 class TesseraRouteReceiptError(ValueError):
@@ -227,7 +227,7 @@ def parse_census_json(text, *, where):
 
 
 def _text_sha(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return text_sha256hex(text)
 
 
 def _current_scoped_contract():
@@ -264,7 +264,7 @@ def current_table_refuses_flat_census():
         table, _formats = _current_scoped_contract()
     except ModuleNotFoundError:
         return None
-    if table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA:
+    if table.schema in lane.SCOPED_LANE_SCHEMAS:
         return FLAT_CENSUS_REFUSAL.format(schema=table.schema)
     return None
 
@@ -444,9 +444,9 @@ def check_scoped_route_receipt(census, binding, *, build, model_dir=None):
             _require(all(file_sha256(Path(model_dir) / name) == sha for name, sha in seals.items()),
                      "census sidecars differ from independently supplied artifact files")
         table, formats = _current_scoped_contract()
-        _require(table.present and table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA,
-                 f"scoped census needs a current {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA} "
-                 "eligibility table; legacy cells attest no image")
+        _require(table.present and table.schema in lane.SCOPED_LANE_SCHEMAS,
+                 f"scoped census needs a scoped eligibility table; got {table.schema!r}; "
+                 "legacy cells attest no image")
         target, units, owners = _priced_projection_population(binding, build, formats)
         _require(census.get("runtime") == {"image": target.runtime_image, "execution_mode": target.execution_mode}
                  and census.get("compiled") is (target.execution_mode == "compiled"),

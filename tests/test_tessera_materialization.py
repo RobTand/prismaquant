@@ -451,21 +451,19 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     metadata = json.loads(output.read_text())['__prismaquant__']
     assert metadata[tep.EXPERT_WIRES_KEY][missing] == original_record
     assert load_assignment(output) == assignment
-    import os
-    import runpy
     from pathlib import Path
     from safetensors import safe_open
     shapes = {}
     for shard in Path(argv[1]).glob('*.safetensors'):
         with safe_open(str(shard), framework='pt', device='cpu') as handle:
             shapes.update({name:tuple(handle.get_slice(name).get_shape()) for name in handle.keys()})
-    producer = runpy.run_path(str(Path(os.environ['TESSERA_REPO']) / 'experiments/plan_from_layer_config.py'))
     derived = export._write_plan_assignment(output, expected_sha256=tm._sha(output),
                                             profile=profile)
     assert load_assignment(output) == assignment
     producer_config = json.loads(Path(derived['plan_assignment']).read_text())
-    translated, _provenance = producer['build'](producer_config, shapes,
-        cover='as-allocated', allow_disagreement=False, prismaquant=None, with_control=False)
+    from prismaquant.tessera_plan_writer import build_serving_plan, tessera_surface
+    translated, _provenance = build_serving_plan(producer_config, shapes,
+        cover='as-allocated', allow_disagreement=False, surface=tessera_surface(), with_control=False)
     assert translated[missing + '.weight'] == {'grid':'E4M3', 'q256':1024}
 
 
@@ -529,6 +527,35 @@ def test_finalize_refuses_original_capture_count_drift(selection, monkeypatch):
     assert not selection.output.exists()
 
 
+def test_finalize_refuses_a_misnamed_seed_wire_before_reading_or_linking_it(selection, monkeypatch):
+    """#2310: the filename refusal precedes the source read, not just the link."""
+    from prismaquant.cost_stage_checkpoint import unit_path, write_unit
+    path, root = _completed(selection, monkeypatch)
+    data = tm._inputs(path)[0]
+    *_, identity, _group = tm._inputs(path, 0)
+    _root, (journal, digest, _done) = tm._journal(data, identity, 0, sorted(_units()))
+    record = copy.deepcopy(selection.case.receipts[selection.missing])
+    (root / 'wire' / 'misnamed.tessera').write_bytes(
+        (root / 'wire' / record['file']).read_bytes())
+    record['file'] = 'misnamed.tessera'
+    unit_path(journal, selection.missing).unlink()
+    write_unit(journal, stage=tm.STAGE, qname=selection.missing, identity_sha256=digest,
+               state=dict(format=FMT, record=record, anchor=None))
+    reads = []
+    verify = ReceiptAPI.verify_cached_unit
+
+    def spy(self, blob, record, identity):
+        reads.append(record['file'])
+        return verify(self, blob, record, identity)
+
+    monkeypatch.setattr(ReceiptAPI, 'verify_cached_unit', spy)
+    with pytest.raises(RuntimeError, match='seed wire filename differs'):
+        tm.finalize(path)
+    assert 'misnamed.tessera' not in reads
+    assert not (selection.workspace / 'final' / 'wire' / 'misnamed.tessera').exists()
+    assert not selection.output.exists()
+
+
 def test_materialization_refuses_unbound_producer_source(selection, monkeypatch):
     s = selection
     s.cost[tep.EXPERT_WIRES_KEY] = {}
@@ -539,3 +566,130 @@ def test_materialization_refuses_unbound_producer_source(selection, monkeypatch)
     monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:ReceiptAPI())
     with pytest.raises(RuntimeError, match='no priced producer receipt'):
         tm._inputs(path)
+
+
+@pytest.mark.parametrize("colliding,malformed", [(True, False), (False, False), (False, True)])
+def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
+        selection, tmp_path, monkeypatch, colliding, malformed):
+    from transformers import AutoModelForCausalLM
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant import model_profiles, tessera_hessian as th
+    from prismaquant.tessera_formats import parse_tessera_format_name
+
+    s = selection
+    first = "model.layers.0.mlp.a.experts.0.gate_proj"
+    second = ("model.layers.0.mlp__a.experts.0.gate_proj" if colliding
+              else "model.layers.0.mlp.z.experts.0.gate_proj")
+    names = [first, second]
+    assert sorted(names) == names  # The missing coordinate is visited first.
+    _request, _cost, source, original_units, _expanded = tm._request(s.request)
+    units = {name: {**original_units[s.missing], "tensor": name + ".weight",
+                    "wire": name + ".wire"} for name in names}
+    weight = torch.ones(N, N)
+    api = ReceiptAPI()
+    api.make_unit_record = lambda blob, identity, filename: dict(
+        file=filename, blob_bytes=len(blob),
+        blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
+    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: api)
+    family, rung = parse_tessera_format_name(FMT)
+    seed_blob = b"priced seed wire"
+    seed_record = copy.deepcopy(s.case.receipts[s.missing])
+    seed_record.update(api.make_unit_record(seed_blob,
+        tm._expert_input_identity(api, weight, units[second], FMT, None),
+        tc._wire_path(s.case.wire_dir, second, FMT).name))
+    if malformed:
+        seed_record["file"] = "other-coordinate.tessera"
+    seed_path = s.case.wire_dir / seed_record["file"]
+    seed_path.write_bytes(seed_blob)
+    provenance = copy.deepcopy(s.cost["provenance"])
+    provenance["activation_static_scales"]["units"] = {name: 1.0 for name in names}
+    cost = {"provenance": provenance, tep.EXPERT_WIRES_KEY: {second: {FMT: seed_record}}}
+    census = json.loads(s.census.read_text())
+    census.update(counts={name: 8 for name in names}, max_abs={name: 1.0 for name in names})
+    data = {"workspace": str(s.workspace)}
+    group = {"assignment": dict.fromkeys(names, FMT)}
+    monkeypatch.setattr(tm, "_inputs", lambda *_args: (
+        data, {}, cost, source, units, group["assignment"], census, {"fixture": True}, group))
+    monkeypatch.setattr(tm, "_verify_source", lambda *_args: None)
+    monkeypatch.setattr(model_profiles, "detect_profile", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(tep, "source_unit_weight", lambda *_args: weight)
+    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained",
+                        lambda *_args, **_kwargs: SimpleNamespace(eval=lambda: None))
+    monkeypatch.setattr(tc, "_require_campaign_population", lambda *_args: SimpleNamespace(
+        members=[SimpleNamespace(qname=name, weight=weight) for name in names]))
+    monkeypatch.setattr(tc, "_calibration_tokens",
+                        lambda *_args: (torch.ones(2, 4), "fixture"))
+    calibration = provenance["hessian"]["calibration_identity"]
+    monkeypatch.setattr(th, "calibration_identity", lambda *_args, **_kwargs: calibration)
+    monkeypatch.setattr(tc, "_collect_activations", lambda *_args, **_kwargs: (
+        {name: torch.ones(4, N) for name in names}, {}, census["counts"], census["max_abs"]))
+    monkeypatch.setattr(tc, "_static_input_scales", lambda *_args, **_kwargs: (
+        provenance["activation_static_scales"]["units"],
+        provenance["activation_static_scales"]["policy"]))
+    spec = SimpleNamespace(bits_for_shape=lambda shape: 8 * shape[0] * shape[1],
+                           memory_bytes_for_shape=lambda shape: shape[0] * shape[1],
+                           act_dtype_name="a16")
+    monkeypatch.setattr(tc, "_prepare_anchor", lambda **_kwargs: dict(
+        spec=spec, family=family, rung=rung, wire="fixture",
+        activation_qdq=lambda value: value, input_scale=None,
+        activation_kwargs=None, hessian_required=False))
+    monkeypatch.setattr(tc, "_encode_and_render",
+                        lambda tensor, *_args, **_kwargs: (tensor * 0.75, b"fresh wire"))
+    publications, links, reads = [], [], []
+    store, link, verify = pwc._store_rendered_weight_entry, tc._link_seed_wire, api.verify_cached_unit
+
+    def publish(**kwargs):
+        publications.append(kwargs["qname"])
+        if colliding:
+            pytest.fail("missing-first alias reached fresh publication")
+        assert seen_cache[0]._campaign_wire_coordinates == set(group["assignment"].items())
+        return store(**kwargs)
+
+    def seed_link(*args, **kwargs):
+        result = link(*args, **kwargs)
+        links.append(args)
+        return result
+
+    def read_wire(*args):
+        reads.append(args)
+        return verify(*args)
+
+    seen_cache = []
+    cache_type = pwc.ProductionWeightCache
+
+    def capture_cache(**kwargs):
+        cache = cache_type(**kwargs)
+        seen_cache.append(cache)
+        return cache
+
+    monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry", publish)
+    monkeypatch.setattr(tc, "_link_seed_wire", seed_link)
+    monkeypatch.setattr(api, "verify_cached_unit", read_wire)
+    if malformed:
+        with pytest.raises(RuntimeError, match="wire filename differs"):
+            tm.run(tmp_path / "plan.json", 0)
+        assert publications == links == reads == []
+        group_wire = s.workspace / "groups" / "0" / "wire"
+        assert list(group_wire.iterdir()) == []
+    elif colliding:
+        with pytest.raises(ValueError) as error:
+            tm.run(tmp_path / "plan.json", 0)
+        assert first in str(error.value) and second in str(error.value)
+        assert seed_record["file"] in str(error.value)
+        assert publications == links == reads == []
+        assert not list((s.workspace / "groups" / "0" / "wire").iterdir())
+    else:
+        tm.run(tmp_path / "plan.json", 0)
+        assert publications == [first]
+        assert len(links) == len(reads) == 1
+        group_wire = s.workspace / "groups" / "0" / "wire"
+        assert tc._wire_path(group_wire, first, FMT).read_bytes() == b"fresh wire"
+        assert tc._wire_path(group_wire, second, FMT).read_bytes() == seed_blob
+        # A real resume re-registers completed coordinates without injection.
+        tm.run(tmp_path / "plan.json", 0)
+        assert publications == [first]
+        assert len(links) == 1 and len(reads) == 3
+        assert seen_cache[-1]._campaign_wire_coordinates == set(group["assignment"].items())
+    assert seed_path.read_bytes() == seed_blob
+

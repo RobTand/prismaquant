@@ -88,27 +88,28 @@ def _reader_sdk_bound():
 
 @pytest.fixture(scope="module")
 def pb():
-    """One pinned SDK3 package for the module's real mover fixtures."""
+    """One authenticated source package for the module's real mover fixtures."""
     require_prismabuild_sdk()
-    info = pbgen.require_paths()
-    import prismabuild.core as core  # noqa: E402
-    import prismabuild.storage_tiers as tiers  # noqa: E402
-    import prismabuild.residency_plan as plans  # noqa: E402
-    import prismabuild.pool as pool  # noqa: E402
-    import prismabuild.residency_map as pb_map  # noqa: E402
-    import stage_move  # noqa: E402
-    import ram_promote  # noqa: E402
-    root = info["root"]
-    for module in (core, tiers, plans, pool, pb_map, stage_move,
-                   ram_promote):
-        location = Path(getattr(module, "__file__", "")).resolve()
-        assert location.is_relative_to(Path(root)), (
-            f"{module.__name__} loaded from {location}, not {root}")
-    assert info["generation"], "generation recorded once per admitted action"
-    return {"generation": info["generation"], "root": root, "core": core,
-            "tiers": tiers, "plans": plans, "pool": pool,
-            "pb_map": pb_map, "stage_move": stage_move,
-            "ram_promote": ram_promote}
+    with pbgen.source_bound():
+        info = pbgen.require_paths()
+        import prismabuild.core as core  # noqa: E402
+        import prismabuild.storage_tiers as tiers  # noqa: E402
+        import prismabuild.residency_plan as plans  # noqa: E402
+        import prismabuild.pool as pool  # noqa: E402
+        import prismabuild.residency_map as pb_map  # noqa: E402
+        import stage_move  # noqa: E402
+        import ram_promote  # noqa: E402
+        root = info["root"]
+        for module in (core, tiers, plans, pool, pb_map, stage_move,
+                       ram_promote):
+            location = Path(getattr(module, "__file__", "")).resolve()
+            assert location.is_relative_to(Path(root)), (
+                f"{module.__name__} loaded from {location}, not {root}")
+        assert info["generation"], "generation recorded once per admitted action"
+        yield {"generation": info["generation"], "root": root, "core": core,
+                "tiers": tiers, "plans": plans, "pool": pool,
+                "pb_map": pb_map, "stage_move": stage_move,
+                "ram_promote": ram_promote}
 
 
 @pytest.fixture(scope="module")

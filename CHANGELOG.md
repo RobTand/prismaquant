@@ -2,23 +2,15 @@
 
 ## Unreleased
 
-### Changed
-
-- **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
-  `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
-  `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
-  one exact commit/version contract, no dual-SDK probing, alias, editable
-  install or fallback. The strict original-source result read now requires the
-  selected immutable attempt's native producer context; runtime documents,
-  `original_cuda_control`'s launch-owned helper check and the fixture
-  provenance pins follow the same owner-resolved identities (Tessera stays at
-  its existing b40 pin). The separately qualified SDK5 install/fixture/portable
-  tuple (PB #1485), fleet helper-runtime selection and live deployment remain
-  separate and unchanged; no capability, admission or serving claim rides the
-  pin.
+### Added
+- The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
+  The central processor path writes a valid structure draft without tensor payload reads or profile registration.
+  Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
+  The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
+  Its central processor preflight checks the real runtime arguments without a graphics processor.
+  Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
-
 - **Production pilot result fixtures use one real installed SDK5 helper**
   (Refs #2152, #1293). The production Gateway, resolver, CAS, queue and capture
   binder now consume the same Git/RECORD-qualified SDK5 package. The positive
@@ -39,6 +31,1011 @@
   nonactivating source preparation: current SDK4/DC480 fixtures, c437 helpers,
   deployment and GPU/source admission are unchanged; a qualified SDK5 helper
   and coherent source/pin transition remain coupled prerequisites.
+
+- A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
+  Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
+  With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
+  The completeness check reported fused units as claimed by no mechanism.
+  Both now raise the lookup error. A working lookup gives the same mapping as before.
+  No format, default, gate threshold or artifact byte changes when the lookup works.
+- The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
+  Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
+  The retained result carries no speed, energy or residency qualification.
+  Certified mode keeps the refusal and the failed status.
+  A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
+  Missing telemetry retains each actual instrument name and its exact error detail.
+  Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
+
+### Changed
+- **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
+  `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
+  `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
+  one exact commit/version contract, no dual-SDK probing, alias, editable
+  install or fallback. The strict original-source result read now requires the
+  selected immutable attempt's native producer context; runtime documents,
+  `original_cuda_control`'s launch-owned helper check and the fixture
+  provenance pins follow the same owner-resolved identities (Tessera stays at
+  its existing b40 pin). The separately qualified SDK5 install/fixture/portable
+  tuple (PB #1485), fleet helper-runtime selection and live deployment remain
+  separate and unchanged; no capability, admission or serving claim rides the
+  pin.
+
+- The paired expert-dominance menu rule applies only to complete routed layers (#2288).
+  A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
+  The complete-assignment exact filter and the final emission guard still refuse dominant trades.
+  The price arithmetic, strict-half boundary, cancellation, and all-zero behavior stay unchanged.
+- The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
+  Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
+  The commit, read digest, read-byte comparison, contract path, and all other fields remain in the oracle.
+  The retained D13 and v60 outputs produce the same digest in the final CPU check.
+  The applicability and Pareto digests remain unchanged.
+- The Tessera pin moves to `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60 (Tessera #1033, PQ #2426).
+  The serving and development constants, legal-domain provenance, and identity snapshot move in one commit.
+  The generated admission answer remains unchanged.
+  The new producer supplies the attention projection APIs and the canonical rung-allowability API.
+  The contract retains the v56 cells and native-extension rows.
+
+  The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
+  Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
+  No new seal, serving result, or performance result is claimed.
+
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
+
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
+- Tessera export setup derives architecture wiring, census inputs and partitions
+  from profile capabilities and source headers (#2409, D50 item six).
+  The plan writer can emit the metadata plan. The model dispatcher exposes it
+  through a non-submit mode and replaces the fixed-count shard driver.
+  The existing exporter, construction census and native runtime checks remain
+  authoritative. This CPU work grants no runtime or serving qualification.
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Scope cache keys reuse the exact strict and lax JSON profiles from the digest owner.
+  Body and MTP topology use the existing allocation lane protocol and shared scope owner.
+  Synthetic card fixtures declare a compatible Qwen3 MoE profile. Missing-profile refusals remain strict.
+  Constructor repairs remain unchanged. No identity seal is added.
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
+- Mark the task-suite tests for the required layered gate (#2412, #2413).
+  Ordinary runs report explicit skips with the recorded receipt.
+  The task-suite gate must run the marked tests and must report zero skips.
+  Select it with `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+- The forward-recovery proof reader and campaign resolver call the existing
+  digest owners (#2398, references #1301). The capsule tail hash calls
+  `digests.bytes_sha256hex`; the source-record check calls the same bytes
+  owner and the historical trailing-newline roster check calls
+  `digests.text_sha256hex`. File reads, stat fences, limits, JSON parsing,
+  campaign fields, geometry, identities, containment and refusal behavior
+  stay unchanged. The streaming one-MiB reader keeps its own code.
+- The forward-recovery chain tools drop the source-text scan test
+  (#2398, references #1929). The test read the builder source and its
+  string literals instead of consumer behavior. Rendered-launcher
+  identity, invalid-field checks, read bounds and pre-load mismatch
+  checks stay unchanged. No speed change is claimed.
+- The streaming MXFP4 decode builds its lookup from the existing full signed
+  table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
+  code order, the positive zero at code 8, dtype, device, nibble order,
+  scales, chunking, copy behavior and output stay unchanged.
+
+- The allocator and PACT consume canonical v3 scope, qualified chords and
+  reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
+  Actual bytes, native admission and scientific gates remain unchanged.
+  An immutable candidate index requires no active index change.
+  Legacy metadata contracts retain the original producer interface.
+  CPU fixtures do not qualify speed, served loss or serving.
+
+- The shipcard model identity hashes its two canonical JSON texts through the
+  existing text owner (#2384, references #1301). The canonical quant-config
+  digest and the final canonical payload digest call `digests.text_sha256hex`;
+  canonicalization, scope flags, model hashes, errors, auxiliary files,
+  content checks and admission policy stay unchanged.
+
+- The shipcard model identity hashes its raw config bytes through the
+  existing bytes owner (#2394, references #1301). The config digest calls
+  `digests.bytes_sha256hex`; the read position, call count, scope flags,
+  model hashes, errors, auxiliary files, content checks and admission
+  policy stay unchanged.
+
+- The AURA checkpoint manifest writer uses the existing strict, indented
+  UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
+  unit order, source diagnostics and atomic publication stay unchanged.
+  The writer adds no final newline.
+
+- The AURA checkpoint producer comparison follows development-mode policy
+  (#2375, references #1147, CEO D32). A dirty producer file prints the source
+  provenance stamp and keeps the resolved commit. Certified mode keeps its
+  original refusal. Git errors and timeouts still refuse in both modes.
+  The change does not rewrite or recompute checkpoints.
+
+- The allocator serve-constraints and serving-lane tests reuse the existing
+  safetensors fixture writer from test_footprint (#2383, references #1929).
+  Fixture bytes, tensor order, costs and semantic assertions stay unchanged.
+  The serve-constraints introduction no longer cites the retired Gridbook
+  lane policy as a live document.
+
+- The native route-histogram test reuses the existing safetensors fixture
+  writer from test_footprint (#2390, references #1929). Fixture bytes,
+  tensor order, costs, route reports and semantic assertions stay unchanged.
+
+- The PACT frontier profile cohort carries the measured-consumer contract
+  (#2423, references #2427). `pact_cohort_from_profile` returns
+  `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
+  the existing adapter, and `glm_paths_identical` rejects a cohort that
+  lacks or changes them. Remaining cohort values, bands, TP rules, defaults,
+  gates and the active index stay unchanged.
+
+### Added
+
+- **Bounded head walk measurement mode** (#1492, #1247).
+  `tools/profile_stage_b_head.py --mode scoped-walk` walks a slice of the
+  census roster with one explicit I/O worker count. It is read-only: it writes
+  no head checkpoint, verifies no payload and synthesizes no render. One call
+  holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
+  `--sweep-workers`) reads and validates the census-wide metadata once, in
+  the baseline scope, and walks disjoint slices in one process from that
+  state (`metadata_memo` on `load_measured_anchor_input`; a drifted file is
+  read and verified again). The mode leaves the candidate overlay out of the
+  inputs, so no wire payload is hashed. The whole sweep shares the 2,000-unit
+  budget, and the first scope is a one-unit baseline. A guard thread stops the
+  run when the NFS READ round trip exceeds `--stop-read-rtt-ms`. Both guard
+  limits must be positive and finite. A `SIGTERM` stops the run with one
+  report. The tool changes no default. The default worker count stays
+  derived from the CPU reservation until a measurement supports a change.
+
+- **Research-only finer-grained FIT pricing and packed reference wire**
+  (#2329). Conditional single-block prices retain the complete baseline
+  gradient; group residual shrinkage and a deterministic integer-byte solver
+  select existing whole-projection parent fragments. The standalone wire
+  preserves actual column rates, tables, scales and incoming window states,
+  charging tags, framing, checksum and padding exactly. Its reader rejects
+  invalid rates, noncanonical planes and nonfinite scales before allocating
+  decoded weights; offset scratch is linear in block count. The recorded
+  real-A8S CPU proof covers exact mixed-fragment reconstruction and boundary
+  refusals, not in-domain held-out gain or a serving qualification. No
+  production menu, pipeline default, serving pin or kernel changes.
+  The research CLI binds declared inputs through the existing I/O engine
+  and validates actual source/FIT shapes, row counts and current canonical
+  producer admission. Encode and encode preflight never open HELDOUT
+  payloads; CPU scoring verifies their own bytes and complete moments.
+  Real L0 source/FIT preflight is recorded by action `fad7fa64ee59`. The
+  later complete dense L0 gate `6b5288acd80c` matches the native control
+  exactly at 25,191,435 bytes but has 3.475059 times its HELDOUT output-error
+  loss. The routed L3 expert0-up contrast `509251c3242d` also matches exactly
+  at 4,215,563 bytes, with 2.044249 times the control HELDOUT loss. Both
+  early-site contrasts reject this recipe, not fine-grained allocation in
+  general. FIT loss is already 4.13x/3.67x control: surrogate additivity fails
+  before held-out generalization. L28/L44 are cancelled and unmeasured under
+  CEO `dec-1006-223431-2bf3`, not deferred. No sampling interval or G3
+  qualification is claimed.
+  `pq_block_schedule_cost.py` consumes the real driver's flat row-major
+  selection, candidate-order mapping and own-byte stamps, while retaining
+  raw source-order input. CPU proof `63a5fc616b98` exercises both CLI forms
+  and malformed order, digest, geometry and tag refusals. Stored bytes are
+  exact; run, launch and shared-memory estimates remain conditional models,
+  not measured traffic, occupancy or speed.
+
+- **Explicit GLM projection owners.** The producer reads fused members from Tessera dense_ownership instead of a duplicate profile table.
+  The source config separates KDA queries from standalone MLA queries.
+  Existing pin-lift controls can select the actual bare router parameter owner.
+  The producer keeps its stock forward and uses the existing input capture hook.
+  DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
+  Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
+
+- **Direct head arithmetic.** The DSA head screen uses FP32 inputs without the key projection's A8 activation quantization.
+  The producer reads its decoded weights with the runtime's direct consumer helper.
+  The publication cache keeps the head values in FP32 and charges the actual publication bytes.
+  T-16 retains its folded BF16 weight arithmetic before the head cache cast.
+
+- **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
+  The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
+
+- **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
+  The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
+
+- **Shared-expert roster migration.** The quality population reads census names and the profile fused-owner seam.
+  It no longer reads the removed duplicate fused-group table.
+
+- **Behavioral coverage of persisted multimodal calibration provenance**
+  (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
+  back after the actual loader blends a partial real dataset with synthetic
+  rows. Populated CPU forward/backward paths include a failed synthetic row
+  and check nonzero visual Fisher; loaded-row composition stays independent
+  of successful forwards. Duplicate synthetic-composition coverage and a
+  fixture-only shutdown-call assertion are removed; no blend policy or
+  numerical behavior changes.
+
+- **Default-off CPU input/readset preflight for joint adjoint capture**
+  (#2325). `--cpu-input-preflight` shares the calibration and source metadata
+  startup owners, derives expected source phases from the actual meta-model and
+  normalized job independently of the manifest, then checks every selected
+  tensor span. It reports no capture or price and creates no generation,
+  checkpoint or GPU allocation; normal CUDA and staged tier guards are unchanged.
+  Missing phases, shard tails and ranges in another phase refuse before capture.
+  The shared checkpoint-map and resident-head owners cover indexed/unindexed
+  sources and LFM2/DSv4 head extras without skipping tensors. Source metadata
+  reads use the same staged owner as the loader, not a pool fallback.
+  Resume selection uses the actual adjoint-checkpoint session marker; a stored
+  recovery capsule cannot re-enable a resumed forward pass. Bounded diagnostic
+  specs are read under their own byte pin and bound to the actual draw before
+  their lower-chain stopping boundary selects the source schedule.
+
+- **Use shared digest owners in the research harness** (#2329, PR #2367).
+  Byte, file, and tensor digests use their existing owners. Trial, bank, and
+  schedule reports share strict JSON output in insertion order with one final
+  newline. The wire retains its raw 32-byte checksum. Direct refusals retain
+  their exception classes, messages, and check order. The duplication baseline,
+  scientific results, production defaults, and serving contracts do not change.
+
+- **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
+  rows** (#1962). `make_joint_aura_entry` can publish a
+  `sequence_attribution` block decomposing each projection over whole
+  caller-owned blocks of the calibration draw — the streamed dense lease
+  notes each streamed partition's batch block; the Stage B quantum retains
+  the caller's capture-batch id per spill record and re-reads one window's
+  captured rows through the spill's own reader lifecycle right after each
+  single candidate's `project`, while that rendered delta is resident. The
+  authoritative whole-draw fields and the stats contraction total stay
+  bitwise authoritative (flag-off controls byte-identical); the price stays
+  `0.5 mean_p(total_p**2)` over the whole draw, never a sum of per-block
+  squares. The sidecar reports its own residual against the authoritative
+  totals with a stated gate and denominator (default the issue's 1e-3
+  relative against `fsum |w|+|a|+|m|`; zero scale must reconcile exactly),
+  the attribution `c_i = .5 mean_p a_pi*total_p` against those totals, and —
+  for at least two equal whole blocks covering the draw — delete-one
+  leaveout prices `Nseq/(Nseq-k) * .5 mean_p((t_p-a_pi)**2)` with their
+  jackknife standard error under a stated exchangeability assumption; a
+  one-block or unequal-block scope publishes no standard error rather than a
+  fabricated one. `validate_joint_aura_entry` recomputes the sidecar from
+  its own parts for every reader, refuses any foreign `uncertainty_scope` a
+  row publishes (a missing field keeps the legacy conditional reading), and
+  refuses cohorts that cut a block or bind a foreign calibration.
+  Each W/A/mixed projection separately reconciles with its authoritative
+  component; a matching total cannot hide projection redistribution.
+  Full block coverage, integer coordinates and recorded calibration/token
+  geometry are validated before any reader uses the decomposition.
+  Spill callbacks release their borrowed source and delta immediately and
+  retain scalar block components only. Each read charges the existing complete
+  host and device replay buffer envelopes before allocation, including pinned
+  host capacity and aligned device staging; resource refusal prevents read
+  and publication. Both collectors reject unknown
+  candidates before capture and require complete sidecars only on selected
+  rows. The full normalized selector binds the run identity; resume refuses
+  a changed requested attribution surface even in dev mode. Missing selected
+  probes refuse before unit publication. Existing rows stay
+  probe-only; this is not the #1962 estimator fix, a repricing, or an issue
+  closure. Gates: `tests/test_joint_sequence_attribution.py`, the spill
+  sidecar tests of `tests/test_stageb_one_pass_spill.py`.
+
+### Changed
+- **Reuse the shared E2M1 value owner in the MXFP4 widening table**
+  (#2380, Refs #1303). `mxfp4_widen.E2M1_VALUES` derives its positive half
+  from `_E2M1_POSITIVE` in `nvfp4_activation_contract`, keeping the same
+  public tuple type, the same code order, explicit positive zero at index 8
+  and a negative half that negates only the nonzero magnitudes. Table bytes,
+  widened weight bytes, carried scale bytes, geometry, route status and
+  evidence strings are unchanged. The module introduction now describes the
+  retired Gridbook MXFP8 dense lane in the past tense. No performance or
+  serving qualification follows from this refactor.
+
+- **Reuse the shared E2M1 value owner in RTN and MXFP4 source decode**
+  (#2369, Refs #1303). `build_rtn_cache._nvfp4_round_rtn` reads its
+  magnitudes, midpoint ties and maximum from `_E2M1_POSITIVE`,
+  `E2M1_MIDPOINTS` and `FP4_E2M1_MAX` in
+  `nvfp4_activation_contract`, and the MXFP4 nibble decode in
+  `layer_streaming._apply_fp8_dequant_inplace` builds its value table
+  from the same positive grid. The nested `torch.where` chain, the
+  decode order, positive zero at codes 0 and 8, dtypes, scales,
+  padding, ties and nonfinite behavior are unchanged. No format,
+  default, gate, pin or artifact byte changes. No performance or
+  serving qualification follows from this refactor.
+
+- **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
+  Final-hidden manifests and MTP censuses use the existing
+  `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
+  ASCII escapes, strict non-finite handling, UTF-8 and one final line feed.
+  Atomic publication, publish-once checks, native encoding errors, returned
+  byte digests and census admission ordering are unchanged. The projection
+  tool and its text summaries retain their own recipes.
+
+- **Allocator partition and cost byte digests reuse the shared bytes owner**
+  (#2355, Refs #1301). The rank-partition manifest reference and the
+  measured-runtime cost payload integrity comparison in `allocator.main` call
+  `digests.bytes_sha256hex` instead of inlining
+  `hashlib.sha256(...).hexdigest()`. Bytes, digest values, comparison order,
+  refusal messages and ownership are unchanged: the partition reference still
+  authenticates the exact rank manifest bytes the recomputation consumes, and
+  the cost comparison still runs on the owned bytes before `pickle.loads`,
+  ahead of any parse or publication. The remaining `hashlib` use in
+  `allocator.main` is the assignment-payload dedupe digest, which hashes a
+  canonical JSON string, not artifact bytes.
+
+- **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
+  Refs #1303). The final `_student` scoring path of
+  `tools/measure_vllm_full_kl.py` now calls
+  `prismaquant.kl_fisher.forward_kl_per_token` instead of inlining the
+  `teacher.exp() * (teacher - student)` sum over the vocabulary axis.
+  Operand order, dtypes, broadcasting, the last-axis reduction, the
+  non-finite refusal and every published field are unchanged, as are script
+  and module bootstrap. The all-position estimator keeps its own convention
+  (`_position_kl` / `_student_all_positions`: top-K support plus one tail
+  bucket); final-position full vocabulary is not all-position top-K plus
+  tail.
+
+- **Caller-declared journal producer seals** (#687, CEO
+  dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
+  the joint qualification journal declares only `implementation_sha256`;
+  the campaign checkpoint and stream journal declare only the PrismaQuant and
+  encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
+  and reuses stored shards without rewriting their manifest or digest.
+  The campaign wire-reader wrapper defers only `encoder_source_sha256` and
+  still calls the real cached-unit verifier with that stored field; wire bytes,
+  every other identity field, filename and measured length remain checked.
+  Mixed mismatches, every comparability field and byte-integrity checks still
+  refuse, as does certified mode (`PRISMAQUANT_DEV_MODE=0`). This retires
+  the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash moves
+  only; `--seed-checkpoint` stays the path for real correctness changes,
+  and every comparability field still refuses.
+
+- **Stage the exact public Tessera master D13 pin** (#2262): serving JSON,
+  all serving/development constants and the complete reviewed answer bind
+  `2dbac1910c88254d9c6391f02a34c4b07e516803` / contract v56
+  (`47f180ef…d0aed78`), v11 run-table coverage and four extension rows.
+  Root graph-receipt v2 retains all nine scope fields. The existing
+  fingerprint, provisioning, lane, export and release refusals remain enforced.
+  Route-census scope checks use the existing authoritative scoped-schema set
+  at both entry points, preserving flat-row refusal and valid scoped replay
+  under v11 rather than comparing with the legacy v10 label.
+  Isolated installed-package evidence is not performance, compiled-cell
+  or ship-card qualification; D13 landing still needs the fresh public-source
+  packet and CEO review. No private `608bb` result is transferred.
+
+- **D32 dev-mode metadata stamp-and-continue** (#2302). The existing central
+  default (anything except exact PRISMAQUANT_DEV_MODE=0) now also governs
+  capture metadata owners, source provenance consumers and paired-trade
+  producer/arithmetic/source metadata. Consumers keep stored data without
+  archive, rehash, recompute or proof barriers and mark dev results in-band.
+  Row-to-row probe coordinates, seed/draw/token/noise alignment and KL units
+  (temperature, normalization, distribution) remain mathematical refusals in
+  both modes. Own-byte digests, strict publishing fingerprints, same-held-fd
+  mutation, finite complete numeric dimensions and wire/kernel/resource safety
+  remain. No prices are rescaled or fabricated; no serving qualification is
+  claimed.
+
+- **Verified-capture capacity test isolation** (#2308). Scope its global
+  `os.open` refusal sentinel to the loader call so failed-only pytest temp
+  cleanup does not trip the sentinel after the safety assertion has passed.
+  The real pre-open capacity refusal is unchanged.
+
+- **Mixed-rate COST_UCB_Z and paired rate-trade validity** (#2282, Refs #2281).
+  The existing allocator accepts an explicit `--cost-baseline-assignment`;
+  mixed-rate UCB requires it and matched joint AURA source/probe/currency
+  evidence instead of raising NotImplementedError or dropping uncertainty.
+  The exact group fold retains complete combinations through common-probe
+  paired pricing. One paired arithmetic owner also aggregates projections by
+  routed expert and refuses changes exceeding half the signed layer delta;
+  exactly half is allowed and nonzero cancellation to zero is refused.
+  Signed differences keep their global KL Fisher normalization and are not
+  clipped or rescaled; final candidate totals alone clamp nonnegative.
+  Legacy unpaired stock/uniform paths and zero-z prices are unchanged,
+  apart from the guard on explicitly compared trades. This source correction
+  does not establish corrected campaign prices or close measured P0 #2281.
+
+- **Bounded sorted-JSON consumers route to their existing exact
+  `JsonProfile` recipes** (Refs #1301, follow-up to the byte-hash routing).
+  79 selected scopes / 86 sorted-`json.dumps` calls across 56 package
+  modules now call the profile they already spelled out by options —
+  `DIRECT_ASCII_SPACED_LAX`, `DIRECT_ASCII_SPACED_STRICT`,
+  `DIRECT_ASCII_LAX`, `DIRECT_ASCII_STRICT`, `DIRECT_ASCII_INDENT2_LAX`,
+  `DIRECT_UTF8_LAX`, `DIRECT_UTF8_STRICT` or `DIRECT_UTF8_INDENT2_STRICT` —
+  via `.text`, `.encoded` or `.sha256` exactly where the previous expression
+  consumed text, bytes or the digest of those bytes. Each route is
+  byte-identical to the recipe it replaces: the encoder options and UTF-8
+  encoding step are unchanged. Flags, bytes, refusals, evaluation order,
+  newlines, prefix truncation and source-identity contracts are unchanged,
+  and `digests.py` itself is untouched. Five matching scopes in two
+  protected loaders stay on raw `json.dumps`: the campaign container test
+  loads `prismabuild_progress.py` by run path without package context (its
+  four scopes), and the host row profiler loads `io_spans.py` by file-spec
+  without package context — `tools/pq_profile_source.py:18-25`,
+  `tools/pq_row_profile_observer.py:26` — so `ReadRateReporter._emit` keeps
+  its direct recipe; no fallback loaders were added. `dsv4_campaign_completion.py`
+  extends its existing same-tree file-spec digests owner binding with the
+  two UTF-8 profiles symmetrically in package and no-package mode. The
+  committed per-scope census in
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
+  historical rows and names the 334 remaining gated scopes; #1301 stays open.
+
+- **The tools serializer correction retains only proved routes** (Refs #1301,
+  correction #2320). The original selection was 58 calls in 45 scopes across
+  36 files. The CEO-authorized cutoff retains 40 proved profile calls in 32
+  scopes across 24 files and restores 18 individual unproved expressions to
+  their exact original recipes as explicit #1301 residuals. Proved mixed-scope
+  neighbors and all eight actual lightweight bootstrap repairs remain.
+  Source-routing/profile-echo assertions were removed in favor of actual
+  consumer outcomes and the supported-context launch matrix. Version-three
+  evidence distinguishes boundary and unqualified CPU-fixture behavior from
+  whole-producer/native qualification; all old red runs and late diagnostics
+  remain preserved. The owner-generated gated-scope baseline is 309, a net
+  reduction of 25 from the original 334, with residuals explicitly restored.
+  The staged standard-library worker and unrelated recipe families stay
+  unchanged. #1301 remains open; no speed, serving or full-suite claim.
+
+- **Raw byte-hash constructors route to the digest owners** (Refs #1301).
+  83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
+  package modules now call the existing `prismaquant.digests` byte/text
+  owners (`bytes_sha256hex`, `text_sha256hex`), with the base-bound census
+  of 485 gated digest scopes (434 load-bearing, 51 ephemeral) recorded in
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json`. The slice leaves
+  413 gated scopes as explicit remaining work. One migrated module loads
+  without a package context — `dsv4_campaign_completion.py` (the campaign
+  waiter's file-spec load) — and binds the same named owner functions by
+  loading the same tree's stdlib-only `digests.py` by file path; its three
+  census rows carry that binding note.
+
+- **Three protected digest contracts stay on raw `hashlib` and are
+  excluded from owner routing** (Refs #1301). The packaged KDA capture
+  kernel self-source identity (`kernels/kda_chunk.py` `source_sha256`,
+  sealed as `identity.source_sha256` in
+  `kernels/kda_chunk_qualification.json` and seal-checked by
+  `glm_kda_capture_kernel` admission), the deployed single-file
+  `container_runtime_identity.py` contract (no-package bootstrap and runpy
+  loads; the gold producer byte set lists the file without `digests.py`),
+  and `joint_prewarm_phases.py` (executed by file path without a package
+  by `experiments/glm_data_manifests.py`) keep raw `hashlib`; their four
+  census rows are reclassified as retained protected contracts with
+  file:line witnesses, and their four ratchet rows return to the baseline.
+  Editing any of these files is an identity or contract change, not a
+  mechanical route. No encoding, wire, default or pin change is part of
+  this slice.
+
+### Fixed
+
+- **The nested-rotary meta-skeleton test owns its import process** (Refs
+  #2279, a residual exposure of #2276). `tests/test_dsv4_nested_rotary_init.py`
+  uses the existing `own_process` marker when it shares a pytest session, so a
+  native `transformers.models.deepseek_v4` import in an earlier test cannot make
+  `register_deepseek_v4()` refuse. On main, running
+  `test_streaming_text_only_wrapper_config.py` first failed this test; the
+  reverse order and the test alone passed. The regression runs the real
+  unsupported-configuration predecessor, this test and the native-import
+  refusal control together. Production registration and its native-module
+  refusal are unchanged. The other exposures listed in #2279 are not fixed
+  here, and the issue stays open.
+
+- **Bound paired-rate-trade diagnostic retention to summaries outside the
+  emitted assignment** (#2286). Menu, applicability and diagnostic-trace
+  records keep a bounded summary per priced trade -- priced scalars, refusal
+  verdict, per-group and per-expert means without per-probe arrays, and the
+  canonical digest binding the exact full trade -- instead of storing every
+  complete trade. Only the emitted assignment carries the full paired arrays
+  and per-expert breakdown; refusal stdout prints the summarized rows.
+  Pricing arithmetic, UCB hedging, joint sample/currency/format validation,
+  expert-dominance refusal and reproduction diagnostics are unchanged.
+  The command tests read the complete selected evidence and the actual refusal text.
+  `tools/paired_trade_report_proof.py` measures the real allocation and report paths with synthetic samples.
+  The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
+  The proof records process peaks, output bytes, profiles, and assignment arithmetic.
+  It makes no scientific quality, serving, or GPU claim.
+  The proof tool now uses the public PrismaBuild client to reserve and
+  publish its archive as a retained output batch. It uses the existing
+  exact-byte digest and sorted, spaced, ASCII JSON profiles. The allocator
+  command profiler has a domain-specific name. Both boundary baselines and
+  their scanner rules are unchanged.
+
+- **Correct readiness in the research preflight** (#2329). The census now
+  reports not-ready if any bank rung lacks canonical allow status. It keeps
+  all admission decisions and names the missing `rung_admission` prerequisite.
+  CPU CLI action `53433514eeee` passed the all-allow and valid R768-hold cases.
+  Both cases left HELDOUT payloads unopened. The test does not encode, score,
+  or capture a model.
+- **Authenticated locator aliases survive both real acquisition merges** (#2195,
+  PR #2253). The existing control owner derives one locator-independent request
+  control identity carried through actual row loading, rendering and journals.
+  Checkpoint and scalar-payload joins compare those controls and all real
+  scientific inputs before stamping only raw request provenance. Own-file SHA
+  reads, schedule/source/scope, calibration and numerical refusals stay strict.
+
+- **Acquisition input byte checks participate in the seal ratchet** (#2195,
+  PR #2253). The torch-free input owner is scanned, with only its actual
+  own-byte digest check allowlisted as integrity. Injecting a new recorded
+  producer wall is a causal regression, not an unscanned escape.
+
+- **Acquisition producer identities and locator spelling follow development mode**
+  (#2195, PR #2253). Only recorded live pins and export/grammar source digests
+  stamp and continue; source-state schema and actual request/cost, rate, shape,
+  atomic scope and calibration correctness still refuse. Planning and manifest
+  validation authenticate controls through the existing input owners before
+  separating locator spelling, without trusting a declared digest alone.
+
+- **Authenticated acquisition requests reach complete per-row execution and
+  strict merge through the existing planner** (#2195). Each active atomic
+  cohort keeps the original request/cost/run/probe identity; deferred cohorts
+  remain explicit and produce no zero-work jobs. Whole request/cost bindings
+  precede captures in the torch-free staged readset, with a bounded fenced
+  metadata memo instead of repeated whole-cost reads. Submission and merge
+  require disjoint complete active coverage, exact requested scalar cells,
+  source proofs and common regime settings. Both merges use authenticated
+  checkpoint menus to bind the exact deferred family domain, retaining real
+  unrequested families and refusing fabricated extras. The original raw joint evidence,
+  normal opt-out paths and production/scientific qualification gates remain;
+  no Fisher price, pin/default change or served artifact is inferred.
+
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery lives in the allowlisted staged-lease seam over the same sealed
+  generation; the campaign container carries its launcher-owned
+  `PRISMABUILD_QUEUE_ROOT` and refuses spec forgeries. Legacy residency-map
+  discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
+- **Sealed io buffers open where this interpreter's os lacks
+  `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
+  has no `os.memfd_create`, and every io engine stream entry died on the
+  missing attribute (PrismaBuild action `ded8698fa4d6`). `SealedBuffer` now
+  opens through `io_engine._create_memfd`: `os.memfd_create` when present,
+  otherwise the runtime libc's `memfd_create` wrapper (glibc 2.27+,
+  musl 1.1.20+), with the MFD flags resolved from their ABI-fixed Linux
+  UAPI numbers and a named `OSError` when the runtime libc has no wrapper.
+  The seal-and-verify guard is unchanged; no default, pin, wire, GPU or
+  serving claim.
+
+- **The io engine resolves memfd seal constants without CPython build-time
+  fcntl names** (#1896). Portable interpreters whose build headers predate
+  glibc 2.27 expose only part of the fcntl seal surface, and reading
+  `fcntl.F_SEAL_*` at import crashed the engine there, failing collection of
+  every capture and calibration test file that imports it (qualified CPU venv
+  `pq-cpu312` on dl380g10; PrismaBuild actions `be3dd1332259`, `5e848d8252be`).
+  The numbers now resolve from the Linux UAPI values they denote, ABI-fixed
+  since kernel 3.11, and the kernel stays the authority: each seal is
+  attempted through fcntl and read back through `F_GET_SEALS`. The
+  original-material delivery witness reads seals through
+  `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
+  moved: a buffer still refuses unless the kernel reports all four seals; no
+  default, pin, wire, GPU or serving claim.
+
+- **A joint plan that cannot name its campaign chain is refused by name, at
+  admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
+  plan with no `inputs` block, and the `prepare` GPU action then died on a
+  bare `KeyError: 'inputs'` after the projection prewarm had already
+  allocated — preserved in the #1293 non-release pilot's run-01 S3. The plan
+  grammar now requires the campaign chain `inputs` mapping, shape-checks
+  every bound head-walk key without reading behind the binding, and requires
+  the canonical capture binding; the anchor intake names its missing chain
+  keys in one refusal; the standalone synthesis census read refuses a missing
+  binding by name. A Stage B quantum plan that binds a subset (#1024) still
+  loads in both modes; its test explicitly sets the empty subset instead of
+  depending on the imported fixture default. No gate weakened, no wire, codec,
+  numerical or GPU claim; the named refusal moves the run-01 S3 failure from
+  minutes into a GPU action to a plan-load ValueError naming the absent key.
+  Policy-refusal tests start from the canonical shape-only plan and name each
+  probe, token-scope, temperature and activation-clipping refusal, so an
+  earlier missing-input error cannot hide those guards. The standalone
+  `synthesize` command also takes this complete plan and its canonical capture
+  binding, although it loads neither model nor capture payloads.
+
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+
+- **The RTN FP8 helper keeps finite FP16 zero and tiny rows finite**
+  (#2352; `build_rtn_cache._fp8_round`, parent #1303). The 1e-8 max-abs
+  floor and the resulting `/448` scale underflow FP16 to `0.0`: an
+  all-zero row divides `0/0` to NaN, and a nonzero tiny row divides to
+  ±Inf, which the finite-only E4M3FN cast turns into NaN — every
+  element of the row comes back NaN either way. FP16 inputs now
+  round-trip through FP32 with the dequantized result cast back at the
+  output boundary; FP32 and BF16 keep the original arithmetic and
+  byte-identical outputs (pinned by
+  `test_fp8_round_preserves_fp32_bf16_recipe_bytes`), and the default
+  BF16 cache recipe is unchanged.
+
+- **`file_sha256hex` refuses a zero read count instead of hashing no bytes**
+  (#2344). `read(0)` never advances, so a `block_size=0` caller — including
+  every zero spelling `read` coerces (`False`, any `__index__` zero) — got
+  the SHA-256 of no bytes: any **nonempty** file silently returned the
+  empty-input digest `e3b0c442…855` instead of a digest of its bytes (an
+  empty file already matched that digest, which is how the bug could hide).
+  The owner now
+  raises a `ValueError` naming `block_size` before the first read, whether
+  the file is empty or not. Everything else is unchanged: positive sizes
+  stream in that many bytes per read, `-1` and `None` read the whole file,
+  other negative sizes keep `read`'s own refusal, non-integer sizes keep
+  the `TypeError` from the integer coercion, and a missing path or
+  directory still raises what `open` raises before any read-count check.
+  Regression tests pin the refusal on real empty and nonempty files plus
+  the read-all and type-refusal boundaries.
+
+- **Forward-split relaunches reuse declared producer seals** (#2342). Full
+  retained/running bind identities now use the existing chain-resume
+  classifier before adopting the original identity for exact-session rebind.
+  Calibration/draw/probe/seed/temperature/partition and unknown fields still
+  refuse, including an unknown null field; certified mode still refuses
+  seal drift. Session hashes and prep/entry bytes are never re-keyed.
+
+- **Restore the shared owned-byte digest comparison after the #2283 port.**
+  `read_bound` again routes the acquired-byte hash through the hard `same`
+  comparison before memoizing, preserving `owned bytes: identity mismatch`.
+  A stat-fence drift cannot adopt changed bytes; dev-mode provenance stamps
+  never waive this byte-integrity check. Existing consumer tests stay unchanged.
+
+- **The seed wire filename refusal in `tessera_materialization.finalize()`
+  precedes the source read** (#2310). The check that a seed receipt names its
+  unit/rung destination is now one helper, `_require_seed_wire_filename`, which
+  `_link_seed_wire` and `finalize()` both call; `finalize()` runs it before
+  locating or reading the source wire, so a misnamed receipt is refused without
+  touching its bytes. A regression builds a misnamed seed receipt and checks that
+  nothing reads or links it. No bytes, formats or gates change.
+
+- **Retired interpreter receipts remain history, not active attestation**
+  (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina` stay under
+  `retired_interpreters`, separate from active placement attestations. The
+  inventory reader validates both mappings and refuses active/retired overlap.
+  Following D32, missing or retired host attestation now uses the existing
+  `dev_mode.seal_check`: default dev mode stamps `[DEV-MODE]` and continues with
+  the spec; only `PRISMAQUANT_DEV_MODE=0` keeps the certified refusal. Continuing
+  never marks a retired receipt active or qualifies its runtime. Active SDK4
+  and ROCm entries, inventory shape, container/device and instruction-set
+  checks, actual runtime compatibility and safety remain distinct; no runtime
+  probe, re-pin or new identity gate is added.
+
+- **The collection-time PrismaBuild import guard catches dynamic imports**
+  (#2299). It scans importlib and built-in import calls and decorator arguments,
+  including named local helpers, without entering uncalled test bodies; the
+  source-family test documents its static-analysis limit and rename upkeep.
+
+- **Seed wire filenames are checked before linking** (#2273). Campaign
+  adoption and selected-wire materialization refuse another coordinate's
+  filename without leaving a stray link; a real resume pins registration
+  before receipt reads. The architecture note documents off-menu evidence
+  and the per-cache roster's pre-publication registration contract.
+
+- **The real DeepSeek V4 model-walk export gate owns its import process**
+  (#2276). It uses the existing `own_process` marker when sharing a pytest
+  session, so an unsupported native AutoModel configuration in another test
+  cannot select the gate's model implementation. The regression runs that
+  real unsupported-configuration predecessor, the complete export gate, and
+  the native-import refusal control together. Production registration and
+  its native-module refusal are unchanged.
+
+- **PrismaBuild test imports are owned by tests or fixtures, not collection**
+  (#2265). The control-artifact tests import their installed CAS inside the
+  two tests that use it; the optional prefill decomposer harness imports its
+  candidate inside an explicit graph-detaching module scope. The three readset
+  source consumers also own pinned source scopes, including when pytest
+  preloads the installed package through its public PrismaBuild bound plugin.
+  Every test module now explicitly owns an initially detached import graph,
+  which also covers candidate, published-runtime and imported helper families
+  without adding source prerequisites to unrelated tests. The old graph and
+  parent edges return at module teardown. A syntax-tree regression discovers
+  origin-refusing resolvers across tests, follows imports, fixture parameters
+  and named calls, and runs a representative of every family with the real
+  public plugin preloaded. All origin assertions remain unchanged.
+
+- **Required domain imports and malformed-header consumer refusals stay
+  visible** (Refs #2260, bounded child of #1303).
+  `tests/test_container_qname_owner_1303.py` imports
+  `prismaquant.measure_quant_cost` directly instead of
+  `pytest.importorskip`, so a broken required module now fails the suite
+  instead of silently skipping the per-expert name-decomposition check;
+  that test's assertion is unchanged. `tests/test_safetensors_reader_owner.py`
+  adds one parametrised consumer test that overwrites its small real
+  checkpoint shard with genuinely malformed containers — a file shorter
+  than the u64 length prefix, and a real 8-byte prefix naming an impossible
+  header length — and asserts each consumer's actual visible error
+  boundary: `footprint._read_safetensors_header`,
+  `artifact_completeness._read_safetensors_header` and
+  `autoscale._shard_resident_bytes` propagate the container grammar owner's
+  named `ValueError` from `prismaquant.source_read_plan`, and
+  `pipeline._safetensors_parameter_count` wraps it as
+  `cannot inspect safetensors shard ...` with the owner's reason intact.
+  Test-only: no production behavior, guard, default, format, pin or
+  geometry change; the added coverage does not claim these readers were
+  broken before.
+
+- **Test cost: repeated in-process work runs once; two stale consumer
+  fixtures move from 32 rows to the shared fixture's `OUTPUT_FEATURES`=8**
+  (#1929). The prefill dry-run tables memoize their pure seeded mandatory-set
+  build and legal-domain enumeration per family; three pairs of plan-driver
+  tests read one real driver run instead of two identical ones; the scalar
+  staged publication campaign is shared by its two read-only consumers behind
+  byte-digest guards; and the two stale row-startup consumer fixtures now
+  build `stream_fixture`'s `OUTPUT_FEATURES`=8 rows, with the wrong-shape
+  admission slice derived from `OUTPUT_FEATURES` so the refusal cell stays
+  live. The launcher contract tests share one stdlib-only inspection
+  fixture. Ten old test IDs become six merged or renamed IDs; every test
+  assertion and execution logic is unchanged, and every removed execution's
+  assertions survive on the execution that remains. Production defaults,
+  pins, guards, timeouts, markers, production geometry and the fixture-
+  owning file's geometry are unchanged; line coverage and encode-regime
+  coverage are not measured here and are left to the shared merged batch.
+
+- **The joint prepare's omitted `file_hash_workers` takes `prepare_cache`'s
+  own derivation** (#1382). One derivation for one knob:
+  `prepare_cache`'s `file_load_workers` default and the joint plan's omitted
+  key both resolve through `default_file_load_workers()` — the measured PWC
+  load curve (4 threads), bounded by the PB-assigned CPU affinity the same
+  way an explicit plan value is fenced — and the regeneration tool's one
+  head intake resolves the key through the same resolver. A plan without the
+  key no longer loads render files serially, and an explicit plan value
+  still wins with its existing refusals unchanged.
+
+- **A producer-source checkpoint mismatch names the first file that moved**
+  (#2218, option (c); the writer itself was fixed separately in #2226). The AURA checkpoint
+  manifest records one pass over the producer tree — its aggregate digest
+  and per-file digests — beside the sealed identity, and when a resume's
+  `producer_source_sha256` seal mismatches, the refusal names the first
+  differing relative path with both per-file digests; when the per-file
+  maps match but the aggregate differs, it says the tree changed between
+  the identity's digest and the manifest write. The record is diagnostic
+  only — no gate reads it — and manifests written before it existed keep
+  the plain refusal.
+
+- **An expert-projection refusal no longer writes into the model source, and
+  the carried block's producer entry is described as it is** (#2243).
+  `request_expert_projection` ran both inside-source refusals after writing
+  the stack-plan request file, so a call with an output path inside the
+  checkpoint was refused only after a file had landed in the source tree
+  every later source identity hashes; the refusals (output parent and
+  digest cache directory) now run before any write, and an output path
+  inside the source is refused even when the producer advertises no digest
+  cache. Nothing else moved: the returned projection still carries the
+  caller's `source_digest_cache_use` record, and because
+  `carried_projection` embeds that answer verbatim under `producer`, the
+  docstrings and `docs/ARCHITECTURE.md` now say the carried block's
+  producer entry carries this one caller-side key instead of restructuring
+  the block.
+
+- **The census caller hands the producer's projection a stat-bound digest
+  cache** (#2229, Refs RobTand/tessera#790). `request_expert_projection`
+  passes `--source-digest-cache` whenever the selected producer's CLI
+  advertises it, using a stable directory beside the projection output
+  (caller-overridable, created if absent, refused inside the model source
+  and when the override is an existing file), so a repeated projection of
+  unchanged checkpoint bytes reuses the producer's recorded shard digests
+  instead of re-hashing the whole checkpoint. The producer's
+  `source_digest_cache` receipt stays the producer's own in the answer and
+  invalidation on changed bytes is unchanged; every answer also carries the
+  caller's `source_digest_cache_use` record (`used`, `reason`), so a
+  producer without the option is named and a consumer never branches on the
+  receipt's schema. An explicitly requested cache with such a producer
+  refuses by name. No real census row or idle-GPU measurement is claimed;
+  the tessera#790 acceptance evidence stays open.
+
+
+- **Remaining safetensors header decoders and in-file name grammars read
+  through their owners** (#1303). The model-profile validator's header check
+  and the `chain_roll_bench` / `stage_fed_demonstration` host tools use
+  `source_read_plan.read_safetensors_header` instead of restating the 8-byte
+  prefix + JSON grammar; well-formed files are byte-identical and corrupt
+  prefixes now refuse with the owner's named bound messages. The per-expert
+  cost-name grammar (`measure_quant_cost._PER_EXPERT_NAME_RE`) and the
+  streaming prefix/layer grammar (`streaming_initialization._prefix_layer_index`)
+  are each stated once, and the fused kernel module's unused local
+  `_FP4_E2M1_MAX` literal is removed in favor of the activation-contract
+  constant. Regex acceptance, spans, wire, defaults and served paths are
+  unchanged; the broader domain-numerics census stays open. The benchmark
+  imports the header reader only for manifest spans, so historical child
+  trees need not provide it merely to import the standalone tool. Coverage
+  retains real bytes, spans, grammar results and malformed-header refusals,
+  not source-layout or forwarding assertions.
+
+- **Remaining write paths refuse non-injective cache filename sets at the
+  write open** (#2231, parent #2219). The shared
+  `require_injective_cache_filenames` check now also covers the MTP append —
+  over its own `(qname, canonical format)` coordinates and, when it opens a
+  real cache directory, over the union with the manifest keys already in
+  the cache, before the stale-scope prune or any shard is written — and the
+  joint aura head walk's per-owner
+  check groups names by the resolved owner root instead of the directory
+  string as spelled, so two rows naming one cache directory through
+  different spellings are checked as one cache. The same check now shares
+  the walk's measured-format set, so costed but unmeasured aliases do not
+  refuse distinct render reads (#2231 item 10). The residency docstring now
+  states the prefetch recheck honestly: it runs on every call that has
+  something to load (the `if not keys: return 0` early return skips it),
+  not on every call. Still unrefused at write time, and out of scope here:
+  the campaign encode lane (`tessera_campaign.py`), the `.tessera` wire
+  family (`_wire_path`), `weight_session.py` source snapshots, a
+  `__` separator check on format names, and the packed and dense opens'
+  union with the manifest keys already in a directory they append to.
+
+- **Non-injective production cache filenames refuse at open** (#2219).
+  `_cache_weight_filename` mangles `.` → `_` and `/` → `__`, so distinct
+  qualified names can share one shard leaf while the stored payload is the
+  bare tensor. A shared `require_injective_cache_filenames` check now refuses
+  — naming both coordinates and the colliding filename — wherever a cache
+  directory is opened for a model's rendered coordinate set: the dense fill's
+  render-identity destination check (via delegation), the packed-expert
+  fill, the streaming dense fill, and every residency read — `prefetch`
+  rechecks the whole manifest on every call that has something to load
+  (keys can be popped after fill), and the lazy `get()` load path carries
+  the same check behind a size memo — plus the joint aura head walk's
+  per-owner render reads. Injectivity is filename-level over
+  `(qname, canonical format)` coordinates: an alias pair at two different
+  formats names two different files and is admitted (#1859); the same pair
+  at one format refuses. The mangled filename spelling is unchanged.
+
+- **Campaign, wire and source snapshot writes refuse filename collisions**
+  (#2231). Campaign rendered-file checks retain the whole manifest; wire-file
+  checks include only the wire-owning roster and each new coordinate, allowing
+  dense-only aliases that never wrote a wire. The roster records successful
+  publications and reserves resume/seed coordinates before links or receipt
+  reads, even when their rendered-manifest entries are absent. Batch admission
+  and the ordered writer still refuse real collisions before either write.
+  Concurrent producer admission and ordered publication install one shared
+  wire roster; a stale bootstrap cannot discard an already published owner.
+  Selected-wire materialization reserves the complete group's coordinates
+  before any seed link, resumed wire read or fresh publication, including a
+  missing-first coordinate whose wire name aliases a later seeded selection.
+  The unchanged direct writer in `experiments/pq237_joint_aura_streamed.py:243-260`
+  is not covered by these campaign and materialization guards.
+  Packed expert appends include existing dense keys.
+  Disk-backed weight sessions check the complete snapshot roster before
+  capture or reuse and share the existing cache leaf helper. Every refusal
+  names both coordinates and their shared filename. Cross-format name aliases
+  remain legal when they name distinct files; all on-disk spellings are
+  unchanged.
+  The memory-only multi-token prediction append now has an entry-point test
+  for same-format refusal before rendering and cross-format admission; this
+  pins existing behavior rather than changing it (#2231 item 13).
+
+- **Campaign filename indexing is not adopted** (#2231 item 15).
+  A filename index would need to own every cache-manifest mutation and
+  failed-publication lifetime, not just the campaign writer, to retain the
+  rendered-file refusal set. No before/after measurement establishes a material
+  cost here, so the index is not worth adding for this low-priority follow-up;
+  complete destination checks remain and no speed improvement is claimed.
+
+- **Projected preparation validates effective CUDA allocator settings**
+  (#2039, PR #2247 hardening). An in-process allocator setter followed by an
+  empty-string reset can leave expandable segments active while the snapshot
+  configuration text is empty. The existing default-native guard now also
+  requires the qualified PyTorch 2.11 effective defaults: expandable segments
+  off, signed SIZE_MAX split bound, zero garbage-collection threshold and the
+  complete all-zero rounding table. Public C10 getters also read the sticky
+  large-segment and nonsplit-rounding sizes the snapshot omits; both must be
+  their derived 20-MiB defaults. The tiny read-only bridge reuses the existing
+  locked Torch extension loader/cache and packages its C++ source; no CUDA
+  kernel, Torch rebuild, state reset or serving-pin change is involved.
+  Missing, nondefault or unpriced fields refuse before source reads. Real
+  setter/reset regressions run in isolated PB child processes so global
+  settings never leak into the suite, including the large-segment-only reset.
+  The full-pass reservation, source ownership, four credits, cap, ordering,
+  lifetimes and cancellation are unchanged; no tighter or performance claim.
+
+
+- **The head-wait credit control holds the second launch's token** (#2039).
+  The control test for mid-wait credit reaping decided which launch's
+  completion token to hold after the event had already appended itself, so it
+  held the FIRST launch's token, stranded that credit for the whole test and
+  could never reach the mid-wait admission it exists to prove. The decision
+  now happens before the append. Its read-order check also assumed FIFO worker
+  starts, which the shared two-thread executor does not promise. The control
+  now forces a legal out-of-order read and proves coordinator CUDA launches
+  remain ordered, while retaining the mid-wait fifth-read credit gate.
+  Control-only; production admission and lifetime semantics are unchanged.
+
+- **Projected preparation reserves comparison and allocator residency**
+  (#2039, PR #2247). The previous element-count term was the full-size bool
+  comparison-mask allowance, not staged-copy byte pricing: staged bytes were
+  already charged by the private-byte bound. Replacing that term removed the
+  mask allowance and charged retained verdicts/settle storage as logical bytes
+  even though the guard reads CUDA allocator segments. The opt-in path now
+  conservatively charges a fresh native allocator segment for every staged
+  copy, comparison mask, reduction workspace, retained verdict and per-device
+  settle stack across the entire pass, without assuming cache or stream reuse.
+  Nondefault or unavailable allocator settings refuse before source reads;
+  serial preparation is unchanged. Actual CUDA reserved-growth and early
+  refusal regressions replace the arithmetic-only reservation assertion.
+  Four credits, the finite private-byte cap, authentication, ordered refusals,
+  lifetimes and cancellation remain intact. The historical device timing is
+  an unqualified same-host screen, not a host-copy causality, residency saving,
+  energy/work-per-joule or campaign qualification claim.
+
+- **Ordered projected preparation reaps freed credits during the head wait**
+  (#2039). The coordinator held all four credits until the ordered head's
+  staging wait returned at the loop top, so a launch whose completion event
+  fired mid-wait idled both read-pool workers instead of admitting the next
+  source read. The head wait now reaps completed events and admits through
+  the same finite-credit rule before each bounded result poll. Admission
+  order, the serial-fallback exclusion, private-buffer lifetimes through
+  asynchronous completion and cancellation drains are unchanged; the paired
+  device timing comparison is a separate measurement.
+
+
+- **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
+  (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
+  private source/capture identities, full-width Hessians and every existing
+  byte/refusal/window assertion while encoding fewer output rows. The preserved
+  acceptance is branch and assertion coverage, not encode-regime coverage: at
+  eight output rows several derived sweep reps stay inside the trellis start
+  transient taller fixtures passed through, while the row-stream window rep
+  (E4M3 K1 R1024, L=14 at 4 rows) still shifts past its window and reaches
+  steady state. The Hessian
+  predicate sweep still derives every family, wire recipe and scale plane,
+  with real encodes sized to complete arity/span groups rather than a model-sized
+  weight matrix. Production defaults, pins, guards and timeout/skip policy are
+  unchanged; this fixture change is not GPU or scientific qualification.
+
+- **Connected PB fixtures own their authenticated import contexts** (#2192).
+  Explicit source fixtures detach and restore the canonical PB graph, fleet
+  tools and parent-package edges around their existing reviewed source pin.
+  Module-scoped movers retain that graph until their work finishes; installed
+  SDK controls retain their own provenance. Removed and orphaned module edges
+  restore exactly, so differential monkeypatch targets remain identical.
+  Production source-origin refusals, dependency pins, framework generation and
+  the next-full negative gate are unchanged; no deployment or native GPU claim.
+  Candidate qualification retains named refusal details, and real guard
+  controls distinguish rejected in-checkout generated executables from
+  sibling fixture work preserving the same source HEAD. Qualification places
+  pytest scratch outside the authenticated checkout without moving compiler
+  TMPDIR, adding ignore rules or changing the cleanliness guard.
+  Ticket scenarios send the pinned broker's actual scope-ID intent fields;
+  malformed requests remain failures instead of being mislabeled as missing
+  creator cgroup membership. Actual membership refusal remains nonqualified.
+
+- **Original-containing guard regressions retain their existing owners and
+  refusal semantics** (Refs #2198, #2125). The seal ratchet classifies the
+  issued session's real pending-policy and metadata-owner checks, removes the
+  obsolete rebind entry and still rejects an extra run seal at every changed
+  scope. Original snapshots and publication bytes use the exact shared JSON
+  profiles; identity comparison and source-dispatch validation reuse their
+  existing owners while retaining distinct Original/native type, backend and
+  error policies. Offline Stage A fixtures provide their real legacy context
+  instead of relying on a production fallback. Native reader, resource, CUDA,
+  source-admission and automatic-capture gates are unchanged; these corrections
+  do not establish full-suite, GPU, scientific or serving qualification.
+- **Original checkpoint metadata uses its generic public source owner**
+  (#2200). Core checkpoint and streamed identities share
+  `source_generation.original_checkpoint_description`, rather than reaching
+  directly into the PQ-internal Tessera calibration domain. The old private
+  core copy is gone; exact class qualification, absolute-root equality,
+  descriptor provenance and refusal vocabulary remain unchanged. CPU
+  metadata tests do not establish original GLM/native/capture admission.
+
 - **Original CUDA fixture dependencies use the existing source-owned pins**
   (#2188). The finite pure-Python packer resolves the authoritative PB and
   Tessera pins through their existing stdlib owners, and the inner fixture
@@ -114,6 +1111,11 @@
   device predicate first and supplies the same owned config/profile to the
   streaming builder. Legacy capture behavior and original CUDA/automatic-source
   admission remain unchanged; no provider or GPU qualification is implied.
+- **Checkpoint incoming readset slice agreement is explicitly classified by
+  the seal ratchet** (#2176). The exact one-site entry follows the existing
+  conservative Stage A slice-binding classification. Foreign slice references
+  still refuse in both dev and certified modes; a second identity check still
+  fails the ratchet. No runtime guard, scanner rule or existing control changes.
 - **PACT regression fixtures retain their declared synthetic standing after
   JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
   now writes a JSON legacy digest-bound artifact rather than plain text. Real
@@ -121,6 +1123,11 @@
   replay remain active; no checker attestation or GPU price is fabricated.
   The numerics-pair exporter tests require the already-declared `gguf` full
   dependency, not a changed numeric golden or a skipped arithmetic regression.
+- **Remaining producer test callers use the qualified public dependency** (#2158).
+  GLM census/capture and stack CLI fixtures select the declared producer
+  interpreter with verified installed-package provenance. Namespace and
+  materialization handoffs exercise the supported PrismaQuant plan writer,
+  not retired Tessera experiment scripts. Serving pins and assertions remain.
 - **Expert projection uses Tessera's public installed producer CLI** (#2128).
   The campaign invokes `python -m tessera.producer_plan` with the unchanged
   `tessera.expert_projection.v1` contract; it no longer locates an experiment
@@ -128,11 +1135,39 @@
   package containing Tessera #871. Export/serving pins and admission stay fixed.
   `TESSERA_PRODUCER_PYTHON` can select a separate installed producer without
   changing the pinned consumer/serving package; explicit `python=` overrides it.
+- Prepare Tessera lane-schema v11 readers without moving the live b40c93cb/v45
+  producer or serving pin. Window-rate rules and census-derived run tables are
+  validated once per family and retained separately from the census rungs.
+  Runtime, render, profile and shape-price lookups share their derived coverage;
+  legal-domain reports use the same parser. This is compatibility preparation,
+  not new native, compiled, TP2, quality, construction or release qualification.
 - **Native MoE source replay binds the geometry's original router bias** (#2144).
   GLM's strict FP32 `correction_bias` identity is checked with the whole
   expert-roster shape; LFM retains its existing `selection_bias` identity.
   Independent source/runtime/calibration and exact tensor-byte checks remain
   mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
+- **Matched-byte control uses Tessera's public installed CLI** (#2168).
+  The standing plan/verify producer is `python -m tessera.uniform_control`,
+  emitting the existing versioned control handoff without experiment checkout
+  imports. The lane can name a separate `TESSERA_PRODUCER_PYTHON`; pinned
+  serving packages and all existing unserved/byte/KL/shipping refusals stay fixed.
+- **Installed GLM evidence consumers have their container identity owner**
+  (#2190). The sole stdlib implementation is shipped as
+  `prismaquant.container_runtime_identity`, rather than imported from an
+  absent checkout-only `tools` package. Live API and bootstrap paths migrate
+  together; direct-file bootstrap still authenticates the mount before
+  importing PrismaQuant. Image fingerprint bytes, runtime/source identity,
+  duplicate-JSON refusals and scientific gates are unchanged.
+  Launcher regression fixtures now supply complete Docker inspection metadata
+  to that owner instead of patching a removed launcher-level digest export.
+
+- **Authenticated shape-time tables refuse unmeasured admission** (#2094, PR #2112).
+  Conversion and reload compare the independently expected panel digest to
+  authenticated bytes. Nonempty rate pools and legacy or synthetic digest-only
+  receipts now refuse at `--pact-shape-table` intake; only checker-bound rows
+  price allocator/frontier options. Receipt reads reuse the bounded checker
+  envelope and malformed bindings refuse cleanly. The serving pin, SDK4 source
+  contract and independent native/serving qualification are unchanged.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).

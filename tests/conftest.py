@@ -40,6 +40,19 @@ def _installed_contract() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
 
 
+def set_cell_census(payload: dict, cell: dict, rungs: list[int]) -> None:
+    """Change a valid fixture census and its v11 derived run-table metadata."""
+    from prismaquant.lane_eligibility import _allowable_rung_tables
+
+    cell["rungs_q256"] = list(rungs)
+    if "run_tables" in cell:
+        row = next(r for r in payload["formats"] if r["family"] == cell["family"])
+        tables = _allowable_rung_tables(row, "fixture.formats")
+        cell["run_tables"] = [list(t) for t in sorted(
+            {tables[r] for r in rungs})] if tables else []
+
+
+
 def down_convert_lane_table(payload: dict, schema: str) -> dict:
     """The installed contract, expressed in an OLDER lane grammar.
 
@@ -286,6 +299,15 @@ def installed_helper_sdk(tmp_path, monkeypatch):
     yield sdk
 
 
+@pytest.fixture
+def pinned_pb_source():
+    """Explicit, non-autouse ownership of the reviewed PB source graph."""
+    from fullstack_pb_generation import source_bound
+
+    with source_bound():
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.
@@ -414,6 +436,27 @@ def _no_staged_tier_policy_carried_between_tests():
     deactivate_staged_tier_policy_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _no_activation_scale_policy_carried_between_tests():
+    """No test inherits another test's ``PRISMAQUANT_PROD_ACT_SCALES``.
+
+    ``run_adjoint_capture`` writes the sealed ``production_act_scales`` of its
+    config into the process environment, and the in-process stage-A tests feed
+    it ``"0"``. The variable changes what the joint lease does (it skips the
+    calibrated clamp), so a test that compares against a clamping oracle failed
+    whenever ``--dist worksteal`` put it on a worker after such a test (PQ
+    #2230's dense sidecar oracle failed on a Spark this way). Restore the
+    incoming value, or its absence, after every test.
+    """
+    from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
+    incoming = os.environ.get(ACTIVATION_SCALE_ENV)
+    yield
+    if incoming is None:
+        os.environ.pop(ACTIVATION_SCALE_ENV, None)
+    else:
+        os.environ[ACTIVATION_SCALE_ENV] = incoming
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _no_prismabuild_import_carried_between_modules():
     """No module inherits another module's ``prismabuild`` imports (PQ #1281).
@@ -424,10 +467,17 @@ def _no_prismabuild_import_carried_between_modules():
     ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back.
+    teardown puts the imports back. This module explicitly owns a detached,
+    initially unbound graph: collection or a public pytest plugin may have
+    imported the installed package before setup. Clearing only those cached
+    entries lets each resolver choose and authenticate its own source; it
+    neither pins a default nor weakens an origin assertion. Installed-build
+    tests still import from their original paths, and teardown restores the
+    exact pre-existing module objects and parent edges. Test imports themselves
+    must remain inside a test or fixture (PQ #2265).
     """
     from fleet_sdk import prismabuild_imports_restored
-    with prismabuild_imports_restored():
+    with prismabuild_imports_restored(detach=True):
         yield
 
 
@@ -676,33 +726,48 @@ FLEET_DATA_ENV = "PQ_FLEET_DATA_TESTS"
 FLEET_DATA_SKIP_REASON = (
     f"{FLEET_DATA_MARK}: reads fleet data PrismaBuild does not declare "
     f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
+TASK_SUITE_MARK = "task_suite"
+TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
+TASK_SUITE_SKIP_REASON = (
+    "task_suite: run the required layered gate with -m task_suite or "
+    "PQ_TASK_SUITE_TESTS=1; recorded 76 passed, 0 skipped; "
+    "action 5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859; "
+    "receipt 1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb")
 
 
-class _FleetDataSelection:
-    """Skip ``fleet_data`` tests unless the run asks for them."""
+class _ExplicitMarkerSelection:
+    """Report a skip unless the run selects the required environment."""
 
-    @staticmethod
-    def requested(config) -> bool:
-        return (os.environ.get(FLEET_DATA_ENV) == "1"
-                or FLEET_DATA_MARK in (config.getoption("markexpr", "") or ""))
+    def __init__(self, mark, environment, reason):
+        self.mark = mark
+        self.environment = environment
+        self.reason = reason
+
+    def requested(self, config) -> bool:
+        return (os.environ.get(self.environment) == "1"
+                or self.mark in (config.getoption("markexpr", "") or ""))
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection_modifyitems(self, session, config, items):
         if self.requested(config):
             return
         for item in items:
-            if item.get_closest_marker(FLEET_DATA_MARK) is not None:
-                item.add_marker(pytest.mark.skip(reason=FLEET_DATA_SKIP_REASON))
+            if item.get_closest_marker(self.mark) is not None:
+                item.add_marker(pytest.mark.skip(reason=self.reason))
 
 
 def pytest_configure(config):
-    config.pluginmanager.register(_FleetDataSelection(), "pq-fleet-data-selection")
+    config.pluginmanager.register(_ExplicitMarkerSelection(
+        FLEET_DATA_MARK, FLEET_DATA_ENV, FLEET_DATA_SKIP_REASON), "pq-fleet-data-selection")
+    config.pluginmanager.register(_ExplicitMarkerSelection(
+        TASK_SUITE_MARK, TASK_SUITE_ENV, TASK_SUITE_SKIP_REASON), "pq-task-suite-selection")
     config.addinivalue_line(
         "markers",
         f"{OWN_PROCESS_MARK}: the module needs a pytest process of its own. In "
         "a session that collects other modules too, its tests run in one "
         "child pytest and report back under their own node ids (PQ #1008).")
     _load_prismabuild_test_bound(config)
+
 
 
 class OwnProcessFailure(Exception):

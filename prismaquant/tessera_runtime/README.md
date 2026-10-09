@@ -39,8 +39,220 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
+## Current pin: contract v60
 
-The current pin is Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a`,
+The pin names Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).
+The contract uses v60 and lane schema v11.
+Its raw SHA-256 is `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+The canonical remote supplies these bytes, not a working checkout.
+
+The v56-to-v60 contract changes are:
+
+- The construction table uses the selective constructor override and the current GLM receipt.
+- The producer interface adds `src/tessera/export_serving.py` to the reuse-authority drivers.
+- The stock override table adds the default-off `TESSERA_GLM53_MHC_FUSED` method.
+- Tessera #1033 adds the attention projection APIs and routes.
+
+The lane cells, format rows, activation rows, and four native-extension rows remain unchanged.
+Construction shows module reachability, not a successful weight load or forward result.
+No default, seal, active measurement, or D13 overlay changes in this pin move.
+The isolated CPU interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python`.
+The review parent checks the exact head before the independent pool review.
+The PrismaQuant integrator owns the merge.
+
+Resolve the exact commit from the canonical remote:
+
+```bash
+TS=/home/rob/tmp/tessera-pin-probe-$$
+mkdir -p "$TS"
+git -C "$TS" init -q
+SHA=fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb
+git -C "$TS" fetch -q https://github.com/RobTand/tessera "$SHA"
+git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha256sum
+```
+
+Use `tools/resolve_tessera_dev_pin.py` to read the development pin.
+Use `tools/provision_tessera_pin.py` to install and compare the package bytes.
+Install the canonical Git URL in the isolated interpreter to retain its exact commit metadata.
+Generate the admission answer with `contract_answer` in that interpreter.
+Generate the identity snapshot with `tests.tessera_serving_identity_snapshot`.
+Route each CPU action through PrismaBuild with `--tag x86 --env TMPDIR=/tmp`.
+
+
+PB `da8fbb6d706a668c98cbe2f2841a6365eaff90d3e3851a6bab76c849f851cd87`
+generates the answer and snapshot from the installed contract.
+The answer remains unchanged; the snapshot changes only its pin commit and contract digest.
+The installed package digest is `68486e33ae4d8ba93d83fd94b0e396e153a69aeece7a75da84524b2ee0ba88c2` over 127 files.
+The Git metadata names the canonical remote and exact commit.
+
+PB `92867be921aec5d64f5c1361bfb5817d281badba94661e01f0231c39e5a246a7`
+passes `require_pinned_tessera_runtime` and both real export preflights.
+The action uses CPU metadata only, with no model weights.
+It records these exact commands:
+
+```bash
+/home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m prismaquant.tessera_export_lane --model /tmp/pq-v60-preflight-z234_i73/dense --tessera-platform sm_121 --tessera-runtime-image vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14 --tessera-execution-mode eager --tessera-residency resident
+
+/home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m prismaquant.tessera_export_lane --model /tmp/pq-v60-preflight-z234_i73/routed_moe --tessera-platform sm_121 --tessera-runtime-image localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5 --tessera-execution-mode eager --tessera-residency resident
+```
+
+The output reports `tessera lane OK` for `dense` and `routed_moe`.
+Both commands return zero and produce no stderr.
+The complete commands and output are in `/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0/preflight.json`.
+The earlier failed actions `b1df45193f42` and `dce89e57985c` remain in the owned record.
+The first action had no build backend. The second installed Tessera, but its inline data probe failed.
+
+The installed producer also adds `tessera.rung_allowability`, which the previous pin does not package.
+The test population includes `test_rung_allowability.py` and `test_rung_allowability_versions.py`.
+Keep the overlay packages unchanged after the six conditions pass.
+
+
+## CPU population for the v60 pin
+
+The 49-file population used four x86 shards and one targeted correction.
+The initial result was 1,065 passed, one failed, and one skipped.
+The failed test copied the audited source roster.
+Its wire checks remain and pass in correction action `ce33bde128ff`.
+The reconciled population has 1,066 passed, one skipped, zero failed, and zero errors.
+The reconciliation replaces earlier outcomes by node ID; it does not add duplicate passes.
+
+All 1,067 selected nodes have outcomes.
+All 49 modules collected tests; no module remains uncollected.
+The sole skip is `test_explicit_publisher_v5_contract_admits_only_complete_matching_contexts`.
+Its reason is: "explicit immutable v5 publisher contract was not supplied".
+That skip supplies no historical-v5 qualification.
+
+The runs used Python 3.14.4, Torch 2.11.0+cpu, pytest 9.1.1, and xdist 3.8.0 on dl380g10.
+The device population was CPU only; CUDA was unavailable and `CUDA_VISIBLE_DEVICES` was empty.
+No GPU arm ran.
+Each shard used one CPU, four GiB, one native thread, and scratch under `/tmp`.
+
+| Initial shard | Action | Passed | Failed | Skipped |
+|---|---|---:|---:|---:|
+| 1 | `b231a219ed47029f03e59bede14b3dfe257ca2a5f788b2f87872c6a3fd1902a1` | 349 | 0 | 0 |
+| 2 | `a07852542c2e4105625e22417d53a17e463a888712247fccb818d2f99a09ea70` | 266 | 0 | 0 |
+| 3 | `b5d55c096ab10238a8ae4a930a190220c3c5e592ed5599339f374c808d85d184` | 265 | 1 | 1 |
+| 4 | `5526fc51e45ed45564161d118bae5af2316919774d59d3ee0bad7e2ef0f5fa04` | 185 | 0 | 0 |
+
+The correction action is `ce33bde128ffcfe8d856849b56e08e30cff8637c7d7e37a78412e301fc04fff9`; its three targeted tests pass.
+The failed shard remains failed in the record.
+PB `65e5a0168bab` uses the published snapshot owner to compare the four initial snapshots.
+Their 3,470 tracked source files agree after only owner-verified generated metadata leaves the comparison.
+The source digest is `15ca467cbaa0bd9eba93929892a2be19545ab0702f6c77d523fe181f45963fa5`.
+
+The new canonical producer changes which tests can reach the D41 validators.
+Both `test_rung_allowability.py` and `test_rung_allowability_versions.py` pass 26 tests in shard 1.
+The previous pin does not package `tessera.rung_allowability`.
+Without the external test override, its positive admission and version-dispatch cases cannot reach that API.
+That old result follows from source inspection, not a second test run on D13.
+The no-table refusal controls do not depend on the missing API.
+
+PB `f05313eeee06` compares captured origin/main `50ec6c1` on D13 with branch source on the new overlay.
+Both overlays remain unchanged.
+Only `contract_version` and `reviewed_contract_sha256` differ in its fixture outputs.
+The canonical layer oracle excludes only those two fields.
+It retains the commit, read digest, read-byte comparison, contract path, and every other value.
+Both stored outputs hash to `57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9` over 13,622 bytes.
+
+The evidence directory is `/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0`.
+It contains the preparation, preflight, shard summaries, complete outcomes, source audit, and retained allocation outputs.
+These results prove CPU reader and metadata behavior, not a served model or performance change.
+The final oracle check is PB `62678617d06b38f536343af36ad2a3fe96beeee9c30da605d01f56831fb1f90d`.
+It calls the final normalizer on both retained outputs and passes without another allocator run.
+The six-field proposal remains historical; the final test excludes only the two observed fixture fields.
+
+
+
+## Previous pin: contract v56 (PQ #2262)
+
+The previous pin named Tessera
+`2dbac1910c88254d9c6391f02a34c4b07e516803`, contract v56, raw SHA-256
+`47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78`.
+The v11 rule covers a non-census rung only when its derived run table was
+censused in that exact cell. Census rungs remain separate. The complete
+answer, four native-extension rows, runtime scope, plugin, lane and
+evidence predicates are retained; 22 cells remain eager and none compiled.
+The previous v45 package still refuses by digest and reviewed-answer drift.
+
+PB action `bb2911530f0390c7ede9504761d620e8e35468fe766fcaf3902ce4ea62352f2c`
+installed the exact source in isolated DL380 overlay
+`/home/rob/venvs/pq-d13-candidate-2dbac191/bin/python`, without replacing
+any shared default interpreter. Under `-I`, the installed package and
+source both hash to `322d21bc03f7e936f836da098cd202b0b9d9d5db869422dd0f2cf0bef985fbe8`
+over 118 shipped files. Root `tessera.graph_receipt` imports v2 with
+`verify(receipt, serve) -> str | None` and all nine fields including fabric;
+TP1 uses `none`, TP2+ uses `socket` or `roce`, and v1 card verification refuses.
+This is Python/install availability, not native binary or model qualification.
+Raw log: `/home/rob/fleet/inventory/kernels-d13-preparation-20261005.log`;
+identities and full old-answer drift:
+`/mnt/shared/tessera-measurements/d13-public-master-2dbac191/preparation.json`.
+
+The final non-editable Git install is PB
+`7f50b73fca5cfab880bbffcf8ff7e939803975c1e37883e30cec6c776d6dd16e`;
+`direct_url.json` records the real public remote and exact full commit, not
+a manually restamped local install. The verified source manifest hashes
+all 1,910 archived files to
+`f7f331f6fb77d7dd5a688ff773a6a571e1cb8ade961b6a6c8c3a82736175958f`.
+PB `7da66126cebfe7e1c88b6e07e3fa7b56a8c850d6a95cabb11e8052ec67f21eb8`
+ran valid LSP references for all eight authoritative pin constants using
+python-lsp-server 1.12.2, Jedi 0.19.2 and Parso 0.8.5. The initial
+Parso 0.8.4/Python 3.14 zero-result queries are not qualification.
+The admitted 37-file test action `30f1aeb54b128dc241796e9efe5e2405719a92a9af5728d289876716506704bf`
+was refused before pytest because the owned overlay inherited duplicate
+Tessera metadata. Its zero-execution failure is retained; no dependency
+guard or shared default interpreter is changed to make it pass.
+
+The duplicate metadata was removed only from the owned overlay search path
+through a dependency shadow; inherited parent/default environments remain
+untouched. Actual installed-v11 behavioral control
+`6852eb7392c7e9d1e8b8f414906e5690ffc6e750a4b917948fb2a7f77179abdc`
+failed all three original policy cases. Both scope classifiers now use
+`SCOPED_LANE_SCHEMAS`; #214 exact flat fill/verify refusals are preserved.
+The corrected v56 fixture/coverage population
+`b53bd4c5367a1d11542207d3f2b761ab771708418da4c85c9472f8602768ef0c`
+passed 31 tests with zero failures/skips, including the real-loader v11
+scoped fill/replay control and explicit rate/rule-boundary controls.
+This does not erase the earlier failed full candidate run or its data faults.
+
+The completed full tracked-live AST/schema-LSP audit
+`0dffad99abd5ca416fac29d60f1e94cf10015e4614679eeaa7da7bba38616f14`
+scanned 1,747 Python files and all 51 relevant comparisons. No production
+old-v10/legacy-label equality remains. The five v11 equalities deliberately
+kept select run-table grammar, coverage inventory and allowance projection,
+not generic scope. Full inventory and reviewed rationale:
+`/mnt/shared/tessera-measurements/d13-public-master-2dbac191/schema-comparison-sweep.json`
+and `/home/rob/fleet/inventory/kernels-d13-schema-comparison-reviewed-20261005.json`.
+PB `80662975483d47eefb21d733ec666751309053555947d34893052b47b8d363fc`
+compiled all five affected reader/pin modules, rechecked the installed
+contract/package with no drift and sealed the inventory/control file hashes
+in its actual CAS output. These are CPU correctness/install facts only.
+
+
+The composed 39-file pin/provisioning/reader/export/fingerprint/doc population
+then completed under the exact Git-installed overlay: PB
+`357857d174f6a5fac067c865eb7810ef32d410d02f4a54d6f12130a849b8d89d`,
+907 passed, zero failed, one skipped. The sole skip is the separately
+opt-in immutable historical-v5 publisher fixture not being supplied; active
+v56 pin/install/API controls ran. Log and per-shard record:
+`/home/rob/fleet/inventory/kernels-d13-final-composed-20261005.log` and
+`/home/rob/fleet/inventory/kernels-d13-final-composed-results-20261005.json`.
+CPU-only, two workers/cores, eight GiB total, one native thread per worker;
+CUDA/native serving, model equality, speed, power and release qualification
+are not claimed by these 907 passes.
+
+
+
+D13 still requires fresh exact-source performance/profiles/both-Spark power
+and CEO review before landing/promotion. CEO approved Option A in
+`dec-1005-023421-75cf`: qualify and review this exact candidate first,
+then measure only that candidate in the controlled window. Main and
+promotion stay held. Private `608bb`/1770 receipts do not transfer.
+Neither zero compiled cells nor a missing future artifact is invented as
+a module-availability prerequisite; both keep their real independent
+release gates. Pin schema v2 and the advisory release label do not change.
+No serving-runtime code is imported or vendored into PrismaQuant.
+
+The previous pin was Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a`,
 master's merge of #730 on 2026-09-29 (tessera#729, PQ #1739). It fixes the
 routed MoE loader, which stored the tensor-parallel row-cut start state in the
 original column order and so corrupted rank-1 gate/up weights on mixed-rate
@@ -543,8 +755,8 @@ only one split identity, is drift rather than a silently ignored field or a
 missing-key exception. A future activating review must transcribe both v3
 identities into its frozen state; this change does not fabricate them for v2.
 
-This is the metadata-report slice deferred by #1574. The current v45 contract
-still has 14 cells and none names its serving code; producer requalification,
+This metadata-report slice was deferred by #1574. At #1768 the v45
+contract had 14 cells and none named its serving code; producer requalification,
 `contract_answer`'s code-column review and a separately reviewed v3 pin remain
 required. No cell promotion, new GPU/serving measurement or live pin change is
 claimed by the CPU reader tests. The existing package-source matcher and

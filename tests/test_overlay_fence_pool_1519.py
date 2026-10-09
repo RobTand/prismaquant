@@ -57,7 +57,7 @@ class _DigestProbe:
                     self.active -= 1
                     self.completed.append(str(handle.name))
 
-        monkeypatch.setattr(jce.hashlib, 'file_digest', probe_digest)
+        monkeypatch.setattr(hashlib, 'file_digest', probe_digest)
 
 
 @pytest.fixture

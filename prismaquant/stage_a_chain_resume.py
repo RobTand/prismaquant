@@ -63,7 +63,6 @@ That dispatcher contract is not exercised by the fixture tests.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -73,6 +72,7 @@ from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publis
 from .dev_mode import NOT_COMPUTED, seal_check
 from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
 from .matmul_arithmetic import BF16_REDUCTION_FIELD
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -168,9 +168,25 @@ def _chain_wall(name, recorded, recomputed) -> bool:
         return False
     if not isinstance(recorded, dict) or not isinstance(recomputed, dict):
         return True
-    return any(recorded.get(key) != recomputed.get(key)
+    return any(key not in recorded or key not in recomputed
+               or recorded[key] != recomputed[key]
                for key in set(recorded) | set(recomputed) if key not in seal_keys)
 
+
+def require_chain_fields_equal(recorded, recomputed, *, fields=_COMPARED,
+                               where="Stage A chain resume") -> None:
+    """Compare declared chain fields with one seal/comparability classifier."""
+    differing = [name for name in fields if recomputed.get(name) != recorded[name]]
+    if not differing:
+        return
+    refusal = ChainResumeRefused(
+        "the relaunch is not the run its chain state seals; it differs in "
+        + ", ".join(differing))
+    if any(_chain_wall(name, recorded[name], recomputed.get(name)) for name in differing):
+        raise refusal
+    for name in differing:
+        seal_check(f"chain state {name}", recorded[name], recomputed.get(name),
+                   where=where, refusal=refusal)
 
 def _seal(document: dict) -> dict:
     body = {key: value for key, value in document.items() if key != "chain_state_sha256"}
@@ -201,14 +217,13 @@ def build_chain_state(*, run_identity, stride, boundary_storage, bind_identity, 
 
 def write_chain_state(space, document) -> dict:
     """Publish the chain state once; a second writer refuses."""
-    payload = (json.dumps(document, sort_keys=True, separators=(",", ":"),
-                          allow_nan=False) + "\n").encode()
+    payload = DIRECT_ASCII_STRICT.encoded(document) + b"\n"
     path = chain_state_path(space)
     if not publish_new_bytes(path, payload):
         raise ChainResumeRefused(
             f"{path} already exists: a run's chain state is written once, at its "
             "tail checkpoint")
-    return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()}
+    return {"path": str(path), "sha256": bytes_sha256hex(payload)}
 
 
 def load_chain_state(space, sha256) -> dict:
@@ -220,7 +235,7 @@ def load_chain_state(space, sha256) -> dict:
         raise ChainResumeRefused(
             f"the run has no chain state at {path}: only a run that sealed its "
             "tail checkpoint under #1001 can resume its chain") from exc
-    if hashlib.sha256(raw).hexdigest() != str(sha256):
+    if bytes_sha256hex(raw) != str(sha256):
         raise ChainResumeRefused(f"{path} does not have the pinned digest {sha256}")
     document = json.loads(raw)
     if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA
@@ -379,18 +394,7 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
         raise ChainResumeRefused(
             f"{adjoint_receipt_path(space)} exists: the run completed and has no "
             "chain left to resume")
-    differing = [name for name in _COMPARED if recomputed.get(name) != document[name]]
-    if differing:
-        refusal = ChainResumeRefused(
-            "the relaunch is not the run its chain state seals; it differs in "
-            + ", ".join(differing))
-        if any(_chain_wall(name, document[name], recomputed.get(name)) for name in differing):
-            raise refusal
-        # Only run seals differ (PQ #1147). A relaunch may pass NOT_COMPUTED
-        # for an input it would derive only to compare it here.
-        for name in differing:
-            seal_check(f"chain state {name}", document[name], recomputed.get(name),
-                       where="Stage A chain resume", refusal=refusal)
+    require_chain_fields_equal(document, recomputed)
     from .cost_streaming import boundary_storage_layout_differs
 
     storage = document["boundary_storage"]

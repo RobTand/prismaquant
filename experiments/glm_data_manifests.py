@@ -208,7 +208,10 @@ def git_commit(tree: str) -> str:
 #: repository root.
 PRODUCER_SOURCES = ("experiments/glm_data_manifests.py",
                     "experiments/glm_arc_prewarm.py",
-                    "prismaquant/tessera_campaign_selection.py")
+                    "prismaquant/tessera_campaign_selection.py",
+                    "prismaquant/tessera_acquisition_inputs.py",
+                    "prismaquant/digests.py", "prismaquant/file_identity.py",
+                    "prismaquant/schemas.py")
 
 
 def producer_source_sha256() -> str:
@@ -284,12 +287,11 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                    argv: "list | None" = None) -> dict:
     """One row's read set, in the order the row consumes it.
 
-    Captures come first because ``prefetch_capture`` runs before the layer's
-    weights are touched; the seed wire the row re-verifies comes last, for the
-    same reason -- within each group the order is the consumer's own, and the
-    prewarm reader walks ``entries`` in order, so a warm cut short by ARC
-    headroom is cut at the end of the row's own read, not in the middle of its
-    captures.
+    Opt-in bound acquisition inputs come first: intake reads the whole request
+    and raw cost before model preparation. Captures then precede weights because
+    ``prefetch_capture`` runs before the layer's weights are touched; seed wire
+    re-verification comes last. Within each group the order is the consumer's
+    own, so a prewarm cut at its byte budget respects the row's actual readset.
 
     ``argv`` is the row's own command line.  It is what names
     ``--seed-wire-dir``, and reading the plan instead is what made every
@@ -297,7 +299,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
     9.4-19 GB of wire off cold spindles at 41 MB/s.
     """
     plan = campaign.row_plan(row_id, argv)
-    entries = []
+    acquisition = plan.get("_acquisition", [])
+    entries = [{"path": record["path"], "offset": 0,
+                "bytes": record["bytes"], "sha256": record["sha256"]} for record in acquisition]
     for path, size in plan["_captures"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     for path, offset, length in plan["_extents"]:
@@ -307,6 +311,12 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                "cumulative_bytes": plan["capture_bytes"]},
               {"name": "weight_extents", "bytes": plan["weight_bytes"],
                "cumulative_bytes": plan["capture_bytes"] + plan["weight_bytes"]}]
+    if acquisition:
+        acquisition_bytes = plan["acquisition_bytes"]
+        phases.insert(0, {"name": "acquisition_inputs", "bytes": acquisition_bytes,
+                          "cumulative_bytes": acquisition_bytes})
+        for phase in phases[1:]:
+            phase["cumulative_bytes"] += acquisition_bytes
     for path, size in plan["_seeds"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
@@ -331,7 +341,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
             "readable file was found there; refusing to declare a read set "
             "that omits the row's seed wire")
     for e in entries:
-        if not e["path"].startswith(SHARED_MOUNT + "/"):
+        if (not e["path"].startswith(SHARED_MOUNT + "/")
+                or (e["sha256"] is not None and not os.path.realpath(e["path"]).startswith(
+                    os.path.realpath(SHARED_MOUNT) + "/"))):
             raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")
         if e["bytes"] <= 0:
             raise SystemExit(f"{row_id}: zero-length entry: {e['path']}")
@@ -345,7 +357,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
         "annotations": {
             "row_id": row_id,
             "group": plan["group"],
-            "sha256_present": False,
+            "sha256_present": bool(acquisition),
+            **({"sha256_present_scope": "original acquisition request and bound raw cost only"}
+               if acquisition else {}),
             "sha256_absent_reason": (
                 "hashing 1023 GB of capture bytes costs more than the prewarm "
                 "saves; the manifest file itself is content-addressed in the "
@@ -354,11 +368,13 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                 "captures": plan["capture_files"],
                 "weight_extents": plan["weight_extents"],
                 "seeds": plan["seed_files"],
+                **({"acquisition_inputs": plan["acquisition_files"]} if acquisition else {}),
             },
             "bytes": {
                 "captures": plan["capture_bytes"],
                 "weight_extents": plan["weight_bytes"],
                 "seeds": plan["seed_bytes"],
+                **({"acquisition_inputs": plan["acquisition_bytes"]} if acquisition else {}),
             },
             # The directory the row's argv named, so a reader can tell a row
             # that declared no seeds from one whose seed directory was empty
@@ -1132,8 +1148,11 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
     the census, the campaign plan and its receipts, the merged cost payload,
     the merged checkpoint manifest and every one of its unit shards, then the
     calibration input, the capture compatibility record, the projection
-    backend and the canonical capture manifest. ``run`` additionally binds the
-    prepared completion and the production cache it names.
+    backend and the canonical capture manifest. A plan that binds a
+    ``joint_eval_draw`` descriptor stages that draw's calibration input here
+    too, beside the encoding calibration input, before forward cost.
+    ``run`` additionally binds the prepared completion and the production
+    cache it names.
     """
     inputs = plan["inputs"]
     track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "plan")
@@ -1168,6 +1187,15 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
             continue
         path = _bound(record, f"plan {key}")
         track.add(path, 0, _required_size(path, f"plan {key}"), "head")
+    # A top-level joint_eval_draw descriptor binds a fresh eval calibration
+    # alongside the unchanged encoding calibration input; both are staged
+    # here, before any forward-cost phase, in the order the pass reads them.
+    eval_draw = plan.get("joint_eval_draw")
+    if eval_draw is not None:
+        path = _bound(eval_draw.get("calibration_input"),
+                      "plan joint_eval_draw.calibration_input")
+        track.add(path, 0,
+                  _required_size(path, "plan joint_eval_draw.calibration_input"), "head")
     backend = ((plan.get("execution") or {}).get("projection_backend") or {}).get("binary")
     if backend is not None:
         path = _bound(backend, "plan execution.projection_backend.binary")
@@ -1620,9 +1648,13 @@ def _cost_layer_windows(names, *, formats_by_qname, census, owners,
 
 
 def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
-                                 retained_budget, source_bytes, n_probes=4,
+                                 retained_budget, source_bytes, n_probes,
                                  validated_completed_units=None, argv=None):
     """Declare COST's forward/reverse reads with sealed retained-window IDs.
+
+    The sealed probe count is the plan's ``execution.n_probes``; the explicit
+    ``n_probes`` argument must agree with it, so a plan declaring sixteen
+    probes can never be sealed with an invented four.
 
     Full target partitions are derived before applying a validated resume
     subset. COST creates boundaries online from source and calibration IDs;
@@ -1639,12 +1671,26 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         raise SystemExit("COST V2 requires a complete retained-window budget")
     if type(source_bytes) is not int or source_bytes <= 0:
         raise SystemExit("COST V2 requires the fixed declared source-owner byte cap")
-    if type(n_probes) is not int or n_probes != 4:
-        raise SystemExit("COST V2 currently declares exactly four joint probes")
+    if type(n_probes) is not int or n_probes < 2:
+        raise SystemExit("COST V2 requires an explicit integer n_probes of at least two")
     plan_path, prepared = os.path.abspath(plan_path), os.path.abspath(prepared)
     plan = _read_json(plan_path, "joint plan")
     if plan.get("schema") != JOINT_PLAN_SCHEMA:
         raise SystemExit(f"{plan_path}: not a {JOINT_PLAN_SCHEMA} plan")
+    # The sealed probe count is the plan's, never an invented default: the
+    # declared execution.n_probes is the count the pass executes, and the
+    # caller's explicit argument must agree with it or the manifest would
+    # price one count and serve another.
+    plan_execution = plan.get("execution")
+    plan_probes = plan_execution.get("n_probes") if isinstance(plan_execution, dict) else None
+    if type(plan_probes) is not int or plan_probes < 2:
+        raise SystemExit(
+            "the joint plan must declare an exact integer execution.n_probes "
+            "of at least two for COST V2")
+    if plan_probes != n_probes:
+        raise SystemExit(
+            f"COST V2 n_probes={n_probes} disagrees with the plan's "
+            f"execution.n_probes={plan_probes}")
     prefetch = plan.get("source_prefetch") or {}
     if (prefetch.get("prefetch_lookahead") != 1
             or prefetch.get("max_cache_slots") != 2):
@@ -1671,6 +1717,18 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         if not fmts or any(not isinstance(fmt, str) or not fmt for fmt in fmts):
             raise SystemExit(f"prepared COST has no measured candidate: {name}")
         formats_by_qname[name] = fmts
+
+    # An optional diagnostic ``joint_eval_targets`` roster selects the subset
+    # the fresh eval draw reprices; COST's windows and rosters derive from that
+    # actual selection, never from the completion's whole historical roster.
+    from prismaquant.tessera_joint_eval_panel import evaluation_formats
+    formats_by_qname = evaluation_formats(plan, formats_by_qname)
+    if not isinstance(formats_by_qname, dict) or not formats_by_qname:
+        raise SystemExit("COST V2 eval target selection left no repriced target")
+    if not set(formats_by_qname) <= set(roster):
+        raise SystemExit("COST V2 eval target roster names units outside the campaign")
+    if any(not fmts for fmts in formats_by_qname.values()):
+        raise SystemExit("COST V2 eval target selection has a formatless unit")
 
     workspace = os.path.dirname(campaign_plan_path)
     campaign = Campaign(workspace)
@@ -1701,7 +1759,8 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     # selected archive and proves storage <= the declared file size.
     windows_by_layer, render_paths = {}, {}
     for layer in source_layers:
-        names = sorted(by_layer.get(layer, ()))
+        names = sorted(name for name in by_layer.get(layer, ())
+                       if name in formats_by_qname)
         if not names:
             windows_by_layer[layer] = ()
             continue

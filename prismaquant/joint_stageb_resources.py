@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 import pickle
@@ -13,6 +12,7 @@ from pathlib import Path
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
 from .schemas import Contract
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 SCHEMA = "prismaquant.joint_stageb_resource_policy.v1"
 GIB = 1024 ** 3
@@ -173,7 +173,7 @@ def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
     return {"layers": sorted(int(value) for value in layers), **owned,
             "regime": dict(profile["identity"]["chain_regime"]), "source": "measured",
             "receipt": {"action_key": action_key, "path": str(path),
-                        "sha256": hashlib.sha256(raw).hexdigest()},
+                        "sha256": bytes_sha256hex(raw)},
             "basis": basis or (
                 f"layer {int(layer)}'s chain roll: workspace = max(allocated delta, reserved "
                 "delta) over the reading after its admission released the cache; "
@@ -462,7 +462,7 @@ def workspace_from_receipt(path, *, action_key):
     _require(type(per_batch) is int and per_batch > 0, f"{path} measured no workspace")
     return {"bytes": per_batch,
             "receipt": {"action_key": action_key, "path": str(path),
-                        "sha256": hashlib.sha256(raw).hexdigest()},
+                        "sha256": bytes_sha256hex(raw)},
             "basis": profile["measured"]["basis"]}
 
 
@@ -498,15 +498,15 @@ def main(argv=None):
     policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), host_bytes=args.host_bytes,
                            physical_bytes=args.physical_bytes, gpu_bytes=args.gpu_bytes,
                            capture=capture, chain=chain, cotangent=cotangent)
-    raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
+    raw = DIRECT_ASCII_SPACED_LAX.encoded(policy) + b"\n"
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
-    print(json.dumps({"status": "resource_geometry_derived", "out": args.out,
-        "sha256": hashlib.sha256(raw).hexdigest(),
+    print(DIRECT_ASCII_SPACED_LAX.text({"status": "resource_geometry_derived", "out": args.out,
+        "sha256": bytes_sha256hex(raw),
         "limits": policy["limits"], "budget": policy["budget"],
         "capture": policy["derivation"].get("capture"),
         "chain": policy["derivation"].get("chain"),
         "peak_planned_bytes": policy["derivation"]["peak_planned_bytes"],
-        "windows_by_layer": policy["derivation"]["windows_by_layer"]}, sort_keys=True))
+        "windows_by_layer": policy["derivation"]["windows_by_layer"]}))
 
 
 if __name__ == "__main__":

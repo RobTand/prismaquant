@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
@@ -295,6 +295,10 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     wire_dir.mkdir(exist_ok=True)
     cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
         cache_dir=str(root), metadata={'schema': REQUEST_SCHEMA})
+    # Missing selections and adopted/resumed wires share this directory.
+    # Reserve the whole group before iteration: a later seeded alias must
+    # not appear after an earlier coordinate has been scheduled to encode.
+    tc._register_campaign_wire_coordinates(cache, wire_dir, group['assignment'].items())
     api = tc._checkpoint_identity_api()
     missing, expected_by_name = [], {}
     for name in names:
@@ -307,8 +311,11 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         if record is None:
             record = cost.get(tep.EXPERT_WIRES_KEY, {}).get(name, {}).get(fmt)
             if record is not None:
-                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'])
+                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
+                                   qname=name, format_name=fmt)
         if record is not None:
+            if record['file'] != wire_path.name:
+                raise RuntimeError(f'{name}: wire filename differs from selected rung')
             # The receipt checks and the blob's presence and size here; the
             # content check is the one read below, at the point the bytes are
             # handed to the producer (PrismaQuant #643).
@@ -316,8 +323,6 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
                 grid=family.payload_grid().name)
             tep.locate_expert_wire(record, name=name, wire_dir=wire_dir)
             api.verify_cached_unit(wire_path.read_bytes(), record, expected)
-            if record['file'] != wire_path.name:
-                raise RuntimeError(f'{name}: wire filename differs from selected rung')
             anchor = None if state is None else state.get('anchor')
         else:
             if wire_path.exists():
@@ -470,12 +475,16 @@ def finalize(plan_path):
         expected = _expert_input_identity(api, weight, units[name], fmt, activation)
         checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
             grid=family.payload_grid().name)
+        # The name is checked before the source wire is located or read: a
+        # misnamed receipt is refused without touching its bytes (#2310).
+        tc._require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
         source_path = source_dir / checked['file']
         tep.locate_expert_wire(checked, name=name, wire_dir=source_dir)
         # One content check per blob: the verified bytes are the ones the hard
         # link below carries into the published wire directory (#643).
         api.verify_cached_unit(source_path.read_bytes(), checked, expected)
-        tc._link_seed_wire(source_dir, wire_dir, checked['file'])
+        tc._link_seed_wire(source_dir, wire_dir, checked['file'],
+                           qname=name, format_name=fmt)
         linked_path = wire_dir / checked['file']
         if not os.path.samefile(source_path, linked_path):
             # ``_link_seed_wire`` falls back to a copy where a hard link cannot
@@ -546,7 +555,7 @@ def main(argv=None):
         result = run(args.plan, args.group, anchor_batch_size=args.anchor_batch_size)
     else:
         result = finalize(args.plan)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(result))
 
 
 if __name__ == '__main__':

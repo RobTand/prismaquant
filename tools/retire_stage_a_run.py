@@ -18,7 +18,6 @@ removal. Exit 3 on a refusal.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -28,6 +27,7 @@ if str(ROOT) not in sys.path:
 
 from prismaquant.stage_a_retirement import (  # noqa: E402
     RetirementRefused, apply_retirement, plan_retirement)
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 
 def main(argv=None) -> int:
@@ -43,17 +43,17 @@ def main(argv=None) -> int:
                                successor_sha256=args.superseded_by_sha256,
                                binding_roots=args.binding_root)
         if args.dry_run:
-            print(json.dumps({
+            print(DIRECT_ASCII_SPACED_LAX.text({
                 "status": "planned", "record": plan.record,
                 "batches": [row["batch_id"] for *_, row in plan.batches],
                 "untouched_batches": plan.untouched,
-                "bindings_read": plan.bindings_read}, sort_keys=True))
+                "bindings_read": plan.bindings_read}))
             return 0
         report = apply_retirement(plan)
     except (RetirementRefused, OSError, ValueError) as exc:
         print(f"Stage A retirement refused: {exc}", file=sys.stderr)
         return 3
-    print(json.dumps({"status": "retired", **report}, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text({"status": "retired", **report}))
     return 0
 
 

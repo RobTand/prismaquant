@@ -14,8 +14,12 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from tools.container_runtime_identity import (
-    image_content_sha256, prismaquant_source_sha256)
+import runpy
+
+# Authenticate before importing PQ: its initializer needs the producer stack,
+# which the small host interpreter deliberately does not install (#601).
+_runtime_identity = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 from tools.tessera_campaign_namespace import (
     establish_namespace_temporaries, namespace_adapter_request,
     refuse_path_symlinks as _refuse_scratch_symlinks,
@@ -69,9 +73,10 @@ ACTION_KEY_ENV = "PRISMABUILD_ACTION_KEY"
 ACTION_NONCE_ENV = "PRISMABUILD_ACTION_NONCE"
 ACTION_SCOPE_ENV = "PRISMABUILD_ACTION_SCOPE"
 READER_HELPER_ROOT_ENV = "PRISMABUILD_READER_HELPER_ROOT"
+QUEUE_ROOT_ENV = "PRISMABUILD_QUEUE_ROOT"
 #: Every name the launcher -- never the spec -- may supply for reader context.
 READER_CONTEXT_ENV = (ACTION_KEY_ENV, ACTION_NONCE_ENV, ACTION_SCOPE_ENV,
-                      READER_HELPER_ROOT_ENV)
+                      READER_HELPER_ROOT_ENV, QUEUE_ROOT_ENV)
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -818,7 +823,9 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     if not any(present[name] for name in
                (ACTION_NONCE_ENV, ACTION_SCOPE_ENV, READER_HELPER_ROOT_ENV)):
         return {}, []
-    missing = sorted(name for name, value in present.items() if not value)
+    # Older staged launches may carry only the original strict identity tuple.
+    missing = sorted(name for name, value in present.items()
+                     if name != QUEUE_ROOT_ENV and not value)
     if missing:
         raise RuntimeError(
             f"the launcher holds a partial reader-context bundle (missing "
@@ -874,7 +881,7 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     # This proves both the source bytes and read-only access independently
     # of the spec's ancestor mappings.
     extra.append({"source": root, "target": root, "readonly": True})
-    return ({name: present[name] for name in READER_CONTEXT_ENV}, extra)
+    return ({name: value for name, value in present.items() if value}, extra)
 
 
 def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":
@@ -1061,7 +1068,7 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     guarded = guarded_import_root(spec, cwd=cwd)
     unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
     shadow_sha = (None if unguarded is None
-                  else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
+                  else _runtime_identity["prismaquant_source_sha256"](unguarded[1] / "prismaquant"))
     if guarded is None:
         return {"pinned_source_entry": None, "pinned_source_root": None,
                 "pinned_source_sha256": None,
@@ -1071,8 +1078,8 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
                 "working_directory_source_sha256": shadow_sha,
                 "safe_path_guard_is_load_bearing": shadow_sha is not None}
     entry, pinned, by_default = pinned_source_root(spec, cwd=cwd)
-    pinned_sha = prismaquant_source_sha256(pinned / "prismaquant")
-    resolved_sha = prismaquant_source_sha256(guarded[1] / "prismaquant")
+    pinned_sha = _runtime_identity["prismaquant_source_sha256"](pinned / "prismaquant")
+    resolved_sha = _runtime_identity["prismaquant_source_sha256"](guarded[1] / "prismaquant")
     if resolved_sha != pinned_sha:
         raise RuntimeError(
             "the launched environment imports PrismaQuant from "
@@ -1269,7 +1276,7 @@ def main(argv=None) -> int:
     image_id = inspected[0].get("Id")
     if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
         raise RuntimeError("Docker returned no immutable image ID")
-    content_digest = image_content_sha256(inspected[0])
+    content_digest = _runtime_identity["image_content_sha256"](inspected[0])
     declared = spec["container"].get("content_sha256")
     if declared is not None and declared != content_digest:
         raise RuntimeError(f"Docker image content differs for {requested!r}: "

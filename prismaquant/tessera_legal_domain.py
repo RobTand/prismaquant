@@ -277,6 +277,16 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "2127e82b05ba52538dfae1d043f2d75a9b53dd51b8f2f43cd234d62aec2a587d",
     },
+    "reader-pin-2dbac191": {
+        "commit": "2dbac1910c88254d9c6391f02a34c4b07e516803",
+        "export.py":
+            "21b352ad9f9ce64b2348e4c7dfafb8bf880d7aa81bfb4e055f2ead23f86dc512",
+    },
+    "reader-pin-fca4c6ce0": {
+        "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+        "export.py":
+            "3538d1275321e625682de38ef40107cf541d0cf1eadbf32d8d08dba5672373ba",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -308,18 +318,21 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 })
 
 #: The states whose ``export.py`` bytes produce the same wire for the two
-#: primary families.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
-#: expression and the ``*_WINDOW_BITS`` constants are byte-identical between the
-#: reader pin and the frozen study producer; the two files differ only by the
-#: additive ``ScalePlaneKind.MX`` plane (a third plane kind, plus its grid
-#: refusal, its pack branch and its materialiser), which no ``TESSERA_E4M3_K1``
-#: or ``TESSERA_BF16_K1`` rung reaches -- both are WINDOW bodies over CHANNEL.
+#: primary families. The window-width and wire-recipe rules are unchanged
+#: across these audited states. The original study producer adds an MX
+#: scale plane that neither primary WINDOW-over-CHANNEL family reaches.
 #: So a number derived through either is derived through both, and this module
 #: says so from the bytes rather than repeating the audit's prose.
+#: At 2dbac191 the cap expression delegates to manifest.body_rate_cap,
+#: whose WINDOW branch returns the same payload_bits; grammar.py and
+#: wire_recipe are unchanged. The PB audit walk still rederives the counts.
+#: At fca4c6ce0 the exporter extracts the same per-unit key set into a constant.
+#: The WINDOW rules and grammar bytes stay unchanged.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
     "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
     "reader-pin-a5f3b232", "reader-pin-b40c93cb",
+    "reader-pin-2dbac191", "reader-pin-fca4c6ce0",
 )
 
 
@@ -605,18 +618,22 @@ def live_pins() -> DomainPins:
 #: ``2127e82b…`` and ``grammar.py`` at ``9ae1f824…``, so
 #: ``reader-pin-83460680`` is renamed ``reader-pin-b40c93cb`` and no count
 #: moves (PQ #1739).
+#: Re-taken 2026-10-05 for public 2dbac191 / v56 (PQ #2262). The source
+#: audit is the exact exporter/grammar crossing, not private 608bb equality.
+#: Re-taken 2026-10-07 for fca4c6ce0 / v60 (PQ #2426).
+#: The historical study producer and measured values stay unchanged.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+    reader_dev_pin_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
     reader_dev_pin_contract_sha256=(
-        "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
-    serving_runtime_pinned_commit="b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+    serving_runtime_pinned_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
     producer_installed_contract_sha256=(
-        "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
+        "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
 )
 
@@ -828,6 +845,12 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
     """
     data = packaged_contract_payload() if payload is None else payload
     lanes = data.get("lane_eligibility") or {}
+    covered = {}
+    if lanes.get("schema") == "tessera.lane-eligibility.v11":
+        from .lane_eligibility import _parse_table
+        table = _parse_table(lanes, data["formats"], "", "", "",
+                             native_extensions=data["native_extensions"])
+        covered = {c.id: c.covered_rates for c in table.cells}
     rows: list[AttestedCell] = []
     for cell in lanes.get("cells", ()):
         runtime = cell.get("runtime") or {}
@@ -838,7 +861,7 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
         evidence = cell.get("evidence") or {}
         artifact = evidence.get("artifact")
         smoke = evidence.get("smoke") or {}
-        for rate in cell.get("rungs_q256") or ():
+        for rate in covered.get(cell.get("id"), cell.get("rungs_q256") or ()):
             for residency in _residencies_from_flags(flags):
                 for mode in runtime.get("execution_modes") or ():
                     rows.append(AttestedCell(

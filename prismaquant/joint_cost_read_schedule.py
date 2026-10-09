@@ -8,7 +8,6 @@ worker environment. It neither reads declared data files nor warms them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +16,7 @@ import stat
 from typing import Callable, Mapping
 import zlib
 
-from .digests import bytes_sha256hex, is_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, is_sha256hex, text_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
@@ -265,7 +264,8 @@ def load_joint_cost_read_schedule(*, manifest_path: str | Path, manifest_sha256:
     _sha(prepared_sha256, "prepared_sha256")
     _require(type(retained_budget) is RetainedWindowBudget, "retained budget object required")
     source_cap = _int(source_owner_cap_bytes, "source_owner_cap_bytes", positive=True)
-    _require(_int(n_probes, "n_probes", positive=True) == 4, "COST V2 requires four probes")
+    _require(_int(n_probes, "n_probes", positive=True) >= 2,
+             "COST V2 requires at least two probes")
     _require(progress_callback is None or callable(progress_callback), "progress callback invalid")
     m, phases = _validate_pb_v2(_read_sealed(manifest_path, manifest_sha256, manifest_bytes))
     a = _object(m["annotations"], _ANNOTATION_KEYS, "COST annotations")
@@ -332,8 +332,7 @@ def _bind_runtime(a: dict, phases: tuple[str, ...], retained_budget: RetainedWin
     binding = {
         "schema": COMPLETED_SCHEMA, "plan_sha256": plan_sha256,
         "prepared_sha256": prepared_sha256, "units": sorted(completed)}
-    binding_sha = hashlib.sha256(json.dumps(
-        binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    binding_sha = DIRECT_ASCII_LAX.sha256(binding)
     _require(type(a["validated_completed_units"]) is int
              and a["validated_completed_units"] == len(completed)
              and a["validated_completed_units_sha256"] in ((None, binding_sha) if not completed
@@ -384,8 +383,8 @@ def _bind_runtime(a: dict, phases: tuple[str, ...], retained_budget: RetainedWin
     _require([w.layer for w in windows] == sorted([w.layer for w in windows], reverse=True),
              "window annotations are not reverse-layer ordered")
     partition = [[w.layer, w.window_index, list(w.original_full_target_names)] for w in windows]
-    digest = hashlib.sha256(json.dumps(partition, separators=(",", ":"),
-                                       ensure_ascii=False).encode()).hexdigest()
+    digest = text_sha256hex(json.dumps(partition, separators=(",", ":"),
+                                       ensure_ascii=False))
     _require(a["window_partition_sha256"] == digest, "window partition SHA-256 differs")
     expected_phases = ["cost_setup", "cost_head"]
     expected_phases += [f"cost_capture_{layer:03d}" for layer in range(last_source + 1)]

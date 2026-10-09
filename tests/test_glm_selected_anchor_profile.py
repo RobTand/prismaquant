@@ -109,6 +109,9 @@ def test_exact_original_calls_returns_and_finite_windows(tmp_path, controlled, m
 @pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
                                     ('netdata', 'python_sampler')])
 def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeypatch, missing):
+    # Certified mode keeps the refusal (PQ #2315); dev mode is covered by
+    # test_delayed_monitors_retain_completed_anchors_in_dev_mode below.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     obs = observer(tmp_path, calls=(0,))
     ready = monitor_readiness(obs, monkeypatch)
     original_monitor = obs.monitor
@@ -135,14 +138,54 @@ def test_delayed_monitors_refuse_missing_telemetry(tmp_path, controlled, monkeyp
         repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
     for kind in ready:
         assert bool(result[kind].get('samples')) == (kind not in missing)
-    # #1096: the failing recorder entry is in the message, not only in a
-    # result.json that a test's temporary directory may delete.
+    assert {row['instrument'] for row in result['errors']} == set(missing)
+    assert json.loads((obs.out/'progress.json').read_text()) == result
     for kind in missing:
-        assert f"anchor_profiler: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
+        assert f"{kind}: RuntimeError('no {kind} sample was recorded')" in str(raised.value)
 
+
+@pytest.mark.parametrize('missing', [('netdata',), ('python_sampler',),
+                                    ('netdata', 'python_sampler')])
+def test_delayed_monitors_retain_completed_anchors_in_dev_mode(
+        tmp_path, controlled, monkeypatch, missing, capsys):
+    # PQ #2315: finished anchor work survives missing telemetry in dev mode,
+    # stamped dev_uncertified with the missing instruments named. Native
+    # profiling truth is preserved, not rewritten.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    obs = observer(tmp_path, calls=(0,))
+    ready = monitor_readiness(obs, monkeypatch)
+    original_monitor = obs.monitor
+    def delayed_monitor(kind):
+        if kind in missing:
+            assert obs.stopped.wait(timeout=10), 'observer did not reach shutdown'
+        original_monitor(kind)
+    monkeypatch.setattr(obs, 'monitor', delayed_monitor)
+    token = object()
+    journal = []
+    with obs:
+        for kind, event in ready.items():
+            if kind not in missing:
+                assert event.wait(timeout=10), f'{kind} did not sample'
+        journal.append(obs.wrap_anchor(lambda **_: token)(qname='u', format_name='f'))
+    assert journal == [token]
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and result['native_anchor_profiled']
+    assert result['dev_uncertified'] is True
+    assert result['evidence_complete'] is False
+    assert result['profile_status'] == 'observed'
+    assert result['anchors'][0]['status'] == 'complete'
+    assert set(result['incomplete_instruments']) == set(missing)
+    assert {row['instrument'] for row in result['errors']} == set(missing)
+    assert {row['error'] for row in result['errors']} == {
+        repr(RuntimeError(f'no {kind} sample was recorded')) for kind in missing}
+    assert json.loads((obs.out/'progress.json').read_text()) == result
 
 @pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
 def test_observation_failure_preserves_success_for_journaling(tmp_path, controlled, monkeypatch, failure):
+    # Certified mode keeps the refusal (PQ #2315); dev mode is covered by
+    # test_observation_failure_retains_journal_in_dev_mode below.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     if failure == 'no_cuda':
         monkeypatch.setattr(FakeProfiler, 'cuda', False)
     if failure == 'enter':
@@ -166,7 +209,40 @@ def test_observation_failure_preserves_success_for_journaling(tmp_path, controll
         assert not list(obs.out.glob('*.trace.json'))
 
 
-def test_original_encoder_exception_is_preserved(tmp_path, controlled):
+@pytest.mark.parametrize('failure', ['no_cuda', 'trace_cap', 'enter'])
+def test_observation_failure_retains_journal_in_dev_mode(
+        tmp_path, controlled, monkeypatch, failure, capsys):
+    # PQ #2315: the journaled anchor value survives a failed profiler window
+    # in dev mode. The missing native proof stays explicit: profile_status
+    # remains 'missing' and native_anchor_profiled stays False.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    if failure == 'no_cuda':
+        monkeypatch.setattr(FakeProfiler, 'cuda', False)
+    if failure == 'enter':
+        monkeypatch.setattr(FakeProfiler, 'enter_error', RuntimeError('profiler unavailable'))
+    obs = observer(tmp_path, calls=(0,), cap=1 if failure == 'trace_cap' else 4096)
+    seen, journal = [], []
+    token = object()
+    def original(**kwargs):
+        seen.append(kwargs)
+        return token
+    with obs:
+        journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+    assert len(seen) == 1 and journal == [token]
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'complete' and not result['native_anchor_profiled']
+    assert result['dev_uncertified'] is True
+    assert result['evidence_complete'] is False
+    assert result['profile_status'] == 'missing'
+    assert result['anchors'][0]['status'] == 'observation_failed'
+
+
+@pytest.mark.parametrize('certified', [False, True])
+def test_original_encoder_exception_is_preserved(tmp_path, controlled, monkeypatch, certified):
+    # PQ #2315: a real encoder failure propagates unchanged in both modes;
+    # observer evidence never replaces it.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
     obs = observer(tmp_path, calls=(0,))
     error = ValueError('original encoder rejection')
     calls = []
@@ -177,7 +253,10 @@ def test_original_encoder_exception_is_preserved(tmp_path, controlled):
         with obs:
             obs.wrap_anchor(original)(qname='u', format_name='f')
     assert caught.value is error and len(calls) == 1
-    assert json.loads((obs.out/'result.json').read_text())['anchors'][0]['status'] == 'anchor_failed'
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert result['anchors'][0]['status'] == 'anchor_failed'
+    assert 'original encoder rejection' in result['campaign_error']
 
 
 def test_retry_keeps_attempt_evidence_and_no_work_is_not_native_proof(tmp_path, controlled):
@@ -431,3 +510,116 @@ def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
     trace = json.loads((obs.out/record['trace']['path']).read_text())
     kernels = [event for event in trace['traceEvents'] if event.get('cat') == 'kernel']
     assert len(kernels) == 1, 'CUDA work after the deadline was also collected'
+
+
+@pytest.mark.parametrize('timed', [False, True])
+@pytest.mark.parametrize('certified', [False, True])
+@pytest.mark.parametrize('original_fails', [False, True])
+def test_profiler_teardown_failure_refuses_full_lifecycle(
+        tmp_path, controlled, monkeypatch, timed, certified, original_fails):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    teardown_error = RuntimeError('native profiler teardown failed')
+    stopped = threading.Event()
+    def stop(self, *_):
+        stopped.set()
+        raise teardown_error
+    monkeypatch.setattr(FakeProfiler, '__exit__', stop)
+    obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
+        command=selected(), cuda_only=timed, window_seconds=60 if timed else None)
+    ready = monitor_readiness(obs, monkeypatch)
+    campaign_error = ValueError('original campaign failure during profiling')
+    token, calls, journal = object(), [], []
+    def original(**kwargs):
+        calls.append(kwargs)
+        if original_fails:
+            raise campaign_error
+        return token
+    with pytest.raises(ValueError if original_fails else RuntimeError) as caught:
+        with obs:
+            for event in ready.values():
+                assert event.wait(10), 'monitor did not commit its sample'
+            journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+    if original_fails:
+        assert caught.value is campaign_error
+    else:
+        assert journal == [token]
+        assert 'native profiler teardown failed' in str(caught.value)
+    assert len(calls) == 1 and stopped.is_set()
+    assert not any(thread.is_alive() for thread in obs.threads)
+    result = json.loads((obs.out/'result.json').read_text())
+    assert result['status'] == 'failed'
+    assert result['campaign_error'] == (repr(campaign_error) if original_fails else None)
+    assert result['native_anchor_profiled'] is False
+    assert result['profile_status'] == 'missing'
+    assert result['anchors'][0]['status'] == (
+        'anchor_failed' if original_fails else 'observation_failed')
+    assert any(row['instrument'] == 'anchor_profiler' and
+               row['error'] == repr(teardown_error) for row in result['errors'])
+    assert 'dev_uncertified' not in result
+    assert not list(obs.out.glob('*.trace.json'))
+    assert json.loads((obs.out/'progress.json').read_text()) == result
+    if timed:
+        assert result['anchors'][0]['collection_window']['stopped_by'] == 'stop_failed'
+
+
+@pytest.mark.parametrize('certified', [False, True])
+@pytest.mark.parametrize('deletion_fails', [False, True])
+@pytest.mark.parametrize('campaign_fails', [False, True])
+def test_rejected_trace_cleanup_full_lifecycle(
+        tmp_path, controlled, monkeypatch, certified, deletion_fails, campaign_fails):
+    from contextlib import nullcontext
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0' if certified else '1')
+    obs = observer(tmp_path, calls=(0,), cap=1)
+    ready = monitor_readiness(obs, monkeypatch)
+    trace = obs.out/'anchor-000000.trace.json'
+    original_unlink = Path.unlink
+    cleanup_error = PermissionError('rejected trace deletion denied')
+    def unlink(path, *args, **kwargs):
+        if deletion_fails and path == trace:
+            raise cleanup_error
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    campaign_error = ValueError('original campaign failure after trace rejection')
+    token, calls, journal = object(), [], []
+    def original(**kwargs):
+        calls.append(kwargs)
+        return token
+    expected_error = (ValueError if campaign_fails else
+                      RuntimeError if certified or deletion_fails else None)
+    try:
+        with (pytest.raises(expected_error) if expected_error else nullcontext()) as caught:
+            with obs:
+                for event in ready.values():
+                    assert event.wait(10), 'monitor did not commit its sample'
+                journal.append(obs.wrap_anchor(original)(qname='u', format_name='f'))
+                if campaign_fails:
+                    raise campaign_error
+        if campaign_fails:
+            assert caught.value is campaign_error
+        elif deletion_fails:
+            assert 'rejected trace deletion denied' in str(caught.value)
+        assert calls and len(calls) == 1 and journal == [token]
+        result = json.loads((obs.out/'result.json').read_text())
+        assert result['status'] == ('failed' if expected_error else 'complete')
+        assert result['campaign_error'] == (repr(campaign_error) if campaign_fails else None)
+        assert result['anchors'][0]['status'] == 'observation_failed'
+        assert result['anchors'][0]['rejected_trace_bytes'] > 1
+        assert result['native_anchor_profiled'] is False
+        assert result['profile_status'] == 'missing'
+        assert trace.exists() == deletion_fails
+        if expected_error:
+            assert 'dev_uncertified' not in result
+        else:
+            assert result['dev_uncertified'] is True
+            assert result['evidence_complete'] is False
+            assert result['incomplete_instruments'] == ['anchor_profiler']
+        if deletion_fails:
+            assert any(row['error'] == repr(cleanup_error) for row in result['errors'])
+        else:
+            assert any('exported byte cap' in row['error'] for row in result['errors'])
+        assert json.loads((obs.out/'progress.json').read_text()) == result
+        assert not any(thread.is_alive() for thread in obs.threads)
+    finally:
+        if trace.exists():
+            original_unlink(trace)
+        assert not trace.exists()

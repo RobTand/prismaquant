@@ -5,7 +5,6 @@ A rate-axis pick is refused by default because the byte-matched uniform comparis
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -26,6 +25,7 @@ from prismaquant.footprint import (
     assignment_serialization_sha256,
     whole_artifact_budget_from_assignment_payload,
 )
+from .digests import text_sha256hex
 
 
 def _load_json(path: str | Path):
@@ -1170,15 +1170,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     resolved_payload = selected.get("resolved_assignment_payload")
     if isinstance(resolved_payload, Mapping):
         selected_payload = dict(resolved_payload)
-        resolved_payload_sha256 = hashlib.sha256(
-            json.dumps(
+        resolved_payload_sha256 = text_sha256hex(json.dumps(
                 selected_payload,
                 sort_keys=True,
                 separators=(",", ":"),
                 ensure_ascii=False,
                 allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
+            ))
         if selected.get("resolved_assignment_payload_sha256") != (
             resolved_payload_sha256
         ):
