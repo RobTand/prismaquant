@@ -645,7 +645,7 @@ bias repair remain. No runtime pin, menu, adoption or default changes occur.
 
 Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
 requires an explicit PB action/publication/attempt selector for each checker
-completion. The public SDK4 result reader and standard capture binder join
+completion. The source-pinned public result reader and standard capture binder join
 the owned observation output to an independently reviewed checker config
 containing the exact snapshot selection (commit, parent, schema, subdirectory,
 refs and input), working directories, command and environment. Converted rows
@@ -1856,6 +1856,94 @@ attempt binding. The obsolete test of a historical reader SDK commit literal
 is removed rather than repinned; strict serving/refusal behavior remains the
 consumer contract. No production admission, SDK pin, runtime, numerical,
 pipeline-default or serving gate changes.
+
+Re-stamped 2026-10-04 (Refs PQ #2152, PB #1481/#1482): the reviewed PrismaBuild
+reader and client SDK pin moves to merged PB #1482
+`027103d9a8417e06c7f13356e58779a313cd7088` with exact SDK version 5; the
+literal `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`/SDK4 stamp above is
+historical and no longer the consumer contract. SDK5 adds
+`require_native_producer_context` on the public selected-action result reader:
+the strict original-source qualification binds each verified result to the
+selected immutable attempt's authenticated native producer context (worker/
+incarnation, host, nonce, broker scope, helper root, sealed-demand resources)
+and refuses cache-hit, legacy or missing native evidence. One SDK moves
+together — commit, version, runtime documents, fixture helper checks and the
+`original_cuda_control` launch-owned helper check; no dual-SDK probing, alias,
+editable install or fallback is added. The separately qualified exact SDK5
+install/fixture/portable identities and helper-runtime selection (PB #1485)
+remain coupled prerequisites for the full original native consumer exercise.
+This pin does not change the published fleet runtime or live deployment, and
+does not move numerical, wire, pipeline-default, serving or admission gates.
+
+Production-gateway pilot controls (#1293) now bind the actual non-editable
+SDK5 installation through an explicit private helper view. The published
+pbtest pin verifier proves its Git identity, RECORD bytes and import origin
+once per shard. The fixture reads only the install identity again, with the
+standard library. The verifier module exists in the shard's main process and
+not in its xdist workers. Client, CAS, pool and capture binder resolve from
+that same installed package, with no test-only SDK injection or SDK4 fallback.
+These CPU controls do not publish a helper generation or qualify native GPU
+pilots; PB #1485's durable Python3.12+b40 SDK5 pack and launch-owned helper
+selection remain separate prerequisites for the original native provider.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455): the shared connected-fixture pin
+`tests/pb_runtime_generation_pin.json` moves with the reader pin. It now names
+PB `027103d9a8417e06c7f13356e58779a313cd7088`, SDK5. The bundle is an
+immutable `git archive` of that commit. It carries the `.pinned-source.json`
+marker of the SDK3 and SDK4 bundles. PB action
+`1a525af7c723625c16b9279b726c66120f07b5c5945008ceeea186b9964b42b5` published it
+read-only at
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088`.
+The archive digest is
+`94727274fd0515c5f1ee7c031c90c1106793ef22b38b286caf44f1755675677d`. It equals
+the digest of `git archive` from the PrismaBuild history. The same method
+reproduces the recorded SDK3 and SDK4 digests. Before this change, the reader
+pin had moved and the shared pin had not. The Stage A produced-output, band
+handoff, spool, retirement and render-publication suites then refused the SDK4
+archive by version. A census of 121 test files showed 255 such failures.
+`tests/test_pb_generation_pin_1084.py` now requires one commit for both pins.
+The SDK4 archive stays on the mount. The consumer still refuses it by exact
+version. Source qualification is independent of live worker activation. The
+pbtest pin guard reads the reader pin. It refuses a shard when the interpreter
+has no non-editable Git install of that commit. Every PrismaQuant pbtest run
+now needs an SDK5 interpreter, and the SDK4 interpreters are refused. The x86
+interpreter is `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`
+(PQ #2467). It is a layer over `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9`,
+which holds PrismaBuild `027103d9` and Tessera `fca4c6ce`. The guard passes in
+PB action `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`.
+PB #1485 still owns the portable Python 3.12 pack.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455, CEO D32): the Original reader
+qualification (`source_generation._require_original_reader_producer` and
+`_require_original_qualified_source`) splits its joins by kind. A seal compares
+the reader's record of its producer run with the identity the SDK selected. A
+correctness join checks that two things are comparable. These seals go through
+`dev_mode.seal_check` (`source_generation._recorded_same`):
+
+- the reader runtime's helper root and helper generation;
+- the producer reservation;
+- every native delivery claim and its launch label;
+- the complete helper-tree digests;
+- the restamp join of the unchanged-family owner.
+
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each seal with its earlier
+message. Default dev mode prints one `[DEV-MODE]` line for each mismatch and
+continues. Dev mode computes no helper-tree digest. It passes `NOT_COMPUTED` and
+stamps it beside the recorded tree.
+
+These joins refuse in both modes:
+
+- the reader's target: publisher, producer, source paths, readset, calibration,
+  source model and dispatch;
+- the model config;
+- the SDK answer's own mirrors and the exact SDK policy;
+- the target source and runtime of the family acceptance.
+
+The strict result request still passes `require_native_producer_context=True`.
+The SDK refuses a result without a native producer context in both modes.
+`tests/test_no_new_seals.py` counts the two kinds of join in each function.
+Tests: `tests/test_original_source_admission.py` and
+`tests/test_held_producer_sdk5_smoke_2152.py`.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -26800,8 +26888,10 @@ Serving-backed Tessera task support with its vLLM plugin remains a production pr
 
 The four task-suite test modules carry the `task_suite` marker.
 Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
-The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
-Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
+The required gate uses `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+The SDK5 reader pin (PQ #2152) makes the pbtest pin guard refuse the earlier layer `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`, which holds PrismaBuild `dc4803da`.
+Its recorded action is `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`; receipt `0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913` reports 76 passes and zero skips.
+The earlier layer recorded action `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859` with the same counts before the repin.
 An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.

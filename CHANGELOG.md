@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Added
+- The fleet registry attests both x86 merge-train layers for the SDK4 and SDK5 vehicles (#2467).
+  The SDK5 entry names `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`, not its base interpreter.
+  PB `975efe59c9d63ae5de43a3a001b1b9a8d5369da9a82d1e6bc5dc3dc1a56243cd` verifies the non-editable PB `027103d9` and Tessera `fca4c6ce` installs.
+  Its guard admits PR #2216 head `f6960f8`; pytest reports 10 passed.
+  Current dependency pins and the existing SDK4 entry stay unchanged.
+
+  PB `df3d153fa68ce8780031596028e8620a8be65042c93bcd7214b621c5ae39cd9f` executes `suite.command` from fleetgraph `1d2d5a6d1bac7a727ee17903b0decd37ec33a248`.
+  It uses the captured live interpreter table, SHA-256 `efbbbd1b87c43d9b3d6bd63aff67697352a91361c770fc1127f8cf9598cc2701`.
+  The SDK4 vehicle selects `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`.
+  The SDK5 vehicle at PR #2216 head `d08c3ba9` selects `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`.
+  Each selected interpreter passes the dependency pin guard and all 50 row-class tests.
+  Portable placement tests replace the host-dependent SDK4 pin assertions.
+
+  The same action replays the retained private build script from PB `7386f1618cf0739623072428b6da532b48fe7fca4de691caa9cc18dd055407e0`.
+  Only private destinations, the temporary directory, and the immutable source transport differ.
+  Content manifests cover both train layers, both pin bases, and both source environments, including symlink targets.
+  Before and after manifests match: SHA-256 `33b5839e2adef872abffe2edf2ce9ca9b225d7c61479094fe51c14862cc349bc`, with zero changed entries.
+  The action retains the manifests and selector output under `/mnt/shared/tessera-measurements/pq2467-a4-ka_6p__1/`.
+  This proves preservation during the checks and replay; the original build has no retained before manifest.
+
 - The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
   The central processor path writes a valid structure draft without tensor payload reads or profile registration.
   Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
@@ -42,6 +62,35 @@
   Production deadlines and fail-closed release behavior remain unchanged.
   PB `cc59619e6a893b3778cfd0e8863565a6b6dd98e594631114e5210ee8e444dc0f` passes 11 affected tests, the direct delay smoke, and the compile check on x86.
   The same run retains deterministic staging-timeout and release-budget coverage.
+- **Production pilot result fixtures use one real installed SDK5 helper**
+  (Refs #2152, #1293). The production Gateway, resolver, CAS, queue and capture
+  binder now consume the same Git/RECORD-qualified SDK5 package. The positive
+  and source/invocation/attempt negative controls no longer request admission
+  from the preserved SDK4 source archive. No installed-SDK injection fallback,
+  mixed package tree, runtime publication or GPU qualification is introduced;
+  the durable portable SDK5 pack and native helper adoption remain PB #1485
+  prerequisites. The fixture reads the install identity with the standard
+  library, because the pbtest pin verifier is absent in xdist workers.
+
+- **Original reader authority joins the selected native producer and outer
+  target** (Refs #2152). The strict result request uses SDK5's existing public
+  native-context owner. Published source controls, the reader's actual snapshot
+  and independently accepted target-family transfer, producer reservation,
+  complete helper tree and every native delivery identity must agree. A later
+  consumer's resource/session tuple and the distinct launch/selected-attempt
+  provenance labels are not substituted for those producer observations.
+  Seven joins are D32 seals and go through `seal_check`. They compare the
+  reader's record of its producer run with the identity the SDK selected. They
+  are the helper root, the helper generation, the reservation, the delivery
+  claims, their launch labels, the complete helper tree and the family
+  restamp. Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each one. Default
+  dev mode stamps `[DEV-MODE]` and continues. Dev mode hashes no helper tree.
+  The target, readset, calibration and config joins refuse in both modes.
+  Runtime version validation reuses the existing exact SDK owner. This is
+  nonactivating source preparation: current SDK4/DC480 fixtures, c437 helpers,
+  deployment and GPU/source admission are unchanged; a qualified SDK5 helper
+  generation remains a coupled prerequisite.
+
 - A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
   Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
   With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
@@ -57,6 +106,36 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
+  `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
+  `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
+  one exact commit/version contract, no dual-SDK probing, alias, editable
+  install or fallback. The strict original-source result read now requires the
+  selected immutable attempt's native producer context; runtime documents,
+  `original_cuda_control`'s launch-owned helper check and the fixture
+  provenance pins follow the same owner-resolved identities. The portable SDK5
+  pack (PB #1485), fleet helper-runtime selection and live deployment remain
+  separate and unchanged; no capability, admission or serving claim rides the
+  pin.
+
+- **The shared connected-fixture pin moves to an immutable SDK5 source bundle**
+  (Refs #2152, #2455). The reader pin had moved to SDK5 while
+  `tests/pb_runtime_generation_pin.json` still named the SDK4 archive. The
+  Stage A produced-output, band handoff, spool, retirement and
+  render-publication suites then refused their own transport by version.
+  The pin now names a read-only `git archive` of PB `027103d9` under
+  `qualification/pq-pb-sdk5-20261009`. `tests/test_pb_generation_pin_1084.py`
+  requires one commit for both pins. The SDK4 archive stays on the mount, and
+  the consumer still refuses it by exact version. No runtime, default,
+  numerical or serving behavior changes. The pbtest pin guard refuses a shard
+  whose interpreter lacks a non-editable Git install of the reader pin, so
+  every PrismaQuant pbtest run now needs an SDK5 interpreter and the SDK4
+  interpreters are refused. The x86 interpreter is
+  `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` (#2467).
+  The required task-suite gate runs on it and reports 76 passes and zero
+  skips (PB `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`).
+  The gate record in `tests/conftest.py` and `docs/ARCHITECTURE.md` follows.
+
 - The paired expert-dominance menu rule applies only to complete routed layers (#2288).
   A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
   The complete-assignment exact filter and the final emission guard still refuse dominant trades.

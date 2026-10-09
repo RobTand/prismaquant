@@ -541,6 +541,65 @@ def test_d32_consumers_add_no_run_identity_refusals():
         assert {scope: counts[scope] for scope in expected} == expected
 
 
+# The Original reader qualification (PR #2216) joins a reader proof to its
+# selected producer through two helpers of prismaquant/source_generation.py
+# that the lint above cannot see. ``_same`` always refuses: a correctness join.
+# ``_recorded_same`` is the D32 seal and goes through ``seal_check``. Neither
+# call names a sha256, identity or digest, so the name filter never fired and
+# the module is outside MODULES. Each row is the reviewed pair (``_same``
+# joins, ``_recorded_same`` seals) of one function. A new comparison there
+# fails the test until it takes the helper that matches its kind.
+READER_JOINS = {
+    # Target, readset, calibration, model and dispatch: which data the proof is about.
+    "_require_original_reader_target": (1, 0),
+    # The SDK answer's own mirrors, the SDK policy and the model config refuse in
+    # both modes. The helper root and generation, the reservation, every delivery
+    # claim, the launch label and the helper-tree digest are producer-run seals.
+    "_require_original_reader_producer": (8, 6),
+    # The row against its own executed request, the family's compatibility and the
+    # target source and runtime refuse in both modes. The restamp join is a seal.
+    "_require_original_qualified_source": (4, 1),
+}
+
+
+class _HelperCalls(ast.NodeVisitor):
+    def __init__(self):
+        self.stack: list[str] = []
+        self.found: list[tuple[str, str]] = []
+
+    def _scope(self, node):
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _scope
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name) and node.func.id in {"_same", "_recorded_same"}:
+            self.found.append((".".join(self.stack), node.func.id))
+        self.generic_visit(node)
+
+
+def _reader_join_counts(source: str) -> dict[str, tuple[int, int]]:
+    visitor = _HelperCalls()
+    visitor.visit(ast.parse(source))
+    counts = Counter(visitor.found)
+    return {scope: (counts[(scope, "_same")], counts[(scope, "_recorded_same")])
+            for scope in READER_JOINS}
+
+
+def test_original_reader_producer_joins_are_each_classified():
+    source = (ROOT / "prismaquant/source_generation.py").read_text()
+    assert _reader_join_counts(source) == READER_JOINS
+
+
+def test_a_new_original_reader_join_fails_the_classification():
+    source = (ROOT / "prismaquant/source_generation.py").read_text()
+    marker = "    _same(runtime['config'], reader_authority['source_model_identity']['config'],\n"
+    assert marker in source
+    added = "    _same(runtime['prismabuild']['nonce'], context['nonce'], 'selected reader nonce')\n"
+    assert _reader_join_counts(source.replace(marker, added + marker, 1)) != READER_JOINS
+
 
 def test_allowlist_keys_are_unique():
     tree = ast.parse(Path(__file__).read_text())

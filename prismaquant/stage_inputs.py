@@ -30,11 +30,18 @@ def same(actual, expected, label, *, contract: Contract | None = None):
     check(actual == expected, f"{label}: identity mismatch")
 
 
-def recorded_same(actual, expected, label):
-    """Recorded-versus-running provenance, stamped in default dev mode."""
+def recorded_same(actual, expected, label, *, contract: Contract | None = None,
+                  where: str = "Stage A/B recorded versus running provenance"):
+    """Recorded-versus-running provenance, stamped in default dev mode.
+
+    Certified mode refuses in the caller's vocabulary, as :func:`same` does;
+    dev mode prints one ``[DEV-MODE]`` line naming ``where`` and continues.
+    """
     from .dev_mode import seal_check
-    seal_check(label, expected, actual, where="Stage A/B recorded versus running provenance",
-               refusal=lambda: ValueError(f"{label}: identity mismatch"))
+    message = f"{label}: identity mismatch"
+    seal_check(label, expected, actual, where=where,
+               refusal=lambda: ValueError(message) if contract is None
+               else contract.exception(message))
 
 
 def bound(record, label):

@@ -1,34 +1,34 @@
 {
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe",
-  "candidate_commit": "dc4803daaf09b6426083d2d36bd2a2da3d6832fe",
-  "runtime_generation": "dc4803daaf09b6426083d2d36bd2a2da3d6832fe",
-  "qualification": "SOURCE QUALIFICATION ONLY: reviewed PB #1453 at dc4803da, SDK4; immutable git-archive source bundle. No fleet deployment or GPU qualification is established.",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088",
+  "candidate_commit": "027103d9a8417e06c7f13356e58779a313cd7088",
+  "runtime_generation": "027103d9a8417e06c7f13356e58779a313cd7088",
+  "qualification": "SOURCE QUALIFICATION ONLY: reviewed PB #1482 at 027103d9, SDK5; immutable git-archive source bundle. No fleet deployment or GPU qualification is established.",
   "files": {
     "src/prismabuild/action_edges.py": "969abef4dddbf195da96c1d2c3b5a8775efbe348a44f6f80ffac14e3ae8ea9af",
-    "src/prismabuild/action_result.py": "3a09a8baa98057f2ecb79a869943a6f490db158f89a0fa6a5126e5f37325bdda",
+    "src/prismabuild/action_result.py": "32526ec1c622c734421395b14cbb9bfa7a4822fe402b7d303e77ce3b5c0c0dae",
     "src/prismabuild/adaptive_cpu.py": "e6782bff313d39bd481cba8f8aef577c1e0a6e40e733c2a5711c653b3f5d6bad",
-    "src/prismabuild/client.py": "01faf3b7812d2896afcf43dcc18f5a18d3ea0a287da3081799bbe8ab19032106",
-    "src/prismabuild/core.py": "f7bbd12ebb4d2d0e125bd5ab4ff94e6574e0b972478ba4254300fabe19a67363",
+    "src/prismabuild/client.py": "40b4f5cc88b18ea127eeb9325e7f03d954adcd0e4b6cdceda25ceda8a9f352c9",
+    "src/prismabuild/core.py": "aff66d949b76b9b9a4b44f01588fe3bdf74a5e43b58aad88e3c600ee7a7e11a4",
     "src/prismabuild/movement_actions.py": "059ae9fe6efa18de826f58cb8333e1688b688622b894c92896b9ebdf074ad0c9",
-    "src/prismabuild/pool.py": "ebf0835beddab49ac892af2748d6d287c933994a2f3e947e15d2117109249730",
+    "src/prismabuild/pool.py": "8956e06af22df44225ca4e5857937960222302e62311677341f70eb45f71e6be",
     "src/prismabuild/produced_output.py": "8d636899e500ee8ea88dde1b5654a1a938fba619b76fb485ac17903ec0898187",
     "src/prismabuild/produced_spool.py": "818891c8d9c13b3e05beefb551b43091ee419b2eb7457cdcf5321b9ea5dd2645",
-    "src/prismabuild/reader_lease.py": "db3faad20cb59f61121922deac98fbab695fb873085ce50f92a256583cdc8196",
+    "src/prismabuild/reader_lease.py": "645a58bf26f88f1afc5ce20baf20d9bc4244b619eaf1c17b3bea76c23dc11f9b",
     "src/prismabuild/residency_map.py": "10ce7f4f654fab46d45f64ffa5a85768df5dafa12bd8343a61b5abb0363d7b99",
     "src/prismabuild/residency_plan.py": "bb2a133d52547a48e9f696b82022d2bdb2d20a8c9cb2f62704ff4082d84fd589",
-    "src/prismabuild/resource_scope.py": "1dd143bec66f28ffb6cce9c019c37205f6fb765d847598c6176822dd8c19246c",
+    "src/prismabuild/resource_scope.py": "1392c1b4fbadd9d2b131a667596f11c0428f050882258760ddadffd3e2b3c547",
     "src/prismabuild/storage_tiers.py": "cf1685e2001318ce02c545327c9eeb904b9471f6103d47e64d04a505ea5106ee",
     "tools/fleet/prewarm_loop.py": "1d8b5c0c5a3df2ddb2cdd739226f5bfd4f44ada0689fd10732efd534da14cafe",
     "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc",
     "tools/fleet/ram_promote.py": "4d28cf1b9fe9bcf8b00afc4271543f09d69f0e5df12ccb02edc0ffb73a5c2ece",
-    "tools/fleet/stage_move.py": "c1e4e8bdb660fcc119ec1d075d917563be45ca10925d0f9093331ac897da44fe",
-    "tools/fleet/stage_release.py": "d2146498ed47fd9ce45fa4732407ae0f25ebceac839c5667df61be6082aedebf",
+    "tools/fleet/stage_move.py": "e73b73aa448cdc2d3398b512176b54bdb390e79e281a59deff569464018f8ead",
+    "tools/fleet/stage_release.py": "8bb0c30187cf8fd3350e96e37a59fe9f33800ba4ceabceb9f0bf91a726a66be4",
     "tools/prismabuild_worker.py": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
   },
   "search_paths": [
     {
-      "path": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
+      "path": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088"
     }
   ],
   "consumers": [
@@ -40,5 +40,5 @@
     "tests/test_stage_a_retirement_pb_1073.py",
     "tests/test_stage_b_prep_produced_1070.py"
   ],
-  "note": "One shared immutable source pin for connected SDK4 and produced-output CPU fixtures (PQ #1084, #1293). Current consumers share the complete file union; historical SDK3 bundles and receipts remain preserved in Git and on the shared mount. Source qualification is independent of live worker activation."
+  "note": "One shared immutable source pin for connected SDK5 and produced-output CPU fixtures (PQ #1084, #1293, #2152). Current consumers share the complete file union; the historical SDK3 and SDK4 bundles and receipts remain preserved in Git and on the shared mount, and the SDK5 consumer refuses them by version. The pin and staged_lease.PB_READER_LEASE_PIN_COMMIT move together (tests/test_pb_generation_pin_1084.py). Source qualification is independent of live worker activation."
 }
