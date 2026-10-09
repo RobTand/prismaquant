@@ -1,16 +1,19 @@
 # GLM T-8 serve evidence and GPU authorization for PQ #2459
 
-Refs #2459. Refs #2471. This record is the coordinator evidence and
-written authorization that #2459 holds GPU qualification on. No GPU
-action for #2459 may start before this record merges. The hold stays
-until this record merges. Tessera #1095 supplies the separate
-producer-evidence prerequisite for #2459.
+Refs #2459. Refs #2471. This packet records the evidence for the
+coordinator decision `dec-1009-061144-b3de`, approved at 2026-10-09 06:14:02 UTC.
+The decision authorizes only scopes with verified evidence.
+The GPU hold stays until the coordinator records this packet and written authorization on #2459.
+A repository merge alone does not release that hold.
+Tessera #1095 remains a separate producer-evidence prerequisite.
 
 ## Serve evidence
 
-The measured run is window `u4-R1-20261001T0058Z`, arm A8SESHMN. It
-executed 2026-10-01 (client start 02:21:36 UTC, trace flush
-01:17:29 to 01:30:02 UTC). It serves the A8S artifact
+The measured run is window `u4-R1-20261001T0058Z`, arm A8SESHMN.
+It executed on 2026-10-01.
+The eager TR3 trace spans 01:17:29 to 01:30:02 UTC.
+The latency trace spans 01:31:35 to 01:52:03 UTC.
+The run serves the A8S artifact:
 `/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported`
 (config.json sha256
 `3f5c2c7381aae1c02d486c645ec6015cd1a60eb41faa5686541a15f523d79898`,
@@ -20,12 +23,14 @@ It runs Tessera `bb088715f5a114fe0da33bb6f30b3f4e64b8661c` with
 `TESSERA_FUSED_E4M3_MMA=e4m3` on image
 `localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a`
 (vLLM `0.30.1rc1.dev336+gaf5b4857e.d20260929`, Torch `2.13.0+cu130`).
-Topology is TP 2 over RoCE. Serve settings are `max_num_seqs 4`,
-`max_model_len 8448`, `max_num_batched_tokens 2048`, MTP off. The serve
-passes `--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY"}'`
-with `VLLM_USE_BREAKABLE_CUDAGRAPH=0` (tessera#774). The control arm is
-A8SESH, window `u4-A8SESH-20260930T2132Z` (2026-09-30), without
-`"mode":"NONE"`. Nothing else changes between the arms.
+Topology is TP 2 over RoCE.
+The latency serve uses `max_num_seqs 4`, `max_model_len 8448`, and `max_num_batched_tokens 2048`, with MTP off.
+It passes `--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY"}'`
+and `VLLM_USE_BREAKABLE_CUDAGRAPH=0` (tessera#774).
+The control arm is A8SESH, window `u4-A8SESH-20260930T2132Z`, on 2026-09-30.
+The control omits `"mode":"NONE"`.
+The eager TR3 scorer uses a different profile: `max_num_seqs 1`, `max_model_len 2049`, and `max_num_batched_tokens 2049`.
+Its `engine-tr3.json` sets `enforce_eager=true` and disables chunked prefill and prefix caching.
 
 Measured against the control arm: L8192 c1 prefill 1558.5 to 1657.8
 tok/s (+6.4%), TTFT 5256.3 to 4941.6 ms (-6.0%). The full panel is
@@ -36,18 +41,34 @@ unchanged: full-vocabulary KL `0.027885896312391557` over 25 windows
 serve is eager in both arms, so the panel shows the scorer did not
 move. It does not score the graph serve.
 
-Receipts for this run: runtime binding file
-`full-vocabulary-kl.runtime-5fbf983a927983c15973e67ae0b9745802322af9d2c7c454be708172b1051d70.json`
-(sha256 `5fbf983a927983c15973e67ae0b9745802322af9d2c7c454be708172b1051d70`,
-serve image bound inside); route traces `tr3-rank0.json` and
-`tr3-rank1.json` (`torch.distributed`, world size 2, `sm_121`);
-`route/verdict-tr3.json` (exact-module qualified: 56 modules, 14 dense
-plus 42 routed MoE, on `TESSERA_FP8` contracts; the layer-45 draft
-target is removed as diagnostic); speed files `speed/host-L512.json`,
-`speed/host-L2048.json`, `speed/host-L8192.json` with
-`speed/summary.json`; tessera#774. Raw data paths are
-`/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/A8SESHMN-nightly-20260930/run`
-and `.../A8SESH-nightly-20260930/run`.
+The receipt root is:
+`/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/A8SESHMN-nightly-20260930/run`.
+The control root is the sibling `A8SESH-nightly-20260930/run`.
+The runtime observation resides at:
+`head/tr3/full-vocabulary-kl.runtime-5fbf983a927983c15973e67ae0b9745802322af9d2c7c454be708172b1051d70.json`.
+Its `runtime_binding_sha256` is
+`5fbf983a927983c15973e67ae0b9745802322af9d2c7c454be708172b1051d70`.
+Its raw file SHA-256 is
+`3e6741d2bdc484fb5082b0207c43fda4e45b7bed21afd21b971200533e220545`.
+The observation records `initialized_before_scoring`; it binds the runtime but does not prove completed scoring.
+The result resides in `tr3/kl-summary.json` and `tr3/full-vocabulary-kl.json`.
+
+The route verdict, `route/verdict-tr3.json`, covers 56 exact modules: 14 dense and 42 routed MoE modules, on `TESSERA_FP8` contracts.
+It excludes the layer-45 draft target as diagnostic.
+The eager traces are `head/route/tr3-rank0.json` and `route/tr3-rank1.json`.
+The speed traces are `head/route/latency-rank0.json` and `route/latency-rank1.json`.
+Each rank declares `torch.distributed`, world size 2, and `sm_121`.
+The speed files are `speed/host-L512.json`, `speed/host-L2048.json`, `speed/host-L8192.json`, and `speed/summary.json`.
+Tessera [#774](https://github.com/RobTand/tessera/issues/774) records the historical speed change.
+
+Verified raw SHA-256 identities:
+
+- `route/tr3-rank1.json`:
+  `6311a0e76c6ddb32c606773f8a1b2c4ccc3885a6a5ae66859013c18274555252`
+- `route/latency-rank1.json`:
+  `edbd516fcb0aa1ac92e7ab5ef9c5108c34701872adea8201685038dde26e9174`
+- `engine-tr3.json`:
+  `85f5f1cbff18eaa9a2db3ec2ce4a9cdd3dd35d3f55e11598ad9b0eddac4afe78`
 
 Limits of this evidence: decode under FULL graphs past `max_model_len`
 2048 is not eager-equivalent (tessera#702 cause 2); the release serve
@@ -102,38 +123,54 @@ execution mode eager, residency resident
 (`TESSERA_SERVE_MODE=resident`), platform `sm_121`.
 
 - `tessera_bf16_k1_dense_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 832, 880, 960, 1024, 1088 | TP 2
+  | batch | rungs q256 832, 880, 960, 1024, 1088 | TP 2 | tr3_batch, speed_batch
 - `tessera_bf16_k1_dense_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 832, 880, 960, 1024, 1088 | TP 2
+  | decode | rungs q256 832, 880, 960, 1024, 1088 | TP 2 | speed_decode
 - `tessera_bf16_k1_routed_moe_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 1024 | TP 2
+  | batch | rungs q256 1024 | TP 2 | tr3_batch, speed_batch
 - `tessera_bf16_k1_routed_moe_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 1024 | TP 2
+  | decode | rungs q256 1024 | TP 2 | speed_decode
 - `tessera_e4m3_k1_dense_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 832, 960, 1024, 1088 | TP 2
+  | batch | rungs q256 832, 960, 1024, 1088 | TP 2 | tr3_batch, speed_batch
 - `tessera_e4m3_k1_dense_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 832, 960, 1024, 1088 | TP 2
+  | decode | rungs q256 832, 960, 1024, 1088 | TP 2 | speed_decode
 - `tessera_e4m3_k1_routed_moe_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 896, 928, 1024, 1088 | TP 2
+  | batch | rungs q256 896, 928, 1024, 1088 | TP 2 | tr3_batch, speed_batch
 - `tessera_e4m3_k1_routed_moe_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 896, 928, 1024, 1088 | TP 2
+  | decode | rungs q256 896, 928, 1024, 1088 | TP 2 | speed_decode
 
-Fixture scope for each authorized cell: fresh served traces on the
-named image, in the cell regime and residency, at the listed rungs, at
-TP 2. The served entry point is the R1 recipe: the A8S release export
-above, TP 2 over RoCE, `max_num_seqs 4`, `max_model_len 8448`,
-`max_num_batched_tokens 2048`, eager, resident. TP 1 is not
-authorized: the TP 1 reference script cannot serve this artifact, so
-no TP 1 fixture entry point exists. The served trace shapes bound the
-fixture set: dense `M2048:N12288:K4096`, `M2048:N2048:K4096`,
-`M2048:N4096:K1024`, `M2048:N4096:K6144`; MoE `M2048:N2048:K4096`;
-plus one `M2049` row per shape for the trailing single-token flush.
-The TR3 speed panel adds token counts L512, L2048, L8192 at c1 and c4.
-The packet records actual shapes per trace; shapes outside this set
-need coordinator review before they qualify. All 8 cells carry
-evidence grade `route_only` with smoke `not_recorded`, which the
-status-only gate admits. No pre-existing per-cell served fixture
-exists; the qualification runs produce the fixtures.
+Each target cell permits fresh served traces on the named image, at its listed rungs, with TP 2, eager execution, and resident weights.
+The numeric fixture profiles reside in `pq2471_fixture_profiles_2026-10-09.json`, beside this packet.
+Each profile specifies token rows M and rank-local (N, K) pairs.
+Use dense pairs `(12288,4096)`, `(2048,4096)`, `(4096,1024)`, and `(4096,6144)`.
+Use routed MoE pair `(2048,4096)`.
+
+The profiles separate the two historical serves:
+
+| Profile | Target regime | Permitted M | Fixture and entry point |
+| --- | --- | --- | --- |
+| tr3_batch | batch | 2048, 2049 | A8S export; eager TR3 scorer; `engine-tr3.json`; max length and token batch 2049; one sequence |
+| speed_batch | batch | 512, 1024, 1026, 1537, 2048 | A8S export; fresh eager replay of the R1 speed client; L512/L2048/L8192; c1/c4; max length 8448; token batch 2048 |
+| speed_decode | decode | 1, 2, 4 | Same eager replay; one token per active sequence; up to four sequences; same N and K pairs |
+
+The source `route/latency-rank1.json` records each speed profile's M values with all five structure-specific (N, K) pairs.
+The eager scorer's `route/tr3-rank1.json` records M2048 and M2049 with those pairs.
+M2049 describes a complete scorer dispatch, not a separate M1 decode fixture.
+Prompt length L does not equal dispatch M under chunked prefill.
+L8192 therefore does not permit M8192.
+
+The historical speed serve uses decode graphs; its traces do not count CUDA graph replays.
+Its M1, M2, and M4 records supply geometry, not eager decode qualification.
+Run fresh eager decode fixtures before any decode cell can qualify.
+Do not transfer the eager TR3 KL result to the graph serve.
+The scheduler also records mixed M7, M8, and M25 dispatches.
+Those rows have no isolated prefill or decode classification in this packet and remain outside per-cell qualification.
+Record them in the coverage matrix as excluded, not as qualified decode rows.
+
+All eight cells publish grade `route_only` and smoke `not_recorded`.
+The unchanged status-only gate admits that evidence.
+Those statuses do not prove these new fixture profiles.
+TP 1 has no usable A8S fixture entry point and remains excluded.
 
 Behavioral check: `tests/test_pq2471_t8_scope_admission.py` reads the
 live pin and packaged contract through `lane_eligibility` and
@@ -200,11 +237,8 @@ permission to run, not a result.
 
 - Execute through PrismaBuild only. Use priority 0.
 - Bound each GPU action to 30 minutes or less.
-- Require a D38 CPU dry run for every new or changed GPU entry
-  point before its GPU action. D38: the GLM-5.3 serve runs a
-  patched runtime (`prismaquant/serving_runtime_patches/`,
-  `serving_runtime_patch_set.py`); a patched runtime is not an
-  attested one, so each entry point proves its path on CPU first.
+- Require a D38 CPU dry run for every new or changed GPU entry point before its GPU action.
+- Use the named stock vLLM runtime with the Tessera plugin. Do not add vLLM core patches.
 - Require `runtime.tessera_commit` and
   `runtime.serving_source_sha256` on every target cell the packet
   qualifies. Compute the digest with
@@ -218,3 +252,34 @@ permission to run, not a result.
 - Equivalence: compare the live v2 admission results, route
   verdicts, and legal-domain projection before and after the
   evidence PR. Require identical results.
+
+## CPU verification of this correction
+
+These actions use PrismaBuild, tag `x86`, priority 0, and the pinned interpreter `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python`.
+They start no GPU work and qualify no cell.
+
+- Red regression:
+  `b20a3e8b26707e19e3d5a0b4b66e5614e673b37a721b07e48274389950365bec`.
+  The retained M2048/M2049 restriction fails seven speed and decode cases.
+  Three cases pass; ten existing admission cases are deselected.
+- Corrected suite:
+  `52bde44fc854c333a5990c88b206ca526720083c2c3bfc0509fad7fa85c32841`.
+  All 20 cases pass; no case skips.
+  The result file is `/home/rob/fleet/ceo/exec/ig-pq-2471-l1-a4/tests.json`.
+  The log resides at the action's CAS receipt:
+  `/mnt/shared/prismabuild-fleet/cas/actions/v3/52/52bde44fc854c333a5990c88b206ca526720083c2c3bfc0509fad7fa85c32841.json`.
+- Initial CPU smoke:
+  `f8b8a37349b99c31b2bd3288a6d9a6d878babee711f86c0315ab79fad55d675a`.
+  The temporary harness incorrectly expects `backed`.
+  The live owner returns `backed_with_serve_flag`, with `TESSERA_SERVE_MODE=resident`.
+  This harness failure changes no production gate or test assertion.
+- Corrected CPU smoke:
+  `12580f3491d15b8744a5d3311cb2ed35cb8cf8c976f37917d1cf4701a7acdf8f`.
+  The harness expands each numeric profile and calls the live `resolve_unit_route` owner for both structures and families.
+  Each route requires the resident serve flag.
+  The harness also compiles the changed test module on the worker.
+  It exits successfully and reports `qualified_cells=0`.
+  Its payload SHA-256 is `c9924b3974f8583a9e55c731eaf2253f3f313d7627b1f4e6014b6fc8e7690d8a`.
+  The temporary harness is absent from the delivered branch.
+
+The parent issue must receive the coordinator record before GPU qualification can start.

@@ -8,6 +8,9 @@ that excluded scopes refuse. The dated prose record in
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from prismaquant import lane_eligibility as lane
@@ -93,3 +96,30 @@ def test_excluded_scopes_refuse():
     vanilla_cells = [c for c in table.cells if c.runtime_image == vanilla]
     assert vanilla_cells
     assert all(c.runtime_image != IMAGE_5BE13705 for c in vanilla_cells)
+
+
+@pytest.mark.parametrize(
+    "profile_name,shape",
+    [
+        ("tr3_batch", (2048, 12288, 4096)),
+        ("tr3_batch", (2049, 2048, 4096)),
+        ("speed_batch", (512, 12288, 4096)),
+        ("speed_batch", (1024, 2048, 4096)),
+        ("speed_batch", (1026, 4096, 1024)),
+        ("speed_batch", (1537, 4096, 6144)),
+        ("speed_batch", (2048, 12288, 4096)),
+        ("speed_decode", (1, 12288, 4096)),
+        ("speed_decode", (2, 2048, 4096)),
+        ("speed_decode", (4, 4096, 1024)),
+    ],
+)
+def test_fixture_profiles_permit_recorded_regime_shapes(profile_name, shape):
+    """The qualification scope must include its prefill and decode inputs."""
+    path = (Path(__file__).resolve().parents[1] / "docs" / "results"
+            / "pq2471_fixture_profiles_2026-10-09.json")
+    profile = json.loads(path.read_text())["profiles"][profile_name]
+    m, n, k = shape
+    assert m in profile["token_rows"], (profile_name, shape)
+    assert [n, k] in profile["dense_nk"], (profile_name, shape)
+    if (n, k) == (2048, 4096):
+        assert [n, k] in profile["routed_moe_nk"], (profile_name, shape)
