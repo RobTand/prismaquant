@@ -255,7 +255,7 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
 
     torch.manual_seed(WORKLOAD_SEED)
     state = TinyLM().eval().state_dict()
-    model = TinyLM(state).eval()
+    model = TinyLM(state).eval().to(device)
     context = FakeContext(model, device)
     context.settle_prefetch_layers = lambda layers: None
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
