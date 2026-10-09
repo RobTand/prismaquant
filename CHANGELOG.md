@@ -174,6 +174,14 @@
   writer from test_footprint (#2390, references #1929). Fixture bytes,
   tensor order, costs, route reports and semantic assertions stay unchanged.
 
+- The PACT scope lives in the existing model profile contract (#2483, part of #2427).
+  `ModelStructureSpec` carries a declared `pact` scope (dense end, band width,
+  role TP splits, hidden streams); `ModelProfile` exposes it with layer,
+  cohort, hidden and TP readers. `Glm5NextProfile` states the exact running
+  cohort and layer count; `Qwen3Profile` resolves its declared fields with
+  no GLM fallback. The adapter consumes only that public contract and
+  refuses undeclared or inconsistent scope. GLM paths stay bit-identical;
+  detection, name projection and production behavior stay unchanged.
 - The PACT frontier profile cohort carries the measured-consumer contract
   (#2423, references #2427). `pact_cohort_from_profile` returns
   `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through

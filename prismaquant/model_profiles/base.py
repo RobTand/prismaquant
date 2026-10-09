@@ -389,6 +389,78 @@ class ModelProfile(ABC):
         if spec is not None:
             return tuple(spec.pinned_names)
         return ("lm_head",)
+    # ------------------------------------------------------------
+    # PACT measurement scope (issue 2427)
+    # ------------------------------------------------------------
+    def pact_scope_declared(self) -> bool:
+        """True when this family declares a PACT scope in its contract."""
+        spec = self.structure_spec()
+        return bool(spec is not None and spec.pact.declared)
+
+    def pact_dense_layer_end(self) -> int | None:
+        """First routed layer index, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.dense_layer_end
+
+    def pact_band_width(self) -> int | None:
+        """Routed band width, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.band_width
+
+    def pact_hidden_streams(self) -> int | None:
+        """Parallel residual streams, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.hidden_streams
+
+    def pact_tp_splits_for_role(self, role: str) -> int | None:
+        """TP split count for one role, or None without a declaration."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.tp_splits_for_role(role)
+
+    def pact_layer_count(self, config: dict | None) -> int | None:
+        """Decoder layer count from a config, or None when unstated."""
+        source = config.get("text_config") if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            source = config if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            return None
+        value = source.get("num_hidden_layers")
+        if type(value) is int and value > 0:
+            return value
+        return None
+
+    def pact_hidden_size(self, config: dict | None) -> int | None:
+        """Hidden width from a config, or None when unstated."""
+        source = config.get("text_config") if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            source = config if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            return None
+        value = source.get("hidden_size")
+        if type(value) is int and value > 0:
+            return value
+        return None
+
+    def pact_vocab_size(self, config: dict | None) -> int | None:
+        """Vocabulary size from a config, or None when unstated."""
+        source = config.get("text_config") if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            source = config if isinstance(config, dict) else None
+        if not isinstance(source, dict):
+            return None
+        value = source.get("vocab_size")
+        if type(value) is int and value > 0:
+            return value
+        return None
+
 
     def source_derivative_contract(self) -> dict | None:
         """Optional closed research derivative contract; declaration does not enable it."""

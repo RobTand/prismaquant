@@ -22,6 +22,9 @@ from __future__ import annotations
 
 # GLM-5.3 Flash legacy values. These are the exact constants the running
 # measurement uses today. Keep them unchanged while those runs finish.
+# The shared contract now owns them: Glm5NextProfile states the cohort
+# and layer count, and specs/glm5_next.json states the scope. This
+# table stays as the frozen equivalence oracle only.
 GLM_LEGACY = {
     "num_layers": 45,
     "dense_layers": (0, 3),
@@ -71,26 +74,61 @@ def _config_value(config, *names, default=None):
     return default
 
 
+def _require_profile(profile):
+    """Return the profile, or refuse a call with no declared scope."""
+    if profile is None or getattr(profile, "pact_scope_declared", None) is None:
+        raise ValueError(
+            "PACT scope needs a declared model profile; "
+            "explicit non-GLM resolution states no GLM fallback"
+        )
+    if not profile.pact_scope_declared():
+        raise ValueError(
+            f"profile {getattr(profile, 'name', 'unknown')} declares no PACT scope"
+        )
+    return profile
+
+
 def num_layers_from_profile(profile=None, config=None):
-    """Return the decoder layer count. Fall back to the GLM legacy value."""
-    value = _config_value(config, "num_hidden_layers")
-    if type(value) is int and value > 0:
-        return value
-    layers = getattr(profile, "_declared_config", None)
-    if isinstance(layers, dict):
-        value = _config_value(layers, "num_hidden_layers")
-        if type(value) is int and value > 0:
-            return value
-    return GLM_LEGACY["num_layers"]
+    """Return the decoder layer count from the profile contract."""
+    _require_profile(profile)
+    count = profile.pact_layer_count(config)
+    if count is not None:
+        return count
+    raise ValueError(
+        "PACT layer count needs num_hidden_layers in the explicit "
+        "or declared config; no fallback supplies it"
+    )
 
 
 def pact_bands(num_layers=None, profile=None, config=None):
-    """Return the PACT band list. Keep the GLM shape for 45 layers."""
-    count = num_layers if type(num_layers) is int and num_layers > 0 else num_layers_from_profile(profile, config)
-    dense = GLM_LEGACY["dense_layers"]
-    width = GLM_LEGACY["band_width"]
-    bands = [dense]
-    start = dense[1]
+    """Return the PACT band list from the profile scope."""
+    if type(num_layers) is int:
+        if num_layers <= 0:
+            raise ValueError("PACT bands need a positive layer count")
+        count = num_layers
+    else:
+        _require_profile(profile)
+        count = num_layers_from_profile(profile, config)
+    owner = _require_profile(profile)
+    dense_end = owner.pact_dense_layer_end()
+    width = owner.pact_band_width()
+    if dense_end is None or width is None:
+        raise ValueError(
+            f"profile {getattr(owner, 'name', 'unknown')} declares no PACT band scope"
+        )
+    if type(count) is not int or count <= 0:
+        raise ValueError("PACT bands need a positive layer count")
+    if dense_end < 0 or dense_end > count:
+        raise ValueError(
+            f"PACT dense_layer_end {dense_end} is outside 0..{count}"
+        )
+    bands = [(0, dense_end)] if dense_end > 0 else []
+    if dense_end == 0:
+        bands = [(0, min(width, count))]
+        start = width
+    else:
+        bands = [(0, dense_end)]
+        start = dense_end
     while start < count:
         bands.append((start, min(start + width, count)))
         start += width
@@ -98,48 +136,68 @@ def pact_bands(num_layers=None, profile=None, config=None):
 
 
 def pact_cohort_from_profile(profile=None, config=None):
-    """Return the pricing cohort dict. Explicit config wins, then declared profile config, then GLM."""
-    declared = getattr(profile, "_declared_config", None)
-    prefix = _config_value(config, "prefix_ids", "serving_prefix_ids", default=None)
-    if prefix is None:
-        prefix = _config_value(declared, "prefix_ids", "serving_prefix_ids", default=None)
-    if prefix is None:
-        prefix = GLM_LEGACY["prefix_ids"]
-    vocab = _config_value(config, "vocab_size", default=None)
-    if vocab is None:
-        vocab = _config_value(declared, "vocab_size", default=GLM_LEGACY["vocab_size"])
-    scored = _config_value(config, "scored_positions_per_sequence", default=None)
-    if scored is None:
-        scored = _config_value(
-            declared, "scored_positions_per_sequence", default=GLM_LEGACY["scored_positions"])
-    raw_tokens = _config_value(config, "raw_tokens_per_sequence", default=None)
-    if raw_tokens is None:
-        raw_tokens = _config_value(
-            declared, "raw_tokens_per_sequence", default=GLM_LEGACY["raw_tokens_per_sequence"])
-    cohort = {
-        "sample_range": list(GLM_LEGACY["sample_range"]),
-        "raw_tokens_per_sequence": int(raw_tokens),
-        "prefix_ids": list(prefix),
-        "local_prefix_rows": GLM_LEGACY["local_prefix_rows"],
-        "input_contract": GLM_LEGACY["input_contract"],
-        "global_original_tokens": GLM_LEGACY["global_original_tokens"],
-        "scored_positions_per_sequence": int(scored),
-        "vocab_size": int(vocab),
+    """Return the pricing cohort dict from the profile contract."""
+    owner = _require_profile(profile)
+    cohort_fn = getattr(owner, "pact_cohort_values", None)
+    if not callable(cohort_fn):
+        raise ValueError(
+            f"profile {getattr(owner, 'name', 'unknown')} declares no PACT cohort"
+        )
+    values = cohort_fn(config)
+    for key in (
+        "sample_range",
+        "raw_tokens_per_sequence",
+        "prefix_ids",
+        "local_prefix_rows",
+        "input_contract",
+        "global_original_tokens",
+        "scored_positions_per_sequence",
+        "vocab_size",
+    ):
+        if key not in values:
+            raise ValueError(
+                f"PACT cohort from {getattr(owner, 'name', 'unknown')} lacks {key}"
+            )
+    return {
+        "sample_range": list(values["sample_range"]),
+        "raw_tokens_per_sequence": int(values["raw_tokens_per_sequence"]),
+        "prefix_ids": list(values["prefix_ids"]),
+        "local_prefix_rows": values["local_prefix_rows"],
+        "input_contract": values["input_contract"],
+        "global_original_tokens": int(values["global_original_tokens"]),
+        "scored_positions_per_sequence": int(
+            values["scored_positions_per_sequence"]
+        ),
+        "vocab_size": int(values["vocab_size"]),
     }
-    return cohort
 
 
 def tp_splits_for_role(role, profile=None):
-    """Return the TP split count for a unit role. Keep the TP2 rule."""
-    del profile
+    """Return the TP split count from the profile scope."""
+    owner = _require_profile(profile)
+    count = owner.pact_tp_splits_for_role(role)
+    if count is not None:
+        return count
     if role == "down_proj":
-        return GLM_LEGACY["tp_splits_down_proj"]
-    return GLM_LEGACY["tp_splits_other"]
+        raise ValueError(
+            f"profile {getattr(owner, 'name', 'unknown')} declares no TP split "
+            f"for {role}"
+        )
+    return 1
 
 
 def glm_paths_identical(cohort):
     """Check the cohort against the running GLM measurement values."""
-    legacy = pact_cohort_from_profile()
+    from .model_profiles import profile_from_config
+
+    legacy = pact_cohort_from_profile(
+        profile_from_config(
+            {
+                "model_type": "glm5_next",
+                "architectures": ["Glm5NextForConditionalGeneration"],
+            }
+        )
+    )
     return all(cohort.get(key) == legacy[key] for key in legacy)
 
 
@@ -158,11 +216,18 @@ def frontier_manifest_overlay(manifest, profile=None, config=None):
     return overlay
 
 
-# Shared profile need, routed to the existing owner (campaign):
-# pact prefix ids, vocab, scored positions and TP rules belong in the
-# model profile / structure spec. This adapter reads plain config dicts
-# until the owner adds them. Do not add profile methods here.
-PROFILE_OWNER_REQUEST = (
-    "campaign: expose pact cohort (prefix ids, vocab, scored positions), "
-    "layer count, hidden layout and TP rules on ModelProfile/structure spec"
-)
+def pact_hidden_layout(profile=None, config=None):
+    """Return hidden streams and width from the profile contract."""
+    owner = _require_profile(profile)
+    streams = owner.pact_hidden_streams()
+    width = owner.pact_hidden_size(config)
+    if streams is None:
+        raise ValueError(
+            f"profile {getattr(owner, 'name', 'unknown')} declares no hidden layout"
+        )
+    if width is None:
+        raise ValueError(
+            "PACT hidden width needs hidden_size in the explicit "
+            "or declared config; no fallback supplies it"
+        )
+    return {"hidden_streams": streams, "hidden_size": width}

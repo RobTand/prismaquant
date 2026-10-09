@@ -15,6 +15,17 @@ packed expert Parameters are present.
 from __future__ import annotations
 
 from .base import ModelProfile
+def _pact_config_entry(config, name):
+    """First present config value. Walk nested text_config."""
+    if not isinstance(config, dict):
+        return None
+    if name in config and config[name] is not None:
+        return config[name]
+    text = config.get("text_config")
+    if isinstance(text, dict) and text.get(name) is not None:
+        return text[name]
+    return None
+
 
 
 class Qwen3Profile(ModelProfile):
@@ -40,6 +51,54 @@ class Qwen3Profile(ModelProfile):
         # installed-vLLM registry key.  The declarative spec supplies the
         # dense gate/up fusion that the MoE class adds only conditionally.
         return "Qwen3MoeForCausalLM"
+    def pact_cohort_values(self, config: dict | None) -> dict:
+        """PACT cohort from explicit plus declared config, no GLM fallback."""
+        declared = self._declared_config
+        values = {}
+        for key in (
+            "prefix_ids",
+            "serving_prefix_ids",
+            "vocab_size",
+            "scored_positions_per_sequence",
+            "raw_tokens_per_sequence",
+        ):
+            explicit = _pact_config_entry(config, key)
+            if explicit is not None:
+                values[key] = explicit
+                continue
+            stated = _pact_config_entry(declared, key)
+            if stated is not None:
+                values[key] = stated
+        prefix = values.get("prefix_ids", values.get("serving_prefix_ids"))
+        missing = [
+            key
+            for key in (
+                "vocab_size",
+                "scored_positions_per_sequence",
+                "raw_tokens_per_sequence",
+            )
+            if values.get(key) is None
+        ]
+        if prefix is None:
+            missing.append("prefix_ids")
+        if missing:
+            raise ValueError(
+                "qwen3: PACT cohort needs explicit cohort fields "
+                + ",".join(sorted(missing))
+            )
+        return {
+            "sample_range": list(values.get("sample_range", (0, 0))),
+            "raw_tokens_per_sequence": int(values["raw_tokens_per_sequence"]),
+            "prefix_ids": list(prefix),
+            "local_prefix_rows": values.get("local_prefix_rows", "included"),
+            "input_contract": values.get("input_contract", "raw"),
+            "global_original_tokens": int(values.get("global_original_tokens", 0)),
+            "scored_positions_per_sequence": int(
+                values["scored_positions_per_sequence"]
+            ),
+            "vocab_size": int(values["vocab_size"]),
+        }
+
 
     def fused_sibling_group(self, linear_qname: str) -> str | None:
         """Consult stable spec groups before config-dependent vLLM metadata."""
