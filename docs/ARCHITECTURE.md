@@ -2992,6 +2992,18 @@ a mixed stack without the carried request refuses (no baseline to normalize
 against), and the expressibility gate is the installed runtime's v57
 `producer_interface.routed_units` capability (§4.10).
 
+Re-stamped 2026-10-09 (PQ #2566, `prismaquant-2566`): the TR3 scorer stamps
+`execution_mode` at the top level of every dump (compiled or eager; older
+dumps carry it only on a compiled run's `runtime_binding`, eager reads as
+absent), and `check_paired_execution_dumps` pairs one compiled dump with one
+eager dump on the same tree, panel, tokenizer and topology: same schema,
+fidelity and calibration contract, bindings equal except the declared mode
+keys through the same replay comparison a qualification passes. KL values are
+never compared. Graph coverage stays prefill only: no hook scores a decode
+step, so no dump attests graph-replayed decode. Measurement-tool contract
+only; no default, stage, format, lane or ship gate changes. Gates:
+`tests/test_glm_tr3_full_vocab.py`.
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -7570,6 +7582,15 @@ Re-stamped (2026-09-29, `sonnet/1392-refusals-declared-reads`) for **the
 uncovered-source refusal on Stage A, Stage B and the probe workers** (PQ
 #1392) and **the campaign identity without the source-identity cache flags**
 (PQ #1532); see the stamp at the top of this document.
+
+As of: 2026-10-09 · `prismaquant-2566`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-10-09, `prismaquant-2566`) for **the TR3 scorer's paired
+graph/eager dumps** (PQ #2566): top-level `execution_mode` on every dump and
+`check_paired_execution_dumps` on the same tree, panel, tokenizer and
+topology; graph coverage stays prefill only; see the stamp at the top of this
+document.
 
 As of: 2026-09-28 · `claude/1613-streaming-resume`.
 Stamps follow, newest first, each recording its own branch and date.
