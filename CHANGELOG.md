@@ -17,8 +17,9 @@
   and source/invocation/attempt negative controls no longer request admission
   from the preserved SDK4 source archive. No installed-SDK injection fallback,
   mixed package tree, runtime publication or GPU qualification is introduced;
-  the durable Python3.12+b40 pack and native helper adoption remain PB #1485
-  prerequisites.
+  the durable portable SDK5 pack and native helper adoption remain PB #1485
+  prerequisites. The fixture reads the install identity with the standard
+  library, because the pbtest pin verifier is absent in xdist workers.
 
 - **Original reader authority joins the selected native producer and outer
   target** (Refs #2152). The strict result request uses SDK5's existing public
@@ -30,7 +31,7 @@
   Runtime version validation reuses the existing exact SDK owner. This is
   nonactivating source preparation: current SDK4/DC480 fixtures, c437 helpers,
   deployment and GPU/source admission are unchanged; a qualified SDK5 helper
-  and coherent source/pin transition remain coupled prerequisites.
+  generation remains a coupled prerequisite.
 
 - A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
   Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
@@ -54,11 +55,23 @@
   install or fallback. The strict original-source result read now requires the
   selected immutable attempt's native producer context; runtime documents,
   `original_cuda_control`'s launch-owned helper check and the fixture
-  provenance pins follow the same owner-resolved identities (Tessera stays at
-  its existing b40 pin). The separately qualified SDK5 install/fixture/portable
-  tuple (PB #1485), fleet helper-runtime selection and live deployment remain
-  separate and unchanged; no capability, admission or serving claim rides the
-  pin.
+  provenance pins follow the same owner-resolved identities. The separately
+  qualified SDK5 interpreter and portable pack (PB #1485), fleet helper-runtime
+  selection and live deployment remain separate and unchanged; no capability,
+  admission or serving claim rides the pin.
+
+- **The shared connected-fixture pin moves to an immutable SDK5 source bundle**
+  (Refs #2152, #2455). The reader pin had moved to SDK5 while
+  `tests/pb_runtime_generation_pin.json` still named the SDK4 archive. The
+  Stage A produced-output, band handoff, spool, retirement and
+  render-publication suites then refused their own transport by version.
+  The pin now names a read-only `git archive` of PB `027103d9` under
+  `qualification/pq-pb-sdk5-20261009`. `tests/test_pb_generation_pin_1084.py`
+  requires one commit for both pins. The SDK4 archive stays on the mount, and
+  the consumer still refuses it by exact version. No runtime, default,
+  numerical or serving behavior changes. The pbtest pin guard refuses a shard
+  whose interpreter lacks a non-editable Git install of the reader pin, so
+  the SDK5 interpreter delivery (PB #1485) must come before this change lands.
 
 - The paired expert-dominance menu rule applies only to complete routed layers (#2288).
   A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.

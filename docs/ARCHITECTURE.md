@@ -1760,13 +1760,36 @@ does not move numerical, wire, pipeline-default, serving or admission gates.
 
 Production-gateway pilot controls (#1293) now bind the actual non-editable
 SDK5 installation through an explicit private helper view. The published
-pbtest pin verifier proves its Git identity, RECORD bytes and import origin;
-client, CAS, pool and capture binder resolve from that same installed package,
-with no test-only SDK injection or SDK4 fallback. The unrelated produced-output
-source archive remains historical SDK4 and is still refused by this consumer.
+pbtest pin verifier proves its Git identity, RECORD bytes and import origin
+once per shard. The fixture reads only the install identity again, with the
+standard library. The verifier module exists in the shard's main process and
+not in its xdist workers. Client, CAS, pool and capture binder resolve from
+that same installed package, with no test-only SDK injection or SDK4 fallback.
 These CPU controls do not publish a helper generation or qualify native GPU
 pilots; PB #1485's durable Python3.12+b40 SDK5 pack and launch-owned helper
 selection remain separate prerequisites for the original native provider.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455): the shared connected-fixture pin
+`tests/pb_runtime_generation_pin.json` moves with the reader pin. It now names
+PB `027103d9a8417e06c7f13356e58779a313cd7088`, SDK5. The bundle is an
+immutable `git archive` of that commit. It carries the `.pinned-source.json`
+marker of the SDK3 and SDK4 bundles. PB action
+`1a525af7c723625c16b9279b726c66120f07b5c5945008ceeea186b9964b42b5` published it
+read-only at
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088`.
+The archive digest is
+`94727274fd0515c5f1ee7c031c90c1106793ef22b38b286caf44f1755675677d`. It equals
+the digest of `git archive` from the PrismaBuild history. The same method
+reproduces the recorded SDK3 and SDK4 digests. Before this change, the reader
+pin had moved and the shared pin had not. The Stage A produced-output, band
+handoff, spool, retirement and render-publication suites then refused the SDK4
+archive by version. A census of 121 test files showed 255 such failures.
+`tests/test_pb_generation_pin_1084.py` now requires one commit for both pins.
+The SDK4 archive stays on the mount. The consumer still refuses it by exact
+version. Source qualification is independent of live worker activation. The
+pbtest pin guard reads the reader pin. It refuses a shard when the interpreter
+has no non-editable Git install of that commit. PB #1485 owns that interpreter
+delivery.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
