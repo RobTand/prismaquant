@@ -1,21 +1,23 @@
 # GLM T-8 serve evidence and GPU authorization for PQ #2459
 
-Refs #2459. Closes #2471. This record is the coordinator evidence and
+Refs #2459. Refs #2471. This record is the coordinator evidence and
 written authorization that #2459 holds GPU qualification on. No GPU
-action for #2459 may start before this record lands. The hold stays
+action for #2459 may start before this record merges. The hold stays
 until this record merges. Tessera #1095 supplies the separate
 producer-evidence prerequisite for #2459.
 
 ## Serve evidence
 
 The measured run is window `u4-R1-20261001T0058Z`, arm A8SESHMN. It
-executed 2026-10-01 (client start 02:21:36 UTC). It serves the A8S
-artifact `/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported`
+executed 2026-10-01 (client start 02:21:36 UTC, trace flush
+01:17:29 to 01:30:02 UTC). It serves the A8S artifact
+`/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported`
 (config.json sha256
 `3f5c2c7381aae1c02d486c645ec6015cd1a60eb41faa5686541a15f523d79898`,
 index sha256
 `2990e8c051fac609e913d8619a1dea3bfda49fe69bfaf474a8ca802bdf8b9c84`).
-It runs Tessera `bb088715` with `TESSERA_FUSED_E4M3_MMA=e4m3` on image
+It runs Tessera `bb088715f5a114fe0da33bb6f30b3f4e64b8661c` with
+`TESSERA_FUSED_E4M3_MMA=e4m3` on image
 `localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a`
 (vLLM `0.30.1rc1.dev336+gaf5b4857e.d20260929`, Torch `2.13.0+cu130`).
 Topology is TP 2 over RoCE. Serve settings are `max_num_seqs 4`,
@@ -43,27 +45,30 @@ serve image bound inside); route traces `tr3-rank0.json` and
 plus 42 routed MoE, on `TESSERA_FP8` contracts; the layer-45 draft
 target is removed as diagnostic); speed files `speed/host-L512.json`,
 `speed/host-L2048.json`, `speed/host-L8192.json` with
-`speed/summary.json`; measurement note
-`docs/measurements/2026-10-01-glm-release-serve-mode-none.md`
-(2026-10-01) in the Tessera checkout; tessera#774. Raw data paths are
+`speed/summary.json`; tessera#774. Raw data paths are
 `/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/A8SESHMN-nightly-20260930/run`
 and `.../A8SESH-nightly-20260930/run`.
 
 Limits of this evidence: decode under FULL graphs past `max_model_len`
 2048 is not eager-equivalent (tessera#702 cause 2); the release serve
 runs 8448. The lane TP 1 reference script cannot serve the GLM-5.3
-artifact. The MTP drafter under graphs is open (tessera#695). The
-measured Tessera commit `bb088715` predates the live pin below; the
-recipe evidence binds the image, flags, topology and artifact class,
-not the serving commit. Each qualification packet therefore records
-its own serving commit and code digest.
+artifact, so TP 1 has no usable fixture entry point on this artifact.
+The MTP drafter under graphs is open (tessera#695). The
+measured Tessera commit `bb088715f5a114fe0da33bb6f30b3f4e64b8661c`
+predates the live pin below; the recipe evidence binds the image,
+flags, topology and artifact class. Each qualification packet records
+its own serving commit and code digest through
+`tessera.package_source.v1`. The served trace stamps
+`serving_source_sha256`
+`e0f9b3433a40de2c90a40f288bbe2bb7fc68b1025aa52cd3ff5a2f7fbc585731`
+for the `bb088715` tree.
 
 ## Live pin (unchanged by this record)
 
 This authorization preserves the live v2 pin and admission behavior.
 It moves no pin, constant, reviewed answer, or frozen legal-domain
-state. The identities below are historical evidence, not a gate
-against future runtime identities.
+state. The identities below are historical evidence. A later reviewed
+pin move supersedes them without invalidating this record.
 
 - Tessera commit: `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`
 - Contract: v60, lane schema v11
@@ -74,6 +79,12 @@ against future runtime identities.
   constant remains `None`. The release label remains advisory.
 - The independent export and serve gates stay in force. The
   `cell_evidence_admits` status-only rule stays in force.
+- Serving-code checks compare each packet trace header against the
+  digest that packet qualifies, per `tessera_route_trace_gate`. This
+  record names the measured digest above; it does not gate packets to
+  the live pin identity. The Tessera #1095 producer packet names its
+  own commit `9eef9fea6edce32f4e64abf87f0058b11dab2287` and digest
+  `a9b7bf32563ce874f45956dd4e5ff4b4c43de73459f9aa40dee1977b9b152330`.
 
 ## Authorized cell scope
 
@@ -91,32 +102,44 @@ execution mode eager, residency resident
 (`TESSERA_SERVE_MODE=resident`), platform `sm_121`.
 
 - `tessera_bf16_k1_dense_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 832, 880, 960, 1024, 1088 | TP 1, 2
+  | batch | rungs q256 832, 880, 960, 1024, 1088 | TP 2
 - `tessera_bf16_k1_dense_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 832, 880, 960, 1024, 1088 | TP 1, 2
+  | decode | rungs q256 832, 880, 960, 1024, 1088 | TP 2
 - `tessera_bf16_k1_routed_moe_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 1024 | TP 1, 2
+  | batch | rungs q256 1024 | TP 2
 - `tessera_bf16_k1_routed_moe_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 1024 | TP 1, 2
+  | decode | rungs q256 1024 | TP 2
 - `tessera_e4m3_k1_dense_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 832, 960, 1024, 1088 | TP 1, 2
+  | batch | rungs q256 832, 960, 1024, 1088 | TP 2
 - `tessera_e4m3_k1_dense_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 832, 960, 1024, 1088 | TP 1, 2
+  | decode | rungs q256 832, 960, 1024, 1088 | TP 2
 - `tessera_e4m3_k1_routed_moe_sm121_batch_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | batch | rungs q256 896, 928, 1024, 1088 | TP 1, 2
+  | batch | rungs q256 896, 928, 1024, 1088 | TP 2
 - `tessera_e4m3_k1_routed_moe_sm121_decode_resident_runtime_1bd4e9052e00b217fe52b40a9b9a9e2445b6cdd504bef051d8410d3fbc72a96e`
-  | decode | rungs q256 896, 928, 1024, 1088 | TP 1, 2
+  | decode | rungs q256 896, 928, 1024, 1088 | TP 2
 
 Fixture scope for each authorized cell: fresh served traces on the
 named image, in the cell regime and residency, at the listed rungs, at
-TP 1 or TP 2. The contract publishes covered rungs, not tensor shapes;
-shapes come from the served artifact at run time, and the packet
-records them per trace. All 8 cells carry evidence grade `route_only`
-with smoke `not_recorded`, which the status-only gate admits. No
-pre-existing per-cell served fixture exists; the qualification runs
-produce the fixtures. Input artifact for qualification is the A8S
-release export named above, or a newer reviewed export named in the
-packet.
+TP 2. The served entry point is the R1 recipe: the A8S release export
+above, TP 2 over RoCE, `max_num_seqs 4`, `max_model_len 8448`,
+`max_num_batched_tokens 2048`, eager, resident. TP 1 is not
+authorized: the TP 1 reference script cannot serve this artifact, so
+no TP 1 fixture entry point exists. The served trace shapes bound the
+fixture set: dense `M2048:N12288:K4096`, `M2048:N2048:K4096`,
+`M2048:N4096:K1024`, `M2048:N4096:K6144`; MoE `M2048:N2048:K4096`;
+plus one `M2049` row per shape for the trailing single-token flush.
+The TR3 speed panel adds token counts L512, L2048, L8192 at c1 and c4.
+The packet records actual shapes per trace; shapes outside this set
+need coordinator review before they qualify. All 8 cells carry
+evidence grade `route_only` with smoke `not_recorded`, which the
+status-only gate admits. No pre-existing per-cell served fixture
+exists; the qualification runs produce the fixtures.
+
+Behavioral check: `tests/test_pq2471_t8_scope_admission.py` reads the
+live pin and packaged contract through `lane_eligibility` and
+`tessera_render`. It asserts each authorized cell admits at its stated
+rungs and refuses the excluded scopes. Static review reads this
+record; no substring test gates its prose.
 
 ## Excluded scopes
 
@@ -139,7 +162,8 @@ incompatible evidence stay outside it.
   `tessera_e4m3_k1_routed_moe_sm121_batch_resident`,
   `tessera_e4m3_k1_routed_moe_sm121_decode_resident`.
   The whole `TESSERA_E2M1_K2` family is therefore outside this
-  authorization.
+  authorization: no `TESSERA_E2M1_K2` cell names the `5be13705`
+  image.
 - Vanilla vLLM image
   (`vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14`):
   no measured serve runs on this image. Excluded cells:
@@ -153,8 +177,11 @@ incompatible evidence stay outside it.
 - Residency streamed: no authorized cell publishes it. The two
   vanilla dense E4M3 cells publish streamed, but they are excluded
   above for lack of serve evidence.
+- TP 1: no usable fixture entry point exists on the A8S artifact.
 - TP above 2: refused by the closed-world ceiling.
 - CPU fixtures: no cell qualifies from CPU fixtures.
+- Tensor shapes outside the served set above: need coordinator
+  review before they qualify.
 - Synthetic fixtures: `tests/fixtures/tessera_route_trace_union/`
   carries synthesized speculative entries for layer 45 and empty real
   speculative traces (see its `PROVENANCE.md`). Those files support
@@ -163,7 +190,6 @@ incompatible evidence stay outside it.
   uniform T-8, MTP artifact `a8/body-mtp-v39/exported-r2`) is a
   separate fixture source, not the release serve.
 - Families, structures, or rungs outside the live reviewed answer.
-- Any Tessera commit or contract digest other than the live pin.
 
 ## Coordinator authorization
 
