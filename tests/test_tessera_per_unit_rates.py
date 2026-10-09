@@ -48,7 +48,6 @@ from test_allocator_expert_projection import (
     _units as _alloc_units,
     _v5_contract as _alloc_v5_contract,
 )
-from test_allocator_byte_budget_selection import _write_safetensors
 from test_tessera_census_cache import FMT as CENSUS_FMT, _world as _census_world
 from test_tessera_export_projection import (
     _blob as _lane_blob,

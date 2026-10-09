@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2301, revision 5): `tools/g3job` owns the imported G3 measurement harness.
+Re-stamped 2026-10-09 (PQ #2301, revision 6): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -24198,10 +24198,93 @@ draw or scope, checks every observed unit against it, and only then stamps the
 scope's values.
 
 An optional dependent `capture` action (`--capture-calibration-out`) computes
-all uncapped Hessians and first-row float32 scoring inputs once using the same
+the requested uncapped Hessians and first-row float32 scoring inputs once using the same
 census and exits before encoding. The existing activation-cache writer and
 cost-stage journal seal a complete `prismaquant.tessera_calibration_cache.v2`
-manifest. `plan --calibration-cache` binds that manifest path and SHA256 into
+manifest. The shared cache API also accepts explicit
+`capture_identity(..., unit_names=...)`: its identity declares
+`unit_scope="selected"` and maps exactly the requested census units to their
+shapes. `CaptureWriter` and `publish_capture` require every requested entry,
+preserve each unit's full-draw Hessian/count/maxima and retained float32 prefix,
+and reject missing, unknown or shape-incompatible units. Omitting the selection
+retains the existing full-census identity and completeness rule; merely deleting
+units from an implicit full identity is not a selected capture. This scope
+metadata changes neither the encoded wire nor serving kernels. Fresh capture
+also accepts the existing `--units` whole-group selection grammar: the prep
+resolves names from census anchor groups without loading a model, and model
+rows confirm those memberships before collection. Sampled, audited, partitioned
+and exact-member pricing selections are not whole-group capture requests. The
+selected capture still forwards every source layer and keeps the full draw;
+quanta with no requested units may record an empty unit map only for an explicit
+selected identity whose unit layers are unambiguous. The join still requires
+full layer tiling, the complete initialization witness and every requested unit.
+Completed-capture reuse refuses a different requested coverage instead of silently
+returning the stored scope. A normal `--calibration-cache` reader may consume
+any requested subset covered by the stored selected or full capture; requested
+units outside that coverage refuse before cached rows reach pricing. Automatic
+fresh recording remains refused until an
+enforced immutable-source provider is qualified (`require_automatic_capture_source_recording`,
+Refs #2010/#2008); selected-unit support does not bypass that safety admission.
+The optional `_collect_activations(..., row_consumer=...)` seam receives each
+canonical shared input group once per batch, before prefix capping and
+independently of built-in Hessian collection. Its default is off; consumers
+must own retained bytes because the passed rows may alias source activations.
+`experiments/indomain_split_capture.py` uses the seam for the explicitly
+authorized D42 Stage 1 research route: fixed whole-sample fit and held-out
+coordinates accumulate separate unnormalized moments in one forward pass. Each
+quantum verifies the actual draw bytes, role token identities and running split
+boundary against the persisted manifest before model load; these are data
+comparability refusals even in dev mode. Their per-unit counts must sum to this
+forward's observed routing, not historical census counts. Gate/up/down counts
+must agree per expert and sample role; each role's expert sum equals its tokens
+times the config-declared top-k. Dense units cover every token in that role.
+Historical counts and max-abs are planning metadata: the existing D32 helper
+stamps drift, and both values and deltas enter the trusted layer/quantum receipt.
+The census has no mean statistic; the manifest explicitly records that absence.
+An expert appearing/vanishing or changing by more than 1 percent stops for CEO
+review. That bound is the CEO directive of 2026-10-06 11:42Z, set from layer-3
+gaps of 0.002 to 0.16 percent. The completed layer 40 to 44 fragments of the
+first capture (`research-capture-shared-01`) differ from the census by up to
+8.9 percent, and 1056 of their 5184 routed units exceed 1 percent, so this stop
+refuses those layers until the CEO sets a bound for deep layers. Hessians and
+prefixes contain only the actual routed rows. Stable publication
+is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
+files relative to the capture root. The research join compares each role
+record (path, own digest, length, count, Hessian/input/prefix geometry) with
+the completed quantum's verified receipt before checking its actual file.
+Count redistribution or a substituted payload cannot be accepted merely
+because the layer totals still match. A single GPU action may run adjacent
+prepared quanta; each layer publishes and verifies its own files and frees its
+moments before the next layer, including within a multi-layer prepared range.
+A prepared range whose owner is already complete ends in one of three ways.
+It refuses when the request is another measurement than the prep sealed: a
+different unit set, scoring prefix (`--max-act-rows`), draw, split boundary or
+batch count, a missing selection file, or a published role record that differs
+from the quantum's verified receipt. Nothing runs and nothing is reused. It
+replays, and does not refuse, when the prep identity matches but the stored
+`capture_binding` (the selection file digest and the retained-prefix budget
+`--max-prefix-rows`) differs from this request, or the fragment stores no
+binding: that is another request over the same prepared traversal, so the
+owner runs again and publishes new role files. One `research_quantum_replay`
+line names the changed fields. It adopts the stored result, with no source
+forward, when the binding matches and every publication matches its verified
+receipt. A changed unit set or scoring prefix is part of the prep identity and
+refuses before the binding is read. The three explicitly prioritized
+L3 expert0 up, L28 shared up and L44 expert0 up units publish their verified
+role pairs before the remainder of their layer is serialized. This research
+publication is not an
+ordinary production capture manifest and confers no immutable-provider
+qualification. The automatic admission guard remains unchanged. Chain quanta
+retain the canonical prep identity after the existing dev-mode runtime stamp:
+CPU-prep/GPU-quantum version metadata is not a second admission seal. Calibration,
+unit scope/shapes, prefix and batch counts still compare strictly. Completed
+initialization witnesses must retain valid observed grammar and coverage; their
+recorded-versus-running identity uses the existing dev-mode stamp at join and
+finish. Actual unit tensor geometry, counts and own-byte checks remain hard.
+Certified mode retains identity refusals. The entry's `--mode preflight` runs a
+tiny two-layer GLM control on `--device` (default `cpu`); on `cuda` the quanta
+forward and accumulate on the GPU, which a CUDA-gated test pins.
+`plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default
 (`--row-head stream`, `tessera_row_stream.RowStream`) it then reads only its
@@ -32311,7 +32394,9 @@ retried in parts. `prismaquant/capture_layer_chain.py` cuts it into rows
 that each run a contiguous layer range `[a, b)` and pass the hidden states
 on through the boundary storage. `tessera_campaign --capture-chain` runs
 each row; all three kinds require `--streaming` and
-`--capture-calibration-out`.
+`--capture-calibration-out`. A selected fresh capture uses the same full layer
+chain and boundary format. Only collection and published unit coverage narrow;
+an empty selected range still forwards its batches and contributes its witness.
 
 **Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
 --capture-chain-boundary-storage JSON`). Loads no model and reads no source
