@@ -846,7 +846,8 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
     data = packaged_contract_payload() if payload is None else payload
     lanes = data.get("lane_eligibility") or {}
     covered = {}
-    if lanes.get("schema") == "tessera.lane-eligibility.v11":
+    if lanes.get("schema") in ("tessera.lane-eligibility.v11",
+                               "tessera.lane-eligibility.v12"):
         from .lane_eligibility import _parse_table
         table = _parse_table(lanes, data["formats"], "", "", "",
                              native_extensions=data["native_extensions"])
