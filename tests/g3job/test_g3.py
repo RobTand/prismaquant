@@ -23,10 +23,11 @@ from pathlib import Path
 import pytest
 import torch
 
+pytestmark = pytest.mark.fleet_data
+
 HERE = Path(__file__).resolve().parents[2] / "tools" / "g3job"
 sys.path.insert(0, str(HERE))
 PIN = Path(os.environ.get("TESSERA_PIN", "/mnt/shared/tessera-pins/b40c93cb73745097e57a1ba4cf5b9eee166c759a"))
-sys.path.insert(0, str(PIN / "src"))
 PQ = Path(os.environ.get("PQ_SRC", "/mnt/shared/tessera-measurements/surrogate-diag-20260929/src/pq-7882eda3"))
 MANIFEST = Path(os.environ.get("G3_MANIFEST",
                                "/mnt/shared/tessera-measurements/surrogate-diag-20260929/g3/unit_manifest_v2.json"))
@@ -442,9 +443,7 @@ def _source_tensor(qname):
 
 
 def _decoder():
-    import tessera
     from tessera.unit_artifact import read_unit_artifact
-    assert str(PIN) in tessera.__file__, tessera.__file__
     return read_unit_artifact
 
 

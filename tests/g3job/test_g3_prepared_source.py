@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+pytestmark = pytest.mark.fleet_data
+
 
 def _canonical(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

@@ -35,6 +35,9 @@ The phased launcher refuses `--pilot` because that mode has no arm completion pl
 
 PB `81dd844a14e0` passes 88 CPU cases, including the source guards, with no skips.
 PB `9f10a29c7f0c` compiles the harness and exercises its CLI and tiny one-arm comparison.
+PB `a58f8bd4ac5c` passes all 79 harness cases after the fixture import correction.
+Fleet asset tests use the existing `fleet_data` opt-in and the PB-qualified installed reader.
+They do not put the old Tessera source ahead of the installed package.
 PB `31b249361cb2` builds the actual 47-phase manifest for `a8_w`.
 It declares 37,858 ranges and omits 36,423 fully replaced source tensors.
 The retained manifest is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-data-manifest-v2.json.gz`.
@@ -45,7 +48,10 @@ It preserves the source digest through a GPU round trip.
 Its tiny Linear comparison preserves logits and FP64 KL bytes across source-read and source-omission paths.
 Its profiles reside in `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke/reader-smoke-ig-a3.one-arm/`.
 The comparison has three positions and two vocabulary columns, not the whole GLM panel.
-The final shared-engine GPU check is separate from this initial smoke.
+PB `c8c75f6aa414` passes the final shared-engine smoke on Sparklina at priority zero.
+It repeats the RAM read and the bitwise comparison in the actual producer container.
+Its result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke-final/reader-smoke-ig-a3-final.json`.
+Its two traces reside beside that result in `reader-smoke-ig-a3-final.one-arm/`.
 No speed, energy, whole-model residency gain, serving, or promotion claim follows from these checks.
 Netdata power has a ten-second native interval, which cannot resolve the tiny comparison for work per joule.
 

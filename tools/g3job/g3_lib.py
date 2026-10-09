@@ -1,12 +1,13 @@
 """G3 offline decoded-forward evaluator: the pieces the GPU run and the CPU tests share.
 
-Shared functions (torch + stdlib); no PrismaQuant, Tessera or transformers import at module
-scope. Range I/O resolves PB's admitted staged reader lazily; CPU tests need no CUDA.
+The helpers reuse the accepted G3 arithmetic and tensor digest owners.
+They import no Tessera or Transformers package at module scope.
+Range I/O resolves the admitted PB reader lazily. CPU tests need no CUDA.
 
 What lives here:
-  * the served activation quantizer, restated: fp8_per_token_dynamic;
+  * the accepted served activation quantizer, fp8_per_token_dynamic;
   * the TSRFUSE1 container framing (tessera/fused.py:37 FUSED_MAGIC, :105 parse_fused);
-  * the tensor-identity hash (prismaquant/production_weight_cache.py:3037 convention);
+  * the shared tensor digest owner, prismaquant/tensor_digests.py;
   * the map from a priced Linear (payload row name) to the tensor slice the streamed
     transformers model executes, and the in-place substitution with its hash gate;
   * the W+A hooks that put the served activation contract on a streamed MLP.
@@ -18,14 +19,14 @@ serving/native_ops.py:179/200 implements it as vLLM's registered op
 torch.ops._C.dynamic_per_token_scaled_fp8_quant; routed_fused.py:828-830 and
 serving/fp8_route.py:446 call it on every Tessera E4M3 GEMM's A side.  The contract's
 activation_quantizers block does NOT attest this contract's arithmetic (it names only
-e2m1_group16_ue4m3_static).  The arithmetic below is therefore taken from Tessera's pinned test
-tests/test_native_fp8_quant.py, whose `_kernel_arithmetic` restates the pinned kernel source and
-whose `test_native_fp8_quant_is_the_pinned_kernels_arithmetic` holds the native op to it
-bitwise on the pinned image (vLLM 0.28.1rc1.dev397+gfd4a15126, measured 2026-09-28):
+e2m1_group16_ue4m3_static). The shared arithmetic retains the original G3 operation order.
+The reference is Tessera's pinned tests/test_native_fp8_quant.py.
+Its `_kernel_arithmetic` function restates the pinned kernel source.
+The historical native check uses vLLM 0.28.1rc1.dev397+gfd4a15126 on 2026-09-28:
     scale = max(fl32(amax / 448), fl32(1 / (448 * 512)))
     code  = e4m3_rne_sat(clamp(fl32(x / scale), -448, 448))
-The CPU test compares this module to that function's own source text, parsed from the pinned
-file, and G1 re-runs the pinned GPU test in the served image.
+The CPU test compares the shared arithmetic with that independent pinned reference.
+This source import does not repeat the historical native GPU qualification.
 
 TENSOR PARALLELISM.  The served T8R ran TP2 (U4 engine_kwargs.tensor_parallel_size = 2, no
 expert parallelism).  A column-parallel GEMM (gate/up) sees the whole hidden row, so its
