@@ -17683,6 +17683,10 @@ class TesseraRouteCell:
     residency_modes: tuple[str, ...]
     runtime_image: str
     execution_modes: tuple[str, ...]
+    #: v12's per-launch census scope, in ``executes`` order: each entry is the
+    #: launch's ``rungs_q256`` tuple, or ``None`` when the launch keeps the
+    #: scope of its cell. ``()`` means the table named no scope.
+    launch_rungs_q256: tuple[tuple[int, ...] | None, ...] = ()
     #: v6's per-cell runtime versions and evidence block; empty/``None`` under
     #: the pre-v6 grammars, which published neither.
     runtime_vllm: str = ""
@@ -17701,6 +17705,31 @@ class TesseraRouteCell:
 
     def covers_rate(self, rate_q256: int) -> bool:
         return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
+
+    def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
+        """Whether the launch at ``executes[index]`` covers ``rate_q256``.
+
+        A launch without a v12 ``rungs_q256`` scope keeps the scope of its
+        cell. A scoped launch covers its census rungs plus the run-table
+        rungs its tables share with another covered census rung of its
+        cell (the same rule :func:`contract_answer` projects beside the
+        pairs, evaluated here from the cell's stored coverage).
+        """
+        scopes = tuple(self.launch_rungs_q256 or ())
+        scope = scopes[index] if index < len(scopes) else None
+        if scope is None:
+            return self.covers_rate(rate_q256)
+        if rate_q256 in scope:
+            return True
+        if not self.covers_rate(rate_q256) or self.run_tables is None:
+            return False
+        tables = [tuple(t) for t in self.run_tables]
+        census = sorted(self.rungs_q256)
+        if len(tables) != len(census):
+            return False
+        by_census = dict(zip(census, tables))
+        want = {by_census[q] for q in scope if q in by_census}
+        return by_census.get(rate_q256) in want
 
     @property
     def native(self) -> bool:
@@ -18101,6 +18130,13 @@ def contract_answer(contract: "TesseraContract") -> dict:
                 sorted(cell.requires_serve_flags),
                 [list(launch) for launch in sorted(cell.executes)],
                 sorted(cell.residency_modes),
+                [{"symbol": symbol, "decoder": decoder,
+                  "rungs_q256": sorted(scope)}
+                 for symbol, decoder, scope in sorted(
+                     (symbol, decoder, scope)
+                     for (symbol, decoder), scope
+                     in zip(cell.executes, cell.launch_rungs_q256)
+                     if scope is not None)],
             ] + ([{"image": cell.runtime_image,
                    "execution_modes": sorted(cell.execution_modes),
                    **({"kernel_build": cell.runtime_kernel_build} if cell.runtime_kernel_build else {})}]
@@ -19695,6 +19731,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             requires_serve_flags=cell.requires_serve_flags,
             executes=cell.executes,
             residency_modes=cell.residency_modes,
+            launch_rungs_q256=tuple(cell.launch_rungs_q256),
             runtime_image=cell.runtime_image,
             execution_modes=cell.execution_modes,
             runtime_vllm=cell.runtime_vllm,
@@ -19733,7 +19770,8 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         activation_quantizers=_parse_activation_quantizers(payload, path),
         allowable_rungs={str(e["family"]): dict(e["allowable_rungs"])
                          for e in formats if "allowable_rungs" in e}
-        if table.schema == "tessera.lane-eligibility.v11" else {},
+        if table.schema in ("tessera.lane-eligibility.v11",
+                            "tessera.lane-eligibility.v12") else {},
     )
 
 

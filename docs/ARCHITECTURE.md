@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
+applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
+only at a rung its scope covers; a launch without the key keeps the scope
+of its cell. The pin stays at lane schema v11; no pin moves in this change.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
