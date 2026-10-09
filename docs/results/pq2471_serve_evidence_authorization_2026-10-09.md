@@ -283,3 +283,59 @@ They start no GPU work and qualify no cell.
   The temporary harness is absent from the delivered branch.
 
 The parent issue must receive the coordinator record before GPU qualification can start.
+
+## Coordinator delivery — 2026-10-09 08:32:02 UTC
+
+The coordinator posted the evidence and explicit authorization on #2459:
+[coordinator record](https://github.com/RobTand/prismaquant/issues/2459#issuecomment-6077376824).
+GitHub records author `RobTand`, association `OWNER`, and creation time `2026-10-09T08:32:02Z`.
+Decision `dec-1009-081845-3b70` assigns this delivery to the coordinator.
+The comment binds the corrected packet and numeric profiles at commit `d2a9f44b9fd1285bb2e112b34f5c7382696792f9`.
+Its UTF-8 body SHA-256 is `d95141bdb39a3153ca3e922b3bda897c06c93ed1e91a605ffd7d93f1c0960b8c`.
+
+This delivery satisfies the parent-record prerequisite from #2471.
+The earlier hold statements describe the state before this delivery.
+Tessera #1095 remains a separate producer-evidence prerequisite.
+Resume #2459 only after all applicable prerequisites pass.
+The authorization permits only the eight mapped cells and the three numeric fixture profiles above.
+It does not qualify any cell or artifact.
+
+The posted limits require PrismaBuild, priority 0, and GPU actions of at most 30 minutes.
+Each new or changed GPU entry point requires a D38 CPU dry run before its GPU action.
+The live v2 pin, admission behavior, and independent export and serve gates remain unchanged.
+This attempt submitted no GPU action and changed no fixture profile or test assertion.
+
+### Delivery verification
+
+PrismaBuild action `dfb33b2289b4d5273577afafe443955f54abdc1d36a68a409f3eb3de27440506` completed on `dl380g10` with return code 0.
+It used tag `x86`, priority 0, `/tmp` scratch, and a 120-second deadline.
+The temporary CPU harness fetched the posted comment through the GitHub API.
+It checked the author, parent issue, creation date, and exact body digest.
+It parsed the permitted runtime through `parse_runtime_scope`.
+It resolved 410 fixture and rung combinations through the live `resolve_unit_route` owner across all eight mapped cells.
+Each route required the Tessera plugin and `TESSERA_SERVE_MODE=resident`.
+The harness compiled the retained test module and reported `qualified_cells=0`.
+
+- CAS receipt:
+  `/mnt/shared/prismabuild-fleet/cas/actions/v3/df/dfb33b2289b4d5273577afafe443955f54abdc1d36a68a409f3eb3de27440506.json`.
+- Receipt digest:
+  `0b63f079dbfb39cfd0a72c63298f207a30cb259f07613ab99d32a7c4ab8aef3e`.
+- Payload:
+  `/mnt/shared/prismabuild-fleet/cas/blobs/6f/6f28f18124b2200bd76e3ce98f24c9e911b18d004e23c2bdda37f48abf7731b6`.
+- Local result claim:
+  `5ef14cc01cd2c86b4ff568399ca7b0a6b253639b2d84bab690ecf136e11fd1c4`.
+- `pb_verify_claim` passed all nine checks, including the payload hash.
+  It did not verify the worker attestation.
+
+The retained regression remains action `b20a3e8b26707e19e3d5a0b4b66e5614e673b37a721b07e48274389950365bec`, with seven failures.
+The corrected suite remains action `52bde44fc854c333a5990c88b206ca526720083c2c3bfc0509fad7fa85c32841`.
+Its verified payload contains 20 passed call outcomes, no skips, and no collection, setup, or teardown failures.
+The fixture and test bytes remain unchanged in this delivery; the historical red run needs no repeat.
+
+The suite receipt binds snapshot bundle `4353d1f12e3676638fb91262a6957af598024c9bef81955bfc6b6c2ed9b4d9fb`.
+Its snapshot commit is `7f2995cbf9ca11cb66f31b0de69b24e40efd5a54`.
+The snapshot test module hashes to `8bf748b74f25ac61cfc2b8d91f4a2553731216598f9b9e759927c10bdd5fc7aa`.
+Its numeric fixture file hashes to `65b336caa1622ea559ea2f16673b0aa0f5594ffbd484599495ec2e9defbcacf0`.
+The new CPU smoke records the same two file digests.
+These matching bytes bind the retained suite to the delivered test and fixture scope without another suite run.
+
