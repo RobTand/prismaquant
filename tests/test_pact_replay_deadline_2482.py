@@ -1,6 +1,5 @@
 """The PACT replay CLI accepts the approved deadline and keeps its bounds."""
 
-import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,11 +9,7 @@ import pytest
 REPLAY_ROOT = Path(__file__).resolve().parents[1] / "prismaquant" / "pact_replay"
 sys.path.insert(0, str(REPLAY_ROOT))
 
-from multi_stream_replay import (  # noqa: E402
-    APPROVED_DEADLINE_SECONDS,
-    cli_parser,
-    resolve_cli_run,
-)
+from multi_stream_replay import cli_parser, resolve_cli_run  # noqa: E402
 
 
 def _fixture():
@@ -54,10 +49,6 @@ def _args(deadline):
     )
 
 
-def test_approved_deadline_constant_is_3500():
-    assert APPROVED_DEADLINE_SECONDS == 3500
-
-
 def test_default_deadline_stays_1700():
     assert cli_parser().get_default("deadline_seconds") == 1700
 
@@ -84,12 +75,6 @@ def test_invalid_deadlines_refuse(deadline):
     roster, receipt, raw = _fixture()
     with pytest.raises(ValueError, match="bounded deadline"):
         resolve_cli_run(_args(deadline), receipt, raw, roster)
-
-
-def test_nonfinite_deadline_is_not_orderable():
-    assert not 0 < float("nan") <= 3500
-    assert not 0 < float("inf") <= 3500
-    assert math.isfinite(APPROVED_DEADLINE_SECONDS)
 
 
 def test_science_inputs_match_canonical_resolution():

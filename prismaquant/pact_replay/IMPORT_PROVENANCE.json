@@ -23,6 +23,20 @@
     "returncode": 1,
     "stdout_sha256": "9a1d7470d521026ebe8636a327dd75ac2a44b88c7588f1a1b1aa55dbfe3c9cb9"
   },
+  "d38_corrected": {
+    "action": "25d65391d7ce29c27f4c265396d8810d0ad95d76782396117b7ed3aa2e81cd6d",
+    "snapshot_parent": "7672bace107fe09b9907747a9a70ba758af59b32",
+    "host": "dl380g10",
+    "elapsed_s": 83.55014443397522,
+    "returncode": 0,
+    "stdout": "D38_CPU_passed true, 7 streams, full_band_measured false",
+    "stdout_log_sha256": "7db58bcdf915617bcaf2e47b22d0fd735664116b6cfcaaf22717afa86cbc2dfc",
+    "proof": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-deadline-3500-02-pq2482/proof.json",
+    "proof_sha256": "0a5c68acf4bf671f0585c0b40495d67ab66381e98bd6e6471642421851711ca5",
+    "proof_schema": "pact.same_entry_real_cpu_proof.v2",
+    "energy_rows_sha256": "422890d96a5a744bc7c666272b33369becf4572cb3a60312a26c2eeb4ae44cdf",
+    "resolved_origins": "prismaquant/pact_replay/DEPENDENCY_MANIFEST.json resolved_origins: 92 modules with origin tags and byte digests for this action"
+  },
   "entry": "prismaquant/pact_replay/multi_stream_replay.py",
   "excluded_run_state": [
     "bootstrap-data.json",
@@ -32,10 +46,20 @@
     "failed-cycle-evidence.json",
     "parent-lease-data.json"
   ],
+  "dependency_manifest": "prismaquant/pact_replay/DEPENDENCY_MANIFEST.json",
+  "dependency_manifest_sha256": "86669bd258d7e1a470af3f8b5b6028d9a1d5d0716de9b6ec058ef01f9aa6afeb",
+  "dependency_closure": "92 external modules: 7 g3-source, 56 pq-owner, 29 tessera-pin. 75 executed in the D38 dry chain, 17 latent with per-module reasons. D32 advisory; no refusal gate reads these digests.",
   "external_pins": {
     "g3_source": "/mnt/shared/tessera-measurements/g3-v2-rebaseline-20261005/source",
+    "g3_source_head": "a23165b979a90536e060a2c99ea26930d5445a59",
+    "g3_source_bundle": "/mnt/shared/tessera-measurements/g3-readset-2301/source-a23165b.bundle",
+    "g3_source_bundle_sha256": "8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec",
+    "pq_owner": "/mnt/shared/tessera-measurements/t8-nextarm-source-preparation-20261005/sources/pq-owner",
     "pq_owner_head": "931085dbdf9cc321e3e586c6a47cc62f970be978",
-    "tessera_pin": "/mnt/shared/tessera-pins/b40c93cb73745097e57a1ba4cf5b9eee166c759a/src"
+    "pq_owner_branch": "campaign/nextarm-shard-provider-20261005",
+    "tessera_pin": "/mnt/shared/tessera-pins/b40c93cb73745097e57a1ba4cf5b9eee166c759a/src",
+    "tessera_pin_commit": "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+    "tessera_pin_tree_sha256": "1e93c8eecff2f2389e2d07647ade6de681d5bd7a9f78292d396c5a986dbc7462"
   },
   "frozen_head": "073646c7293685869b3ad18b261c49b49c4c481a",
   "frozen_head_subject": "Document duplicate diagnostic records after a crash replay",
