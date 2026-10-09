@@ -43,6 +43,8 @@ TEST_TOOLS = {
 }
 CONTRACT_IN_TREE = "src/tessera/serving/runtime_contract.json"
 WORKERS = 2
+#: Without it pytest elides long values in an assertion's explanation: ('tessera::fu...window_dense').
+ASSERTION_VERBOSITY = "verbosity_assertions=2"
 
 
 def say(tag: str, payload) -> None:
@@ -123,7 +125,7 @@ def selftest_probe(out: Path) -> dict:
     env = {**os.environ, "PQ1317_PROBE_DIR": str(probe_dir)}
     done = subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "xdist.plugin", "-p", "native_probe", "-n", str(WORKERS),
-         "-o", "enable_assertion_pass_hook=true", "-q", "probe_selftest.py"],
+         "-o", "enable_assertion_pass_hook=true", "-o", ASSERTION_VERBOSITY, "-q", "probe_selftest.py"],
         cwd=directory, env=env, capture_output=True, text=True)
     records = [json.loads(line) for path in sorted(probe_dir.glob("probe.*.jsonl"))
                for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -176,7 +178,8 @@ def run_suite(files: list[str], out: Path) -> int:
         out, "-p", "xdist.plugin", "-p", "native_probe", "-n", str(WORKERS), "--dist", "loadfile",
         "--durations=20", "--strict-cuda", "--surface-json", str(out / "surface.json"),
         "--basetemp", str(out / "tmp" / "pytest"), "--junitxml", str(out / "junit.xml"),
-        "-o", "enable_assertion_pass_hook=true", "-o", "log_level=INFO", "-rP", *files)
+        "-o", "enable_assertion_pass_hook=true", "-o", ASSERTION_VERBOSITY, "-o", "log_level=INFO",
+        "-rP", *files)
     env = {**os.environ, "PQ1317_PROBE_DIR": str(out / "probe")}
     say("PQ1317_PYTEST_COMMAND", command)
     with (out / "pytest.log").open("w", encoding="utf-8") as log:
