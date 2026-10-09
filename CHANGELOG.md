@@ -11,6 +11,13 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- Deliver the accepted D44 guard through the repository snapshot (#2481).
+  Preserve its accepted head, bundle digest, frozen owners, and external dependency bindings.
+  Select absolute child paths and the delivered container workspace.
+  Validate the native request before any output write.
+  Apply D32 to external source, template, and module identities.
+  PrismaBuild CPU proofs cover the real route, child argument parsers, and unchanged publication rules.
+  No GPU work or scientific replay ran.
 - The unknown-deferral test starts its release timer after initial staging and tensor access (#2304).
   The real mover retains the fixture's normal staging budget; only release uses the 30-second budget.
   A synthetic 31-second staging delay verifies immediate refusal, zero release retries, zero supported deferrals, and the exact unclassified debt.

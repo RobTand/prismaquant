@@ -8,14 +8,13 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 GUARD_DIR = REPO / "prismaquant" / "d44_guard"
-CPU_PYTHON = "/home/rob/venvs/pb-cpu/bin/python"
+CPU_PYTHON = sys.executable
 
 NEEDS_FLEET = pytest.mark.skipif(
     not Path("/mnt/shared/tessera-measurements/g3-v2-rebaseline-20261005/source/v2_launch.py").is_file(),
@@ -41,7 +40,7 @@ def _plan(entry: Path) -> dict:
     return {
         "schema": "prismabuild.logical_request.v1",
         "common": {
-            "argv": ["python3", str(entry), "--device", "cpu",
+            "argv": [CPU_PYTHON, str(entry), "--device", "cpu",
                      "--batch", "{pb.task_batch}"],
             "cwd": ".",
             "demand": {"cpu": 1},
@@ -215,67 +214,166 @@ def test_bound_residency_supplies_container_contract():
 
 
 @NEEDS_FLEET
-def test_routed_entry_selects_delivered_guard_in_subprocess(tmp_path):
-    """Route-plan runs the delivered guard in a fresh subprocess.
-
-    The subprocess imports the staged guard with real owners. No test
-    replaces stage1, D30, residency, or the child client. The routed
-    entry reports a dry run unpublished.
-    """
+@pytest.mark.parametrize("stage,child", [
+    ("encode", "stage1.py"),
+    ("select-unit", "d44_training.py"),
+    ("encode-cost", "d44_subsample.py"),
+])
+def test_routed_entry_selects_delivered_guard_in_subprocess(tmp_path, stage, child):
+    """The real route and guard execute the delivered child's argument parser."""
     delivery = _load_delivery()
-    entry = tmp_path / "owner-tree" / "encode_launch.py"
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    entry.write_text("# frozen entry\n")
-    before = entry.read_bytes()
-    src = tmp_path / "plan.json"
+    original = tmp_path / "active"
+    original.mkdir()
+    for name in ("encode_launch.py", child, "v2_launch.py"):
+        (original / name).write_text("raise SystemExit('old source selected')\n")
+    before = {p.name: p.read_bytes() for p in original.iterdir()}
+    root = tmp_path / "output"
+    plan = _plan(original / "encode_launch.py")
+    plan["common"]["cwd"] = str(original)
+    plan["common"]["argv"] += [
+        "--stage", stage, "--root", str(root), "--dry-run", "--capture"]
+    plan["roster"]["tasks"][0]["residency_key"] = "GPU-A"
+    plan["batch_policy"]["residencies"][0]["key"] = "GPU-A"
+    source = tmp_path / "plan.json"
     out = tmp_path / "routed.json"
-    src.write_text(json.dumps(_plan(entry)))
+    source.write_text(json.dumps(plan))
+    routed = subprocess.run(
+        [CPU_PYTHON, str(GUARD_DIR / "campaign_launch.py"),
+         "route-plan", str(source), "--out", str(out)],
+        cwd=original, capture_output=True, text=True, timeout=300)
+    assert routed.returncode == 0, routed.stderr
+    request = json.loads(out.read_text())
+    entry = Path(request["common"]["cwd"]) / request["common"]["argv"][1]
+    assert entry == GUARD_DIR / "campaign_launch.py"
+    assert request["common"]["cwd"] == str(REPO)
+    assert hashlib.sha256(entry.read_bytes()).hexdigest() == (
+        delivery.load_pin()["corrected_guard_sha256"])
+    assert request["roster"]["tasks"][0]["residency_key"] == "gpu-a"
+    assert request["batch_policy"]["residencies"][0]["key"] == "gpu-a"
+    batch = tmp_path / "batch.json"
+    batch.write_text(json.dumps({"result_manifest_path": str(root / "child.json")}))
+    argv = [str(batch) if token == "{pb.task_batch}" else token
+            for token in request["common"]["argv"]]
+    env = {**os.environ, **request["common"]["env"]}
+    run = subprocess.run(argv, cwd=request["common"]["cwd"], env=env,
+                         capture_output=True, text=True, timeout=300)
+    assert run.returncode == 2, run.stderr
+    assert f"{child} {stage}:" in run.stderr
+    assert "argument --capture: expected one argument" in run.stderr
+    assert "old source selected" not in run.stderr
+    assert not root.exists()
+    assert {p.name: p.read_bytes() for p in original.iterdir()} == before
+    assert json.loads(source.read_text()) == plan
+
+
+@NEEDS_FLEET
+def test_native_refusal_precedes_source_staging(tmp_path):
+    """Native request validation refuses before a source tree or output exists."""
+    stage_root = tmp_path / "delivery"
+    plan = _plan(tmp_path / "encode_launch.py")
+    plan["roster"]["tasks"][0]["estimated_seconds"] = -1
+    source = tmp_path / "plan.json"
+    source.write_text(json.dumps(plan))
+    out = tmp_path / "routed.json"
+    done = subprocess.run(
+        [CPU_PYTHON, str(GUARD_DIR / "campaign_launch.py"),
+         "route-plan", str(source), "--out", str(out)],
+        env={**os.environ, "D44_DELIVERY_STAGE_PARENT": str(stage_root)},
+        capture_output=True, text=True, timeout=300)
+    assert done.returncode != 0
+    assert "estimated_seconds must be greater than zero" in done.stderr
+    assert not out.exists()
+    assert not stage_root.exists()
+    assert json.loads(source.read_text()) == plan
+
+
+@NEEDS_FLEET
+@pytest.mark.parametrize("binding", ["owner", "template"])
+@pytest.mark.parametrize("mode", ["1", "0"])
+def test_external_provenance_follows_d32(binding, mode, monkeypatch, tmp_path, capsys):
+    """Recorded source drift stamps in dev mode and refuses in certified mode."""
+    delivery = _load_delivery()
+    pin = delivery.load_pin()
+    if binding == "owner":
+        pin["external_owner_bindings"]["files"]["g3_residency.py"] = "0" * 64
+    else:
+        pin["external_owner_bindings"]["container_template"]["sha256"] = "0" * 64
+    path = tmp_path / "pin.json"
+    path.write_text(json.dumps(pin))
+    monkeypatch.setattr(delivery, "PIN_PATH", path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    if mode == "0":
+        with pytest.raises(ValueError, match="changed"):
+            delivery.verify_external_bindings()
+    else:
+        actual = delivery.verify_external_bindings()
+        assert actual["g3_residency.py"] == (
+            "22c2068a92c516c8bae2564b589e8228b47d5ce145c5e03ba0d898773e0548e8")
+        assert actual["container_template"] == (
+            "ca1e014058f9c48ee88e16a471af59b301ff15afae1a5731649a8b79fd08734e")
+        assert "[DEV-MODE]" in capsys.readouterr().out
+
+
+@NEEDS_FLEET
+@pytest.mark.parametrize("mode", ["1", "0"])
+def test_residency_module_identity_follows_d32(mode, monkeypatch, capsys):
+    """A module path mismatch follows D32 without a module replacement."""
+    delivery = _load_delivery()
+    delivery.require_container_residency()
+    module = sys.modules["g3_residency"]
+    monkeypatch.setattr(module, "__file__", "/different/g3_residency.py")
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    if mode == "0":
+        with pytest.raises(ImportError, match="module path changed"):
+            delivery.require_container_residency()
+    else:
+        delivery.require_container_residency()
+        assert sys.modules["g3_residency"] is module
+        assert "[DEV-MODE]" in capsys.readouterr().out
+
+
+@NEEDS_FLEET
+@pytest.mark.parametrize("mode", ["1", "0"])
+def test_missing_external_dependency_refuses_in_both_modes(mode, monkeypatch, tmp_path):
+    """Neither mode permits an absent owner."""
+    delivery = _load_delivery()
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    with pytest.raises(FileNotFoundError, match="external owner is absent"):
+        delivery.stage_tree(tmp_path / "stage", owners_dir=tmp_path)
+    assert not (tmp_path / "stage").exists()
+
+
+@NEEDS_FLEET
+def test_container_client_selects_delivered_workspace(tmp_path):
+    """The real client boundary supplies the delivered read-only workspace."""
+    delivery = _load_delivery()
+    entry = delivery.stage_tree(tmp_path / "delivered")
+    output = tmp_path / "output"
     script = (
         "import json, sys\n"
-        f"sys.path.insert(0, {str(GUARD_DIR)!r})\n"
-        "import source_delivery as delivery\n"
         "from pathlib import Path\n"
-        "guard = delivery.stage_fresh()\n"
-        "print(str(guard))\n"
-    )
-    done = subprocess.run(
-        [CPU_PYTHON, "-c", script], capture_output=True, text=True,
-        timeout=300, cwd=str(tmp_path))
-    assert done.returncode == 0, done.stderr
-    staged_guard = Path(done.stdout.strip())
-    assert staged_guard.name == "campaign_launch.py"
-    assert staged_guard.parent != entry.parent
-    assert entry.read_bytes() == before
-    assert list(entry.parent.iterdir()) == [entry]
-
-    run_script = (
-        "import json, os, sys\n"
-        "from pathlib import Path\n"
-        f"sys.path.insert(0, {str(staged_guard.parent)!r})\n"
-        f"sys.path.insert(0, {str(delivery.owners_dir())!r})\n"
+        f"sys.path.insert(0, {str(entry.parent)!r})\n"
         "import campaign_launch as guard\n"
-        f"assert guard.__file__ == {str(staged_guard)!r}\n"
-        f"assert str(guard.OWNER) == {str(delivery.owners_dir())!r}\n"
-        f"root = Path({str(tmp_path / 'routed-dry')!r})\n"
-        "root.mkdir(parents=True, exist_ok=True)\n"
-        "receipt = root / 'receipts' / 'q.json'\n"
-        "receipt.parent.mkdir(parents=True, exist_ok=True)\n"
-        "receipt.write_text('{}\\n')\n"
-        "batch = {'parent_key': 'a' * 64, 'plan_key': 'b' * 64,\n"
-        "         'child_ordinal': 0,\n"
-        "         'result_manifest_path': str(root / 'child.json'),\n"
-        "         'tasks': [{'id': 't0', 'output_id': 'o0',\n"
-        "                    'payload': {'qname': 'q'}}]}\n"
-        "batch_path = root / 'batch.json'\n"
-        "batch_path.write_text(json.dumps(batch))\n"
-        "published = guard._publish_batch_result(\n"
-        "    batch_path, root, 'encode', dry_run=True)\n"
-        "assert published is False\n"
-        "assert not (root / 'child.json').exists()\n"
-        "print('routed-guard-ok')\n"
+        f"root = Path({str(output)!r})\n"
+        "container, command, client = guard.container_launch(\n"
+        "    ['stage1.py', 'encode', '--device', 'cuda', '--root', str(root)], root)\n"
+        f"assert client[1] == {str(entry.parent / 'v2_launch.py')!r}\n"
+        "assert command[1] == '/workspace/stage1.py'\n"
+        "probe = guard.start_container_client([sys.executable, '-c',\n"
+        "    \"from pathlib import Path; print('workspace=' + str(Path.cwd()))\"])\n"
+        "assert probe.wait(timeout=30) == 0\n"
+        "sys.path.insert(0, '/mnt/shared/tessera-measurements/"
+        "surrogate-diag-20260929/src/pq-7882eda3')\n"
+        "from tools import tessera_campaign_container as adapter\n"
+        "docker = adapter.docker_command(container, command,\n"
+        "    cwd=str(guard.CHILD_SOURCE), uid=1000, gid=1000,\n"
+        "    image_id='sha256:' + 'a' * 64, with_gpu=False)\n"
+        f"assert 'type=bind,src={entry.parent},dst=/workspace,readonly' in docker\n"
+        "assert not root.exists()\n"
+        "print('container-workspace-ok')\n"
     )
-    run = subprocess.run(
-        [CPU_PYTHON, "-c", run_script], capture_output=True, text=True,
-        timeout=300, cwd=str(tmp_path))
-    assert run.returncode == 0, run.stderr
-    assert "routed-guard-ok" in run.stdout
+    done = subprocess.run([CPU_PYTHON, "-c", script], cwd=tmp_path,
+                          capture_output=True, text=True, timeout=300)
+    assert done.returncode == 0, done.stderr
+    assert f"workspace={entry.parent}" in done.stdout
+    assert "container-workspace-ok" in done.stdout

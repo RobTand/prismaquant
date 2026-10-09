@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2481): the D44 source delivery uses the repository snapshot.
+The accepted standalone head is `fa3775151f77dc713fd78882daf6e147ab471243`.
+Its bundle SHA-256 is `7ea79d62000dc4a41d940a9c72eb925e6dbd2b752e49dccd25b22b3a78c998e0`.
+`prismaquant/d44_guard/standalone_source_pin.json` records the frozen owners and the external dependency bindings.
+The external owners and the container template reside on the shared fleet mount, not a workstation.
+
+Use the repository guard to route a frozen native request:
+
+```sh
+python3 prismaquant/d44_guard/campaign_launch.py route-plan PLAN.json --out ROUTED.json
+```
+
+The route selects the repository Git root as `common.cwd` and a relative guard entry.
+PrismaBuild then seals the repository source and supplies its snapshot to each selected worker.
+The guard selects each numerical child by its absolute repository path.
+The container client uses `_vendored` as its workspace, so `/workspace` contains the delivered numerical owners.
+Native request validation completes before the route writes its output.
+Explicit standalone delivery still uses `source_delivery.stage_tree` and refuses an existing destination.
+The native route does not submit that non-Git directory as a checkout.
+
+External source, template, and module identities use the shared `dev_mode.seal_check`.
+Development mode prints `[DEV-MODE]` on a mismatch and continues.
+Certified mode keeps the refusal.
+Missing files, stored-byte integrity, native request correctness, and the D30 resource checks remain enforced.
+
+PB `8e922d3db1a9` passes 24 delivery cases; PB `080d37c1d157` passes 12 publication cases.
+PB `ea08af48600f` proves the real route, native script ownership, the selected CPU child parser, and compilation.
+The CPU proof deliberately refuses an incomplete child argument before numerical work.
+It proves source selection, not a scientific result, GPU execution, or container execution.
+The active campaign tree, retained receipts, and action `a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0` remain outside this delivery.
+
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.

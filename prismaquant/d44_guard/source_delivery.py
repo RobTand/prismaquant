@@ -1,17 +1,13 @@
 """Deliver the accepted D44 standalone source (PQ #2481).
 
-The guard needs its standalone owners to run. This module stages the
-vendored owner tree for a campaign run. It verifies each vendored file
-against its own recorded digest. It verifies each external owner file
-against its immutable binding. It refuses a missing or changed file.
+The repository supplies the frozen owners and the corrected guard.
+External owners and the container template have immutable digest bindings.
+Source, template, and module identities use the shared D32 seal.
+Missing dependencies and stored-byte corruption refuse in both modes.
 
-The staged tree keeps the standalone layout. The launcher subprocess
-starts beside its sibling owners. Route-plan stages into a separate
-directory. It never overwrites the active source tree.
-
-Recorded-versus-running identity follows D32. Each provenance check
-goes through the shared dev-mode seal helper. Missing files and
-own-byte corruption refuse in both modes.
+Native routes use the repository snapshot on each selected worker.
+Explicit standalone delivery uses a fresh tree on the shared fleet mount.
+The delivery never overwrites the active source tree.
 """
 
 from __future__ import annotations
@@ -78,42 +74,31 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _seal_check(kind, expected, actual, *, where, refusal):
-    """Route one identity comparison through the shared D32 seal.
-
-    The guard runs beside its staged owners, without the installed
-    package on its path. This loader finds the shared seal helper in
-    the repository tree. The helper stamps a mismatch in dev mode and
-    refuses in certified mode. No new seal behavior lives here.
-    """
-    repo = HERE.parents[1]
-    helper = repo / "prismaquant" / "dev_mode.py"
-    name = "prismaquant.dev_mode"
+def _seal_check(kind, expected, actual, *, where, refusal, environ=None):
+    """Use the shared D32 helper without the numerical package initializer."""
+    policy = HERE / "_policy"
+    if not policy.is_dir():
+        policy = HERE.parent
+    package_name = "_d44_delivery_policy"
+    name = package_name + ".dev_mode"
     found = sys.modules.get(name)
     if found is None:
-        # The helper imports one sibling by relative path. Register a
-        # light package anchor so the import resolves without torch.
-        # An installed package already present keeps its own modules.
-        package = sys.modules.get("prismaquant")
-        if package is None:
-            package = importlib.util.module_from_spec(
-                importlib.util.spec_from_loader(
-                    "prismaquant", loader=None, is_package=True))
-            package.__path__ = [str(repo / "prismaquant")]
-            sys.modules["prismaquant"] = package
-        spec = importlib.util.spec_from_file_location(
-            name, helper, submodule_search_locations=[])
+        package = importlib.util.module_from_spec(
+            importlib.util.spec_from_loader(package_name, loader=None, is_package=True))
+        package.__path__ = [str(policy)]
+        sys.modules[package_name] = package
+        spec = importlib.util.spec_from_file_location(name, policy / "dev_mode.py")
         if spec is None or spec.loader is None:
             raise ImportError("D44 delivery cannot load the D32 seal helper")
         found = importlib.util.module_from_spec(spec)
         sys.modules[name] = found
         try:
             spec.loader.exec_module(found)
-        except Exception:
+        except BaseException:
             sys.modules.pop(name, None)
             raise
     return found.seal_check(kind, expected, actual, where=where,
-                            refusal=refusal)
+                            refusal=refusal, environ=environ)
 
 
 def load_pin() -> dict:
@@ -140,12 +125,12 @@ def check_recorded_source(*, environ=None) -> bool:
         "D44 accepted source head",
         "fa3775151f77dc713fd78882daf6e147ab471243",
         pin.get("accepted_head"), where=str(PIN_PATH),
-        refusal=ValueError("D44 accepted source head drifted"))
+        refusal=ValueError("D44 accepted source head drifted"), environ=environ)
     ok = _seal_check(
         "D44 accepted bundle digest",
         "7ea79d62000dc4a41d940a9c72eb925e6dbd2b752e49dccd25b22b3a78c998e0",
         pin.get("accepted_bundle_sha256"), where=str(PIN_PATH),
-        refusal=ValueError("D44 accepted bundle digest drifted")) and ok
+        refusal=ValueError("D44 accepted bundle digest drifted"), environ=environ) and ok
     return ok
 
 
@@ -167,12 +152,7 @@ def verify_vendored() -> dict[str, str]:
 
 
 def verify_external_bindings(*, owners_dir: Path | None = None) -> dict[str, str]:
-    """Hash each external owner. Refuse a missing or changed file.
-
-    The external owners stay outside this repository. The pin binds
-    each one by path and digest. This check refuses drift in both
-    modes, because the staged guard executes these exact bytes.
-    """
+    """Compare external source identities through the shared D32 seal."""
     pin = load_pin()
     bindings = pin["external_owner_bindings"]
     root = Path(owners_dir) if owners_dir is not None else Path(
@@ -183,8 +163,8 @@ def verify_external_bindings(*, owners_dir: Path | None = None) -> dict[str, str
         if not path.is_file():
             raise FileNotFoundError(f"D44 external owner is absent: {path}")
         found = _sha(path)
-        if found != want:
-            raise ValueError(f"D44 external owner changed: {path}")
+        _seal_check("D44 external source", want, found, where=str(path),
+                    refusal=ValueError(f"D44 external owner changed: {path}"))
         digests[name] = found
     template = bindings["container_template"]
     template_path = Path(template["path"])
@@ -192,8 +172,9 @@ def verify_external_bindings(*, owners_dir: Path | None = None) -> dict[str, str
         raise FileNotFoundError(
             f"D44 container template is absent: {template_path}")
     found = _sha(template_path)
-    if found != template["sha256"]:
-        raise ValueError("D44 container template changed")
+    _seal_check("D44 container template", template["sha256"], found,
+                where=str(template_path),
+                refusal=ValueError("D44 container template changed"))
     digests["container_template"] = found
     return digests
 
@@ -204,22 +185,25 @@ def _check_staged_imports(staged: Path, owners_dir: Path) -> None:
     owners = owners_dir.resolve()
     script = (
         "import importlib, sys\n"
+        "import source_delivery as delivery\n"
         f"STAGED = {str(staged)!r}\n"
         f"OWNERS = {str(owners)!r}\n"
-        "sys.path.insert(0, STAGED)\n"
-        "sys.path.insert(0, OWNERS)\n"
-        f"for name in {list(REQUIRED_STAGED_IMPORTS)!r}:\n"
-        "    module = importlib.import_module(name)\n"
-        "    assert module.__file__.startswith(STAGED + '/'), name\n"
-        f"for name in {list(REQUIRED_EXTERNAL_IMPORTS)!r}:\n"
-        "    module = importlib.import_module(name)\n"
-        "    assert module.__file__.startswith(OWNERS + '/'), name\n"
+        "sys.path[:0] = [STAGED, OWNERS]\n"
+        f"for root, names in [(STAGED, {list(REQUIRED_STAGED_IMPORTS)!r}),\n"
+        f"                    (OWNERS, {list(REQUIRED_EXTERNAL_IMPORTS)!r})]:\n"
+        "    for name in names:\n"
+        "        module = importlib.import_module(name)\n"
+        "        delivery._seal_check('D44 module path', root + '/' + name + '.py',\n"
+        "            module.__file__, where=name,\n"
+        "            refusal=ImportError('D44 module path changed: ' + name))\n"
     )
     import subprocess
 
     done = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True,
+        [sys.executable, "-c", script], cwd=staged, capture_output=True, text=True,
         timeout=300)
+    if done.stdout:
+        print(done.stdout, end="", flush=True)
     if done.returncode != 0:
         raise ImportError(
             "D44 staged tree lacks a required owner: "
@@ -234,6 +218,7 @@ def stage_tree(dest: Path, *, owners_dir: Path | None = None) -> Path:
     tree. It verifies every vendored and external owner first. It then
     checks that the staged tree imports each required owner.
     """
+    check_recorded_source()
     verify_vendored()
     bindings = load_pin()["external_owner_bindings"]
     owners = Path(owners_dir) if owners_dir is not None else Path(
@@ -262,6 +247,12 @@ def stage_tree(dest: Path, *, owners_dir: Path | None = None) -> Path:
             target = dest / name
             shutil.copyfile(HERE / name, target)
             staged.append(target)
+        policy = dest / "_policy"
+        policy.mkdir()
+        for name in ("dev_mode.py", "digests.py"):
+            target = policy / name
+            shutil.copyfile(HERE.parent / name, target)
+            staged.append(target)
         _check_staged_imports(dest, owners)
     except BaseException:
         for target in staged:
@@ -269,6 +260,9 @@ def stage_tree(dest: Path, *, owners_dir: Path | None = None) -> Path:
                 target.unlink()
             except OSError:
                 pass
+        policy = dest / "_policy"
+        if policy.exists():
+            shutil.rmtree(policy)
         try:
             dest.rmdir()
         except OSError:
@@ -280,8 +274,9 @@ def stage_tree(dest: Path, *, owners_dir: Path | None = None) -> Path:
 def stage_fresh(*, parent: Path | None = None,
                 owners_dir: Path | None = None) -> Path:
     """Stage the tree in a fresh directory. Return the guard entry."""
-    root = Path(parent) if parent is not None else Path(
-        tempfile.gettempdir()) / "d44-delivered"
+    selected = parent or os.environ.get("D44_DELIVERY_STAGE_PARENT")
+    root = Path(selected) if selected else Path(
+        "/mnt/shared/tessera-measurements/d44-delivered")
     root.mkdir(parents=True, exist_ok=True)
     claimed = Path(tempfile.mkdtemp(prefix="d44-delivered-", dir=str(root)))
     dest = claimed / "tree"
@@ -306,14 +301,15 @@ def require_container_residency(*, owners_dir: Path | None = None) -> None:
         raise FileNotFoundError(
             f"D44 bound g3_residency is absent: {path}")
     found = _sha(path)
-    if found != want:
-        raise ValueError("D44 bound g3_residency changed")
+    _seal_check("D44 residency source", want, found, where=str(path),
+                refusal=ValueError("D44 bound g3_residency changed"))
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     module = sys.modules.get("g3_residency")
-    if module is not None and getattr(module, "__file__", None) != str(path):
-        del sys.modules["g3_residency"]
-        module = None
+    if module is not None:
+        _seal_check("D44 residency module path", str(path),
+                    getattr(module, "__file__", None), where="g3_residency",
+                    refusal=ImportError("D44 residency module path changed"))
     if module is None:
         spec = importlib.util.spec_from_file_location(
             "g3_residency", path)
@@ -337,12 +333,13 @@ def check_d30_binding(*, owners_dir: Path | None = None) -> Path:
     path = root / "v2_launch.py"
     if not path.is_file():
         raise FileNotFoundError(f"D44 bound D30 launcher is absent: {path}")
-    if _sha(path) != want:
-        raise ValueError("D44 bound D30 launcher changed")
+    _seal_check("D44 D30 source", want, _sha(path), where=str(path),
+                refusal=ValueError("D44 bound D30 launcher changed"))
     template = bindings["container_template"]
     template_path = Path(template["path"])
-    if _sha(template_path) != template["sha256"]:
-        raise ValueError("D44 container template changed")
+    _seal_check("D44 container template", template["sha256"], _sha(template_path),
+                where=str(template_path),
+                refusal=ValueError("D44 container template changed"))
     text = path.read_text()
     suffix = template["path"]
     base = "/mnt/shared/tessera-measurements"
@@ -350,7 +347,9 @@ def check_d30_binding(*, owners_dir: Path | None = None) -> Path:
         suffix = suffix[len(base):]
     # The launcher names the bound template through BASE plus a suffix.
     if suffix not in text and template["path"] not in text:
-        raise ValueError("D44 bound D30 launcher names another template")
+        _seal_check("D44 D30 template path", template["path"], "another template",
+                    where=str(path),
+                    refusal=ValueError("D44 bound D30 launcher names another template"))
     return template_path
 
 
@@ -361,6 +360,3 @@ def owners_dir(*, override: Path | None = None) -> Path:
     return Path(load_pin()["external_owner_bindings"]["owners_dir"])
 
 
-def bound_owners_env(*, owners_dir: Path | None = None) -> dict[str, str]:
-    """Return the environment that selects the bound owners directory."""
-    return {"D44_DELIVERED_OWNERS_DIR": str(owners(override=owners_dir))}

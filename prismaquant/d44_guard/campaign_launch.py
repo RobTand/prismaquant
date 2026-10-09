@@ -26,31 +26,31 @@ import threading
 import time
 def _load_delivery():
     """Load the repository delivery module without a package import."""
-    here = Path(__file__).resolve().parent
-    candidate = here / 'source_delivery.py'
+    candidate = Path(__file__).resolve().parent / 'source_delivery.py'
+    name = 'prismaquant_d44_guard_source_delivery'
+    if name in sys.modules:
+        return sys.modules[name]
     if not candidate.is_file():
         return None
-    name = 'prismaquant_d44_guard_source_delivery'
-    found = sys.modules.get(name, 'absent')
-    # A test disables delivery by binding the module name to None.
-    if found is None:
-        return None
-    if found != 'absent':
-        return found
     module_spec = importlib.util.spec_from_file_location(name, candidate)
     if module_spec is None or module_spec.loader is None:
-        return None
+        raise ImportError('D44 delivery has no loader')
     module = importlib.util.module_from_spec(module_spec)
     sys.modules[name] = module
     try:
         module_spec.loader.exec_module(module)
-    except Exception:
+    except BaseException:
         sys.modules.pop(name, None)
-        return None
+        raise
     return module
 
 
 _DELIVERY = _load_delivery()
+HERE = Path(__file__).resolve().parent
+CHILD_SOURCE = HERE if (HERE / 'stage1.py').is_file() else HERE / '_vendored'
+if _DELIVERY is not None:
+    sys.path.insert(0, str(CHILD_SOURCE))
+    _DELIVERY.check_recorded_source()
 def _delivered_owners():
     """Select the bound owners directory. Refuse drift before D30 loads."""
     if _DELIVERY is None:  # pragma: no cover - standalone tree without the package
@@ -207,17 +207,18 @@ def route_plan(path, out):
     plan = S.load(path)
     argv = plan['common']['argv']
     index = next((i for i, token in enumerate(argv) if Path(token).name == 'encode_launch.py'), None)
+    original_entry = Path(argv[index]) if index is not None else None
     S.require(index is not None, 'Plan has no encode_launch.py entry')
     if _DELIVERY is not None:
-        staged_argv = list(argv)
-        staged_argv[index] = '<d44-delivered-guard>'
-        if '--stage' not in staged_argv:
-            staged_argv[index + 1:index + 1] = ['--stage', 'encode']
-        S.require(staged_argv[staged_argv.index('--stage') + 1] in ENTRY, 'Plan has an unsupported guard stage')
-        _validate_routed_residencies(plan)
-        argv[index] = str(_DELIVERY.stage_fresh())
-    else:  # pragma: no cover - standalone tree without the package
-        argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))
+        S.require(_DELIVERY.VENDORED_DIR.is_dir(), 'Route native requests through the repository guard')
+        repo = HERE.parents[1]
+        argv[index] = str((HERE / 'campaign_launch.py').relative_to(repo))
+        plan['common']['cwd'] = str(repo)
+        override = os.environ.get('D44_DELIVERED_OWNERS_DIR')
+        owners = _DELIVERY.owners_dir(override=Path(override) if override else None)
+        plan['common']['env']['D44_DELIVERED_OWNERS_DIR'] = str(owners)
+    else:
+        argv[index] = str(original_entry.with_name('campaign_launch.py'))
     if '--stage' not in argv:
         argv[index + 1:index + 1] = ['--stage', 'encode']
     S.require(argv[argv.index('--stage') + 1] in ENTRY, 'Plan has an unsupported guard stage')
@@ -225,6 +226,8 @@ def route_plan(path, out):
     sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/src')
     from prismabuild.decomposition import validate_logical_request
     validate_logical_request(plan)
+    if _DELIVERY is not None:
+        _DELIVERY.verify_vendored()
     S.save(out, plan)
     print(json.dumps({'plan': str(path), 'argv': argv}), flush=True)
 
@@ -249,7 +252,36 @@ def _validate_routed_residencies(plan):
 
 def start_container_client(argv):
     """The one place that starts the container client, in its own process group (tests replace only this)."""
-    return subprocess.Popen(argv, start_new_session=True)
+    return subprocess.Popen(argv, cwd=CHILD_SOURCE, start_new_session=True)
+
+
+def container_launch(payload, root):
+    """Build the container request without a container or an output write."""
+    if _DELIVERY is not None:
+        override = os.environ.get('D44_DELIVERED_OWNERS_DIR')
+        owners = _DELIVERY.owners_dir(override=Path(override) if override else None)
+        template = _DELIVERY.check_d30_binding(owners_dir=owners)
+        _DELIVERY.require_container_residency(owners_dir=owners)
+        _DELIVERY._seal_check('D44 D30 module template', str(template),
+                             str(D30.TEMPLATE), where=str(OWNER / 'v2_launch.py'),
+                             refusal=ValueError('D44 D30 module template changed'))
+    launch = S.load(D30.TEMPLATE)
+    container = launch['spec']
+    for mount in container['container']['mounts']:
+        if mount['target'] == '/out':
+            mount['source'] = str(root)
+    container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})
+    from g3_residency import container_contract
+    mounts, env = container_contract()
+    container['container']['mounts'].extend(mounts)
+    container['env'].update(env)
+    container['env'].update(PRISMAQUANT_DEV_MODE='1',G3_PQ_ROOT='/pq',TESSERA_SRC='/tessera/src')
+    container['env']['G3_HOST_MOUNTS'] = json.dumps({m['target']:m['source'] for m in container['container']['mounts']})
+    container['container']['mounts'].append({'source':str(root),'target':str(root),'readonly':False})
+    command = ['python3','/workspace/'+payload[0],*payload[1:]]
+    client = [sys.executable, str(CHILD_SOURCE / 'v2_launch.py'), '--container',
+              json.dumps(container), json.dumps(command)]
+    return container, command, client
 
 
 def main():
@@ -274,7 +306,7 @@ def main():
         payload.extend(['--batch', str(args.batch)])
     publish = args.stage in ('select-unit', 'encode') and args.batch is not None
     if args.device == 'cpu':
-        rc = subprocess.call([sys.executable, *payload])
+        rc = subprocess.call([sys.executable, str(CHILD_SOURCE / payload[0]), *payload[1:]])
         if rc == 0 and publish:
             _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)
         return rc
@@ -282,25 +314,7 @@ def main():
     S.require(valid_owner(owner), f'{OWNER_ENV} must be the 64-hex PB owner; refusing to start a container')
     args.root.mkdir(parents=True, exist_ok=True)
     S.require(D30.available() >= 8*2**30, 'D30 available below 8GiB start floor')
-    if _DELIVERY is not None:
-        override = os.environ.get('D44_DELIVERED_OWNERS_DIR')
-        owners = _DELIVERY.owners_dir(override=Path(override) if override else None)
-        _DELIVERY.check_d30_binding(owners_dir=owners)
-        _DELIVERY.require_container_residency(owners_dir=owners)
-    launch = S.load(D30.TEMPLATE)
-    container = launch['spec']
-    for mount in container['container']['mounts']:
-        if mount['target'] == '/out':
-            mount['source'] = str(args.root)
-    container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})
-    from g3_residency import container_contract
-    mounts, env = container_contract()
-    container['container']['mounts'].extend(mounts)
-    container['env'].update(env)
-    container['env'].update(PRISMAQUANT_DEV_MODE='1',G3_PQ_ROOT='/pq',TESSERA_SRC='/tessera/src')
-    container['env']['G3_HOST_MOUNTS'] = json.dumps({m['target']:m['source'] for m in container['container']['mounts']})
-    container['container']['mounts'].append({'source':str(args.root),'target':str(args.root),'readonly':False})
-    command = ['python3','/workspace/'+payload[0],*payload[1:]]
+    container, command, client = container_launch(payload, args.root)
     token = hashlib.sha256(json.dumps(command).encode()).hexdigest()[:20]
     S.save(args.root/('encode-launch-'+token+'.json'),{'spec':container,'command':command,'resident_tier':'PB stage+auto RAM','guard':'G3 D30 8GiB start / 2GiB abort; repaired group+container escalation'})
     test_abort = os.environ.get('D44_GUARD_TEST_ABORT_AFTER_S')
@@ -343,7 +357,7 @@ def main():
     previous = {sig: signal.signal(sig, on_signal) for sig in (signal.SIGTERM, signal.SIGINT)}
     rc, published, caught = None, False, None
     try:
-        child = start_container_client([sys.executable,'v2_launch.py','--container',json.dumps(container),json.dumps(command)])
+        child = start_container_client(client)
         guard['child_pid'] = child.pid
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()

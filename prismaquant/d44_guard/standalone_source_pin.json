@@ -2,7 +2,7 @@
  "accepted_bundle_sha256": "7ea79d62000dc4a41d940a9c72eb925e6dbd2b752e49dccd25b22b3a78c998e0",
  "accepted_head": "fa3775151f77dc713fd78882daf6e147ab471243",
  "accepted_source_branch": "campaign/d44-autonomous-phase-2449-20261009",
- "corrected_guard_sha256": "cc1650e4e49a7d1876f31a6e2c0314a1d8ae1abea1583a42caa2fc6f62c2b4df",
+ "corrected_guard_sha256": "50e21acf5a4228a62a2165a62275891de223b9b048887d7ec57315084279dcbe",
  "external_owner_bindings": {
   "container_template": {
    "path": "/mnt/shared/tessera-measurements/g3-v2-teacher-20261005/gpu-score/probe-v2teacher.launch.json",
