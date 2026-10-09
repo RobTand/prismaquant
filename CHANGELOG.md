@@ -31,6 +31,12 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
+  The branch issue must match a verified same-repository closing reference or an open parent reference.
+  Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.
+  These exemptions do not bypass the issue-link check.
+  PrismaBuild action `e0087aafc8cd` passes all 62 behavioral cases on x86.
+  Action `4a11ec1d4a68` passes the direct gate smoke and both syntax checks with a simulated GitHub API.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
