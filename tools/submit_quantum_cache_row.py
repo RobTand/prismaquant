@@ -107,7 +107,7 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
     ]
     for key, value in env.items():
         argv += ["--env", f"{key}={value}"]
-    return argv + ["--detach", "--", "/usr/bin/python3", *payload]
+    return argv + ["--detach", "--", *payload]
 
 
 def main(argv=None) -> int:
