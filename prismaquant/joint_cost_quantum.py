@@ -1823,15 +1823,18 @@ def run_layer_quantum_core(
 
     # The #1962 opt-in instrument: normalize once; a requested attribution
     # binds the run identity and refuses to resume committed no-attribution
-    # rows, and its collector needs the one-pass spill's captured rows.
-    from .joint_replay_spill import stage_b_spill_config
+    # rows, and its collector needs the one-pass spill's captured rows. The
+    # import stays inside the branch that needs it: the spill module needs
+    # xxhash, and a row that requests no attribution must not require it.
     attribution_config = normalize_sequence_attribution(
         execution.get("sequence_attribution"))
-    if attribution_config is not None and stage_b_spill_config() is None:
-        raise QuantumIdentityRefused(
-            f"quantum {record.get('quantum_id', '?')}: sequence_attribution "
-            "requires the one-pass spill reader's captured X/G rows; declare "
-            "PRISMAQUANT_STAGE_B_SPILL_ROOT and PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
+    if attribution_config is not None:
+        from .joint_replay_spill import stage_b_spill_config
+        if stage_b_spill_config() is None:
+            raise QuantumIdentityRefused(
+                f"quantum {record.get('quantum_id', '?')}: sequence_attribution "
+                "requires the one-pass spill reader's captured X/G rows; declare "
+                "PRISMAQUANT_STAGE_B_SPILL_ROOT and PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
 
     from .joint_layer_quanta import (
         CHECKPOINT_INCOMING_STAGED,
@@ -1924,12 +1927,12 @@ def run_layer_quantum_core(
         normalize_replay_regime,
         replay_regime_identity,
     )
-    from .joint_replay_spill import stage_b_spill_config
     try:
         replay_regime = normalize_replay_regime(execution.get("replay_regime"))
     except ReplayRegimeRefused as exc:
         raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
     if replay_regime != DEFAULT_REPLAY_REGIME:
+        from .joint_replay_spill import stage_b_spill_config
         if stage_b_spill_config() is None:
             raise QuantumIdentityRefused(
                 f"quantum {quantum_id}: replay regime {replay_regime} replays from "

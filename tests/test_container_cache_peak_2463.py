@@ -58,8 +58,10 @@ def test_initial_inventory_is_captured_before_the_row_runs(tmp_path):
     initial = receipt["initial_state"]["totals"]
     assert initial["allocated_bytes"] == before["totals"]["allocated_bytes"]
     assert initial["files"] == before["totals"]["files"] == 1
-    assert receipt["measurement"]["final_allocated_bytes"] == 0
-    assert receipt["measurement"]["peak_allocated_bytes"] >= initial["allocated_bytes"]
+    # The warm file survives the row: the final inventory equals the
+    # initial one, and the peak exceeds both.
+    assert receipt["measurement"]["final_allocated_bytes"] == initial["allocated_bytes"]
+    assert receipt["measurement"]["peak_allocated_bytes"] > initial["allocated_bytes"]
 
 
 def test_failed_scan_invalidates_the_evidence(tmp_path):
