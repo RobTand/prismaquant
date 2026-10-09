@@ -130,12 +130,17 @@ def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
 
 
 def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path):
+    # The child runs without site packages and must not import prismaquant, so
+    # the parent passes it the one SDK version the consumer pins (PQ #2152).
+    from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
+
     program = (
         'import sys; from experiments.original_cuda_control import artifact_cas; '
         'cas=artifact_cas(sys.argv[1]); '
-        'from prismabuild.client import SDK_VERSION; assert SDK_VERSION==4; '
+        'from prismabuild.client import SDK_VERSION; assert SDK_VERSION==int(sys.argv[2]); '
         'assert "prismaquant" not in sys.modules and "torch" not in sys.modules; '
         'print(str(cas.root))')
-    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas')],
+    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas'),
+                           str(PB_CLIENT_SDK_VERSION)],
                           capture_output=True, text=True, check=True)
     assert done.stdout.strip() == str(tmp_path / 'cas')

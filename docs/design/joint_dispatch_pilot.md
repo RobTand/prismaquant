@@ -30,10 +30,11 @@ review input. Contracts are deduplicated by the caller; zero or multiple
 matching contracts refuse. A source or selection change needs a newly reviewed contract.
 This is source qualification, independent of worker-generation deployment.
 
-The existing pinned SDK4 client reads the exact selected generation/attempt's
-verified result and sealed request. A coordinator using the scoped SDK4
-interpreter must also configure the existing sealed-root resolver to the
-reviewed SDK4 qualification tree (`PRISMABUILD_READER_HELPER_ROOT`, or the
+The existing pinned SDK client (exactly SDK5 since PQ #2152) reads the exact
+selected generation/attempt's verified result and sealed request. A
+coordinator using the scoped SDK interpreter must also configure the existing
+sealed-root resolver to the reviewed SDK qualification tree
+(`PRISMABUILD_READER_HELPER_ROOT`, or the
 existing explicit helper-root API). Package installation alone is not that
 production resolver configuration. Inside an admitted workload the worker's
 protected helper root remains its actual deployed generation; this client
@@ -76,8 +77,9 @@ identity, receipt, original record and independently bound source contract.
 PB alone owns placement and retry. PQ adds no CAS reader, Git materializer,
 cache, dispatcher or serving runtime.
 
-CPU consumer smoke also runs the production `Gateway` through the sealed SDK4
-root resolver against a private real CAS/queue. Only the queue owner's default
+CPU consumer smoke also runs the production `Gateway` through the production
+root resolver, over an explicit private helper view of the installed SDK5
+package, against a private real CAS/queue. Only the queue owner's default
 root is redirected; result reading and capture binding use their unmodified
 public implementations. A matching dry-run emits authenticated receipt stamps,
 while foreign source, refs, wrapper and attempt selections refuse without

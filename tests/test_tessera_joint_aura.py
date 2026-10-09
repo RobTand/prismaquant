@@ -255,7 +255,7 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
             "render_file_sha256": "a" * 64, "render_origin": "encoded"}
     seen = []
     def derive(value, *, weights, menus, calibration_source, static_scales, projected_units,
-               structure):
+               structure, profile=None):
         # A projected unit is verified on the routed served wire (#1502).
         assert structure == "routed_moe"
         assert value.qname == anchor["qname"]

@@ -20,6 +20,10 @@ Native request validation completes before the route writes its output.
 Explicit standalone delivery still uses `source_delivery.stage_tree` and refuses an existing destination.
 The native route does not submit that non-Git directory as a checkout.
 
+Use `D44_DELIVERED_OWNERS_DIR` only for guard identity tests.
+Numerical children retain the pinned external owners path.
+The override does not relocate child dependencies.
+
 External source, template, and module identities use the shared `dev_mode.seal_check`.
 Development mode prints `[DEV-MODE]` on a mismatch and continues.
 Certified mode keeps the refusal.
@@ -30,6 +34,10 @@ PB `ea08af48600f` proves the real route, native script ownership, the selected C
 The CPU proof deliberately refuses an incomplete child argument before numerical work.
 It proves source selection, not a scientific result, GPU execution, or container execution.
 The active campaign tree, retained receipts, and action `a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0` remain outside this delivery.
+
+Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
+The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
+Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
 
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
@@ -559,7 +567,7 @@ bias repair remain. No runtime pin, menu, adoption or default changes occur.
 
 Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
 requires an explicit PB action/publication/attempt selector for each checker
-completion. The public SDK4 result reader and standard capture binder join
+completion. The source-pinned public result reader and standard capture binder join
 the owned observation output to an independently reviewed checker config
 containing the exact snapshot selection (commit, parent, schema, subdirectory,
 refs and input), working directories, command and environment. Converted rows
@@ -1770,6 +1778,94 @@ attempt binding. The obsolete test of a historical reader SDK commit literal
 is removed rather than repinned; strict serving/refusal behavior remains the
 consumer contract. No production admission, SDK pin, runtime, numerical,
 pipeline-default or serving gate changes.
+
+Re-stamped 2026-10-04 (Refs PQ #2152, PB #1481/#1482): the reviewed PrismaBuild
+reader and client SDK pin moves to merged PB #1482
+`027103d9a8417e06c7f13356e58779a313cd7088` with exact SDK version 5; the
+literal `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`/SDK4 stamp above is
+historical and no longer the consumer contract. SDK5 adds
+`require_native_producer_context` on the public selected-action result reader:
+the strict original-source qualification binds each verified result to the
+selected immutable attempt's authenticated native producer context (worker/
+incarnation, host, nonce, broker scope, helper root, sealed-demand resources)
+and refuses cache-hit, legacy or missing native evidence. One SDK moves
+together — commit, version, runtime documents, fixture helper checks and the
+`original_cuda_control` launch-owned helper check; no dual-SDK probing, alias,
+editable install or fallback is added. The separately qualified exact SDK5
+install/fixture/portable identities and helper-runtime selection (PB #1485)
+remain coupled prerequisites for the full original native consumer exercise.
+This pin does not change the published fleet runtime or live deployment, and
+does not move numerical, wire, pipeline-default, serving or admission gates.
+
+Production-gateway pilot controls (#1293) now bind the actual non-editable
+SDK5 installation through an explicit private helper view. The published
+pbtest pin verifier proves its Git identity, RECORD bytes and import origin
+once per shard. The fixture reads only the install identity again, with the
+standard library. The verifier module exists in the shard's main process and
+not in its xdist workers. Client, CAS, pool and capture binder resolve from
+that same installed package, with no test-only SDK injection or SDK4 fallback.
+These CPU controls do not publish a helper generation or qualify native GPU
+pilots; PB #1485's durable Python3.12+b40 SDK5 pack and launch-owned helper
+selection remain separate prerequisites for the original native provider.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455): the shared connected-fixture pin
+`tests/pb_runtime_generation_pin.json` moves with the reader pin. It now names
+PB `027103d9a8417e06c7f13356e58779a313cd7088`, SDK5. The bundle is an
+immutable `git archive` of that commit. It carries the `.pinned-source.json`
+marker of the SDK3 and SDK4 bundles. PB action
+`1a525af7c723625c16b9279b726c66120f07b5c5945008ceeea186b9964b42b5` published it
+read-only at
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088`.
+The archive digest is
+`94727274fd0515c5f1ee7c031c90c1106793ef22b38b286caf44f1755675677d`. It equals
+the digest of `git archive` from the PrismaBuild history. The same method
+reproduces the recorded SDK3 and SDK4 digests. Before this change, the reader
+pin had moved and the shared pin had not. The Stage A produced-output, band
+handoff, spool, retirement and render-publication suites then refused the SDK4
+archive by version. A census of 121 test files showed 255 such failures.
+`tests/test_pb_generation_pin_1084.py` now requires one commit for both pins.
+The SDK4 archive stays on the mount. The consumer still refuses it by exact
+version. Source qualification is independent of live worker activation. The
+pbtest pin guard reads the reader pin. It refuses a shard when the interpreter
+has no non-editable Git install of that commit. Every PrismaQuant pbtest run
+now needs an SDK5 interpreter, and the SDK4 interpreters are refused. The x86
+interpreter is `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`
+(PQ #2467). It is a layer over `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9`,
+which holds PrismaBuild `027103d9` and Tessera `fca4c6ce`. The guard passes in
+PB action `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`.
+PB #1485 still owns the portable Python 3.12 pack.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455, CEO D32): the Original reader
+qualification (`source_generation._require_original_reader_producer` and
+`_require_original_qualified_source`) splits its joins by kind. A seal compares
+the reader's record of its producer run with the identity the SDK selected. A
+correctness join checks that two things are comparable. These seals go through
+`dev_mode.seal_check` (`source_generation._recorded_same`):
+
+- the reader runtime's helper root and helper generation;
+- the producer reservation;
+- every native delivery claim and its launch label;
+- the complete helper-tree digests;
+- the restamp join of the unchanged-family owner.
+
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each seal with its earlier
+message. Default dev mode prints one `[DEV-MODE]` line for each mismatch and
+continues. Dev mode computes no helper-tree digest. It passes `NOT_COMPUTED` and
+stamps it beside the recorded tree.
+
+These joins refuse in both modes:
+
+- the reader's target: publisher, producer, source paths, readset, calibration,
+  source model and dispatch;
+- the model config;
+- the SDK answer's own mirrors and the exact SDK policy;
+- the target source and runtime of the family acceptance.
+
+The strict result request still passes `require_native_producer_context=True`.
+The SDK refuses a result without a native producer context in both modes.
+`tests/test_no_new_seals.py` counts the two kinds of join in each function.
+Tests: `tests/test_original_source_admission.py` and
+`tests/test_held_producer_sdk5_smoke_2152.py`.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -24129,10 +24225,93 @@ draw or scope, checks every observed unit against it, and only then stamps the
 scope's values.
 
 An optional dependent `capture` action (`--capture-calibration-out`) computes
-all uncapped Hessians and first-row float32 scoring inputs once using the same
+the requested uncapped Hessians and first-row float32 scoring inputs once using the same
 census and exits before encoding. The existing activation-cache writer and
 cost-stage journal seal a complete `prismaquant.tessera_calibration_cache.v2`
-manifest. `plan --calibration-cache` binds that manifest path and SHA256 into
+manifest. The shared cache API also accepts explicit
+`capture_identity(..., unit_names=...)`: its identity declares
+`unit_scope="selected"` and maps exactly the requested census units to their
+shapes. `CaptureWriter` and `publish_capture` require every requested entry,
+preserve each unit's full-draw Hessian/count/maxima and retained float32 prefix,
+and reject missing, unknown or shape-incompatible units. Omitting the selection
+retains the existing full-census identity and completeness rule; merely deleting
+units from an implicit full identity is not a selected capture. This scope
+metadata changes neither the encoded wire nor serving kernels. Fresh capture
+also accepts the existing `--units` whole-group selection grammar: the prep
+resolves names from census anchor groups without loading a model, and model
+rows confirm those memberships before collection. Sampled, audited, partitioned
+and exact-member pricing selections are not whole-group capture requests. The
+selected capture still forwards every source layer and keeps the full draw;
+quanta with no requested units may record an empty unit map only for an explicit
+selected identity whose unit layers are unambiguous. The join still requires
+full layer tiling, the complete initialization witness and every requested unit.
+Completed-capture reuse refuses a different requested coverage instead of silently
+returning the stored scope. A normal `--calibration-cache` reader may consume
+any requested subset covered by the stored selected or full capture; requested
+units outside that coverage refuse before cached rows reach pricing. Automatic
+fresh recording remains refused until an
+enforced immutable-source provider is qualified (`require_automatic_capture_source_recording`,
+Refs #2010/#2008); selected-unit support does not bypass that safety admission.
+The optional `_collect_activations(..., row_consumer=...)` seam receives each
+canonical shared input group once per batch, before prefix capping and
+independently of built-in Hessian collection. Its default is off; consumers
+must own retained bytes because the passed rows may alias source activations.
+`experiments/indomain_split_capture.py` uses the seam for the explicitly
+authorized D42 Stage 1 research route: fixed whole-sample fit and held-out
+coordinates accumulate separate unnormalized moments in one forward pass. Each
+quantum verifies the actual draw bytes, role token identities and running split
+boundary against the persisted manifest before model load; these are data
+comparability refusals even in dev mode. Their per-unit counts must sum to this
+forward's observed routing, not historical census counts. Gate/up/down counts
+must agree per expert and sample role; each role's expert sum equals its tokens
+times the config-declared top-k. Dense units cover every token in that role.
+Historical counts and max-abs are planning metadata: the existing D32 helper
+stamps drift, and both values and deltas enter the trusted layer/quantum receipt.
+The census has no mean statistic; the manifest explicitly records that absence.
+An expert appearing/vanishing or changing by more than 1 percent stops for CEO
+review. That bound is the CEO directive of 2026-10-06 11:42Z, set from layer-3
+gaps of 0.002 to 0.16 percent. The completed layer 40 to 44 fragments of the
+first capture (`research-capture-shared-01`) differ from the census by up to
+8.9 percent, and 1056 of their 5184 routed units exceed 1 percent, so this stop
+refuses those layers until the CEO sets a bound for deep layers. Hessians and
+prefixes contain only the actual routed rows. Stable publication
+is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
+files relative to the capture root. The research join compares each role
+record (path, own digest, length, count, Hessian/input/prefix geometry) with
+the completed quantum's verified receipt before checking its actual file.
+Count redistribution or a substituted payload cannot be accepted merely
+because the layer totals still match. A single GPU action may run adjacent
+prepared quanta; each layer publishes and verifies its own files and frees its
+moments before the next layer, including within a multi-layer prepared range.
+A prepared range whose owner is already complete ends in one of three ways.
+It refuses when the request is another measurement than the prep sealed: a
+different unit set, scoring prefix (`--max-act-rows`), draw, split boundary or
+batch count, a missing selection file, or a published role record that differs
+from the quantum's verified receipt. Nothing runs and nothing is reused. It
+replays, and does not refuse, when the prep identity matches but the stored
+`capture_binding` (the selection file digest and the retained-prefix budget
+`--max-prefix-rows`) differs from this request, or the fragment stores no
+binding: that is another request over the same prepared traversal, so the
+owner runs again and publishes new role files. One `research_quantum_replay`
+line names the changed fields. It adopts the stored result, with no source
+forward, when the binding matches and every publication matches its verified
+receipt. A changed unit set or scoring prefix is part of the prep identity and
+refuses before the binding is read. The three explicitly prioritized
+L3 expert0 up, L28 shared up and L44 expert0 up units publish their verified
+role pairs before the remainder of their layer is serialized. This research
+publication is not an
+ordinary production capture manifest and confers no immutable-provider
+qualification. The automatic admission guard remains unchanged. Chain quanta
+retain the canonical prep identity after the existing dev-mode runtime stamp:
+CPU-prep/GPU-quantum version metadata is not a second admission seal. Calibration,
+unit scope/shapes, prefix and batch counts still compare strictly. Completed
+initialization witnesses must retain valid observed grammar and coverage; their
+recorded-versus-running identity uses the existing dev-mode stamp at join and
+finish. Actual unit tensor geometry, counts and own-byte checks remain hard.
+Certified mode retains identity refusals. The entry's `--mode preflight` runs a
+tiny two-layer GLM control on `--device` (default `cpu`); on `cuda` the quanta
+forward and accumulate on the GPU, which a CUDA-gated test pins.
+`plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default
 (`--row-head stream`, `tessera_row_stream.RowStream`) it then reads only its
@@ -26631,8 +26810,10 @@ Serving-backed Tessera task support with its vLLM plugin remains a production pr
 
 The four task-suite test modules carry the `task_suite` marker.
 Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
-The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
-Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
+The required gate uses `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+The SDK5 reader pin (PQ #2152) makes the pbtest pin guard refuse the earlier layer `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`, which holds PrismaBuild `dc4803da`.
+Its recorded action is `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`; receipt `0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913` reports 76 passes and zero skips.
+The earlier layer recorded action `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859` with the same counts before the repin.
 An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
@@ -32242,7 +32423,9 @@ retried in parts. `prismaquant/capture_layer_chain.py` cuts it into rows
 that each run a contiguous layer range `[a, b)` and pass the hidden states
 on through the boundary storage. `tessera_campaign --capture-chain` runs
 each row; all three kinds require `--streaming` and
-`--capture-calibration-out`.
+`--capture-calibration-out`. A selected fresh capture uses the same full layer
+chain and boundary format. Only collection and published unit coverage narrow;
+an empty selected range still forwards its batches and contributes its witness.
 
 **Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
 --capture-chain-boundary-storage JSON`). Loads no model and reads no source
@@ -32438,6 +32621,20 @@ MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
 
 Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
 Both direct consumers refuse quantized input observations in development and certified modes.
+
+The activation rule and memory helper require the profile argument.
+A declared architecture must equal `Glm5NextForConditionalGeneration` before either helper selects a GLM direct consumer.
+An undeclared profile uses its canonical `glm5_next` identity.
+Other architectures receive no direct activation contract and no direct-cache charge.
+Single-anchor measurement, batch measurement, resume checks, and seed admission pass the profile through the existing path.
+
+PB `3b99c748b714eb7237206a696c52e41d7310cd7d31edb342383b21093fef5d6d` executes two CPU batches through the actual encoder, publication, and resume paths.
+It observes GLM contracts `a16` and `a32`, with direct-cache charges of 16,384 and 32,768 bytes for 32-by-256 weights.
+The non-GLM batch receives zero direct-cache charge for both leaves.
+The same action compiles the three changed production modules.
+The sealed command is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m tools.ig2457_smoke`.
+The action snapshot retains the temporary script.
+Its result payload is `/mnt/shared/prismabuild-fleet/cas/blobs/cf/cff3ba1b18ba6f652c572c7fa7bf0841cd7ed31f82f863c313c9d7b843e6e4ed`.
 
 The producer reads direct weights with projection_routes.direct_consumer_weight.
 The runtime and producer use the same folded T-16 arithmetic.

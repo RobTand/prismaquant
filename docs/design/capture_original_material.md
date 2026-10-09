@@ -175,7 +175,7 @@ is never shadowed by the application mount. A separately admitted bounded
 bytes and GPU profile events under those same bindings. It is an entry proof,
 not a source-lifetime or actual GLM qualification, and enables no production gate.
 
-Successful fixture nodes use the exact launch-owned SDK4 helper and an explicitly
+Successful fixture nodes use the exact launch-owned SDK5 helper and an explicitly
 sealed `--cas-root` to retain all six actual artifacts through PB's existing
 immutable input owner. The original granted trace is checked before retention;
 the parent ending and publication name the same durable trace bytes, whose digest
@@ -259,8 +259,9 @@ and `prismabuild`. Versions retain Python/Torch/Torch-Git/CUDA/Transformers;
 arithmetic retains matmul precision, TF32 and BF16 reduced-precision policy.
 The material pipeline records the CPU stock decoder plus actual loader
 target dtype, model-declared tensor dtype map and scale/cast map.
-The PB tuple records SDK4, actual helper root/generation and complete package
-and sealed helper/worker/proxy tree digests. Existing installed-SDK test
+The PB tuple records the pinned SDK version (SDK5), actual helper root/generation
+and complete package and sealed helper/worker/proxy tree digests. Existing
+installed-SDK test
 controls truthfully lack a shared-generation tree; that absence cannot satisfy
 public admission. Installed modeling paths must resolve inside stock
 Transformers before any path supplied by a control can be hashed.
@@ -281,7 +282,7 @@ joined with the original publisher/producer/readset tokenizer auxiliaries.
 Public admission requires a separately bound complete qualification record:
 one real selected native-reader proof and all 64 actual CUDA member tuples
 (16 cases × two page policies × FP32/BF16 source dtype), exact entered pytest
-call reports, controller endings, selected SDK4 receipt/CAS payload and all
+call reports, controller endings, selected SDK5 receipt/CAS payload and all
 source-input payload bindings. Old-source members keep their original snapshot
 and receipts and require independently selected unchanged-family acceptance;
 they are never restamped as new-source executions. The root matched-source
@@ -445,3 +446,75 @@ evidence of same-source execution. Same-source acceptance may explicitly name
 the same old/new source, but still joins the selected snapshot, actual target
 package and complete runtime digests. No foreign forward64 can skip this
 requirement by setting a null compatibility binding.
+
+The strict selected-result call requests
+`require_native_producer_context=True` from the versioned SDK5 public owner
+(merged PB #1482, reviewed source `855032b1f3f2edcef0b6cc49c16078942ea1644e`).
+This is not a generic SDK4 result upgraded by the consumer. The SDK joins the
+same immutable publication/attempt/generation, full worker/incarnation, host,
+nonce, broker scope and actual helper root, and authenticates native execution,
+reservation and completion evidence before its last selected-ending recheck.
+The Original consumer never parses private queue state or substitutes its own
+later active claim.
+
+The reader record now also requires `source_snapshot` and `compatibility`.
+The same independently bound source-family owner used for CUDA members joins
+its actual selected snapshot to the target PrismaQuant package and complete
+runtime. The published reader authority must agree with the outer authority's
+publisher, producer, source paths, whole-file readset, full calibration, source
+model and dispatch selectors. Its runtime, reservation and artifact session are
+producer identities, not silently equated with the later consumer's identities.
+Every actual material delivery joins its queue/action/nonce/scope/full worker/
+host/incarnation/helper tuple to the selected producer. Material observations
+retain `attempt_source=launch-env`; the SDK result truthfully records
+`attempt_source=selected-immutable-attempt`. These provenance labels differ;
+the identity fields must agree. The producer's resource control joins the SDK's
+`selected-claim-sealed-demand` reservation, and its recorded package and full
+helper-tree digests join the actual selected helper tree through the existing
+source-digest owner. Existing descriptor, seal, pin/ref, completion and debt
+checks still apply independently.
+
+Re-stamped 2026-10-09 (Refs PQ #2152, #2455, CEO D32): the reader joins have two
+kinds. A seal asks whether the reader's record of its producer run is the
+identity the SDK selected. A correctness join asks whether two things are
+comparable. Each seal goes through `dev_mode.seal_check`
+(`source_generation._recorded_same`):
+
+- the reader runtime's helper root and helper generation;
+- the producer reservation against the SDK's sealed demand;
+- every material delivery claim (queue, action, nonce, scope, worker, host,
+  incarnation, helper root) and its `launch-env` label;
+- the complete helper-tree digests;
+- the family's `old_source` against the executed member source. This restamp
+  join is shared with the CUDA members.
+
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each seal with the message it
+had before. Default dev mode prints one `[DEV-MODE]` line for each mismatch and
+continues with the stored record. Dev mode computes no helper-tree digest. It
+passes `NOT_COMPUTED` and stamps it beside the recorded tree.
+
+These joins refuse in both modes:
+
+- the reader's target: publisher, producer, source paths, readset, calibration,
+  source model and dispatch;
+- the model config;
+- the SDK answer's own mirrors, the exact SDK policy and the independent runtime;
+- the executed snapshot against its own verified request;
+- the compatibility binding, and the target source and runtime of the family
+  acceptance.
+
+The strict result request still passes `require_native_producer_context=True`.
+The SDK refuses a result without a native producer context in both modes. This
+repository cannot stamp that refusal.
+
+Re-stamped 2026-10-04 (Refs PQ #2152, PB #1481/#1482): the consumer source now
+pins that SDK5 owner exactly — `staged_lease.PB_READER_LEASE_PIN_COMMIT` is
+merged PB #1482 `027103d9a8417e06c7f13356e58779a313cd7088` and
+`PB_CLIENT_SDK_VERSION` is 5, moving together as one contract. The launch-owned
+fixture helper check refuses any other generation. This source pin is not the
+qualified helper/runtime tuple: the separately qualified exact SDK5
+install/fixture/portable identities (PB #1485) and the explicitly authorized
+helper selection remain coupled prerequisites for the complete positive
+consumer exercise, and the published c437 fleet generation stays unchanged. No
+compatibility shim, mixed SDK namespace, dual-SDK probing, test-only production
+fallback or new GPU/source admission is introduced by these joins.
