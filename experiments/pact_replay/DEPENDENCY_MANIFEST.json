@@ -1,0 +1,416 @@
+{
+ "schema": "prismaquant.pact_replay_dependency_manifest.v1",
+ "issue": "prismaquant#2482",
+ "parent": "prismaquant#2427",
+ "pact_replay_head": "c9260081766ec8a47e7a0f357432833a4d3b1cb6",
+ "note": "This source inventory records inferred dependencies. Only a separate actual CLI capture can establish observed imports. D32 records remain advisory.",
+ "sources": {
+  "g3-source": {
+   "path": "/mnt/shared/tessera-measurements/g3-v2-rebaseline-20261005/source",
+   "head": "a23165b979a90536e060a2c99ea26930d5445a59",
+   "subject": "Fix reviewed G3 single-arm progress and evidence boundaries",
+   "tree": "cfdbb862d1050f2bf66075647c9ce40ae6a8569c",
+   "origin_bundle": "/mnt/shared/tessera-measurements/g3-readset-2301/source-a23165b.bundle",
+   "origin_bundle_sha256": "8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec",
+   "origin_ref": "refs/heads/campaign/g3-readset-2301",
+   "worktree_state": "tracked files clean at head; untracked scratch only (__pycache__, v2_launch.py, v2_score.py, tests/test_v2_launch.py)",
+   "files": {
+    "exl3_torch.py": {
+     "sha256": "a8d841710fa21f6998b95a6a929aedc5fe74da09a6c4ad81a7eb1be32f66ab2c",
+     "git_blob": "f64bb307310d02e345c3ef9b32c112e03a53640f"
+    },
+    "g3_lib.py": {
+     "sha256": "41f9b556bd581b6b0a377076e90f9a73398d31a51fc6d351333df2fcd3a876b8",
+     "git_blob": "3e597eb075ed99e4cc769d4208b08df2cf7b5fb4"
+    },
+    "g3_pq_policy/__init__.py": {
+     "sha256": "80cd03a3ed6eb622ca7e29fe49cb12f6a2c190bd36168315832e186143b54b1d",
+     "git_blob": "17c4875de5e84649511799d177b1b749040e069c"
+    },
+    "g3_pq_policy/dev_mode.py": {
+     "sha256": "6df30277ede0660d152d9bdb6c6febe1a5c9298250c0e1253380dcb8271cc79c",
+     "git_blob": "b9cb3c13fc9ffbba0a459b245fecdc51cac757e6"
+    },
+    "g3_pq_policy/digests.py": {
+     "sha256": "8ebf4f2b2c81595697daa1d718e1e8c196af0db0aeabd6d26921397c4f6a6cfb",
+     "git_blob": "45cae05b8c179b56b6836e748012a3da750cc2ab"
+    },
+    "g3_readset.py": {
+     "sha256": "1b714f48773af8d8f75984de2b3ce1dffff8c0ce6ddaf435df7bf796dea7374e",
+     "git_blob": "ed8f72033d4471fd09868e40a997d94cb776d56a"
+    },
+    "g3_residency.py": {
+     "sha256": "22c2068a92c516c8bae2564b589e8228b47d5ce145c5e03ba0d898773e0548e8",
+     "git_blob": "baebfcfdca38b5d3ef38e817be2783b37d9637e6"
+    }
+   }
+  },
+  "pq-owner": {
+   "path": "/mnt/shared/tessera-measurements/t8-nextarm-source-preparation-20261005/sources/pq-owner",
+   "head": "931085dbdf9cc321e3e586c6a47cc62f970be978",
+   "subject": "source checkpoint identity takes a shard digest provider",
+   "tree": "c9baa719382ca14affb5355449ee7df734c0459d",
+   "branch": "campaign/nextarm-shard-provider-20261005",
+   "worktree_state": "clean at head",
+   "files": {
+    "prismaquant/__init__.py": {
+     "sha256": "406e85160fa46ac747452647d6abcc1071da4a6fb6f86008317908607435efff",
+     "git_blob": "dd40335879b4e82ae786c05921a60e64fc76d70b"
+    },
+    "prismaquant/activation_sampling.py": {
+     "sha256": "8db50f39f7f6a3bcb3b71e53e5e1b19816c315bd5edb8420dd6127e3c22c9e7b",
+     "git_blob": "b4e42020dab18c4d833208a9a1cf882f41c033bd"
+    },
+    "prismaquant/autoscale.py": {
+     "sha256": "57472852eda04997498f132d58017a23e76d766a323efb96ea993685d6da4ac4",
+     "git_blob": "9bac37566f6434c722f5c5ca948f13289002e34e"
+    },
+    "prismaquant/build_rtn_cache.py": {
+     "sha256": "de43886e92aef1209c52bd0e41029b36a6a6b0de4ddf058a11727c08e65fcb49",
+     "git_blob": "7a2cf82ef030cc2043e17d53e9e86a1048ccc2de"
+    },
+    "prismaquant/cb_compile_contract.py": {
+     "sha256": "f806ad671d533e719970583921073f5c8b6b555bca8d5808ed385dc6fa0ff55d",
+     "git_blob": "ff6895be97d9254cfec8bea03e758cc3e2f334a5"
+    },
+    "prismaquant/cb_layout.py": {
+     "sha256": "7ef70277213dbb380589ef3406d162a5feab7451a54279c3c3e9488b4bfaad4d",
+     "git_blob": "db41c464b60968f7279cf14ad7fbb2bd5ae53226"
+    },
+    "prismaquant/cost_stage_checkpoint.py": {
+     "sha256": "758328f91e880b0063c9a506c0272a37e42482698b936d3299268192770c5299",
+     "git_blob": "e48344df0a89bf0d3ba77b68634fe3f8b5daf57b"
+    },
+    "prismaquant/cost_streaming.py": {
+     "sha256": "74d4fbc1688d98be20a15788991cde6e0b5a058c67573f133b960ae7da9d57a5",
+     "git_blob": "6faff0ffa117e282b2f4226db3a636134fd9b0b0"
+    },
+    "prismaquant/format_registry.py": {
+     "sha256": "c868e1a44a690c8b8d3a73de8524edaf1cc27a2e960b942987749a7253a98c47",
+     "git_blob": "4b8aeb84fcefe8beff8e9a037be4d98e6790eaa8"
+    },
+    "prismaquant/fp8_dynamic.py": {
+     "sha256": "34db63701a12183e97aa7b22847c414955a955fcc3704b22f67ea569ed320ee1",
+     "git_blob": "6fb7a04b5b593b2cf0cdc795c6cf88554ef9f7e7"
+    },
+    "prismaquant/gguf_formats.py": {
+     "sha256": "66181197e482be094479fa061b0f57ef59a74e241397334f340c07887de13a04",
+     "git_blob": "26e22cb4302f5738f47b23df64371322f4259669"
+    },
+    "prismaquant/gguf_iq_formats.py": {
+     "sha256": "79927b6e35ff4da09566c42dae5a1fdcd95fd38b547600b166fb37bccdeabca4",
+     "git_blob": "bb69f48d46a30ca8ccc2ee2470ee3f5ad416dc82"
+    },
+    "prismaquant/joint_adjoint_checkpoints.py": {
+     "sha256": "a85dd05ce339b5694218705d31bc49926e765fadc2c8012cfe820541aa246a25",
+     "git_blob": "d7d82500d1dd12346957eb71d31c7212c5e469aa"
+    },
+    "prismaquant/layer_streaming.py": {
+     "sha256": "6e2aa0a53295c9317007a5ae292195ceefc67273d514628b556114a662dd831b",
+     "git_blob": "41611caeb5963c5e5e5afac170ba08388c940947"
+    },
+    "prismaquant/measure_quant_cost.py": {
+     "sha256": "533eeb51ec7910cea8b88c1c42f58efb08659b1b3c1767a336fb64d0a5dadcc7",
+     "git_blob": "2164888215efba2fc22019a5305a2ceaebdbfddf"
+    },
+    "prismaquant/memory_management.py": {
+     "sha256": "c2a91c7b9a550add3a48a87f7b0f02083b97f60e194b366e0131f6a8db180258",
+     "git_blob": "a8b8272a97fa7c265968bee7227d2e0ae6599b22"
+    },
+    "prismaquant/model_profiles/__init__.py": {
+     "sha256": "826a49652457a727115592b1a305be957c197deae68a7451dce41938bdb03962",
+     "git_blob": "e638a01652b3f72c8394f521f9f63c94f7cabcfc"
+    },
+    "prismaquant/model_profiles/base.py": {
+     "sha256": "adea8c714dc8489a840c11a587bac6d7c0b3ac00ab5ecae1606d6b9d78fdfc25",
+     "git_blob": "23d6e98903884740204f037280ab759793c87057"
+    },
+    "prismaquant/model_profiles/deepseek_v4.py": {
+     "sha256": "06cf8a5ed7bc0a11cca415147110465ffa9030e65fa5cb6fa65cfe28085d562f",
+     "git_blob": "730de8f7a116a2ca8ae834168c708e50295df249"
+    },
+    "prismaquant/model_profiles/default.py": {
+     "sha256": "371578120349576365a200d38b2b737710903638db538843a689eed96a1197f0",
+     "git_blob": "09dacd9000050ba323faf304ace32055fafd6abb"
+    },
+    "prismaquant/model_profiles/gemma4.py": {
+     "sha256": "36928a133916715385dc71849976e7f1b0bb0ea5019741a6c9f515999f1d4513",
+     "git_blob": "191017b9ca745b3c13e80d5464ff8df32cdf9223"
+    },
+    "prismaquant/model_profiles/glm5_next.py": {
+     "sha256": "2bc82489cac341d88cd5de7ae60872bab09812ca36b81d3b73c2b51ebcd8355f",
+     "git_blob": "f599adceb9fb3001d108ce9f14a888e44b2468bb"
+    },
+    "prismaquant/model_profiles/hy_v3.py": {
+     "sha256": "43d9a51ceae164fae808939fd69b5682461413edd6ac10791451409c8f06f36d",
+     "git_blob": "fea460ca6fbffee5d846ab8e993b978ef3fa6c80"
+    },
+    "prismaquant/model_profiles/laguna.py": {
+     "sha256": "176b23ac5e1ebd897b29264036200949969bfeb3e3663ec29c9ad3599fdf6e05",
+     "git_blob": "a5cf050dc870a36d6b4b9d97b5622c0d049f9837"
+    },
+    "prismaquant/model_profiles/lfm2_moe.py": {
+     "sha256": "2d4e794528410f52354ce2c4f0773a72ca6ff48470a78ccc3cbeafa2dec6fa30",
+     "git_blob": "1f19a961f3e76579f0096b0e032b77200c15651c"
+    },
+    "prismaquant/model_profiles/minimax_m2.py": {
+     "sha256": "2eeccca67ab10d6eb053d343f41c4971848bbd8104ed432e84a8656f917723de",
+     "git_blob": "7c499520d8141d5b50d38c561b758acb0b277dd3"
+    },
+    "prismaquant/model_profiles/qwen3.py": {
+     "sha256": "cf8ae81800813ecc4b83d505a81198fd193591edef02e722cff1dd14b0926535",
+     "git_blob": "a4ec94e729e1154d421f7665fb87bdf5134fd77c"
+    },
+    "prismaquant/model_profiles/qwen3_5.py": {
+     "sha256": "df0e543514615cbf1b62c1bfa1e24decfa2833849a2d76ba637efee6e89acde8",
+     "git_blob": "30850d0ae36f2ab2c9439a79e42c0769d6ce1d6b"
+    },
+    "prismaquant/model_profiles/qwen3_5_dense.py": {
+     "sha256": "27ee2c61a11e398e66e0138fe00b83c07f7904350641fad5e2c3265c374c8c1a",
+     "git_blob": "97193f59fcf67359988421e8475cdd23e5bce232"
+    },
+    "prismaquant/model_profiles/qwen4_exp.py": {
+     "sha256": "0895de04081a9f8d9c4ceb0441fb90f7db6db1c902d54a3b1973784193d55072",
+     "git_blob": "4368d159ae1f8e5522a35e9c6f066cf65db4a507"
+    },
+    "prismaquant/model_profiles/registry.py": {
+     "sha256": "0c6f47459d7f15590f59c0c7ebdc79cb2a8eb7ee4873669e07b1be7d2e0a1324",
+     "git_blob": "d1e98024cd7398d353cc86c804dd2b4c53d2bcbb"
+    },
+    "prismaquant/model_profiles/spec_profile.py": {
+     "sha256": "1d841087100cb5de0fe216bbba6c3b6c867d4731204f43194fe276388cf00e95"
+    },
+    "prismaquant/model_profiles/structure.py": {
+     "sha256": "8f2225129929f346a45d221a113717f30c09980bf3e1b8515ba0af78b864f06c",
+     "git_blob": "e706e46e67af042af3ebfcebb960416e6151667d"
+    },
+    "prismaquant/mx_formats.py": {
+     "sha256": "b18e16b0c8349615d4290c90e0423e0ed41680ab59a52788578df87f0cad2eea",
+     "git_blob": "ea9c48bdf5b610c43eb1b04d382f08a9df173af5"
+    },
+    "prismaquant/mxfp4_widen.py": {
+     "sha256": "a90e7509c06fd3f04313fc0d8ae4836e77f1d25e940d7b6ffc5725e0da668579",
+     "git_blob": "cf6735db02b330db9eb6f9e31640fa0fefd4f417"
+    },
+    "prismaquant/name_projection.py": {
+     "sha256": "2c314b42a8a2f881c02523e36b6a89ebafd7ebfd7bbba474d124cd7f08f556df",
+     "git_blob": "e19cf308b1bf6d0b9d065e9b7b4c50a9484141d2"
+    },
+    "prismaquant/nvfp4_activation_contract.py": {
+     "sha256": "8a227acc8a825988e38c3598436f41a8d61e919240ef6ed32cbbd5ca47a0c05b",
+     "git_blob": "4e3246c20206f409170de7c3d869a3f974886207"
+    },
+    "prismaquant/nvfp4_cb_footprint.py": {
+     "sha256": "96bc38a7ab18c6d2401ed2b66141eef9809409c78468f8ceb16c0891b9701547",
+     "git_blob": "26aad0b308e8340a5e5d89a8e613ad407bc4b16d"
+    },
+    "prismaquant/nvfp4_cb_formats.py": {
+     "sha256": "9f886165d4495f8e93615ac3804b41d87a69c8c4526833c196817366147d23d1",
+     "git_blob": "827fa0dc8d9ee2e69633337313315191aa0f315d"
+    },
+    "prismaquant/perturbed_x_cache.py": {
+     "sha256": "ba24707e627b794d74d9719ad97e220282d244af0cc8f87b928d2a1f44ed4587"
+    },
+    "prismaquant/production_weight_cache.py": {
+     "sha256": "99d8c281976962b60aa0e71425de3feda66ae456691df686eed2e6fb8e9df62b",
+     "git_blob": "ce5c42224409ea6a1bc7b00b8136715b24a0e439"
+    },
+    "prismaquant/render_score.py": {
+     "sha256": "49c27e63f6d71f2b62024e6295e8544b652fb60fac4be457d18629615d3d5185",
+     "git_blob": "637f04f47881af33861b0f971d38a2eeb0cbdea1"
+    },
+    "prismaquant/residency_map.py": {
+     "sha256": "30e9d14323845a10b2f471eb8d57c14cbe0554b6741f4091c2df4698356c52f2",
+     "git_blob": "2e54e4224f5cf4b078e7da3e0d3a3e17263d59da"
+    },
+    "prismaquant/residency_shard_reader.py": {
+     "sha256": "23d73b266268b7808571bd034dabfff68503c8aa8aecabf900dc350d305b44f5",
+     "git_blob": "2061ad7728c3f23eadfc2d0c1d787e4dbadb3446"
+    },
+    "prismaquant/routed_experts.py": {
+     "sha256": "2d49e8267527632ca745ee1b2b9ba4a49a9e368a8c6e6701f2ac8272226a9b98",
+     "git_blob": "eb889bb31f50525e5de76609efd2ac62e2843d00"
+    },
+    "prismaquant/routed_moe_codebooks.py": {
+     "sha256": "eb55bd4c41ba6ac1e08a1d53263cc372b187c0fd1e0b7dd373d5e92ec007b72a",
+     "git_blob": "375d538471dac1e7ac71782c811e98d835bb8a40"
+    },
+    "prismaquant/sensitivity_probe.py": {
+     "sha256": "675b3775b39bc0e56b54bb1d3cfe29ddf7a22d566203d8fa592c1d5407ff299a",
+     "git_blob": "fe764176dc582d9d17188b320965f7dbb15ae0d7"
+    },
+    "prismaquant/shard_layout.py": {
+     "sha256": "16e2730ccc0118dbaea190116ffa1cb53ae963d7124afb53453b40e420b60816",
+     "git_blob": "ef60c72bfa9d165dbadebb03e4f395cf37c3577d"
+    },
+    "prismaquant/source_prefetch.py": {
+     "sha256": "8ea593855e1d57fc21d374d916a933e78cdecb0628ea938fc7f875294d822bfc",
+     "git_blob": "a144ad1b06d380bb0b36ac5574deed7ce374701d"
+    },
+    "prismaquant/streaming_model.py": {
+     "sha256": "98976fec01740499973f432033af77b19aac90cf5345c1de74c918db0c7a5a93",
+     "git_blob": "bec09191f3a04de94d734f3ac43a83b7bf4a3715"
+    },
+    "prismaquant/tessera_campaign.py": {
+     "sha256": "f3d41180807b2e540b8c8151ea479d8a9a50b95dc55f0028b8de5efd9223be56",
+     "git_blob": "8dcecdb5ba6ec757bc481ac4edd4362701d94464"
+    },
+    "prismaquant/tessera_expert_projection.py": {
+     "sha256": "6bea8bd4e9f487082c68fa01a899f37e14435aaf199ef5c4ab448d8918fa80f6",
+     "git_blob": "669d9da905fc7ca88225255c518552e379250698"
+    },
+    "prismaquant/tessera_hessian.py": {
+     "sha256": "1492ca5cda787a452b27d85094492cf5f7d64920d96891c48900a7fdb3a59bb9",
+     "git_blob": "9d1f5b70c6cf0c6fb073bc40f3e3ad29348c0d61"
+    },
+    "prismaquant/tessera_publication.py": {
+     "sha256": "95187801183e734278410f8dd99cc5c02a1f803a1c18221df7dffcc066eb29af",
+     "git_blob": "2a923375efd162a9a4aa5dbdb05c81ee0608df35"
+    },
+    "prismaquant/tied_embeddings.py": {
+     "sha256": "e4552a536a2a3fc82bf76c44c4c8162e800b574453aec34d711cf6fdc6b2a296",
+     "git_blob": "9ab5895149dcf669a2b3052a4769d6498f4c2565"
+    },
+    "prismaquant/vendored/__init__.py": {
+     "sha256": "e922ba7bfc85c52e85a96bd19e148c3b6569feeeb27713538baed5e747c94e2d",
+     "git_blob": "550545d1a4e30e030dcc775d649a2b2d30e2b924"
+    },
+    "prismaquant/vendored/transformers_qwen3/__init__.py": {
+     "sha256": "05d131da1799477ed4204fb2da9e41d9d137feadb98e2a90d514944d59ea350c",
+     "git_blob": "51bd7ed33ee2812e45b4bede5c8be0a35c315bf7"
+    },
+    "prismaquant/vendored/transformers_qwen3/modeling_qwen3.py": {
+     "sha256": "00e66a7bdf933a80dd001253930f1bc18e9e427eea355d174aa5e51633acc72f",
+     "git_blob": "954e0139c039955e3276334d0cfbcaf97f4b8ef5"
+    }
+   }
+  },
+  "tessera-pin": {
+   "path": "/mnt/shared/tessera-pins/b40c93cb73745097e57a1ba4cf5b9eee166c759a/src",
+   "commit": "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+   "tree_sha256": "1e93c8eecff2f2389e2d07647ade6de681d5bd7a9f78292d396c5a986dbc7462",
+   "pinned_files": 1580,
+   "pin_record": ".pinned-source.json",
+   "note": "No git checkout; identity is the pin commit plus the pinned tree digest. Only the imported src/ subset below joins the runtime.",
+   "files": {
+    "tessera/__init__.py": {
+     "sha256": "9e681d73db412b0c437af4fc5e247170a068ab05709a88a51da2e5d292104a69"
+    },
+    "tessera/alphabet.py": {
+     "sha256": "36a53971920e629f0115beeb90bc3d9d971729fc1375abd03ea6bba64561cc34"
+    },
+    "tessera/canonical.py": {
+     "sha256": "fb2776b4be5b2717b6c921ff1fd88e44ec8d80d05a09b5dfb753595e0a5bff3c"
+    },
+    "tessera/container.py": {
+     "sha256": "a0ede63276c00f7f0adae7194fff48839c1ffb1e5cca3cad400270a7135467bd"
+    },
+    "tessera/decode.py": {
+     "sha256": "1290872b07010e45f90634c1bd25ab808556773f03e365956eda746489c94887"
+    },
+    "tessera/diagonals.py": {
+     "sha256": "08732e87d54b2107dfb1e52374a811d78ffcb58485b0edc3c273d92008c71785"
+    },
+    "tessera/encode.py": {
+     "sha256": "cf5931ca4232c6f00584c146f0e7dd99d8378f59f5ddd411b4e6a1690d3436ef"
+    },
+    "tessera/encoder_identity.py": {
+     "sha256": "8e1bc02b86ba5be960a7a9aff0aa231917670aba201756dfb283f55509249fa6"
+    },
+    "tessera/errors.py": {
+     "sha256": "765894f6b69c94eea19ac42913275fe423da0fb03dfff08ccd56291206f1fcf0"
+    },
+    "tessera/exact.py": {
+     "sha256": "ffa9fce2d2f1caa0550f5b9979720a476bb39943e301d1a85d4b5d221198e526"
+    },
+    "tessera/export.py": {
+     "sha256": "2127e82b05ba52538dfae1d043f2d75a9b53dd51b8f2f43cd234d62aec2a587d"
+    },
+    "tessera/footprint.py": {
+     "sha256": "9d09f68f6883aac2039129cf56aa7ee240346884748d246722e0e2dcbeaa1cde"
+    },
+    "tessera/fp8.py": {
+     "sha256": "b961c588744f0301fb2c293460a7e0e3d6c753f2554b5d51ea63d276dd5fa3c5"
+    },
+    "tessera/grammar.py": {
+     "sha256": "9ae1f824afd316950e2ea224df994a9048e90a616d78300a2baf054783786da4"
+    },
+    "tessera/kernel_a4.py": {
+     "sha256": "260e8a18d62058b62843aeadeb05e0c6869a86e336733758546ba2bf80625a03"
+    },
+    "tessera/kernel_roster.py": {
+     "sha256": "473d4b9dce99a48cf963fdb3e6bf552cb714c9be469b6aadaa399fa36bc5f88b"
+    },
+    "tessera/layout.py": {
+     "sha256": "d1f459d19b97e1b912136011ba9b2e7a6d90440f44ebe220b312684f2fcdffcf"
+    },
+    "tessera/manifest.py": {
+     "sha256": "db9b1f71576ec7a09cb7dab8967ec8c05c33e21145726320a6013109f94293a8"
+    },
+    "tessera/planes.py": {
+     "sha256": "f5fd5b8385664b7fad9fd4541101b1f31570ad8385aad30f8e9cb6647f00f9fa"
+    },
+    "tessera/scale_channel.py": {
+     "sha256": "f391a7313f0fd91c660eadccca606988d90b462c71f02a2201966f1a394a714a"
+    },
+    "tessera/scale_codec.py": {
+     "sha256": "592dc7078fb532b21e106ffdf142adf5811b8454c99f11e969b21025cb0e67dc"
+    },
+    "tessera/serving/__init__.py": {
+     "sha256": "49bed61d544da802ca7eeb99bdaef4f17d1f618f928c2be99bed4f7628ad882a"
+    },
+    "tessera/serving/ext.py": {
+     "sha256": "456c338b5653ce31ad8d3ae3eba7be51c7001ae2757b1acd36ef8164503b9c76"
+    },
+    "tessera/serving/native_ops.py": {
+     "sha256": "bd40225ab2aff92b86f570c6a374c1aa894df6d037a374b82a47fc623594fb18"
+    },
+    "tessera/slicing.py": {
+     "sha256": "58ae82e639c935226369a64e633029c7a3848e0cdb44bdd3fc7255ccb63ab8ce"
+    },
+    "tessera/structure.py": {
+     "sha256": "e5cb13d7952325b1813892e1879ec999d48f0407f32d4783fd1ca1e41705cb77"
+    },
+    "tessera/trellis.py": {
+     "sha256": "0d23f903b564b26bdaa8656c2ef7647fea6f740038b83f87afa80acf5324fbec"
+    },
+    "tessera/unit_artifact.py": {
+     "sha256": "fac9e0f5f133576b9eeda2fe8f052f4c35e7c52d7331cc6525cd60c1d1961c28"
+    },
+    "tessera/wire.py": {
+     "sha256": "10d4ea2a94a71db5f05219298817980d40f6f82bb589bd01de9f1ab188efd69c"
+    }
+   }
+  }
+ },
+ "cli_capture": {
+  "file": "D38_IMPORTS.json",
+  "sha256": "ba78915d140ad32c385adf7884048fac1dbe927b8a37a7717688156038518a46",
+  "projection_columns": ["source", "path", "sha256"],
+  "raw_file": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-research-a8/capture/cli-imports.json",
+  "raw_sha256": "6fc32dc80ba3a3d3c5662859d47be669893298f398262e55e261b30c3792d246",
+  "all_modules_file": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-research-a8/capture/all-modules.json",
+  "all_modules_sha256": "198693ec725abb275e7228c8f26319dad417eb1f15fac7b554caccaa4117a4ea",
+  "scope": "The projection contains all observed project module names, source tags, relative paths, and byte digests.",
+  "limit": "The raw capture retains absolute origins, CLI argv, and the initial module search path. Non-file module origins have no byte claim."
+ },
+ "d38_evidence": {
+  "action": "a46b541d3e849559057461edaafe943b8523e2ffb285528d20f3e47db6eefba1",
+  "snapshot_parent": "c9260081766ec8a47e7a0f357432833a4d3b1cb6",
+  "snapshot_commit": "09bc4df8e2685085a106ff57afc987f1aeeabb52",
+  "host": "dl380g10",
+  "returncode": 0,
+  "command": "The raw capture records the full normal public CLI argv. The sealed request records the observer invocation.",
+  "stdout": "D38_CPU_passed true; seven streams; full_band_measured false",
+  "proof": "/mnt/shared/tessera-measurements/eng-pact-band-20261009/D38-pq2482-research-a8/proof.json",
+  "proof_sha256": "8dcca30ce649d6e34da1d0c0dd84da280e7bc643899914cd5ada96b3c4235df7",
+  "energy_rows_sha256": "422890d96a5a744bc7c666272b33369becf4572cb3a60312a26c2eeb4ae44cdf",
+  "replacement_authority": ["dec-1009-071459-9147", "dec-1009-071701-e118"]
+ },
+ "inferred_scope": "The source files above include CPU and latent device paths. Their presence does not prove a D38 import.",
+ "superseded_claim": {
+  "head": "51c1f5707063c2ac48a19b4decc06fe571b36c8e",
+  "reason": "Separate manual imports did not establish the module origins of action 25d65391d7ce.",
+  "review": "https://github.com/RobTand/prismaquant/pull/2489#issuecomment-6077888109"
+ }
+}
