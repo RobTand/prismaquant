@@ -81,17 +81,26 @@ from .staged_tier_policy import TierPolicyRefused
 #: selected action generation's verified result through the public SDK4
 #: surface. The reader-lease names are unchanged; the version moves together
 #: below. Live fleet deployment remains separate and is never inferred.
-PB_READER_LEASE_PIN_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
+#: PQ #2152 re-pins to merged PB #1482 at 027103d (accepted child 855032b)
+#: so the strict original-source qualification can require the selected
+#: action's native producer context (PB #1481) from the SAME held immutable
+#: attempt. One SDK, exact commit and version; no dual-SDK probing, alias or
+#: fallback is introduced. Live fleet deployment stays separate and is never
+#: inferred from this pin.
+PB_READER_LEASE_PIN_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: The PrismaBuild client SDK version this package is written against
 #: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
 #: version refuses as unsupported: the SDK's contract is pinned by version, so
 #: a mismatch is a different contract, never a subset to probe.
-#: SDK4 (PB #1453) adds the public ``read_verified_action_result`` and
-#: ``bind_standard_capture_command`` surface PQ #1293 consumes; SDK3 or
-#: anything else still refuses.
-PB_CLIENT_SDK_VERSION = 4
+#: SDK5 (PB #1482) adds ``require_native_producer_context`` on
+#: ``read_verified_action_result`` — the selected attempt's authenticated
+#: native producer context PQ #2152 joins — beside SDK4's public
+#: ``read_verified_action_result`` and ``bind_standard_capture_command``.
+#: SDK4 and anything else still refuse; cache-hit, legacy and missing native
+#: production evidence refuse inside the SDK rather than degrading.
+PB_CLIENT_SDK_VERSION = 5
 
 #: The one PrismaBuild module PrismaQuant imports.
 _CLIENT_MODULE = "prismabuild.client"
@@ -361,18 +370,18 @@ def sdk_submodule(name: str):
     return module
 
 
-def inject_installed_sdk_for_tests():
-    """TEST-ONLY explicit injection of the reviewed installed distribution.
+def reviewed_installed_distribution():
+    """TEST-ONLY: the one installed ``prismabuild`` distribution, proven reviewed.
 
-    Binds the ``prismabuild`` resolved by normal import after verifying it
-    is a single installed distribution at exactly
-    :data:`PB_READER_LEASE_PIN_COMMIT` (no worktree shadow, no editable
-    install — the same properties the pbtest pin guard proves worker-side
-    before pytest). Raises ``RuntimeError`` (never a tier refusal) when
-    the environment does not provide it: tests fail loudly on a missing
-    dependency, never silently skip. Production never calls this.
+    Verifies from install metadata alone, with the standard library, that
+    exactly one distribution owns ``prismabuild`` and that it is a
+    non-editable Git install at exactly :data:`PB_READER_LEASE_PIN_COMMIT`.
+    That is the identity the pbtest pin guard proves worker-side before
+    pytest; the guard also proves the RECORD bytes, once per shard. Raises
+    ``RuntimeError`` (never a tier refusal) when the environment does not
+    provide it: tests fail loudly on a missing dependency, never silently
+    skip. Production never calls this.
     """
-    global _INJECTED, _INJECTED_MODULES_BEFORE
     import importlib.metadata as metadata
     import json as _json
     owners = metadata.packages_distributions().get("prismabuild", [])
@@ -393,6 +402,22 @@ def inject_installed_sdk_for_tests():
         raise RuntimeError(
             "test SDK injection needs a non-editable Git install at "
             f"{PB_READER_LEASE_PIN_COMMIT}, found {vcs}")
+    return dist
+
+
+def inject_installed_sdk_for_tests():
+    """TEST-ONLY explicit injection of the reviewed installed distribution.
+
+    Binds the ``prismabuild`` resolved by normal import after
+    :func:`reviewed_installed_distribution` proved it is a single installed
+    distribution at exactly :data:`PB_READER_LEASE_PIN_COMMIT` (no worktree
+    shadow, no editable install — the same properties the pbtest pin guard
+    proves worker-side before pytest). Raises ``RuntimeError`` (never a tier
+    refusal) when the environment does not provide it: tests fail loudly on a
+    missing dependency, never silently skip. Production never calls this.
+    """
+    global _INJECTED, _INJECTED_MODULES_BEFORE
+    dist = reviewed_installed_distribution()
     # Before the import, so the teardown can tell the modules this
     # injection adds from the ones the process already had (PQ #963).
     # A second injection with one still on record keeps the first

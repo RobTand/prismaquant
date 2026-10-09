@@ -273,6 +273,34 @@ def installed_client_sdk(monkeypatch):
 
 
 @pytest.fixture
+def installed_helper_sdk(tmp_path, monkeypatch):
+    """Production resolver over the actual, Git/RECORD-qualified SDK sources.
+
+    The published pbtest guard owns install verification, once per shard and
+    before pytest; this fixture re-reads only the install identity, with the
+    standard library, because the guard's module exists in the shard's main
+    process and not in its xdist workers. This private helper view links those
+    installed bytes, not an SDK4 archive or a copied package; it is a CPU
+    fixture, never a published runtime generation. No test-only SDK injection
+    supplies the production Gateway.
+    """
+    from fleet_sdk import require_prismabuild_sdk
+    from prismaquant import staged_lease
+
+    require_prismabuild_sdk()
+    dist = staged_lease.reviewed_installed_distribution()
+    package = Path(dist.locate_file("prismabuild")).resolve()
+    helper = tmp_path / "installed-sdk-helper"
+    (helper / "src").mkdir(parents=True)
+    (helper / "src" / "prismabuild").symlink_to(package, target_is_directory=True)
+    assert staged_lease._INJECTED is None
+    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", str(helper))
+    sdk = staged_lease.client_sdk()
+    assert Path(sdk.__file__).resolve() == package / "client.py"
+    yield sdk
+
+
+@pytest.fixture
 def pinned_pb_source():
     """Explicit, non-autouse ownership of the reviewed PB source graph."""
     from fullstack_pb_generation import source_bound
@@ -704,8 +732,8 @@ TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
 TASK_SUITE_SKIP_REASON = (
     "task_suite: run the required layered gate with -m task_suite or "
     "PQ_TASK_SUITE_TESTS=1; recorded 76 passed, 0 skipped; "
-    "action 5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859; "
-    "receipt 1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb")
+    "action 20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6; "
+    "receipt 0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913")
 
 
 class _ExplicitMarkerSelection:
