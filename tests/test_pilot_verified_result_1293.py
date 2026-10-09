@@ -165,6 +165,23 @@ def test_real_selected_result_admits_only_the_reviewed_source_and_invocation(
     assert bool(gateway.submitted) is (fault is None)
 
 
+#: What the production Gateway refuses each fault for. A control that broke for
+#: another reason, such as sealing or setup, would still say "refused"; it would
+#: not say this.
+_REFUSALS = {
+    "source": "has no unique independently reviewed contract",
+    "source_commit": "has no unique independently reviewed contract",
+    "subdirectory": "has no supported checkout snapshot invocation",
+    "refs": "has no unique independently reviewed contract",
+    "entry": "is not the supported containerized quantum entry",
+    "plan": "sealed invocation differs from the proposed row",
+    "environment": "has no unique independently reviewed contract",
+    "wrapper": "is not the standard capture recipe",
+    "legacy": "carries 0 quantum completion announcements",
+    "attempt": "is not the terminal attempt 1",
+}
+
+
 @pytest.mark.parametrize("fault", [None, "source", "source_commit", "subdirectory", "refs", "entry", "plan", "environment", "wrapper", "legacy", "attempt"])
 def test_production_gateway_consumes_selected_results_from_the_installed_sdk5_helper(
         tmp_path, campaign, records_dir, monkeypatch, capsys, installed_helper_sdk, fault):
@@ -198,6 +215,7 @@ def test_production_gateway_consumes_selected_results_from_the_installed_sdk5_he
     assert result == (0 if fault is None else 3)
     if fault is not None:
         assert "refused" in captured.err
+        assert _REFUSALS[fault] in captured.err
         assert not captured.out
     else:
         rows = json.loads(captured.out)["rows"]
