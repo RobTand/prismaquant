@@ -17,6 +17,12 @@
   Production deadlines and fail-closed release behavior remain unchanged.
   PB `cc59619e6a893b3778cfd0e8863565a6b6dd98e594631114e5210ee8e444dc0f` passes 11 affected tests, the direct delay smoke, and the compile check on x86.
   The same run retains deterministic staging-timeout and release-budget coverage.
+- The DSv4 fake-trace test now uses `own_process` in mixed sessions (#2279).
+  The fake-trace ordered-pair regression retains the expected `DataDependentOutputException` and the native-import refusal.
+  A pinned real config removes the host config dependency from the regression.
+  Nested-rotary ordered-pair coverage stays in `test_dsv4_fixture_isolation.py` from PR #2391.
+  The PB pair shows no order effect: the spill skips without DIO-capable scratch (blocked by #2162),
+  and the `-S` SDK-loader failure in `test_original_cuda_control_artifacts.py` fails standalone.
 - A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
   Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
   With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.

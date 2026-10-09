@@ -19,6 +19,7 @@ coverage recording an unexecuted module.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 import torch
@@ -370,7 +371,9 @@ def test_qwen3_walk_is_stable_across_two_runs(qwen3_walk):
 # ratchet so a torch/vendored change that lifts it turns the test red with
 # an instruction to promote the fake path.
 
-DSV4_CONFIG = "/home/rob/dq-runs/dsv4-flash-0731/source/config.json"
+DSV4_CONFIG = os.path.join(
+    os.environ.get("DSV4_FLASH_SOURCE", "/home/rob/dq-runs/dsv4-flash-0731/source"),
+    "config.json")
 
 
 def test_dsv4_profile_rules_decide_the_grouped_linear_weight():
@@ -486,6 +489,8 @@ def test_dsv4_walk_fails_without_the_profile_rules():
     assert "bmm" in message
 
 
+# Keep the native-import refusal in the parent session (PQ #2279).
+@pytest.mark.own_process
 @pytest.mark.slow
 def test_dsv4_fake_trace_block_is_still_real():
     """Ratchet on the documented block: the fake trace of the real source
