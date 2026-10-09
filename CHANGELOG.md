@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Added
+- The fleet registry attests both x86 merge-train layers for the SDK4 and SDK5 vehicles (#2467).
+  The SDK5 entry names `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`, not its base interpreter.
+  PB `975efe59c9d63ae5de43a3a001b1b9a8d5369da9a82d1e6bc5dc3dc1a56243cd` verifies the non-editable PB `027103d9` and Tessera `fca4c6ce` installs.
+  Its guard admits PR #2216 head `f6960f8`; pytest reports 10 passed.
+  Current dependency pins and the existing SDK4 entry stay unchanged.
+
+  PB `df3d153fa68ce8780031596028e8620a8be65042c93bcd7214b621c5ae39cd9f` executes `suite.command` from fleetgraph `1d2d5a6d1bac7a727ee17903b0decd37ec33a248`.
+  It uses the captured live interpreter table, SHA-256 `efbbbd1b87c43d9b3d6bd63aff67697352a91361c770fc1127f8cf9598cc2701`.
+  The SDK4 vehicle selects `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`.
+  The SDK5 vehicle at PR #2216 head `d08c3ba9` selects `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`.
+  Each selected interpreter passes the dependency pin guard and all 50 row-class tests.
+  Portable placement tests replace the host-dependent SDK4 pin assertions.
+
+  The same action replays the retained private build script from PB `7386f1618cf0739623072428b6da532b48fe7fca4de691caa9cc18dd055407e0`.
+  Only private destinations, the temporary directory, and the immutable source transport differ.
+  Content manifests cover both train layers, both pin bases, and both source environments, including symlink targets.
+  Before and after manifests match: SHA-256 `33b5839e2adef872abffe2edf2ce9ca9b225d7c61479094fe51c14862cc349bc`, with zero changed entries.
+  The action retains the manifests and selector output under `/mnt/shared/tessera-measurements/pq2467-a4-ka_6p__1/`.
+  This proves preservation during the checks and replay; the original build has no retained before manifest.
+
 - The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
   The central processor path writes a valid structure draft without tensor payload reads or profile registration.
   Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
