@@ -1,8 +1,9 @@
 """PB's launch-bound staged ranges, translated through G3 container mounts.
 
 Only the admitted helper tree owns map validation, pinning and release. A map
-miss reads the declared origin. A named range never falls back after failure.
+miss reads the declared origin. A named range never uses an origin fallback.
 Each phase holds batched tier leases until all its descriptors close.
+An unavailable RAM cover can select published stage covers. Integrity failures refuse.
 """
 import json
 import os
@@ -12,6 +13,7 @@ import threading
 import time
 import uuid
 from g3_pq_policy.digests import bytes_sha256hex
+from g3_pq_policy.staged_lease import _classify
 
 _LOCK = threading.Lock()
 _READER = None
@@ -94,6 +96,12 @@ class StagedReader:
                     and ("ram_path" in mapping["entries"][k]) == ("ram_path" in entry)}
         covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
                                           manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
+        if not covers["ok"] and "ram_path" in entry and _classify(covers["refusal"]) == "availability":
+            # PB permits unavailable RAM covers to select the same bytes on stage.
+            # Integrity and unknown refusals never select another copy.
+            tier, epoch = mapping["tier_id"], ""
+            covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
+                                              manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
         if not covers["ok"]:
             raise RuntimeError(f'{phase}: PB covering material: {covers["refusal"]}')
         acq = self.lease.acquire_for(

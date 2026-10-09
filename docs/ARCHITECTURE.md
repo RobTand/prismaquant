@@ -95,6 +95,23 @@ Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a5/net
 This correctness comparison adds no speed, energy, or whole-model residency claim.
 Work per joule remains null.
 
+The revision-6 merge includes `origin/main` at `3d2841dc9605` and retains both changelog additions.
+The initial container check, PB `5ae3bcef04c9`, fails at `omission-setup` on an unavailable RAM cover.
+PB `35251b1db6f4` reproduces that refusal in the new CPU regression.
+The correction reuses the shared lease owner's refusal classification.
+An unavailable RAM cover can select published stage covers for the same phase and expected bytes.
+Integrity and unknown refusals still fail; the reader never substitutes origin bytes for a named range.
+The existing phase leases, digest checks, omission rule, numerical code, and D32 behavior remain unchanged.
+PB `7b2fd0569f8c` passes all 117 selected CPU cases, with no skips.
+PB `36269dbc3563` completes the real container comparison on Sparklina at priority zero.
+Both passes verify 876 replacements; the logits and both FP64 KL arrays match bitwise.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a6-corrected/real-arm-ig-a6-corrected/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a6/netdata-power.json`.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
+
 
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.

@@ -149,3 +149,47 @@ def test_real_comparison_progress_refuses_missing_layers_and_early_score():
         progress.observe('G3_COMPARE_PROGRESS {"phase": "source-read-layer-01"}')
     with pytest.raises(ValueError, match="unrequested"):
         progress.observe('G3_COMPARE_PROGRESS {"phase": "source-read-teachers", "scored": true}')
+
+
+def test_unpublished_ram_phase_uses_one_verified_stage_window(tmp_path):
+    reader, mapping, map_path, _, events, live = reader_fixture(tmp_path)
+    mapping.update(ram_tier_id="ram:stage", ram_epoch="current")
+    for key in reader.phase_keys["layer-00"]:
+        mapping["entries"][key]["ram_path"] = "/ram/" + key.rsplit("/", 1)[-1]
+    map_path.write_text(json.dumps(mapping))
+    stage_covers = reader.lease.covers_for_keys
+    tiers = []
+
+    def covers(root, owner, keys, **kwargs):
+        tiers.append(kwargs["tier_id"])
+        if kwargs["tier_id"] == "ram:stage":
+            return {"ok": False, "refusal": "unpublished"}
+        return stage_covers(root, owner, keys, **kwargs)
+
+    reader.lease.covers_for_keys = covers
+    assert reader.read("/host/source", 0, 6) == b"source"
+    assert reader.read("/host/wire", 0, 4) == b"wire"
+    assert tiers == ["ram:stage", "stage"]
+    assert [keys for kind, keys in events if kind == "acquire"] == [{"0:/host/source", "0:/host/wire"}]
+    assert reader.stats["tiers"] == {"stage": {"reads": 2, "bytes": 10}}
+    reader.finish_phase("layer-00")
+    assert not live
+
+
+@pytest.mark.parametrize("refusal", ["source-coverage-gap", "ownership-uncertain", "unknown"])
+def test_ram_integrity_or_unknown_refusal_never_selects_stage(tmp_path, refusal):
+    reader, mapping, map_path, _, _, live = reader_fixture(tmp_path)
+    mapping.update(ram_tier_id="ram:stage", ram_epoch="current")
+    mapping["entries"]["0:/host/source"]["ram_path"] = "/ram/source"
+    map_path.write_text(json.dumps(mapping))
+    tiers = []
+
+    def covers(_root, _owner, _keys, **kwargs):
+        tiers.append(kwargs["tier_id"])
+        return {"ok": False, "refusal": refusal}
+
+    reader.lease.covers_for_keys = covers
+    with pytest.raises(RuntimeError, match=refusal):
+        reader.read("/host/source", 0, 6)
+    assert tiers == ["ram:stage"]
+    assert not live and reader.stats["staged_reads"] == 0

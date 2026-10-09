@@ -26,6 +26,11 @@
   The pinned `/pq` package and action `1cb0d64a` remain unchanged.
   The merge with `origin/main` preserves the accepted fix and both documentation additions.
   PB `42ee5b235134` passes 113 CPU cases; PB `07921c3dd917` preserves bitwise equality in the real container.
+  The next merge retains main at `3d2841dc9605` and its independent changelog addition.
+  An unavailable RAM cover now selects published stage covers for the same phase and expected bytes.
+  The shared lease owner classifies each refusal; integrity and unknown refusals still fail.
+  PB `35251b1db6f4` reproduces the old RAM refusal; PB `7b2fd0569f8c` passes all 117 affected CPU cases.
+  PB `36269dbc3563` completes the real comparison on Sparklina with bitwise logits and FP64 KL equality.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
