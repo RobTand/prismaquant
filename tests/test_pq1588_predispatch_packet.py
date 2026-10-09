@@ -42,7 +42,7 @@ def test_packet_source_sha_comes_from_provenance():
     sha = provenance["source_commit"]
     assert SHA_RE.fullmatch(sha) is not None
     assert packet["source_commit"] == sha
-    assert packet["short_id"] == sha[:8]
+    assert provenance["short_id"] == sha[:8]
     assert sha[:8] in packet["namespace"]["proposed_root"]
 
 
