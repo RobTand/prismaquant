@@ -145,6 +145,41 @@ def test_v12_unscoped_launch_keeps_the_scope_of_its_cell():
     assert parsed_cell.launch_covers_rate(0, 768)
     assert parsed_cell.launch_covers_rate(0, 832)
 
+def test_v12_route_cell_keeps_the_derived_launch_coverage():
+    parsed = _parsed()
+    table = _table()
+    route = next(c for c in parsed.cells
+                 if c.cell_id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
+    cell = next(c for c in table.cells if c.id == route.cell_id)
+    assert tuple(route.launch_covered_rungs_q256) == tuple(
+        cell.launch_covered_rungs_q256)
+    index = next(i for i, (_, decoder) in enumerate(route.executes)
+                 if decoder in HISTORICAL)
+    assert 800 in route.launch_covered_rungs_q256[index]
+    assert route.launch_covers_rate(index, 800)
+    assert route.launch_covers_rate(index, 832)
+    class_index = next(i for i, (_, decoder) in enumerate(route.executes)
+                       if decoder == CLASS_DECODER)
+    assert not route.launch_covers_rate(class_index, 800)
+
+
+def test_v12_answer_keeps_v11_row_shape_without_a_scope():
+    payload = _payload()
+    payload["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
+    for cell in payload["lane_eligibility"]["cells"]:
+        for launch in cell["executes"]:
+            launch.pop("rungs_q256", None)
+    before = runtime.contract_answer(_parsed())
+    answer = runtime.contract_answer(runtime._parse(
+        payload, commit="fixture", sha="fixture", path="fixture"))
+    assert runtime._answer_drift(before, before) == []
+    row = next(r for r in answer["cells"]
+               if r[0] == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
+    assert len(row) == 18
+    assert isinstance(row[13], dict) and set(row[13]) >= {
+        "image", "execution_modes"}
+    assert "launch_scopes" not in row
+
 
 @pytest.mark.parametrize("mutation,match", [
     (lambda e: e.update(rungs_q256=[]), "at least one rung"),
@@ -176,8 +211,9 @@ def test_v12_scope_change_moves_the_contract_answer():
     answer = runtime.contract_answer(before)
     row = next(r for r in answer["cells"]
                if r[0] == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
-    assert any(entry["decoder"] == CLASS_DECODER and entry["rungs_q256"] == [768]
-               for entry in row[13])
+    entry = next(e for e in row[13]["launch_scopes"]
+                 if e["decoder"] == CLASS_DECODER)
+    assert entry["rungs_q256"] == [768]
     payload = _payload()
     cell = next(c for c in payload["lane_eligibility"]["cells"]
                 if c["id"] == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
