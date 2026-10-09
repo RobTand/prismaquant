@@ -303,35 +303,21 @@ def _graph_image() -> str:
 
 
 def _graph_tessera_source_sha256() -> str:
-    """Hash installed Python sources using Tessera #702's sha256sum recipe.
+    """Hash installed Python sources using Tessera #702's sha256sum recipe."""
+    from .lane_spec import single_lane_hook
 
-    The installed receipt module locates the package, including editable and
-    wheel installs. Logical names remain src/tessera/... in either case, as
-    in the equality producer's sorted src/**/*.py sha256sum output. Read the
-    packaged pin evidence as bytes, without importing tessera.serving.
-    """
-    from .digests import bytes_sha256hex, file_sha256hex
-    from .dev_mode import NOT_COMPUTED, seal_check
-    from .tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
+    hook = single_lane_hook("graph_tessera_source_sha256")
+    if hook is None:
+        from .dev_mode import NOT_COMPUTED, seal_check
 
-    try:
-        from tessera import graph_receipt
-
-        package = Path(graph_receipt.__file__).resolve().parent
-        seal_check("tessera_runtime_pin", load_tessera_serving_runtime_pin().contract_sha256,
-                   file_sha256hex(package / "serving" / "runtime_contract.json"),
-                   where="native_export.graph")
-        sources = sorted(package.rglob("*.py"),
-                         key=lambda p: p.relative_to(package).as_posix())
-        if not sources:
-            raise ValueError("installed Tessera has no Python source files")
-        lines = (f"{file_sha256hex(p)}  src/tessera/{p.relative_to(package).as_posix()}\n"
-                 for p in sources)
-        return bytes_sha256hex("".join(lines).encode())
-    except (ImportError, OSError, ValueError, TypeError, AttributeError) as exc:
-        seal_check("tessera_src_sha256", "installed Tessera Python source digest",
-                   NOT_COMPUTED, where=f"native_export.graph: {exc}")
+        seal_check(
+            "tessera_src_sha256",
+            "installed Tessera Python source digest",
+            NOT_COMPUTED,
+            where="native_export.graph: no lane provides graph_tessera_source_sha256",
+        )
         return NOT_COMPUTED
+    return hook()
 
 
 def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
@@ -406,7 +392,8 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         # archived Gridbook probe learned to do and it keeps the sweep's
         # objects the same objects the generate ran on.
         os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
-    from .digests import bytes_sha256hex, file_sha256hex
+    import copy
+    from .digests import bytes_sha256hex, canonical_json, file_sha256hex
 
     llm = None
     try:
@@ -430,7 +417,11 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             if not isinstance(compilation, dict):
                 raise ValueError("cannot derive compilation_config: expected a JSON object")
             # Preserve exactly what is passed even if vLLM mutates its input.
-            compilation = json.loads(json.dumps(compilation, sort_keys=True))
+            try:
+                compilation = canonical_json(
+                    compilation, where="native_export.graph: compilation_config")
+            except ValueError as exc:
+                raise ValueError(f"cannot derive compilation_config: {exc}") from exc
             image = _graph_image()
             source_sha256 = _graph_tessera_source_sha256()
             try:
@@ -452,7 +443,7 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             max_num_seqs=args.max_num_seqs,
             tensor_parallel_size=args.tensor_parallel_size,
             speculative_config=spec,
-            **({"compilation_config": json.loads(json.dumps(compilation))}
+            **({"compilation_config": copy.deepcopy(compilation)}
                if not enforce_eager else {}),
         )
         if not enforce_eager:

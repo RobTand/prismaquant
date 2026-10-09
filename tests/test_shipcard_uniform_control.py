@@ -302,16 +302,20 @@ def _ship_gate_record(model_sha, *, source):
     )
 
 
-def _native_record(slot, model_sha):
+def _native_record(slot, model_sha, *, model_dir=None):
     # What `validate_native_export._record_arm` files: the arm it ran
     # (`arm = "eager" if enforce_eager else "graph"`) with one greedy
     # decode as evidence.
     arm = slot.split(".", 1)[1]
+    metrics = {"arm": arm, "generated_chars": 128,
+                 "enforce_eager": arm == "eager", "max_new_tokens": 16}
+    if arm == "graph" and model_dir is not None:
+        from test_shipcard import _graph_receipt_metrics
+
+        metrics.update(_graph_receipt_metrics(model_dir))
     return make_record(
         slot=slot, tool="validate_native_export.py", passed=True,
-        model_sha=model_sha,
-        metrics={"arm": arm, "generated_chars": 128,
-                 "enforce_eager": arm == "eager", "max_new_tokens": 16},
+        model_sha=model_sha, metrics=metrics,
         detail=f"{arm} smoke", git_commit=_FAKE_COMMIT)
 
 
@@ -324,7 +328,7 @@ def _close_base_slots(model_dir, candidate_kl=_ALLOCATED_KL):
             fill_slot(path, slot, _ship_gate_record(sha, source=str(model_dir)))
             continue
         if slot.startswith("native_export."):
-            fill_slot(path, slot, _native_record(slot, sha))
+            fill_slot(path, slot, _native_record(slot, sha, model_dir=model_dir))
             continue
         is_gold = slot in GOLD_SLOTS
         fill_slot(path, slot, make_record(

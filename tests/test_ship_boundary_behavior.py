@@ -413,11 +413,15 @@ def _full_card(tmp_path, **record_kwargs):
                 sha, source=str(model_dir), **record_kwargs))
         elif slot.startswith("native_export."):
             arm = slot.split(".")[1]
+            metrics = {"arm": arm, "enforce_eager": arm == "eager",
+                         "generated_chars": 128, "max_new_tokens": 16}
+            if arm == "graph":
+                from test_shipcard import _graph_receipt_metrics
+
+                metrics.update(_graph_receipt_metrics(model_dir))
             fill_slot(path, slot, make_record(
                 slot=slot, tool="validate_native_export.py", passed=True,
-                model_sha=sha,
-                metrics={"arm": arm, "enforce_eager": arm == "eager",
-                         "generated_chars": 128, "max_new_tokens": 16},
+                model_sha=sha, metrics=metrics,
                 detail=f"{arm} smoke", git_commit=_FAKE_COMMIT))
         elif slot == "gold.kl":
             fill_slot(path, slot, make_record(

@@ -832,6 +832,66 @@ def serving_runtime_contract_path():
     return contract_path()
 
 
+def graph_equality_verify(receipt: Mapping[str, Any], scope: Mapping[str, Any]) -> str | None:
+    """Run the numeric rule for a graph-equals-eager receipt."""
+    try:
+        from tessera import graph_receipt
+    except ImportError as exc:
+        return (
+            "tessera.graph_receipt is unavailable from the installed Tessera; "
+            f"the serving pin must carry it: {exc}"
+        )
+    if receipt.get("schema") != graph_receipt.SCHEMA:
+        return (
+            f"graph receipt schema {receipt.get('schema')!r} is not "
+            f"{graph_receipt.SCHEMA}"
+        )
+    try:
+        reason = graph_receipt.verify(dict(receipt), dict(scope))
+    except Exception as exc:
+        return f"graph receipt unreadable: {type(exc).__name__}: {exc}"
+    if reason is None:
+        return None
+    return f"graph equality receipt refused: {reason}"
+
+
+def graph_tessera_source_sha256() -> str:
+    """Hash the installed Tessera sources by the #702 recipe."""
+    from pathlib import Path
+    from .dev_mode import NOT_COMPUTED, seal_check
+    from .digests import bytes_sha256hex, file_sha256hex
+
+    try:
+        from tessera import graph_receipt
+        from .tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
+
+        package = Path(graph_receipt.__file__).resolve().parent
+        seal_check(
+            "tessera_runtime_pin",
+            load_tessera_serving_runtime_pin().contract_sha256,
+            file_sha256hex(package / "serving" / "runtime_contract.json"),
+            where="native_export.graph",
+        )
+        sources = sorted(
+            package.rglob("*.py"), key=lambda p: p.relative_to(package).as_posix()
+        )
+        if not sources:
+            raise ValueError("installed Tessera has no Python source files")
+        lines = (
+            f"{file_sha256hex(p)}  src/tessera/{p.relative_to(package).as_posix()}\n"
+            for p in sources
+        )
+        return bytes_sha256hex("".join(lines).encode())
+    except (ImportError, OSError, ValueError, TypeError, AttributeError) as exc:
+        seal_check(
+            "tessera_src_sha256",
+            "installed Tessera Python source digest",
+            NOT_COMPUTED,
+            where=f"native_export.graph: {exc}",
+        )
+        return NOT_COMPUTED
+
+
 # -- the ship record (shipcard, shipcard_cli) --------------------------------
 
 def shipcard_slot_verifiers() -> dict:

@@ -2123,19 +2123,11 @@ def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
     if not isinstance(serve, Mapping):
         return [f"{slot}: missing structured serve_scope"]
     try:
-        from tessera import graph_receipt
-    except ImportError as exc:
-        return [f"{slot}: tessera.graph_receipt is unavailable from the installed "
-                f"Tessera; the serving pin must carry it: {exc}"]
-    try:
         receipt = json.loads(raw)
     except (ValueError, TypeError) as exc:
         return [f"{slot}: malformed graph receipt: {exc}"]
     if not isinstance(receipt, dict):
         return [f"{slot}: malformed graph receipt: expected a JSON object"]
-    if receipt.get("schema") != "tessera.graph_equals_eager.v2":
-        return [f"{slot}: graph receipt schema {receipt.get('schema')!r} is not "
-                "tessera.graph_equals_eager.v2"]
     scope = dict(serve)
     from .dev_mode import seal_check
 
@@ -2146,12 +2138,16 @@ def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
     seal_check("tessera_src_sha256", recorded_source,
                scope.get("tessera_src_sha256"), where=slot)
     scope["tessera_src_sha256"] = recorded_source
+    from .lane_spec import single_lane_hook
+
+    hook = single_lane_hook("graph_equality_verify")
+    if hook is None:
+        return [f"{slot}: no lane provides graph equality verification"]
     try:
-        reason = graph_receipt.verify(receipt, scope)
+        suffix = hook(receipt, scope)
     except Exception as exc:
         return [f"{slot}: graph receipt unreadable: {type(exc).__name__}: {exc}"]
-    return ([f"{slot}: graph equality receipt refused: {reason}"]
-            if reason is not None else [])
+    return [] if suffix is None else [f"{slot}: {suffix}"]
 
 
 
