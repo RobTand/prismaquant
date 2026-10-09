@@ -14,10 +14,9 @@ UNIT = "model.layers.0.proj"
 
 
 def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
-                  format_name="TESSERA_E4M3_K1_R1024"):
+                  format_name="TESSERA_E4M3_K1_R1024", profile=None):
     from prismaquant import model_profiles, tessera_campaign, tessera_render
-    from prismaquant.model_profiles import DefaultProfile
-
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     model = torch.nn.Module()
     model.model = torch.nn.Module()
     model.model.layers = torch.nn.ModuleList([torch.nn.Module()])
@@ -50,7 +49,7 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
     # The fresh run prices under the default static-scale policy so a test
     # can change the policy afterwards and see the identity refuse it.
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
-    monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: DefaultProfile())
+    monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: profile or Glm5NextProfile())
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
         "accepted": True, "reason": "CPU test fixture", "kwargs": [], "recipe": {},
     })
@@ -559,3 +558,28 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
                            match="activation (contract|observation)"):
             campaign.main([*rejected, "--seed-checkpoint", str(checkpoint)])
         assert not (tmp_path / (label + "-cost.pkl")).exists()
+
+def test_non_glm_profile_with_kv_b_proj_leaf_gets_no_direct_contract():
+    """A future MLA profile must not inherit the GLM direct rule (#2457)."""
+    from prismaquant import tessera_campaign as campaign
+    from prismaquant.model_profiles import DefaultProfile
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    from prismaquant.tessera_formats import get_tessera_family
+
+    name = "model.layers.0.self_attn.kv_b_proj"
+    family = get_tessera_family("TESSERA_E4M3_K1")
+    assert campaign._direct_consumer_activation_contract(
+        name, profile=DefaultProfile()) is None
+    assert campaign._direct_consumer_activation_contract(name) is None
+    assert campaign._direct_consumer_memory_bytes(
+        name, family, (128, 64), profile=DefaultProfile()) == 0
+    assert campaign._direct_consumer_activation_contract(
+        name, profile=Glm5NextProfile()) == "a16"
+    assert campaign._direct_consumer_memory_bytes(
+        name, family, (128, 64), profile=Glm5NextProfile()) == 128 * 64 * 2
+    assert campaign._direct_consumer_activation_contract(
+        "model.layers.0.self_attn.indexer.weights_proj",
+        profile=Glm5NextProfile()) == "a32"
+    assert campaign._direct_consumer_activation_contract(
+        "model.layers.0.self_attn.indexer.weights_proj",
+        profile=DefaultProfile()) is None
