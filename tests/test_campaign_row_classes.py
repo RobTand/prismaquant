@@ -37,6 +37,7 @@ ROCM_PYTHON = "/home/rob/ml-venvs/torch-rocm7/bin/python"
 GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
 SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
 SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
+SDK5_PYTHON = "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python"
 
 
 def fleet() -> dict:
@@ -428,6 +429,14 @@ def test_active_sdk4_interpreters_validate_explicit_classes(tag):
     assert records == [{"class": "default", "isa": dispatch.load_fleet_interpreters()[
         "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
         "containerized": False, "wire_shared": True, "weights_only": False}]
+
+def test_active_sdk5_interpreter_validates_on_dl380g10():
+    record = dispatch.load_fleet_interpreters()["tags"]["dl380g10"][
+        "interpreters"][SDK5_PYTHON]
+    assert len(record["attested_by"]) == 64
+    records = dispatch.validate_row_classes(base_spec(
+        python=SDK5_PYTHON, tags=["dl380g10"], classes={"default": {}}))
+    assert records[0]["python"] == SDK5_PYTHON
 
 
 @pytest.mark.parametrize("dev_env", [None, "0"])
