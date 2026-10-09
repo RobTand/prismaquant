@@ -317,18 +317,30 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
     # The retained budget's physical bound must match the row's live guard:
     # a 50 MiB fixture plan cannot run under a 34 GiB container guard.
     # A real dispatch prices the plan for its box; this row reads the
-    # guard the quantum will hold and states that bound. The reserves
-    # stay the tiny fixture's own sealed numbers.
+    # guard the quantum will hold and states that bound. The runtime
+    # reserve covers the live committed baseline (torch/CUDA runtime);
+    # the other reserves stay the tiny fixture's sealed numbers.
     if torch.device(device).type == "cuda":
-        from prismaquant.joint_statistics_replay import operator_window_guard
-        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.joint_retained_window_plan import (
+            OBSERVED_BASELINE_KEY,
+        )
+        from prismaquant.joint_statistics_replay import (
+            check_operator_allocation,
+            operator_window_guard,
+        )
 
         preview = operator_window_guard(device)
         physical_limit = int(preview.physical_cap_bytes)
         safety_margin = int(preview.margin_bytes)
+        observed = check_operator_allocation(
+            preview, "quantum_row_baseline", reserve_bytes=0)
+        baseline = int(observed[OBSERVED_BASELINE_KEY])
         del preview
+        # Round up with headroom: later imports allocate before the check.
+        runtime_reserve = ((baseline + (1 << 30) - 1) // (1 << 30)) * (1 << 30)
     else:
-        physical_limit, safety_margin = 50 << 20, 1 << 20
+        physical_limit, safety_margin, runtime_reserve = (
+            50 << 20, 1 << 20, 1 << 20)
     execution = {
         "n_probes": N_PROBES,
         "seed_base": SEED_BASE,
@@ -341,8 +353,8 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
         "retained_operator_windows": {
             "schema": "prismaquant.joint_retained_execution.v1",
             "budget": RetainedWindowBudget(
-                physical_limit, safety_margin, 1 << 20, 1 << 20, 1 << 20,
-                1 << 20, 1 << 20, 1 << 20, 1 << 20, 1024,
+                physical_limit, safety_margin, 1 << 20, runtime_reserve,
+                1 << 20, 1 << 20, 1 << 20, 1 << 20, 1 << 20, 1024,
                 2048, 4 << 20, 4).as_dict(),
             "source_reserve_bytes": 1 << 20,
             "source_loading_reserve_bytes": 2 << 20,
