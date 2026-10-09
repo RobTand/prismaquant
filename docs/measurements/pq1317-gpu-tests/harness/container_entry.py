@@ -122,7 +122,8 @@ def selftest_probe(out: Path) -> dict:
     (directory / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (directory / "probe_selftest.py").write_bytes((Path(__file__).parent / "probe_selftest.py").read_bytes())
     probe_dir = out / "probe-selftest"
-    env = {**os.environ, "PQ1317_PROBE_DIR": str(probe_dir)}
+    ext_root = out / "selftest-ext"
+    env = {**os.environ, "PQ1317_PROBE_DIR": str(probe_dir), "PQ1317_EXT_DIR_ROOT": str(ext_root)}
     done = subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "xdist.plugin", "-p", "native_probe", "-n", str(WORKERS),
          "-o", "enable_assertion_pass_hook=true", "-o", ASSERTION_VERBOSITY, "-q", "probe_selftest.py"],
@@ -140,6 +141,7 @@ def selftest_probe(out: Path) -> dict:
           and all(number in float_test["assertions"][0]["evaluated"] for number in ("0.125", "0.25"))
           and int_test.get("assertions") == []
           and "tessera::fused_window_dense" in pair_text and "native_fused_window_dense" in pair_text
+          and sorted(p.name for p in ext_root.iterdir()) == ["gw0", "gw1"]
           and all(r.get("kind") != "error" for r in records))
     return {"ok": ok, "returncode": done.returncode, "workers": workers,
             "float_assertion": (float_test.get("assertions") or [None])[0],
@@ -180,7 +182,7 @@ def run_suite(files: list[str], out: Path) -> int:
         "--basetemp", str(out / "tmp" / "pytest"), "--junitxml", str(out / "junit.xml"),
         "-o", "enable_assertion_pass_hook=true", "-o", ASSERTION_VERBOSITY, "-o", "log_level=INFO",
         "-rP", *files)
-    env = {**os.environ, "PQ1317_PROBE_DIR": str(out / "probe")}
+    env = {**os.environ, "PQ1317_PROBE_DIR": str(out / "probe"), "PQ1317_EXT_DIR_ROOT": str(out / "torch-ext")}
     say("PQ1317_PYTEST_COMMAND", command)
     with (out / "pytest.log").open("w", encoding="utf-8") as log:
         process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -202,17 +204,21 @@ def merge_probe(out: Path) -> dict:
     sessions = [r for r in records if r.get("kind") == "session"]
     errors = [r for r in records if r.get("kind") == "error"]
     (out / "probe-tests.json").write_text(json.dumps(tests, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    libraries: dict[str, str] = {}
+    by_worker: dict[str, dict[str, dict]] = {}
     for record in tests + sessions:
-        libraries.update(record.get("native_libraries_mapped", {}))
+        by_worker.setdefault(record["worker"], {}).update(record.get("native_libraries_mapped", {}))
+    seen: dict[str, set] = {}
+    for libraries in by_worker.values():
+        for module, info in libraries.items():
+            seen.setdefault(module, set()).add(info.get("sha256"))
     summary = {
         "tests_recorded": len(tests),
         "workers": sorted({r["worker"] for r in tests}),
         "errors": errors,
         "assertions_recorded": sum(len(r["assertions"]) for r in tests),
         "assertions_dropped": sum(r["assertions_dropped"] for r in tests),
-        "native_libraries_mapped": {os.path.basename(p): {"path": p, "sha256": s}
-                                    for p, s in sorted(libraries.items())},
+        "native_libraries_by_worker": {w: dict(sorted(libs.items())) for w, libs in sorted(by_worker.items())},
+        "native_library_sha256_seen": {m: sorted(h) for m, h in sorted(seen.items())},
     }
     (out / "probe-summary.json").write_text(json.dumps(summary, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     return summary

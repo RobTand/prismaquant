@@ -2,11 +2,17 @@
 
 It records, for each test process:
 
-* the Tessera native libraries (``tessera_*.so``) the process had mapped after
-  each test, read from ``/proc/self/maps``, each with its sha256; and
+* the Tessera native libraries (``tessera_*.so``) the process has mapped after
+  each test, read from ``/proc/self/maps``, each with the sha256 of the bytes
+  that are mapped (read through ``/proc/self/map_files``); and
 * the evaluated text of each passing assertion that holds a floating-point
   value or names a launch (a symbol, a decoder or a ``tessera::`` op), through
   pytest's ``pytest_assertion_pass`` hook.
+
+It also gives each xdist worker its own ``TORCH_EXTENSIONS_DIR`` under
+``PQ1317_EXT_DIR_ROOT``. On the shared NFS mount a library that one worker
+rebuilds while another worker has it mapped is renamed to ``.nfsXXXX``. The
+mapping then loses its ``tessera_`` name and the binary that ran is unclear.
 
 Load it with ``-p native_probe -o enable_assertion_pass_hook=true`` and set
 ``PQ1317_PROBE_DIR``. Each process appends JSON lines to
@@ -22,6 +28,7 @@ import re
 from pathlib import Path
 
 PROBE_DIR_ENV = "PQ1317_PROBE_DIR"
+EXT_DIR_ROOT_ENV = "PQ1317_EXT_DIR_ROOT"
 NATIVE_PREFIX = "tessera_"
 MAX_TEXT = 600
 MAX_ASSERTIONS_PER_TEST = 64
@@ -29,6 +36,8 @@ MAX_ASSERTIONS_PER_TEST = 64
 HAS_FLOAT = re.compile(r"\d+\.\d+|\d[eE][-+]?\d+")
 #: The assertion names a launch: the route's symbol and decoder, or a Tessera op.
 NAMES_LAUNCH = re.compile(r"symbol|decoder|launch_pair|tessera::|DENSE_")
+#: The build directory of a JIT extension: <module>_<platform token>_tessera_guarded_v1.
+BUILD_DIR = re.compile(r"^(tessera_[a-z0-9_]+?)_sm_\d+_tessera_guarded_v1$")
 
 _digests: dict[str, str] = {}
 _assertions: dict[str, list[dict]] = {}
@@ -62,37 +71,65 @@ def _append(record: dict) -> None:
         pass
 
 
-def _digest(path: str) -> str:
-    if path not in _digests:
-        try:
-            _digests[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        except OSError as error:
-            _digests[path] = f"unreadable: {error}"
-    return _digests[path]
+def parse_maps(lines) -> list[dict]:
+    """Tessera shared objects in ``/proc/self/maps`` lines.
+
+    A library is recognised by its file name (``tessera_*.so``) or, when NFS has
+    renamed a busy file to ``.nfsXXXX``, by the build directory it sits in.
+    """
+    found = []
+    for line in lines:
+        fields = line.split(None, 5)
+        if len(fields) < 6:
+            continue
+        address, path = fields[0], fields[5].strip()
+        deleted = path.endswith(" (deleted)")
+        if deleted:
+            path = path[: -len(" (deleted)")]
+        name = os.path.basename(path)
+        module = None
+        if name.startswith(NATIVE_PREFIX) and ".so" in name:
+            module = name.split(".so", 1)[0]
+        elif name.startswith(".nfs"):
+            built = BUILD_DIR.match(os.path.basename(os.path.dirname(path)))
+            module = built.group(1) if built else None
+        if module:
+            found.append({"module": module, "address": address, "path": path,
+                          "nfs_renamed": name.startswith(".nfs"), "deleted": deleted})
+    return found
 
 
-def mapped_native_libraries() -> dict[str, str]:
-    """``{path: sha256}`` of the Tessera shared objects this process has mapped."""
-    found: dict[str, str] = {}
+def _digest(entry: dict) -> str:
+    """sha256 of the mapped bytes: the map file first, the path as a fall back."""
+    key = f"{entry['path']}@{entry['address']}"
+    if key not in _digests:
+        for candidate in (f"/proc/self/map_files/{entry['address']}", entry["path"]):
+            try:
+                _digests[key] = hashlib.sha256(Path(candidate).read_bytes()).hexdigest()
+                break
+            except OSError as error:
+                _digests[key] = f"unreadable: {error}"
+    return _digests[key]
+
+
+def mapped_native_libraries() -> dict[str, dict]:
+    """``{module: {path, sha256, nfs_renamed, deleted}}`` for the mapped Tessera libraries."""
     try:
         with open("/proc/self/maps", encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                fields = line.split(None, 5)
-                if len(fields) < 6:
-                    continue
-                path = fields[5].strip()
-                if path.endswith(" (deleted)"):
-                    path = path[: -len(" (deleted)")]
-                name = os.path.basename(path)
-                if name.startswith(NATIVE_PREFIX) and ".so" in name:
-                    found[path] = _digest(path)
+            entries = parse_maps(handle)
     except OSError as error:
-        found["<unreadable /proc/self/maps>"] = str(error)
-    return found
+        return {"<unreadable /proc/self/maps>": {"error": str(error)}}
+    return {e["module"]: {"path": e["path"], "sha256": _digest(e), "nfs_renamed": e["nfs_renamed"],
+                          "deleted": e["deleted"]} for e in entries}
 
 
 def pytest_configure(config):
     _state["config"] = config
+    root = os.environ.get(EXT_DIR_ROOT_ENV)
+    if root and hasattr(config, "workerinput"):
+        directory = Path(root) / _worker(config)
+        directory.mkdir(parents=True, exist_ok=True)
+        os.environ["TORCH_EXTENSIONS_DIR"] = str(directory)
 
 
 def pytest_assertion_pass(item, lineno, orig, expl):
@@ -117,14 +154,14 @@ def pytest_runtest_logreport(report):
     if report.when != "call" and not (report.when == "setup" and report.outcome != "passed"):
         return
     try:
-        libraries = mapped_native_libraries()
         _append({
             "kind": "test",
             "nodeid": report.nodeid,
             "when": report.when,
             "outcome": report.outcome,
             "duration_s": round(report.duration, 4),
-            "native_libraries_mapped": libraries,
+            "native_libraries_mapped": mapped_native_libraries(),
+            "extensions_dir": os.environ.get("TORCH_EXTENSIONS_DIR"),
             "assertions": _assertions.pop(report.nodeid, []),
             "assertions_dropped": _dropped.pop(report.nodeid, 0),
         })
