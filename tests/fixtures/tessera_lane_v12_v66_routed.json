@@ -1,0 +1,1134 @@
+{
+ "contract_version": 66,
+ "formats": [
+  {
+   "activation_contract": "e2m1_group16_ue4m3_static",
+   "attested_rungs_q256": [],
+   "attested_wire": [],
+   "candidate_rungs_q256": [],
+   "family": "TESSERA_E2M1_K2",
+   "grid": "E2M1x2",
+   "kind": "tessera_wire",
+   "name_pattern": "TESSERA_E2M1_K2_R{k}",
+   "native_terminal_q256": 1024,
+   "reader_rate_bound": "native_paired_window_lut14_rates_1_through_8",
+   "reader_rate_range_q256": [
+    128,
+    1024
+   ],
+   "reader_rate_step_q256": 1,
+   "residency_modes": [
+    "resident",
+    "streamed"
+   ],
+   "structures": [
+    "dense",
+    "routed_moe"
+   ]
+  },
+  {
+   "activation_contract": "fp8_per_token_dynamic",
+   "allowable_rungs": {
+    "code_arity": 1,
+    "evidence": [
+     "docs/measurements/2026-09-30-t8-run-tables.md"
+    ],
+    "excluded_q256": [],
+    "excluded_run_tables": [],
+    "range_q256": [
+     256,
+     2048
+    ],
+    "rule": "window_rate_set",
+    "run_tables": [
+     [
+      1
+     ],
+     [
+      1,
+      2
+     ],
+     [
+      2
+     ],
+     [
+      2,
+      3
+     ],
+     [
+      3
+     ],
+     [
+      3,
+      4
+     ],
+     [
+      4
+     ],
+     [
+      4,
+      5
+     ],
+     [
+      5
+     ],
+     [
+      5,
+      6
+     ],
+     [
+      6
+     ],
+     [
+      6,
+      7
+     ],
+     [
+      7
+     ],
+     [
+      7,
+      8
+     ],
+     [
+      8
+     ]
+    ],
+    "step_q256": 1,
+    "wire": {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    }
+   },
+   "attested_rungs_q256": [
+    256,
+    384,
+    512,
+    640,
+    768,
+    832,
+    864,
+    896,
+    928,
+    944,
+    960,
+    1024,
+    1088,
+    1152,
+    1280,
+    1408,
+    1536,
+    1664,
+    1792,
+    1920,
+    2048
+   ],
+   "attested_wire": [
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 256,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 384,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 512,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 640,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 768,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 832,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 864,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 896,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 928,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 944,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 960,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1024,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1088,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1152,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1280,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1408,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1536,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1664,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1792,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 1920,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    },
+    {
+     "body": "window",
+     "channel_sigma": null,
+     "plane": "channel",
+     "q256": 2048,
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    }
+   ],
+   "candidate_rungs_q256": [
+    256,
+    384,
+    512,
+    640,
+    768,
+    832,
+    864,
+    896,
+    928,
+    944,
+    960,
+    1024,
+    1088,
+    1152,
+    1280,
+    1408,
+    1536,
+    1664,
+    1792,
+    1920,
+    2048
+   ],
+   "family": "TESSERA_E4M3_K1",
+   "grid": "E4M3",
+   "kind": "tessera_wire",
+   "name_pattern": "TESSERA_E4M3_K1_R{k}",
+   "native_terminal_q256": 2048,
+   "reader_rate_bound": "trellis_shaped_domain",
+   "reader_rate_range_q256": [
+    256,
+    2048
+   ],
+   "reader_rate_step_q256": 1,
+   "residency_modes": [
+    "resident",
+    "streamed"
+   ],
+   "structures": [
+    "dense",
+    "routed_moe"
+   ]
+  },
+  {
+   "activation_contract": "bf16_unquantized",
+   "allowable_rungs": {
+    "code_arity": 1,
+    "evidence": [
+     "docs/measurements/2026-09-30-t16-run-tables.md",
+     "docs/measurements/2026-09-30-t16-dense-rates-9-14.md"
+    ],
+    "excluded_q256": [],
+    "excluded_run_tables": [],
+    "range_q256": [
+     256,
+     3584
+    ],
+    "rule": "window_rate_set",
+    "run_tables": [
+     [
+      1
+     ],
+     [
+      1,
+      2
+     ],
+     [
+      2
+     ],
+     [
+      2,
+      3
+     ],
+     [
+      3
+     ],
+     [
+      3,
+      4
+     ],
+     [
+      4
+     ],
+     [
+      4,
+      5
+     ],
+     [
+      5
+     ],
+     [
+      5,
+      6
+     ],
+     [
+      6
+     ],
+     [
+      6,
+      7
+     ],
+     [
+      7
+     ],
+     [
+      7,
+      8
+     ],
+     [
+      8
+     ],
+     [
+      8,
+      9
+     ],
+     [
+      9
+     ],
+     [
+      9,
+      10
+     ],
+     [
+      10
+     ],
+     [
+      10,
+      11
+     ],
+     [
+      11
+     ],
+     [
+      11,
+      12
+     ],
+     [
+      12
+     ],
+     [
+      12,
+      13
+     ],
+     [
+      13
+     ],
+     [
+      13,
+      14
+     ],
+     [
+      14
+     ]
+    ],
+    "step_q256": 1,
+    "wire": {
+     "body": "window",
+     "channel_sigma": 1.0,
+     "plane": "channel",
+     "seed": 0,
+     "sigma": null,
+     "span": 1,
+     "window_bits": 14
+    }
+   },
+   "attested_rungs_q256": [],
+   "attested_wire": [],
+   "candidate_rungs_q256": [],
+   "family": "TESSERA_BF16_K1",
+   "grid": "BF16",
+   "kind": "tessera_wire",
+   "name_pattern": "TESSERA_BF16_K1_R{k}",
+   "native_terminal_q256": 4096,
+   "reader_rate_bound": "trellis_shaped_domain",
+   "reader_rate_range_q256": [
+    256,
+    4096
+   ],
+   "reader_rate_step_q256": 1,
+   "residency_modes": [
+    "resident",
+    "streamed"
+   ],
+   "structures": [
+    "dense",
+    "routed_moe"
+   ]
+  }
+ ],
+ "fused_module": {
+  "container": "TSRFUSE1",
+  "fields": {
+   "body": "shared",
+   "columns": "shared",
+   "family": "shared",
+   "grid": "shared",
+   "plane": "shared",
+   "q256": "per_member",
+   "rows": "per_member",
+   "structure": "shared"
+  },
+  "fields_note": "Inside one vLLM-fused module (q/k/v, gate/up), what every role must SHARE and what is free PER MEMBER. vLLM builds one quant method per module, so the family -- and with it the grid, body, scale plane and input width the route decodes to one tile -- is a module fact. The RATE is not: every decoder in this build reads each role from that role's OWN manifest (fp8_route/bf16_route call prepare_window on unit.body_bits/unit.rates/unit.window_bits per role and concatenate; nvfp4_route packs each role's own rate/arity/memory/half scalars and decodes into that role's row slice). This block is checked against tessera.serving.scheme.FUSED_MODULE_FIELDS, the dict the loader itself gates on, exactly as tensor_parallel.units[].loader_axes is checked against sharding.ROUTE_TP_AXES.",
+  "mixed_rung_receipt": false,
+  "mixed_rung_receipt_note": "Whether a CONTAINER RECEIPT covers a served module whose members took different rungs. It is false: the relaxation is proven by a decode identity (a real Qwen3-0.6B q/k/v at three rungs decodes element-for-element to what the three roles decode alone -- experiments/fused_member_rung_identity.py, tests/test_fused_member_rungs.py), not by a vLLM serve. This is the same distinction loader_axes draws against max_world_size: what the loader accepts is not what a receipt has covered. lane_eligibility is UNCHANGED by this version, so a mixed-rung module's cells resolve exactly as its members' rungs do individually -- unattested where no cell names the rung, which is the honest status and not a refusal.",
+  "schema": "tessera.fused-module.v1",
+  "sidecar_q256": "int_or_per_role_list",
+  "sidecar_q256_note": "How a fused module's rungs are spelled in the checkpoint's scheme. ONE field, one fact: config_groups[..].scheme.q256 is an integer when every role carries the same rung -- the spelling of every checkpoint written before contract v6, unchanged -- or a list of one integer per role, in the scheme's own roles order, when they differ. A plugin build older than v6 refuses the list form on sight ('q256 must be an integer'), which is the fail-closed direction; a v6 build reads both."
+ },
+ "lane_eligibility": {
+  "cells": [
+   {
+    "activation_contract": "fp8_per_token_dynamic",
+    "evidence": {
+     "artifact": null,
+     "grade": "route_only",
+     "kl": [],
+     "smoke": {
+      "attribution": "unattributed",
+      "control": null,
+      "receipt": null,
+      "record": null,
+      "status": "not_recorded"
+     }
+    },
+    "executes": [
+     {
+      "decoder": "native_window_moe_compact",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_fused_window",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_fused_window_e4m3mma",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_window_classes_e4m3mma",
+      "rungs_q256": [
+       768
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     }
+    ],
+    "family": "TESSERA_E4M3_K1",
+    "id": "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
+    "platform": "sm_121",
+    "predicates": [],
+    "qualification": "device_qualified",
+    "regime": "decode",
+    "requires_plugin": "tessera",
+    "requires_serve_flags": [
+     "TESSERA_SERVE_MODE=resident"
+    ],
+    "route_status": "backed_with_serve_flag",
+    "run_tables": [
+     [
+      3
+     ],
+     [
+      3,
+      4
+     ],
+     [
+      4
+     ],
+     [
+      4,
+      5
+     ]
+    ],
+    "rungs_q256": [
+     768,
+     832,
+     864,
+     896,
+     928,
+     944,
+     960,
+     1024,
+     1088
+    ],
+    "runtime": {
+     "execution_modes": [
+      "eager"
+     ],
+     "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+     "kernel_build": "legacy-toolchain/0.28.1rc1.dev397+gfd4a15126.d20260904/2.13.0+cu130",
+     "torch": "2.13.0+cu130",
+     "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904"
+    },
+    "structure": "routed_moe"
+   },
+   {
+    "activation_contract": "fp8_per_token_dynamic",
+    "evidence": {
+     "artifact": null,
+     "grade": "route_only",
+     "kl": [],
+     "smoke": {
+      "attribution": "unattributed",
+      "control": null,
+      "receipt": null,
+      "record": null,
+      "status": "not_recorded"
+     }
+    },
+    "executes": [
+     {
+      "decoder": "native_window_moe_compact",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_fused_window",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_fused_window_e4m3mma",
+      "rungs_q256": [
+       832,
+       864,
+       896,
+       928,
+       944,
+       960,
+       1024,
+       1088
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     },
+     {
+      "decoder": "native_routed_window_classes_e4m3mma",
+      "rungs_q256": [
+       768
+      ],
+      "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
+     }
+    ],
+    "family": "TESSERA_E4M3_K1",
+    "id": "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
+    "platform": "sm_121",
+    "predicates": [],
+    "qualification": "device_qualified",
+    "regime": "batch",
+    "requires_plugin": "tessera",
+    "requires_serve_flags": [
+     "TESSERA_SERVE_MODE=resident"
+    ],
+    "route_status": "backed_with_serve_flag",
+    "run_tables": [
+     [
+      3
+     ],
+     [
+      3,
+      4
+     ],
+     [
+      4
+     ],
+     [
+      4,
+      5
+     ]
+    ],
+    "rungs_q256": [
+     768,
+     832,
+     864,
+     896,
+     928,
+     944,
+     960,
+     1024,
+     1088
+    ],
+    "runtime": {
+     "execution_modes": [
+      "eager"
+     ],
+     "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+     "kernel_build": "legacy-toolchain/0.28.1rc1.dev397+gfd4a15126.d20260904/2.13.0+cu130",
+     "torch": "2.13.0+cu130",
+     "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904"
+    },
+    "structure": "routed_moe"
+   }
+  ],
+  "platforms": {
+   "gfx1151": {
+    "backend": "hip",
+    "executes": {
+     "TESSERA_BF16_K1": "bf16_unquantized",
+     "TESSERA_E2M1_K2": null,
+     "TESSERA_E4M3_K1": null
+    },
+    "gcn_arch": "gfx1151",
+    "lds_bytes": 65536,
+    "serve_image": null,
+    "wavefront": 32
+   },
+   "gfx1201": {
+    "backend": "hip",
+    "executes": {
+     "TESSERA_BF16_K1": "bf16_unquantized",
+     "TESSERA_E2M1_K2": null,
+     "TESSERA_E4M3_K1": null
+    },
+    "gcn_arch": "gfx1201",
+    "lds_bytes": 65536,
+    "serve_image": null,
+    "wavefront": 32
+   },
+   "sm_121": {
+    "backend": "cuda",
+    "compute_capability": [
+     12,
+     1
+    ],
+    "executes": {
+     "TESSERA_BF16_K1": "bf16_unquantized",
+     "TESSERA_E2M1_K2": "e2m1_group16_ue4m3_static",
+     "TESSERA_E4M3_K1": "fp8_per_token_dynamic"
+    },
+    "serve_image": "vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14"
+   }
+  },
+  "regimes": [
+   "decode",
+   "batch"
+  ],
+  "schema": "tessera.lane-eligibility.v12",
+  "structures": [
+   "dense",
+   "routed_moe"
+  ]
+ },
+ "native_extensions": [
+  {
+   "filename_glob": "tessera_window_gemv*.so",
+   "lane": {
+    "decoder": "window_gemv",
+    "requires": {
+     "body": "window",
+     "column_rates": [
+      1,
+      2,
+      4
+     ],
+     "diagonals": false,
+     "grid_arities": [
+      1
+     ],
+     "plane": "channel",
+     "release_overrides": false,
+     "rotation": [
+      "none"
+     ],
+     "start_state": false,
+     "window_bits": [
+      14
+     ]
+    }
+   },
+   "loaded_by": "tessera.serving.fp8_gemv",
+   "match": "basename_fnmatch",
+   "module_name_prefix": "tessera_window_gemv",
+   "routes": [
+    "TESSERA_FP8",
+    "TESSERA_BF16"
+   ],
+   "source": "csrc/window_gemv.cu",
+   "when_unavailable": {
+    "resident": {
+     "decoder": "torch_window",
+     "status": "substituted"
+    },
+    "streamed": {
+     "decoder": "torch_window",
+     "status": "substituted"
+    }
+   }
+  },
+  {
+   "filename_glob": "tessera_routed_fused_e4m3*.so",
+   "lane": {
+    "decoder": "native_routed_fused_window",
+    "requires": {
+     "body": "window",
+     "column_rates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "column_rates_routed_moe": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "diagonals": false,
+     "grid_arities": [
+      1
+     ],
+     "plane": "channel",
+     "release_overrides": false,
+     "rotation": [
+      "none"
+     ],
+     "window_bits": [
+      14
+     ]
+    }
+   },
+   "loaded_by": "tessera.serving.moe_route",
+   "match": "basename_fnmatch",
+   "module_name_prefix": "tessera_routed_fused_e4m3",
+   "routes": [
+    "TESSERA_FP8"
+   ],
+   "source": "csrc/routed_fused_window.cu",
+   "when_unavailable": {
+    "resident": {
+     "decoder": "native_window_moe_compact",
+     "status": "substituted"
+    },
+    "streamed": {
+     "decoder": "native_window_moe_compact",
+     "status": "substituted"
+    }
+   }
+  },
+  {
+   "filename_glob": "tessera_routed_fused_mma_e4m3*.so",
+   "lane": {
+    "decoder": "native_routed_fused_window_e4m3mma",
+    "requires": {
+     "body": "window",
+     "column_rates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "column_rates_routed_moe": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "diagonals": false,
+     "grid_arities": [
+      1
+     ],
+     "plane": "channel",
+     "release_overrides": false,
+     "rotation": [
+      "none"
+     ],
+     "window_bits": [
+      14
+     ]
+    }
+   },
+   "loaded_by": "tessera.serving.moe_route",
+   "match": "basename_fnmatch",
+   "module_name_prefix": "tessera_routed_fused_mma_e4m3",
+   "routes": [
+    "TESSERA_FP8"
+   ],
+   "source": "csrc/routed_fused_window.cu",
+   "when_unavailable": {
+    "resident": {
+     "decoder": "native_window_moe_compact",
+     "status": "substituted"
+    },
+    "streamed": {
+     "decoder": "native_window_moe_compact",
+     "status": "substituted"
+    }
+   }
+  },
+  {
+   "filename_glob": "tessera_routed_fused_value*.so",
+   "lane": {
+    "decoder": "native_routed_fused_window_bf16",
+    "requires": {
+     "body": "window",
+     "column_rates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+     ],
+     "column_rates_routed_moe": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "diagonals": false,
+     "grid_arities": [
+      1
+     ],
+     "plane": "channel",
+     "release_overrides": false,
+     "rotation": [
+      "none"
+     ],
+     "window_bits": [
+      14
+     ]
+    }
+   },
+   "loaded_by": "tessera.serving.moe_route",
+   "match": "basename_fnmatch",
+   "module_name_prefix": "tessera_routed_fused_value",
+   "routes": [
+    "TESSERA_BF16"
+   ],
+   "source": "csrc/routed_fused_window.cu",
+   "when_unavailable": {
+    "resident": {
+     "decoder": "native_window_moe_compact_bf16",
+     "status": "substituted"
+    },
+    "streamed": {
+     "decoder": "native_window_moe_compact_bf16",
+     "status": "substituted"
+    }
+   }
+  },
+  {
+   "filename_glob": "tessera_routed_fused_e2m1*.so",
+   "lane": {
+    "decoder": "native_routed_fused_window_e2m1",
+    "requires": {
+     "body": "window",
+     "column_rates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "column_rates_routed_moe": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "diagonals": false,
+     "grid_arities": [
+      2
+     ],
+     "plane": "lut16",
+     "release_overrides": false,
+     "rotation": [
+      "none"
+     ],
+     "start_state": true,
+     "window_bits": [
+      14
+     ]
+    }
+   },
+   "loaded_by": "tessera.serving.nvfp4_moe_route",
+   "match": "basename_fnmatch",
+   "module_name_prefix": "tessera_routed_fused_e2m1",
+   "routes": [
+    "TESSERA_NVFP4"
+   ],
+   "source": "csrc/routed_fused_window.cu",
+   "when_unavailable": {
+    "resident": {
+     "decoder": null,
+     "status": "refused"
+    },
+    "streamed": {
+     "decoder": null,
+     "status": "refused"
+    }
+   }
+  }
+ ],
+ "quant_method": {
+  "accepted": [
+   "tessera"
+  ],
+  "canonical": "tessera",
+  "legacy": []
+ },
+ "schema": "tessera.runtime-contract.v1",
+ "tensor_parallel": {
+  "semantics": "closed_world",
+  "units": []
+ },
+ "versions": {
+  "default_serve_image": "vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14",
+  "plugin_entry_point": "tessera = tessera.serving:register",
+  "tessera": "0.1.0"
+ }
+}
