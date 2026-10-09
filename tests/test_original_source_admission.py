@@ -668,13 +668,16 @@ def test_reader_join_accepts_the_sealed_helper_generation_it_recorded(authority_
 
 
 @MODES
+@pytest.mark.parametrize('moved', ['package', 'helper'])
 def test_reader_helper_tree_is_hashed_from_disk_only_in_certified_mode(
-        authority_case, monkeypatch, capsys, mode):
+        authority_case, monkeypatch, capsys, moved, mode):
     """A byte that moved after the reader recorded its tree.
 
-    Certified mode re-hashes the generation and refuses. Dev mode computes no
-    digest over existing data: it stamps ``not computed`` beside the recorded
-    tree and the helper tree is never read.
+    A byte in the package moves both recorded digests. A byte elsewhere in the
+    generation moves only the complete-tree digest. Certified mode re-hashes
+    the generation and refuses either. Dev mode computes no digest over
+    existing data: it stamps ``not computed`` beside the recorded tree and the
+    helper tree is never read.
     """
     from prismaquant import production_weight_cache
 
@@ -682,7 +685,8 @@ def test_reader_helper_tree_is_hashed_from_disk_only_in_certified_mode(
     before = _forbid_source_work(case, monkeypatch)
     root = _sealed_helper_generation(case['tmp'] / 'runtime-generations' / 'fixture-generation-0')
     receipt, authority, result = _reader_rows_over(case, root)
-    (root / 'src' / 'prismabuild' / 'client.py').write_text('SDK_VERSION = 5\n# moved\n')
+    moved_file = root / 'src' / 'prismabuild' / 'client.py' if moved == 'package' else root / 'worker.py'
+    moved_file.write_text(moved_file.read_text() + '# moved\n')
 
     def hashed(*args, **kwargs):
         pytest.fail('dev mode hashed the helper tree to seal a run')

@@ -1024,6 +1024,8 @@ def _require_original_reader_producer(receipt, reader_authority, result, expecte
                        {key: context[key] for key in identity_keys},
                        'actual reader delivery selected producer')
         _recorded_same(claim['attempt_source'], 'launch-env', 'actual reader delivery launch provenance')
+    # Dev mode hashes no existing tree only to seal a run: NOT_COMPUTED stands for
+    # the tree on disk, beside the tree the reader recorded.
     _recorded_same(NOT_COMPUTED if dev_mode_enabled() else _helper_tree(helper_root),
                    runtime['prismabuild']['source_tree'], 'selected reader actual complete helper tree')
 

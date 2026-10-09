@@ -485,22 +485,27 @@ comparable. Each seal goes through `dev_mode.seal_check`
 - every material delivery claim (queue, action, nonce, scope, worker, host,
   incarnation, helper root) and its `launch-env` label;
 - the complete helper-tree digests;
-- the family's `old_source` against the executed member source (the restamp
-  join, shared with the CUDA members).
+- the family's `old_source` against the executed member source. This restamp
+  join is shared with the CUDA members.
 
 Certified mode (`PRISMAQUANT_DEV_MODE=0`) refuses each seal with the message it
 had before. Default dev mode prints one `[DEV-MODE]` line for each mismatch and
 continues with the stored record. Dev mode computes no helper-tree digest. It
 passes `NOT_COMPUTED` and stamps it beside the recorded tree.
 
-These joins refuse in both modes: the reader's target (publisher, producer,
-source paths, readset, calibration, source model, dispatch), the model config,
-the SDK answer's own mirrors, the exact SDK policy and independent runtime, the
-executed snapshot against its own verified request, the compatibility binding,
-and the target source and runtime. The strict result request still passes
-`require_native_producer_context=True`. The SDK refuses a result without a
-native producer context in both modes, and this repository cannot stamp that
-refusal.
+These joins refuse in both modes:
+
+- the reader's target: publisher, producer, source paths, readset, calibration,
+  source model and dispatch;
+- the model config;
+- the SDK answer's own mirrors, the exact SDK policy and the independent runtime;
+- the executed snapshot against its own verified request;
+- the compatibility binding, and the target source and runtime of the family
+  acceptance.
+
+The strict result request still passes `require_native_producer_context=True`.
+The SDK refuses a result without a native producer context in both modes. This
+repository cannot stamp that refusal.
 
 Re-stamped 2026-10-04 (Refs PQ #2152, PB #1481/#1482): the consumer source now
 pins that SDK5 owner exactly — `staged_lease.PB_READER_LEASE_PIN_COMMIT` is
