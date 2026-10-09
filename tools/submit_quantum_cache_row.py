@@ -46,6 +46,9 @@ def sealed_spec(row: str) -> dict:
             "MIMALLOC_PURGE_DELAY": "0",
             "PRISMAQUANT_RELEASE_SOURCE_PAGES": "1",
             "PRISMAQUANT_DEV_MODE": "1",
+            "PRISMAQUANT_DETERMINISTIC": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPATH": "/workspace",
             "PRISMAQUANT_CONTAINER_CACHE_ROOT":
                 f"/home/rob/pb-scratch-pq2463q/{row}/cache",
             "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES":
