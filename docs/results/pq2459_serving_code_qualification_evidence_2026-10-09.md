@@ -1,11 +1,12 @@
-# PQ #2459 serving-code qualification evidence (no cell qualifies)
+# PQ #2459 serving-code qualification evidence (attempt 3: no cell qualifies)
 
-Refs #2459. Part of #1549. This record publishes the immutable
-identity, the complete target coverage matrix, the performed
-actions with their receipts, the failure, and the excluded scopes.
-It qualifies no cell and moves no pin. The live v2 pin, the
-constants, the reviewed answer, and the frozen legal-domain state
-stay unchanged.
+Refs #2459. Part of #1549. This record supersedes the attempt-2
+record at `47082bb766`. It publishes the immutable identity,
+the complete target coverage matrix, every performed action
+with receipts, every failure, and the excluded scopes. It
+qualifies no cell and moves no pin. The live v2 pin, the
+constants, the reviewed answer, and the frozen legal-domain
+state stay unchanged.
 
 ## Immutable identity
 
@@ -90,7 +91,8 @@ separate M1 decode fixture. L8192 does not permit M8192.
 ## Actions and receipts
 
 All actions run through PrismaBuild at priority 0. CPU actions
-use tag `x86` and scratch `/tmp`. No action ran on celestia.
+use tag `x86` and scratch `/tmp`. No action runs on celestia.
+Each GPU action respects the 30-minute bound.
 
 - CPU preflight `cb56877aa9d17b4b3e0b4c31b1c980f78b89e69909f5f70a0f7ab76ef5faaf1d`
   (pass, dl380g10, 143 s): coordinator delivery present;
@@ -100,21 +102,61 @@ use tag `x86` and scratch `/tmp`. No action ran on celestia.
   for the pin, the snapshot helper, and the scope test.
   Payload:
   `/mnt/shared/prismabuild-fleet/cas/blobs/76/7652707922700f1567a4189c2a97f48ee4fd26911739618a395fb302376bba0b`.
-- D38 CPU dry run `b8d434721cc1e60135085dcb9c5812a96380bf45710659452b718d4650d4c120`
-  (pass, dl380g10, 1 s): the GPU census entry point's argument
-  parsing, fixture metadata, artifact check (57 config groups),
-  and submission manifest against the A8S artifact, TP 2, image
-  `5be13705`, and serving commit `9eef9fea`. No CUDA executes.
-- GPU census `22758f6d05ce393cd75e05d6f59c1c77bd5f3ddf0f6e156545d281d0661e47ef`
-  (FAILED, sparky, return code 2, 2.2 s, within the 30-minute
-  bound): TP 2 eager census of the A8S artifact at serving
-  commit `9eef9fea` on image `5be13705` through
-  `tessera_plugin_served_tp.sh`. The driver refuses before any
-  serve: `/home/rob/tessera` is at `1fe0c73bfb` on sparky and
-  `a9eb572e` on sparklina. Two trees are two plugins, so the
-  receipt could name only one. Neither tree equals the
-  qualified serving commit `9eef9fea`. No trace, no log beyond
-  the refusal, and no partial output exist to preserve.
+- New D38 dry run `3a9d74776fa0e74f4d5ac2981cb660d62a49bec1777c40ea16c8d8b1927e1c5e`
+  (pass, dl380g10, 1.3 s): the real GPU entry point
+  `tools/pq2459_serve_census.py --mode dry-run --profile all`.
+  It exercises the parser, the three fixture profiles, the A8S
+  artifact binding (57 groups, config `3f5c2c73`, index
+  `2990e8c0`), the stock image `5be13705`, TP 2, and the
+  qualified commit `9eef9fea` with digest `a9b7bf32`. No CUDA
+  executes. This dry run replaces the attempt-2 metadata-only
+  script `b8d43472`, which never invoked the entry point.
+- New D38 dry run `838f1a634a76df5f3d41a2f06fb503960fa1a8bef5f9784fd4d8a7f37765e267`
+  (pass, dl380g10, 1.3 s): wrapper syntax plus the same entry
+  point dry run. It validates the TP2 wrapper path before the
+  first GPU action.
+- Old D38 script `b8d434721cc1e60135085dcb9c5812a96380bf45710659452b718d4650d4c120`
+  (pass, attempt 2): a metadata-only script. It never invoked
+  the GPU entry point. The review rejects it for that reason.
+- Old GPU census `22758f6d05ce393cd75e05d6f59c1c77bd5f3ddf0f6e156545d281d0661e47ef`
+  (FAILED, attempt 2, return code 2, 2.2 s): the driver refuses
+  before any serve. `/home/rob/tessera` is at `1fe0c73bfb`
+  on sparky and `a9eb572e` on sparklina. Neither tree equals
+  the qualified serving commit `9eef9fea`. No trace exists.
+- GPU census `5cf1646934ff0214395ac53e26527a4e3b987ada29ae1572b7770947c2ac4623`
+  (FAILED, sparklina, return code 2, 0.7 s): the staged-tree
+  wrapper refuses. The worker box cannot ssh back to stage its
+  own tree. Both trees are later staged from this seat and
+  verified: 128 files, digest `a9b7bf32`.
+- GPU census `ec31478c93846f04bba70f74059ae08b7cf51ec5abc3838a8fe09861db630e42`
+  (FAILED, sparklina, return code 2, 0.7 s): same ssh refusal
+  inside the worker. The seat's ssh sessions do not reach the
+  worker from inside a sparklina-claimed action.
+- GPU census `3610de05bd2b32ce52f8925b47428f0898420306d8ce551bf93d9ea26281d821`
+  (FAILED, sparklina, return code 2, 0.8 s): the worker-side
+  ssh check fails again. The wrapper now requires staged trees
+  and refuses without ssh use inside the action.
+- GPU census `7e4c425a8800dc04d4bbe8967684e779b9ab3378dae0c574443c3525d6420032`
+  (FAILED, sparky, return code 1, 51 s): the serve starts on
+  the staged qualified trees. Both ray nodes join. The census
+  fails in the GLOO rendezvous with mixed IPv4 and IPv6
+  families. The driver names no GLOO interface. The
+  historical serve sets `GLOO_SOCKET_IFNAME=enp1s0f0np0`.
+- GPU census `690f7e23e3d58f630a42278581a9ba91b523fa7b35b43f4815c2722fd2a7f0cc`
+  (FAILED, sparklina, return code 2, 0.8 s): claimed on the
+  wrong box. Pinning to sparky is now mandatory.
+- GPU census `66075f25b98d3c84b14a5ed23b161c0e4d0f242e7c597ce3e918a7df25d6c23f`
+  (FAILED, sparky, return code 1, 57 s): GLOO fixed, both
+  ranks join, the engine loads, then NCCL init fails. The
+  driver pins NCCL to the RoCE NIC while history runs
+  sockets.
+- GPU census `767f659b6be11067f1524a12dbfa68a064fee86420c15d7778d243ad0d6a5a99`
+  (FAILED, sparky, elapsed 346 s, no exit code): the socket
+  fabric matches history (IB off, NCCL and GLOO on
+  `enp1s0f0np0`). NCCL inits, both ranks load 78 of 120
+  shards (65%), then the 30-minute bound ends the action
+  mid-load at 4 s per shard. No trace exists. A full census
+  needs staged engines or split loads outside this attempt.
 - Equivalence suite (pass): `721132fdb4adc7582f1ec7141c7961a91554380036b4b77e5b4736f076cfea3a`
   (20 scope admission cases), `2b9a74337c74b38c0c1d28805fd6e7452b14e8bc6db9c5b2c21af80993124b79`
   (44 serving-code identity cases),
@@ -127,10 +169,11 @@ use tag `x86` and scratch `/tmp`. No action ran on celestia.
 
 ## Failures and excluded scopes
 
-- The single GPU action fails closed on the two-box tree
-  mismatch above. It qualifies nothing. A retry needs the same
-  qualified Tessera tree at the same absolute path on both
-  boxes before the serve starts.
+- Every GPU action above fails closed. No action qualifies a
+  cell. The tree mismatch, the worker ssh refusal, the GLOO
+  and NCCL fabric errors, and the shard-load timeout each end
+  their action before any trace exists. A retry needs staged
+  engines or split loads that fit the 30-minute bound.
 - The qualified serving commit `9eef9fea` names contract v57,
   while the live pin names v60. Its eight cells carry no
   `tessera_commit` or `serving_source_sha256` fields, and the
