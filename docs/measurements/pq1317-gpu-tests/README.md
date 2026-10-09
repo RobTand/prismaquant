@@ -2,6 +2,8 @@
 
 Status: **complete**. All 136 required nodes passed on sm_121 in image X at one candidate commit.
 No node failed, skipped or went uncollected. A second, independent run agrees node by node.
+All 54 nodes that carry a correction ran on the device. 52 further nodes are host logic or refuse
+before they allocate. They passed, but this package does not count them as GPU proof.
 
 This package answers prismaquant#2547, a part of prismaquant#1317 (criterion C5).
 It qualifies one candidate. It does not qualify whole-model serving. See "What this does not show".
@@ -28,7 +30,7 @@ It qualifies one candidate. It does not qualify whole-model serving. See "What t
 | Dense | tessera#611 | 2 | 65 | 65 | 46 | `ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6` | sparky |
 | Total | | 5 | 136 | 136 | 84 | | |
 
-Every run used `--strict-cuda`. The instrument reported 0 skipped tests and 0 modules not collected.
+Every GPU run used `--strict-cuda`. The instrument reported 0 skipped tests and 0 modules not collected.
 
 **What counts as GPU proof.** Tessera's instrument marks a node "device-allocating" when
 the CUDA allocator saw a new allocation during the test call. That count is a floor.
@@ -46,8 +48,8 @@ Facts were read from GitHub on 2026-10-09. `corrections.json` has the full recor
 
 | Issue | State | Fix | Merge commit | Ancestor of candidate |
 |---|---|---|---|---|
-| tessera#610 | closed 2026-09-30 | PR #642, merged 2026-09-30 (`Closes #610`) | `86cda15daa16c4aba6b064cbd9bab72013d9a115` | yes: 1317 commits before the candidate, 0 behind |
-| tessera#611 | closed 2026-09-27 | PR #643, merged 2026-09-27 (`Closes #611`) | `66f3626f22c71396d7cda47c8ce93906290918cf` | yes: 1593 commits before the candidate, 0 behind |
+| tessera#610 | closed 2026-09-30 | PR #642, merged 2026-09-30 (`Closes #610`) | `86cda15daa16c4aba6b064cbd9bab72013d9a115` | yes: the candidate is 1317 commits ahead, 0 behind |
+| tessera#611 | closed 2026-09-27 | PR #643, merged 2026-09-27 (`Closes #611`) | `66f3626f22c71396d7cda47c8ce93906290918cf` | yes: the candidate is 1593 commits ahead, 0 behind |
 
 Both fixes changed tests only. #642 changed three MoE test files. #643 changed two dense test files.
 
@@ -194,7 +196,7 @@ The pin's four `serving_native_extensions` are listed in `candidate.json`.
 * **Performance.** No speed claim is made.
 * **A fixed owner roster.** See "Roster provenance".
 * **Host variety.** The accepted runs both used sparky. Corroborating GPU runs of the same candidate passed on sparklina
-  (see "Runs"). Attempt 2's dense run used sparklina.
+  (see "Runs"). The first run's dense suite used sparklina.
 
 ## Requalification
 
@@ -216,7 +218,7 @@ Run `--mode collect` first without `--gpu` (the D38 preflight). `gpu-commands.md
 | Run | What | Where | Result |
 |---|---|---|---|
 | run2 (accepted) | Harness `dffc6a6b72`, git checkout, instrument `verified`, per-worker extension directories | `results/logs/run2-*` | 71 + 65 passed |
-| run1 (corroborating) | Attempt 2's runs, source read from the shared pin directory, instrument `unknown` | `results/logs/run1-*` | 71 + 65 passed |
+| run1 (corroborating) | The first run of the five files, before the harness existed. Source read from the shared pin directory, instrument `unknown` | `results/logs/run1-*` | 71 + 65 passed |
 | development | 12 other PrismaBuild actions of this attempt | `results/pb-receipts.json` | 10 passed, 2 refused by the preflight (see below) |
 
 Node outcomes and the per-node CUDA flag agree between run1 and run2 for all 136 nodes.

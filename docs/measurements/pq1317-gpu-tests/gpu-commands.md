@@ -60,7 +60,7 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py --cwd <checkout> --cpu
 | MoE (tessera#610) | `7a3dac4d75437bb570b7c27379112cf65bff1fcc8bc6728d72a6b6c07e19db4d` | sparky | 48 s | 4.1 GB | 71 passed |
 | Dense (tessera#611) | `ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6` | sparky | 130 s | 10.0 GB | 65 passed |
 
-Sizing (D30). Attempt 2's runs of the same suites peaked at 4.5 GB and 11.16 GB. The 12 GB cap was close for the dense run.
+Sizing (D30). The first run of the same suites peaked at 4.5 GB and 11.16 GB. The 12 GB cap was close for the dense run.
 This attempt asked for 12 GB and 24 GB. Placement was left to PrismaBuild (`--tag gb10`). No host was pinned.
 The timeout is a backstop of 5400 s for runs of about one to two minutes.
 
@@ -70,7 +70,7 @@ the probe records, `native-so.sha256`, `triton-kernels.json` and `collect.txt`.
 
 ## Run 1: the earlier runs that corroborate
 
-Attempt 2 ran the same five files from the shared pin directory with one inline script per action.
+The first run read the same five files from the shared pin directory, with one inline script per action.
 The scripts are in `results/logs/run1-*/command.sh`.
 
 | Role | Action | Host | Result |

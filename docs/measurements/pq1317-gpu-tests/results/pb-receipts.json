@@ -1,6 +1,6 @@
 {
  "schema": "pq1317.pb-receipts.v2",
- "note": "Facts read from the PrismaBuild queue and CAS on 2026-10-09: attempt record, sealed request and CAS receipt. 'snapshot.parent' is the PrismaQuant commit the action ran from. The run's .pbrun-closure file (run-manifest.json, closure_files) shows dirty_sha256 = sha256 of empty input, which proves a clean snapshot. 'actions' holds the accepted run (run2-*) and the corroborating run of attempt 2 (run1-*). 'development_actions' holds every other PrismaBuild action of this attempt. They qualify nothing.",
+ "note": "Facts read from the PrismaBuild queue and CAS on 2026-10-09: attempt record, sealed request and CAS receipt. 'snapshot.parent' is the PrismaQuant commit the action ran from. The run's .pbrun-closure file (run-manifest.json, closure_files) shows dirty_sha256 = sha256 of empty input, which proves a clean snapshot. 'actions' holds the accepted run (run2-*) and the corroborating first run (run1-*). 'development_actions' holds every other PrismaBuild action of this attempt. They qualify nothing.",
  "actions": {
   "run1-moe": {
    "action_key": "fe1ae1f2402b865d7dc84a6f86e56745f4767db4b8aee0bddeec73d964d03462",
