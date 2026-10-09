@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
+The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
+Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.
+
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
@@ -32407,6 +32411,20 @@ MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
 
 Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
 Both direct consumers refuse quantized input observations in development and certified modes.
+
+The activation rule and memory helper require the profile argument.
+A declared architecture must equal `Glm5NextForConditionalGeneration` before either helper selects a GLM direct consumer.
+An undeclared profile uses its canonical `glm5_next` identity.
+Other architectures receive no direct activation contract and no direct-cache charge.
+Single-anchor measurement, batch measurement, resume checks, and seed admission pass the profile through the existing path.
+
+PB `3b99c748b714eb7237206a696c52e41d7310cd7d31edb342383b21093fef5d6d` executes two CPU batches through the actual encoder, publication, and resume paths.
+It observes GLM contracts `a16` and `a32`, with direct-cache charges of 16,384 and 32,768 bytes for 32-by-256 weights.
+The non-GLM batch receives zero direct-cache charge for both leaves.
+The same action compiles the three changed production modules.
+The sealed command is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python -m tools.ig2457_smoke`.
+The action snapshot retains the temporary script.
+Its result payload is `/mnt/shared/prismabuild-fleet/cas/blobs/cf/cff3ba1b18ba6f652c572c7fa7bf0841cd7ed31f82f863c313c9d7b843e6e4ed`.
 
 The producer reads direct weights with projection_routes.direct_consumer_weight.
 The runtime and producer use the same folded T-16 arithmetic.

@@ -575,14 +575,20 @@ def _bind_served_quantizer(qname, format_name):
 
 
 def _is_glm_direct_consumer_profile(profile) -> bool:
-    """Whether ``profile`` owns the GLM direct-consumer activation rule."""
-    return getattr(profile, "name", None) == "glm5_next"
+    """Use the declared architecture before the undeclared profile identity."""
+    if profile is None:
+        return False
+    architectures = profile.declared_architectures()
+    if architectures:
+        return architectures == ("Glm5NextForConditionalGeneration",)
+    return profile.name == "glm5_next"
 
-def _direct_consumer_activation_contract(qname, *, profile=None):
+
+def _direct_consumer_activation_contract(qname, *, profile):
     source = qname.removesuffix(".weight")
-    if profile is None or not _is_glm_direct_consumer_profile(profile):
-        return None
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return None
+    if not _is_glm_direct_consumer_profile(profile):
         return None
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_activation_contract
@@ -675,12 +681,12 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                 hessian_required=hessian_required)
 
 
-def _direct_consumer_memory_bytes(qname, family, shape, *, profile=None):
+def _direct_consumer_memory_bytes(qname, family, shape, *, profile):
     """Charge each direct cache once through its source member."""
     source = qname.removesuffix(".weight")
-    if profile is None or not _is_glm_direct_consumer_profile(profile):
-        return 0
     if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
+        return 0
+    if not _is_glm_direct_consumer_profile(profile):
         return 0
     from tessera.serving.dense_ownership import fused_module, role_name
     from tessera.serving.projection_routes import direct_consumer_resident_bytes

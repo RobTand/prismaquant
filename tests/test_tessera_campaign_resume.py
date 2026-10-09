@@ -16,7 +16,7 @@ UNIT = "model.layers.0.proj"
 def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
                   format_name="TESSERA_E4M3_K1_R1024", profile=None):
     from prismaquant import model_profiles, tessera_campaign, tessera_render
-    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    from prismaquant.model_profiles import DefaultProfile
     model = torch.nn.Module()
     model.model = torch.nn.Module()
     model.model.layers = torch.nn.ModuleList([torch.nn.Module()])
@@ -49,7 +49,8 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
     # The fresh run prices under the default static-scale policy so a test
     # can change the policy afterwards and see the identity refuse it.
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
-    monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: profile or Glm5NextProfile())
+    monkeypatch.setattr(model_profiles, "detect_profile",
+                        lambda _path: profile if profile is not None else DefaultProfile())
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
         "accepted": True, "reason": "CPU test fixture", "kwargs": [], "recipe": {},
     })
@@ -505,14 +506,26 @@ def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_camp
 
 
 @pytest.mark.parametrize("suffix,contract", [("indexer.weights_proj", "a32"), ("kv_b_proj", "a16")])
-@pytest.mark.parametrize("format_name", ["TESSERA_E4M3_K1_R1024", "TESSERA_BF16_K1_R1792"])
+@pytest.mark.parametrize("format_name,profile_kind", [
+    ("TESSERA_E4M3_K1_R1024", "synthetic"),
+    ("TESSERA_BF16_K1_R1792", "synthetic"),
+    ("TESSERA_BF16_K1_R1792", "production"),
+])
 @pytest.mark.parametrize("dev_mode", ["0", "1"])
 def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
-        monkeypatch, tmp_path, suffix, contract, format_name, dev_mode):
+        monkeypatch, tmp_path, suffix, contract, format_name, profile_kind, dev_mode):
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+
     name = "model.layers.0.self_attn." + suffix
+    # The synthetic menu tests direct ownership, not production menu admission.
+    profile = (Glm5NextProfile() if profile_kind == "production" else
+               _architecture_profile("glm_test_architecture", "Glm5NextForConditionalGeneration"))
     campaign, checkpoint, argv, _model, _inputs = _main_fixture(
-        monkeypatch, tmp_path, priced=True, unit=name, format_name=format_name)
+        monkeypatch, tmp_path, priced=True, unit=name, format_name=format_name,
+        profile=profile)
+    if profile_kind == "production":
+        argv.extend(["--allow-pinned", name, "--pinned-roster-only"])
     assert campaign.main(argv) == 0
     with (tmp_path / "cost.pkl").open("rb") as handle:
         original_costs = pickle.load(handle)["costs"]
@@ -559,27 +572,63 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
             campaign.main([*rejected, "--seed-checkpoint", str(checkpoint)])
         assert not (tmp_path / (label + "-cost.pkl")).exists()
 
-def test_non_glm_profile_with_kv_b_proj_leaf_gets_no_direct_contract():
-    """A future MLA profile must not inherit the GLM direct rule (#2457)."""
-    from prismaquant import tessera_campaign as campaign
+
+def _architecture_profile(profile_name, architecture):
     from prismaquant.model_profiles import DefaultProfile
-    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+
+    class StubProfile(DefaultProfile):
+        @property
+        def name(self):
+            return profile_name
+
+    profile = StubProfile()
+    profile.declare_config(None, [architecture])
+    return profile
+
+
+@pytest.mark.parametrize("suffix,contract,element_bytes", [
+    ("kv_b_proj", "a16", 2), ("indexer.weights_proj", "a32", 4),
+])
+@pytest.mark.parametrize("profile_name,architecture,is_glm", [
+    ("future_mla", "FutureMLAForCausalLM", False),
+    ("glm5_next", "FutureMLAForCausalLM", False),
+    ("glm_alias", "Glm5NextForConditionalGeneration", True),
+])
+def test_declared_architecture_controls_direct_contract_and_memory(
+        suffix, contract, element_bytes, profile_name, architecture, is_glm):
+    from prismaquant import tessera_campaign as campaign
     from prismaquant.tessera_formats import get_tessera_family
 
-    name = "model.layers.0.self_attn.kv_b_proj"
+    profile = _architecture_profile(profile_name, architecture)
+    name = "model.layers.0.self_attn." + suffix
     family = get_tessera_family("TESSERA_E4M3_K1")
     assert campaign._direct_consumer_activation_contract(
-        name, profile=DefaultProfile()) is None
-    assert campaign._direct_consumer_activation_contract(name) is None
+        name, profile=profile) == (contract if is_glm else None)
     assert campaign._direct_consumer_memory_bytes(
-        name, family, (128, 64), profile=DefaultProfile()) == 0
-    assert campaign._direct_consumer_activation_contract(
-        name, profile=Glm5NextProfile()) == "a16"
-    assert campaign._direct_consumer_memory_bytes(
-        name, family, (128, 64), profile=Glm5NextProfile()) == 128 * 64 * 2
-    assert campaign._direct_consumer_activation_contract(
-        "model.layers.0.self_attn.indexer.weights_proj",
-        profile=Glm5NextProfile()) == "a32"
-    assert campaign._direct_consumer_activation_contract(
-        "model.layers.0.self_attn.indexer.weights_proj",
-        profile=DefaultProfile()) is None
+        name, family, (128, 64), profile=profile) == (
+            128 * 64 * element_bytes if is_glm else 0)
+
+
+def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
+        monkeypatch, tmp_path):
+    from prismaquant import format_registry
+
+    name = "model.layers.0.self_attn.kv_b_proj"
+    profile = _architecture_profile("future_mla", "FutureMLAForCausalLM")
+    campaign, checkpoint, argv, model, _inputs = _main_fixture(
+        monkeypatch, tmp_path, priced=True, unit=name, profile=profile)
+    assert campaign._direct_consumer_activation_contract(name, profile=profile) is None
+    assert campaign.main(argv) == 0
+    with (tmp_path / "cost.pkl").open("rb") as handle:
+        price = pickle.load(handle)["costs"][name]["TESSERA_E4M3_K1_R1024"]
+    spec = format_registry.get_format("TESSERA_E4M3_K1_R1024")
+    shape = tuple(model.model.layers[0].self_attn.kv_b_proj.weight.shape)
+    from prismaquant.cost_stage_checkpoint import prepare_journal
+
+    manifest = json.loads(checkpoint.read_text())
+    state = prepare_journal(checkpoint.with_name(checkpoint.name + ".parts"),
+        stage="Tessera campaign", resume=True, identity=manifest["identity"],
+        qnames=[name], manifest_path=checkpoint)[2][name]
+    assert state["anchors"][0]["memory_bytes"] == spec.memory_bytes_for_shape(shape)
+    assert price["activation_contract"] == spec.act_dtype_name
+    assert price["activation_quantized"] is True
