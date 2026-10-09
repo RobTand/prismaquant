@@ -370,18 +370,18 @@ def sdk_submodule(name: str):
     return module
 
 
-def inject_installed_sdk_for_tests():
-    """TEST-ONLY explicit injection of the reviewed installed distribution.
+def reviewed_installed_distribution():
+    """TEST-ONLY: the one installed ``prismabuild`` distribution, proven reviewed.
 
-    Binds the ``prismabuild`` resolved by normal import after verifying it
-    is a single installed distribution at exactly
-    :data:`PB_READER_LEASE_PIN_COMMIT` (no worktree shadow, no editable
-    install — the same properties the pbtest pin guard proves worker-side
-    before pytest). Raises ``RuntimeError`` (never a tier refusal) when
-    the environment does not provide it: tests fail loudly on a missing
-    dependency, never silently skip. Production never calls this.
+    Verifies from install metadata alone, with the standard library, that
+    exactly one distribution owns ``prismabuild`` and that it is a
+    non-editable Git install at exactly :data:`PB_READER_LEASE_PIN_COMMIT`.
+    That is the identity the pbtest pin guard proves worker-side before
+    pytest; the guard also proves the RECORD bytes, once per shard. Raises
+    ``RuntimeError`` (never a tier refusal) when the environment does not
+    provide it: tests fail loudly on a missing dependency, never silently
+    skip. Production never calls this.
     """
-    global _INJECTED, _INJECTED_MODULES_BEFORE
     import importlib.metadata as metadata
     import json as _json
     owners = metadata.packages_distributions().get("prismabuild", [])
@@ -402,6 +402,22 @@ def inject_installed_sdk_for_tests():
         raise RuntimeError(
             "test SDK injection needs a non-editable Git install at "
             f"{PB_READER_LEASE_PIN_COMMIT}, found {vcs}")
+    return dist
+
+
+def inject_installed_sdk_for_tests():
+    """TEST-ONLY explicit injection of the reviewed installed distribution.
+
+    Binds the ``prismabuild`` resolved by normal import after
+    :func:`reviewed_installed_distribution` proved it is a single installed
+    distribution at exactly :data:`PB_READER_LEASE_PIN_COMMIT` (no worktree
+    shadow, no editable install — the same properties the pbtest pin guard
+    proves worker-side before pytest). Raises ``RuntimeError`` (never a tier
+    refusal) when the environment does not provide it: tests fail loudly on a
+    missing dependency, never silently skip. Production never calls this.
+    """
+    global _INJECTED, _INJECTED_MODULES_BEFORE
+    dist = reviewed_installed_distribution()
     # Before the import, so the teardown can tell the modules this
     # injection adds from the ones the process already had (PQ #963).
     # A second injection with one still on record keeps the first
