@@ -28,8 +28,10 @@
   prepared layers run in one GPU action with bounded per-layer moments and
   durable progress; explicit priority units publish first in the same capture.
   Moments drain after every layer even inside a multi-layer prepared range.
-  Completed adoption rechecks scope, persisted split and scoring geometry;
-  changed selection hashes or retained-prefix budgets replay instead of reuse.
+  Completed adoption rechecks scope, persisted split and scoring geometry and
+  refuses a changed unit set or scoring prefix. A changed selection digest or
+  retained-prefix budget replays the quantum instead of refusing or reusing it,
+  and prints one `research_quantum_replay` line that names the changed fields.
   Historical census counts/maxima use D32 stamps with explicit deltas; actual
   routing, per-role projection agreement and tokens-times-top-k stay hard checks.
 

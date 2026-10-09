@@ -15,7 +15,8 @@ One runnable experiment entry with four modes over ONE capture root:
   range forwards, even a layer with no selected unit. Both roles are
   persisted once per layer and verified (file bytes/sha, tensor geometry,
   counts, fit+heldout == observed forward) before ``ChainQuantum.complete`` carries
-  the role receipts in its verified unit map.
+  the role receipts in its verified unit map. A prepared range that is already
+  complete is refused, replayed or adopted, as :func:`mode_quantum` states.
 * ``join``     -- research metadata verification only: the existing ranges /
   owner / fragment checks, the witness merge against the census contract,
   the recorded source digest union, and the role-manifest union. It does
@@ -850,7 +851,23 @@ def _verified_layer_publication(root, manifest_path, manifest, verified, census,
 
 
 def mode_quantum(args, guard) -> dict:
-    """Run adjacent prepared quanta in one action; each layer stays bounded and durable."""
+    """Run adjacent prepared quanta in one action; each layer stays bounded and durable.
+
+    A prepared range whose owner is already complete ends in one of three ways:
+
+    * **Refuse.** The request is another measurement than the prep sealed: a different
+      unit set, scoring prefix (``--max-act-rows``), draw, split boundary or batch count,
+      a missing selection file, or a published role record that differs from the verified
+      receipt. Nothing runs and nothing is reused.
+    * **Replay.** The prep identity matches, but the fragment's ``capture_binding``
+      (selection file digest, ``--max-prefix-rows``) differs from this request, or the
+      fragment carries no binding. This is another request over the same prepared
+      traversal, not a corruption, so the quantum runs again (``recompute=True``) and
+      publishes new role files. It never refuses; one ``research_quantum_replay`` line
+      names the changed fields.
+    * **Adopt.** The binding matches and every publication matches its verified receipt.
+      No source forward runs.
+    """
     root = Path(args.capture_root).resolve()
     prep = chain.read_prep(root)
     start, stop = chain.parse_layer_range(args.capture_layer_range)
@@ -878,7 +895,10 @@ def mode_quantum(args, guard) -> dict:
         if owner is not None and owner.get("status") == "complete":
             chain.require_owner_complete(prep, lo, hi)
             fragment = chain.read_fragment(root, prep, lo, hi)
-            if _changed_binding_fields(fragment.get("capture_binding"), binding):
+            changed = _changed_binding_fields(fragment.get("capture_binding"), binding)
+            if changed:
+                print(json.dumps({"research_quantum_replay": {"layers": [lo, hi], "changed": changed}}),
+                      flush=True)
                 options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
                 result = _run_prepared_quantum(options, guard, recompute=True)
             else:

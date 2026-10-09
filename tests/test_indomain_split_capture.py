@@ -1,4 +1,5 @@
 """The research quantum must consume the split its persisted receipt describes."""
+from pathlib import Path
 from types import SimpleNamespace
 import json
 
@@ -116,7 +117,8 @@ def _resume_args(directory):
 
 
 @pytest.mark.parametrize("change", ["selection", "missing_selection", "scoring_prefix"])
-def test_completed_adoption_rechecks_requested_prep_comparability(tmp_path, change):
+def test_completed_adoption_rechecks_requested_prep_comparability(tmp_path, monkeypatch, capsys, change):
+    """A request that is another measurement than the prep sealed refuses; it never replays."""
     capture._toy_control_preflight(tmp_path, lambda _label: None)
     args = _resume_args(tmp_path)
     if change == "selection":
@@ -129,8 +131,26 @@ def test_completed_adoption_rechecks_requested_prep_comparability(tmp_path, chan
         args.units = str(tmp_path / "missing-units.json")
     else:
         args.max_act_rows = 8
+    monkeypatch.setattr(capture, "build_streamed_causal_lm",
+                        lambda *_args, **_kwargs: pytest.fail("a refused request reached a replay"))
+    capsys.readouterr()
     with pytest.raises((capture.ResearchRefused, capture.chain.CaptureChainRefused, FileNotFoundError)):
         capture.mode_quantum(args, lambda _label: None)
+    assert "research_quantum_replay" not in capsys.readouterr().out
+
+
+def test_completed_matching_binding_adopts_the_stored_result_without_a_forward(tmp_path, monkeypatch, capsys):
+    capture._toy_control_preflight(tmp_path, lambda _label: None)
+    args = _resume_args(tmp_path)
+    fragment = tmp_path / "capture/chain/capture-000-001.fragment.json"
+    stored = fragment.read_bytes()
+    monkeypatch.setattr(capture, "build_streamed_causal_lm",
+                        lambda *_args, **_kwargs: pytest.fail("a matching completed quantum forwarded"))
+    capsys.readouterr()
+    summary = capture.mode_quantum(args, lambda _label: None)
+    assert [Path(path).resolve() for path in summary["fragments"]] == [fragment.resolve()]
+    assert fragment.read_bytes() == stored
+    assert "research_quantum_replay" not in capsys.readouterr().out
 
 
 _BINDING = {"selection_sha256": "a", "units": ["u"], "max_act_rows": 7, "max_prefix_rows": 4}
@@ -149,8 +169,10 @@ def test_changed_binding_fields_names_each_difference(stored, changed):
     assert capture._changed_binding_fields(stored, dict(_BINDING)) == changed
 
 
-@pytest.mark.parametrize("change", ["selection_hash", "retained_prefix"])
-def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeypatch, change):
+@pytest.mark.parametrize("change,field", [("selection_hash", "selection_sha256"),
+                                          ("retained_prefix", "max_prefix_rows")])
+def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeypatch, capsys, change, field):
+    """A binding mismatch is another request over the same traversal: it replays and never refuses."""
     capture._toy_control_preflight(tmp_path, lambda _label: None)
     args = _resume_args(tmp_path)
     if change == "selection_hash":
@@ -168,12 +190,17 @@ def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeyp
     monkeypatch.setattr(capture, "build_streamed_causal_lm", build)
     from test_glm5_next_streamed_forward_parity import _torch_only_causal_conv1d
     kernels = pytest.MonkeyPatch()
+    capsys.readouterr()
     try:
         _torch_only_causal_conv1d.__wrapped__(kernels)
         capture.mode_quantum(args, lambda _label: None)
     finally:
         kernels.undo()
     assert replayed
+    announced = [json.loads(line)["research_quantum_replay"]
+                 for line in capsys.readouterr().out.splitlines()
+                 if line.startswith('{"research_quantum_replay"')]
+    assert announced == [{"layers": [0, 1], "changed": [field]}]
     fragment = json.loads((tmp_path / "capture/chain/capture-000-001.fragment.json").read_text())
     assert fragment["capture_binding"]["selection_sha256"] == capture._sha256_file(args.units)
     assert fragment["capture_binding"]["max_prefix_rows"] == args.max_prefix_rows

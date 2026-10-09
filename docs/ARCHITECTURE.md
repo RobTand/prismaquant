@@ -23745,11 +23745,20 @@ Count redistribution or a substituted payload cannot be accepted merely
 because the layer totals still match. A single GPU action may run adjacent
 prepared quanta; each layer publishes and verifies its own files and frees its
 moments before the next layer, including within a multi-layer prepared range.
-Completed quanta are adopted only after requested scope, scoring geometry and
-actual split still match prep, request binding matches and publications match
-the verified receipts. A compatible changed selection hash or retained-prefix
-budget replays its owner instead of silently reusing old results. Matching
-retries do not duplicate source forwards. The three explicitly prioritized
+A prepared range whose owner is already complete ends in one of three ways.
+It refuses when the request is another measurement than the prep sealed: a
+different unit set, scoring prefix (`--max-act-rows`), draw, split boundary or
+batch count, a missing selection file, or a published role record that differs
+from the quantum's verified receipt. Nothing runs and nothing is reused. It
+replays, and does not refuse, when the prep identity matches but the stored
+`capture_binding` (the selection file digest and the retained-prefix budget
+`--max-prefix-rows`) differs from this request, or the fragment stores no
+binding: that is another request over the same prepared traversal, so the
+owner runs again and publishes new role files. One `research_quantum_replay`
+line names the changed fields. It adopts the stored result, with no source
+forward, when the binding matches and every publication matches its verified
+receipt. A changed unit set or scoring prefix is part of the prep identity and
+refuses before the binding is read. The three explicitly prioritized
 L3 expert0 up, L28 shared up and L44 expert0 up units publish their verified
 role pairs before the remainder of their layer is serialized. This research
 publication is not an
