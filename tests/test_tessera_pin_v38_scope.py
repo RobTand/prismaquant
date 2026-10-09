@@ -20,9 +20,6 @@ from importlib.resources import as_file
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as tr
 from prismaquant import tessera_runtime_contract as contract
-from prismaquant.tessera_serving_runtime_pin import (
-    TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256,
-)
 
 NEW_IMAGE = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
              "f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5")
@@ -56,13 +53,6 @@ def _resolve(facts, image):
     return lane.resolve_unit_route(
         facts, _table(), platform="sm_121", residency="resident",
         runtime_image=image, execution_mode="eager")
-
-
-def test_the_installed_contract_is_the_v56_pin():
-    # The inherited v39 scopes remain; v56 adds separately image-scoped cells.
-    raw = _packaged_bytes()
-    assert hashlib.sha256(raw).hexdigest() == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
-    assert json.loads(raw)["contract_version"] == 56
 
 
 @pytest.mark.parametrize("rung", [832, 864, 896, 928, 944, 960, 1024, 1088])

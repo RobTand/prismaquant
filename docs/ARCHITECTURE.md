@@ -1,5 +1,287 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
+`fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+The pin retains schema v2 and lane schema v11.
+The producer and serving commits remain equal; the serving-source constant remains `None`.
+The release label remains advisory.
+The v56 cells, format rows, activation rows, and four native-extension rows remain unchanged.
+
+The construction table uses the selective override and the current GLM receipt.
+The producer interface adds the export API to the reuse-authority drivers.
+The stock override table adds the default-off MHC method.
+Tessera #1033 supplies the attention projection APIs and routes that PQ #2371 needs.
+
+Construction proves module reachability, not a successful weight load or forward result.
+The pin move adds no seal, default change, serving claim, or performance claim.
+The isolated interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` on x86.
+The D13 overlay and active measurements stay unchanged.
+
+PB `da8fbb6d706a` generates the answer and snapshot from the installed v60 contract.
+The answer remains unchanged; only the snapshot's pin commit and contract digest change.
+PB `92867be921ae` passes the installed pin gate and real export preflight for dense and routed metadata.
+The evidence is `/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0/preflight.json`.
+These CPU results do not prove weight loading, model output, serving, or performance.
+
+The legal-domain provenance retains its historical study producer and measured values.
+Its exporter source delta extracts the same per-unit key set; the WINDOW rules and grammar bytes stay unchanged.
+
+The CPU population covers 49 modules and 1,067 unique selected nodes.
+The initial population has one failure from a copied source roster.
+The corrected wire check passes in PB `ce33bde128ff`.
+The reconciled record has 1,066 passed and one historical-v5 skip, with no uncollected module.
+The skip has no qualification value.
+The installed rung-allowability API lets both canonical producer test modules run; each passes 26 cases.
+
+PB `f05313eeee06` retains the allocation A/B from captured main on D13 and branch source on the new overlay.
+Only the fixture's contract version and reviewed digest differ.
+The corrected layer oracle keeps every other identity field and allocation value.
+The evidence and full commands reside in `prismaquant/tessera_runtime/README.md`.
+No overlay package changes after the parent verifies its six conditions.
+
+The review parent must check the exact head before the independent pool review.
+The PrismaQuant integrator owns the merge.
+
+Re-stamped 2026-10-07 (PQ #2364): the canonical consumer joins v3
+performance evidence through the existing lane admission owner.
+An explicit index file can select an immutable candidate without an active
+index change. A directory still selects its current `index.json`.
+Legacy tables require only the original three producer functions.
+V3 tables require the scope, class, time and quality functions they use.
+
+The shared owner retains each unit's actual rank-local shape, structure,
+token-row scope, independently observed activation build and wire recipe.
+Body, independent MTP, final assignments and logical surfaces use that scope.
+An unresolved explicit scope waits. It never becomes an unscoped allowance.
+
+The producer owns geometry classification and the performance menu.
+Its missing half-bit coverage remains missing. T4 remains unadmitted under
+its current policy. T8 R1280 remains a quality anchor, not a menu option.
+
+Qualified neighbouring whole anchors supply the producer's linear chord.
+Both scientific currencies retain their actual quantity through the price owner.
+A complete objective price receives no gain or activation transfer.
+Fused and packed sums retain their original bound member quantities.
+The same rule applies to the exact frontier and later price reads.
+A derived price remains proposal data, not a new measurement.
+
+Joint anchors require complete `quality_scope` and their actual joint evidence.
+The existing joint validator runs before optional scope metadata is read.
+Unit, family, format, shape, calibration, teacher, window and objective remain explicit.
+Actual sample coordinates and probe identifiers also remain explicit.
+Missing or incompatible scientific coordinates refuse or wait.
+Weight-error screens never become validated KL.
+
+The existing probe owner separates mathematical facts from producer provenance.
+Current seeds, samples, tokens, temperatures, shapes and objectives remain strict.
+Actual data still match their own digests in every mode.
+Producer-only and run-only differences use `seal_check` and stamp `[DEV-MODE]`.
+Recorded chord reads compare numeric claims and scientific scope through that owner.
+Missing qualified prices cannot remove a unit from byte accounting.
+
+The independent MTP selector retains its objective and byte budget.
+Its public API intersects each owned wire option with the shared admission owner.
+The native callback remains an additional gate. It cannot bypass canonical admission.
+The API derives each source shape from validated measured operators or their unique anchors.
+The shared scope owner derives rank-local geometry, the activation build and the wire recipe.
+Callers supply per-unit structure, regime M, tensor parallel size and required routing coordinates.
+Missing or unresolved v3 scope removes the option. It never permits an unscoped query.
+The selection record retains admitted unit scopes and the original table provenance.
+The allocator accepts separate --mtp-regime, --mtp-tensor-parallel and --mtp-routing arguments.
+The fixed-selection tool uses the same scope and publication owners.
+The allocator reads profile structure and checked probe topology through its existing allocation lane protocol.
+The Tessera plugin calls the shared scope owner for both body and MTP units.
+Synthetic card tests declare a Qwen3 MoE profile with the required expert grammar.
+An absent profile still refuses explicit scope. The fixture does not qualify GLM serving.
+Legacy no-owner emulation keeps its original contract. Production still requires canonical evidence.
+Measured quality anchors and exact wire menus have separate rosters.
+An admitted fractional wire uses the existing qualified chord owner.
+It does not require fractional quality samples.
+Selection and export retain the actual M3/M4 wire receipts and byte counts.
+The export reader recomputes recorded chords from their original anchors.
+
+Canonical logical candidates retain their chord records and original anchors.
+Anchor stderr remains diagnostic data. It is not measured fractional uncertainty.
+The candidate records absent fractional stderr as null, not zero.
+The constructor refuses every non-null chord stderr, including zero.
+The current chord protocol supplies no measured fractional uncertainty.
+Measured marginal intervals and CI-overlap choices refuse absent uncertainty.
+Explicit point-only menus remain available without a measured CI claim.
+Candidate construction restores its owned frozen coordinates through the existing thaw path.
+The original scientific validator checks those coordinates before the candidate freezes them again.
+Immutable-provenance construction and dataclass replacement retain both currencies and their original anchors.
+
+PACT retains actual operator rows as its first time source.
+A missing row can use a canonical class model only after reconciliation with
+an admitted operator row of the same class and actual operator scope.
+The model scales operator samples with canonical timing ratios.
+It keeps raw kernel times, operator receipts and original class identities
+separate in provenance. Shared operator samples remain correlated.
+The uncertainty interval is conditional on the class model.
+
+Neither class costs nor chords establish numerical or serving qualification.
+The existing exact solver charges integer serialized bytes and leaves budget
+slack when no assignment fills the budget. Fused-family constraints stay intact.
+
+Scope recipes use the digest owner's strict, ASCII-escaped, default-spaced JSON profile.
+Class identities use its lax profile. Exact cache bytes and nonfinite policies remain unchanged.
+The selected table, explicit index, unit scopes, chord sources and class
+cost sources remain in allocation and frontier provenance.
+The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
+Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
+The existing isolated test adapter fetches that module when no source is
+supplied. No untracked producer, serving overlay or global feature skip is required.
+
+CPU fixtures prove source mechanics, not measured speed, validated KL or a
+serving frontier. No serving pin, kernel, wire or active index changes.
+
+As of: 2026-10-07 · `sol/d50-ship-gates-2413` (D50, #2413; quality source #2412 and RoPE fix #2418).
+The configured job preserves every lane gate. CPU preflight does not qualify serving.
+The runner uses the shared file digest owner. Its digest recipe and eight-MiB read size stay unchanged.
+Section 7.0 owns operator instructions. The current task backend is HF-only.
+
+The runner derives actual output and log paths once and validates them before execution.
+The same destination owner checks configured and preflight paths against protected inputs and the artifact boundary.
+Existing logs refuse. Exclusive log creation preserves retained bytes if a collision appears later.
+
+The quality source accepts upstream `rope_parameters` and preserves legacy `rope_theta`.
+The inverse-frequency arithmetic, float32 dtype and operation order stay unchanged.
+A missing theta still raises an error. The quality owner owns this compatibility fix.
+
+Re-stamped 2026-10-07 (D50, PQ #2410): day-zero intake is a metadata-only consumer
+of profile detection, source-index grammar, name projection, and safetensors header validation.
+The source entry point is `tools/day0_model_intake.py`; its domain code is
+`prismaquant/day0_model_intake.py`.
+It accepts a local checkpoint or an explicit model identifier with a full revision.
+Remote discovery uses Hugging Face snapshot download before config and index checks.
+Inconsistent inputs refuse before full-weight download or runtime launch.
+The generated structure draft stays outside profile registration and has no declared export lanes.
+The report names unsupported kinds and never claims native serving qualification.
+An explicit brain floating-point degree-two check uses Docker and the existing vLLM prompt smoke.
+Its central processor preflight runs that smoke's argument path without importing vLLM or acquiring a device.
+The runbook is `docs/new_model_intake.md`.
+No active PACT path, serving default, runtime pin, or production format menu changes.
+
+Re-stamped 2026-10-07 (D50 item six, PQ #2409): Tessera export setup reads
+profile capabilities and the source index. The lane derives
+`wired_architectures` from the profile specs' `supported_lanes` field.
+No architecture gains runtime qualification from that roster.
+
+`tessera_export_lane.export_setup` reads headers through the producer's
+`source_inventory` and `quantizable` contracts. It emits construction-census
+inputs for Tessera's existing `tools/tessera_construction_census.py`.
+It records both census execution and runtime qualification as `not_run`.
+The plan writer exposes this result through `--export-setup-json`.
+
+`export_partition.whole_layer_partitions` owns the shared count rule.
+It uses Tessera's `partition_owner` for every source tensor, including
+passthrough tensors. The largest nonempty modulo domain defines the count.
+Fused modules and all experts of a stack retain one owner.
+
+`tools.tessera_fleet.dispatch_model --dry-run` exposes the real metadata
+plan without files or submissions. The fixed-count `dispatch_shards` driver
+and its dependency on a model-specific wrapper are removed. Full exports retain the existing
+preparation, encoding and complete-set assembly paths. The worker calls the
+supported `tessera.export_serving` package, not an experiment wrapper.
+The ladder probe retains its own historical configuration.
+
+Re-stamped 2026-10-07 (PQ #2417, R1): the worker imports the shared partition
+owner only for preparation. Standalone help and atomic publication require
+only the standard library. They do not require a copied export helper.
+Preparation still uses the staged shared owner and the producer's real
+source inventory. No ownership rule, source layout or runtime check changes.
+
+Provenance: `lane_spec.py`, `lane_specs/tessera.json`,
+`tessera_export_lane.py`, `tessera_plan_writer.py`, `export_partition.py`,
+and `tools/tessera_fleet/{dispatch_model,model_worker}.py` own these rules.
+The consumer proof is `tests/test_tessera_export_setup.py`.
+No production format, serving default, runtime pin or active PACT path changes.
+
+Re-stamped 2026-10-07 for issue #2408.
+The Tessera cell reader accepts an explicit kernel build in `ServingContext`.
+The reader matches kernel build and module kind without an image-digest key.
+The compatibility map preserves historical cell identifiers and image-only calls.
+The image remains provenance. Evidence, wire predicates and source checks remain unchanged.
+This change moves no pin, default, wire byte or running measurement path.
+Central processor proof does not establish device qualification.
+The compatibility map and matcher use one effective build name for historical cells.
+Both lookup forms reject overlapping scopes. Cell order cannot select a route.
+Version-three and version-four tables refuse an explicit kernel build that their cells cannot attest.
+Calls without the build field remain unchanged.
+
+
+Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
+lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
+applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
+legacy residency-map path otherwise) after resolving the same sealed
+generation. Discovery is independent of whether inputs have residency.
+The campaign container forwards this launcher-owned value and refuses a
+spec that forges it; the older strict tuple remains accepted without it.
+Live-claim/nonce/scope, declared-template, own-byte and budget checks are
+unchanged. Unstaged D38 must bind the actual admitted produced-output owner
+on CPU before any subsequent GPU capture, not just sample its input files.
+
+Re-stamped 2026-10-06 (D41, PQ #2328): production allocations of Tessera
+rungs require a current measured allowability table.
+`--tessera-rung-allowability-root` names its publication root;
+`--tessera-rung-kernel-builds` names an independently observed
+format-to-`kernel_build` JSON map, never a build copied from the measurement
+table itself. `index.json` selects the format/build `current_version` in
+`formats[format].kernel_builds[build_id]` and its `versions[str(version)]` safe relative
+path, schema and status. Absent, unreadable or invalid index/table evidence
+refuses in both modes; kernel and measurement-scope comparability stay hard.
+Present publication identity drift goes through `dev_mode.seal_check`: dev mode
+stamps and continues with the stored validated selection, while certified mode
+retains the refusal. A version move with a changed required-cell scope is not
+identity-only: canonical `admit_rung(scope=current_selected_scope)` refuses
+carrying narrow measurements into the widened scope. The pure producer
+`tessera.rung_allowability` validators and `admit_rung`
+own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
+admission. PrismaQuant intersects that answer with its existing v11
+`formats[].allowable_rungs` run-table rule, then passes it through the existing
+`tessera_lane.rung_admission` → `tessera_menu.route_admission` seam. Unlisted or
+unmeasured rows wait; observations alone are not exclusions or seals.
+
+Versioned intake delegates table/index schema dispatch to the canonical producer:
+`fleet.rung_allowability.v1`/`.v2` and versioned index contracts are not
+revalidated through a consumer-owned schema roster. The selected descriptor
+must still match the actual payload schema/version/status, and provenance records
+that payload schema. V2 body/decoder/owner/execution-scope and explicit word-ring
+applicability facts are required where its producer grammar requires them; TCQ
+non-WINDOW fields are explicitly non-applicable, never fabricated positive WINDOW
+geometry. WINDOW width zero remains a producer refusal. No v1 behavior, serving
+pin, allocation default or shared-index rollout changes as part of this intake.
+
+Body candidate menus, independent MTP menus and the final expanded assignment
+(including fixed auxiliary units) use the same lane admission seam.
+Binding checks the observed build id, library variant, architecture and
+activation contract; source-commit stamps and extra diagnostic metadata are
+provenance, not new identity seals. Producer decisions are cached per queried
+rung within one loaded table, never across allocations or index versions.
+An explicitly supplied table also restricts an emulation-only allocation, so
+the next full campaign allocation can consume the measured input without
+changing a serving profile, default or pin. Production cannot opt out through
+a research menu mode. Existing wire/shape, serving, export and quality gates
+remain independent. The allocation records the selected table version and
+observed build in its menu provenance; fixture tables establish only reader
+mechanics, not measured or served qualification.
+The current shared root is `/mnt/shared/fleet-ceo/rung-allowability`. Its v0003
+20-cell scope is distinct from historical v0002 16-cell mechanics; v2 measurements
+are never a narrowed production substitute for v3. Cost-only geometry observations
+do not change pending measurement status or admit an allocated rung.
+
+Re-stamped 2026-10-06 (PQ #2342): forward-split quanta compare the full
+retained and running bind identities through the chain-resume owner. Only
+its declared producer/source seals stamp in dev mode; all calibration,
+draw, probe, seed, token-scope, temperature, execution-partition and unknown
+fields remain comparability walls (key presence matters even for null).
+After that comparison, the original bind identity is reused so the unchanged
+exact-session hash check remains enforced. No prep, hash, entry or checkpoint
+is re-keyed or overwritten. The CPU exact-session preflight uses the same
+capture bind-construction owner and verifies the original retained hash.
+
 Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `7b02dafa602`,
 PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
 caller-declared set of top-level producer seal fields. The joint qualification
@@ -81,7 +363,9 @@ by default. Source citations are to this rebased branch.
 
 ## Adjacent acquisition and readset correctness
 
-The current main has no separate `units.*.acquisition_source_weight` journal field. Actual acquisition weight shape, dtype, logical bytes and content digest are checked against authenticated requests (`tessera_campaign.py:1005–1022,7694–7707`); all remain correctness refusals. Any later such identity field stays undeclared comparability. Source/capture authentication and replay readset/frontier agreement remain unchanged (`tessera_joint_aura.py:1911–1928,1951–1979`): they bind actual capture bytes, roster and execution reads, not producer-only hashes.
+Acquisition checkpoints retain `units.*.acquisition_source_weight`, checked against the authenticated request and the measured unit weight. Shape, dtype, logical bytes, content digest, raw request/cost bytes, exact atomic coverage, legal rates, calibration and probe comparability remain correctness refusals. Source/capture authentication and replay readset/frontier agreement likewise bind actual capture bytes, roster and execution reads, not producer-only hashes.
+
+`load_joint_campaign_acquisition` treats recorded live domain pins and export/grammar producer source digests as identities: the existing `dev_mode.seal_check` stamps their mismatch and continues with stored data by default. Producer source-state schema remains a protocol refusal. Dispatcher planning and manifest validation authenticate both request and cost bytes through their existing input owners before comparing controls, stamping only locator spelling. The same control owner supplies canonical request content excluding only `cost_path`; the loader carries its `request_control_sha256` through projected runtime origins, journals and scalar payloads. Both merges and plan reload require that authenticated control identity, actual cost/run/probe identity and regime to agree before stamping only raw `request_sha256` provenance differences. The raw request/cost SHA checks still authenticate each file read, never the canonical control digest alone. Absence, changed content, shape/rate/source/calibration, schedule, atomic coverage, deferred-domain and numerical disagreement refuse in every mode. The producer document schema and raw joint evidence remain unchanged; no archive, re-seal, recapture, domain reduction or qualification follows from a development stamp.
 
 PR 2313 is closed because its exact approved production head `b987bff97244397e04f14b7a54727d58a43d45fc` landed through merged PR 2324 (`7b02dafa602a09fc5ed14d0aae746d98a9e4ee96`); no literal PR 2313 merged-state gate exists. Every field added by future callers is comparability unless explicitly classified and declared; this deliverable declares no other caller.
 
@@ -817,6 +1101,21 @@ source-header rank/non-Linear exclusions and independent export/serving gates,
 formats, numerical methods, pins, caches and production defaults are unchanged.
 CPU fixture choices supply no multimodal quality, wire, runtime or performance
 qualification. The representative GPU/serving acceptance remains in #1921.
+
+Re-stamped 2026-10-06 (Refs #1921, #2244, persisted calibration provenance):
+both multimodal visual probe passes persist `meta.calibration_source` with
+`dataset`, `requested`, `real_loaded` and `synthetic_loaded`. These are rows
+actually loaded, not the real/synthetic composition of successful forwards.
+The streaming final write counts successes in `nsamples`; the non-streaming
+pass and streaming no-match exit retain the loaded-row budget there. Blend
+policy and Fisher normalization are unchanged.
+`TestMultimodalProbePassIntegration` in `tests/test_prismaquant_visual_phase2.py`
+reads all three emitted pickle paths using the actual loader, a partial real
+dataset, its synthetic fallback and a populated CPU model. A failed synthetic
+forward leaves the loaded composition intact; successful paths also require
+nonzero visual Fisher. This proves persistence, not a consumer refusal policy,
+real-checkpoint calibration, GPU arithmetic or served qualification.
+
 Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
 MTP probe-identity admission compares each unit's exact positive integer
 parameter count with the product of its validated joint-AURA source-weight
@@ -2575,6 +2874,17 @@ PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
 the pinned package; it stays fail-closed with a named refusal on any older
 pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
 
+Re-stamped 2026-10-05 (PQ #2319, `PerUnitRates967.pq2319-allocator-export`):
+`stack_plan` expresses a mixed-run routed stack per unit — the stack entry
+keeps the producer-planned `q256` from the carried projection's request and
+adds `unit_q256`, the canonical logical unit names (`.weight` stripped, the
+producer's own spelling) whose rung differs from that baseline, normalized
+away when no leaf differs so a stack-uniform plan is byte-identical to the
+spelling #1587 wrote. Mixed Tessera/BF16 leaves and mixed grids still refuse;
+a mixed stack without the carried request refuses (no baseline to normalize
+against), and the expressibility gate is the installed runtime's v57
+`producer_interface.routed_units` capability (§4.10).
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -2699,6 +3009,13 @@ and refuses a point without a bootstrap, and the sweep replay stamps
 `layer_config` claim the hull replay passes. The duplicate bootstrap
 constants in `prefill_frontier.py` are removed. No default, stage, format,
 lane or ship gate changes. Gate: `tests/test_pact_frontier_intervals.py`.
+
+Re-stamped 2026-10-07 (D50 item 3, `campaign/pact-frontier-adapter-20261007`): `prismaquant/pact_frontier_profile.py` reads the PACT cohort and TP rules from the model profile and config.
+The cohort is layers, bands, vocab, prefix ids, scored positions, prefix-row handling and the input contract.
+GLM-5.3-Flash resolves to the exact running-measurement values (`glm_paths_identical`).
+Corrected 2026-10-08 (issue 2427): the cohort carries `local_prefix_rows="excluded"` and `input_contract="prefixed_514"`; the guard rejects a cohort that lacks or changes them.
+No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_frontier_profile_adapter.py`.
+
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
@@ -4684,6 +5001,17 @@ it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
 
+Re-stamped 2026-10-07 (PQ #2375, references #1301 and #1147, CEO D32):
+the AURA checkpoint producer comparison treats Git diff status one as source
+provenance. `aura_cost._checkpoint_git_commit` sends only this mismatch to
+`dev_mode.seal_check`. Development mode prints `[DEV-MODE]` and returns the
+resolved commit. Certified mode keeps the original exception and message.
+Git execution errors, timeouts, unresolved commits and malformed overrides
+still refuse in both modes. Explicit commit overrides keep their existing
+behavior. No checkpoint is archived, recomputed or rewritten. Byte integrity
+and mathematical checks stay unchanged. The pipeline topology stays unchanged.
+Tests: `tests/test_aura_checkpoint_resume_identity.py`.
+
 Re-stamped 2026-10-05 (PQ #2302, CEO D32): selected capture metadata,
 source digest stat reuse, and paired-rate trade consumers follow the same
 existing default-on policy. An owned capture snapshot keeps its original
@@ -5963,11 +6291,12 @@ prewrite per group of files it creates (extension, inputs, manifests,
 records, launch), writes them first-writer as before and commits them with
 `produced_output.commit_origin_batch`; a later action can declare them with
 `origin_batch_manifest`. Without the flag both tools write exactly as before,
-including inside a test shard. `--residency stage` is required, not a tuning
-choice: PrismaBuild sets `PRISMABUILD_RESIDENCY_MAP` only for an action with a
-residency plan, and the produced-output binding derives the queue root from
-it. The preparation's reads are plain file reads, so the staged copy is not
-yet what they read. Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
+including inside a test shard. The preparation still declares staged input
+residency, but produced-output queue discovery does not depend on it:
+the allowlisted staged-lease seam prefers `PRISMABUILD_QUEUE_ROOT` and
+owns the legacy residency-map path rule. The preparation's reads remain plain
+file reads, so the staged copy is not yet what they read.
+Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
 hook shows every file the generator opens is in its manifest),
 `tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
 published generation pinned in `tests/pb_runtime_generation_pin.json`: every file
@@ -15626,6 +15955,12 @@ from completed measured Tessera anchors** (#322). The explicit
 its fleet receipts, merged scalar payload/journal, full census and canonical
 token/capture artifacts. Only journaled measured wire cells enter the exact
 per-Linear format plan; interpolated MSE rows never become joint prices.
+Admission requires the campaign `inputs` mapping and a shape-only
+`canonical_capture` path/SHA256 pair for every plan command, including
+`synthesize`, which loads neither model nor capture payloads. Bound head-walk
+inputs are shape-checked without reading their files; a Stage B subset remains
+legal at plan load, while the anchor walk names every missing chain binding.
+The synthesis census read also refuses a missing binding by name before work.
 Preparation derives the producer's encoding identity from actual streamed source
 weights and original prefetched Hessians, verifies original wire bytes, and
 requires their decoded BF16 values to equal original PWC shards (see the
@@ -16542,6 +16877,14 @@ marginal pricing without a paired baseline and default `z=0` prices stay
 unchanged. CPU fixtures in `tests/test_paired_rate_trade.py` qualify this source
 policy, not corrected model prices, held-out KL, GPU execution or #2281.
 
+Re-stamped 2026-10-08 (#2288): menu pruning on expert dominance applies only
+when the priced decision group covers its complete routed layer. A
+subgroup-scoped verdict stays in provenance and reprices the option without
+pruning it. The complete-assignment exact filter and the final emission guard
+refuse genuinely dominant trades. A baseline member whose expert identity
+cannot be established blocks pruning the same way (R1): the menu never
+certifies a shortened roster.
+
 Re-stamped (2026-09-05, `codex/two-anchor-bootstrap`) for campaign
 bootstrapping from two endpoints (§4.10). A requested initial count of one
 or two retains both endpoints; subsequent rounds use the existing widest-gap
@@ -16934,6 +17277,69 @@ the tree was and stays clean; what changed is that the pin now holds the shape
 it claims to hold. The census's own docstring names what it does not cover
 (aliased or dispatched calls, a swallow one frame up, computed exception
 classes, callers outside `prismaquant/`), since it is cited as future-proofing.
+
+Re-stamped (2026-10-05, `PerUnitRates967.pq2319-allocator-export`, PQ #2319)
+for **the allocator spending the byte budget at per-unit routed granularity**
+(§4.10; the D36 ruling that the corrected T-8 build's 188,331,767 B headroom
+must fill once the wire is expressible — RobTand/tessera#967). The price
+surface was per unit all along (11,232 routed rows for the 13 up-only layers,
+262,144 B per R1024→R1088 wire delta); the export path could only express
+picks whole per layer stack, so the corrected all-rates allocation under the
+EXL3 cap was arithmetically empty. Three owners move together:
+
+- `tessera_expert_projection.select_priced_unit_upgrades` consumes the
+  campaign table's exact per-unit rows (`predicted_dloss`, `wire_bytes`) and
+  a HARD price-row wire-delta byte cap: exactly one best-fitting marginal per
+  recompute, ordered by ascending predicted_dloss delta per added wire byte
+  (ties by unit then format; a total order, so row insertion order never
+  moves a pick), until no eligible single-unit upgrade fits. Same grid only
+  -- a stack's units keep their family/body/plane and differ only in rung;
+  downgrades, same-bytes moves, BF16/non-Tessera baselines and units priced only at stack
+  granularity stay grouped where they were. An explicit `reserve_bytes` comes
+  off the cap before any pick. The record states its currency
+  (`price_row_wire_delta_bytes`) and sets `whole_artifact_bytes_claimed`
+  false: the whole-artifact accounting is the export's own exact owner, and
+  body rows alone never claim it.
+- `require_unit_assignment` replaces `require_stack_uniform_assignment` as
+  the one owner of the executed-stack selection rule: a stack whose units
+  share one rung keeps the stack-uniform stamps byte for byte; a mixed stack
+  returns the complete per-unit member map and is expressible only when the
+  INSTALLED runtime publishes `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 — read straight from
+  the packaged table by
+  `tessera_runtime_contract.packaged_routed_unit_capability` (exact
+  five-field block, version and block both refusing by name; the dev pin, the
+  serving pin and every admission answer are untouched). Without it the mixed
+  stack refuses by unit, stack and required version. The allocation block
+  carries the mixed map as `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`) beside the stack formats, with
+  exactly the selected rungs' receipts; the export lane and the census close
+  verify their selection against that stamp the way they verify the
+  stack-uniform one.
+- `tessera_plan_writer.stack_plan` emits the plan's `unit_q256` overrides on
+  a mixed stack entry — the entry keeps the producer-planned `q256` (the
+  carried projection's request) and names only the leaves that differ, so a
+  stack-uniform plan is byte-identical to what it wrote before; mixed
+  Tessera/BF16 leaves and mixed grids still refuse.
+
+The post-selection application belongs to
+`tessera_lane.allocation_routed_unit_rates`, reached through the existing
+`_allocation_lane()` / `lane_spec` plugin seam. Core passes its canonical
+format and artifact-pricing callbacks and never imports the Tessera lane;
+the final whole-artifact stamp remains owned by the existing footprint rule.
+
+Unit source records, receipts, wire bytes and framing are unchanged:
+`check_expert_wire_receipt` / `verify_expert_wire_record` keep their
+correctness refusals, and the packed-serving-group DP route, production
+admission and every default are unchanged. Gate:
+`tests/test_tessera_per_unit_rates.py` (fixture = the byte-identical
+corrected-derivation price table, sha256 `43144ce9…`; the 718-pick fill of
+188,331,767 B at 262,144 B per upgrade is the derivation's own arithmetic)
+plus the migrated `tests/test_tessera_expert_projection.py` selection-rule
+test; pre-fix red through PB (key `137d610a…`, 21 failed, unchanged v56 SDK):
+missing `select_priced_unit_upgrades` / `require_unit_assignment` /
+`packaged_routed_unit_capability`, and the migrated owner test's
+`AttributeError`.
 
 Re-stamped (2026-09-05, `claude/pq-gates`) for **the export seal's
 capture-context roster read from Tessera rather than typed** (§5.7;
@@ -24445,20 +24851,31 @@ Two properties make the numbers comparable with the rest of the menu:
   block verbatim, the producer's `tessera_expert_projection` it was priced
   under, `tessera_expert_wires` holding for every projected unit the receipt
   of exactly the rung selected (checked against that unit's projection and
-  rung), `tessera_expert_stack_formats` (one format per executed stack) and
-  `tessera_expert_wire_dir`. A projected unit the assignment does not place,
-  a stack given different rungs, or a selected rung with no priced wire is
-  refused by name before the layer config is written; a stock table adds
-  nothing.
+  rung), `tessera_expert_stack_formats` (one format per stack whose units
+  share one rung) and `tessera_expert_wire_dir`.  A stack whose units carry
+  different rungs of the producer's served E4M3 grid is carried per unit
+  under `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`, complete member map per mixed
+  stack) and only when the installed Tessera runtime publishes the per-unit
+  capability — `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 (PrismaQuant #2319);
+  a stack-uniform world emits no unit-rungs block and keeps every spelling it
+  had.  A projected unit the assignment does not place, a partly selected
+  stack, a mixed stack under a runtime without the capability, a mixed stack
+  off the served E4M3/BF16 families, a mixed stack whose rungs span more than
+  one grid, or a selected rung with no priced wire is refused by name before
+  the layer config is written; a stock table adds nothing.
 
 * **The export lane hands the exporter the priced bytes (PrismaQuant #183).**
   `require_assignment_scope` re-binds the selected routed expert units to the
   carried projection (`_carried_expert_projection`) before it resolves any
   route: a unit the producer did not project, a source tensor in a shard the
-  producer did not hash, a partly selected or split-rung stack, a
-  `tessera_expert_stack_formats` stamp that disagrees with the selection, a
-  selected rung with no receipt, or a priced blob whose bytes are not the
-  receipt's — each refused by name (`expert projection: ...`). The producer's
+  producer did not hash, a partly selected stack, a stack-uniform stamp that
+  disagrees with the selection, a mixed per-unit stack whose
+  `tessera_expert_unit_rungs` stamp is absent or disagrees (expressible only
+  under the installed v57 per-unit capability, PrismaQuant #2319), a selected
+  rung with no receipt, or a priced blob whose bytes are not the receipt's —
+  each refused by name (`expert projection: ...`). The producer's
   record is what attests the executed unit here, so a **predicated
   `routed_moe` cell resolves** on the producer's geometry rather than being
   refused for lacking one; dense units keep the source-member refusal, which
@@ -26220,6 +26637,242 @@ re-render, it is the render the gate declined to keep.
   silently produce an all-raw table stamped as LDLQ.
 
 ## 7. Validation & ship gates
+
+### 7.0 Configured ship-gates action (D50, #2413)
+
+`python -m prismaquant.ship_gates --config FILE --output JSON` runs one
+ordered stage sequence inside a PrismaBuild action. It submits no child jobs.
+The `prismaquant.ship_gates/1` configuration names the artifact, topology,
+serving image, input files and every stage. The existing model profile owns
+model structure. `gold_engine_options` validates the explicit topology.
+The runner does not assume one tensor-parallel rank.
+
+The required stage set is the artifact card's `required_slots`, plus
+`offline.g3` and `task_suite`. A missing or duplicate stage is a refusal.
+The existing lane spec and card verifier remain the gate owners. The Tessera
+lane still owes eager, graph, census, trace, the numeric ship gate, served KL,
+served PPL and the applicable byte-matched uniform control. This runner changes
+no architecture roster, runtime pin, admission rule or numerical default.
+
+Versioned configuration drives `prismaquant.g3_v2` and `prismaquant.task_suite`.
+Each module writes `prismaquant.quality_stage/1` evidence. The G3 configuration
+names the protocol, tokenizer, panel, teacher and candidate. GLM protocol
+version two keeps `[gMASK]<sop>`, 25 windows and 2047 scored positions per window.
+
+The streamed candidate reuses the model profile, source prefetch,
+`ProductionWeightCache` and resident window. Offline decoded KL stays separate
+from served `gold.kl`. Missing criteria allow measurement but give `not_evaluated`.
+`quality_stage.verify_result` replays criteria. The job requires a passed replay,
+not a written pass flag.
+
+`g3_v2.verify_g3_result` verifies owned KL and Boolean agreement arrays through `read_bound`.
+The producer and replay use `g3_numerics.g3_summary` for all four metrics, counts and per-window summaries.
+Missing arrays, corrupt bytes and a summary that differs from those arrays refuse in both modes.
+An edited metric and a matching edited gate cannot bypass that numerical replay.
+Replay runs no model inference.
+
+The whole configuration SHA and candidate input provenance use the existing `seal_check`.
+Default dev mode stamps drift and retains stored data. Schema, paired population,
+owned-byte, numerical and gate checks remain unconditional.
+
+The task backend is HF-only and uses `lm-eval[hf]` 0.4.12.
+It requires a current checkpoint that its Hugging Face model classes can load.
+The shared HF capability guard refuses unsupported declared formats before preflight or measurement.
+The HF backend does not load Tessera serving bytes and cannot prove native task quality.
+Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
+
+The four task-suite test modules carry the `task_suite` marker.
+Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
+The required gate uses `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+Its recorded action is `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859`; receipt `1ffffc4741d48ad48592027103921839394489c1d40568afe8e44b939d3e1bfb` reports 76 passes and zero skips.
+An ordinary skip does not replace that required gate. The gate must run all four modules and report zero skips.
+
+Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
+The receipt keeps task configurations, versions, model identity, samples, raw results and numerical metrics.
+Fixed task metadata is not a metric. Numerical metrics must stay finite.
+Metadata-only results refuse.
+
+CPU evidence cannot establish GLM quality, served quality or whole-instrument equivalence.
+
+The quality owner verifies owned raw-result bytes and reuses `task_metrics` for decision replay.
+Task population, sample policy, seeds, few-shot counts and task definitions remain correctness checks.
+Default dev replay keeps stored measurements and does not rehash checkpoint or tokenizer data solely for provenance.
+The runner retains the owner's `dev_uncertified` stamp and stored metrics.
+Its aggregate result also carries the existing dev stamp. These metrics do not measure replacement bytes.
+
+Certified fixtures compare the existing model content identity and tokenizer file metadata.
+Same-path config, weight and tokenizer replacements refuse. Fixture evidence does not certify a real artifact.
+
+The gold stages use `measure_vllm_full_kl` and
+`measure_vllm_wikitext_ppl`. The latter reads the existing generic
+`model_wikitext_inputs/2` contract. It adds no corpus normalization path.
+
+Valid cache fingerprint drift uses the existing D32 provenance stamp in dev mode.
+Certified fixtures retain the provenance refusal. Corpus hashes, token values,
+revision, sampling, closed fields and own-byte integrity remain correctness checks.
+
+Opt-in `--preflight` reads real inputs without loading vLLM. It reports
+`runtime_qualification: not_run`. The job's CPU preflight cannot fill a
+serving gate. `--verify-only` replays existing evidence and refuses missing
+quality output or card slots. Each job result retains stage status, process
+exit, log path, output hash, device population and measured source.
+
+`shipcard.verify_gold_producer_record` owns producer-record intake. It accepts
+the generic `prismaquant.gold_record/1` interchange and the unchanged live
+TR3 interchange. It refuses unknown schemas, wrong slots, invalid metrics,
+unknown speculative decode, and a different control artifact path. The CLI
+has no model-specific producer dispatch. Unused DSv4 card constants are removed;
+archived receipts and live GLM measurement tools are unchanged.
+
+PrismaBuild's native gang has one start barrier. It has no per-stage ordering
+or successful-peer teardown. A multi-host sequence needs an existing rank
+lifecycle driver from the serving owner. `gold_headless_peer` is a launcher,
+not that driver. The kernels rank driver is not `gold_headless_peer`.
+Full ordered stages and peer teardown remain a production prerequisite.
+No multi-host gold topology is qualified here. Item six owns export setup,
+construction-census policy, partitions and the architecture roster. Consumers
+use `tessera_export_lane.export_setup`,
+`lane_spec_for_container("tessera").wired_architectures`, and
+`export_partition.whole_layer_partitions`. Cards cannot admit an architecture.
+CPU setup keeps `runtime_qualification: not_run` and cannot fill a runtime census.
+
+#### 7.0.1 Prepare the configured action
+
+Export the artifact and open its canonical `shipcard.json` first.
+Keep job outputs outside the artifact. Use a new job result path.
+Existing inputs, results and artifact files are not output destinations.
+Actual stage outputs and logs must remain distinct from all protected files.
+The runner derives preflight paths once and creates logs exclusively.
+
+The configuration schema is `prismaquant.ship_gates/1`. Supply these fields:
+
+- `schema`: the version above.
+- `artifact`: the exported checkpoint directory.
+- `topology`: explicit `tensor_parallel_size` and `nnodes`, plus the required stock gold-engine options.
+- `serve_image`: the actual immutable serving image reference.
+- `inputs`: scientific configurations, teacher payload and metadata, token inputs and existing evidence files.
+- `stages`: an ordered list with the card's `required_slots`, `offline.g3` and `task_suite` exactly once.
+
+Multi-node topology also needs explicit rank, master address, port and both
+multiprocessing backend selections. PrismaBuild's data manifest must declare
+shared inputs in their read order.
+
+Each stage has a unique `output` path. Quality stages also have a `config` path.
+Gold stages have an `args` array. The runner owns their model, output, image
+and topology arguments. Other stages have an `argv` array and `record` path.
+
+Use `record: "{shipcard}"` when a real producer fills the canonical card.
+Use `record: "{output}"` when it writes a slot record for the existing verifier.
+
+Whole-argument substitutions are `{artifact}`, `{shipcard}`, `{output}`,
+`{image}`, `{tp}` and `{nnodes}`. Other arguments stay literal.
+Use actual producer commands. Do not replace missing evidence with a pass flag.
+
+Use the existing `model_wikitext_inputs/2` producer for generic models.
+Pass its independent file hash with `--wikitext-inputs-sha256`.
+Do not normalize WikiText a second time. Served KL needs the stored teacher
+and its metadata. Use `--score-positions all`; a final-position screen cannot close that slot.
+
+| Stage | Existing producer or verifier | Required evidence |
+|---|---|---|
+| `offline.g3` | `python -m prismaquant.g3_v2 --config FILE --output JSON` | Paired teacher panel, bound candidate and explicit criteria |
+| `task_suite` | `python -m prismaquant.task_suite --config FILE --output JSON` | Current HF-loadable artifact, tokenizer, tasks, sampling and explicit criteria |
+| `native_export.eager` | Lane eager producer; native compressed-tensors uses `validate_native_export --shipcard` | Actual eager generation record |
+| `native_export.graph` | Lane graph producer; native compressed-tensors uses `validate_native_export --no-enforce-eager --shipcard` | Actual graph record under the lane contract |
+| `ship_gate` | `validate_quantized_model --base-url URL --model-name NAME --artifact-dir DIR --shipcard CARD` | Numeric and boundary ledger from the bound live endpoint |
+| `gold.kl` | Runner-owned `measure_vllm_full_kl` student entry point | Stored teacher, metadata, all-position protocol and observed no-spec execution |
+| `gold.ppl` | Runner-owned `measure_vllm_wikitext_ppl` | Generic token payload and independent file hash |
+| `route.sweep`, when declared | `validate_native_export --route-sweep-out`, then `shipcard_cli fill-route-sweep` | Actual served sweep per configured rank |
+| `route.census`, when declared | Public Tessera census producer, then `shipcard_cli fill-route-census` | Complete census and exact allocation binding |
+| `route.trace`, when declared | Lane trace capture, then `shipcard_cli fill-route-trace` | Actual trace per rank and explicit rank count |
+| `uniform_control`, when required | Installed `tessera.uniform_control verify`, then `shipcard_cli fill-control` | Producer block and the control checkpoint's own served gold record |
+
+Keep lane-specific route slots distinct. Keep graph, speculative-decode,
+calibration, artifact, runtime and byte-matched control checks in force.
+A serving deployment is an explicit input. Its endpoint must run on the
+admitted host under the declared image and artifact. Unobserved service state
+is not evidence. A lane producer may need its serving owner's lifecycle driver.
+
+#### 7.0.2 Submit and retain evidence
+
+Inspect the published client's `--help` before submission.
+Run disk admission on every eligible host. Retain its complete JSON for the
+checkout, output, scratch and CAS mounts. Supply actual resource demand for
+the configured workload, including the controller and concurrent children.
+The examples use operator-supplied demands; they are not workload requirements.
+
+`CLIENT`, `CHECKOUT`, `CONFIG`, `RESULT`, `DATA_MANIFEST` and interpreter
+variables name actual operator paths. CPU preflight uses the same entry point:
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd "$CHECKOUT" --tag x86 --cpus "$CPUS" --demand "mem_gb=$HOST_MEMORY_GB" \
+  --max-attempts 1 --timeout-s "$TIMEOUT_S" --data-manifest "$DATA_MANIFEST" \
+  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
+  --env OPENBLAS_NUM_THREADS=1 --env CUDA_VISIBLE_DEVICES= --env TMPDIR=/tmp \
+  --detach -- "$CPU_PYTHON" -m prismaquant.ship_gates \
+  --config "$CONFIG" --output "$RESULT" --preflight
+```
+
+After CPU preflight succeeds, the single-host production command uses the same
+configuration and module. Declare aggregate CPUs, host memory and the GPU
+subset from the actual workload. The serving image must already exist on an
+eligible host. `IMAGE` is immutable; `SERVING_PYTHON` names its interpreter.
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
+  --cwd "$CHECKOUT" --tag gb10 --cpus "$CPUS" --gpu \
+  --demand "mem_gb=$HOST_MEMORY_GB" --gpu-memory-gb "$GPU_MEMORY_GB" \
+  --container-image "$IMAGE" --max-attempts 1 --timeout-s "$TIMEOUT_S" \
+  --data-manifest "$DATA_MANIFEST" --residency stage \
+  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
+  --detach -- "$SERVING_PYTHON" -m prismaquant.ship_gates \
+  --config "$CONFIG" --output "$RESULT"
+```
+
+This example grants no GPU priority. D49 still sets GPU order.
+A single-host declaration does not cover the two-Spark target.
+
+The HF-only task backend cannot complete native task quality for Tessera bytes.
+Keep that task limitation explicit in a Tessera production plan.
+An HF proxy score cannot replace current-artifact native task evidence.
+Serving-backed Tessera tasks require a backend with the native vLLM plugin.
+That backend remains a production prerequisite; this HF path does not provide native qualification.
+
+For multi-host submission, use published `pbgang.py --manifest M --cwd CHECKOUT`.
+Each member needs explicit topology, resource, image and data declarations.
+The kernels-owned `rank_window.py`, `managed_window.py` and `tp2_recipe.py`
+own rank lifecycle. Their reported recipe covers eager, graph, KL probe and
+determinism. Full route, served PPL, offline quality and complete one-action
+coverage remain unverified. The native gang orders no stages and stops no successful peers.
+
+Do not fork that lifecycle or add another transport.
+Full ordered stages and peer teardown remain explicit production prerequisites.
+The runner refuses multi-host execution without that complete lifecycle.
+CPU preflight can inspect its topology without qualifying it.
+
+Retain each action key at submission. Start the published completion client:
+
+```bash
+"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbwait.py \
+  "$ACTION_KEY" --wait-s "$WAIT_S" --json
+```
+
+Run that client under the existing supervisor. Do not poll with an agent.
+Inspect the native ending, process exit, logs, result claim, CAS payload and
+receipt. Keep failed actions. A submission is not completion.
+
+The runner atomically writes `prismaquant.ship_gates_result/1` after each stage.
+It retains process exits, output and log paths, file hashes, source and device
+population. Compare retained files with the hashes printed in stdout.
+PrismaBuild seals input identity, not arbitrary output files.
+A final pass needs every quality criterion and required card slot.
+Publication still uses the existing `publish_artifact` gate.
+
+Use `--verify-only` to replay stored quality and card evidence without new inference.
+Missing evidence still refuses. A CPU preflight, selected tests or primitive
+parity does not establish serving, model quality or multi-host behavior.
+
 
 ### 7.1 What runs where
 
@@ -31808,3 +32461,39 @@ this is not the #1962 estimator fix, a repricing, or an issue closure. Design:
 The dense per-invocation oracle explicitly enables calibrated activation
 clipping, matching its independent clamp rather than inheriting a campaign
 or worker process setting. No production activation policy is changed.
+
+## Explicit GLM projection source owners
+
+The GLM profile uses the declared lane plugin for fused ownership.
+The Tessera lane reads fused members from the runtime's dense_ownership module.
+It uses the existing parsed source config to identify KDA layers and standalone MLA queries.
+No second unit schema or member table exists in PrismaQuant.
+The existing pin-lift controls select commissioned projection units without a default change.
+The quality population derives its shared-expert parent from census names and the same profile fused-owner seam.
+It keeps no duplicate runtime group table.
+
+
+The source router has a two-dimensional parameter and a stock FP32 Linear operation.
+The profile can expose that actual parameter owner only when an explicit pin lift selects it.
+The campaign uses the existing module pre-hook and selected weight intake.
+It does not replace the source module or change its forward, dtype, bias, or tensor name.
+
+The campaign calls projection_routes.direct_consumer_resident_bytes for selected direct consumers.
+Only the DSA weights_proj member pays for its retained FP32 tail.
+The MLA kv_b_proj member pays for one decoded BF16 matrix.
+These charges increase memory_bytes, not wire_bytes.
+The exported fused owner pays for each retained buffer once.
+This price does not claim a compressed absorbed BMM route.
+
+The direct activation contract separates the DSA head from its key projection.
+The head screen uses FP32 inputs without A8 activation quantization.
+The key keeps its dense activation contract.
+MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
+
+Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
+Both direct consumers refuse quantized input observations in development and certified modes.
+
+The producer reads direct weights with projection_routes.direct_consumer_weight.
+The runtime and producer use the same folded T-16 arithmetic.
+The publication cache preserves the DSA head values in FP32.
+Its publication byte charge uses four bytes per element; other units keep the existing BF16 cache path.

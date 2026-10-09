@@ -980,8 +980,7 @@ def _resolve_nvfp4_input_global_scale(
     """Legacy native-export compatibility delegate.
 
     The uncalibrated fallback preserves existing native artifact bytes.  Its
-    presence is also why this exporter does not claim the versioned Gridbook
-    fused-W4A4 activation contract.
+    presence is also why this exporter claims no versioned fused contract.
     """
 
     return _nvfp4_activation_contract.resolve_input_global_scale_value(
@@ -2473,12 +2472,12 @@ def _packed_expert_stage_attestation(
     """Attest one packed FusedMoE module's w13/w2 stages (ROADMAP K0.2).
 
     This legacy container deliberately publishes no
-    ``execution_contracts.nvfp4_w4a4`` record (its activation scalars are
-    optional/defaultable and cannot carry the strict Gridbook fused-W4A4
-    claim), but it must not be able to emit a routed-MoE artifact whose two
-    stages were not both calibrated.  The section is built by the same shared
-    builder both CB exporters use, from the same calibration-source vocabulary,
-    so all three emit paths agree on stage identity, framing, and digests.
+    ``execution_contracts.nvfp4_w4a4`` record: its activation scalars are
+    optional/defaultable and claim no versioned fused contract.  It still
+    must not emit a routed-MoE artifact whose two stages were not both
+    calibrated.  The section is built on the shared ``routed_moe_stage``
+    parser and the same calibration-source vocabulary, so stage identity,
+    framing and digests stay comparable.
 
     Returns ``None`` for anything that is not a packed routed-expert stage.
     Raises when the sibling stage of the same FusedMoE module has no calibrated
@@ -7754,10 +7753,10 @@ def _fused_modules_mapping_for_profile(profile) -> dict[str, tuple[str, ...]]:
 
     getter = getattr(profile, "fused_sibling_leaf_mapping", None)
     if callable(getter):
-        try:
-            mapping = getter()
-        except Exception:
-            mapping = None
+        # A failed lookup propagates. Falling through would return a mapping that
+        # lacks the profile's own fused groups, and the export would skip the
+        # fill-in of fused siblings into `ignore` without an error (#2443).
+        mapping = getter()
         if mapping:
             return {
                 str(fused): tuple(str(sibling) for sibling in siblings)
@@ -7832,9 +7831,8 @@ def build_quantization_config(
 
     This legacy compressed-tensors container intentionally does not publish
     ``execution_contracts.nvfp4_w4a4``.  Its optional/defaulted activation
-    scalars preserve existing native artifact bytes but cannot attest the
-    strict Gridbook fused-W4A4 activation contract; only the versioned CB
-    export path may emit that record after complete calibration.
+    scalars preserve existing native artifact bytes but claim no versioned
+    fused contract; no live exporter emits that record.
     """
     from .model_profiles import DefaultProfile
     profile = profile or DefaultProfile()

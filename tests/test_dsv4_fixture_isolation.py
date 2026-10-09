@@ -18,6 +18,10 @@ from test_layer_streaming_mxfp4_isolation import native_dsv4_session
         "test_dsv4_real_topology_passes_the_gate_end_to_end",
     ), id="model-walk-export-gate-2276"),
     pytest.param((
+        "../test_dsv4_nested_rotary_init.py::"
+        "test_meta_skeleton_materializes_all_rotary_buffers",
+    ), id="nested-rotary-2279"),
+    pytest.param((
         "../test_grouped_linear_fisher.py::test_real_dsv4_wo_a_gets_a_priced_probe_row",
     ), id="grouped-fisher-1959"),
     pytest.param((

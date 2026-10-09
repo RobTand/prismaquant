@@ -32,7 +32,8 @@ def test_selected_snapshot_reads_only_requested_dense_weights(tmp_path, monkeypa
 
     monkeypatch.setattr(sm, "_read_layer_to_device", observe)
     profile = SimpleNamespace(per_expert_moe_regex=lambda: None,
-                              concat_merge_groups=lambda: ())
+                              concat_merge_groups=lambda: (),
+                              is_dense_parameter_owner=lambda _name, module: isinstance(module, torch.nn.Linear))
     from prismaquant import routed_experts
     monkeypatch.setattr(routed_experts, "profile_declared_packed_expert_projections", lambda *_: [])
     monkeypatch.setattr(routed_experts, "refresh_packed_expert_projections", lambda *_: [])
@@ -337,7 +338,8 @@ def test_selected_snapshot_walks_an_uncapped_layer_cache(tmp_path, monkeypatch):
     path = tmp_path / "weights.safetensors"
     save_file(source, path)
     profile = SimpleNamespace(per_expert_moe_regex=lambda: None,
-                              concat_merge_groups=lambda: ())
+                              concat_merge_groups=lambda: (),
+                              is_dense_parameter_owner=lambda _name, module: isinstance(module, torch.nn.Linear))
     from prismaquant import routed_experts
     monkeypatch.setattr(routed_experts, "profile_declared_packed_expert_projections", lambda *_: [])
     monkeypatch.setattr(routed_experts, "refresh_packed_expert_projections", lambda *_: [])

@@ -373,12 +373,14 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: contract v56 / 47f180ef, lane schema v11. Root graph_receipt is v2 with
 #: all nine scope fields. Schema v2 remains one producer/serving commit;
 #: no code-digest/v3 activation, compiled-cell or release-card waiver.
+#: Re-pinned 2026-10-07 to fca4c6ce0 (Tessera #1033, PQ #2426).
+#: Contract v60 retains the v56 cells and extension rows.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "2dbac1910c88254d9c6391f02a34c4b07e516803"
+    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+    "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -388,7 +390,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "2dbac1910c88254d9c6391f02a34c4b07e516803"
+    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

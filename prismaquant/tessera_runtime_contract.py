@@ -131,6 +131,7 @@ __all__ = [
     "ACTIVATION_QUANTIZER_SCHEMA_V2",
     "contract_answer",
     "packaged_activation_quantizers",
+    "packaged_routed_unit_capability",
     "require_activation_quantizer_attested",
     "describe_dev_pin",
     "dev_pin_requested",
@@ -420,14 +421,16 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: v56 uses lane schema v11, rule-derived window coverage, four extensions
 #: and 22 eager cells. The literal is the complete existing-reader projection
 #: from PB bb291153; no compiled or full-artifact qualification is inferred.
-TESSERA_DEV_PIN_COMMIT = "2dbac1910c88254d9c6391f02a34c4b07e516803"
+#: Re-pinned 2026-10-07 to fca4c6ce0 with contract v60 (PQ #2426).
+#: The installed contract supplies the generated admission answer.
+TESSERA_DEV_PIN_COMMIT = "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
+    "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -533,6 +536,8 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: answer, not a census alias. Eight additional eager cells scope image
 #: 5be13705; the routed MMA extension and published lane predicates move.
 #: D13 promotion still requires exact-source performance evidence and review.
+#: v60 review (PQ #2426): PB da8fbb6d706a regenerates the installed answer.
+#: Its diff from this literal is empty. The admission values remain unchanged.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
  'lane_schema': 'tessera.lane-eligibility.v11',
  'required_regimes': ['batch', 'decode'],
@@ -17692,6 +17697,7 @@ class TesseraRouteCell:
     runtime_serving_source_sha256: str = ""
     covered_rungs_q256: frozenset[int] = frozenset()
     run_tables: tuple[tuple[int, ...], ...] | None = None
+    runtime_kernel_build: str = ""
 
     def covers_rate(self, rate_q256: int) -> bool:
         return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
@@ -18096,7 +18102,8 @@ def contract_answer(contract: "TesseraContract") -> dict:
                 [list(launch) for launch in sorted(cell.executes)],
                 sorted(cell.residency_modes),
             ] + ([{"image": cell.runtime_image,
-                   "execution_modes": sorted(cell.execution_modes)}]
+                   "execution_modes": sorted(cell.execution_modes),
+                   **({"kernel_build": cell.runtime_kernel_build} if cell.runtime_kernel_build else {})}]
                  if contract.requires_serving_context else [])
             # v6's per-cell runtime versions and evidence. Both are ANSWER,
             # not identity: ``cell_evidence_admits`` decides on the evidence
@@ -18919,6 +18926,107 @@ def packaged_activation_quantizers() -> tuple[str, dict]:
     return sha, _parse_activation_quantizers(payload, str(contract_path()))
 
 
+#: The contract version that first publishes per-unit (one expert projection)
+#: rung assignment for routed expert stacks (PrismaQuant #2319; the shared
+#: D36 contract with RobTand/tessera#967).  A mixed-rate routed stack is
+#: expressible only when the INSTALLED runtime publishes at least this
+#: version AND the exact capability block below; both checks refuse by name,
+#: and neither moves the dev pin, the serving pin or any admission answer.
+ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION = 57
+#: ``producer_interface.routed_units`` -- the exact block the v57 contract
+#: publishes, transcribed here and compared field for field.  A renamed or
+#: reworded field is a different capability, not this one.
+ROUTED_UNIT_ASSIGNMENT_SCHEMA = "tessera.routed-unit-assignment.v1"
+ROUTED_UNIT_ASSIGNMENT_BLOCK = {
+    "schema": ROUTED_UNIT_ASSIGNMENT_SCHEMA,
+    "plannable_unit": "expert_projection",
+    "plan_field": "unit_q256",
+    "q256_spelling": "int_or_per_role_or_expert_role_matrix",
+    "production_admission": "requires_lane_qualification",
+}
+
+
+def packaged_routed_unit_capability() -> tuple[str, dict]:
+    """The installed runtime's per-unit routed assignment capability.
+
+    Read straight from the packaged JSON through :func:`contract_path`, like
+    :func:`packaged_activation_quantizers`, and deliberately NOT through the
+    dev pin: the pin's reviewed answer is a v45-era admission answer, and a
+    capability read must refuse on the CAPABILITY (this version plus this
+    block), never on a pin nobody moved.  There is no serving-pin leg here
+    either -- which bytes installed is not what this gate decides; the block
+    itself carries ``production_admission`` and nothing here relaxes it.
+
+    Returns ``(contract_sha256, capability_block)``.  Refuses, naming the
+    required contract version, when no tessera package is importable, the
+    packaged table is unreadable, ``contract_version`` is below
+    :data:`ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION`, or the published block
+    is not exactly :data:`ROUTED_UNIT_ASSIGNMENT_BLOCK`.
+    """
+    from importlib.resources import as_file
+
+    try:
+        with as_file(contract_path()) as path:
+            raw = Path(path).read_bytes()
+    except (ImportError, ModuleNotFoundError, OSError, AttributeError,
+            TypeError, ValueError) as exc:
+        raise TesseraContractError(
+            "no installed tessera.serving package to read a per-unit routed "
+            f"assignment capability from ({exc}); mixed-rate routed stacks "
+            "require the Tessera runtime contract "
+            f"v{ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION} with "
+            f"producer_interface.routed_units ({ROUTED_UNIT_ASSIGNMENT_SCHEMA})"
+        ) from exc
+    sha = bytes_sha256hex(raw)
+    where = str(path)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TesseraContractError(
+            f"{where}: packaged contract is not readable JSON ({exc}); "
+            "mixed-rate routed stacks require the Tessera runtime contract "
+            f"v{ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION} with "
+            f"producer_interface.routed_units ({ROUTED_UNIT_ASSIGNMENT_SCHEMA})"
+        ) from exc
+    version = payload.get("contract_version")
+    if type(version) is not int or version < ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION:
+        raise TesseraContractError(
+            f"{where}: contract_version {version!r} does not support per-unit "
+            "routed assignment; mixed-rate routed stacks require the Tessera "
+            f"runtime contract v{ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION} "
+            f"with producer_interface.routed_units ({ROUTED_UNIT_ASSIGNMENT_SCHEMA})"
+        )
+    producer = payload.get("producer_interface")
+    if not isinstance(producer, Mapping) or "routed_units" not in producer:
+        raise TesseraContractError(
+            f"{where}: publishes no producer_interface.routed_units; "
+            "mixed-rate routed stacks require the Tessera runtime contract "
+            f"v{ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION} with "
+            f"producer_interface.routed_units ({ROUTED_UNIT_ASSIGNMENT_SCHEMA})"
+        )
+    block = producer["routed_units"]
+    if block != ROUTED_UNIT_ASSIGNMENT_BLOCK:
+        if not isinstance(block, Mapping):
+            published = repr(block)
+            fields: list[str] = ["<not an object>"]
+        else:
+            published = ""
+            fields = sorted(
+                key for key in set(block) | set(ROUTED_UNIT_ASSIGNMENT_BLOCK)
+                if block.get(key) != ROUTED_UNIT_ASSIGNMENT_BLOCK.get(key))
+        raise TesseraContractError(
+            f"{where}: producer_interface.routed_units is not the per-unit "
+            f"routed assignment capability this reader requires "
+            f"({'; '.join(f'{key}: published {block.get(key)!r}, required '
+                          f'{ROUTED_UNIT_ASSIGNMENT_BLOCK.get(key)!r}' for key in fields)
+              if published == '' else published}); mixed-rate routed stacks "
+            "require the Tessera runtime contract "
+            f"v{ROUTED_UNIT_ASSIGNMENT_CONTRACT_VERSION} "
+            f"({ROUTED_UNIT_ASSIGNMENT_SCHEMA})"
+        )
+    return sha, dict(block)
+
+
 def _select_activation_attestation_set(
     table: Mapping[str, Any], *, platform: str, executing_image: str,
 ) -> "Mapping[str, ActivationQuantizerAttestation]":
@@ -19596,6 +19704,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
             covered_rungs_q256=frozenset(cell.covered_rungs_q256),
             run_tables=cell.run_tables,
+            runtime_kernel_build=cell.runtime_kernel_build,
         ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)

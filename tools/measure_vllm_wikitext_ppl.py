@@ -424,6 +424,8 @@ def main() -> int:
     add_gold_engine_arguments(parser)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--preflight", action="store_true",
+                        help="Read token inputs on CPU. Do not load vLLM or qualify a gate.")
     parser.add_argument("--dataset-cache-dir", default="/hfcache/datasets")
     parser.add_argument("--corpus-text-file", default=None,
                         help="Materialized corpus text (see "
@@ -506,6 +508,16 @@ def main() -> int:
         chunks=chunks,
         n_tokens_scored=expected_tokens_scored,
     )
+
+    if args.preflight:
+        from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+        report = {"schema": "prismaquant.gold_preflight/1", "status": "preflight",
+                  "stage": "gold.ppl", "model": str(args.model),
+                  "calibration_contract": calibration_contract,
+                  "n_tokens_scored": expected_tokens_scored,
+                  "runtime_qualification": "not_run"}
+        atomic_write_bytes(output, json.dumps(report, allow_nan=False).encode())
+        return 0
 
     # Constructing SamplingParams imports vLLM, so even that follows the full
     # corpus/token/window preflight.  No GPU memory is committed before this.

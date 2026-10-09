@@ -3,6 +3,257 @@
 ## Unreleased
 
 ### Added
+- The day-zero model intake tool and new-model runbook reuse existing profile and source metadata interfaces (#2410).
+  The central processor path writes a valid structure draft without tensor payload reads or profile registration.
+  Unsupported kinds remain explicit, and inconsistent inputs refuse before full-weight download or launch.
+  The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
+  Its central processor preflight checks the real runtime arguments without a graphics processor.
+  Native serving qualification and all production defaults stay unchanged.
+
+### Fixed
+- A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
+  Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
+  With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
+  The completeness check reported fused units as claimed by no mechanism.
+  Both now raise the lookup error. A working lookup gives the same mapping as before.
+  No format, default, gate threshold or artifact byte changes when the lookup works.
+- The capture observer retains a finished campaign when only profiler or telemetry evidence is incomplete (#2315).
+  Development mode writes `status: "complete"` with a `dev_uncertified` stamp and the missing instruments named.
+  The retained result carries no speed, energy or residency qualification.
+  Certified mode keeps the refusal and the failed status.
+  A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
+  Missing telemetry retains each actual instrument name and its exact error detail.
+  Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
+
+### Changed
+- The paired expert-dominance menu rule applies only to complete routed layers (#2288).
+  A subgroup verdict reprices its option without pruning it, and the verdict stays in provenance.
+  The complete-assignment exact filter and the final emission guard still refuse dominant trades.
+  The price arithmetic, strict-half boundary, cancellation, and all-zero behavior stay unchanged.
+- The allocation byte-identity test retains the canonical `layer.json` digest across Tessera pin moves (#2426).
+  Its fixture excludes only `contract_version` and `reviewed_contract_sha256` from the pin block.
+  The commit, read digest, read-byte comparison, contract path, and all other fields remain in the oracle.
+  The retained D13 and v60 outputs produce the same digest in the final CPU check.
+  The applicability and Pareto digests remain unchanged.
+- The Tessera pin moves to `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60 (Tessera #1033, PQ #2426).
+  The serving and development constants, legal-domain provenance, and identity snapshot move in one commit.
+  The generated admission answer remains unchanged.
+  The new producer supplies the attention projection APIs and the canonical rung-allowability API.
+  The contract retains the v56 cells and native-extension rows.
+
+  The isolated x86 interpreter leaves shared defaults, the D13 overlay, and active measurements unchanged.
+  Tests derive pin identities and cell rosters from their owners instead of duplicate version, digest, and count literals.
+  No new seal, serving result, or performance result is claimed.
+
+- The ship-gates runner uses `digests.file_sha256hex` at every call (#2413).
+  Remove the private digest helper and unused import. Keep the digest recipe and read size.
+  Consolidate unique operator instructions in ARCHITECTURE and remove the standalone guide.
+  State the HF-only task scope. Unmeasured GPU examples use operator-supplied resource demand.
+- The report publisher reuses `digests.indent2_json_file_bytes` (#2413).
+  Preserve sorted ASCII-escaped JSON, nonfinite refusal and the trailing newline.
+  Give independent ship-gates contracts domain-specific names and migrate every caller without aliases.
+  Keep the duplication ratchet and its baseline unchanged.
+- Consume the shared G3 array verifier through the quality owner (#2413).
+  Add verify-only consumer cases for edited summaries, consistent edited gates,
+  missing arrays and corrupt bytes. Preserve unconditional numerical checks.
+- Preserve the quality owner's dev replay stamp in the aggregate ship result (#2413).
+  Keep stored metrics. Add verify-only consumer regressions for owned bytes,
+  mathematical comparison and certified source replacement. No new seal gate is added.
+- Stamp generic WikiText cache provenance drift under D32 (#2413).
+  Preserve exact corpus hashes, sampling, token values and own-byte integrity.
+  Keep the certified fixture refusal and the unchanged DSv4 input path.
+- Refuse unsafe actual preflight destinations and retained runtime logs (#2413).
+  Reuse the destination validator for configured and derived paths.
+  Create logs exclusively so a later collision cannot truncate retained bytes.
+- Add one configured ship-gates action and CPU preflight (#2413, D50 item 4).
+  Keep every lane gate. Replay quality criteria through the shared quality owner.
+  Keep offline G3 separate from served KL. Record stage exits, logs and hashes.
+  Use the generic gold producer verifier for uniform controls. Remove unused
+  model constants. Live GLM measurements and serving admission stay unchanged.
+  Multi-host stage lifecycle and real served qualification remain external
+  prerequisites. No performance, energy or residency change is claimed.
+
+- The Tessera worker loads the shared partition helper only for preparation
+  (#2417, R1). Standalone help and atomic publication retain their standard-library
+  contract without that helper. The tests use the shared owner directly.
+  The ASCII escapes, final newline, source checks and partition rule stay unchanged.
+- Tessera export setup derives architecture wiring, census inputs and partitions
+  from profile capabilities and source headers (#2409, D50 item six).
+  The plan writer can emit the metadata plan. The model dispatcher exposes it
+  through a non-submit mode and replaces the fixed-count shard driver.
+  The existing exporter, construction census and native runtime checks remain
+  authoritative. This CPU work grants no runtime or serving qualification.
+- The public MTP selector now enforces canonical admission through the existing shared owners (#2364).
+  Held, unmeasured and outside-menu wires remain unavailable, even with an always-true native callback.
+  Missing or unresolved actual structure, shape, regime M or required routing also removes the option.
+  The selector retains rank-local scope, the activation build, the recipe and the table provenance.
+  The allocator and fixed-selection tool supply this scope through explicit MTP arguments.
+  Legacy emulation, anchor-only quality, exact budgets and bound wire export retain their existing contracts.
+  Scope cache keys reuse the exact strict and lax JSON profiles from the digest owner.
+  Body and MTP topology use the existing allocation lane protocol and shared scope owner.
+  Synthetic card fixtures declare a compatible Qwen3 MoE profile. Missing-profile refusals remain strict.
+  Constructor repairs remain unchanged. No identity seal is added.
+- The PQ #2364 consumer keeps measured joint rows and fractional chords in one scientific quantity.
+  Fused sums apply no extra gain or activation transfer.
+  Independent MTP selection and export use whole-bit quality anchors with exact fractional wire receipts.
+  Canonical logical candidates retain their bound chord records and report absent fractional stderr as null.
+  Measured interval consumers refuse this absent uncertainty. Native, byte, scope, and serving gates stay unchanged.
+- Canonical chord constructors refuse non-null fractional stderr, including zero (#2364).
+  Anchor stderr does not supply fractional uncertainty evidence.
+  Point-only menus remain available with null stderr. Scientific and byte checks stay strict.
+- Canonical candidates restore their frozen provenance through the existing thaw path before scientific validation (#2364).
+  Direct construction and dataclass replacement retain immutable metadata, original anchors, and both scientific currencies.
+  The original joint validator stays strict. No identity seal is added.
+- Mark the task-suite tests for the required layered gate (#2412, #2413).
+  Ordinary runs report explicit skips with the recorded receipt.
+  The task-suite gate must run the marked tests and must report zero skips.
+  Select it with `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
+- The forward-recovery proof reader and campaign resolver call the existing
+  digest owners (#2398, references #1301). The capsule tail hash calls
+  `digests.bytes_sha256hex`; the source-record check calls the same bytes
+  owner and the historical trailing-newline roster check calls
+  `digests.text_sha256hex`. File reads, stat fences, limits, JSON parsing,
+  campaign fields, geometry, identities, containment and refusal behavior
+  stay unchanged. The streaming one-MiB reader keeps its own code.
+- The forward-recovery chain tools drop the source-text scan test
+  (#2398, references #1929). The test read the builder source and its
+  string literals instead of consumer behavior. Rendered-launcher
+  identity, invalid-field checks, read bounds and pre-load mismatch
+  checks stay unchanged. No speed change is claimed.
+- The streaming MXFP4 decode builds its lookup from the existing full signed
+  table (#2401, references #1303). The lookup reads `mxfp4_widen.E2M1_VALUES`;
+  code order, the positive zero at code 8, dtype, device, nibble order,
+  scales, chunking, copy behavior and output stay unchanged.
+
+- The allocator and PACT consume canonical v3 scope, qualified chords and
+  reconciled class costs through their existing owners (#2364).
+  Chord prices retain their actual scientific quantity without another transfer.
+  Complete scope binds joint anchors to validated samples and actual coordinates.
+  Producer provenance uses the existing development-mode check.
+  Actual bytes, native admission and scientific gates remain unchanged.
+  An immutable candidate index requires no active index change.
+  Legacy metadata contracts retain the original producer interface.
+  CPU fixtures do not qualify speed, served loss or serving.
+
+- The shipcard model identity hashes its two canonical JSON texts through the
+  existing text owner (#2384, references #1301). The canonical quant-config
+  digest and the final canonical payload digest call `digests.text_sha256hex`;
+  canonicalization, scope flags, model hashes, errors, auxiliary files,
+  content checks and admission policy stay unchanged.
+
+- The shipcard model identity hashes its raw config bytes through the
+  existing bytes owner (#2394, references #1301). The config digest calls
+  `digests.bytes_sha256hex`; the read position, call count, scope flags,
+  model hashes, errors, auxiliary files, content checks and admission
+  policy stay unchanged.
+
+- The AURA checkpoint manifest writer uses the existing strict, indented
+  UTF-8 profile (#2375, references #1301). Exact-input bytes, identity digests,
+  unit order, source diagnostics and atomic publication stay unchanged.
+  The writer adds no final newline.
+
+- The AURA checkpoint producer comparison follows development-mode policy
+  (#2375, references #1147, CEO D32). A dirty producer file prints the source
+  provenance stamp and keeps the resolved commit. Certified mode keeps its
+  original refusal. Git errors and timeouts still refuse in both modes.
+  The change does not rewrite or recompute checkpoints.
+
+- The allocator serve-constraints and serving-lane tests reuse the existing
+  safetensors fixture writer from test_footprint (#2383, references #1929).
+  Fixture bytes, tensor order, costs and semantic assertions stay unchanged.
+  The serve-constraints introduction no longer cites the retired Gridbook
+  lane policy as a live document.
+
+- The native route-histogram test reuses the existing safetensors fixture
+  writer from test_footprint (#2390, references #1929). Fixture bytes,
+  tensor order, costs, route reports and semantic assertions stay unchanged.
+
+- The PACT frontier profile cohort carries the measured-consumer contract
+  (#2423, references #2427). `pact_cohort_from_profile` returns
+  `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
+  the existing adapter, and `glm_paths_identical` rejects a cohort that
+  lacks or changes them. Remaining cohort values, bands, TP rules, defaults,
+  gates and the active index stay unchanged.
+
+### Added
+
+- **Bounded head walk measurement mode** (#1492, #1247).
+  `tools/profile_stage_b_head.py --mode scoped-walk` walks a slice of the
+  census roster with one explicit I/O worker count. It is read-only: it writes
+  no head checkpoint, verifies no payload and synthesizes no render. One call
+  holds at most 2,000 units. A sweep (`--sweep-start`, `--slice-units`,
+  `--sweep-workers`) reads and validates the census-wide metadata once, in
+  the baseline scope, and walks disjoint slices in one process from that
+  state (`metadata_memo` on `load_measured_anchor_input`; a drifted file is
+  read and verified again). The mode leaves the candidate overlay out of the
+  inputs, so no wire payload is hashed. The whole sweep shares the 2,000-unit
+  budget, and the first scope is a one-unit baseline. A guard thread stops the
+  run when the NFS READ round trip exceeds `--stop-read-rtt-ms`. Both guard
+  limits must be positive and finite. A `SIGTERM` stops the run with one
+  report. The tool changes no default. The default worker count stays
+  derived from the CPU reservation until a measurement supports a change.
+
+- **Research-only finer-grained FIT pricing and packed reference wire**
+  (#2329). Conditional single-block prices retain the complete baseline
+  gradient; group residual shrinkage and a deterministic integer-byte solver
+  select existing whole-projection parent fragments. The standalone wire
+  preserves actual column rates, tables, scales and incoming window states,
+  charging tags, framing, checksum and padding exactly. Its reader rejects
+  invalid rates, noncanonical planes and nonfinite scales before allocating
+  decoded weights; offset scratch is linear in block count. The recorded
+  real-A8S CPU proof covers exact mixed-fragment reconstruction and boundary
+  refusals, not in-domain held-out gain or a serving qualification. No
+  production menu, pipeline default, serving pin or kernel changes.
+  The research CLI binds declared inputs through the existing I/O engine
+  and validates actual source/FIT shapes, row counts and current canonical
+  producer admission. Encode and encode preflight never open HELDOUT
+  payloads; CPU scoring verifies their own bytes and complete moments.
+  Real L0 source/FIT preflight is recorded by action `fad7fa64ee59`. The
+  later complete dense L0 gate `6b5288acd80c` matches the native control
+  exactly at 25,191,435 bytes but has 3.475059 times its HELDOUT output-error
+  loss. The routed L3 expert0-up contrast `509251c3242d` also matches exactly
+  at 4,215,563 bytes, with 2.044249 times the control HELDOUT loss. Both
+  early-site contrasts reject this recipe, not fine-grained allocation in
+  general. FIT loss is already 4.13x/3.67x control: surrogate additivity fails
+  before held-out generalization. L28/L44 are cancelled and unmeasured under
+  CEO `dec-1006-223431-2bf3`, not deferred. No sampling interval or G3
+  qualification is claimed.
+  `pq_block_schedule_cost.py` consumes the real driver's flat row-major
+  selection, candidate-order mapping and own-byte stamps, while retaining
+  raw source-order input. CPU proof `63a5fc616b98` exercises both CLI forms
+  and malformed order, digest, geometry and tag refusals. Stored bytes are
+  exact; run, launch and shared-memory estimates remain conditional models,
+  not measured traffic, occupancy or speed.
+
+- **Explicit GLM projection owners.** The producer reads fused members from Tessera dense_ownership instead of a duplicate profile table.
+  The source config separates KDA queries from standalone MLA queries.
+  Existing pin-lift controls can select the actual bare router parameter owner.
+  The producer keeps its stock forward and uses the existing input capture hook.
+  DSA and MLA direct buffers increase memory_bytes through the shared runtime byte rule.
+  Wire prices, default scope, source identities, pins, and serving cells remain unchanged.
+
+- **Direct head arithmetic.** The DSA head screen uses FP32 inputs without the key projection's A8 activation quantization.
+  The producer reads its decoded weights with the runtime's direct consumer helper.
+  The publication cache keeps the head values in FP32 and charges the actual publication bytes.
+  T-16 retains its folded BF16 weight arithmetic before the head cache cast.
+
+- **Direct-consumer journal contracts.** Fresh publication, resume, and seed use the same activation contract as the direct-consumer score.
+  The DSA head and MLA projection refuse quantized input observations in both development and certified modes.
+
+- **Declared GLM ownership seam.** The GLM profile reads its fused owner and leaf mapping through the existing lane plugin.
+  The Tessera lane keeps the authoritative runtime import. No boundary allowlist or runtime pin changes.
+
+- **Shared-expert roster migration.** The quality population reads census names and the profile fused-owner seam.
+  It no longer reads the removed duplicate fused-group table.
+
+- **Behavioral coverage of persisted multimodal calibration provenance**
+  (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
+  back after the actual loader blends a partial real dataset with synthetic
+  rows. Populated CPU forward/backward paths include a failed synthetic row
+  and check nonzero visual Fisher; loaded-row composition stays independent
+  of successful forwards. Duplicate synthetic-composition coverage and a
+  fixture-only shutdown-call assertion are removed; no blend policy or
+  numerical behavior changes.
 
 - **Explicit selected-unit fresh calibration capture**. The shared cache
   identity accepts `unit_names` and declares `unit_scope="selected"`; writers
@@ -62,6 +313,13 @@
   specs are read under their own byte pin and bound to the actual draw before
   their lower-chain stopping boundary selects the source schedule.
 
+- **Use shared digest owners in the research harness** (#2329, PR #2367).
+  Byte, file, and tensor digests use their existing owners. Trial, bank, and
+  schedule reports share strict JSON output in insertion order with one final
+  newline. The wire retains its raw 32-byte checksum. Direct refusals retain
+  their exception classes, messages, and check order. The duplication baseline,
+  scientific results, production defaults, and serving contracts do not change.
+
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a
   `sequence_attribution` block decomposing each projection over whole
@@ -103,6 +361,47 @@
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.
 
 ### Changed
+- **Reuse the shared E2M1 value owner in the MXFP4 widening table**
+  (#2380, Refs #1303). `mxfp4_widen.E2M1_VALUES` derives its positive half
+  from `_E2M1_POSITIVE` in `nvfp4_activation_contract`, keeping the same
+  public tuple type, the same code order, explicit positive zero at index 8
+  and a negative half that negates only the nonzero magnitudes. Table bytes,
+  widened weight bytes, carried scale bytes, geometry, route status and
+  evidence strings are unchanged. The module introduction now describes the
+  retired Gridbook MXFP8 dense lane in the past tense. No performance or
+  serving qualification follows from this refactor.
+
+- **Reuse the shared E2M1 value owner in RTN and MXFP4 source decode**
+  (#2369, Refs #1303). `build_rtn_cache._nvfp4_round_rtn` reads its
+  magnitudes, midpoint ties and maximum from `_E2M1_POSITIVE`,
+  `E2M1_MIDPOINTS` and `FP4_E2M1_MAX` in
+  `nvfp4_activation_contract`, and the MXFP4 nibble decode in
+  `layer_streaming._apply_fp8_dequant_inplace` builds its value table
+  from the same positive grid. The nested `torch.where` chain, the
+  decode order, positive zero at codes 0 and 8, dtypes, scales,
+  padding, ties and nonfinite behavior are unchanged. No format,
+  default, gate, pin or artifact byte changes. No performance or
+  serving qualification follows from this refactor.
+
+- **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
+  Final-hidden manifests and MTP censuses use the existing
+  `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
+  ASCII escapes, strict non-finite handling, UTF-8 and one final line feed.
+  Atomic publication, publish-once checks, native encoding errors, returned
+  byte digests and census admission ordering are unchanged. The projection
+  tool and its text summaries retain their own recipes.
+
+- **Allocator partition and cost byte digests reuse the shared bytes owner**
+  (#2355, Refs #1301). The rank-partition manifest reference and the
+  measured-runtime cost payload integrity comparison in `allocator.main` call
+  `digests.bytes_sha256hex` instead of inlining
+  `hashlib.sha256(...).hexdigest()`. Bytes, digest values, comparison order,
+  refusal messages and ownership are unchanged: the partition reference still
+  authenticates the exact rank manifest bytes the recomputation consumes, and
+  the cost comparison still runs on the owned bytes before `pickle.loads`,
+  ahead of any parse or publication. The remaining `hashlib` use in
+  `allocator.main` is the assignment-payload dedupe digest, which hashes a
+  canonical JSON string, not artifact bytes.
 
 - **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
   Refs #1303). The final `_student` scoring path of
@@ -244,6 +543,166 @@
   this slice.
 
 ### Fixed
+
+- **The nested-rotary meta-skeleton test owns its import process** (Refs
+  #2279, a residual exposure of #2276). `tests/test_dsv4_nested_rotary_init.py`
+  uses the existing `own_process` marker when it shares a pytest session, so a
+  native `transformers.models.deepseek_v4` import in an earlier test cannot make
+  `register_deepseek_v4()` refuse. On main, running
+  `test_streaming_text_only_wrapper_config.py` first failed this test; the
+  reverse order and the test alone passed. The regression runs the real
+  unsupported-configuration predecessor, this test and the native-import
+  refusal control together. Production registration and its native-module
+  refusal are unchanged. The other exposures listed in #2279 are not fixed
+  here, and the issue stays open.
+
+- **Bound paired-rate-trade diagnostic retention to summaries outside the
+  emitted assignment** (#2286). Menu, applicability and diagnostic-trace
+  records keep a bounded summary per priced trade -- priced scalars, refusal
+  verdict, per-group and per-expert means without per-probe arrays, and the
+  canonical digest binding the exact full trade -- instead of storing every
+  complete trade. Only the emitted assignment carries the full paired arrays
+  and per-expert breakdown; refusal stdout prints the summarized rows.
+  Pricing arithmetic, UCB hedging, joint sample/currency/format validation,
+  expert-dominance refusal and reproduction diagnostics are unchanged.
+  The command tests read the complete selected evidence and the actual refusal text.
+  `tools/paired_trade_report_proof.py` measures the real allocation and report paths with synthetic samples.
+  The workload uses the routed dimensions from `GLM-5.3-Flash-BF16`.
+  The proof records process peaks, output bytes, profiles, and assignment arithmetic.
+  It makes no scientific quality, serving, or GPU claim.
+  The proof tool now uses the public PrismaBuild client to reserve and
+  publish its archive as a retained output batch. It uses the existing
+  exact-byte digest and sorted, spaced, ASCII JSON profiles. The allocator
+  command profiler has a domain-specific name. Both boundary baselines and
+  their scanner rules are unchanged.
+
+- **Correct readiness in the research preflight** (#2329). The census now
+  reports not-ready if any bank rung lacks canonical allow status. It keeps
+  all admission decisions and names the missing `rung_admission` prerequisite.
+  CPU CLI action `53433514eeee` passed the all-allow and valid R768-hold cases.
+  Both cases left HELDOUT payloads unopened. The test does not encode, score,
+  or capture a model.
+- **Authenticated locator aliases survive both real acquisition merges** (#2195,
+  PR #2253). The existing control owner derives one locator-independent request
+  control identity carried through actual row loading, rendering and journals.
+  Checkpoint and scalar-payload joins compare those controls and all real
+  scientific inputs before stamping only raw request provenance. Own-file SHA
+  reads, schedule/source/scope, calibration and numerical refusals stay strict.
+
+- **Acquisition input byte checks participate in the seal ratchet** (#2195,
+  PR #2253). The torch-free input owner is scanned, with only its actual
+  own-byte digest check allowlisted as integrity. Injecting a new recorded
+  producer wall is a causal regression, not an unscanned escape.
+
+- **Acquisition producer identities and locator spelling follow development mode**
+  (#2195, PR #2253). Only recorded live pins and export/grammar source digests
+  stamp and continue; source-state schema and actual request/cost, rate, shape,
+  atomic scope and calibration correctness still refuse. Planning and manifest
+  validation authenticate controls through the existing input owners before
+  separating locator spelling, without trusting a declared digest alone.
+
+- **Authenticated acquisition requests reach complete per-row execution and
+  strict merge through the existing planner** (#2195). Each active atomic
+  cohort keeps the original request/cost/run/probe identity; deferred cohorts
+  remain explicit and produce no zero-work jobs. Whole request/cost bindings
+  precede captures in the torch-free staged readset, with a bounded fenced
+  metadata memo instead of repeated whole-cost reads. Submission and merge
+  require disjoint complete active coverage, exact requested scalar cells,
+  source proofs and common regime settings. Both merges use authenticated
+  checkpoint menus to bind the exact deferred family domain, retaining real
+  unrequested families and refusing fabricated extras. The original raw joint evidence,
+  normal opt-out paths and production/scientific qualification gates remain;
+  no Fisher price, pin/default change or served artifact is inferred.
+
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery lives in the allowlisted staged-lease seam over the same sealed
+  generation; the campaign container carries its launcher-owned
+  `PRISMABUILD_QUEUE_ROOT` and refuses spec forgeries. Legacy residency-map
+  discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
+- **Sealed io buffers open where this interpreter's os lacks
+  `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
+  has no `os.memfd_create`, and every io engine stream entry died on the
+  missing attribute (PrismaBuild action `ded8698fa4d6`). `SealedBuffer` now
+  opens through `io_engine._create_memfd`: `os.memfd_create` when present,
+  otherwise the runtime libc's `memfd_create` wrapper (glibc 2.27+,
+  musl 1.1.20+), with the MFD flags resolved from their ABI-fixed Linux
+  UAPI numbers and a named `OSError` when the runtime libc has no wrapper.
+  The seal-and-verify guard is unchanged; no default, pin, wire, GPU or
+  serving claim.
+
+- **The io engine resolves memfd seal constants without CPython build-time
+  fcntl names** (#1896). Portable interpreters whose build headers predate
+  glibc 2.27 expose only part of the fcntl seal surface, and reading
+  `fcntl.F_SEAL_*` at import crashed the engine there, failing collection of
+  every capture and calibration test file that imports it (qualified CPU venv
+  `pq-cpu312` on dl380g10; PrismaBuild actions `be3dd1332259`, `5e848d8252be`).
+  The numbers now resolve from the Linux UAPI values they denote, ABI-fixed
+  since kernel 3.11, and the kernel stays the authority: each seal is
+  attempted through fcntl and read back through `F_GET_SEALS`. The
+  original-material delivery witness reads seals through
+  `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
+  moved: a buffer still refuses unless the kernel reports all four seals; no
+  default, pin, wire, GPU or serving claim.
+
+- **A joint plan that cannot name its campaign chain is refused by name, at
+  admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
+  plan with no `inputs` block, and the `prepare` GPU action then died on a
+  bare `KeyError: 'inputs'` after the projection prewarm had already
+  allocated — preserved in the #1293 non-release pilot's run-01 S3. The plan
+  grammar now requires the campaign chain `inputs` mapping, shape-checks
+  every bound head-walk key without reading behind the binding, and requires
+  the canonical capture binding; the anchor intake names its missing chain
+  keys in one refusal; the standalone synthesis census read refuses a missing
+  binding by name. A Stage B quantum plan that binds a subset (#1024) still
+  loads in both modes; its test explicitly sets the empty subset instead of
+  depending on the imported fixture default. No gate weakened, no wire, codec,
+  numerical or GPU claim; the named refusal moves the run-01 S3 failure from
+  minutes into a GPU action to a plan-load ValueError naming the absent key.
+  Policy-refusal tests start from the canonical shape-only plan and name each
+  probe, token-scope, temperature and activation-clipping refusal, so an
+  earlier missing-input error cannot hide those guards. The standalone
+  `synthesize` command also takes this complete plan and its canonical capture
+  binding, although it loads neither model nor capture payloads.
+
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+
+- **The RTN FP8 helper keeps finite FP16 zero and tiny rows finite**
+  (#2352; `build_rtn_cache._fp8_round`, parent #1303). The 1e-8 max-abs
+  floor and the resulting `/448` scale underflow FP16 to `0.0`: an
+  all-zero row divides `0/0` to NaN, and a nonzero tiny row divides to
+  ±Inf, which the finite-only E4M3FN cast turns into NaN — every
+  element of the row comes back NaN either way. FP16 inputs now
+  round-trip through FP32 with the dequantized result cast back at the
+  output boundary; FP32 and BF16 keep the original arithmetic and
+  byte-identical outputs (pinned by
+  `test_fp8_round_preserves_fp32_bf16_recipe_bytes`), and the default
+  BF16 cache recipe is unchanged.
+
+- **`file_sha256hex` refuses a zero read count instead of hashing no bytes**
+  (#2344). `read(0)` never advances, so a `block_size=0` caller — including
+  every zero spelling `read` coerces (`False`, any `__index__` zero) — got
+  the SHA-256 of no bytes: any **nonempty** file silently returned the
+  empty-input digest `e3b0c442…855` instead of a digest of its bytes (an
+  empty file already matched that digest, which is how the bug could hide).
+  The owner now
+  raises a `ValueError` naming `block_size` before the first read, whether
+  the file is empty or not. Everything else is unchanged: positive sizes
+  stream in that many bytes per read, `-1` and `None` read the whole file,
+  other negative sizes keep `read`'s own refusal, non-integer sizes keep
+  the `TypeError` from the integer coercion, and a missing path or
+  directory still raises what `open` raises before any read-count check.
+  Regression tests pin the refusal on real empty and nonempty files plus
+  the read-all and type-refusal boundaries.
+
+- **Forward-split relaunches reuse declared producer seals** (#2342). Full
+  retained/running bind identities now use the existing chain-resume
+  classifier before adopting the original identity for exact-session rebind.
+  Calibration/draw/probe/seed/temperature/partition and unknown fields still
+  refuse, including an unknown null field; certified mode still refuses
+  seal drift. Session hashes and prep/entry bytes are never re-keyed.
 
 - **Restore the shared owned-byte digest comparison after the #2283 port.**
   `read_bound` again routes the acquired-byte hash through the hard `same`

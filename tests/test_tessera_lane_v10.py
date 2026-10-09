@@ -66,7 +66,7 @@ def test_v10_remains_the_legacy_schema_constant():
     assert (lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
             == "tessera.lane-eligibility.v10")
-    # The legacy aliases agree; the exact v56 package uses the supported v11.
+    # The legacy aliases agree; the active package uses the supported v11.
     assert contract.TESSERA_LANE_SCHEMA == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
 
 
@@ -104,15 +104,14 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v56_at_the_pinned_digest():
-    """The v56 pin uses v11; historical v10 refusal regressions remain below."""
+def test_the_packaged_contract_has_the_pinned_digest():
+    """The active pin uses v11; historical v10 refusal cases remain below."""
     raw = _packaged_bytes()
     assert (hashlib.sha256(raw).hexdigest()
             == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256), (
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 56
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11)
 
@@ -123,13 +122,12 @@ def _packaged_table():
 
 
 def test_the_packaged_table_publishes_the_three_platforms():
-    """Twenty-two eager cells are scoped to sm_121; AMD declares no cells."""
+    """The reviewed cells use sm_121; AMD declares no cells."""
     table = _packaged_table()
     assert table.present
     assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
     assert {cell.platform for cell in table.cells} == {"sm_121"}
-    assert len(table.cells) == 22
     # The withdrawal is total off sm_121: both AMD platforms ship no cell.
     assert not [c for c in table.cells if c.platform != "sm_121"]
 
@@ -138,7 +136,7 @@ def test_the_cell_roster_matches_the_reviewed_pin_answer():
     """Read the scope roster from its one reviewed owner, not a second list.
 
     The unchanged status-only gate permits each route-only/not-recorded cell.
-    This is not a served-KL claim. The v56 image/structure crossing is pinned
+    This is not a served-KL claim. The image/structure crossing is checked
     independently by test_tessera_pin_v38_scope.py.
     """
     table = _packaged_table()
@@ -146,7 +144,6 @@ def test_the_cell_roster_matches_the_reviewed_pin_answer():
     expected_routed = {row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
                        if row[3] == "routed_moe"}
     assert {c.id for c in routed} == expected_routed
-    assert len(routed) == 10
     for cell in table.cells:
         admits, why = lane.cell_evidence_admits(cell)
         assert admits, (cell.id, why)

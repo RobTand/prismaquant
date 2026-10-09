@@ -1,18 +1,10 @@
-"""The Tessera EXPORT lane: vocabulary, declaration, and three fail-closed gates.
+"""The Tessera export lane checks declared structures and runtime facts.
 
-Rob's decision of 2026-09-02 made the sanctioned serving lanes
-compressed-tensors, GGUF and Tessera.  ``run-pipeline.sh`` implemented the
-retirement half the same day (``EXPORT_CONTAINER=nvfp4_cb`` fails closed); the
-addition half is what this module pins.
-
-The shape being pinned matters more than the values.  Being *in* the
-``EXPORT_CONTAINER`` vocabulary is not permission to build: an architecture
-still has to declare the lane, and the lane still has to clear a preflight
-whose three gates are each read from the pinned runtime's own published table.
-Today the third gate -- the release pin -- refuses every run, and it is the
-ONLY thing that does.  That is the difference this file protects: the refusal
-is the pin's, spoken where an operator can act on it, rather than "unknown
-export lane" from a vocabulary check three layers up.
+The lane vocabulary does not authorize an export.
+The preflight requires an explicit target, the declared producer tools,
+and an installed contract that matches the reviewed pin.
+The producer source must package the same contract.
+These independent checks retain their own failure reasons.
 """
 from __future__ import annotations
 

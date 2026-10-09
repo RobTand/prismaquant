@@ -45,10 +45,11 @@ from .cost_stage_checkpoint import MANIFEST_SCHEMA, _load_unit, unit_path
 from .digests import checkpoint_json_sha256
 from .layer_config import LAYER_CONFIG_META_KEY
 from .tessera_expert_projection import (
-    EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
+    EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, STACK_FORMATS_KEY,
+    UNIT_RUNGS_KEY, UNIT_RUNGS_SCHEMA, WIRE_DIR_KEY,
     ExpertProjectionError, allocation_expert_projection_block, cached_units_manifest,
     carried_units, check_expert_wire_receipt, expand_stack_decision_assignment,
-    locate_expert_wire, require_stack_uniform_assignment, verify_expert_wire_record,
+    locate_expert_wire, require_unit_assignment, verify_expert_wire_record,
 )
 from .tessera_joint_aura import STAGE
 
@@ -196,13 +197,21 @@ def selected_census_assignment(assignment: Mapping[str, str], metadata: Mapping[
         selected, _owners = expand_stack_decision_assignment(
             assignment, metadata.get(POPULATION_KEY), units=units, stack_of=stack_of,
             costs=costs)
-        stack_formats = require_stack_uniform_assignment(
-            {name: selected[name] for name in units if name in selected}, stack_of, units)
+        stack_formats, unit_rungs = require_unit_assignment(
+            {name: selected[name] for name in units if name in selected},
+            stack_of, units)
     except (ExpertProjectionError, KeyError) as exc:
         raise CensusCacheError(f"selected cache projection: {exc}") from exc
     selected = census_roster_selection(selected, costs, CensusCacheError)
     if metadata.get(STACK_FORMATS_KEY) != stack_formats:
         raise CensusCacheError("selected cache stack formats differ from the assignment")
+    if unit_rungs:
+        stamped_units = metadata.get(UNIT_RUNGS_KEY)
+        expected_units = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
+        if stamped_units != expected_units:
+            raise CensusCacheError(
+                f"selected cache per-unit rung stamp ({UNIT_RUNGS_KEY}) differs "
+                "from the assignment")
     return dict(selected), source, units, stack_of
 
 

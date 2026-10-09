@@ -801,6 +801,136 @@ def _verify_measured_hessian_identity(name, row, anchor, provenance_hessian,
         _same(value, provenance_hessian.get(key), f"{name}: measured H {key}")
 
 
+def _read_campaign_metadata(inputs, reuse_policy):
+    """Read and validate the census-wide campaign metadata of one load.
+
+    The bound files are hashed and parsed here, and every census-wide gate
+    runs. The result is the state the walk reads from; a caller that walks
+    several scopes in one process keeps it through ``metadata_memo`` (#1492).
+    """
+    from tools.dispatch_tessera_campaign import _require_receipts
+
+    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
+    census = json.loads(paths["census"].read_text())
+    plan = json.loads(paths["campaign_plan"].read_text())
+    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
+    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
+    _same(paths["campaign_receipts"].resolve(),
+          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
+    rows = plan["rows"]
+    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
+    _require_receipts(paths["campaign_plan"].parent, len(rows))
+    owners, groups = {}, {}
+    for row in rows:
+        for name in row["members"]:
+            _require(name not in owners, f"duplicate campaign unit {name}")
+            owners[name] = Path(row["dir"])
+        for group in row["groups"]:
+            _require(group not in groups, f"duplicate campaign group {group}")
+            groups[group] = row["row_id"]
+    names = set(census["unit_shapes"])
+    _same(set(owners), names, "complete census roster")
+    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
+    _same(len(names), inputs["required_source_units"], "declared full source unit count")
+    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
+    for group, members in census["anchor_groups"].items():
+        owner = next(row for row in rows if row["row_id"] == groups[group])
+        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
+
+    payload = pickle.loads(paths["merged_cost"].read_bytes())
+    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
+    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
+    _same(set(payload["costs"]), names, "complete merged cost roster")
+    provenance = payload["provenance"]
+    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
+    _same(provenance.get("model"), census["model"], "campaign model")
+    _same(plan["model"], census["model"], "planned model")
+    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
+    _same(provenance.get("campaign_fanout", {}).get("rows"),
+          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
+
+    manifest = load_json_file(paths["merged_checkpoint"])
+    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
+    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
+    identity = manifest["identity"]
+    declared_seal = manifest.get("identity_sha256")
+    if dev_mode_enabled():
+        # Rob's dev-mode directive (2026-09-19): the seal returns at the
+        # artifact gate, not the run gate. This recompute is the run gate's
+        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
+        # in-process profile on action 282c61140ba7 (2026-09-20) over the
+        # 7.2 GB merged checkpoint -- and the digest it would produce is
+        # already declared by the manifest. The declared value is checked for
+        # 64-hex shape and RECORDED, never silently trusted: the walk still
+        # hands it to every unit envelope below (``_load_unit``), and the run
+        # stays ``dev_uncertified`` through the existing stamp.
+        _require_sha256(declared_seal, "campaign checkpoint seal")
+        dev_warning(
+            "campaign checkpoint seal not recomputed under dev mode; using "
+            f"the manifest's declared identity_sha256 {declared_seal} "
+            "(recorded, not gated)")
+        seal = declared_seal
+    else:
+        # The checkpoint is parsed from JSON, so its identity is already
+        # normalized (string keys, dict/list containers, JSON scalars) and the
+        # seal can stream the canonical bytes into the digest. The generic
+        # helper normalizes first, which holds the encoded text, a second full
+        # graph and the second encoded text at once; on a checkpoint this size
+        # that is the difference between fitting a bounded envelope and being
+        # killed by it. Same digest -- held by
+        # tests/test_canonical_json_normalized.py.
+        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
+        _same(seal, declared_seal, "campaign checkpoint seal")
+    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
+    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
+    _same(set(identity["units"]), names, "complete checkpoint identity roster")
+    listed = [row["qname"] for row in manifest["units"]]
+    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
+    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
+        value = identity.get(key)
+        _require(isinstance(value, str) and len(value) == 64 and
+                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
+    # The one encoder identity a run can re-derive is the installed package's
+    # own. Refuse anything else here -- before the per-cell origin walk reads
+    # or decodes a wire -- unless the plan named that exact digest.
+    from . import tessera_campaign as tc
+    encoder_source_reuse = resolve_encoder_source_reuse(
+        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        reuse_policy, where="joint anchor checkpoint encoder source")
+    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
+    for row in manifest["units"]:
+        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+
+    return SimpleNamespace(paths=paths, census=census, plan=plan, rows=rows, owners=owners, groups=groups, names=names, payload=payload, provenance=provenance, manifest=manifest, identity=identity, declared_seal=declared_seal, seal=seal, encoder_source_reuse=encoder_source_reuse, parts=parts)
+
+
+def _campaign_metadata(inputs, reuse_policy, memo):
+    """The validated campaign metadata, read once per memo (#1492).
+
+    With no memo every load reads and validates the bound files, as before.
+    With a memo the first load does, and each later load reuses that state
+    while the bound records and the stat fence of all five files hold. The
+    digest check on the first load authenticates the bytes; the fence only
+    admits reusing them. A drifted file is read and verified again, and a
+    digest mismatch still refuses (the same contract as ``read_bound``).
+    """
+    if memo is None:
+        return _read_campaign_metadata(inputs, reuse_policy)
+    from .stage_inputs import bound_stat_fence
+    records = tuple((key, inputs[key]["path"], inputs[key]["sha256"])
+                    for key in HEAD_WALK_INPUT_KEYS)
+    key = (records, inputs.get("required_source_units"),
+           inputs.get("required_campaign_groups"), repr(reuse_policy))
+    fence = tuple(bound_stat_fence(Path(path)) for _, path, _ in records)
+    held = memo.get("metadata")
+    if held is not None and held[0] == key and held[1] == fence:
+        return held[2]
+    metadata = _read_campaign_metadata(inputs, reuse_policy)
+    memo["metadata"] = (key, fence, metadata)
+    memo["loads"] = memo.get("loads", 0) + 1
+    return metadata
+
+
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
@@ -810,7 +940,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
                                head_walk_workers=None, head_walk_quantum=None,
-                               progress_allowance_s=None):
+                               progress_allowance_s=None, metadata_memo=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -951,12 +1081,17 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     full-core fan-out); until then this parameter is the producer/consumer
     contract under test, not the production prepare path, which passes
     nothing here.
+
+    ``metadata_memo`` is an optional caller-owned dict. With it the census-
+    wide metadata is read, hashed and validated once and reused by every
+    later load in the process while the bound records and their stat fences
+    hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
+    reused state is read-only for the walk.
     """
     from .production_weight_cache import (
         _cache_weight_filename,
         require_injective_cache_filenames,
     )
-    from tools.dispatch_tessera_campaign import _require_receipts
 
     reuse_policy = normalize_historical_encoder_reuse(historical_encoder_reuse)
     _require(type(verify_payloads) is bool, "verify_payloads must be an explicit boolean")
@@ -991,96 +1126,22 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # that reads as a verified campaign input.
     _require(unit_scope is None or not verify_payloads,
              "a scoped read cannot also verify the complete campaign payload")
-    paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
-    census = json.loads(paths["census"].read_text())
-    plan = json.loads(paths["campaign_plan"].read_text())
-    _same(plan.get("schema"), "prismaquant.tessera_campaign_plan.v1", "campaign plan schema")
-    _same(Path(plan["census"]).resolve(), paths["census"].resolve(), "campaign census path")
-    _same(paths["campaign_receipts"].resolve(),
-          (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
-    rows = plan["rows"]
-    _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
-    _require_receipts(paths["campaign_plan"].parent, len(rows))
-    owners, groups = {}, {}
-    for row in rows:
-        for name in row["members"]:
-            _require(name not in owners, f"duplicate campaign unit {name}")
-            owners[name] = Path(row["dir"])
-        for group in row["groups"]:
-            _require(group not in groups, f"duplicate campaign group {group}")
-            groups[group] = row["row_id"]
-    names = set(census["unit_shapes"])
-    _same(set(owners), names, "complete census roster")
-    _same(set(groups), set(census["anchor_groups"]), "complete census groups")
-    _same(len(names), inputs["required_source_units"], "declared full source unit count")
-    _same(len(groups), inputs["required_campaign_groups"], "declared full campaign group count")
-    for group, members in census["anchor_groups"].items():
-        owner = next(row for row in rows if row["row_id"] == groups[group])
-        _require(set(members) <= set(owner["members"]), f"campaign group membership changed: {group}")
-
-    payload = pickle.loads(paths["merged_cost"].read_bytes())
-    _same(payload.get("schema"), CAMPAIGN_SCHEMA, "campaign cost schema")
-    _same(payload.get("currency"), CURRENCY, "campaign scalar currency")
-    _same(set(payload["costs"]), names, "complete merged cost roster")
-    provenance = payload["provenance"]
-    _same(provenance.get("cost_mode"), "production-render-score", "campaign cost mode")
-    _same(provenance.get("model"), census["model"], "campaign model")
-    _same(plan["model"], census["model"], "planned model")
-    _require(provenance.get("stopped_early") is False, "campaign stopped before completing anchors")
-    _same(provenance.get("campaign_fanout", {}).get("rows"),
-          {row["row_id"]: sorted(row["groups"]) for row in rows}, "complete merged fanout")
-
-    manifest = load_json_file(paths["merged_checkpoint"])
-    _same(manifest.get("schema"), MANIFEST_SCHEMA, "campaign checkpoint schema")
-    _same(manifest.get("stage"), STAGE, "campaign checkpoint stage")
-    identity = manifest["identity"]
-    declared_seal = manifest.get("identity_sha256")
-    if dev_mode_enabled():
-        # Rob's dev-mode directive (2026-09-19): the seal returns at the
-        # artifact gate, not the run gate. This recompute is the run gate's
-        # most expensive step on the real campaign -- 302.653 s of a 765.6 s
-        # in-process profile on action 282c61140ba7 (2026-09-20) over the
-        # 7.2 GB merged checkpoint -- and the digest it would produce is
-        # already declared by the manifest. The declared value is checked for
-        # 64-hex shape and RECORDED, never silently trusted: the walk still
-        # hands it to every unit envelope below (``_load_unit``), and the run
-        # stays ``dev_uncertified`` through the existing stamp.
-        _require_sha256(declared_seal, "campaign checkpoint seal")
-        dev_warning(
-            "campaign checkpoint seal not recomputed under dev mode; using "
-            f"the manifest's declared identity_sha256 {declared_seal} "
-            "(recorded, not gated)")
-        seal = declared_seal
-    else:
-        # The checkpoint is parsed from JSON, so its identity is already
-        # normalized (string keys, dict/list containers, JSON scalars) and the
-        # seal can stream the canonical bytes into the digest. The generic
-        # helper normalizes first, which holds the encoded text, a second full
-        # graph and the second encoded text at once; on a checkpoint this size
-        # that is the difference between fitting a bounded envelope and being
-        # killed by it. Same digest -- held by
-        # tests/test_canonical_json_normalized.py.
-        seal = canonical_json_sha256_normalized(identity, where="joint anchor input")
-        _same(seal, declared_seal, "campaign checkpoint seal")
-    _same(identity.get("campaign_schema"), CAMPAIGN_SCHEMA, "checkpoint campaign schema")
-    _same(identity.get("currency"), CURRENCY, "checkpoint scalar currency")
-    _same(set(identity["units"]), names, "complete checkpoint identity roster")
-    listed = [row["qname"] for row in manifest["units"]]
-    _require(len(listed) == len(names) and set(listed) == names, "incomplete checkpoint unit roster")
-    for key in ("prismaquant_source_sha256", "encoder_source_sha256"):
-        value = identity.get(key)
-        _require(isinstance(value, str) and len(value) == 64 and
-                 all(c in "0123456789abcdef" for c in value), f"missing checkpoint {key}")
-    # The one encoder identity a run can re-derive is the installed package's
-    # own. Refuse anything else here -- before the per-cell origin walk reads
-    # or decodes a wire -- unless the plan named that exact digest.
-    from . import tessera_campaign as tc
-    encoder_source_reuse = resolve_encoder_source_reuse(
-        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
-        reuse_policy, where="joint anchor checkpoint encoder source")
-    parts = merged_checkpoint_parts(paths["merged_checkpoint"])
-    for row in manifest["units"]:
-        _same(parts / row["file"], unit_path(parts, row["qname"]), "canonical checkpoint unit path")
+    # The walk's own admission, one refusal naming every unbound key: read
+    # with a subscript a missing chain key was a bare ``KeyError`` deep in the
+    # read, on a plan the grammar should have refused (PQ #1293).
+    _require(bool(inputs), "the campaign chain ``inputs`` block binds nothing; "
+             f"it must bind {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    missing = [key for key in HEAD_WALK_INPUT_KEYS if key not in inputs]
+    _require(not missing, "campaign chain input(s) not bound in the plan's "
+             f"``inputs`` block: {', '.join(missing)}")
+    metadata = _campaign_metadata(inputs, reuse_policy, metadata_memo)
+    (paths, census, plan, rows, owners, groups, names, payload, provenance,
+     manifest, identity, declared_seal, seal, encoder_source_reuse, parts) = (
+        metadata.paths, metadata.census, metadata.plan, metadata.rows,
+        metadata.owners, metadata.groups, metadata.names, metadata.payload,
+        metadata.provenance, metadata.manifest, metadata.identity,
+        metadata.declared_seal, metadata.seal, metadata.encoder_source_reuse,
+        metadata.parts)
 
     cells, formats = {}, {}
     wire_dir = Path(provenance["wire_dir"])
@@ -2382,6 +2443,44 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     # A plan that names a historical encoder seal is the only place one may be
     # admitted; the strict default is the same as before this field existed.
     normalize_historical_encoder_reuse(config.get("historical_encoder_reuse"))
+    # The campaign chain block is the one input every command reads
+    # (``load_measured_anchor_input``, the census read under ``synthesize``).
+    # Read with a subscript it surfaced as a bare ``KeyError: 'inputs'``
+    # raised inside the GPU action, after the projection prewarm had already
+    # allocated -- indistinguishable from an admitted plan that failed later
+    # (PQ #1293, preserved run-01 S3). Stated here it is the cheap input
+    # refusal the plan grammar owes: by name, before any command, before any
+    # device. Only keys that ARE bound are shape-checked, shape-only, with no
+    # read behind the binding: a Stage B quantum plan binds a subset (PQ
+    # #1024), and a catalog extension binds inputs beyond the head walk's.
+    _require(isinstance(config.get("inputs"), dict),
+             "joint anchor plan: the campaign chain ``inputs`` block is required; "
+             f"it binds {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    # Partial binding is legal here (a Stage B quantum plan binds a subset,
+    # PQ #1024, and a catalog extension binds keys beyond the head walk's);
+    # only the walk loader (``load_measured_anchor_input``) requires the
+    # complete chain. A binding's vocabulary is closed -- exactly
+    # ``{path, sha256}``, the shape the campaign scope compares
+    # (``SCOPE_ARTIFACT_BINDINGS``) -- so a binding with extra metadata keys
+    # is refused rather than silently carried.
+    for key in HEAD_WALK_INPUT_KEYS:
+        if key in config["inputs"]:
+            binding = config["inputs"][key]
+            _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
+                     and isinstance(binding["path"], str)
+                     and isinstance(binding["sha256"], str),
+                     f"campaign chain input {key}: exactly a bound path/SHA256 "
+                     "pair is required")
+    # Required, not newly: every prepare arm reads ``canonical_capture`` bare
+    # (``_prepare_source_owner``, ``prepare_cache``) and a campaign scope's
+    # artifact bindings always name it, so a plan without one never executed
+    # -- it died later, after the projection prewarm had allocated (PQ #1293,
+    # run-01 S3). Stating it at admission names the field the grammar owes.
+    _require(isinstance(config.get("canonical_capture"), dict)
+             and set(config["canonical_capture"]) == {"path", "sha256"}
+             and isinstance(config["canonical_capture"]["path"], str)
+             and isinstance(config["canonical_capture"]["sha256"], str),
+             "canonical capture: exactly a bound path/SHA256 pair is required")
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
@@ -3242,9 +3341,11 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
     reservation it does not use: measured, 125,144 shards at 2.6 cells/s on
     one core while the reserved GB10 sat at 5 W of 140 W (#549).
 
-    This is the same function, addressable on its own: a unit range, no
-    model, no capture, no GPU required, and idempotent -- a cell whose shard
-    exists is skipped, the origin marker is published before the shard, and
+    This is the same function, addressable on its own: a unit range, no model
+    or capture payload is loaded, and no GPU is required. The command still
+    takes a complete admitted campaign plan, including the shape-only
+    canonical capture binding. It is idempotent: a cell whose shard exists
+    is skipped, the origin marker is published before the shard, and
     staging names are unique per writer. PrismaBuild owns the fan-out; rows
     carry disjoint ``sorted(names)[lo:hi]`` ranges cut from the census, so no
     two rows ever address the same cell and a retried row re-reads rather
@@ -3261,6 +3362,10 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
              "publishing into the campaign row caches requires explicit authorization")
     _require(mirror_root is not None or not compare,
              "a byte comparison needs a mirror to compare against the campaign's shards")
+    # Named, not subscripted: a plan without the census binding is a plan the
+    # grammar should refuse, and the refusal says which key is absent (PQ #1293).
+    _require("census" in config["inputs"],
+             "campaign chain input census is not bound in the plan's ``inputs`` block")
     census = json.loads(_bound(config["inputs"]["census"], "census").read_text())
     scope = parse_unit_scope(units, len(census["unit_shapes"]))
     reader = load_declared_reader(config.get("reader"))

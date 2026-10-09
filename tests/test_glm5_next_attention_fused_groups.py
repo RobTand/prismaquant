@@ -20,7 +20,11 @@ INDEXER_FUSED = ("indexer.wk", "indexer.weights_proj")
 
 @pytest.fixture(scope="module")
 def profile():
-    return Glm5NextProfile()
+    result = Glm5NextProfile()
+    kinds = ["linear_attention"] * 46
+    kinds[3] = kinds[45] = "deepseek_sparse_attention"
+    result._declare_config_document({"text_config": {"layer_types": kinds}})
+    return result
 
 
 @pytest.mark.parametrize("prefix", ["model.language_model.layers.0.", "model.layers.0."])
@@ -54,6 +58,10 @@ def test_attention_stays_pinned_and_no_group_is_partly_pinned(profile):
     prefix = "model.language_model.layers.3.self_attn."
     for leaf in KDA_FUSED + KDA_ALONE + MLA_FUSED + MLA_ALONE + INDEXER_FUSED:
         assert profile.is_pinned_name(prefix + leaf + ".weight"), leaf
-    for group in profile.structure_spec().fused_groups:
-        pinned = {profile.is_pinned_name("model.language_model.layers.3." + m) for m in group.member_suffixes}
-        assert len(pinned) == 1, (group.target_suffix, pinned)
+    for target, members in profile.fused_sibling_leaf_mapping().items():
+        prefix = "model.language_model.layers.3."
+        suffix = "self_attn.indexer." if target == "wk_weights_proj" else "self_attn."
+        if target == "gate_up_proj":
+            suffix = "mlp."
+        pinned = {profile.is_pinned_name(prefix + suffix + m) for m in members}
+        assert len(pinned) == 1, (target, pinned)

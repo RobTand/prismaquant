@@ -6,6 +6,11 @@ extras. Update them together. Naming a dependency only in root metadata is not
 sufficient: the corresponding resolved package and transitive references must
 also exist.
 
+Adding an already-resolved base dependency to an optional extra still needs a
+lock refresh: the extra's root reference and its `requires-dist` marker must
+both be present. The Pillow test extra is covered by the same per-declaration
+checks as every other extra.
+
 The #1756 refresh uses **uv 0.10.10** for both generation and verification.
 The generator version is intentionally recorded here because `uv.lock` does not
 record it. Use the same version when reproducing this refresh. Do not use
@@ -32,3 +37,21 @@ version, each declared dependency's resolved package and root requirement
 metadata, and the `pytest-xdist` → `execnet` edge. It does not call a resolver or
 require network access. The uv check above independently verifies resolver
 freshness rather than trusting this structural check alone.
+
+## Canonical metadata tests
+
+The v3 consumer tests declare one pure metadata module in
+`tests/fixtures/rung_allowability_v3/producer.json`.
+The declaration names the merged Tessera commit, source path and actual module
+SHA-256. The existing isolated producer adapter uses this declaration by default.
+It verifies the fetched module bytes before a child process imports them.
+The child imports no Torch, Triton or serving module.
+An explicitly supplied module and its byte hash remain supported.
+The dependency does not alter the serving pin or the installed serving package.
+
+Fleet test commands can use `tools/provision_tessera_pin.py` to provision the
+unchanged development pin in a scoped environment under `/tmp`.
+An older qualified interpreter is not a substitute for that current source.
+The command records both the installed source and its byte identity.
+The metadata adapter and the serving runtime remain separate dependencies.
+

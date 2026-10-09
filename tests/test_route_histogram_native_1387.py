@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import pickle
-import struct
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -22,10 +21,10 @@ import pytest
 
 import prismaquant.allocator as alloc
 import prismaquant.allocator_candidates as ac
-from prismaquant import footprint as fp
 from prismaquant import shipcard
 from prismaquant.layer_config import read_layer_config_metadata
 from prismaquant.serving_profiles import ResolvedServingLane
+from test_footprint import _write_safetensors
 
 
 # ---------------------------------------------------------------------------
@@ -120,23 +119,6 @@ _FLOOR_TENSORS = {
     "lm_head.weight": ("BF16", (512, 64)),
     "model.norm.weight": ("BF16", (64,)),
 }
-
-
-def _write_safetensors(path, tensors):
-    header = {}
-    off = 0
-    for name, (dtype, shape) in tensors.items():
-        nbytes = fp._ST_DTYPE_BYTES[dtype]
-        for d in shape:
-            nbytes *= d
-        header[name] = {"dtype": dtype, "shape": list(shape),
-                        "data_offsets": [off, off + nbytes]}
-        off += nbytes
-    blob = json.dumps(header).encode()
-    with open(path, "wb") as fh:
-        fh.write(struct.pack("<Q", len(blob)))
-        fh.write(blob)
-        fh.write(b"\x00" * off)
 
 
 def _allocator_fixture(tmp_path):

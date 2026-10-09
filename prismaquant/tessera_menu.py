@@ -310,6 +310,9 @@ class RouteAdmission:
     #: when no contract governs the family, which is the fail-closed direction:
     #: absence is "no reader is published", never "any rate is fine".
     readable: bool = False
+    # None means no measurement input on an emulation-only allocation.
+    measured_allowable: bool | None = None
+
 
     @property
     def attested(self) -> bool:
@@ -318,7 +321,7 @@ class RouteAdmission:
 
     def admits(self, mode: str = MENU_ATTESTED) -> bool:
         """Does this rung enter a menu built in ``mode``?"""
-        if not self.serialisable:
+        if not self.serialisable or self.measured_allowable is False:
             return False
         if mode == MENU_RESEARCH:
             return True
@@ -620,6 +623,8 @@ def _rate_is_readable(rung: int, span: "tuple[int, int] | None") -> bool:
 
 def route_admission(
     name: str, *, serving_context: "ServingContext | None" = None,
+    allowability=None, require_allowability: bool = False,
+    allowability_scope: "Mapping | None" = None,
 ) -> RouteAdmission:
     """The pinned runtime's verdict on one Tessera rung.  **The one seam.**
 
@@ -667,6 +672,10 @@ def route_admission(
     cell ``activation_contract`` must project to the same ``(act_bits,
     act_group_size)``, on both the dev-pin and the packaged-contract paths.
 
+    ``allowability_scope`` carries the unit priced to the D41 owner: actual
+    serving structure, declared shape, regime M, activation build and recipe.
+    An omitted scope stays unscoped. An unresolved explicit scope waits.
+
     A v5 development contract requires the caller's complete serving context.
     Its own scoped lookup checks every required regime under that one target;
     an absent context cannot borrow the runtime or structure of another cell.
@@ -691,6 +700,15 @@ def route_admission(
     if parsed is None:
         raise TesseraMenuError(f"{name!r} is not a Tessera format name")
     family, rung = parsed
+    measured_allowable = None
+    measured_reason = ""
+    if require_allowability and allowability is None:
+        raise TesseraMenuError(f"{name}: current measured rung allowability table required")
+    if allowability is not None:
+        if allowability.format != family.name:
+            raise TesseraMenuError(f"{name}: allowability table belongs to another format")
+        measured_reason = allowability.refusal(rung, scope=allowability_scope)
+        measured_allowable = not measured_reason
     recipe = tessera_wire_recipe(family, rung)
     route = tessera_serving_route(family, recipe, rung)
     serialisable = tessera_rung_is_serialisable(name)
@@ -793,12 +811,13 @@ def route_admission(
         route_status=status,
         serialisable=serialisable,
         source=source,
-        detail=detail,
+        detail=(f"{measured_reason}; {detail}" if measured_reason else detail),
         requires_serve_flags=flags,
         max_world_size=world,
         serving_context=serving_context,
         requires_serving_context=requires_context,
         readable=readable,
+        measured_allowable=measured_allowable,
     )
 
 

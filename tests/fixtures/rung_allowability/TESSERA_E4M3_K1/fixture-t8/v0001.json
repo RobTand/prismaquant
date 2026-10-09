@@ -1,0 +1,278 @@
+{
+  "schema": "fleet.rung_allowability.v1",
+  "table_version": 1,
+  "table_status": "partial",
+  "format": "TESSERA_E4M3_K1",
+  "kernel_build": {
+    "id": "fixture-t8",
+    "source_commit": "fixture-only",
+    "library_variant": "fixture",
+    "architecture": "sm_121",
+    "activation_contract": "W8A8"
+  },
+  "generated_at": "2026-10-06T02:40:00Z",
+  "scope": {
+    "rung_min": 1024,
+    "rung_max": 1026,
+    "grid_step_q256": 1,
+    "grid_owner": "prismaquant.tessera_formats.realisable_rungs",
+    "required_cells": [
+      {
+        "cell_id": "dense-1",
+        "kernel_kind": "dense",
+        "shape_id": "fixture-shape",
+        "M": 1
+      }
+    ]
+  },
+  "rungs": [
+    {
+      "rung": 1024,
+      "measurement_status": "measured",
+      "supported": true,
+      "anomaly_flags": [],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "measured",
+          "kernel_time_us": 10,
+          "kernel_path": "fixture",
+          "geometry": {
+            "alignment": {
+              "half_bytes": [
+                32
+              ],
+              "half_copy": [
+                "16B"
+              ],
+              "lane_bits": [
+                32
+              ],
+              "lane_ends_on_word": [
+                true
+              ],
+              "slot_words": 8
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 1027
+            },
+            "decode_width": {
+              "k_split": 2,
+              "run_widths": [
+                4
+              ],
+              "superblock_rows": 64,
+              "value_bits": 8,
+              "window_bits": 14,
+              "word_stages": 3
+            },
+            "raw": {
+              "owner": "tessera.routed_fused.launch_smem_bytes and control.unit_wire_bits",
+              "packed_tile_words": 262144,
+              "payload_bits_per_256_weights": {
+                "denominator": 4096,
+                "numerator": 4194304
+              }
+            },
+            "register_pressure": {
+              "LOCAL": 0,
+              "REG": 108,
+              "SHARED": 1024,
+              "STACK": 0
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "requested_bytes": 36880
+            }
+          },
+          "evidence": {
+            "fixture": true,
+            "comparison_id": "synthetic-pair",
+            "paired_seed_contract": "synthetic-only",
+            "timing_statistic": "fixture-mean",
+            "timer": "fixture",
+            "geometry_source": {
+              "table_version": 5,
+              "table_sha256": "eb3399b7530c8a4e566496e4fa4f6a552b1b4b186642961a2f2e95af36aaeff5",
+              "rung": 1024,
+              "cell_id": "dense:o_proj:M1",
+              "action_key": "1c52f9b6783fe53c1df3c04bb23f10ace56800d653f2bfc1027ef3878d818bf1"
+            }
+          },
+          "measurement_build_id": "fixture-t8",
+          "pass_times_us": [
+            10,
+            10
+          ]
+        }
+      ],
+      "quality": {
+        "fixture": true,
+        "anomaly_flags": [],
+        "measurement_status": "measured",
+        "source_kind": "actual_sampled_expert_weights",
+        "device": "cpu",
+        "samples": [
+          {
+            "source_sha256": "synthetic-not-real-weight-evidence",
+            "source_squared_norm": 2,
+            "relative_sse": 0.1,
+            "exact_bytes": 3
+          }
+        ]
+      },
+      "dominance_evidence": []
+    },
+    {
+      "rung": 1025,
+      "measurement_status": "measured",
+      "supported": true,
+      "anomaly_flags": [
+        "quality_failure"
+      ],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "measured",
+          "kernel_time_us": 10,
+          "kernel_path": "fixture",
+          "geometry": {
+            "alignment": {
+              "half_bytes": [
+                32,
+                40
+              ],
+              "half_copy": [
+                "16B",
+                "8B tail"
+              ],
+              "lane_bits": [
+                32,
+                40
+              ],
+              "lane_ends_on_word": [
+                true,
+                false
+              ],
+              "slot_words": 12
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 1028
+            },
+            "decode_width": {
+              "k_split": 2,
+              "run_widths": [
+                4,
+                5
+              ],
+              "superblock_rows": 64,
+              "value_bits": 8,
+              "window_bits": 14,
+              "word_stages": 3
+            },
+            "raw": {
+              "owner": "tessera.routed_fused.launch_smem_bytes and control.unit_wire_bits",
+              "packed_tile_words": 262400,
+              "payload_bits_per_256_weights": {
+                "denominator": 4096,
+                "numerator": 4198400
+              }
+            },
+            "register_pressure": {
+              "LOCAL": 0,
+              "REG": 108,
+              "SHARED": 1024,
+              "STACK": 0
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "requested_bytes": 39952
+            }
+          },
+          "evidence": {
+            "fixture": true,
+            "comparison_id": "synthetic-pair",
+            "paired_seed_contract": "synthetic-only",
+            "timing_statistic": "fixture-mean",
+            "timer": "fixture",
+            "geometry_source": {
+              "table_version": 5,
+              "table_sha256": "eb3399b7530c8a4e566496e4fa4f6a552b1b4b186642961a2f2e95af36aaeff5",
+              "rung": 1025,
+              "cell_id": "dense:o_proj:M1",
+              "action_key": "1c52f9b6783fe53c1df3c04bb23f10ace56800d653f2bfc1027ef3878d818bf1"
+            }
+          },
+          "measurement_build_id": "fixture-t8",
+          "pass_times_us": [
+            10,
+            10
+          ]
+        }
+      ],
+      "quality": {
+        "fixture": true,
+        "anomaly_flags": ["quality_failure"],
+        "measurement_status": "measured",
+        "source_kind": "actual_sampled_expert_weights",
+        "device": "cpu",
+        "samples": [
+          {
+            "source_sha256": "synthetic-not-real-weight-evidence",
+            "source_squared_norm": 2,
+            "relative_sse": 0.1,
+            "exact_bytes": 3
+          }
+        ]
+      },
+      "dominance_evidence": []
+    },
+    {
+      "rung": 1026,
+      "measurement_status": "pending",
+      "supported": null,
+      "anomaly_flags": [],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "pending",
+          "kernel_time_us": null,
+          "kernel_path": null,
+          "geometry": null,
+          "evidence": {}
+        }
+      ],
+      "quality": {
+        "status": "pending"
+      },
+      "dominance_evidence": []
+    }
+  ],
+  "evidence": {
+    "fixture": true,
+    "geometry_source": "Admitted v0005 R1024/R1025 dense:o_proj:M1 geometry, full source scope 20 cells; projection PB 122e20fd99a4",
+    "synthetic_controls": "This small fixture keeps synthetic cell/build names, timing and quality values. The R1025 anomaly is injected, R1026 pending is synthetic, and R1027 is unlisted. This is not a production measurement table."
+  }
+}

@@ -509,39 +509,26 @@ class LaneSpec:
 
 
 def _wired_architectures(payload: Mapping[str, Any]) -> frozenset[str]:
-    """Parse the lane's declared architecture roster.
-
-    REQUIRED, and required to be non-empty.  The roster is a decision, not
-    something derivable from the code -- but it has to live in exactly ONE
-    place, and this is it.  It used to live in `tests/test_profile_export_lanes.py`
-    as two module-level sets named after two specific lanes (`GGUF_WIRED`,
-    `TESSERA_WIRED`), which a fourth lane would have escaped entirely: the
-    test asserted two lanes by name and said nothing about any other.  Here,
-    a lane declares its own roster beside everything else about that lane and
-    the profile-vs-declaration property covers every lane in the vocabulary
-    without a test edit.
-    """
+    """Read a declared roster or derive it from profile lane capabilities."""
     if "wired_architectures" not in payload:
-        raise ValueError(
-            f"lane {payload.get('id')!r} must declare `wired_architectures`: "
-            "the set of model-profile names permitted to export through it "
-            f"(or [{LaneSpec.ANY_ARCHITECTURE!r}] for a lane every "
-            "architecture ships through). An absent roster is not an empty "
-            "one, and a lane nobody is wired for must say so with a value")
+        raise ValueError(f"lane {payload.get('id')!r} must declare wired_architectures")
     wired = payload["wired_architectures"]
-    if isinstance(wired, str) or not isinstance(wired, (list, tuple, set,
-                                                        frozenset)):
-        raise ValueError(
-            f"lane {payload.get('id')!r}: `wired_architectures` must be a "
-            f"list of model-profile names; got {type(wired).__name__}")
-    names = frozenset(str(n) for n in wired)
+    if isinstance(wired, Mapping):
+        if dict(wired) != {"from": "profile_supported_lanes"}:
+            raise ValueError("unsupported wired_architectures derivation")
+        from .model_profiles.structure import iter_structure_specs
+
+        lane = str(payload["export_container"])
+        names = frozenset(spec.id for spec in iter_structure_specs()
+                          if lane in spec.supported_lanes)
+    else:
+        if isinstance(wired, str) or not isinstance(wired, (list, tuple, set, frozenset)):
+            raise ValueError("wired_architectures must be a list of model-profile names")
+        names = frozenset(str(n) for n in wired)
     if not names:
-        raise ValueError(
-            f"lane {payload.get('id')!r}: `wired_architectures` is empty. A "
-            "lane in the EXPORT_CONTAINER vocabulary that no architecture may "
-            "use is a lane whose refusal happens three layers below where an "
-            "operator can read it; declare the roster or retire the lane")
+        raise ValueError(f"lane {payload.get('id')!r}: wired_architectures is empty")
     return names
+
 
 
 def _opt_str(value: object) -> str | None:

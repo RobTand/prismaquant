@@ -316,19 +316,27 @@ def _body_layer_prefix(spec) -> str:
     return str(prefix)
 
 
-def _shared_expert_parent(spec) -> str:
-    """Derive the shared-expert module suffix from the spec's fused groups."""
-    for group in getattr(spec, "fused_groups", ()) or ():
-        target = str(group.target_suffix)
-        if "." not in target:
+def _shared_expert_parent(profile, counts, layer_re) -> str:
+    """Resolve the shared parent from census names and the fused-owner seam."""
+    parents = set()
+    for qname in counts:
+        match = layer_re.match(qname)
+        if match is None:
             continue
-        parent = target.rsplit(".", 1)[0]
-        if parent.rsplit(".", 1)[-1].startswith("shared_expert"):
-            return parent
+        parent = qname[match.end():].rsplit(".", 1)[0]
+        if not parent.rsplit(".", 1)[-1].startswith("shared_expert"):
+            continue
+        owner = profile.fused_sibling_group(qname)
+        if owner is None:
+            continue
+        owner_match = layer_re.match(owner)
+        if owner_match is not None:
+            parents.add(owner[owner_match.end():].rsplit(".", 1)[0])
+    if len(parents) == 1:
+        return next(iter(parents))
     raise PopulationSelectionError(
-        "the structure spec declares no shared-expert fused group; the three "
-        "shared strata cannot be derived from it"
-    )
+        "the census and profile fused ownership must identify one shared-expert "
+        f"parent; observed {sorted(parents)}")
 
 
 def _routed_pattern(profile, spec) -> re.Pattern[str]:
@@ -381,9 +389,9 @@ def build_roster(*, counts: Mapping[str, int], profile) -> PopulationRoster:
     spec = _spec_of(profile)
     strata = build_strata(profile)
     prefix = _body_layer_prefix(spec)
-    shared_parent = _shared_expert_parent(spec)
-    routed_pattern = _routed_pattern(profile, spec)
     layer_re = re.compile(re.escape(prefix) + r"\.(\d+)\.")
+    shared_parent = _shared_expert_parent(profile, counts, layer_re)
+    routed_pattern = _routed_pattern(profile, spec)
 
     projections = tuple(sorted({item.projection for item in strata}))
 
