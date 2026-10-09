@@ -33,10 +33,12 @@
 ### Fixed
 - Import the canonical diagnostic replay closure and accept the approved 3500-second deadline (#2482).
   Preserve the 1700-second default, valid legacy deadlines, and all scientific refusals.
-  Record actual public CLI module origins instead of synthetic import claims.
-  PB `b3498341ca27` passes the x86 CPU dry branch with seven streams and no GPU replay after the main merge.
+  Keep the frozen closure in `experiments/pact_replay`, outside the production package.
+  Preserve its source bytes and every production boundary gate.
+  Use the shared digest owner for actual public CLI module observations.
+  The affected replay, boundary, and architecture tests pass 64 cases without skips.
+  Retained PB `b3498341ca27` passes the x86 CPU dry branch before the path move, with no GPU replay.
   PB `04d03f51d333` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
-  The affected replay tests and architecture provenance test pass 37 cases without skips.
   Preserve the frozen execution source and require final artifact review before replacement.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.

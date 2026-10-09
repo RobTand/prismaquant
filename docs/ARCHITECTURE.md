@@ -1,18 +1,24 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2482): `prismaquant/pact_replay` contains the canonical diagnostic replay closure from frozen source `073646c7293685869b3ad18b261c49b49c4c481a`.
+Re-stamped 2026-10-09 (PQ #2482): `experiments/pact_replay` contains the canonical diagnostic replay closure.
+Its frozen source is `073646c7293685869b3ad18b261c49b49c4c481a`.
 The public CLI accepts positive deadlines through 3500 seconds. Its default remains 1700 seconds.
 Only the named deadline constant and guard differ from the frozen executable source.
 The cohort, roster, windows, teacher contracts, scientific refusals, and production pipeline remain unchanged.
 
-PB `daa683c956c2` executes the normal public CLI on x86 with `--deadline-seconds 3500 --dry-run-cpu`.
-The CPU branch passes with seven streams. It does not execute GPU replay.
-The observer records actual module origins and byte digests after `main` returns.
-`D38_IMPORTS.json` projects 95 observed module names from that capture.
-The separate dependency inventory includes latent sources. It does not label them as observed imports.
-PB `04d03f51d333` verifies the projection, 94 external source files, and the complete canonical correction delta.
+The closure uses standalone imports and explicit campaign pins. It is not a production package.
+The move from `prismaquant/pact_replay` preserves all 31 imported source files byte for byte.
+The production boundary gates and their allowlists remain unchanged.
+The observer uses the shared digest owner without importing a PrismaQuant package into the CLI process.
+The parent issue owns the separate model-profile migration.
+
+The retained PB D38 `daa683c956c2` records actual CLI imports before the move.
+Its capture supplies the current `D38_IMPORTS.json` projection.
+PB `b3498341ca27` repeats that public CLI after the main merge.
+Both CPU branches pass with seven streams and no GPU replay.
+PB `04d03f51d333` verifies 94 external source files and the complete canonical correction delta.
 It also proves default and legacy resolver equivalence, plus identical invalid-deadline and scientific refusals.
-`IMPORT_PROVENANCE.json` records the capture digests, exact source identities, and CEO replacement authority.
+`IMPORT_PROVENANCE.json` records exact source identities, the path delta, and CEO replacement authority.
 All identity records remain advisory. No new runtime identity gate reads them.
 The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
 

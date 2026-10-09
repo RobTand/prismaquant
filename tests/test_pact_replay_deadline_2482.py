@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-REPLAY_ROOT = Path(__file__).resolve().parents[1] / "prismaquant" / "pact_replay"
+REPLAY_ROOT = Path(__file__).resolve().parents[1] / "experiments" / "pact_replay"
 sys.path.insert(0, str(REPLAY_ROOT))
 
 from multi_stream_replay import cli_parser, resolve_cli_run  # noqa: E402

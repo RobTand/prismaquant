@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-REPLAY_ROOT = Path(__file__).resolve().parents[1] / "prismaquant" / "pact_replay"
+REPLAY_ROOT = Path(__file__).resolve().parents[1] / "experiments" / "pact_replay"
 MANIFEST = REPLAY_ROOT / "DEPENDENCY_MANIFEST.json"
 PROVENANCE = REPLAY_ROOT / "IMPORT_PROVENANCE.json"
 
@@ -22,7 +22,7 @@ def test_observed_imports_match_cli_capture():
     assert capture["entry"]["sha256"] == provenance["correction"]["corrected_sha256"]
     for name, (tag, path, digest) in capture["modules"].items():
         if tag == "pact-replay":
-            expected = provenance["imported_files"]["prismaquant/pact_replay/" + path]
+            expected = provenance["imported_files"]["experiments/pact_replay/" + path]
         else:
             expected = manifest["sources"][tag]["files"][path]["sha256"]
         assert digest == expected, name

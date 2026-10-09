@@ -7,19 +7,20 @@ It records modules present after the CLI returns, not function execution.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import runpy
 import sys
 
+# Load the digest owner without importing a PrismaQuant package into the CLI.
+# The CLI must still resolve its explicitly supplied, frozen dependency roots.
+_digests = runpy.run_path(str(Path(__file__).resolve().parents[1] / "prismaquant" / "digests.py"))
+
 
 def file_record(path):
     path = Path(path).resolve()
-    with path.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    return {"origin": str(path), "sha256": digest}
+    return {"origin": str(path), "sha256": _digests["file_sha256hex"](path)}
 
 
 def capture_cli(entry, arguments, roots, output, source_head):
@@ -68,8 +69,8 @@ def capture_cli(entry, arguments, roots, output, source_head):
         sys.argv, sys.path[:] = previous_argv, previous_path
         output.mkdir(parents=True, exist_ok=True)
         library_path = output / "all-modules.json"
-        library_bytes = (json.dumps({"modules": all_modules, "non_file_modules": non_file},
-                                   indent=2, sort_keys=True) + "\n").encode()
+        library_bytes = _digests["indent2_json_file_bytes"](
+            {"modules": all_modules, "non_file_modules": non_file})
         library_path.write_bytes(library_bytes)
         capture = {
             "schema": "pact.public_cli_import_capture.v1",
@@ -83,13 +84,13 @@ def capture_cli(entry, arguments, roots, output, source_head):
             "error": error,
             "modules": modules,
             "all_modules": {"file": str(library_path),
-                            "sha256": hashlib.sha256(library_bytes).hexdigest()},
+                            "sha256": _digests["bytes_sha256hex"](library_bytes)},
             "scope": "Modules present after the actual CLI call. Unobserved source files remain inferred dependencies.",
         }
-        raw = (json.dumps(capture, indent=2, sort_keys=True) + "\n").encode()
+        raw = _digests["indent2_json_file_bytes"](capture)
         (output / "cli-imports.json").write_bytes(raw)
         print(json.dumps({"cli_import_capture": str(output / "cli-imports.json"),
-                          "sha256": hashlib.sha256(raw).hexdigest(),
+                          "sha256": _digests["bytes_sha256hex"](raw),
                           "returncode": returncode, "observed_modules": len(modules)}), flush=True)
 
 
@@ -99,7 +100,7 @@ def main():
     parser.add_argument("--source-head", required=True)
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
-    replay = Path(__file__).resolve().parents[1] / "prismaquant" / "pact_replay"
+    replay = Path(__file__).resolve().parents[1] / "experiments" / "pact_replay"
     manifest = json.loads((replay / "DEPENDENCY_MANIFEST.json").read_bytes())
     roots = {"pact-replay": replay,
              **{name: source["path"] for name, source in manifest["sources"].items()}}
