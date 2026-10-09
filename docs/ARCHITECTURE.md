@@ -1,5 +1,55 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2301): `tools/g3job` owns the imported G3 measurement harness.
+The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
+Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
+The issuegraph branch supplies this harness for normal exact-head review.
+No earlier standalone report counts as approval of the imported head.
+
+The harness leaves the pinned `/pq` package, candidates, teachers, and action `1cb0d64a` unchanged.
+The source reader retains every tensor that any requested forward uses as source.
+It also retains a tensor when the replacement shape is partial or unknown.
+Each omitted tensor receives correctly shaped writable storage before its complete candidate replacement.
+Used source and rendered candidate bytes retain their digest checks before a forward.
+The harness reuses the existing G3 arithmetic and EXL3 decoder without changes to those owners.
+Its hash, wire, teacher, and decode tasks use the shared IO engine.
+
+Run `tools/g3job/g3_readset.py` through PB with `--tag x86` to construct the data manifest.
+Set `G3_PQ_ROOT` to the pinned host package for this metadata step.
+Supply the source model, requested arms, wire roots, both teachers, and the panel.
+Supply the reference binding and source execution JSON through `--setup-file`.
+Supply `--arrays-root` when the panel arrays do not reside beside the panel.
+This step reads headers and metadata, not omitted BF16 tensor bodies.
+The manifest orders setup, `layer-00` through `layer-44`, and teachers.
+The profile owns each layer prefix, including the GLM language-model wrapper.
+
+Use `tools/g3job/g3_submit.py` with explicit CPU, host memory, and GPU memory demands.
+Pass the launch arguments after `--`.
+The submitter uses PB stage residency, share auto, RAM auto, and priority zero.
+PB admission and its published RAM policy remain the qualification authority.
+The container retains the admitted helper, environment, writable queue, and read-only input mounts.
+A named range retains its lease until its descriptor closes.
+Its RAM epoch and own digest must agree before the reader returns bytes.
+Completed layer and window events advance matching progress phases.
+The phased launcher refuses `--pilot` because that mode has no arm completion plan.
+
+PB `81dd844a14e0` passes 88 CPU cases, including the source guards, with no skips.
+PB `9f10a29c7f0c` compiles the harness and exercises its CLI and tiny one-arm comparison.
+PB `31b249361cb2` builds the actual 47-phase manifest for `a8_w`.
+It declares 37,858 ranges and omits 36,423 fully replaced source tensors.
+The retained manifest is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-data-manifest-v2.json.gz`.
+These counts describe declared reads, not measured I/O savings.
+
+The initial GPU smoke, PB `eb14b4b4cb4a`, reads one 96-MiB range from PB RAM inside the producer container.
+It preserves the source digest through a GPU round trip.
+Its tiny Linear comparison preserves logits and FP64 KL bytes across source-read and source-omission paths.
+Its profiles reside in `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke/reader-smoke-ig-a3.one-arm/`.
+The comparison has three positions and two vocabulary columns, not the whole GLM panel.
+The final shared-engine GPU check is separate from this initial smoke.
+No speed, energy, whole-model residency gain, serving, or promotion claim follows from these checks.
+Netdata power has a ten-second native interval, which cannot resolve the tiny comparison for work per joule.
+
+
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
