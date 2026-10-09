@@ -297,6 +297,11 @@ def test_profile_has_a_fused_sibling_source(profile):
 def test_fused_group_is_self_consistent_on_cpu(profile):
     """Spec-driven variant of check 3 that works without vLLM: all q/k/v
     siblings must map to ONE canonical key (or all to None)."""
+    if type(profile).__name__ == "Glm5NextProfile":
+        # GLM KDA ownership reads the layer kind from the declared config.
+        # A hand-built profile declares none, so the probe refuses there.
+        # Declare the same KDA layer kind the fused-group tests use.
+        profile._declare_config_document({"text_config": {"layer_types": ["linear_attention"]}})
     keys = {profile.fused_sibling_group(n) for n in FUSED_PROBE_NAMES}
     assert len(keys) == 1, f"{type(profile).__name__}: {keys}"
 
