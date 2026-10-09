@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--kernel-config", default='{"enable_flashinfer_autotune": false}')
     ap.add_argument("--trust-remote-code", action="store_true", default=True)
     ap.add_argument("--language-model-only", action="store_true", default=True)
+    ap.add_argument("--draft-routes", action="store_true", default=False)
+    ap.add_argument("--speculative-config", default=None)
     return ap
 
 
@@ -186,6 +188,10 @@ def check_engine_scope(args: argparse.Namespace) -> None:
         raise SystemExit("trust remote code must stay on for this census")
     if not args.language_model_only:
         raise SystemExit("language model only must stay on for this census")
+    if args.draft_routes:
+        raise SystemExit("draft routes stay off; the decode attestation needs the one-row forward")
+    if args.speculative_config is not None:
+        raise SystemExit("speculative config stays unset without draft routes")
 
 
 def check_no_single_node_env() -> None:
@@ -238,6 +244,9 @@ def census_argv(args: argparse.Namespace, *, trace_path: str) -> list[str]:
         argv.append("--trust-remote-code")
     if args.language_model_only:
         argv.append("--language-model-only")
+    if args.draft_routes:
+        argv.append("--draft-routes")
+        argv.extend(["--speculative-config", args.speculative_config or ""])
     return argv
 
 
@@ -289,6 +298,8 @@ def run_dry_run(args: argparse.Namespace, out: Path) -> int:
             "kernel_config": json.loads(args.kernel_config),
             "trust_remote_code": args.trust_remote_code,
             "language_model_only": args.language_model_only,
+            "draft_routes": args.draft_routes,
+            "speculative_config": (json.loads(args.speculative_config) if args.speculative_config else None),
         },
         "profiles": {
             name: {
@@ -382,6 +393,11 @@ def run_head(args: argparse.Namespace, out: Path) -> int:
             raise SystemExit("the gang worker never joined the cluster")
         proc = _run(["docker", "exec", args.container, "bash", "-c", inner])
         if proc.returncode != 0:
+            kept = Path(str(out) + ".refused.json")
+            try:
+                kept.write_bytes(out.read_bytes())
+            except OSError:
+                pass
             raise SystemExit(f"census tool exits {proc.returncode}")
     finally:
         _remove_container(args.container)
