@@ -31,6 +31,14 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The SDK6 consumer and shared fixture pin select merged PB #1675 at `03a5451ac61bedcd455805f0fa2ab1f032163300` (#1091).
+  Cache-pair rows seal versioned lifetime intent for the actual temporary root and persistent compile caches.
+  The launcher requires PB's registered attempt namespace and refuses unsupported or unregistered execution.
+  Legacy rows keep their previous cache defaults.
+  The pytest loader preserves bounds with SDK6's relative imports.
+  Measurement callers use the registered TMPDIR and retain receipts outside its ephemeral leaf.
+  PB #1689 still blocks x86 cleanup qualification because the current scratch filesystem is tmpfs.
+  This change claims no quota enforcement, live loss recovery, new GPU measurement, or performance gain.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.

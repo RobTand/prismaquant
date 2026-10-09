@@ -198,6 +198,9 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
+#: PB owns generation-bound scratch registration and terminal cleanup.
+SCRATCH_LIFETIME_DECLARATIONS_ENV = "PRISMABUILD_EPHEMERAL_SCRATCH_DECLARATIONS"
+
 def validate_container(spec: dict, *, bounded: bool = False) -> None:
     """Check a container spec, with the bounded-capture env gate opt-in.
 
@@ -269,6 +272,10 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
         raise RuntimeError("container env must map environment names to strings")
     if 'PRISMAQUANT_CONTAINER_CONTENT_SHA256' in env:
         raise RuntimeError('actual container content is supplied by the inspected launcher')
+    if SCRATCH_LIFETIME_DECLARATIONS_ENV in env:
+        raise RuntimeError(
+            f'spec env {SCRATCH_LIFETIME_DECLARATIONS_ENV} is derived from the declared '
+            'scratch kinds, not declared by a spec')
     if SAFE_PATH_ENV in env:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
     if CHECKOUT_COMMIT_ENV in env:
@@ -621,6 +628,80 @@ LOCAL_SCRATCH_KINDS = (
     (STAGE_B_SPILL_ENV, stage_b_spill_environment),
     (CONTAINER_CACHE_SCRATCH_ENV, container_cache_scratch_environment),
 )
+
+def _scratch_lifetime_client():
+    """Resolve selected SDK6 support through the existing public SDK owner."""
+    from prismaquant.staged_lease import LeaseRefused, client_sdk
+
+    try:
+        sdk = client_sdk()
+    except LeaseRefused as exc:
+        raise RuntimeError(f"scratch lifetime support is unavailable: {exc}") from exc
+    if "scratch-lifetime-v1" not in sdk.CAPABILITIES:
+        raise RuntimeError("selected SDK lacks scratch-lifetime-v1 support")
+    return sdk
+
+
+def scratch_lifetime_selection(spec: dict, scratch: dict) -> dict | None:
+    """Select the declared temporary workspace and persistent cache root."""
+    if not scratch.get(CONTAINER_CACHE_SCRATCH_ENV[0]):
+        return None
+    # Dispatch and Docker validate cache routing before this domain selection.
+    value = _canonical_absolute(spec.get("env", {}).get("PRISMAQUANT_TMPDIR"))
+    if value is None:
+        raise RuntimeError("TMPDIR needs an explicit separate charged workspace")
+    temporary = PurePosixPath(value)
+    root_env = next((names[0] for names, _ in LOCAL_SCRATCH_KINDS
+                     if names != CONTAINER_CACHE_SCRATCH_ENV
+                     and scratch.get(names[0]) == str(temporary.parent)), None)
+    if root_env is None:
+        raise RuntimeError("TMPDIR must name a direct child of a separate charged workspace")
+    sdk = _scratch_lifetime_client()
+    selection = sdk.build_scratch_lifetime_selection([
+        {"root_env": root_env, "name": temporary.name, "lifetime": "ephemeral"},
+        {"root_env": CONTAINER_CACHE_SCRATCH_ENV[0], "name": "compile", "lifetime": "persistent"},
+    ])
+    return {sdk.SCRATCH_LIFETIME_DECLARATIONS_ENV:
+            json.dumps(selection, separators=(",", ":"))}
+
+
+def scratch_workspace_environment(spec: dict, scratch: dict, environ) -> dict:
+    """Use only PB's registered leaf for this launch's exact attempt."""
+    selection = scratch_lifetime_selection(spec, scratch)
+    if selection is None:
+        return {}
+    sdk = _scratch_lifetime_client()
+    control = sdk.SCRATCH_LIFETIME_DECLARATIONS_ENV
+    try:
+        if json.loads(environ.get(control, "")) != json.loads(selection[control]):
+            raise RuntimeError("scratch lifetime launch selection differs from the spec")
+        root = environ.get(QUEUE_ROOT_ENV)
+        key = environ.get(ACTION_KEY_ENV)
+        if not root or not key:
+            raise RuntimeError("scratch lifetime launch has no public queue identity")
+        queue = sdk.PoolQueue(root)
+        claim = sdk.read_claimed_record(queue, key)
+        if claim is None:
+            raise RuntimeError("scratch lifetime launch has no live claim")
+        selected = json.loads(selection[control])["entries"][0]
+        declaration = sdk.bind_ephemeral_scratch(
+            queue, root_env=selected["root_env"], name=selected["name"],
+            claim_snapshot=claim, env=environ)
+        record = claim.get(sdk.SCRATCH_LIFETIME_FIELD, {})
+        if (record.get("schema") != sdk.SCRATCH_LIFETIME_RECORD_SCHEMA_V1
+                or record.get("registration_complete") is not True):
+            raise RuntimeError("scratch lifetime registration is absent or incomplete")
+        matches = [entry for entry in record.get("entries", [])
+                   if entry.get("root_env") == selected["root_env"]
+                   and entry.get("name") == selected["name"]]
+        if (len(matches) != 1 or matches[0].get("lifetime") != "ephemeral"
+                or matches[0].get("declaration") != declaration
+                or not matches[0].get("identity")
+                or matches[0].get("cleaned") is not False):
+            raise RuntimeError("scratch lifetime registration does not own this attempt")
+        return {"PRISMAQUANT_TMPDIR": str(sdk.ephemeral_scratch_path(declaration))}
+    except (ValueError, TypeError, AttributeError, OSError) as exc:
+        raise RuntimeError(f"scratch lifetime binding refused: {exc}") from exc
 
 
 def local_scratch_environment(spec: dict, environ) -> dict:
@@ -1154,11 +1235,14 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     # The caches' defaults come first, so any value in the spec overrides
     # them (PQ #1072).
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
+    workspace_env = scratch_workspace_environment(
+        spec, scratch, environ if environ is not None else {})
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
                  **bounded_defaults,
                  **progress_environment(spec, environ if environ is not None else {}),
                  **residency_env, **reader_env, **scratch,
-                 **produced_spool_environment(spec, environ if environ is not None else {})}
+                 **produced_spool_environment(spec, environ if environ is not None else {}),
+                 **workspace_env}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:

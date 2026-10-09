@@ -112,19 +112,31 @@ def run_compilation_workload() -> dict:
     return workload
 
 
+def measurement_workspace(parser, value, cache_root: Path) -> Path:
+    """Keep an admitted row inside its registered temporary workspace."""
+    if value is None:
+        parser.error("--workspace or PRISMAQUANT_TMPDIR is required")
+    workspace = Path(value)
+    if (os.environ.get("PRISMAQUANT_CONTAINER_CACHE_ROOT")
+            and str(workspace) != os.environ.get("PRISMAQUANT_TMPDIR")):
+        parser.error("--workspace must use the launched PRISMAQUANT_TMPDIR")
+    if workspace == cache_root or cache_root in workspace.parents:
+        parser.error("--workspace must be separate from --cache-root")
+    return workspace
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-root", type=Path, required=True)
-    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, default=os.environ.get("PRISMAQUANT_TMPDIR"),
+                        help="Use the registered TMPDIR unless an offline workspace is explicit")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--profile-out", type=Path, default=None)
     parser.add_argument("--interval-s", type=float,
                         default=peak_mod.SAMPLE_INTERVAL_S)
     args = parser.parse_args(argv)
     cache_root = args.cache_root
-    workspace = args.workspace
-    if workspace == cache_root or cache_root in workspace.parents:
-        parser.error("--workspace must be separate from --cache-root")
+    workspace = measurement_workspace(parser, args.workspace, cache_root)
     for name in ("HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",
                  "XDG_CACHE_HOME"):
         value = os.environ.get(name)

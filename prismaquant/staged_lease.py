@@ -87,20 +87,17 @@ from .staged_tier_policy import TierPolicyRefused
 #: attempt. One SDK, exact commit and version; no dual-SDK probing, alias or
 #: fallback is introduced. Live fleet deployment stays separate and is never
 #: inferred from this pin.
-PB_READER_LEASE_PIN_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
+PB_READER_LEASE_PIN_COMMIT = "03a5451ac61bedcd455805f0fa2ab1f032163300"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: The PrismaBuild client SDK version this package is written against
 #: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
 #: version refuses as unsupported: the SDK's contract is pinned by version, so
 #: a mismatch is a different contract, never a subset to probe.
-#: SDK5 (PB #1482) adds ``require_native_producer_context`` on
-#: ``read_verified_action_result`` — the selected attempt's authenticated
-#: native producer context PQ #2152 joins — beside SDK4's public
-#: ``read_verified_action_result`` and ``bind_standard_capture_command``.
-#: SDK4 and anything else still refuse; cache-hit, legacy and missing native
-#: production evidence refuse inside the SDK rather than degrading.
-PB_CLIENT_SDK_VERSION = 5
+#: PQ #1091 selects merged PB #1675, SDK6. The public lifetime builder
+#: adds generation-bound scratch intent. SDK5's native producer context
+#: and verified result interfaces remain unchanged. Other versions refuse.
+PB_CLIENT_SDK_VERSION = 6
 
 #: The one PrismaBuild module PrismaQuant imports.
 _CLIENT_MODULE = "prismabuild.client"

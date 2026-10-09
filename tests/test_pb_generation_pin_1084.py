@@ -85,6 +85,7 @@ CONSUMER_PIN_NAMES = {
     "test_produced_output_spool_real_pb": "PIN_PATH",
     "test_stage_a_retirement_pb_1073": "PIN_PATH",
     "test_stage_b_prep_produced_1070": "PIN_PATH",
+    "test_container_cache_lifetime_1091": "PIN_PATH",
 }
 
 

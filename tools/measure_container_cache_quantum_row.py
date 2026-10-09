@@ -45,7 +45,7 @@ from prismaquant.digests import (  # noqa: E402
 )
 from prismaquant.stage_b_workspace_profile import write_profile  # noqa: E402
 from tools.measure_container_cache_row import (  # noqa: E402
-    run_compilation_workload, runtime_versions,
+    measurement_workspace, run_compilation_workload, runtime_versions,
 )
 from prismaquant.io_spans import (  # noqa: E402
     GpuPowerSampler,
@@ -439,7 +439,8 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-root", type=Path, required=True)
-    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, default=os.environ.get("PRISMAQUANT_TMPDIR"),
+                        help="Use the registered TMPDIR unless an offline workspace is explicit")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--profile-out", type=Path, default=None)
     parser.add_argument("--device", default="cuda",
@@ -448,9 +449,7 @@ def main(argv=None) -> int:
                         default=peak_mod.SAMPLE_INTERVAL_S)
     args = parser.parse_args(argv)
     cache_root = args.cache_root
-    workspace = args.workspace
-    if workspace == cache_root or cache_root in workspace.parents:
-        parser.error("--workspace must be separate from --cache-root")
+    workspace = measurement_workspace(parser, args.workspace, cache_root)
     for name in ("HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",
                  "XDG_CACHE_HOME"):
         value = os.environ.get(name)

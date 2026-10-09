@@ -62,11 +62,13 @@ from pathlib import Path, PurePosixPath
 if __package__:
     from tools.tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        SCRATCH_LIFETIME_DECLARATIONS_ENV,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
+        scratch_lifetime_selection,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -77,11 +79,13 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
         CONTAINER_IMAGE_FLAG,
+        SCRATCH_LIFETIME_DECLARATIONS_ENV,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
+        scratch_lifetime_selection,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -1897,6 +1901,17 @@ def _admit_overlay_caches(spec: dict, scratch: dict) -> None:
         "pinned": {name: env[name] for name in pinned}, "reason": reason}
 
 
+def _seal_scratch_lifetime(spec: dict, scratch: dict) -> None:
+    """Validate SDK6 lifetime support before publishing a cache-pair row."""
+    if SCRATCH_LIFETIME_DECLARATIONS_ENV in spec.get("env", {}):
+        raise RuntimeError(
+            f"spec env {SCRATCH_LIFETIME_DECLARATIONS_ENV} is derived from the "
+            "declared scratch kinds, not declared by a spec")
+    # The outer request carries lifetime intent. The launcher validates it
+    # against these same spec bytes; container specs cannot forge PB controls.
+    scratch_lifetime_selection(spec, scratch)
+
+
 def _container_wrap(spec_path: Path, payload: list[str], *,
                     progress: Sequence[tuple[str, int]],
                     resource_policy=None,
@@ -1998,6 +2013,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     try:
         scratch = local_scratch_environment(spec, spec.get("env", {}))
         _admit_overlay_caches(spec, scratch)
+        _seal_scratch_lifetime(spec, scratch)
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload,
                                chain_batch_size=handoff_chain_batch_size)
         # The bf16 reduction flag is sealed in the same spec, so it is
@@ -2499,8 +2515,14 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     # Every bounded-local scratch pair and PrismaBuild's list of them (PB
     # #911), so pbrun charges each ceiling to the executing box's disk
     # budget at claim. Nothing declared, nothing added.
-    for name, value in local_scratch_environment(
-            sealed_spec, sealed_spec.get("env", {})).items():
+    _sealed_scratch = local_scratch_environment(
+        sealed_spec, sealed_spec.get("env", {}))
+    for name, value in _sealed_scratch.items():
+        argv += ["--env", f"{name}={value}"]
+    # The row-workspace lifetime intent for a cache-pair row (PQ #1091,
+    # PB #1360): derived from the same sealed bytes, so the outer request
+    # and the launched spec agree.
+    for name, value in (scratch_lifetime_selection(sealed_spec, _sealed_scratch) or {}).items():
         argv += ["--env", f"{name}={value}"]
     # A spec that declares the produced spool seals it into the request too:
     # the container refuses a declared spool the action does not carry, and

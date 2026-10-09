@@ -38,9 +38,11 @@ An explicit pin within that root is preserved. An escaped or overlay pin
 refuses, even when `overlay_cache_reason` is supplied: that waiver does not
 make an opt-in cache declaration account for bytes outside its root.
 
-`PRISMAQUANT_TMPDIR` must be explicit and within a different declared charged
-workspace, such as the cotangent or spill root. It cannot use the cache root
-or an uncharged directory. No attempt/generation suffix is guessed here.
+`PRISMAQUANT_TMPDIR` names a direct child of another charged root.
+It selects that root and the child name for PB's versioned lifetime declaration.
+PB supplies the actual host, action, generation, and attempt namespace.
+The launcher uses only the registered path that the public SDK binds to its live claim.
+It refuses absent, incomplete, cleaned, or foreign registration.
 
 Legacy specs without the new pair retain their previous defaults and overlay
 admission policy. No existing sealed spec is rewritten or silently selected
@@ -49,12 +51,17 @@ same registry-driven forwarding path.
 
 ## Limits and acceptance
 
-This declaration is a reservation, **not** a measured size, filesystem quota,
-or durable lifetime. Persistent compilation caches and temporary workspace
-must not be described as crash-cleaned. PB #1360 owns the public generation-
-bound lifetime contract; PrismaQuant must bind that contract and qualify its
-selected runtime before claiming #1091 complete. No private cleanup hook,
-local sweeper, `finally` cleanup, or produced-output retirement is substituted.
+The ROOT/MAX pair declares a reservation, not a filesystem quota.
+SDK6 supplies the public lifetime builder, registration fields, and namespace binder.
+The shared source pin and the reader pin select PB #1675 at `03a5451ac61bedcd455805f0fa2ab1f032163300`.
+The dispatcher seals a versioned object with an ephemeral workspace and a persistent cache entry.
+Legacy rows select no lifetime object.
+The launcher refuses execution without selected support and complete attempt registration.
+
+PB still owns directory creation, deletion, recovery, and the capacity barrier.
+PrismaQuant adds no sweeper, private cleanup hook, or `finally` cleanup.
+Source-bound fixtures use simulated broker and process endpoints.
+They cannot establish live worker or launcher loss recovery.
 
 CPU tests cover declaration/pricing, command forwarding, containment,
 conflicting/partial/ASCII bounds, mount safety, symlink refusal and unchanged
@@ -65,10 +72,11 @@ ceiling from that peak with declared headroom. Receipts live in
 `docs/measurements/container_cache_quantum_row1_2463.json`,
 `container_cache_quantum_row2_2463.json` and
 `container_cache_quantum_row1_netdata_2463.json`; the report is
-`docs/measurements/container_cache_peak_2463.md`. Recovery from
-worker/launcher loss through the eventual public lifetime contract, quota
-enforcement and cleanup still need proof under #1091 and PB #1360. No
-work-per-joule result or speedup follows from this measurement.
+`docs/measurements/container_cache_peak_2463.md`.
+The recorded GPU results remain historical.
+They predate the sampler lifecycle repair and this SDK6 integration.
+They do not qualify cleanup, a new measurement window, or a performance change.
+New measurement commands use the registered TMPDIR and retain receipts outside that temporary leaf.
 
 ## Sampler lifecycle requirements
 
@@ -98,6 +106,45 @@ Receipt publication reuses the existing profile writer and digest owners.
 The Netdata collector and observer share one validator.
 No frozen allowlist or duplication baseline expands.
 
-This extends the existing container/scratch adapter. It adds no rendered-
-weight/activation cache, model arithmetic, wire format, serving gate, runtime
-pin, kernel, production recipe default, stage graph or agent scheduler.
+This change adds no rendered-weight cache, activation cache, model arithmetic, wire format, or serving gate.
+It moves only the PrismaBuild consumer contract and its connected fixture pin.
+It changes no serving runtime pin, kernel, production recipe, or agent scheduler.
+The opt-in cache-pair path requires a host interpreter with PrismaQuant and the selected SDK.
+The small legacy host path stays unchanged.
+
+## SDK6 qualification and external prerequisite
+
+PB `8746986b175d79ace1ff549b18d70943f98bdda2d3fdb3f29bae9d7c6d5b2ba2` published the read-only source archive and installed SDK6.
+The archive SHA-256 is `7d39c5234bc155e60196e1a72a904a35c17214b78f0913b46980ee7714f9bb94`.
+The qualified x86 interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0-pb03a5451a/bin/python`.
+The installation retains Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
+The published pin guard verifies both Git installs and their RECORD bytes before pytest.
+
+PB `50eb3fb4dc55ecfead8451da3cc05fd2bcfd6d0b7a9cfd9389cb4a76a416d4ea` reproduces seven lifetime integration failures before the fix.
+PB `6ee9dc43b4f630a963f12ffafba449163af4b46cc94b12e0fbfe3c69b7071b57` passes the first ten lifetime cases.
+PB `ed30db4740f8107e8cf162137daddd2c42f6768a76f480f7919c6b4a2da32260` passes all 30 charge cases without skips.
+PB `87842483fce5728841a258b595c8a1e97ed7056392a2e4a14fe989f0862c1a8f` passes all 16 process-isolation cases.
+SDK6's relative pytest import requires a private package, not the former private standalone module.
+The loader preserves the test bound and leaves canonical PB imports unbound.
+
+PB `1d4071b6a337f6b1c351213acaaea4075c1a68daf8b4828a47f6e3757b878f01` exercises the actual Docker adapter.
+It resolves SDK6, builds the versioned selection, and refuses an unregistered launch before Docker.
+It also compiles five changed modules.
+This smoke proves refusal, not successful cleanup.
+
+PB `1d5e7fda251954612f3baaac685e6bd1a9ab42b6bf028defe6b18aa9bac1aabf` verifies the migrated measurement request.
+The request carries the versioned lifetime object and does not override the registered TMPDIR.
+The receipt path stays outside the ephemeral leaf.
+The same action repeats the unregistered-launch refusal and compiles eight changed modules.
+
+PB `f2a31c437c8a2fd12c8424762f26e078812b1baa17eb0da34b23cbdfae9fbd98` reaches the selected pool's filesystem guard.
+Its four cleanup scenarios refuse with `scratch filesystem type not supported: tmpfs`.
+The other 11 cases pass.
+Two spool suites also refuse the `/tmp` filesystem in PB `ec7c740f59a03226c914f38530dd6225ff661fdcb28aab950789d495f748c9b3` and `fbf184367f20e0bee7d051cb4a234ed36f6cea20c838758ce397cd900fb7c12f`.
+No filesystem guard changes or skips hide these failures.
+
+Open PB #1689 owns the required disk-backed x86 scratch mount and measured offer.
+The observed x86 offer has no `spool_gb`.
+Resume the cleanup scenarios with that qualified mount as `pbtest --basetemp`.
+Do not use the HDD pool or move CPU qualification to a Spark.
+Real loss recovery and the new GPU measurement window remain unqualified.

@@ -47,16 +47,18 @@ def test_cache_pair_is_priced_independently_without_creating_directories(tmp_pat
     assert list(tmp_path.iterdir()) == []
 
 
-def test_cache_forwarding_and_defaults_do_not_reuse_spill_or_tmp():
+def test_cache_forwarding_and_defaults_do_not_reuse_spill_or_tmp(installed_client_sdk, monkeypatch):
     spec, env = _layout(CONTAINER_FIXTURE_ROOT)
-    inside = _docker_env(spec, env)
+    from test_container_cache_lifetime_1091 import _registered_client
+    launch, path = _registered_client(spec, env, monkeypatch, installed_client_sdk)
+    inside = _docker_env(spec, launch)
     assert {name: inside[name] for name in CACHE} == {name: env[name] for name in CACHE}
     assert {name: inside[name] for name in COMPILATION} == {
         "HF_HOME": env[CACHE[0]] + "/hf",
         "TRITON_CACHE_DIR": env[CACHE[0]] + "/triton",
         "TORCHINDUCTOR_CACHE_DIR": env[CACHE[0]] + "/inductor",
         "XDG_CACHE_HOME": env[CACHE[0]] + "/xdg"}
-    assert inside["PRISMAQUANT_TMPDIR"] == env["PRISMAQUANT_TMPDIR"]
+    assert inside["PRISMAQUANT_TMPDIR"] == path
     assert "PRISMABUILD_LOCAL_SCRATCH_PAIRS" not in inside
 
 
@@ -155,10 +157,12 @@ def test_identity_mount_does_not_waive_overlay_cache_refusal(overlay):
         _docker_env(spec, env)
 
 
-def test_contained_cache_pins_are_preserved():
+def test_contained_cache_pins_are_preserved(installed_client_sdk, monkeypatch):
     cache = CONTAINER_FIXTURE_ROOT / "compile"
     spec, env = _layout(CONTAINER_FIXTURE_ROOT, pins={"HF_HOME": str(cache / "pinned-hf")})
-    inside = _docker_env(spec, env)
+    from test_container_cache_lifetime_1091 import _registered_client
+    launch, _ = _registered_client(spec, env, monkeypatch, installed_client_sdk)
+    inside = _docker_env(spec, launch)
     assert inside["HF_HOME"] == str(cache / "pinned-hf")
     assert inside["TRITON_CACHE_DIR"] == str(cache / "triton")
 

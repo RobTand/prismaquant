@@ -1,4 +1,4 @@
-"""PQ #1888/#1293/#2152: one reviewed SDK5 boundary, without legacy acceptance."""
+"""One reviewed SDK6 boundary retains native context and refuses older SDKs."""
 from __future__ import annotations
 
 import inspect
@@ -10,10 +10,9 @@ import pytest
 from fleet_sdk import require_prismabuild_sdk
 from prismaquant import staged_lease
 
-COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
+COMMIT = "03a5451ac61bedcd455805f0fa2ab1f032163300"
 
-#: The historical SDK4 connected-fixture archive. It stays on the shared mount
-#: as preserved history; the SDK5 consumer refuses it by version.
+#: The historical SDK4 archive stays unchanged. SDK6 refuses its version.
 SDK4_ARCHIVE_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
 SDK4_ARCHIVE_ROOT = ("/mnt/shared/prismabuild-fleet/qualification/"
                      "pq-pb-sdk4-20261002/" + SDK4_ARCHIVE_COMMIT)
@@ -22,10 +21,10 @@ SDK4_ARCHIVE_ROOT = ("/mnt/shared/prismabuild-fleet/qualification/"
 def test_reviewed_reader_and_sdk_move_together():
     assert staged_lease.PB_READER_LEASE_PIN_COMMIT == COMMIT
     assert staged_lease.PINNED_SDK_COMMIT == COMMIT
-    assert staged_lease.PB_CLIENT_SDK_VERSION == 5
+    assert staged_lease.PB_CLIENT_SDK_VERSION == 6
 
 
-@pytest.mark.parametrize("version", [None, 1, 2, 3, 4])
+@pytest.mark.parametrize("version", [None, 1, 2, 3, 4, 5])
 def test_other_sdk_versions_still_refuse(version):
     names = {name: object() for name in staged_lease._REQUIRED_NAMES}
     module = SimpleNamespace(SDK_VERSION=version, **names)
@@ -39,15 +38,8 @@ def test_sdk_missing_reader_surface_still_refuses():
         staged_lease._require_client_surface(module)
 
 
-def test_preserved_sdk4_archive_refuses_under_the_sdk5_consumer(monkeypatch):
-    """The real historical SDK4 tree is refused by version, never accepted.
-
-    One SDK moves with the pin: the consumer demands exactly SDK5, so the
-    intact SDK4 archive — still present on the shared mount as preserved
-    history — must refuse by name rather than serve as a fallback. Where the
-    archive was never mounted the refusal cannot be exercised and the test
-    says so instead of inventing a tree.
-    """
+def test_preserved_sdk4_archive_refuses_under_the_sdk6_consumer(monkeypatch):
+    """The preserved SDK4 archive cannot supply the SDK6 consumer contract."""
     require_prismabuild_sdk()
     if not Path(SDK4_ARCHIVE_ROOT, "src", "prismabuild", "client.py").is_file():
         pytest.skip(f"preserved SDK4 archive not mounted: {SDK4_ARCHIVE_ROOT}")
@@ -58,7 +50,7 @@ def test_preserved_sdk4_archive_refuses_under_the_sdk5_consumer(monkeypatch):
 
 
 @pytest.mark.usefixtures("pinned_pb_source")
-def test_real_sdk5_sealed_tree_is_the_production_resolver():
+def test_real_sdk6_sealed_tree_is_the_production_resolver():
     """The shared connected-fixture bundle is served by the production resolver.
 
     The bundle lives on the fleet's shared mount, so this test is fleet-only
@@ -74,7 +66,7 @@ def test_real_sdk5_sealed_tree_is_the_production_resolver():
     staged_lease.set_lease_helper_root(root)
     try:
         sdk = staged_lease.client_sdk()
-        assert sdk.SDK_VERSION == staged_lease.PB_CLIENT_SDK_VERSION == 5
+        assert sdk.SDK_VERSION == staged_lease.PB_CLIENT_SDK_VERSION == 6
         assert isinstance(sdk.__file__, str)
         assert Path(sdk.__file__).resolve().is_relative_to(root / "src")
         assert "require_native_producer_context" in inspect.signature(
@@ -82,12 +74,19 @@ def test_real_sdk5_sealed_tree_is_the_production_resolver():
         assert callable(sdk.bind_standard_capture_command)
         assert sdk.READER_LEASE_TAG == "reader-lease-v1"
         assert callable(sdk.acquire_for) and callable(sdk.open_pinned)
+        assert sdk.SCRATCH_LIFETIME_TAG in sdk.CAPABILITIES
+        assert sdk.build_scratch_lifetime_selection([
+            {"root_env": "WORK_ROOT", "name": "row", "lifetime": "ephemeral"}
+        ]) == {
+            "schema": sdk.SCRATCH_LIFETIME_SELECTION_SCHEMA_V1,
+            "entries": [{"root_env": "WORK_ROOT", "name": "row", "lifetime": "ephemeral"}],
+        }
     finally:
         staged_lease.set_lease_helper_root(None)
 
 
 @pytest.mark.usefixtures("pinned_pb_source")
-def test_band_planner_and_reader_share_the_reviewed_sdk5_root(monkeypatch):
+def test_band_planner_and_reader_share_the_reviewed_sdk6_root(monkeypatch):
     """The planner's PB modules and the reader's SDK come from one bundle."""
     require_prismabuild_sdk()
     from fullstack_pb_generation import require_paths

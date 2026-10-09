@@ -385,3 +385,20 @@ def test_pb_charges_cache_gib_plus_each_scratch_reservation():
     declared = {names[0]: root, names[1]: str(cache_gib * (1 << 30)),
                 runner.LOCAL_SCRATCH_PAIRS_ENV: f"{names[0]}:{names[1]}"}
     assert scratch_terms(declared) == {"spool_gb": cache_gib}
+
+
+@pytest.mark.parametrize("module", [
+    "tools.measure_container_cache_row", "tools.measure_container_cache_quantum_row",
+])
+def test_admitted_measurement_refuses_an_unowned_workspace(tmp_path, monkeypatch, module):
+    owner = importlib.import_module(module)
+    cache = tmp_path / "cache"
+    registered = tmp_path / "registered"
+    escaped = tmp_path / "old-attempt"
+    monkeypatch.setenv("PRISMAQUANT_CONTAINER_CACHE_ROOT", str(cache))
+    monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(registered))
+    with pytest.raises(SystemExit) as error:
+        owner.main(["--cache-root", str(cache), "--workspace", str(escaped),
+                    "--out", str(tmp_path / "receipt.json")])
+    assert error.value.code == 2
+    assert not escaped.exists() and not cache.exists()

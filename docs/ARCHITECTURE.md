@@ -1,5 +1,30 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-09 · PQ #1091, SDK6 source integration.
+The current PrismaBuild consumer pin is `03a5451ac61bedcd455805f0fa2ab1f032163300`, from merged PB #1675.
+The shared connected-fixture pin selects the same commit and SDK version 6.
+The earlier SDK4 and SDK5 pin records below remain historical.
+The qualified x86 interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0-pb03a5451a/bin/python`.
+PB `8746986b175d` installs that SDK and preserves the Tessera pin.
+
+Cache-pair rows seal `prismabuild.scratch_lifetime_selection.v1`.
+The temporary entry names the root that contains the declared TMPDIR, not the first scratch root.
+The cache entry remains persistent.
+The launcher binds the actual namespace through PB's public SDK and requires complete registration for that attempt.
+Missing support or registration refuses before Docker.
+Legacy rows select no lifetime object and retain their cache defaults.
+The measurement submitter uses this same declaration owner.
+Both measurement commands require the launched TMPDIR for admitted cache-pair rows.
+
+The opt-in lifetime path needs a host interpreter with PrismaQuant and the selected SDK.
+The pytest loader supplies a private package for SDK6's relative imports.
+It preserves the per-test bound and does not bind canonical PB imports.
+Source qualification does not establish live cleanup or deployment qualification.
+PB `f2a31c437c8a` refuses all four cleanup scenarios because `/tmp` is tmpfs.
+PB #1689 must supply the disk-backed x86 scratch mount and measured offer.
+The existing cache peaks remain historical; no new GPU window, performance comparison, or loss recovery is qualified.
+The serving pin, kernels, wire, numerical policy, and production defaults remain unchanged.
+
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.
 Runtime pins, wire bytes, menu restrictions, and admission gates remain unchanged.

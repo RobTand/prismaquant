@@ -3,7 +3,7 @@
 The producer is the SAME held immutable selected attempt this campaign
 accepted its 24-case CPU negative qualification from
 (``d3966020c8e8...``); it is read, never rerun. This smoke proves the
-installed SDK5 library the consumer pins authenticates that attempt's
+installed current SDK authenticates that attempt's
 native producer context through the public
 ``require_native_producer_context=True`` contract and that the consumer's
 delivery join binds exactly that context — the positive half of the
@@ -112,7 +112,7 @@ def _claim_receipt(claim):
 
 def test_held_producer_context_authenticates_and_joins(
         installed_client_sdk, tmp_path, monkeypatch, capsys):
-    """Read the held attempt through the installed SDK5; never rerun it.
+    """Read the held attempt through the current installed SDK; never rerun it.
 
     The test depends on the fleet queue retaining the held attempt's terminal
     record. A box with no fleet queue mounted skips by name. A mounted queue
@@ -122,7 +122,7 @@ def test_held_producer_context_authenticates_and_joins(
     require_prismabuild_sdk()
     if not Path(QUEUE_ROOT).is_dir():
         pytest.skip(f"fleet queue not mounted: {QUEUE_ROOT}")
-    assert installed_client_sdk.SDK_VERSION == PB_CLIENT_SDK_VERSION == 5
+    assert installed_client_sdk.SDK_VERSION == PB_CLIENT_SDK_VERSION
     result = installed_client_sdk.read_verified_action_result(
         installed_client_sdk.PoolQueue(QUEUE_ROOT), ACTION_KEY,
         published_unix=PUBLISHED_UNIX, attempt=ATTEMPT,

@@ -69,7 +69,7 @@ def sealed_spec(row: str) -> dict:
 def pbrun_argv(row: str, spec: dict) -> list[str]:
 
     cache = f"/home/rob/pb-scratch-pq2463q/{row}/cache"
-    spill = f"/home/rob/pb-scratch-pq2463q/{row}/spill/row-tmp"
+    evidence = f"/home/rob/pb-scratch-pq2463q/{row}/spill/evidence"
     payload = [
         "python3", "-m", "tools.run_with_scratch_dirs",
         "--dir", f"/home/rob/pb-scratch-pq2463q/{row}/cache",
@@ -80,25 +80,16 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
         "--",
         "python3", "-u", "-m", "tools.measure_container_cache_quantum_row",
         "--cache-root", cache,
-        "--workspace", spill,
-        "--out", spill + "/receipt.json",
-        "--profile-out", spill + "/profile.txt",
+        "--out", evidence + "/receipt.json",
+        "--profile-out", evidence + "/profile.txt",
         "--device", "cuda",
     ]
-    env = {
-        "PRISMAQUANT_CONTAINER_CACHE_ROOT": cache,
-        "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES":
-            str(CACHE_GIB[row] * (1 << 30)),
-        "PRISMAQUANT_STAGE_B_COTANGENT_ROOT":
-            f"/home/rob/pb-scratch-pq2463q/{row}/spill",
-        "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES":
-            str(WORKSPACE_GIB * (1 << 30)),
-        "PRISMABUILD_LOCAL_SCRATCH_PAIRS": (
-            "PRISMAQUANT_CONTAINER_CACHE_ROOT:"
-            "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES,"
-            "PRISMAQUANT_STAGE_B_COTANGENT_ROOT:"
-            "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES"),
-    }
+    from tools.tessera_campaign_container import (
+        local_scratch_environment, scratch_lifetime_selection,
+    )
+
+    env = local_scratch_environment(spec, spec["env"])
+    env.update(scratch_lifetime_selection(spec, env) or {})
     argv = [
         sys.executable, "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
         "--cwd", str(Path(__file__).resolve().parents[1]),

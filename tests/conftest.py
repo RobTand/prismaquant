@@ -679,10 +679,9 @@ def _load_prismabuild_test_bound(config) -> None:
 
     Does nothing when ``PRISMABUILD_TEST_TIMEOUT_S`` is unset or empty, or
     when the plugin is already registered (``-p``). Otherwise the plugin's
-    file is found without importing ``prismabuild`` (``find_spec`` of a
-    top-level package does not run it), loaded under a private module name,
-    and registered under the plugin's own name. It imports only the standard
-    library and pytest. A bound the session asks for but cannot load is
+    file is found without importing ``prismabuild``. A private package owns
+    the plugin and its relative imports. Canonical PB imports stay unbound.
+    A bound the session asks for but cannot load is
     refused: running unbounded and green is what the bound exists to end.
     """
     import importlib.util
@@ -704,9 +703,16 @@ def _load_prismabuild_test_bound(config) -> None:
             f"{PRISMABUILD_TEST_BOUND_ENV} is set, but no "
             f"{PRISMABUILD_TEST_BOUND_PLUGIN} is installed to apply it: this "
             "session would run with no per-test bound")
+    from types import ModuleType
+
+    private_name = "_pq_prismabuild_test_bound"
+    private_package = ModuleType(private_name)
+    private_package.__path__ = [str(path.parent)]
+    sys.modules[private_name] = private_package
     spec = importlib.util.spec_from_file_location(
-        "_pq_prismabuild_pytest_test_bound", path)
+        private_name + ".pytest_test_bound", path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     # Registered from pytest_configure, a historic hook: the plugin's own
     # pytest_configure runs now and reads the bound.
