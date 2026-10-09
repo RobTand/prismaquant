@@ -1,0 +1,127 @@
+"""The measured cache ceiling derives from the recorded peak (PQ #2463)."""
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import math
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant import container_cache_peak as peak_mod
+from tests.fixtures import container_cache_ceiling_2463 as fixture_mod
+
+
+def _growth_workload(root: Path, total: int, chunk: int = 50000,
+                     interval: float = 0.06):
+    def run():
+        path = root / "workload.bin"
+        written = 0
+        with open(path, "wb") as handle:
+            while written < total:
+                handle.write(b"\x5a" * min(chunk, total - written))
+                handle.flush()
+                written += chunk
+                time.sleep(interval)
+        path.unlink()
+
+    return run
+
+
+def test_peak_exceeds_final_size_on_grow_then_shrink_workload(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    receipt = peak_mod.measure_around(
+        _growth_workload(cache, 600000), cache, interval_s=0.02)
+    measurement = receipt["measurement"]
+    assert measurement["valid"], measurement["errors"]
+    assert measurement["sample_count"] >= 2
+    assert measurement["peak_allocated_bytes"] > measurement["final_allocated_bytes"]
+    assert measurement["final_allocated_bytes"] == 0
+
+
+def test_failed_scan_invalidates_the_evidence(tmp_path):
+    sampler = peak_mod.CachePeakSampler(tmp_path / "missing", interval_s=0.02)
+    with sampler:
+        time.sleep(0.08)
+    result = sampler.result()
+    assert not result["valid"]
+    assert result["errors"]
+
+
+def test_crash_marks_the_scan_incomplete(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+
+    def fail():
+        (cache / "partial.bin").write_bytes(b"\x5a" * 100000)
+        raise RuntimeError("row crashed")
+
+    with pytest.raises(RuntimeError, match="row crashed"):
+        peak_mod.measure_around(fail, cache, interval_s=0.02)
+
+
+def test_hard_links_count_once(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    target = cache / "target.bin"
+    target.write_bytes(b"\x5a" * 100000)
+    import os
+    os.link(target, cache / "link.bin")
+    totals = peak_mod.scan_cache_bytes(cache)
+    assert totals["allocated_bytes"] == 512 * target.stat().st_blocks
+    assert totals["files"] == 1
+
+
+def test_ceiling_formula_rounds_up_to_gib():
+    gib = peak_mod.GIB_BYTES
+    assert peak_mod.derive_cache_ceiling(0, headroom_bytes=0)["ceiling_bytes"] == gib
+    assert peak_mod.derive_cache_ceiling(1, headroom_bytes=0)["ceiling_bytes"] == gib
+    assert peak_mod.derive_cache_ceiling(gib, headroom_bytes=0)["ceiling_bytes"] == gib
+    derived = peak_mod.derive_cache_ceiling(gib + 1, headroom_bytes=1)
+    assert derived["ceiling_bytes"] == 2 * gib
+
+
+def test_ceiling_rejects_negative_inputs():
+    with pytest.raises(ValueError):
+        peak_mod.derive_cache_ceiling(-1, headroom_bytes=0)
+    with pytest.raises(ValueError):
+        peak_mod.derive_cache_ceiling(0, headroom_bytes=-1)
+
+
+def test_fixture_binds_peak_inputs_ceiling_and_pb_reservation():
+    fixture = dict(fixture_mod.FIXTURE)
+    assert fixture["schema"] == peak_mod.CEILING_SCHEMA
+    assert fixture["gib_bytes"] == peak_mod.GIB_BYTES
+    derived = peak_mod.derive_cache_ceiling(
+        fixture["peak_allocated_bytes"],
+        headroom_bytes=fixture["headroom_bytes"])
+    assert derived["formula"] == fixture["formula"]
+    assert derived["ceiling_bytes"] == fixture["ceiling_bytes"]
+    assert fixture["pb_cache_gib"] == math.ceil(
+        fixture["ceiling_bytes"] / peak_mod.GIB_BYTES)
+    assert "measurement_digest" in fixture and fixture["measurement_digest"]
+
+
+def test_both_peaks_must_fit_the_ceiling_or_it_is_rejected():
+    fixture = fixture_mod.FIXTURE
+    ceiling = fixture["ceiling_bytes"]
+    assert fixture["peak_allocated_bytes"] <= ceiling
+    repeat_peak = ceiling + 1
+    assert repeat_peak > ceiling
+
+
+def test_pb_charges_cache_gib_plus_each_scratch_reservation():
+    if importlib.util.find_spec("prismabuild") is None:
+        pytest.skip("public PB SDK unavailable; pricing needs a qualified receipt")
+    from prismabuild.local_scratch import scratch_terms
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    cache_gib = fixture_mod.FIXTURE["pb_cache_gib"]
+    declared = {runner.CONTAINER_CACHE_SCRATCH_ENV[1]: str(cache_gib * (1 << 30))}
+    assert scratch_terms(declared) == {"spool_gb": cache_gib}
