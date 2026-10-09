@@ -14,7 +14,7 @@ packed expert Parameters are present.
 """
 from __future__ import annotations
 
-from .base import ModelProfile, _read_config_value
+from .base import ModelProfile, _read_config_alias, _read_config_value
 
 
 def _pact_config_entry(config, name):
@@ -24,16 +24,10 @@ def _pact_config_entry(config, name):
 
 def _prefix_entry(explicit, declared):
     """Prefix ids. The whole explicit config beats the declared one."""
-    direct = _read_config_value(explicit, "prefix_ids")
-    if direct is not None:
-        return direct
-    alias = _read_config_value(explicit, "serving_prefix_ids")
-    if alias is not None:
-        return alias
-    direct = _read_config_value(declared, "prefix_ids")
-    if direct is not None:
-        return direct
-    return _read_config_value(declared, "serving_prefix_ids")
+    value = _read_config_alias(explicit, "prefix_ids", "serving_prefix_ids")
+    if value is not None:
+        return value
+    return _read_config_alias(declared, "prefix_ids", "serving_prefix_ids")
 
 
 def _explicit_declared_entry(explicit, declared, name):

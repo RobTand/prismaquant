@@ -60,14 +60,11 @@ FRONTIER_MANIFEST_KEYS = (
 
 
 def _config_value(config, *names, default=None):
-    """First present value. Profiles own resolution; kept for legacy math."""
-    from .model_profiles.base import _read_config_value
+    """First present alias value. Top level beats nested text_config."""
+    from .model_profiles.base import _read_config_alias
 
-    for name in names:
-        value = _read_config_value(config, name)
-        if value is not None:
-            return value
-    return default
+    value = _read_config_alias(config, *names)
+    return default if value is None else value
 
 
 def _require_profile(profile):

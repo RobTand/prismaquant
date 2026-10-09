@@ -141,13 +141,21 @@ def _old_glm_cohort(config, declared):
         if isinstance(text, dict) and text.get(name) is not None:
             return text[name]
         return None
-    prefix = _entry(config, "prefix_ids")
+    def _alias(cfg):
+        if not isinstance(cfg, dict):
+            return None
+        for name in ("prefix_ids", "serving_prefix_ids"):
+            if cfg.get(name) is not None:
+                return cfg[name]
+        text = cfg.get("text_config")
+        if isinstance(text, dict):
+            for name in ("prefix_ids", "serving_prefix_ids"):
+                if text.get(name) is not None:
+                    return text[name]
+        return None
+    prefix = _alias(config)
     if prefix is None:
-        prefix = _entry(config, "serving_prefix_ids")
-    if prefix is None:
-        prefix = _entry(declared, "prefix_ids")
-    if prefix is None:
-        prefix = _entry(declared, "serving_prefix_ids")
+        prefix = _alias(declared)
     if prefix is None:
         prefix = GLM_LEGACY["prefix_ids"]
     vocab = _entry(config, "vocab_size")
@@ -222,6 +230,70 @@ def test_glm_equivalence_old_adapter_vs_shared_contract():
         "hidden_size": GLM_LEGACY["hidden_size"],
     }
     assert num_layers_from_profile(profile, config) == GLM_LEGACY["num_layers"]
+
+
+def test_glm_explicit_alias_beats_declared_primary_prefix():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "glm5_next",
+        "architectures": ["Glm5NextForConditionalGeneration"],
+        "prefix_ids": [154822, 154824],
+        "text_config": {
+            "num_hidden_layers": 45,
+            "hidden_size": 4096,
+            "vocab_size": 154880,
+        },
+    }
+    profile = profile_from_config(declared)
+    explicit = {
+        "num_hidden_layers": 45,
+        "serving_prefix_ids": [1, 2],
+    }
+    cohort = pact_cohort_from_profile(profile, explicit)
+    legacy = _old_glm_cohort(explicit, profile._declared_config)
+    assert cohort["prefix_ids"] == [1, 2]
+    assert cohort == legacy
+
+
+def test_glm_top_level_alias_beats_nested_primary_prefix():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "glm5_next",
+        "architectures": ["Glm5NextForConditionalGeneration"],
+        "text_config": {
+            "num_hidden_layers": 45,
+            "hidden_size": 4096,
+            "vocab_size": 154880,
+        },
+    }
+    profile = profile_from_config(declared)
+    explicit = {
+        "num_hidden_layers": 45,
+        "serving_prefix_ids": [1, 2],
+        "text_config": {"prefix_ids": [9, 9]},
+    }
+    cohort = pact_cohort_from_profile(profile, explicit)
+    legacy = _old_glm_cohort(explicit, profile._declared_config)
+    assert cohort["prefix_ids"] == [1, 2]
+    assert cohort == legacy
+
+
+def test_qwen3_top_level_alias_beats_nested_primary_prefix():
+    profile = _qwen3_declared_profile()
+    explicit = {
+        "serving_prefix_ids": [1, 2],
+        "text_config": {"prefix_ids": [9, 9]},
+    }
+    assert pact_cohort_from_profile(profile, explicit)["prefix_ids"] == [1, 2]
+
+
+def test_glm_nested_invalid_layer_counts_refuse():
+    profile = _glm_profile()
+    for bad in (0, -1, "45"):
+        with pytest.raises(ValueError, match="positive integer"):
+            num_layers_from_profile(profile, {"text_config": {"num_hidden_layers": bad}})
 
 
 def _qwen3_declared_profile():

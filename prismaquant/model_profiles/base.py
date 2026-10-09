@@ -76,6 +76,21 @@ def _read_config_value(config, name):
     return None
 
 
+def _read_config_alias(config, *names):
+    """First present value for alias keys. Top level beats nested text_config."""
+    if not isinstance(config, dict):
+        return None
+    for name in names:
+        if config.get(name) is not None:
+            return config[name]
+    text = config.get("text_config")
+    if isinstance(text, dict):
+        for name in names:
+            if text.get(name) is not None:
+                return text[name]
+    return None
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
