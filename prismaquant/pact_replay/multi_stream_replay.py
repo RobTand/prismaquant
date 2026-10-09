@@ -358,6 +358,7 @@ def production_on_sample(runner, teachers, prepared, check, sid, sample, batch, 
 
 
 TEACHER_STOP = 45
+APPROVED_DEADLINE_SECONDS = 3500
 
 
 def cli_parser():
@@ -428,7 +429,7 @@ def resolve_cli_run(args, receipt_doc, receipt_bytes, roster_doc):
     plan = plan_replay_windows(replay_start, replay_stop, window_layers=window_layers)
     if {"window_start": args.window_start, "window_stop": args.window_stop} not in plan:
         raise ValueError("The CLI window must sit on the planned window grid")
-    if not 0 < args.deadline_seconds <= 1700:
+    if not 0 < args.deadline_seconds <= APPROVED_DEADLINE_SECONDS:
         raise ValueError("The replay needs a bounded deadline")
     generations = {"receipt_sha256": hashlib.sha256(bytes(receipt_bytes)).hexdigest(),
                    "source_window": [receipt_doc["layer_start"], receipt_doc["layer_stop"]],
