@@ -40,6 +40,18 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- Qualify the paired rate-trade source policy on CPU evidence only (#2531, Refs #2281).
+  `docs/results/pq2281-source-qualification.md` ranks the instrument, reconstruction,
+  normalization, additivity, and noise evidence against digest-bound inputs and receipts.
+  Five PB actions pass 217 tests with zero failures: paired trades (`bbb18047`, 91),
+  assignment diagnostics (`6e29893a`, 45), allocator currency (`d81b1fa8`, 21),
+  additivity identity (`dbed584b`, 19), and sequence attribution (`6800e717`, 41).
+  Mismatched coordinates and currency refuse; signed differences, common-probe
+  covariance, and global KL Fisher normalization persist; the complete-layer
+  dominance rule holds with exactly half allowed; legacy and zero-z prices stay
+  unchanged. No code changes. No new GPU arm. G3 hash agreement stays limited to
+  export-versus-priced reconstruction. No inherited counter is reset or claimed.
+  The measured #2281 defect stays open.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.

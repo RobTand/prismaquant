@@ -17036,6 +17036,13 @@ pruning it. The complete-assignment exact filter and the final emission guard
 refuse genuinely dominant trades. A baseline member whose expert identity
 cannot be established blocks pruning the same way (R1): the menu never
 certifies a shortened roster.
+Re-stamped 2026-10-09 (#2531, Refs #2281): CPU qualification of the
+paired-trade source policy lives in
+`docs/results/pq2281-source-qualification.md`. It ranks instrument,
+reconstruction, normalization, additivity, and noise evidence against
+digest-bound PB receipts (217 tests passed, zero failed) and states the
+G3 scope limit. Behavior, menus, pins, and gates stay unchanged. The
+measured #2281 defect stays open.
 
 Re-stamped (2026-09-05, `codex/two-anchor-bootstrap`) for campaign
 bootstrapping from two endpoints (§4.10). A requested initial count of one
