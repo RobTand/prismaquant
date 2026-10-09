@@ -64,6 +64,41 @@ class SourceScope:
     build_skeleton: Callable[[str | None], nn.Module]
 
 
+def _read_config_value(config, name):
+    """First present value for one key. Top level beats nested text_config."""
+    if not isinstance(config, dict):
+        return None
+    if config.get(name) is not None:
+        return config[name]
+    text = config.get("text_config")
+    if isinstance(text, dict) and text.get(name) is not None:
+        return text[name]
+    return None
+
+
+def _read_config_alias(config, *names):
+    """First present value for alias keys. Top level beats nested text_config."""
+    if not isinstance(config, dict):
+        return None
+    for name in names:
+        if config.get(name) is not None:
+            return config[name]
+    text = config.get("text_config")
+    if isinstance(text, dict):
+        for name in names:
+            if text.get(name) is not None:
+                return text[name]
+    return None
+
+
+def _read_config_alias_with_fallback(explicit, declared, *names):
+    """Read explicit aliases before declared aliases, including text_config."""
+    value = _read_config_alias(explicit, *names)
+    if value is not None:
+        return value
+    return _read_config_alias(declared, *names)
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
@@ -389,6 +424,72 @@ class ModelProfile(ABC):
         if spec is not None:
             return tuple(spec.pinned_names)
         return ("lm_head",)
+    # ------------------------------------------------------------
+    # PACT measurement scope (issue 2427)
+    # ------------------------------------------------------------
+    def pact_scope_declared(self) -> bool:
+        """True when this family declares a PACT scope in its contract."""
+        spec = self.structure_spec()
+        return bool(spec is not None and spec.pact.declared)
+
+    def pact_dense_layer_end(self) -> int | None:
+        """First routed layer index, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.dense_layer_end
+
+    def pact_band_width(self) -> int | None:
+        """Routed band width, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.band_width
+
+    def pact_hidden_streams(self) -> int | None:
+        """Parallel residual streams, or None without a declared scope."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.hidden_streams
+
+    def pact_tp_splits_for_role(self, role: str) -> int | None:
+        """TP split count for one role, or None without a declaration."""
+        spec = self.structure_spec()
+        if spec is None or not spec.pact.declared:
+            return None
+        return spec.pact.tp_splits_for_role(role)
+
+    def pact_dimension_value(self, key, config=None):
+        """One dimension value. Explicit config wins, declared next."""
+        for source in (config, self._declared_config):
+            value = _read_config_value(source, key)
+            if value is None:
+                continue
+            if type(value) is not int or isinstance(value, bool):
+                raise ValueError(
+                    f"PACT {key} value {value!r} is not a positive integer"
+                )
+            if value <= 0:
+                raise ValueError(
+                    f"PACT {key} value {value!r} is not a positive integer"
+                )
+            return value
+        return None
+
+    def pact_layer_count(self, config: dict | None) -> int | None:
+        """Decoder layer count from a config, or None when unstated."""
+        return self.pact_dimension_value("num_hidden_layers", config)
+
+    def pact_hidden_size(self, config: dict | None) -> int | None:
+        """Hidden width from a config, or None when unstated."""
+        return self.pact_dimension_value("hidden_size", config)
+
+    def pact_vocab_size(self, config: dict | None) -> int | None:
+        """Vocabulary size from a config, or None when unstated."""
+        return self.pact_dimension_value("vocab_size", config)
+
+
 
     def source_derivative_contract(self) -> dict | None:
         """Optional closed research derivative contract; declaration does not enable it."""
