@@ -601,6 +601,32 @@ def _format_cli_choices() -> tuple[str, ...]:
 # relaxes a container's independent export or serving qualification gates.
 _VISUAL_PREFIX_RE = re.compile(r"^(?:model\.)?visual\.")
 
+VISUAL_NON_LINEAR_NAME_RE = re.compile(
+    r"(?:^|\.)("
+    r"pos_embed|patch_embed|embed_tokens"  # embedding tables, not Linears
+    r"|rotary_emb|lm_head"  # fixed parts: rotary cache, fixed head
+    r"|router"  # router: never a priced Linear
+    r"|downsample"  # strided conv block, not a Linear
+    r"|[^.]*conv[^.]*"  # conv weights, not Linears
+    r"|[^.]*norm[^.]*"  # norms, not Linears
+    r")(?:\.|$)"
+)
+
+
+def _admitting_visual_root(name: str, profile=None) -> str | None:
+    """Return the declared visual root that admits `name`, if any."""
+    roots = profile.visual_root_prefixes() if profile is not None else ()
+    if roots:
+        for root in roots:
+            if name.startswith(root + ".") or (
+                root.startswith("model.") and name.startswith(root[6:] + ".")
+            ):
+                return root
+        return None
+    if _VISUAL_PREFIX_RE.match(name):
+        return "model.visual" if name.startswith("model.") else "visual"
+    return None
+
 
 def _is_visual_linear(name: str, profile=None) -> bool:
     """Classify a visual Linear by the profile's declared root namespaces.
@@ -608,15 +634,10 @@ def _is_visual_linear(name: str, profile=None) -> bool:
     Keep the existing source/recipe `model.` alias. Callers without declared
     roots retain the historical visual namespace control; a declared family
     cannot acquire unrelated body/audio namespaces through a loose prefix.
+    Role tags such as `vis_*`/`merger_*` are not module namespaces and
+    never admit.
     """
-    roots = profile.visual_root_prefixes() if profile is not None else ()
-    if roots:
-        return any(
-            name.startswith(root + ".")
-            or (root.startswith("model.") and name.startswith(root[6:] + "."))
-            for root in roots
-        )
-    return bool(_VISUAL_PREFIX_RE.match(name))
+    return _admitting_visual_root(name, profile) is not None
 
 
 def _prepare_visual_allocations(
@@ -1421,28 +1442,24 @@ def discover_visual_linear_stats_from_source(
             + "; ".join(scan_errors[:8])
         )
 
-    # Only rank-2 weights are Linear-like; conv1d / norms / biases are
+    # Only rank-2 weights are Linear-like; conv / norms / biases are
     # kept at BF16 passthrough regardless of --visual-format.
-    # Additionally, blacklist known rank-2 tensors that live in
-    # `nn.Parameter` / `nn.Embedding` modules (NOT `nn.Linear`), which
-    # the compressed-tensors loader in vLLM cannot consume. Example:
+    # Additionally, VISUAL_NON_LINEAR_NAME_RE excludes known non-Linear
+    # modules by name across five classes (embedding, conv, norm, router,
+    # fixed parts), including rank-2 tensors that live in `nn.Parameter` /
+    # `nn.Embedding` modules (NOT `nn.Linear`) which the
+    # compressed-tensors loader in vLLM cannot consume. Example:
     # `model.visual.pos_embed.weight` is an Embedding-like learned
-    # parameter with shape (num_pos, hidden) — rank-2 but NOT a Linear.
-    # Quantizing it produces `pos_embed.input_global_scale` etc. which
-    # vLLM's VL runtime rejects with `KeyError: pos_embed.input_global_scale`
-    # because its `model.visual.pos_embed` is a bare Parameter, not a
-    # quantizable Linear module.
-    _NON_LINEAR_RE = re.compile(
-        r"(?:^|\.)("
-        r"pos_embed"            # positional embedding (nn.Parameter/Embedding)
-        r"|rotary_emb"          # rotary pos embed cache
-        r")(?:\.|$)"
-    )
+    # parameter — rank-2 but NOT a Linear. Quantizing it produces
+    # `pos_embed.input_global_scale` etc. which vLLM's VL runtime rejects
+    # with `KeyError: pos_embed.input_global_scale` because its
+    # `model.visual.pos_embed` is a bare Parameter, not a quantizable
+    # Linear module.
     out: dict[str, dict[str, object]] = {}
     for name, shape, dtype in candidates:
         if len(shape) != 2:
             continue
-        if _NON_LINEAR_RE.search(name):
+        if VISUAL_NON_LINEAR_NAME_RE.search(name):
             continue
         qname = name[:-len(".weight")] if name.endswith(".weight") else name
         out_features, in_features = (int(shape[0]), int(shape[1]))
@@ -1475,6 +1492,39 @@ def discover_visual_linear_stats_from_source(
 def discover_visual_linears_from_source(model_path: str, *, profile=None) -> list[str]:
     """Backwards-compatible name-only view of source visual Linears."""
     return list(discover_visual_linear_stats_from_source(model_path, profile=profile))
+
+
+def visual_linear_roster(
+    model_path: str,
+    *,
+    profile=None,
+    strict: bool = False,
+) -> dict[str, dict[str, object]]:
+    """Quantizable vision/merger roster with shape and name provenance.
+
+    Keys match `discover_visual_linear_stats_from_source`. Each entry adds
+    `shape` ([out, in]), `name_source` (`checkpoint_index` when names come
+    from `model.safetensors.index.json`, else `source_header`), and
+    `visual_root` (the declared root that admits the name). Out-of-scope
+    classes (embedding, conv, norm, router, fixed parts) never appear:
+    `VISUAL_NON_LINEAR_NAME_RE` excludes them by name and non-rank-2
+    weights are not Linear-like. Read-only over the source checkpoint;
+    allocator math, export, pins, kernels and gates are untouched.
+    """
+    stats = discover_visual_linear_stats_from_source(
+        model_path, profile=profile, strict=strict
+    )
+    index_path = Path(model_path) / "model.safetensors.index.json"
+    name_source = "checkpoint_index" if index_path.exists() else "source_header"
+    roster: dict[str, dict[str, object]] = {}
+    for qname, entry in stats.items():
+        roster[qname] = {
+            **entry,
+            "shape": [entry["out_features"], entry["in_features"]],
+            "name_source": name_source,
+            "visual_root": _admitting_visual_root(qname, profile),
+        }
+    return roster
 
 
 def validate_source_visual_passthrough_contract(
