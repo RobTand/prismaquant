@@ -50,6 +50,22 @@ def _is_nonempty_str(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def tokenizer_content_sha256(source_files: Mapping[str, Any]) -> str:
+    """Recompute the tokenizer content digest from its source map.
+
+    The collector hashes this value from the observed source files. The
+    verifier recomputes it from the witnessed map. A supplied digest that
+    does not equal this recomputation refuses.
+    """
+    import hashlib
+
+    payload = {"files": {name: {"bytes": row["bytes"], "sha256": row["sha256"]}
+                         for name, row in sorted(source_files.items())}}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=True, allow_nan=False).encode("ascii")).hexdigest()
+
+
 def _check_rank(rank: object, where: str) -> list[str]:
     """Name each structural defect of one rank row. Empty means valid."""
     problems: list[str] = []
@@ -61,6 +77,7 @@ def _check_rank(rank: object, where: str) -> list[str]:
     if not isinstance(files, list) or not files:
         problems.append(f"{where}: rank byte evidence needs a nonempty files list")
     else:
+        seen: list[str] = []
         for index, row in enumerate(files):
             site = f"{where}.files[{index}]"
             if not isinstance(row, Mapping):
@@ -68,6 +85,10 @@ def _check_rank(rank: object, where: str) -> list[str]:
                 continue
             if not _is_nonempty_str(row.get("path")):
                 problems.append(f"{site}: file path must be a nonempty string")
+            elif row["path"] in seen:
+                problems.append(f"{site}: file path {row['path']!r} repeats a row")
+            else:
+                seen.append(row["path"])
             if not _is_sha256hex(row.get("sha256")):
                 problems.append(f"{site}: file sha256 must be 64 lowercase hex")
             size = row.get("bytes")
@@ -103,6 +124,10 @@ def witness_problems(witness: object) -> list[str]:
     else:
         for index, rank in enumerate(ranks):
             problems.extend(_check_rank(rank, f"witness.ranks[{index}]"))
+        seen_ranks = [rank["rank"] for rank in ranks
+                      if isinstance(rank, Mapping) and type(rank.get("rank")) is int]
+        if len(set(seen_ranks)) != len(seen_ranks):
+            problems.append("witness: ranks must name each rank once")
     artifact = witness.get("artifact")
     if not isinstance(artifact, Mapping):
         problems.append("witness: artifact byte evidence must be an object")

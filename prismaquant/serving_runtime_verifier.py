@@ -32,6 +32,7 @@ from typing import Any
 
 from prismaquant.serving_runtime_witness import (
     WITNESS_SCHEMA,
+    tokenizer_content_sha256,
     witness_problems,
 )
 
@@ -91,52 +92,121 @@ def _refuse(reason: str) -> dict[str, Any]:
     return {"schema": WITNESS_SCHEMA, "verdict": VERDICT_REFUSE, "reason": reason}
 
 
-def verify(witness: Mapping[str, Any], expected: Mapping[str, Any]) -> dict[str, Any]:
-    """Join ``witness`` to ``expected``. Never touches a rank or endpoint."""
+def verify(witness: Mapping[str, Any], expected: Mapping[str, Any],
+           *, environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Join ``witness`` to ``expected``. Never touches a rank or endpoint.
+
+    Recorded labels (endpoint, alias, attempt, expected rank list) go
+    through the D32 seal: dev mode stamps and continues, certified mode
+    refuses. Missing evidence, byte integrity, coverage, tokenizer joins,
+    and cross-rank agreement refuse in both modes.
+    """
+    from prismaquant.dev_mode import seal_check
+
     problems = witness_problems(witness)
     if problems:
         return _refuse("; ".join(problems))
     failures: list[str] = []
     endpoint = witness["endpoint"]
-    if endpoint.get("base_url") != expected.get("endpoint"):
-        failures.append("endpoint differs from the observed endpoint")
-    if witness.get("served_alias") != expected.get("served_alias"):
-        failures.append("served alias differs from the served alias")
+    if not seal_check("served endpoint", expected.get("endpoint"),
+                      endpoint.get("base_url"), where="served runtime witness",
+                      refusal=ValueError("endpoint differs from the observed endpoint"),
+                      environ=environ):
+        failures.append("endpoint differs from the observed endpoint (dev stamp)")
+    if not seal_check("served alias", expected.get("served_alias"),
+                      witness.get("served_alias"), where="served runtime witness",
+                      refusal=ValueError("served alias differs from the served alias"),
+                      environ=environ):
+        failures.append("served alias differs from the served alias (dev stamp)")
     attempt = witness["launch_attempt"]
-    if attempt.get("attempt_id") != expected.get("attempt_id"):
-        failures.append("launch attempt differs from the recorded attempt")
+    if not seal_check("launch attempt", expected.get("attempt_id"),
+                      attempt.get("attempt_id"), where="served runtime witness",
+                      refusal=ValueError("launch attempt differs from the recorded attempt"),
+                      environ=environ):
+        failures.append("launch attempt differs from the recorded attempt (dev stamp)")
     wanted = expected.get("ranks")
     if not isinstance(wanted, list) or not wanted or any(type(r) is not int for r in wanted):
         return _refuse("expected ranks must be a nonempty integer list")
     seen = sorted(row["rank"] for row in witness["ranks"])
-    if seen != sorted(wanted):
-        failures.append(f"actual rank set {seen} differs from expected {sorted(wanted)}")
-    for row in witness["ranks"]:
-        if row.get("coverage") != "complete":
-            failures.append(f"rank {row.get('rank')}: coverage is not complete")
+    if not seal_check("served rank set", sorted(wanted), seen,
+                      where="served runtime witness",
+                      refusal=ValueError(
+                          f"actual rank set {seen} differs from expected {sorted(wanted)}"),
+                      environ=environ):
+        failures.append(f"actual rank set {seen} differs from expected "
+                        f"{sorted(wanted)} (dev stamp)")
     artifact_files = expected.get("artifact_files")
     if not isinstance(artifact_files, Mapping) or not artifact_files:
         return _refuse("expected artifact_files must be a nonempty path map")
     for row in witness["ranks"]:
+        if row.get("coverage") != "complete":
+            failures.append(f"rank {row.get('rank')}: coverage is not complete")
+    rosters = [sorted(entry["path"] for entry in row["files"])
+               for row in witness["ranks"]]
+    if any(roster != rosters[0] for roster in rosters[1:]):
+        failures.append("rank rows cover different file rosters")
+    want_paths = sorted(artifact_files)
+    if rosters[0] != want_paths:
+        missing = sorted(set(want_paths) - set(rosters[0]))
+        extra = sorted(set(rosters[0]) - set(want_paths))
+        if missing:
+            failures.append(f"rank evidence omits expected files: {missing}")
+        if extra:
+            failures.append(f"rank evidence holds unexpected files: {extra}")
+    by_path: dict[str, dict[str, Any]] = {}
+    for row in witness["ranks"]:
         for entry in row["files"]:
-            want = artifact_files.get(entry["path"])
-            if want is None:
-                failures.append(f"rank {row['rank']}: file {entry['path']!r} is not expected")
-            elif entry["sha256"] != want:
-                failures.append(f"rank {row['rank']}: file {entry['path']!r} digest differs")
+            prior = by_path.setdefault(entry["path"], dict(entry))
+            if entry["sha256"] != prior["sha256"]:
+                failures.append(f"file {entry['path']!r} digest differs across ranks")
+            if entry["bytes"] != prior["bytes"]:
+                failures.append(f"file {entry['path']!r} byte count differs across ranks")
+    for path, want in sorted(artifact_files.items()):
+        seen_entry = by_path.get(path)
+        if seen_entry is None:
+            continue
+        want_digest = want.get("sha256") if isinstance(want, Mapping) else want
+        if seen_entry["sha256"] != want_digest:
+            failures.append(f"file {path!r} digest differs")
+        if isinstance(want, Mapping) and seen_entry["bytes"] != want.get("bytes"):
+            failures.append(f"file {path!r} byte count differs from the expected bytes")
     artifact = witness["artifact"]
+    row_bytes = sum(entry["bytes"] for entry in witness["ranks"][0]["files"])
+    if artifact.get("artifact_bytes") != row_bytes:
+        failures.append("artifact byte total differs from the rank file rows")
     for key in ("model_sha256", "inventory_sha256", "artifact_bytes"):
         if artifact.get(key) != (expected.get("artifact") or {}).get(key):
             failures.append(f"artifact {key} differs from the expected bytes")
     tokenizer = witness["tokenizer"]
-    for name, row in ((expected.get("tokenizer_files") or {}).items()):
-        seen_row = (tokenizer.get("source_files") or {}).get(name)
+    source_files = tokenizer.get("source_files") or {}
+    try:
+        rebuilt = tokenizer_content_sha256(source_files)
+    except (KeyError, TypeError, AttributeError):
+        return _refuse("tokenizer source map cannot rebuild its content digest")
+    if tokenizer.get("content_sha256") != rebuilt:
+        failures.append("tokenizer content digest differs from its source files")
+    want_tokens = expected.get("tokenizer_files")
+    if not isinstance(want_tokens, Mapping) or not want_tokens:
+        return _refuse("expected tokenizer_files must be a nonempty name map")
+    for name in sorted(set(source_files) - set(want_tokens)):
+        failures.append(f"tokenizer file {name!r} is absent from expected evidence")
+    for name, want in sorted(want_tokens.items()):
+        seen_row = source_files.get(name)
         if seen_row is None:
             failures.append(f"tokenizer file {name!r} is absent from server evidence")
-        elif seen_row.get("sha256") != row:
-            failures.append(f"tokenizer file {name!r} digest differs")
+        else:
+            want_digest = want.get("sha256") if isinstance(want, Mapping) else want
+            if seen_row.get("sha256") != want_digest:
+                failures.append(f"tokenizer file {name!r} digest differs")
+            if isinstance(want, Mapping) and seen_row.get("bytes") != want.get("bytes"):
+                failures.append(f"tokenizer file {name!r} byte count differs")
     if tokenizer.get("content_sha256") != expected.get("tokenizer_content_sha256"):
         failures.append("tokenizer content differs from the expected bytes")
+    want_effective = expected.get("tokenizer_effective")
+    if not isinstance(want_effective, Mapping):
+        return _refuse("expected tokenizer_effective must be an object")
+    if dict(tokenizer.get("effective") or {}) != dict(want_effective):
+        failures.append("tokenizer effective settings differ from the expected settings")
     if failures:
         return _refuse("; ".join(failures))
     from prismaquant.serving_runtime_witness import canonical_witness_bytes

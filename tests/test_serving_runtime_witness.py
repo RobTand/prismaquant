@@ -23,8 +23,11 @@ def _sha(text: str) -> str:
 
 def make_witness(*, ranks=(0, 1), coverage="complete", alias="eager-model",
                  endpoint="http://127.0.0.1:8000", attempt="launch-7"):
+    from prismaquant.serving_runtime_witness import tokenizer_content_sha256
+
     file_a, file_b = _sha("weight-a"), _sha("weight-b")
     tok_a = _sha("tokenizer-bytes")
+    source_files = {"tokenizer.json": {"sha256": tok_a, "bytes": 3}}
     return {
         "schema": WITNESS_SCHEMA,
         "endpoint": {"base_url": endpoint},
@@ -36,14 +39,15 @@ def make_witness(*, ranks=(0, 1), coverage="complete", alias="eager-model",
                    "coverage": coverage, "representation_changes": []} for rank in ranks],
         "artifact": {"model_sha256": _sha("model"), "inventory_sha256": _sha("inventory"),
                      "artifact_bytes": 12},
-        "tokenizer": {"source_files": {"tokenizer.json": {"sha256": tok_a, "bytes": 3}},
-                      "content_sha256": _sha("tokenizer-content"),
+        "tokenizer": {"source_files": source_files,
+                      "content_sha256": tokenizer_content_sha256(source_files),
                       "effective": {"add_special_tokens": False}},
     }
 
 
 def make_expected(witness, *, ranks=(0, 1)):
-    files = {row["path"]: row["sha256"] for row in witness["ranks"][0]["files"]}
+    files = {row["path"]: {"sha256": row["sha256"], "bytes": row["bytes"]}
+             for row in witness["ranks"][0]["files"]}
     return {
         "endpoint": witness["endpoint"]["base_url"],
         "served_alias": witness["served_alias"],
@@ -51,9 +55,10 @@ def make_expected(witness, *, ranks=(0, 1)):
         "ranks": list(ranks),
         "artifact_files": files,
         "artifact": dict(witness["artifact"]),
-        "tokenizer_files": {name: row["sha256"]
+        "tokenizer_files": {name: dict(row)
                             for name, row in witness["tokenizer"]["source_files"].items()},
         "tokenizer_content_sha256": witness["tokenizer"]["content_sha256"],
+        "tokenizer_effective": dict(witness["tokenizer"]["effective"]),
     }
 
 
@@ -171,7 +176,9 @@ def test_incomplete_rank_coverage_refuses():
 
 def test_rank_set_mismatch_refuses():
     witness = make_witness(ranks=(0,))
-    assert verify(witness, make_expected(witness, ranks=(0, 1)))["verdict"] == "refuse"
+    with pytest.raises(ValueError, match="rank set"):
+        verify(witness, make_expected(witness, ranks=(0, 1)),
+               environ={"PRISMAQUANT_DEV_MODE": "0"})
 
 
 @pytest.mark.parametrize("join", ["endpoint", "served_alias", "attempt_id"])
@@ -179,7 +186,17 @@ def test_join_mismatch_refuses(join):
     witness = make_witness()
     expected = make_expected(witness)
     expected[join] = "other-value"
-    assert verify(witness, expected)["verdict"] == "refuse"
+    with pytest.raises(ValueError, match="differs"):
+        verify(witness, expected, environ={"PRISMAQUANT_DEV_MODE": "0"})
+
+
+def test_join_mismatch_stamps_in_dev_mode():
+    witness = make_witness()
+    expected = make_expected(witness)
+    expected["served_alias"] = "other-value"
+    verdict = verify(witness, expected, environ={"PRISMAQUANT_DEV_MODE": "1"})
+    assert verdict["verdict"] == "refuse"
+    assert "dev stamp" in verdict["reason"]
 
 
 def test_artifact_digest_mismatch_refuses():
@@ -199,9 +216,108 @@ def test_tokenizer_digest_mismatch_refuses():
 def test_rank_file_digest_mismatch_refuses():
     witness = make_witness()
     expected = make_expected(witness)
-    expected["artifact_files"] = dict(expected["artifact_files"],
-                                      **{"model.safetensors": "0" * 64})
+    expected["artifact_files"] = dict(
+        expected["artifact_files"],
+        **{"model.safetensors": {"sha256": "0" * 64, "bytes": 8}})
     assert "digest differs" in verify(witness, expected)["reason"]
+
+
+def test_omitted_expected_file_refuses_despite_complete_coverage():
+    witness = make_witness()
+    for row in witness["ranks"]:
+        row["files"] = [entry for entry in row["files"]
+                        if entry["path"] != "config.json"]
+    expected = make_expected(make_witness())
+    verdict = verify(witness, expected)
+    assert verdict["verdict"] == "refuse"
+    assert "config.json" in verdict["reason"]
+
+
+def test_extra_witness_file_refuses():
+    witness = make_witness()
+    extra = {"path": "extra.safetensors", "sha256": _sha("extra"), "bytes": 5}
+    for row in witness["ranks"]:
+        row["files"] = [*row["files"], dict(extra)]
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "extra.safetensors" in verdict["reason"]
+
+
+def test_rank_file_byte_inconsistency_refuses():
+    witness = make_witness()
+    witness["ranks"][0]["files"][0]["bytes"] = 999
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "byte" in verdict["reason"].lower()
+
+
+def test_rank_rows_must_cover_one_roster():
+    witness = make_witness()
+    witness["ranks"][1]["files"] = [dict(witness["ranks"][1]["files"][0])]
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "rank" in verdict["reason"].lower()
+
+
+def test_artifact_byte_total_must_match_file_rows():
+    witness = make_witness()
+    witness["artifact"]["artifact_bytes"] = 13
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "byte" in verdict["reason"].lower()
+
+
+def test_tokenizer_content_must_recompute_from_source_files():
+    witness = make_witness()
+    witness["tokenizer"]["content_sha256"] = "0" * 64
+    expected = make_expected(make_witness())
+    expected["tokenizer_content_sha256"] = "0" * 64
+    verdict = verify(witness, expected)
+    assert verdict["verdict"] == "refuse"
+    assert "tokenizer" in verdict["reason"].lower()
+
+
+def test_extra_tokenizer_source_file_refuses():
+    from prismaquant.serving_runtime_witness import tokenizer_content_sha256
+
+    witness = make_witness()
+    witness["tokenizer"]["source_files"]["added_tokens.json"] = {
+        "sha256": _sha("added"), "bytes": 2}
+    witness["tokenizer"]["content_sha256"] = tokenizer_content_sha256(
+        witness["tokenizer"]["source_files"])
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "added_tokens.json" in verdict["reason"]
+
+
+def test_tokenizer_effective_settings_mismatch_refuses():
+    witness = make_witness()
+    witness["tokenizer"]["effective"] = {"add_special_tokens": True}
+    verdict = verify(witness, make_expected(make_witness()))
+    assert verdict["verdict"] == "refuse"
+    assert "effective" in verdict["reason"].lower()
+
+
+def test_collector_observes_rank_files_from_each_rank_root(tmp_path):
+    from prismaquant.serving_runtime_witness_collect import (
+        rank_byte_evidence_from_roots)
+
+    roots = []
+    for rank in (0, 1):
+        root = tmp_path / f"rank{rank}"
+        root.mkdir()
+        (root / "model.safetensors").write_bytes(f"weight-{rank}".encode())
+        (root / "config.json").write_bytes(b"{}")
+        roots.append(root)
+    with pytest.raises(ValueError, match="loaded bytes differ"):
+        rank_byte_evidence_from_roots(roots)
+    (roots[1] / "model.safetensors").write_bytes(b"weight-0")
+    rows = rank_byte_evidence_from_roots(roots)
+    assert [row["rank"] for row in rows] == [0, 1]
+    assert [entry["path"] for entry in rows[0]["files"]] == [
+        "config.json", "model.safetensors"]
+    with pytest.raises(ValueError, match="must differ per rank"):
+        rank_byte_evidence_from_roots([roots[0], roots[0]])
 
 
 def test_consumer_starts_no_rank_and_imports_no_runtime(tmp_path):
@@ -224,7 +340,7 @@ def test_consumer_starts_no_rank_and_imports_no_runtime(tmp_path):
     assert "torch" not in imports
     assert "subprocess" not in imports
     assert "multiprocessing" not in imports
-    assert "seal_check" not in source
+    assert "seal_check" in source
     assert "Popen" not in source and "serve_once" not in source
     record = bind_served_task(served_config(witness_path, expected_path, witness))
     assert record["verdict"] == "pass"
@@ -237,7 +353,8 @@ def test_consumer_refuses_without_verifier_pass(tmp_path):
     expected["served_alias"] = "other-alias"
     expected_path = write_json(tmp_path / "expected.json", expected)
     with pytest.raises(ValueError, match="served binding served_alias differs"):
-        bind_served_task(served_config(witness_path, expected_path, witness))
+        bind_served_task(served_config(witness_path, expected_path, witness),
+                         environ={"PRISMAQUANT_DEV_MODE": "0"})
 
 
 def test_consumer_refuses_incomplete_binding():

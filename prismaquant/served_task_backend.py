@@ -56,28 +56,41 @@ def served_binding_problems(config: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def bind_served_task(config: Mapping[str, Any]) -> dict[str, Any]:
+def bind_served_task(config: Mapping[str, Any], *,
+                     environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Verify the producer witness and return the verdict record.
 
     Reads the witness and expectation files the config names, joins them
-     with the explicit expected endpoint, alias, attempt, and ranks, and
-     refuses on any verifier refusal. Starts no rank, imports no serving
-     runtime, and seals no identity.
+    with the explicit expected endpoint, alias, attempt, and ranks, and
+    refuses on any verifier refusal. Starts no rank, imports no serving
+    runtime, and seals no identity beyond the D32 recorded-label check:
+    the config-to-file label comparison stamps in dev mode and refuses
+    in certified mode. Byte integrity still refuses in both modes.
     """
+    from prismaquant.dev_mode import seal_check
+
     problems = served_binding_problems(config)
     if problems:
         raise ValueError("; ".join(problems))
     binding = config["backend"]["serving_runtime"]
     witness = read_witness(binding["witness"], where="served witness")
     expected_doc = read_expected(binding["expected"])
-    for key in ("endpoint", "served_alias", "attempt_id", "ranks"):
-        if expected_doc.get(key) != binding[key]:
-            raise ValueError(f"served binding {key} differs from its expectation file")
+    for key in ("endpoint", "served_alias", "attempt_id"):
+        seal_check(f"served binding {key}", expected_doc.get(key), binding[key],
+                   where="served task config",
+                   refusal=ValueError(
+                       f"served binding {key} differs from its expectation file"),
+                   environ=environ)
+    seal_check("served binding ranks", sorted(expected_doc.get("ranks") or []),
+               sorted(binding["ranks"]), where="served task config",
+               refusal=ValueError(
+                   "served binding ranks differ from their expectation file"),
+               environ=environ)
     expected = {"endpoint": binding["endpoint"], "served_alias": binding["served_alias"],
                 "attempt_id": binding["attempt_id"], "ranks": sorted(binding["ranks"]),
                 **{k: v for k, v in expected_doc.items()
                    if k not in ("endpoint", "served_alias", "attempt_id", "ranks")}}
-    verdict = verify(witness, expected)
+    verdict = verify(witness, expected, environ=environ)
     if verdict.get("verdict") != "pass":
         raise ValueError(f"served runtime witness refused: {verdict.get('reason')}")
     return {"witness_sha256": verdict["witness_sha256"],
