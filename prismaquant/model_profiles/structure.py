@@ -283,6 +283,21 @@ class ConcatMergeSpec:
         )
 
 
+
+
+
+
+@dataclass(frozen=True)
+class PackageRequirement:
+    module: str
+    package: str
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "PackageRequirement":
+        return cls(
+            module=str(payload["module"]),
+            package=str(payload.get("package") or payload["module"]),
+        )
 @dataclass(frozen=True)
 class PackedExpertSpec:
     param_names: tuple[str, ...] = ()
@@ -322,16 +337,79 @@ class PackedExpertSpec:
 
 
 @dataclass(frozen=True)
-class PackageRequirement:
-    module: str
-    package: str
+class PactScopeSpec:
+    """Declared PACT measurement scope for one architecture family.
+
+    The scope states which layer ranges the frontier prices and which
+    TP cuts each role shards on. It carries no measurement values:
+    calibration rows and teacher payloads stay explicit inputs.
+    An absent scope is a refusal, never a fallback to another
+    architecture.
+    """
+
+    declared: bool = False
+    dense_layer_end: int | None = None
+    band_width: int | None = None
+    tp_splits: tuple[tuple[str, int], ...] = ()
+    hidden_streams: int | None = None
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "PackageRequirement":
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any] | None,
+    ) -> "PactScopeSpec":
+        if payload is None:
+            return cls()
+        unknown = sorted(set(payload) - {
+            "dense_layer_end", "band_width", "tp_splits", "hidden_streams",
+        })
+        if unknown:
+            raise ValueError(
+                f"unsupported pact keys: {unknown}; "
+                "vocabulary is ['dense_layer_end', 'band_width', "
+                "'tp_splits', 'hidden_streams']"
+            )
+        splits = payload.get("tp_splits") or {}
+        if not isinstance(splits, Mapping):
+            raise ValueError("pact.tp_splits must be a mapping of role to split count")
+        parsed_splits = []
+        for role, count in splits.items():
+            if type(count) is not int or count < 1:
+                raise ValueError(
+                    f"pact.tp_splits[{role!r}] is {count!r}, not a positive integer"
+                )
+            parsed_splits.append((str(role), count))
+        dense_end = payload.get("dense_layer_end")
+        if dense_end is not None and (type(dense_end) is not int or dense_end < 0):
+            raise ValueError(
+                f"pact.dense_layer_end is {dense_end!r}, not a non-negative integer"
+            )
+        band_width = payload.get("band_width")
+        if band_width is not None and (type(band_width) is not int or band_width < 1):
+            raise ValueError(
+                f"pact.band_width is {band_width!r}, not a positive integer"
+            )
+        hidden_streams = payload.get("hidden_streams")
+        if hidden_streams is not None and (
+            type(hidden_streams) is not int or hidden_streams < 1
+        ):
+            raise ValueError(
+                f"pact.hidden_streams is {hidden_streams!r}, not a positive integer"
+            )
         return cls(
-            module=str(payload["module"]),
-            package=str(payload.get("package") or payload["module"]),
+            declared=True,
+            dense_layer_end=dense_end,
+            band_width=band_width,
+            tp_splits=tuple(parsed_splits),
+            hidden_streams=hidden_streams,
         )
+
+    def tp_splits_for_role(self, role: str) -> int | None:
+        """Split count for one role, or None when the scope states none."""
+        for name, count in self.tp_splits:
+            if name == str(role):
+                return count
+        return None
 
 
 @dataclass(frozen=True)
@@ -436,6 +514,7 @@ class ModelStructureSpec:
     visual_root_prefixes: tuple[str, ...] = ()
     lm_head_name: str | None = None
     embedding_name: str | None = None
+    pact: PactScopeSpec = field(default_factory=PactScopeSpec)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ModelStructureSpec":
@@ -540,6 +619,7 @@ class ModelStructureSpec:
             visual_root_prefixes=tuple(visual_roots),
             lm_head_name=_optional_str(shard_regexes.get("lm_head_name")),
             embedding_name=_optional_str(shard_regexes.get("embedding_name")),
+            pact=PactScopeSpec.from_dict(payload.get("pact")),
         )
 
     def for_config(

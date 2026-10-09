@@ -42,7 +42,8 @@ function context() {
       pull_request: {
         number: 253,
         base: { ref: "main", repo: { full_name: REPOSITORY } },
-        head: { sha: HEAD_SHA },
+        head: { sha: HEAD_SHA, ref: "prismaquant-252" },
+        created_at: "2026-10-09T17:00:00Z",
       },
     },
     runId: 1234,
@@ -181,13 +182,15 @@ async function parentCheck(body, parent, options = {}) {
       }
       lookups.push(variables);
       if (options.lookupError) throw new Error("parent lookup unavailable");
-      return { repository: { issue: parent } };
+      return { repository: { issue: options.parents ? options.parents[variables.issueNumber] ?? null : parent } };
     },
     rest: { repos: { createCommitStatus: async (input) => statuses.push(input) } },
   };
   const event = context();
   // The API body, not a stale event snapshot, is the authority.
   event.payload.pull_request.body = options.eventBody || "Refs #999";
+  if (Object.hasOwn(options, "branch")) event.payload.pull_request.head.ref = options.branch;
+  if (Object.hasOwn(options, "createdAt")) event.payload.pull_request.created_at = options.createdAt;
   await run({ github, context: event,
     core: { info: () => {}, error: () => {}, setFailed: (message) => failures.push(message) } });
   return { statuses, failures, lookups };
@@ -272,3 +275,122 @@ for (const body of ["Example #252", "> Refs #252", "```text\nRefs #252\n```", "R
     assert.deepEqual(result.lookups, []);
   });
 }
+
+for (const branch of ["prismaquant-123", "prismaquant-123-gpu", "prismaquant-123-gpu-2"]) {
+  test(`accepts branch ${branch} for a verified closing issue`, async () => {
+    const result = await parentCheck("", null, { branch, closing: [issue(123)] });
+    assert.equal(result.statuses.at(-1).state, "success");
+    assert.deepEqual(result.failures, []);
+  });
+  test(`accepts branch ${branch} for a verified open parent`, async () => {
+    const result = await parentCheck("Refs #123", issue(123), { branch });
+    assert.equal(result.statuses.at(-1).state, "success");
+    assert.deepEqual(result.failures, []);
+  });
+}
+
+for (const branch of ["fix/something", "prismaquant-124", "prismaquant-123-", "prismaquant-123-GPU", "prismaquant-123-/gpu"]) {
+  test(`rejects branch ${branch} when only issue #123 is linked`, async () => {
+    const result = await parentCheck("", null, { branch, closing: [issue(123)] });
+    assert.equal(result.statuses.at(-1).state, "failure");
+    assert.equal(result.statuses.at(-1).sha, HEAD_SHA);
+    assert.match(result.statuses.at(-1).description, /branch rule.*prismaquant-<issue>/i);
+    assert.match(result.failures.at(-1), /branch rule.*prismaquant-<issue>/i);
+    assert.match(result.failures.at(-1), /prismaquant-123/);
+  });
+}
+
+for (const options of [
+  { branch: "ig/train/x-9" },
+  { branch: "ig/2518-old" },
+  { branch: "release" },
+  { branch: "release-v1" },
+  { branch: "fix/something", createdAt: "2026-10-09T16:59:59Z" },
+]) {
+  test(`exempts only branch validation: ${JSON.stringify(options)}`, async () => {
+    const accepted = await parentCheck("", null, { ...options, closing: [issue(123)] });
+    assert.equal(accepted.statuses.at(-1).state, "success");
+    const rejected = await parentCheck("", null, options);
+    assert.equal(rejected.statuses.at(-1).state, "failure");
+    assert.match(rejected.failures.at(-1), /no same-repository closing issue or open parent/);
+  });
+}
+
+for (const createdAt of ["2026-10-09T17:00:00Z", "2026-10-09T17:00:01Z"]) {
+  test(`enforces the branch rule at ${createdAt}`, async () => {
+    const result = await parentCheck("Refs #123", issue(123), { branch: "fix/something", createdAt });
+    assert.equal(result.statuses.at(-1).state, "failure");
+    assert.match(result.failures.at(-1), /branch rule/i);
+  });
+}
+
+test("matches any verified closing reference, not only the first", async () => {
+  const result = await parentCheck("", null, { branch: "prismaquant-123", closing: [issue(124), issue(123)] });
+  assert.equal(result.statuses.at(-1).state, "success");
+  assert.deepEqual(result.lookups, []);
+});
+
+test("matches a later verified open parent", async () => {
+  const result = await parentCheck("Refs #124, #123", null, {
+    branch: "prismaquant-123", parents: { 124: issue(124), 123: issue(123) },
+  });
+  assert.equal(result.statuses.at(-1).state, "success");
+  assert.deepEqual(result.failures, []);
+  assert.match(result.statuses.at(-1).description, /parent.*#123/i);
+});
+
+test("matches an open parent when closing references name another issue", async () => {
+  const result = await parentCheck("Part of #123", issue(123), {
+    branch: "prismaquant-123", closing: [issue(124)],
+  });
+  assert.equal(result.statuses.at(-1).state, "success");
+  assert.deepEqual(result.failures, []);
+});
+
+for (const parent of [null, { ...issue(123), state: "CLOSED" }, issue(123, "RobTand/tessera"), { ...issue(123), __typename: "PullRequest" }]) {
+  test(`does not use an unverified branch parent: ${JSON.stringify(parent)}`, async () => {
+    const result = await parentCheck("Refs #123", parent, { branch: "prismaquant-123", closing: [issue(124)] });
+    assert.equal(result.statuses.at(-1).state, "failure");
+    assert.match(result.failures.at(-1), /branch rule/i);
+  });
+}
+
+test("does not use a foreign closing reference to match the branch", async () => {
+  const result = await parentCheck("", null, {
+    branch: "prismaquant-123", closing: [issue(124), issue(123, "RobTand/tessera")],
+  });
+  assert.equal(result.statuses.at(-1).state, "failure");
+  assert.match(result.failures.at(-1), /branch rule/i);
+});
+
+test("fails closed if the branch parent lookup fails despite another closing issue", async () => {
+  const result = await parentCheck("Refs #123", null, {
+    branch: "prismaquant-123", closing: [issue(124)], lookupError: true,
+  });
+  assert.equal(result.statuses.at(-1).state, "failure");
+  assert.match(result.failures.at(-1), /failed closed.*parent lookup unavailable/);
+});
+
+for (const options of [{ branch: undefined }, { createdAt: undefined }, { createdAt: "not-a-date" }]) {
+  test(`fails closed on missing or malformed branch metadata: ${JSON.stringify(options)}`, async () => {
+    const result = await parentCheck("", null, { ...options, closing: [issue(252)] });
+    assert.equal(result.statuses.at(-1).state, "failure");
+    assert.equal(result.statuses.at(-1).sha, HEAD_SHA);
+    assert.match(result.failures.at(-1), /failed closed/);
+  });
+}
+
+test("rejects a branch parent that is closed after another open parent", async () => {
+  const result = await parentCheck("Refs #124, #123", null, {
+    branch: "prismaquant-123", parents: { 124: issue(124), 123: { ...issue(123), state: "CLOSED" } },
+  });
+  assert.equal(result.statuses.at(-1).state, "failure");
+  assert.match(result.failures.at(-1), /branch rule.*prismaquant-<issue>/i);
+  assert.match(result.failures.at(-1), /prismaquant-124/);
+});
+
+test("an exempt branch still fails closed on a parent API error", async () => {
+  const result = await parentCheck("Refs #123", null, { branch: "ig/train/x-9", lookupError: true });
+  assert.equal(result.statuses.at(-1).state, "failure");
+  assert.match(result.failures.at(-1), /failed closed.*parent lookup unavailable/);
+});

@@ -2,6 +2,7 @@
 
 const CHECK_NAME = "linked issue";
 const TARGET_BRANCH = "main";
+const BRANCH_RULE_CUTOFF = Date.parse("2026-10-09T17:00:00Z");
 
 const CLOSING_ISSUES_QUERY = `
   query ClosingIssues($owner: String!, $repo: String!, $number: Int!) {
@@ -165,15 +166,33 @@ function evaluateOpenParent(response, identity, expectedNumber) {
   return { number: node.number, state: node.state, url: node.url };
 }
 
-async function readOpenParent(github, response, identity, serverUrl) {
+async function readOpenParent(github, response, identity, serverUrl, branchIssueNumber) {
+  let first;
   for (const issueNumber of parentIssueNumbers(response.repository.pullRequest.body, identity.repository, serverUrl)) {
     const parent = await github.graphql(PARENT_ISSUE_QUERY, {
       owner: identity.owner, repo: identity.repo, issueNumber,
     });
     const issue = evaluateOpenParent(parent, identity, issueNumber);
-    if (issue) return issue;
+    if (!issue) continue;
+    first ??= issue;
+    if (!branchIssueNumber || issue.number === branchIssueNumber) return issue;
   }
-  return null;
+  return first ?? null;
+}
+
+function branchPolicy(pullRequest) {
+  const branch = pullRequest.head.ref;
+  const createdAt = pullRequest.created_at;
+  if (typeof branch !== "string" || !branch) {
+    throw new Error("pull request head branch is missing or malformed");
+  }
+  if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) {
+    throw new Error("pull request creation time is missing or malformed");
+  }
+  const exempt = branch.startsWith("ig/") || branch.startsWith("release") ||
+    Date.parse(createdAt) < BRANCH_RULE_CUTOFF;
+  const match = branch.match(/^prismaquant-([0-9]+)(-[a-z0-9][a-z0-9-]*)?$/);
+  return { branch, exempt, issueNumber: match ? Number(match[1]) : null };
 }
 
 function pullRequestIdentity(context) {
@@ -254,15 +273,27 @@ async function run({ github, context, core }) {
       identity.pullNumber,
     );
 
-    if (!result.ok) {
-      const parent = await readOpenParent(github, response, identity, context.serverUrl);
-      if (parent) {
-        await publishStatus(github, identity, targetUrl, "success", `Refs open same-repository parent #${parent.number}`);
-        core.info(`accepted open parent reference: #${parent.number} (${parent.url})`);
-      } else {
-        await publishStatus(github, identity, targetUrl, "failure", "No closing issue or open same-repository parent is linked");
-        core.setFailed(`pull request #${identity.pullNumber} has no same-repository closing issue or open parent reference`);
-      }
+    const policy = branchPolicy(context.payload.pull_request);
+    let parent;
+    const matchesBranch = () => result.issues.some((issue) => issue.number === policy.issueNumber);
+    if (!result.ok || (!policy.exempt && policy.issueNumber && !matchesBranch())) {
+      parent = await readOpenParent(github, response, identity, context.serverUrl,
+        policy.exempt ? null : policy.issueNumber);
+      if (parent) result.issues.push(parent);
+    }
+
+    if (!result.issues.length) {
+      await publishStatus(github, identity, targetUrl, "failure", "No closing issue or open same-repository parent is linked");
+      core.setFailed(`pull request #${identity.pullNumber} has no same-repository closing issue or open parent reference`);
+      return;
+    }
+
+    if (!policy.exempt && !matchesBranch()) {
+      const expected = result.issues.map((issue) => `prismaquant-${issue.number}`).join(", ");
+      await publishStatus(github, identity, targetUrl, "failure",
+        "Branch rule: expected prismaquant-<issue> for a verified linked issue");
+      core.setFailed(`Branch rule: expected prismaquant-<issue> or prismaquant-<issue>-<word>. ` +
+        `Use ${expected}, with an optional lowercase suffix. Head branch: ${policy.branch}.`);
       return;
     }
 
@@ -274,9 +305,10 @@ async function run({ github, context, core }) {
       identity,
       targetUrl,
       "success",
-      `Closes same-repository issue #${result.issues[0].number}`,
+      result.ok ? `Closes same-repository issue #${result.issues[0].number}` :
+        `Refs open same-repository parent #${parent.number}`,
     );
-    core.info(`accepted closing issue reference(s): ${linked}`);
+    core.info(`accepted issue reference(s): ${linked}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (identity && targetUrl) {
