@@ -652,6 +652,18 @@ def _capture_request_binding(args, unit_names):
             "max_act_rows": int(args.max_act_rows), "max_prefix_rows": int(args.max_prefix_rows)}
 
 
+def _changed_binding_fields(stored, requested) -> list:
+    """The request-binding fields on which a stored fragment differs from this request.
+
+    A fragment that carries no binding (or a malformed one) differs as a whole.
+    """
+    if not isinstance(stored, dict):
+        return ["capture_binding"]
+    absent = object()
+    return sorted(key for key in stored.keys() | requested.keys()
+                  if stored.get(key, absent) != requested.get(key, absent))
+
+
 def _run_prepared_quantum(args, guard, *, recompute=False) -> dict:
     """One layer-range quantum: same-pass split moments over the chain owner."""
     guard("research quantum startup")
@@ -866,7 +878,7 @@ def mode_quantum(args, guard) -> dict:
         if owner is not None and owner.get("status") == "complete":
             chain.require_owner_complete(prep, lo, hi)
             fragment = chain.read_fragment(root, prep, lo, hi)
-            if fragment.get("capture_binding") != binding:
+            if _changed_binding_fields(fragment.get("capture_binding"), binding):
                 options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
                 result = _run_prepared_quantum(options, guard, recompute=True)
             else:

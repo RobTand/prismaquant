@@ -133,6 +133,22 @@ def test_completed_adoption_rechecks_requested_prep_comparability(tmp_path, chan
         capture.mode_quantum(args, lambda _label: None)
 
 
+_BINDING = {"selection_sha256": "a", "units": ["u"], "max_act_rows": 7, "max_prefix_rows": 4}
+
+
+@pytest.mark.parametrize("stored,changed", [
+    (dict(_BINDING), []),
+    (None, ["capture_binding"]),
+    ("not a binding", ["capture_binding"]),
+    ({**_BINDING, "selection_sha256": "b"}, ["selection_sha256"]),
+    ({**_BINDING, "max_prefix_rows": 8}, ["max_prefix_rows"]),
+    ({key: value for key, value in _BINDING.items() if key != "max_prefix_rows"}, ["max_prefix_rows"]),
+    ({**_BINDING, "extra": None}, ["extra"]),
+])
+def test_changed_binding_fields_names_each_difference(stored, changed):
+    assert capture._changed_binding_fields(stored, dict(_BINDING)) == changed
+
+
 @pytest.mark.parametrize("change", ["selection_hash", "retained_prefix"])
 def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeypatch, change):
     capture._toy_control_preflight(tmp_path, lambda _label: None)
