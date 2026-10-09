@@ -52,34 +52,34 @@ def test_mlp_groups_are_unchanged(profile):
     d = "model.language_model.layers.0.mlp."
     assert {profile.fused_sibling_group(d + r) for r in ("gate_proj", "up_proj")} == {d + "gate_up_proj"}
 
-KDA_NO_CONFIG_LEAVES = ("q_proj", "k_proj", "v_proj", "b_proj", "f_a_proj", "g_a_proj")
-
-
-def _bare_profile():
-    return Glm5NextProfile()
-
 
 @pytest.mark.parametrize("prefix", ["model.language_model.layers.0.", "model.layers.0."])
-@pytest.mark.parametrize("leaf", KDA_NO_CONFIG_LEAVES)
+@pytest.mark.parametrize("leaf", KDA_FUSED)
 def test_kda_member_without_declared_config_refuses(prefix, leaf):
     """A hand-built profile holds no config.json, so a KDA member refuses (PQ #2456)."""
     name = prefix + "self_attn." + leaf
     with pytest.raises(ValueError, match="declared config"):
-        _bare_profile().fused_sibling_group(name)
+        Glm5NextProfile().fused_sibling_group(name)
 
 
-@pytest.mark.parametrize("prefix", ["model.language_model.layers.0.", "model.layers.0."])
-def test_kda_live_forget_gate_spelling_without_declared_config_refuses(prefix):
-    """The live f_a_proj spelling refuses without a declared config (PQ #2456)."""
-    with pytest.raises(ValueError, match="declared config"):
-        _bare_profile().fused_sibling_group(prefix + "self_attn.forget_gate.f_a_proj")
+@pytest.mark.parametrize("prefix", ["model.language_model.layers.5.", "model.layers.5."])
+def test_shared_expert_gate_needs_no_declared_config(prefix):
+    """A shared-expert gate still has an owner without a config (PQ #2456)."""
+    name = prefix + "mlp.shared_experts.gate_proj"
+    assert Glm5NextProfile().fused_sibling_group(name) == (
+        prefix + "mlp.shared_experts.gate_up_proj")
 
 
-def test_shared_expert_gate_needs_no_declared_config():
-    """A name that needs no config still resolves on a hand-built profile (PQ #2456)."""
-    name = "model.language_model.layers.5.mlp.shared_experts.gate_proj"
-    assert _bare_profile().fused_sibling_group(name) == (
-        "model.language_model.layers.5.mlp.shared_experts.gate_up_proj")
+@pytest.mark.parametrize("prefix", ["model.language_model.layers.3.", "model.layers.3."])
+def test_config_independent_attention_names_keep_their_owners(prefix):
+    profile = Glm5NextProfile()
+    attention = prefix + "self_attn."
+    for leaf in MLA_FUSED:
+        assert profile.fused_sibling_group(attention + leaf) == attention + "fused_qkv_a_proj"
+    for leaf in INDEXER_FUSED:
+        assert profile.fused_sibling_group(attention + leaf) == attention + "indexer.wk_weights_proj"
+    for leaf in KDA_ALONE + MLA_ALONE:
+        assert profile.fused_sibling_group(attention + leaf) is None, leaf
 
 
 def test_attention_stays_pinned_and_no_group_is_partly_pinned(profile):

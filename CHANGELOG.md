@@ -11,6 +11,11 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
+  The error names the missing `config.json` document.
+  The lane still owns every fused-group result when the config exists.
+  Shared-expert MLP, MLA, indexer, and standalone attention queries retain their config-independent behavior.
+  Tests cover both model prefixes and both `f_a_proj` spellings.
 - A failed fused-mapping lookup now stops the native export and the artifact completeness check (#2443).
   Both callers used to swallow every exception from `profile.fused_sibling_leaf_mapping()`.
   With the GLM lane lookup failing, the export returned an empty fused mapping and wrote its `ignore` list without the fused siblings.
