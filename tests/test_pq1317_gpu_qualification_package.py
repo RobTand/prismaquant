@@ -403,15 +403,13 @@ def test_the_manifest_binds_the_result_files():
 
 # ------------------------------------------------------------- probe plugin ----
 
-def _load_plugin():
+@pytest.fixture(scope="module")
+def native_probe():
     """The harness plugin, loaded by path so the test session's sys.path stays untouched."""
     spec = importlib.util.spec_from_file_location("pq1317_native_probe", HARNESS / "native_probe.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-native_probe = _load_plugin()
 
 MAPS = """\
 ffff8c000000-ffff8c800000 r-xp 00000000 00:2a 123 /mnt/shared/m/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/.nfs0000000000f553e400000118
@@ -422,7 +420,7 @@ ffff90000000-ffff90100000 r--p 00000000 00:2a 127 /mnt/shared/m/.nfs000000000000
 """
 
 
-def test_the_probe_finds_tessera_libraries_even_when_nfs_renames_them():
+def test_the_probe_finds_tessera_libraries_even_when_nfs_renames_them(native_probe):
     found = {entry["module"]: entry for entry in native_probe.parse_maps(MAPS.splitlines())}
     assert set(found) == {"tessera_routed_fused_value", "tessera_window_gemv"}
     assert found["tessera_routed_fused_value"]["nfs_renamed"] is True
