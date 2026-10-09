@@ -446,6 +446,11 @@ def main(argv=None) -> int:
     # The initial inventory is captured BEFORE the sampler starts and before
     # the row runs: a warm root must record its start state.
     initial_state = peak_mod.describe_initial_state(cache_root)
+    # A retry lands on the same host workspace: a stale row-output from an
+    # earlier attempt would read as another run's chain state and refuse.
+    # Each attempt runs under its own nonce.
+    nonce = os.environ.get("PRISMABUILD_ACTION_NONCE", "local")
+    attempt_root = workspace / f"row-output-{nonce}"
     command = [sys.executable, "-m", "tools.measure_container_cache_quantum_row",
                "--cache-root", str(cache_root), "--workspace", str(workspace),
                "--out", str(args.out), "--device", str(args.device)]
@@ -461,7 +466,7 @@ def main(argv=None) -> int:
         try:
             profile.enable()
             workload = _run_complete_row(
-                output_root=workspace / "row-output", device=args.device)
+                output_root=attempt_root, device=args.device)
             profile.disable()
         except BaseException as exc:  # noqa: BLE001 - receipt records it
             failure = f"{type(exc).__name__}: {exc}"
@@ -487,6 +492,8 @@ def main(argv=None) -> int:
         "runtime": _runtime_versions(),
         "device": args.device,
         "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+        "action_nonce": os.environ.get("PRISMABUILD_ACTION_NONCE"),
+        "row_output": str(attempt_root),
         "cache_env": {name: os.environ.get(name) for name in (
             "HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",
             "XDG_CACHE_HOME", "PRISMAQUANT_TMPDIR",
