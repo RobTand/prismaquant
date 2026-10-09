@@ -213,19 +213,10 @@ _GLM_PACT_COHORT = {
 
 def _config_entry(config, name):
     """First present config value. Walk nested text_config."""
-    if not isinstance(config, dict):
-        return None
-    if name in config and config[name] is not None:
-        return config[name]
-    text = config.get("text_config")
-    if isinstance(text, dict) and text.get(name) is not None:
-        return text[name]
-    if name == "prefix_ids":
-        if config.get("serving_prefix_ids") is not None:
-            return config["serving_prefix_ids"]
-        if isinstance(text, dict) and text.get("serving_prefix_ids") is not None:
-            return text["serving_prefix_ids"]
-    return None
+    from .base import _read_config_value
+
+    return _read_config_value(config, name)
+
 
 
 class Glm5NextProfile(ModelProfile):
@@ -285,21 +276,22 @@ class Glm5NextProfile(ModelProfile):
         """
         for source in (config, self._declared_config):
             if isinstance(source, dict) and "num_hidden_layers" in source:
-                value = super().pact_layer_count(source)
-                if value is None:
+                value = _config_entry(source, "num_hidden_layers")
+                if type(value) is not int or value <= 0:
                     raise ValueError(
                         "glm5_next: explicit num_hidden_layers is not "
                         "a positive integer; the PACT layer count "
                         "cannot be derived"
                     )
                 return value
-            value = super().pact_layer_count(source)
-            if value is not None:
+            value = _config_entry(source, "num_hidden_layers")
+            if type(value) is int and value > 0:
                 return value
         raise ValueError(
             "glm5_next: no config states num_hidden_layers; "
             "the PACT layer count cannot be derived"
         )
+
 
     def pact_cohort_values(self, config: dict | None) -> dict:
         """Measured-consumer cohort for the running GLM measurement.
@@ -327,6 +319,15 @@ class Glm5NextProfile(ModelProfile):
             stated = _config_entry(declared, key)
             if stated is not None:
                 values[key] = stated
+                continue
+            if key == "prefix_ids":
+                alias = _config_entry(config, "serving_prefix_ids")
+                if alias is not None:
+                    values[key] = alias
+                    continue
+                alias = _config_entry(declared, "serving_prefix_ids")
+                if alias is not None:
+                    values[key] = alias
         values["prefix_ids"] = list(values["prefix_ids"])
         return values
 

@@ -64,6 +64,18 @@ class SourceScope:
     build_skeleton: Callable[[str | None], nn.Module]
 
 
+def _read_config_value(config, name):
+    """First present value for one key. Top level beats nested text_config."""
+    if not isinstance(config, dict):
+        return None
+    if config.get(name) is not None:
+        return config[name]
+    text = config.get("text_config")
+    if isinstance(text, dict) and text.get(name) is not None:
+        return text[name]
+    return None
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
@@ -425,41 +437,35 @@ class ModelProfile(ABC):
             return None
         return spec.pact.tp_splits_for_role(role)
 
-    def pact_layer_count(self, config: dict | None) -> int | None:
-        """Decoder layer count from a config, or None when unstated."""
-        source = config.get("text_config") if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            source = config if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            return None
-        value = source.get("num_hidden_layers")
-        if type(value) is int and value > 0:
+    def pact_dimension_value(self, key, config=None):
+        """One dimension value. Explicit config wins, declared next."""
+        for source in (config, self._declared_config):
+            value = _read_config_value(source, key)
+            if value is None:
+                continue
+            if type(value) is not int or isinstance(value, bool):
+                raise ValueError(
+                    f"PACT {key} value {value!r} is not a positive integer"
+                )
+            if value <= 0:
+                raise ValueError(
+                    f"PACT {key} value {value!r} is not a positive integer"
+                )
             return value
         return None
+
+    def pact_layer_count(self, config: dict | None) -> int | None:
+        """Decoder layer count from a config, or None when unstated."""
+        return self.pact_dimension_value("num_hidden_layers", config)
 
     def pact_hidden_size(self, config: dict | None) -> int | None:
         """Hidden width from a config, or None when unstated."""
-        source = config.get("text_config") if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            source = config if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            return None
-        value = source.get("hidden_size")
-        if type(value) is int and value > 0:
-            return value
-        return None
+        return self.pact_dimension_value("hidden_size", config)
 
     def pact_vocab_size(self, config: dict | None) -> int | None:
         """Vocabulary size from a config, or None when unstated."""
-        source = config.get("text_config") if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            source = config if isinstance(config, dict) else None
-        if not isinstance(source, dict):
-            return None
-        value = source.get("vocab_size")
-        if type(value) is int and value > 0:
-            return value
-        return None
+        return self.pact_dimension_value("vocab_size", config)
+
 
 
     def source_derivative_contract(self) -> dict | None:

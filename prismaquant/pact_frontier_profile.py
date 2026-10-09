@@ -60,17 +60,13 @@ FRONTIER_MANIFEST_KEYS = (
 
 
 def _config_value(config, *names, default=None):
-    """Return the first present config value. Walk nested text_config."""
-    if not isinstance(config, dict):
-        return default
+    """First present value. Profiles own resolution; kept for legacy math."""
+    from .model_profiles.base import _read_config_value
+
     for name in names:
-        if name in config and config[name] is not None:
-            return config[name]
-    text = config.get("text_config")
-    if isinstance(text, dict):
-        for name in names:
-            if name in text and text[name] is not None:
-                return text[name]
+        value = _read_config_value(config, name)
+        if value is not None:
+            return value
     return default
 
 
@@ -186,18 +182,23 @@ def tp_splits_for_role(role, profile=None):
     return 1
 
 
+def _legacy_cohort():
+    """Frozen GLM measurement cohort. Never reads a profile."""
+    return {
+        "sample_range": list(GLM_LEGACY["sample_range"]),
+        "raw_tokens_per_sequence": GLM_LEGACY["raw_tokens_per_sequence"],
+        "prefix_ids": list(GLM_LEGACY["prefix_ids"]),
+        "local_prefix_rows": GLM_LEGACY["local_prefix_rows"],
+        "input_contract": GLM_LEGACY["input_contract"],
+        "global_original_tokens": GLM_LEGACY["global_original_tokens"],
+        "scored_positions_per_sequence": GLM_LEGACY["scored_positions"],
+        "vocab_size": GLM_LEGACY["vocab_size"],
+    }
+
+
 def glm_paths_identical(cohort):
     """Check the cohort against the running GLM measurement values."""
-    from .model_profiles import profile_from_config
-
-    legacy = pact_cohort_from_profile(
-        profile_from_config(
-            {
-                "model_type": "glm5_next",
-                "architectures": ["Glm5NextForConditionalGeneration"],
-            }
-        )
-    )
+    legacy = _legacy_cohort()
     return all(cohort.get(key) == legacy[key] for key in legacy)
 
 

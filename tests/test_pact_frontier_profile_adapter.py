@@ -130,28 +130,81 @@ def test_glm_manifest_overlay_keeps_paths():
     assert overlay["bands"][0] == [0, 3]
 
 
+def _old_glm_cohort(config, declared):
+    """Legacy adapter math at 8d441ebf7: explicit, declared, then frozen."""
+    def _entry(cfg, name):
+        if not isinstance(cfg, dict):
+            return None
+        if cfg.get(name) is not None:
+            return cfg[name]
+        text = cfg.get("text_config")
+        if isinstance(text, dict) and text.get(name) is not None:
+            return text[name]
+        return None
+    prefix = _entry(config, "prefix_ids")
+    if prefix is None:
+        prefix = _entry(config, "serving_prefix_ids")
+    if prefix is None:
+        prefix = _entry(declared, "prefix_ids")
+    if prefix is None:
+        prefix = _entry(declared, "serving_prefix_ids")
+    if prefix is None:
+        prefix = GLM_LEGACY["prefix_ids"]
+    vocab = _entry(config, "vocab_size")
+    if vocab is None:
+        vocab = _entry(declared, "vocab_size")
+    if vocab is None:
+        vocab = GLM_LEGACY["vocab_size"]
+    scored = _entry(config, "scored_positions_per_sequence")
+    if scored is None:
+        scored = _entry(declared, "scored_positions_per_sequence")
+    if scored is None:
+        scored = GLM_LEGACY["scored_positions"]
+    raw = _entry(config, "raw_tokens_per_sequence")
+    if raw is None:
+        raw = _entry(declared, "raw_tokens_per_sequence")
+    if raw is None:
+        raw = GLM_LEGACY["raw_tokens_per_sequence"]
+    return {
+        "sample_range": list(GLM_LEGACY["sample_range"]),
+        "raw_tokens_per_sequence": int(raw),
+        "prefix_ids": list(prefix),
+        "local_prefix_rows": GLM_LEGACY["local_prefix_rows"],
+        "input_contract": GLM_LEGACY["input_contract"],
+        "global_original_tokens": GLM_LEGACY["global_original_tokens"],
+        "scored_positions_per_sequence": int(scored),
+        "vocab_size": int(vocab),
+    }
+
+
+def _old_glm_bands(count):
+    """Legacy adapter bands at 8d441ebf7: dense head plus width-6 tail."""
+    bands = [GLM_LEGACY["dense_layers"]]
+    start = GLM_LEGACY["dense_layers"][1]
+    while start < count:
+        bands.append((start, min(start + GLM_LEGACY["band_width"], count)))
+        start += GLM_LEGACY["band_width"]
+    return tuple(bands)
+
+
 def test_glm_equivalence_old_adapter_vs_shared_contract():
     """Identical GLM inputs give equal bands, cohort, roles, dims, TP cuts."""
-    import prismaquant.pact_frontier_profile as adapter
-
     profile = _glm_profile()
     config = _glm_config()
     cohort = pact_cohort_from_profile(profile, config)
-    legacy = dict(
-        adapter.pact_cohort_from_profile(profile, config),
-        sample_range=list(GLM_LEGACY["sample_range"]),
-        raw_tokens_per_sequence=GLM_LEGACY["raw_tokens_per_sequence"],
-        prefix_ids=list(GLM_LEGACY["prefix_ids"]),
-        local_prefix_rows=GLM_LEGACY["local_prefix_rows"],
-        input_contract=GLM_LEGACY["input_contract"],
-        global_original_tokens=GLM_LEGACY["global_original_tokens"],
-        scored_positions_per_sequence=GLM_LEGACY["scored_positions"],
-        vocab_size=GLM_LEGACY["vocab_size"],
-    )
+    legacy = _old_glm_cohort(config, profile._declared_config)
     assert cohort == legacy
     assert glm_paths_identical(cohort)
     assert glm_paths_identical(legacy)
+    # Frozen prefix-row and input contract survive unchanged.
+    assert cohort["local_prefix_rows"] == GLM_LEGACY["local_prefix_rows"]
+    assert cohort["input_contract"] == GLM_LEGACY["input_contract"]
+    assert cohort["sample_range"] == list(GLM_LEGACY["sample_range"])
+    assert cohort["raw_tokens_per_sequence"] == GLM_LEGACY["raw_tokens_per_sequence"]
+    assert cohort["global_original_tokens"] == GLM_LEGACY["global_original_tokens"]
+    assert cohort["prefix_ids"] == list(GLM_LEGACY["prefix_ids"])
     bands = pact_bands(profile=profile, config=config)
+    assert bands == _old_glm_bands(GLM_LEGACY["num_layers"])
     assert bands[0] == GLM_LEGACY["dense_layers"]
     assert bands[-1][1] == GLM_LEGACY["num_layers"]
     roles = {
@@ -168,6 +221,7 @@ def test_glm_equivalence_old_adapter_vs_shared_contract():
         "hidden_streams": GLM_LEGACY["hidden_streams"],
         "hidden_size": GLM_LEGACY["hidden_size"],
     }
+    assert num_layers_from_profile(profile, config) == GLM_LEGACY["num_layers"]
 
 
 def _qwen3_declared_profile():
@@ -182,6 +236,10 @@ def _qwen3_declared_profile():
         "prefix_ids": [151935, 151934],
         "scored_positions_per_sequence": 1023,
         "raw_tokens_per_sequence": 1024,
+        "sample_range": [0, 64],
+        "local_prefix_rows": "included",
+        "input_contract": "raw",
+        "global_original_tokens": 65536,
     }
     profile = profile_from_config(declared)
     assert profile.name == "qwen3"
@@ -196,8 +254,10 @@ def test_qwen3_resolves_declared_scope_without_glm_constants():
     assert cohort["prefix_ids"] == [151935, 151934]
     assert cohort["scored_positions_per_sequence"] == 1023
     assert cohort["raw_tokens_per_sequence"] == 1024
+    assert cohort["sample_range"] == [0, 64]
     assert cohort["local_prefix_rows"] == "included"
     assert cohort["input_contract"] == "raw"
+    assert cohort["global_original_tokens"] == 65536
     assert not glm_paths_identical(cohort)
     bands = pact_bands(profile=profile, config={"num_hidden_layers": 48})
     assert bands[0] == (0, 6)
@@ -215,12 +275,20 @@ def test_qwen3_explicit_config_beats_declared_config():
         "prefix_ids": [1, 2],
         "scored_positions_per_sequence": 777,
         "raw_tokens_per_sequence": 778,
+        "sample_range": [10, 20],
+        "local_prefix_rows": "excluded",
+        "input_contract": "prefixed_514",
+        "global_original_tokens": 111,
     }
     cohort = pact_cohort_from_profile(profile, explicit)
     assert cohort["vocab_size"] == 100001
     assert cohort["prefix_ids"] == [1, 2]
     assert cohort["scored_positions_per_sequence"] == 777
     assert cohort["raw_tokens_per_sequence"] == 778
+    assert cohort["sample_range"] == [10, 20]
+    assert cohort["local_prefix_rows"] == "excluded"
+    assert cohort["input_contract"] == "prefixed_514"
+    assert cohort["global_original_tokens"] == 111
 
 
 def test_qwen3_declared_nested_text_config_and_prefix_alias():
@@ -232,6 +300,10 @@ def test_qwen3_declared_nested_text_config_and_prefix_alias():
         "num_hidden_layers": 48,
         "hidden_size": 2048,
         "serving_prefix_ids": [11, 12],
+        "sample_range": [5, 9],
+        "local_prefix_rows": "included",
+        "input_contract": "raw",
+        "global_original_tokens": 777,
         "text_config": {
             "vocab_size": 151937,
             "scored_positions_per_sequence": 779,
@@ -245,6 +317,8 @@ def test_qwen3_declared_nested_text_config_and_prefix_alias():
     assert cohort["vocab_size"] == 151937
     assert cohort["scored_positions_per_sequence"] == 779
     assert cohort["raw_tokens_per_sequence"] == 780
+    assert cohort["sample_range"] == [5, 9]
+    assert cohort["global_original_tokens"] == 777
     explicit = {"prefix_ids": [1, 2], "serving_prefix_ids": [11, 12]}
     assert pact_cohort_from_profile(profile, explicit)["prefix_ids"] == [1, 2]
 
@@ -320,3 +394,115 @@ def test_role_dependent_tp_dimensions():
     qwen = _qwen3_declared_profile()
     assert tp_splits_for_role("down_proj", qwen) == 2
     assert tp_splits_for_role("w2", qwen) == 1
+
+def test_explicit_prefix_ids_beat_declared_prefix_ids():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3MoeForCausalLM"],
+        "num_hidden_layers": 48,
+        "hidden_size": 2048,
+        "vocab_size": 151936,
+        "prefix_ids": [151935, 151934],
+        "scored_positions_per_sequence": 1023,
+        "raw_tokens_per_sequence": 1024,
+        "sample_range": [0, 64],
+        "local_prefix_rows": "included",
+        "input_contract": "raw",
+        "global_original_tokens": 65536,
+    }
+    profile = profile_from_config(declared)
+    explicit = {"serving_prefix_ids": [11, 12]}
+    assert pact_cohort_from_profile(profile, explicit)["prefix_ids"] == [11, 12]
+    alias_only = dict(declared)
+    del alias_only["prefix_ids"]
+    alias_only["serving_prefix_ids"] = [11, 12]
+    alias_profile = profile_from_config(alias_only)
+    assert pact_cohort_from_profile(alias_profile, explicit)["prefix_ids"] == [11, 12]
+    direct = {"prefix_ids": [1, 2]}
+    assert pact_cohort_from_profile(alias_profile, direct)["prefix_ids"] == [1, 2]
+    assert pact_cohort_from_profile(profile, direct)["prefix_ids"] == [1, 2]
+
+
+def test_explicit_text_config_beats_top_level_declared_dimensions():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "glm5_next",
+        "architectures": ["Glm5NextForConditionalGeneration"],
+        "num_hidden_layers": 45,
+        "hidden_size": 4096,
+        "text_config": {
+            "num_hidden_layers": 44,
+            "hidden_size": 4095,
+            "vocab_size": 154880,
+        },
+    }
+    profile = profile_from_config(declared)
+    assert profile.name == "glm5_next"
+    explicit = {"text_config": {"num_hidden_layers": 43, "hidden_size": 4094}}
+    assert num_layers_from_profile(profile, explicit) == 43
+    assert pact_hidden_layout(profile, explicit) == {
+        "hidden_streams": 4, "hidden_size": 4094,
+    }
+
+
+def test_declared_dimensions_supply_missing_explicit_dimensions():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "glm5_next",
+        "architectures": ["Glm5NextForConditionalGeneration"],
+        "text_config": {
+            "num_hidden_layers": 45,
+            "hidden_size": 4096,
+            "vocab_size": 154880,
+        },
+    }
+    profile = profile_from_config(declared)
+    assert num_layers_from_profile(profile, None) == 45
+    assert pact_hidden_layout(profile, None) == {
+        "hidden_streams": 4, "hidden_size": 4096,
+    }
+    assert pact_cohort_from_profile(profile, None)["vocab_size"] == 154880
+
+
+def test_inconsistent_explicit_dimensions_refuse():
+    profile = _glm_profile()
+    with pytest.raises(ValueError, match="positive integer"):
+        num_layers_from_profile(profile, {"num_hidden_layers": 0})
+    with pytest.raises(ValueError, match="positive integer"):
+        pact_hidden_layout(profile, {"hidden_size": -1})
+    with pytest.raises(ValueError, match="positive integer"):
+        profile.pact_vocab_size({"vocab_size": "big"})
+
+
+def test_qwen3_missing_measurement_fields_refuse():
+    from prismaquant.model_profiles import profile_from_config
+
+    declared = {
+        "model_type": "qwen3",
+        "architectures": ["Qwen3MoeForCausalLM"],
+        "num_hidden_layers": 48,
+        "hidden_size": 2048,
+        "vocab_size": 151936,
+        "prefix_ids": [151935, 151934],
+        "scored_positions_per_sequence": 1023,
+        "raw_tokens_per_sequence": 1024,
+    }
+    profile = profile_from_config(declared)
+    with pytest.raises(ValueError, match="explicit cohort fields"):
+        pact_cohort_from_profile(profile)
+
+
+def test_glm_legacy_guard_uses_frozen_values_without_profile():
+    import prismaquant.pact_frontier_profile as adapter
+
+    frozen = adapter._legacy_cohort()
+    assert frozen["sample_range"] == list(GLM_LEGACY["sample_range"])
+    assert frozen["prefix_ids"] == list(GLM_LEGACY["prefix_ids"])
+    assert frozen["local_prefix_rows"] == GLM_LEGACY["local_prefix_rows"]
+    assert frozen["input_contract"] == GLM_LEGACY["input_contract"]
+    assert glm_paths_identical(frozen)
+    assert not glm_paths_identical(dict(frozen, input_contract="raw"))

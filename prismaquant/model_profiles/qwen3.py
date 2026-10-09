@@ -14,17 +14,37 @@ packed expert Parameters are present.
 """
 from __future__ import annotations
 
-from .base import ModelProfile
+from .base import ModelProfile, _read_config_value
+
+
 def _pact_config_entry(config, name):
     """First present config value. Walk nested text_config."""
-    if not isinstance(config, dict):
-        return None
-    if name in config and config[name] is not None:
-        return config[name]
-    text = config.get("text_config")
-    if isinstance(text, dict) and text.get(name) is not None:
-        return text[name]
-    return None
+    return _read_config_value(config, name)
+
+
+def _prefix_entry(explicit, declared):
+    """Prefix ids. The whole explicit config beats the declared one."""
+    direct = _read_config_value(explicit, "prefix_ids")
+    if direct is not None:
+        return direct
+    alias = _read_config_value(explicit, "serving_prefix_ids")
+    if alias is not None:
+        return alias
+    direct = _read_config_value(declared, "prefix_ids")
+    if direct is not None:
+        return direct
+    return _read_config_value(declared, "serving_prefix_ids")
+
+
+def _explicit_declared_entry(explicit, declared, name):
+    """One cohort entry. Explicit config wins, declared next."""
+    value = _pact_config_entry(explicit, name)
+    if value is not None:
+        return value, "explicit"
+    value = _pact_config_entry(declared, name)
+    if value is not None:
+        return value, "declared"
+    return None, None
 
 
 
@@ -56,20 +76,18 @@ class Qwen3Profile(ModelProfile):
         declared = self._declared_config
         values = {}
         for key in (
-            "prefix_ids",
-            "serving_prefix_ids",
             "vocab_size",
             "scored_positions_per_sequence",
             "raw_tokens_per_sequence",
+            "sample_range",
+            "local_prefix_rows",
+            "input_contract",
+            "global_original_tokens",
         ):
-            explicit = _pact_config_entry(config, key)
-            if explicit is not None:
-                values[key] = explicit
-                continue
-            stated = _pact_config_entry(declared, key)
-            if stated is not None:
-                values[key] = stated
-        prefix = values.get("prefix_ids", values.get("serving_prefix_ids"))
+            entry, _origin = _explicit_declared_entry(config, declared, key)
+            if entry is not None:
+                values[key] = entry
+        prefix = _prefix_entry(config, declared)
         missing = [
             key
             for key in (
@@ -79,6 +97,14 @@ class Qwen3Profile(ModelProfile):
             )
             if values.get(key) is None
         ]
+        for key in (
+            "sample_range",
+            "local_prefix_rows",
+            "input_contract",
+            "global_original_tokens",
+        ):
+            if values.get(key) is None:
+                missing.append(key)
         if prefix is None:
             missing.append("prefix_ids")
         if missing:
@@ -87,12 +113,12 @@ class Qwen3Profile(ModelProfile):
                 + ",".join(sorted(missing))
             )
         return {
-            "sample_range": list(values.get("sample_range", (0, 0))),
+            "sample_range": list(values["sample_range"]),
             "raw_tokens_per_sequence": int(values["raw_tokens_per_sequence"]),
             "prefix_ids": list(prefix),
-            "local_prefix_rows": values.get("local_prefix_rows", "included"),
-            "input_contract": values.get("input_contract", "raw"),
-            "global_original_tokens": int(values.get("global_original_tokens", 0)),
+            "local_prefix_rows": values["local_prefix_rows"],
+            "input_contract": values["input_contract"],
+            "global_original_tokens": int(values["global_original_tokens"]),
             "scored_positions_per_sequence": int(
                 values["scored_positions_per_sequence"]
             ),
