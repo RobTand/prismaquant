@@ -24,30 +24,6 @@ import subprocess
 import sys
 import threading
 import time
-def _load_delivery():
-    """Load the repository delivery module without a package import."""
-    here = Path(__file__).resolve().parent
-    candidate = here / 'source_delivery.py'
-    if not candidate.is_file():
-        return None
-    name = 'prismaquant_d44_guard_source_delivery'
-    found = sys.modules.get(name)
-    if found is not None:
-        return found
-    module_spec = importlib.util.spec_from_file_location(name, candidate)
-    if module_spec is None or module_spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(module_spec)
-    sys.modules[name] = module
-    try:
-        module_spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        return None
-    return module
-
-
-_DELIVERY = _load_delivery()
 import stage1
 import stage1 as S
 
@@ -59,9 +35,8 @@ spec.loader.exec_module(D30)
 
 
 def _publish_batch_result(batch_path, root, stage='encode', *, dry_run=False):
-    """Write the owned scientific result manifest. Report if the write ran."""
     if dry_run:
-        return False
+        return
     batch = stage1.load(batch_path)
     directory = 'grid' if stage == 'select-unit' else 'receipts'
     results = [{'task_id': task['id'], 'output_id': task['output_id'],
@@ -69,7 +44,6 @@ def _publish_batch_result(batch_path, root, stage='encode', *, dry_run=False):
                for task in batch['tasks']]
     stage1.save(batch['result_manifest_path'], {'schema':'prismabuild.child_result_manifest.v1',
                 **{key: batch[key] for key in ('parent_key','plan_key','child_ordinal')}, 'results':results})
-    return True
 
 def decide_commit(guard, returncode):
     """Cancel before the decision rejects the result. Cancel after it cannot undo commit."""
@@ -195,10 +169,7 @@ def route_plan(path, out):
     argv = plan['common']['argv']
     index = next((i for i, token in enumerate(argv) if Path(token).name == 'encode_launch.py'), None)
     S.require(index is not None, 'Plan has no encode_launch.py entry')
-    if _DELIVERY is not None:
-        argv[index] = str(_DELIVERY.stage_tree(Path(argv[index]).parent))
-    else:  # pragma: no cover - standalone tree without the package
-        argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))
+    argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))
     if '--stage' not in argv:
         argv[index + 1:index + 1] = ['--stage', 'encode']
     S.require(argv[argv.index('--stage') + 1] in ENTRY, 'Plan has an unsupported guard stage')
@@ -264,8 +235,6 @@ def main():
         if mount['target'] == '/out':
             mount['source'] = str(args.root)
     container['container']['mounts'].append({'source':'/mnt/shared','target':'/mnt/shared','readonly':True})
-    if _DELIVERY is not None:
-        _DELIVERY.require_container_residency()
     from g3_residency import container_contract
     mounts, env = container_contract()
     container['container']['mounts'].extend(mounts)
@@ -330,7 +299,8 @@ def main():
                 raise LauncherSignal(guard['cancel_signal'])
             S.require(False, decision['abort_before_decision'])
         if decision['allowed'] and publish:
-            published = _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)
+            _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)
+            published = True
         return rc
     except BaseException as exc:
         caught = exc
