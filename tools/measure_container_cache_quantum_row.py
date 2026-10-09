@@ -220,6 +220,45 @@ def _build_tiny_fixture():
     return TinyLM, FakeContext, model_identity, StreamedCausalLM, DefaultProfile
 
 
+TENSOR_SHAPE = (64, 256)
+TENSOR_SEED = 2463
+
+
+def _run_served_compile_probe() -> dict:
+    """Compile and run the served quantiser; probe the KDA kernel on CUDA."""
+    import torch
+
+    from prismaquant.format_registry import _make_rtn
+
+    torch.manual_seed(TENSOR_SEED)
+    quantise = _make_rtn("fp4_e2m1", 16)
+    tensor = torch.randn(*TENSOR_SHAPE)
+    if torch.cuda.is_available():
+        tensor = tensor.to("cuda")
+    started = time.time()
+    result = quantise(tensor)
+    quantise_s = time.time() - started
+    workload = {"quantiser": "fp4_e2m1/g16", "shape": list(TENSOR_SHAPE),
+                "seed": TENSOR_SEED, "quantise_s": round(quantise_s, 3),
+                "output_mean": float(result.float().mean()),
+                "device": str(result.device)}
+    try:
+        from prismaquant.kernels import kda_chunk
+    except ImportError as exc:
+        workload["kda_probe"] = {"status": "missing", "error": str(exc)}
+        return workload
+    if not torch.cuda.is_available():
+        workload["kda_probe"] = {"status": "skipped_no_cuda"}
+        return workload
+    started = time.time()
+    digest = kda_chunk.probe_digest("cuda")
+    workload["kda_probe"] = {"status": "ran", "sha256": digest["sha256"],
+                             "shape": digest["shape"],
+                             "probe_s": round(time.time() - started, 3),
+                             "compiled": sorted(kda_chunk.compiled_kernels())}
+    return workload
+
+
 def _run_complete_row(*, output_root: Path, device: str) -> dict:
     """Stage A capture then one layer quantum on the tiny fixture."""
     import torch
@@ -438,6 +477,12 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
         resolved_windows=resolved,
         counters=counters, progress=progress)
     derive_checkpoint_boundaries  # bound by the capture above; kept explicit
+    # The fixture quantum never quantizes an input, so the served compile
+    # path a production NVFP4A16 row always exercises would stay cold and
+    # the sampler would record an empty cache. Run the served activation
+    # quantiser compile and the KDA capture-kernel probe exactly as the
+    # probe tool does, after the quantum, under the same sampler.
+    compile_workload = _run_served_compile_probe()
     return {
         "row": "stage_a_capture_plus_stage_b_quantum",
         "layer": layer,
@@ -447,6 +492,7 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
         "seed_base": SEED_BASE,
         "checkpoints": [c["boundary"] for c in receipt["checkpoints"]],
         "windows": len(resolved),
+        "served_compile": compile_workload,
     }
 
 
