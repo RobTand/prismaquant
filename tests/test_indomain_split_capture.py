@@ -206,19 +206,27 @@ def test_completed_binding_mismatch_replays_instead_of_reusing(tmp_path, monkeyp
     assert fragment["capture_binding"]["max_prefix_rows"] == args.max_prefix_rows
 
 
-def test_publication_sizes_roles_from_observed_forward_not_planning_census(tmp_path):
+def _published_toy_layer_with_moved_census(tmp_path):
+    """A published toy layer, and its census statistics moved one row and 1.0 off the observed forward."""
     capture._toy_control_preflight(tmp_path, lambda _label: None)
     root = tmp_path / "capture"
     census_path = tmp_path / "census.json"
     census = json.loads(census_path.read_text())
     manifest = json.loads((root / "layers/L000/manifest.json").read_text())
     records = {role: {} for role in ("fit", "heldout")}
-    observed = manifest["full_counts"]
     for name, roles in manifest["units"].items():
         census["counts"][name] += 1
         census["max_abs"][name] += 1.0
         for role in records:
             records[role][name] = torch.load(root / roles[role]["file"], weights_only=True)
+    return root, census_path, census, manifest, records
+
+
+def test_publication_sizes_roles_from_observed_forward_not_planning_census(tmp_path, monkeypatch):
+    """Dev mode, the entry's default: a moved census statistic is stamped and never sizes a role (D32)."""
+    root, census_path, census, manifest, records = _published_toy_layer_with_moved_census(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    observed = manifest["full_counts"]
     verified = capture.persist_split_records(
         root, census, census_path, records, observed, manifest["split_sha256"], lambda _label: None)
     manifest = json.loads((root / "layers/L000/manifest.json").read_text())
@@ -227,5 +235,16 @@ def test_publication_sizes_roles_from_observed_forward_not_planning_census(tmp_p
         assert row["census_count"] == observed[name] + 1
         assert manifest["full_counts"][name] == observed[name]
         assert manifest["census_comparison"][name]["count"]["delta"] == -1
+        assert manifest["census_comparison"][name]["stamp"] == "[DEV-MODE]"
     capture._verified_layer_publication(root, root / "layers/L000/manifest.json",
                                         manifest, verified, census, manifest["split_sha256"])
+
+
+def test_certified_mode_refuses_a_moved_census_statistic_at_publication(tmp_path, monkeypatch):
+    """Certified mode keeps the refusal that dev mode turns into a stamp (D32)."""
+    root, census_path, census, manifest, records = _published_toy_layer_with_moved_census(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(capture.ResearchRefused, match="research_census_statistics differs"):
+        capture.persist_split_records(
+            root, census, census_path, records, manifest["full_counts"], manifest["split_sha256"],
+            lambda _label: None)
