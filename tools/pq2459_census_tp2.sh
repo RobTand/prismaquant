@@ -16,21 +16,11 @@ TS_Q=/home/rob/tessera-2459q
 WORKER=${TESSERA_TP_WORKER:-sparklina}
 
 echo "[pq2459] qualified commit $COMMIT digest $DIGEST image 5be13705"
-rm -rf "$TS_Q"
-mkdir -p "$TS_Q"
-git --git-dir=/home/rob/tessera/.git archive "$COMMIT" | tar -x -C "$TS_Q"
 if [ ! -f "$TS_Q/pyproject.toml" ] || [ ! -d "$TS_Q/src/tessera/serving" ]; then
-  echo "[pq2459] archive missed files; refusing" >&2
+  echo "[pq2459] REFUSED: no staged tree at $TS_Q on $(hostname)" >&2
+  echo "[pq2459] stage it first: git archive $COMMIT to $TS_Q on both boxes" >&2
   exit 2
 fi
-echo "[pq2459] head tree ready at $TS_Q"
-if ! ssh -o BatchMode=yes -o ConnectTimeout=15 "$WORKER" \
-    "test -f '$TS_Q/pyproject.toml' && test -d '$TS_Q/src/tessera/serving' || (rm -rf '$TS_Q' && mkdir -p '$TS_Q' && git --git-dir=/home/rob/tessera/.git archive '$COMMIT' | tar -x -C '$TS_Q' && test -f '$TS_Q/pyproject.toml' && test -d '$TS_Q/src/tessera/serving')" \
-    </dev/null; then
-  echo "[pq2459] REFUSED: cannot stage $TS_Q on $WORKER" >&2
-  exit 2
-fi
-echo "[pq2459] worker tree staged at $TS_Q"
 export TS="$TS_Q"
 export IMG
 export TESSERA_SERVE_MODE=resident
