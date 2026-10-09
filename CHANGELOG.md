@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
+  A launch with `rungs_q256` joins a unit only at a rung its scope covers;
+  a launch without the key keeps the scope of its cell. The scope covers
+  census rungs plus the allowable run-table rungs those rungs derive.
+  The launch scope joins the cell record and the contract answer, so a
+  scope-only change moves the dev-pin answer. No pin moves: the serving
+  and export pins stay at lane schema v11 until a later change bumps
+  them. The v66 routed fixture proves R768 selects only the class
+  decoder and R832 to R1088 select only the historical decoders.
 - The fleet registry attests both x86 merge-train layers for the SDK4 and SDK5 vehicles (#2467).
   The SDK5 entry names `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python`, not its base interpreter.
   PB `975efe59c9d63ae5de43a3a001b1b9a8d5369da9a82d1e6bc5dc3dc1a56243cd` verifies the non-editable PB `027103d9` and Tessera `fca4c6ce` installs.
@@ -31,6 +40,12 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
+  The branch issue must match a verified same-repository closing reference or an open parent reference.
+  Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.
+  These exemptions do not bypass the issue-link check.
+  PrismaBuild action `e0087aafc8cd` passes all 62 behavioral cases on x86.
+  Action `4a11ec1d4a68` passes the direct gate smoke and both syntax checks with a simulated GitHub API.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
@@ -262,6 +277,19 @@
   writer from test_footprint (#2390, references #1929). Fixture bytes,
   tensor order, costs, route reports and semantic assertions stay unchanged.
 
+- The PACT scope lives in the existing model profile contract (#2483, part of #2427).
+  `ModelStructureSpec` carries a declared `pact` scope (dense end, band width,
+  role TP splits, hidden streams); `ModelProfile` exposes it with layer,
+  cohort, hidden and TP readers. `Glm5NextProfile` states the exact running
+  cohort and layer count; `Qwen3Profile` resolves its declared fields with
+  no GLM fallback. The adapter consumes only that public contract and
+  refuses undeclared or inconsistent scope. GLM paths stay bit-identical;
+  detection, name projection and production behavior stay unchanged.
+  The CPU conformance evidence uses the existing isolated x86 interpreter with both reviewed dependency pins.
+  All four PrismaBuild shards pass, including the GLM fused-owner case; ARCHITECTURE records the command and evidence.
+  Both profiles now use one alias reader in the existing base owner.
+  The unchanged helper gate passes without a baseline change.
+  The current x86 command uses the isolated environment with the SDK pin from main.
 - The PACT frontier profile cohort carries the measured-consumer contract
   (#2423, references #2427). `pact_cohort_from_profile` returns
   `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through
