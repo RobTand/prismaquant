@@ -14,20 +14,12 @@ packed expert Parameters are present.
 """
 from __future__ import annotations
 
-from .base import ModelProfile, _read_config_alias, _read_config_value
+from .base import ModelProfile, _read_config_alias_with_fallback, _read_config_value
 
 
 def _pact_config_entry(config, name):
     """First present config value. Walk nested text_config."""
     return _read_config_value(config, name)
-
-
-def _prefix_entry(explicit, declared):
-    """Prefix ids. The whole explicit config beats the declared one."""
-    value = _read_config_alias(explicit, "prefix_ids", "serving_prefix_ids")
-    if value is not None:
-        return value
-    return _read_config_alias(declared, "prefix_ids", "serving_prefix_ids")
 
 
 def _explicit_declared_entry(explicit, declared, name):
@@ -81,7 +73,9 @@ class Qwen3Profile(ModelProfile):
             entry, _origin = _explicit_declared_entry(config, declared, key)
             if entry is not None:
                 values[key] = entry
-        prefix = _prefix_entry(config, declared)
+        prefix = _read_config_alias_with_fallback(
+            config, declared, "prefix_ids", "serving_prefix_ids"
+        )
         missing = [
             key
             for key in (

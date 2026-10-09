@@ -272,6 +272,9 @@
   detection, name projection and production behavior stay unchanged.
   The CPU conformance evidence uses the existing isolated x86 interpreter with both reviewed dependency pins.
   All four PrismaBuild shards pass, including the GLM fused-owner case; ARCHITECTURE records the command and evidence.
+  Both profiles now use one alias reader in the existing base owner.
+  The unchanged helper gate passes without a baseline change.
+  The current x86 command uses the isolated environment with the SDK pin from main.
 - The PACT frontier profile cohort carries the measured-consumer contract
   (#2423, references #2427). `pact_cohort_from_profile` returns
   `local_prefix_rows="excluded"` and `input_contract="prefixed_514"` through

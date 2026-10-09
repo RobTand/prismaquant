@@ -91,6 +91,14 @@ def _read_config_alias(config, *names):
     return None
 
 
+def _read_config_alias_with_fallback(explicit, declared, *names):
+    """Read explicit aliases before declared aliases, including text_config."""
+    value = _read_config_alias(explicit, *names)
+    if value is not None:
+        return value
+    return _read_config_alias(declared, *names)
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 

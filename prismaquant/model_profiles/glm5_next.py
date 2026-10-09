@@ -175,7 +175,7 @@ from __future__ import annotations
 
 import re
 
-from .base import ModelProfile
+from .base import ModelProfile, _read_config_alias_with_fallback
 
 # Body-indexed nextn/MTP block. transformers refuses these keys
 # (modeling_glm5_next.py:1359), so the skeleton has no home for them.
@@ -217,15 +217,6 @@ def _config_entry(config, name):
 
     return _read_config_value(config, name)
 
-
-def _prefix_entry(explicit, declared):
-    """Prefix ids. Explicit aliases beat declared aliases."""
-    from .base import _read_config_alias
-
-    value = _read_config_alias(explicit, "prefix_ids", "serving_prefix_ids")
-    if value is not None:
-        return value
-    return _read_config_alias(declared, "prefix_ids", "serving_prefix_ids")
 
 # KDA leaves whose fused owner comes from the lane config-gated rule.
 # The lane reads the declared checkpoint config to mark KDA layers. A name
@@ -318,7 +309,9 @@ class Glm5NextProfile(ModelProfile):
         """
         declared = self._declared_config
         values = dict(_GLM_PACT_COHORT)
-        prefix = _prefix_entry(config, declared)
+        prefix = _read_config_alias_with_fallback(
+            config, declared, "prefix_ids", "serving_prefix_ids"
+        )
         if prefix is not None:
             values["prefix_ids"] = prefix
         for key in (
