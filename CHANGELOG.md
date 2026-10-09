@@ -38,6 +38,10 @@
   The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
   Its central processor preflight checks the real runtime arguments without a graphics processor.
   Native serving qualification and all production defaults stay unchanged.
+- The digest census now records source commit `30b6231` at `docs/audits/digest_site_census_pq1301_2026-10-04.json` (#2540).
+  The refresh retains every historical record. It adds 420 primitive calls across 320 scopes, 275 supplemental calls, and 22 protected layouts.
+  Each load-bearing call records its exact algorithm, encoding options, input order, framing, digest width, result type, read boundary, and refusal behavior.
+  Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
