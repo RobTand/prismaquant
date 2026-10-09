@@ -1,13 +1,11 @@
-# PQ #2459 serving-code qualification evidence (attempt 4)
+# PQ #2459 qualification record (attempt 4; corrected by attempt 5)
 
-Refs #2459. Part of #1549. This record supersedes the attempt-3
-record at `4b32c7a3b9`. It publishes the immutable identity,
-the complete target coverage matrix, every performed action
-with receipts, every failure, and the excluded scopes. It
-qualifies the four E4M3 target cells below at the qualified
-serving code. It qualifies no BF16 cell. It moves no pin.
-The live v2 pin, the constants, the reviewed answer, and the
-frozen legal-domain state stay unchanged.
+Refs #2459. Part of #1549. This record preserves the failed action history.
+Attempt 5 withdraws the four E4M3 qualification claims from `b5fc8a0e0ac4`.
+No cell qualifies. The authorized fixture roster remains incomplete.
+The failed census has no retained rank traces or observed serving-code identity.
+The live v2 pin, constants, reviewed answer, and frozen legal-domain state stay unchanged.
+Keep #2459 and activation blocked until every required scope has valid evidence.
 
 ## Immutable identity
 
@@ -59,18 +57,18 @@ Common scope for all eight rows: image
 `localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a`,
 vLLM `0.30.1rc1.dev336+gaf5b4857e.d20260929`, Torch `2.13.0+cu130`,
 platform `sm_121`, execution eager, residency resident,
-TP 2, plugin `tessera`, grade `device_qualified`. Every
-qualified cell records `runtime.tessera_commit` and
-`runtime.serving_source_sha256`, with the same digest in every
-trace rank. Numeric fixture profiles reside in
-`pq2471_fixture_profiles_2026-10-09.json`.
+TP 2, plugin `tessera`, grade `device_qualified`.
+A future qualification packet must record `runtime.tessera_commit`
+and `runtime.serving_source_sha256` on each qualified cell.
+Every trace rank must carry the same measured source digest.
+Numeric profiles reside in `pq2471_fixture_profiles_2026-10-09.json`.
 
-Engine scope of the qualifying census (it matches the historical
-R1 `engine-tr3.json` exactly): prompt 2048 tokens, max model
-length 2049, one sequence, token batch 2049, GPU memory 0.5,
-1 GiB KV cache, dtype `fp8_ds_mla`, MoE backend triton,
-no flashinfer autotune, trust remote code, language model only,
-one head plus one worker over ray.
+The failed census uses these engine limits: requested prompt 2048 tokens,
+maximum model length 2049, one sequence, token batch 2049, and GPU memory fraction 0.5.
+It uses a 1 GiB KV cache, `fp8_ds_mla`, and the triton MoE backend.
+It disables flashinfer autotune and selects the language model with remote code.
+It uses one Ray head and one worker.
+These limits do not prove the eager scorer's dispatch geometry.
 
 | # | Family | Structure | Regime | q256 rungs | Profiles | Status |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -78,12 +76,13 @@ one head plus one worker over ray.
 | 2 | TESSERA_BF16_K1 | dense | decode | 832, 880, 960, 1024, 1088 | speed_decode | unqualified: no BF16 dense module in the artifact |
 | 3 | TESSERA_BF16_K1 | routed_moe | batch | 1024 | tr3_batch, speed_batch | unqualified: the sole BF16 module never dispatches |
 | 4 | TESSERA_BF16_K1 | routed_moe | decode | 1024 | speed_decode | unqualified: the sole BF16 module never dispatches |
-| 5 | TESSERA_E4M3_K1 | dense | batch | 832, 960, 1024, 1088 | tr3_batch, speed_batch | QUALIFIED at M2048 prefill scope |
-| 6 | TESSERA_E4M3_K1 | dense | decode | 832, 960, 1024, 1088 | speed_decode | QUALIFIED at M1 |
-| 7 | TESSERA_E4M3_K1 | routed_moe | batch | 896, 928, 1024, 1088 | tr3_batch, speed_batch | QUALIFIED at M2048 prefill scope |
-| 8 | TESSERA_E4M3_K1 | routed_moe | decode | 896, 928, 1024, 1088 | speed_decode | QUALIFIED at M1 |
+| 5 | TESSERA_E4M3_K1 | dense | batch | 832, 960, 1024, 1088 | tr3_batch, speed_batch | unqualified: M461 is outside the profiles; rank traces are absent |
+| 6 | TESSERA_E4M3_K1 | dense | decode | 832, 960, 1024, 1088 | speed_decode | unqualified: rank traces and code identity are absent; M2/M4 are unmeasured |
+| 7 | TESSERA_E4M3_K1 | routed_moe | batch | 896, 928, 1024, 1088 | tr3_batch, speed_batch | unqualified: M461 is outside the profiles; rank traces are absent |
+| 8 | TESSERA_E4M3_K1 | routed_moe | decode | 896, 928, 1024, 1088 | speed_decode | unqualified: rank traces and code identity are absent; M2/M4 are unmeasured |
 
-Qualified cells carry this runtime block:
+The immutable candidate packet names these required runtime values.
+The failed census did not observe them:
 
 - `runtime.tessera_commit`: `9eef9fea6edce32f4e64abf87f0058b11dab2287`.
 - `runtime.serving_source_sha256`:
@@ -99,16 +98,14 @@ M1, M2, M4 (fresh eager decode, one token per sequence, up to
 four sequences). M2049 is a complete scorer dispatch, not a
 separate M1 decode fixture. L8192 does not permit M8192.
 
-The qualifying census drives a 2048-token prompt and reads
-461 live tokens after template and truncation. Its batch phase
-serves M461 on all four dense pairs and the routed pair. Its
-decode phase serves M1 on the same pairs. It therefore covers
-the dense and routed decode rows at M1 exactly. It covers the
-batch cells at a live batch dispatch, not at every listed M.
-The remaining batch M values (512, 1024, 1026, 1537, 2048,
-2049) and decode M2/M4 stay unmeasured. A follow-up campaign
-with staged engines must drive each listed token row before
-those scopes qualify.
+The failed census requests 2048 prompt tokens but encodes only 461 tokens.
+The owner tool repeats a fixed text twenty times and truncates its token list.
+It does not extend that list to the requested length.
+The logs show M461 batch dispatches and M1 decode dispatches.
+M461 belongs to neither authorized batch profile.
+The logs do not supply the required code identities or raw rank traces.
+All authorized cells remain unqualified.
+The remaining batch rows and decode M2/M4 remain unmeasured.
 
 ## Actions and receipts
 
@@ -205,10 +202,9 @@ Equivalence suite (pass, dl380g10):
   `f3e5c983e9968d9ad71c51f6b256f028ea6766883f8aca29aa2c603d4c45c355`
   (11 split-pin drift cases), and
   `9656fed38a89296e92236c9405430db60f8391924846762f532c1a444649e60b`
-  (63 legal-domain cases). The live v2 admission answers, the
-  route verdicts on the committed producer traces, and the
-  legal-domain projection equal the baseline. No source file
-  in this change alters admission behavior.
+  (63 legal-domain cases). These are CPU contract tests.
+  They do not supply new GPU qualification or a before/after snapshot.
+  Attempt 5 records the direct equivalence check below.
 
 Attempt-3 history stays valid and is not repeated here. Its
 final action `767f659b` ends with `memory_budget_exceeded`
@@ -224,38 +220,23 @@ exceeds its budget.
   `TESSERA_BF16` declaration) never dispatches under the
   non-speculative serve. The census therefore names it in
   four PROBLEM lines (both ranks, both phases) and exits 1.
-  History treats this target as diagnostic: the R1
-  `route/verdict-tr3.json` removes it under its `body_scope`
-  label before its exact per-module verdict. The E4M3
-  qualification above follows that rule: 56 priced targets
-  map to 112 served route records (each dense Linear and
-  each routed stack dispatch once per phase), and the one
-  absent module is the same diagnostic target. No BF16 cell
-  qualifies: rows 1-2 name dense modules the artifact does
-  not carry, and rows 3-4 name the routed target that never
-  dispatches. A BF16 artifact must arrive before those rows
-  can qualify.
-- The M461 prefill shape is the live token count of the
-  2048-token prompt after template and truncation. The
-  census passes `--prompt-tokens 2048` exactly as the dry
-  run states. The remaining batch token rows stay unmeasured
-  and unqualified, as the matrix states.
-- The qualifying evidence is the retained gang log, not a
-  CAS receipt of the census JSON: the receipt stays inside
-  the removed container on both serving gangs. The log
-  carries the full printed histogram (routes, contracts,
-  shapes, module counts), the four PROBLEM lines, and the
-  verdict. A follow-up campaign with staged engines must
-  publish the JSON receipts and the per-rank route traces
-  with their `serving_source_sha256` headers before the
-  activation PR can cite them.
-- The qualified serving commit `9eef9fea` names contract v57,
-  while the live pin names v60. Its eight cells carry no
-  `tessera_commit` or `serving_source_sha256` fields, and the
-  live v2 pin performs no code comparison. A future v3 pin at
-  the qualified digest admits a cell only once that cell is
-  censused with the code fields stamped. This record performs
-  no pin move and no re-census.
+  The historical R1 `route/verdict-tr3.json` excludes that target under its `body_scope` label.
+  That diagnostic exclusion does not establish missing fixture coverage.
+  The authorized artifact has no BF16 dense module.
+  Its sole BF16 routed module does not dispatch in these actions.
+  No BF16 cell qualifies.
+- The logs show M461, not M2048.
+  The owner tool's encoded text is shorter than its requested prompt length.
+  All authorized batch rows remain unmeasured.
+- The retained gang logs prove route activity only.
+  Both failed gangs lose their census JSON and raw rank traces.
+  Neither gang has a successful CAS receipt.
+  Activation must not cite these logs as qualification evidence.
+- The candidate serving commit `9eef9fea` names contract v57; the live pin names v60.
+  The eight candidate cells have no `tessera_commit` or `serving_source_sha256` fields.
+  The live v2 pin performs no code comparison.
+  A future packet must bind each cell to its measured source and all rank traces.
+  This record moves no pin and performs no GPU re-census.
 - Excluded from this authorization: both other live image
   identities (`f8dbe1a0`, `61fc8a89`), the whole
   `TESSERA_E2M1_K2` family, platforms `gfx1151` and `gfx1201`,
@@ -264,20 +245,113 @@ exceeds its budget.
   synthetic CPU traces, mixed scheduler rows M7/M8/M25, and
   every shape and rung outside the mapped fixture profiles.
   No cell qualifies from CPU fixtures.
-- The historical TR3 KL (`0.027885896312391557`) scores the
-  eager scorer only, not the graph serve. The historical
-  speed traces use decode graphs and supply geometry, not
-  eager decode qualification. The decode qualification above
-  rests on the fresh eager M1 serve, not on those traces.
+- The historical TR3 KL (`0.027885896312391557`) scores the eager scorer only.
+  It does not score the graph serve.
+  The historical speed traces use decode graphs and supply geometry only.
+  Neither those traces nor the failed M1 census qualifies eager decode.
 
-## Equivalence
+## Attempt 5: local corrections and fixture prerequisite
 
-- Live v2 admission results before and after this record:
-  identical (22 cells, 160 unit routes; 20 scope cases pass).
-- Route verdicts on the committed producer traces before and
-  after: identical (44 identity cases pass).
-- Legal-domain projection before and after: identical
-  (E4M3 1793, BF16 3841, drift matches; 63 domain cases pass).
-- The pin file, the snapshot helper, and the scope test bytes
-  match the preflight hashes. No source file in this record
-  changes admission behavior.
+Attempt 5 fixes local custody and the D32 image seal.
+The launcher mounts the output and trace directories into each member container.
+The host exports raw census JSON, each member trace, and packaged contract bytes before container removal.
+The artifact manifest records absent output explicitly, including failed actions.
+The refused census retains its raw bytes.
+
+The envelope reads the actual trace header and hashes the exported contract bytes.
+It does not replace an absent source digest with the expected constant.
+It separates declared commit identity from observed identity.
+An archive-only installed tree has no observed Git commit; the envelope records null.
+The envelope qualifies zero cells.
+Tessera's telemetry computes the trace digest through its `serving_source_sha256` function.
+PrismaQuant imports and vendors no Tessera serving implementation.
+
+The launcher no longer calls Tessera's hard `runtime_image_require` refusal.
+Its Python entry point reads Docker `RepoDigests` and applies `seal_check`.
+A mismatch refuses in certified mode.
+A mismatch stamps `[DEV-MODE]` and proceeds with the observed image in dev mode.
+The runtime tests execute the actual launcher path in both modes.
+Temporary config and index files replace the tests' external model dependency.
+Runtime assertions replace the source-text launcher test.
+
+The authorized A8S config has 57 groups: 56 FP8 groups and one BF16 routed group.
+Every declared rung is q256 1024.
+The config has no BF16 dense group.
+The sole BF16 routed group targets layer 45, which the non-speculative body does not execute.
+Thus, the fixture cannot cover the complete authorized family and rung roster.
+Changing the output label or driver arguments cannot create the absent tensor bytes.
+
+Tessera must publish an executable fixture roster for the missing BF16 and non-R1024 scopes.
+That packet must bind each fixture to immutable producer bytes and its actual wire metadata.
+The coordinator must authorize any replacement of the currently fixed A8S artifact.
+The source owner must also name an entry point for each permitted M and concurrency scope.
+Do not substitute the ordinary census for the TR3 scorer or speed replay.
+No new GPU action runs in attempt 5.
+No target scope has new GPU qualification.
+
+## Attempt 5: CPU checks and retained evidence
+
+All actions use PrismaBuild at priority 0, tag `x86`, and `/tmp` scratch.
+The interpreter is `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python`.
+The first submission used the generic CPU interpreter and failed its dependency guard before pytest.
+That action is `bbc83053e6738c9dde724c0442642228c6107b3177bb46266d9f3ecf41d26f2b`.
+It supplies no reproduction or test result.
+
+- Reproduction `2b524870c42725126cb8033ad36b33e3e1d56fc51fa57538e35c429acc0c47dc`: three failures before the fix.
+  The cases expose lost successful output, lost refused output, and invented identity.
+- Entry suite `645ed5bdd08069d00c028225a54fe7dce26b3e617a34adaf3e4e3e363243c715`: 15 passed.
+- Final entry suite `3e31d53a20eb149bb81995ce9a14eabd77a8bd2f58712de4215c0d8f9e5a735f`: 15 passed after the mount change.
+- Scope admission `a553d23360d201fd3376a7060d7561901181f1d88796e9589fbbc57486c30784`: 20 passed.
+- Serving identity `20fa5395cec20be9a03732b2afebfc24360f64d473179e67b1a698daa598118c`: 44 passed.
+- Split-pin drift `78d1985a4662c321a5f936304e2306acd67ce917ed29b36a8ecf566af514cce8`: 11 passed.
+- Legal domain `d9190ec79b6912e8f1a57d4b9f6e4711c0c2a2d74300e1e7811042afe670c4d2`: 63 passed.
+- CPU Docker discovery `9850389f94fd043d7a21963ef7d72544c86fb540d88821b165161be7d2b4e91a`: passed.
+- Docker custody and equivalence smoke `3b7e721ba8d0f3f657dc9f8a373f4be46a63839b82c0c123fd0267d207fcb1aa`: passed.
+
+The real Docker smoke exports artifacts from a stopped CPU container and removes that container.
+The host can still read the exact raw JSON and trace bytes afterward.
+Its synthetic trace records an absent serving-source digest and qualifies zero cells.
+The smoke uses `python@sha256:ddb0207ae1f0356c2b724d740769b0c5f5f51cc54a0525178f721825f78fe74c`.
+It does not run vLLM, CUDA, or a Tessera serve.
+The CPU custody proof does not qualify the GPU runtime.
+
+The six successful test claims and the smoke claim pass `pb_verify_claim` with payload hashing.
+The verifier checks receipt binding, payload presence, length, and SHA-256.
+It does not verify the worker attestation.
+Successful receipt paths use `cas/actions/v3/<key-prefix>/<full-key>.json` under the fleet CAS.
+
+| Action | Local-result claim SHA-256 | Payload SHA-256 |
+| --- | --- | --- |
+| `645ed5bdd080` | `fdf49838d38c9aaa855a2ef9d3f435884895928da4e8db42a35b02b40f87c01c` | `724470da049546b78a2c83f1b807dc61bad3782b9a75eb7b17afb3ef6652307c` |
+| `3e31d53a20eb` | `437dd22721e9ff1c229d0de8151bc1991be5cc08ea38219e5139ff227fa3eeb0` | `416f33bd53b234a70d849bed49dd6d1db0c1b6f21a29fe2e08d7e1be507e6e4d` |
+| `a553d23360d2` | `75de8272abe2185cfcd5591d02ac584ccad3d791d8893d967766cd958e66f31b` | `840275d17c445779024b5e57428aeaec560df0d7841959fe2ef0fb2d161c9133` |
+| `20fa5395cec2` | `ec4bf3ccbf005cee70034fd3ed72647ef6bee3b70af9bfdbb99ecb9f5a7f0208` | `4291a9f8df3561a90916f298cb8eee6f3d635c0568a105c52d556fafdb926286` |
+| `78d1985a4662` | `3ed191bbc37d2f6c170da3ca6d2bacbfc6083608aed3aca957e82960c6e23e65` | `c09aceb16568b0e2f73831a73733fca57663ad05769e68a68393163753d3f546` |
+| `d9190ec79b69` | `1a2fafbd6e03cb21f9b98dc0180fefee61846d69eac915906b289abbb251ebc4` | `a2139ab7f4ea3fc25d1e0d90fcb14c77ae9c63316f810dbf5984de22d45c97a7` |
+| `3b7e721ba8d0` | `024ef997bec85b7c58e528757d72aac0bf2aef713232de2faddbfc46a39b95b7` | `2729a47d9c05a0963d1d2a99b16823fed27ff644a307ac268ebeffaeda3c182a` |
+
+## Attempt 5: direct equivalence
+
+The smoke compares the protected source bytes with `b5fc8a0e0ac48432d86e74dbc7548798e67e5494`.
+It executes that revision's unchanged snapshot and domain modules against the pinned CPU environment.
+It then executes the worktree modules and compares their full results.
+The pin, constants, reviewed answer, and frozen-domain module hashes remain identical.
+The full snapshots and legal projections match:
+
+- 22 cells.
+- 160 unit routes.
+- Eight route verdicts on the committed trace fixtures.
+- E4M3: 1,793 legal rates.
+- BF16: 3,841 legal rates.
+- The native-qualification projection and pin-drift report also match.
+
+The retained root is `/mnt/shared/tessera-measurements/pq2459-attempt5-cpu-20261009`.
+The smoke payload binds these file digests:
+
+- `equivalence.json`: 2,682,508 bytes; SHA-256 `1135a74955896108fb46a18b25c29a5f7aa220965787cd7b63e86170c6a315ad`.
+- `artifact-roster.json`: 12,955 bytes; SHA-256 `9bcae18d9b7c9c6f8111fb212b9341dc2591205d118b20e329ff802a0111fdef`.
+- `smoke-raw.json`: 141 bytes; SHA-256 `b7183a13ad91462ca806b6a7af206fe62374dfbe88fe43292daa0c724eb618fd`.
+- `smoke-trace.json`: 163 bytes; SHA-256 `853507278cd6be15f043e12440dc16138d3be589c427540481d98c3a1ebe8f7c`.
+- `summary.json` records the protected file hashes and measured counts.
+
+These are CPU evidence files, not GPU qualification artifacts.

@@ -31,6 +31,12 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The PQ #2459 census retains container output and each member trace before removal.
+  Its envelope records observed trace and contract identities, not expected constants.
+  The launcher applies the D32 image seal through `seal_check`.
+  CPU checks use isolated fixtures and exercise actual Docker artifact export.
+  Full qualification remains blocked on absent BF16 and rate-specific fixtures.
+  The live v2 pin and admission behavior stay unchanged.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.

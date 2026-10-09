@@ -73,7 +73,7 @@ FORBIDDEN_SINGLE_NODE_ENV = (
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mode", required=True,
-                    choices=("dry-run", "head", "worker"))
+                    choices=("dry-run", "head", "worker", "image-env"))
     ap.add_argument("--model", default=ARTIFACT)
     ap.add_argument("--out", required=True)
     ap.add_argument("--runtime-image", default=RUNTIME_IMAGE)
@@ -222,6 +222,39 @@ def seal_commit(commit: str) -> bool:
             f"this entry point serves only {QUALIFIED_SERVING_COMMIT}"))
 
 
+def run_image_env(args: argparse.Namespace, out: Path) -> int:
+    """Record Docker's image identity and apply the D32 launch seal."""
+    proc = _run(["docker", "image", "inspect", args.runtime_image,
+                 "--format", "{{json .}}"], capture_output=True, text=True)
+    if proc.returncode:
+        raise SystemExit(f"Docker cannot inspect {args.runtime_image}: {proc.stderr}")
+    image = json.loads(proc.stdout)
+    digests = image.get("RepoDigests") or []
+    seal_image(args.runtime_image)
+    sealed = seal_check(
+        "Docker image declaration", args.runtime_image, digests,
+        same=args.runtime_image in digests, where="PQ #2459 member launcher",
+        refusal=lambda: SystemExit("Docker RepoDigests differ from the requested image"))
+    resolved = args.runtime_image if sealed else next(iter(digests), None)
+    record = {
+        "schema": "tessera.runtime_image/1",
+        "requested": args.runtime_image,
+        "resolved_reference": resolved,
+        "repo_digests": digests,
+        "local_id": image.get("Id"),
+        "refused": False,
+        "identity_sealed": sealed,
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    lines = [] if resolved is None else [
+        f"TESSERA_CENSUS_RUNTIME_IMAGE={resolved}",
+        "TESSERA_CENSUS_RUNTIME_IMAGE_DECLARATION=" + json.dumps(record, sort_keys=True),
+    ]
+    Path(str(out) + ".env").write_text("\n".join(lines) + "\n")
+    return 0
+
+
 def census_argv(args: argparse.Namespace, *, trace_path: str) -> list[str]:
     """The exact census argv the head runs inside its container."""
     argv = [
@@ -357,6 +390,29 @@ def _cluster_size(container: str) -> int:
     except (IndexError, ValueError):
         return 0
 
+def _retain_artifacts(container: str, out: Path, trace: str) -> dict:
+    """Export raw artifacts before container removal, including failed runs."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sources = {
+        "raw": str(out),
+        "trace": trace,
+        "contract": "/tessera/src/tessera/serving/runtime_contract.json",
+    }
+    retained = {}
+    for kind, source in sources.items():
+        destination = Path(f"{out}.{kind}.json")
+        proc = _run(["docker", "cp", f"{container}:{source}", str(destination)],
+                    capture_output=True, text=True)
+        retained[kind] = {
+            "source": source, "path": str(destination),
+            "copied": proc.returncode == 0,
+            "error": proc.stderr if proc.returncode else None,
+        }
+    Path(str(out) + ".artifacts.json").write_text(
+        json.dumps(retained, indent=1, sort_keys=True) + "\n")
+    return retained
+
+
 
 def run_head(args: argparse.Namespace, out: Path) -> int:
     """Start the ray head, run the census, stop the container."""
@@ -376,12 +432,9 @@ def run_head(args: argparse.Namespace, out: Path) -> int:
     env = head_env(args, Path(args.runs_dir or "/tmp/pq2459-runs"))
     trace = env["TESSERA_ROUTE_TRACE"]
     argv = census_argv(args, trace_path=trace)
-    quoted = " ".join(f"'{word}'" for word in argv)
-    inner = (
-        f"TESSERA_ROUTE_TRACE='{trace}' "
-        f"TESSERA_CENSUS_RUNTIME_IMAGE='{args.runtime_image}' "
-        f"{quoted}"
-    )
+    import shlex
+    inner = shlex.join([
+        "env", f"TESSERA_ROUTE_TRACE={trace}", *argv])
     try:
         if not _ray_alive(args.container):
             raise SystemExit("ray head never answered in its container")
@@ -392,16 +445,20 @@ def run_head(args: argparse.Namespace, out: Path) -> int:
         else:
             raise SystemExit("the gang worker never joined the cluster")
         proc = _run(["docker", "exec", args.container, "bash", "-c", inner])
-        if proc.returncode != 0:
-            kept = Path(str(out) + ".refused.json")
-            try:
-                kept.write_bytes(out.read_bytes())
-            except OSError:
-                pass
-            raise SystemExit(f"census tool exits {proc.returncode}")
     finally:
-        _remove_container(args.container)
-    return _wrap_receipt(args, out, trace)
+        try:
+            retained = _retain_artifacts(args.container, out, trace)
+        finally:
+            _remove_container(args.container)
+    raw = Path(str(out) + ".raw.json")
+    if proc.returncode != 0:
+        if retained["raw"]["copied"]:
+            Path(str(out) + ".refused.json").write_bytes(raw.read_bytes())
+        raise SystemExit(f"census tool exits {proc.returncode}; artifacts: {out}.artifacts.json")
+    if not all(item["copied"] for item in retained.values()):
+        raise SystemExit(f"incomplete census artifacts: {out}.artifacts.json")
+    out.write_bytes(raw.read_bytes())
+    return _wrap_receipt(args, out, str(out) + ".trace.json")
 
 
 def _wrap_receipt(args: argparse.Namespace, out: Path, trace: str) -> int:
@@ -409,20 +466,33 @@ def _wrap_receipt(args: argparse.Namespace, out: Path, trace: str) -> int:
     ranks = receipt.get("ranks", [])
     if len(ranks) != TP_DEGREE:
         raise SystemExit(f"census covers {len(ranks)} ranks, not TP 2")
+    import hashlib
+
+    observed_trace = json.loads(Path(trace).read_text())
+    if (observed_trace.get("schema") != "tessera.route_trace/1"
+            or observed_trace.get("identity_version") != 1):
+        raise SystemExit("unsupported route trace identity")
+    contract = Path(str(out) + ".contract.json").read_bytes()
     envelope = {
         "schema": "prismaquant.pq2459_serve_census_receipt.v2",
-        "runtime_image": args.runtime_image,
-        "tessera_commit": args.tessera_commit,
-        "producer_commit": QUALIFIED_PRODUCER_COMMIT,
-        "serving_source_sha256": QUALIFIED_SERVING_SOURCE_SHA256,
-        "contract_sha256": QUALIFIED_CONTRACT_SHA256,
-        "algorithm": QUALIFIED_ALGORITHM,
+        "declared_identity": {
+            "runtime_image": args.runtime_image,
+            "tessera_commit": args.tessera_commit,
+        },
+        "observed_identity": {
+            "runtime_image": receipt.get("runtime", {}).get("image"),
+            "tessera_commit": None,
+            "serving_source_sha256": observed_trace.get("serving_source_sha256"),
+            "contract_sha256": hashlib.sha256(contract).hexdigest(),
+            "algorithm": QUALIFIED_ALGORITHM,
+        },
         "tensor_parallel_size": TP_DEGREE,
-        "execution_mode": "eager",
-        "residency": "resident",
         "profiles": [args.profile],
         "trace": trace,
+        "trace_header": {k: v for k, v in observed_trace.items() if k != "entries"},
         "receipt": receipt,
+        # One member's trace and a census do not qualify the complete matrix.
+        "qualified_cells": 0,
     }
     out.write_text(json.dumps(envelope, indent=1, sort_keys=True) + "\n")
     return 0
@@ -438,6 +508,7 @@ def run_worker(args: argparse.Namespace, out: Path) -> int:
         raise SystemExit("worker mode needs --container")
     if not args.head_addr:
         raise SystemExit("worker mode needs --head-addr")
+    trace = str(Path(args.runs_dir or "/tmp/pq2459-runs") / "trace-worker.json")
     try:
         proc = _run(["docker", "exec", args.container, "bash", "-c",
                      f"ray start --address='{args.head_addr}:{args.ray_port}' --block"],
@@ -446,12 +517,17 @@ def run_worker(args: argparse.Namespace, out: Path) -> int:
     except subprocess.TimeoutExpired:
         return 0
     finally:
-        _remove_container(args.container)
+        try:
+            _retain_artifacts(args.container, out, trace)
+        finally:
+            _remove_container(args.container)
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     out = Path(args.out)
+    if args.mode == "image-env":
+        return run_image_env(args, out)
     if args.mode == "dry-run":
         return run_dry_run(args, out)
     if args.mode == "head":

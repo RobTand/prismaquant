@@ -11,8 +11,7 @@
 set -euo pipefail
 ROLE=${1:?role: head or worker}
 OUT=${2:?out path}
-COMMIT=9eef9fea6edce32f4e64abf87f0058b11dab2287
-IMG='localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a'
+IMG=${PQ2459_IMAGE:-'localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a'}
 TS_Q=${PQ2459_TS:-/home/rob/tessera-2459q}
 RUNS=${PQ2459_RUNS:-/home/rob/tessera-runs/tsplugin}
 EXT=${PQ2459_EXT:-$RUNS/ext}
@@ -20,6 +19,14 @@ HEAD_ADDR=${PQ2459_HEAD_ADDR:-10.100.96.1}
 RAY_PORT=${PQ2459_RAY_PORT:-6379}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
+PYTHON=${PQ2459_PYTHON:-/home/rob/venvs/pb-cpu/bin/python}
+OUT=$(realpath -m "$OUT")
+OUT_DIR=$(dirname "$OUT")
+mkdir -p "$OUT_DIR"
+if [ -e "$OUT" ] || [ -e "$OUT.raw.json" ]; then
+  echo "[pq2459] REFUSED: output already exists: $OUT" >&2
+  exit 2
+fi
 
 if [ "$ROLE" != "head" ] && [ "$ROLE" != "worker" ]; then
   echo "[pq2459] REFUSED: role must be head or worker, got $ROLE" >&2
@@ -30,9 +37,17 @@ if [ ! -f "$TS_Q/pyproject.toml" ] || [ ! -d "$TS_Q/src/tessera/serving" ]; then
   exit 2
 fi
 
-# Refuse a floating image before the serve lock, as the Tessera driver does.
-source "$TS_Q/experiments/runtime_image.sh"
-runtime_image_require "$IMG" || exit 2
+# Apply the recorded-versus-running image comparison through D32.
+"$PYTHON" "$REPO/tools/pq2459_serve_census.py" --mode image-env \
+  --runtime-image "$IMG" --out "$OUT.image.json"
+IMAGE_ENV=()
+OBSERVED_IMAGE=
+while IFS= read -r kv; do
+  [ -n "$kv" ] && IMAGE_ENV+=(-e "$kv")
+  case "$kv" in
+    TESSERA_CENSUS_RUNTIME_IMAGE=*) OBSERVED_IMAGE=${kv#*=} ;;
+  esac
+done < "$OUT.image.json.env"
 source "$TS_Q/experiments/serve_lock.sh"
 SERVE_LOCK_OWNER="$0 pq2459-$ROLE"
 serve_lock_acquire
@@ -57,7 +72,7 @@ FABRIC=(
   -e "GLOO_SOCKET_IFNAME=enp1s0f0np0"
   -e "RAY_memory_monitor_refresh_ms=0"
 )
-while IFS= read -r kv; do [ -n "$kv" ] && FABRIC+=(-e "$kv"); done <<<"${RUNTIME_IMAGE_CONTAINER_ENV:-}"
+FABRIC+=("${IMAGE_ENV[@]}" -e "TESSERA_ROUTE_TRACE=$RUNS/trace-$ROLE.json")
 
 PREPARE='
 inc="$(python3 -c "import glob; p=sorted(glob.glob(\"/usr/local/lib/python3*/dist-packages/nvidia/cu*/include\")); print(p[0] if p else \"\")")"
@@ -74,6 +89,7 @@ if [ "$ROLE" = "head" ]; then
     -v "$TS_Q/src":/tessera/src:ro -v "$TS_Q/pyproject.toml":/tessera/pyproject.toml:ro \
     -v "$TS_Q/tools":/tessera/tools:ro -v "$TS_Q/tests":/tessera/tests:ro \
     -v "$EXT":/ext -v /mnt/shared:/mnt/shared \
+    -v "$OUT_DIR":"$OUT_DIR" -v "$RUNS":"$RUNS" \
     -e TORCH_EXTENSIONS_DIR=/ext -e TMPDIR=/ext -e TRITON_CACHE_DIR=/ext/triton \
     -e TESSERA_SERVE_MODE=resident -w /tessera "${FABRIC[@]}" \
     --entrypoint bash "$IMG" -c "
@@ -81,10 +97,10 @@ $PREPARE
 ray start --head --node-ip-address='$HEAD_ADDR' --port=$RAY_PORT >/dev/null
 sleep infinity" >/dev/null
   echo "[pq2459] head $HEAD_ADDR:$RAY_PORT on $(hostname), image 5be13705"
-  /home/rob/venvs/pb-cpu/bin/python "$REPO/tools/pq2459_serve_census.py" \
+  "$PYTHON" "$REPO/tools/pq2459_serve_census.py" \
     --mode head --out "$OUT" --container "$NAME" --head-addr "$HEAD_ADDR" \
     --ray-port "$RAY_PORT" --tessera-src "$TS_Q" \
-    --runs-dir "$RUNS" --ext-dir "$EXT"
+    --runs-dir "$RUNS" --ext-dir "$EXT" --runtime-image "$OBSERVED_IMAGE"
   rc=$?
 else
   docker run -d --name "$NAME" --rm --network host --ipc host \
@@ -93,16 +109,17 @@ else
     -v "$TS_Q/src":/tessera/src:ro -v "$TS_Q/pyproject.toml":/tessera/pyproject.toml:ro \
     -v "$TS_Q/tools":/tessera/tools:ro -v "$TS_Q/tests":/tessera/tests:ro \
     -v "$EXT":/ext -v /mnt/shared:/mnt/shared \
+    -v "$OUT_DIR":"$OUT_DIR" -v "$RUNS":"$RUNS" \
     -e TORCH_EXTENSIONS_DIR=/ext -e TMPDIR=/ext -e TRITON_CACHE_DIR=/ext/triton \
     -e TESSERA_SERVE_MODE=resident -w /tessera "${FABRIC[@]}" \
     --entrypoint bash "$IMG" -c "
 $PREPARE
 sleep infinity" >/dev/null
   echo "[pq2459] worker on $(hostname), head $HEAD_ADDR:$RAY_PORT"
-  /home/rob/venvs/pb-cpu/bin/python "$REPO/tools/pq2459_serve_census.py" \
+  "$PYTHON" "$REPO/tools/pq2459_serve_census.py" \
     --mode worker --out "$OUT" --container "$NAME" --head-addr "$HEAD_ADDR" \
     --ray-port "$RAY_PORT" --tessera-src "$TS_Q" \
-    --runs-dir "$RUNS" --ext-dir "$EXT"
+    --runs-dir "$RUNS" --ext-dir "$EXT" --runtime-image "$OBSERVED_IMAGE"
   rc=$?
 fi
 echo "[pq2459] member $ROLE exit $rc -> $OUT"
