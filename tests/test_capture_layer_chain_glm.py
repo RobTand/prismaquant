@@ -336,3 +336,217 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry_on_cuda(
         run_in_bounded_capture_child(request, tmp_path)
         return
     _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, device="cuda")
+
+
+# -- selected fresh captures (--units) -------------------------------------------
+
+def _selected_units_file(tmp_path, source, census):
+    """A v1 --units file with one whole dense group and one whole routed
+    ``s:`` group, from different layers so an interior quantum range holds no
+    selected unit at all. The dense group is a fused ``g:`` group or a
+    single-unit ``u:`` group, whichever the profile's fused siblings give."""
+    groups = census["anchor_groups"]
+
+    def _layer(key):
+        return {_LAYER.search(name).group(1) for name in groups[key]}
+    dense = [key for key in sorted(groups) if not key.startswith("s:")
+             and _layer(key) == {"0"}]
+    routed = [key for key in sorted(groups) if key.startswith("s:")
+              and _layer(key) == {"2"}]
+    assert dense and routed, f"census lacks a layer-0 dense or layer-2 routed group: {sorted(groups)}"
+    keys = [dense[0], routed[0]]
+    selected = sorted(name for key in keys for name in groups[key])
+    path = tmp_path / "units.json"
+    path.write_text(json.dumps({
+        "schema": "prismaquant.tessera_campaign_units.v1",
+        "model": str(source), "layer_stride": 1,
+        "groups": [{"key": key, "members": sorted(groups[key])} for key in keys]}))
+    return path, keys, selected
+
+
+def test_selected_capture_scope_refusals():
+    """A fresh capture prices whole groups: a sampled, audited, partitioned
+    or exact-member selection refuses, while a whole routed ``s:`` group and
+    a whole dense ``g:`` group derive their exact units."""
+    from types import SimpleNamespace
+    from prismaquant import tessera_campaign as campaign
+    resolved = {"s:model.layers.2.mlp.experts": ["m.a", "m.b"],
+                "g:model.layers.0.mlp.up_proj": ["d.a", "d.b"]}
+    args = SimpleNamespace(model="src", layer_stride=1, units="units.json",
+                           research_exact_member=None)
+    routed = {"schema": "prismaquant.tessera_campaign_units.v1",
+              "model": "src", "layer_stride": 1, "groups": [
+        {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
+    assert campaign.selected_capture_unit_names(
+        routed, args=args, resolved=resolved) == ["m.a", "m.b"]
+    mixed = {"schema": "prismaquant.tessera_campaign_units.v1",
+             "model": "src", "layer_stride": 1, "groups": [
+        {"key": "g:model.layers.0.mlp.up_proj", "members": ["d.a", "d.b"]},
+        {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
+    assert campaign.selected_capture_unit_names(
+        mixed, args=args, resolved=resolved) == ["d.a", "d.b", "m.a", "m.b"]
+    sampled = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
+        routed["groups"][0], sampled=["m.a"],
+        inclusion_probability={"m.a": 0.5})]}
+    with pytest.raises(RuntimeError):
+        campaign.selected_capture_unit_names(sampled, args=args, resolved=resolved)
+    partition = {"schema": "prismaquant.tessera_campaign_units.v3", "groups": [dict(
+        key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
+        partition={"schema": "prismaquant.tessera_campaign_expert_partition.v1",
+                   "experts_per_row": 8, "index": 0, "count": 2, "rate_q256": 64,
+                   "members": ["m.a"]})]}
+    with pytest.raises(RuntimeError):
+        campaign.selected_capture_unit_names(partition, args=args, resolved=resolved)
+    exact = SimpleNamespace(**{**vars(args), "research_exact_member": "m.a"})
+    with pytest.raises(RuntimeError):
+        campaign.selected_capture_unit_names(routed, args=exact, resolved=resolved)
+    other_model = SimpleNamespace(**{**vars(args), "model": "other"})
+    with pytest.raises(ValueError):
+        campaign.selected_capture_unit_names(routed, args=other_model, resolved=resolved)
+    outside = {"schema": "prismaquant.tessera_campaign_units.v1",
+               "groups": [{"key": "elsewhere", "members": ["m.a", "m.b"]}]}
+    with pytest.raises(RuntimeError):
+        campaign.selected_capture_unit_names(outside, args=args, resolved=resolved)
+    partial = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
+        key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
+        sampled=["m.a", "m.b"], inclusion_probability={"m.a": 0.5, "m.b": 0.25})]}
+    with pytest.raises(RuntimeError):
+        campaign.selected_capture_unit_names(partial, args=args, resolved=resolved)
+
+
+def test_chain_quantum_empty_range_scope_rules():
+    """A full-scope quantum always requires its units; a selected quantum may
+    complete an empty range only when no selected unit names a layer in it,
+    and a selected unit with no decoder layer is never assumed absent."""
+    from prismaquant import capture_layer_chain as chain
+    full = {"units": {"model.layers.0.mlp.up_proj.weight": [4, 4]}}
+    selected = {"unit_scope": "selected",
+                "units": {"model.layers.2.mlp.experts.0.gate_proj.weight": [4, 4]}}
+    assert chain.quantum_range_requires_units(full, 0, 1)
+    assert chain.quantum_range_requires_units(selected, 2, 3)
+    assert not chain.quantum_range_requires_units(selected, 0, 1)
+    unparsable = {"unit_scope": "selected", "units": {"a": [4, 4]}}
+    with pytest.raises(chain.CaptureChainRefused):
+        chain.quantum_range_requires_units(unparsable, 0, 1)
+    ambiguous = {"unit_scope": "selected", "units": {"m.layers.0.layers.1.w": [4, 4]}}
+    with pytest.raises(chain.CaptureChainRefused):
+        chain.quantum_range_requires_units(ambiguous, 0, 1)
+    unknown = {"unit_scope": "selected",
+               "units": {"model.layers.7.mlp.experts.0.gate_proj.weight": [4, 4]}}
+    assert chain.quantum_range_requires_units(unknown, 7, 8)
+    assert not chain.quantum_range_requires_units(unknown, 0, 1)
+
+
+def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
+        tmp_path, monkeypatch, _cpu_glm_kernels):
+    """A --units full-group capture chains like the monolith: the quanta
+    collect only the selected units but forward every source layer, the join
+    still holds the full layer tiling and witness, and the published manifest
+    carries exactly the selected units under an explicit selected scope."""
+    from prismaquant import capture_layer_chain as chain
+    from prismaquant import tessera_calibration_cache as cache
+    from prismaquant import tessera_campaign as campaign
+    from prismaquant import tessera_calibration_cache as qualification_store
+    monkeypatch.setattr(qualification_store, 'require_automatic_capture_source_recording', lambda: None)
+    from test_glm5_next_streamed_forward_parity import _build_model
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "staging"))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    torch.manual_seed(20261001)
+    source = tmp_path / "source"
+    _write_sharded_checkpoint(_build_model(_three_layer_config()).to(torch.bfloat16), source)
+    tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1),
+              torch.arange(257).flip(0).remainder(126).add(2).reshape(1, -1)]
+    monkeypatch.setattr(campaign, '_calibration_tokens', lambda *_: (tokens, 'tiny GLM frozen draw'))
+    census_path = tmp_path / 'census.json'
+    common = ['--model', str(source), '--out', str(tmp_path / 'unused.pkl'),
+              '--menu-mode', 'research', '--nsamples', '2', '--seqlen', '257',
+              '--max-act-rows', '7', '--attention-implementation', 'eager', '--streaming',
+              '--streaming-cache-headroom-gb', '0']
+    capture = [*common, '--calibration-census', str(census_path)]
+    assert campaign.main([*common, '--cache-dir', str(tmp_path / 'census-cache'),
+                          '--census-out', str(census_path)]) == 0
+    census = json.loads(census_path.read_text())
+    units_path, _group_keys, selected = _selected_units_file(tmp_path, source, census)
+    capture_units = [*capture, '--units', str(units_path)]
+
+    forwards = []
+    real_collect = campaign._collect_activations
+
+    def counting_collect(*args, **kwargs):
+        forwards.append(1)
+        return real_collect(*args, **kwargs)
+    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+    monolith = tmp_path / 'monolith'
+    assert campaign.main([*capture_units, '--cache-dir', str(tmp_path / 'monolith-cache'),
+                          '--capture-calibration-out', str(monolith)]) == 0
+    assert forwards, "the monolith capture never collected activations"
+    monkeypatch.setattr(campaign, '_collect_activations',
+                        lambda *_: (_ for _ in ()).throw(
+                            AssertionError("a completed-capture reuse repeated the forward")))
+    manifest = _manifest(monolith)
+    assert set(manifest['entries']) == set(selected)
+    assert manifest['identity']['unit_scope'] == 'selected'
+    assert set(manifest['identity']['units']) == set(selected)
+    # The capture retains the full draw's calibration: each entry's H and
+    # count describe every routed row, not the retained scoring prefix.
+    values, _receipt = cache.prefetch_capture(monolith / 'capture_manifest.json',
+        expected_identity=manifest['identity'], census=census, names=selected, device='cpu')
+    assert values[2] == {name: census['counts'][name] for name in selected}
+    assert values[3] == {name: census['max_abs'][name] for name in selected}
+
+    # The completed selected capture is reused at its stored scope: the row
+    # returns without one repeated forward, keeps H/counts, and a requested
+    # unit outside the stored scope refuses instead of silently reusing.
+    assert campaign.main([*capture_units, '--cache-dir', str(tmp_path / 'monolith-reuse-cache'),
+                          '--capture-calibration-out', str(monolith)]) == 0
+    outside = {key: members for key, members in census['anchor_groups'].items()
+               if not set(members) <= set(selected)}
+    assert outside
+    other_key = sorted(outside)[0]
+    other_units = tmp_path / 'units-outside.json'
+    other_units.write_text(json.dumps({
+        "schema": "prismaquant.tessera_campaign_units.v1",
+        "model": str(source), "layer_stride": 1,
+        "groups": [{"key": other_key, "members": sorted(outside[other_key])}]}))
+    with pytest.raises(RuntimeError, match="scope mismatch"):
+        campaign.main([*capture, '--units', str(other_units),
+                       '--cache-dir', str(tmp_path / 'monolith-outside-cache'),
+                       '--capture-calibration-out', str(monolith)])
+    # The whole census scope is likewise not the stored selected scope.
+    with pytest.raises(RuntimeError, match="scope mismatch"):
+        campaign.main([*common, '--calibration-census', str(census_path),
+                       '--cache-dir', str(tmp_path / 'monolith-fullreuse-cache'),
+                       '--capture-calibration-out', str(monolith)])
+    # The chain rows forward for real again.
+    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+
+    storage = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
+               "directory": str(tmp_path / "boundaries"), "max_resident_bytes": 64 << 20,
+               "max_auxiliary_bytes": 1 << 20, "max_artifact_bytes": 1 << 30,
+               "prefetch_batches": 1}
+    root = tmp_path / 'chain'
+    chained = [*capture_units, '--capture-calibration-out', str(root)]
+    assert campaign.main([*chained, '--cache-dir', str(tmp_path / 'prep-cache'),
+        '--capture-chain', 'prep', '--capture-chain-ranges', '0:1,1:2,2:3',
+        '--capture-chain-boundary-storage', json.dumps(storage)]) == 0
+    prep = chain.read_prep(root)
+    # The prep has no model: it derived the same selected scope from the census.
+    assert prep['identity']['unit_scope'] == 'selected'
+    assert set(prep['identity']['units']) == set(selected)
+    for start, stop in [(0, 1), (1, 2), (2, 3)]:
+        assert campaign.main([*chained, '--cache-dir', str(tmp_path / f'quantum-{start}-cache'),
+            '--capture-chain', 'quantum', '--capture-layer-range', f'{start}:{stop}']) == 0
+        fragment = json.loads(chain.fragment_path(root, start, stop).read_text())
+        expected_units = {name for name in selected
+                          if start <= int(_LAYER.search(name).group(1)) < stop}
+        # Each quantum journals only its own selected units; a range with none
+        # still forwards every batch and journals an empty map.
+        assert set(fragment['units']) == expected_units
+        assert fragment['source_authentication']['verified_files'], (
+            f"quantum {start}:{stop} read no source; it did not forward its layers")
+    assert campaign.main([*chained, '--cache-dir', str(tmp_path / 'join-cache'),
+                          '--capture-chain', 'join']) == 0
+    _assert_same_capture(monolith, root, what="the selected chain differs from the selected monolith")
+    cache.require_capture_contract(root / 'capture_manifest.json')

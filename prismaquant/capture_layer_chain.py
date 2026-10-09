@@ -13,7 +13,7 @@ another, each retryable on its own:
   generation the quanta share, and seals the prep record
   (``<capture>/chain/prep.json``): the identity, the layer ranges, the
   calibration batch count, the boundary storage policy and session, and the
-  source fingerprints. It runs no forward and hashes nothing.
+  source fingerprints. It runs no forward and hashes no source payload.
 * **Quanta, one per layer range ``[a, b)``, in order.** Each rebinds the
   generation as its own owner (``owners/capture-AAA-BBB.json``) and reads its
   source through a recording
@@ -24,7 +24,8 @@ another, each retryable on its own:
   reaches the capture, and held to the prep's stat fingerprint. A census
   that declares producer digests is compared there. Nothing it does not read
   is hashed, and no stat or path record stands in for a digest; the prep's
-  fingerprints only refuse. It starts from boundary ``a`` (the predecessor's
+    fingerprints refuse in certified mode; dev mode stamps their drift. It starts
+    from boundary ``a`` (the predecessor's
   hidden states, read through the generation's verified windows) and runs
   ``[a, b)`` with the unchanged capture visitor, so its units are written by
   the same writer and journal as a monolithic capture's, each hashed as it
@@ -63,6 +64,7 @@ from .cost_stage_checkpoint import (
     publish_new_bytes,
 )
 from .digests import bytes_sha256hex, canonical_json_bytes, indent2_json_file_bytes
+from .qnames import DOTTED_LAYER_QNAME
 
 #: v2 (PQ #1896): the prep seals the traversal identity, which binds no
 #: source digests; the join binds the digests the quanta recorded. A v1 prep
@@ -360,6 +362,54 @@ class _BoundaryFrontier:
                     yield self.storage.get(window, reference)
 
 
+def quantum_range_requires_units(identity: Mapping, start: int, stop: int) -> bool:
+    """Whether layers ``[start, stop)`` hold units this capture must record.
+
+    A **full-scope** capture (no declared unit scope) tiles every source
+    layer, so every range must verify units. A selected capture's quanta
+    still tile every source layer, but a range none of its declared units
+    live in verifies an empty unit map and that is its complete record --
+    only when every declared unit names exactly one decoder layer: a unit
+    with no ``.layers.N.`` component, or more than one, names no single
+    layer a quantum could own, so the chain refuses rather than assume one;
+    any declared unit inside the range demands its record.
+    """
+    selected = identity.get("unit_scope") == "selected"
+    requires = bool(not selected and identity.get("units"))
+    for name in identity.get("units", {}):
+        first = DOTTED_LAYER_QNAME.search(name)
+        # Components can share a separator: .layers.0.layers.1. has two.
+        second = None if first is None else DOTTED_LAYER_QNAME.search(name, first.start() + 1)
+        if first is None or second is not None:
+            if selected:
+                raise CaptureChainRefused(
+                    f"selected unit {name!r} names no unambiguous decoder layer; "
+                    "the chain cannot tell which quantum records it")
+            requires = True
+            continue
+        if start <= int(first.group(1)) < stop:
+            requires = True
+    return requires
+
+
+def require_prep_identity(prep, identity, *, n_batches, label):
+    """One comparability rule for fresh traversal and completed-result adoption."""
+    recorded = prep["identity"]
+    if (not isinstance(identity, dict) or identity.keys() != recorded.keys()
+            or any(value != identity[key] for key, value in recorded.items()
+                   if key != "capture_runtime")):
+        raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
+    if n_batches != prep["n_batches"]:
+        raise CaptureChainRefused(
+            f"this quantum draws {n_batches} calibration batches; the prep sealed {prep['n_batches']}")
+    from .dev_mode import seal_check
+    seal_check("capture quantum runtime", recorded.get("capture_runtime"),
+               identity.get("capture_runtime"), where=label,
+               refusal=lambda: CaptureChainRefused(
+                   "this quantum's capture runtime differs from the prep's"))
+    return recorded
+
+
 class ChainQuantum:
     """One layer range's owner of the chain's boundary generation.
 
@@ -370,7 +420,7 @@ class ChainQuantum:
     through a recording descriptor owner bound to this prep.
     """
 
-    def __init__(self, capture_root, layers, *, num_layers, source_authentication):
+    def __init__(self, capture_root, layers, *, num_layers, source_authentication, recompute=False):
         self.root = Path(capture_root).resolve()
         self.prep = read_prep(self.root)
         if (not getattr(source_authentication, "is_recording", False) or
@@ -387,7 +437,7 @@ class ChainQuantum:
                 f"capture layers {self.start}:{self.stop} are not a range of this chain")
         self.label = range_label(self.start, self.stop)
         status = _owner_status(self.prep, self.start, self.stop)
-        if status is not None and status.get("status") == "complete":
+        if status is not None and status.get("status") == "complete" and not recompute:
             raise CaptureChainRefused(
                 f"capture layers {self.start}:{self.stop} are already complete; a quantum runs once")
         self.inputs = None
@@ -416,13 +466,9 @@ class ChainQuantum:
     def last(self) -> bool:
         return self.stop == self.num_layers
 
-    def require_identity(self, identity, *, n_batches) -> None:
-        if identity != self.prep["identity"]:
-            raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
-        if n_batches != self.prep["n_batches"]:
-            raise CaptureChainRefused(
-                f"this quantum draws {n_batches} calibration batches; the prep sealed "
-                f"{self.prep['n_batches']}")
+    def require_identity(self, identity, *, n_batches) -> dict:
+        return require_prep_identity(self.prep, identity, n_batches=n_batches,
+                                     label=range_label(self.start, self.stop))
 
     def _remove_stale_outputs(self):
         """A failed attempt's boundary ``stop`` entries: this owner's, never its input."""
@@ -470,7 +516,7 @@ class ChainQuantum:
                                                    boundary_index=self.stop))
         return consume
 
-    def complete(self, *, witness, verified) -> Path:
+    def complete(self, *, witness, verified, capture_binding=None) -> Path:
         """Record this range's fragment; call inside :meth:`owner`."""
         from .joint_adjoint_checkpoints import exact_entry_record
         if self.storage is None:
@@ -481,16 +527,19 @@ class ChainQuantum:
                 f"entries for {self.prep['n_batches']} batches")
         if witness.get("observed_layers") != list(range(self.start, self.stop)):
             raise CaptureChainRefused("a quantum's witness names other layers than its range")
-        if not verified:
+        if not verified and quantum_range_requires_units(
+                self.prep["identity"], self.start, self.stop):
             raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
-        document = _seal({"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
+        payload = {"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
                           "session": self.prep["session"], "layers": [self.start, self.stop],
                           "num_layers": self.num_layers, "n_batches": self.prep["n_batches"],
                           "boundary": None if self.last else
                               [exact_entry_record(reference) for reference in self.outputs],
                           "witness": witness, "units": verified,
-                          "source_authentication": self.source_authentication.receipt()},
-                         where="capture chain fragment", field="fragment_sha256")
+                   "source_authentication": self.source_authentication.receipt()}
+        if capture_binding is not None:
+            payload["capture_binding"] = capture_binding
+        document = _seal(payload, where="capture chain fragment", field="fragment_sha256")
         path = fragment_path(self.root, self.start, self.stop)
         atomic_write_bytes(path, canonical_json_bytes(document, where="capture chain fragment") + b"\n")
         return path
@@ -532,9 +581,10 @@ def join(capture_root, *, census_path) -> dict:
     only after the manifest is published, so a failed join leaves every input
     of a retry.
     """
-    from prismaquant import validate_source_initialization_contract
+
     from .streaming_model import merge_selected_initialization_witnesses
-    from .tessera_calibration_cache import CaptureWriter, record_capture_source, sha256
+    from .tessera_calibration_cache import (
+        CaptureWriter, record_capture_source, require_capture_initialization_contract, sha256)
     root = Path(capture_root).resolve()
     prep = read_prep(root)
     identity = prep["identity"]
@@ -552,9 +602,10 @@ def join(capture_root, *, census_path) -> dict:
                                 where="capture chain join")
     merged = merge_selected_initialization_witnesses(
         [fragment["witness"] for fragment in fragments])
-    if merged != validate_source_initialization_contract(identity["model_load_contract"]):
-        raise CaptureChainRefused(
-            "the quanta's merged initialization witness differs from the census contract")
+    try:
+        require_capture_initialization_contract(identity["model_load_contract"], merged)
+    except RuntimeError as error:
+        raise CaptureChainRefused(str(error)) from error
     verified = {}
     for fragment in fragments:
         repeated = sorted(set(verified) & set(fragment["units"]))

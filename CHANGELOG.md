@@ -270,6 +270,49 @@
   fixture-only shutdown-call assertion are removed; no blend policy or
   numerical behavior changes.
 
+- **Explicit selected-unit fresh calibration capture**. The shared cache
+  identity accepts `unit_names` and declares `unit_scope="selected"`; writers
+  and publication retain full-draw H/counts while requiring exactly the
+  requested entries. Empty or unknown selections, missing requested units and
+  implicit partial full-census captures refuse. Existing full capture identities,
+  wire formats and serving kernels stay unchanged. The existing `--units`
+  whole-group grammar flows through prep, selected collection, empty-range
+  forwarding, join and coverage-checked reuse. Full source-layer traversal and
+  full-draw row counts remain required. The immutable-provider safety refusal
+  remains enforced; this is not admission of real automatic model capture.
+
+- **Default-off uncapped calibration-row consumer**. The activation collector
+  can hand each canonical shared input group to an owner before prefix capping,
+  independently of built-in Hessian collection. The D42 Stage 1 research entry
+  uses this seam for same-pass disjoint fit/held-out moments and checks their
+  row-count sum against this forward's observed routing. It does not publish an
+  ordinary production capture or qualify immutable source delivery.
+
+- **Receipt-bound shared research publication and multi-layer actions**. Joins
+  bind role counts, paths, digests, lengths and geometry to completed quantum
+  receipts, preventing count redistribution or payload substitution. Adjacent
+  prepared layers run in one GPU action with bounded per-layer moments and
+  durable progress; explicit priority units publish first in the same capture.
+  Moments drain after every layer even inside a multi-layer prepared range.
+  Completed adoption rechecks scope, persisted split and scoring geometry and
+  refuses a changed unit set or scoring prefix. A changed selection digest or
+  retained-prefix budget replays the quantum instead of refusing or reusing it,
+  and prints one `research_quantum_replay` line that names the changed fields.
+  Historical census counts/maxima use D32 stamps with explicit deltas; actual
+  routing, per-role projection agreement and tokens-times-top-k stay hard checks.
+  `--mode preflight --device cuda` runs its toy control on the GPU; a CUDA-gated
+  test pins that the quanta forward and accumulate on the device.
+
+- **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
+  version metadata does not reapply an identity seal after source admission.
+  Chain writers keep the canonical prep identity; completed initialization
+  witnesses retain valid grammar and use the same identity stamp at join and
+  finish. Calibration, unit scope/geometry, batch counts and own-byte integrity
+  remain refusals; certified mode still refuses identity drift. Selected cache
+  readers require coverage rather than output-scope equality, and every research
+  quantum binds its actual fit/held-out coordinates before model load. The
+  automatic source safety guard is unchanged.
+
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
   startup owners, derives expected source phases from the actual meta-model and
