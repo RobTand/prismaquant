@@ -336,8 +336,9 @@ def _run_complete_row(*, output_root: Path, device: str) -> dict:
             preview, "quantum_row_baseline", reserve_bytes=0)
         baseline = int(observed[OBSERVED_BASELINE_KEY])
         del preview
-        # Round up with headroom: later imports allocate before the check.
-        runtime_reserve = ((baseline + (1 << 30) - 1) // (1 << 30)) * (1 << 30)
+        # Round up with headroom: Stage A and later imports allocate
+        # ~0.4 GiB after the preview reading.
+        runtime_reserve = ((baseline + (1 << 31) - 1) // (1 << 30)) * (1 << 30) + (1 << 30)
     else:
         physical_limit, safety_margin, runtime_reserve = (
             50 << 20, 1 << 20, 1 << 20)
