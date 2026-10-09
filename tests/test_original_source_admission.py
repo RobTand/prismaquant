@@ -16,6 +16,7 @@ from safetensors.torch import save_file
 from prismaquant import source_generation as sg, tessera_calibration_cache as cc
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_streaming import build_streamed_model_identity
+from prismaquant.digests import canonical_json_sha256
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.staged_lease import LeaseRefused, resolve_context
 from prismaquant.joint_adjoint_checkpoints import adjoint_space, boundary_entry_directory
@@ -535,7 +536,7 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
               'compatibility': _bound(case['tmp'] / 'reader-compat.json', {'accepted': True}),
               'controls': ['tests/original-source-admission-reader'],
               'target_prismaquant_source_sha256': runtime['prismaquant_source_sha256'],
-              'target_runtime_sha256': sg._canonical_sha256(runtime, 'fixture target runtime')}
+              'target_runtime_sha256': canonical_json_sha256(runtime, where='fixture target runtime')}
     accepted = {'tests/original-source-admission-reader': family}
     reader = {'node_id': 'tests/original-source-admission-reader',
               'source_snapshot': snapshot_parent, 'compatibility': family['compatibility']}
