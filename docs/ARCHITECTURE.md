@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2532): the allocator gains an opt-in Option B enumeration path.
+`--mtp-option-b-dir` pairs every feasible declared MTP group choice with a body allocation under the remaining artifact bytes.
+`glm_mtp_selection.enumerate_mtp_rungs` admits the priced group menu without a winner decision.
+Each candidate reuses the shared footprint owner, retains exact prices and wire receipts, and binds the combined assignment digest.
+The manifest selects no winner, and real-model qualification stays outside this path.
+Without the flag the independent selector and body allocation are unchanged.
+Gate: `tests/test_mtp_option_b_2532.py`.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
@@ -8178,6 +8186,11 @@ prices a rung twice.
 - the record names the declaration (`mtp_formats`), each removed rung's unit count (`menu_restricted_rungs`) and any named format offered to no unit (`mtp_formats_unoffered`);
 - a unit or group left without a complete rung exits 2;
 - unset, the menu and the record are unchanged.
+
+`--mtp-option-b-dir` (PQ #2532, opt-in) enumerates every feasible declared group choice and allocates the body under each remainder.
+Each candidate charges body payload, selected MTP bytes, immutable regions, sidecars and reserve once under the global cap.
+The manifest records prices, assignments, wire receipts and the combined digest, and selects no winner.
+Gate: `tests/test_mtp_option_b_2532.py`.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
