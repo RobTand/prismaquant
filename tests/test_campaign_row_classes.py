@@ -38,6 +38,11 @@ GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
 SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
 SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
 SDK5_PYTHON = "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python"
+SDK5_BASELINE = "/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9"
+SDK4_ATTESTED_BY = "204b35146fab0c7c135781d594c4c15890b83fe74c9ec3d7463f802863700209"
+SDK4_PB_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
+SDK5_PB_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
+TESSERA_COMMIT = "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
 
 
 def fleet() -> dict:
@@ -429,6 +434,22 @@ def test_active_sdk4_interpreters_validate_explicit_classes(tag):
     assert records == [{"class": "default", "isa": dispatch.load_fleet_interpreters()[
         "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
         "containerized": False, "wire_shared": True, "weights_only": False}]
+
+def test_merge_train_interpreters_cover_vehicles_with_and_without_pr2216():
+    table = dispatch.load_fleet_interpreters()["tags"]["dl380g10"][
+        "interpreters"]
+    assert table[SDK4_PYTHON]["attested_by"] == SDK4_ATTESTED_BY
+    assert SDK4_PB_COMMIT in table[SDK4_PYTHON]["observed"]
+    assert len(table[SDK5_PYTHON]["attested_by"]) == 64
+    observed = table[SDK5_PYTHON]["observed"]
+    assert SDK5_BASELINE in observed
+    assert SDK5_PB_COMMIT in observed
+    assert TESSERA_COMMIT in observed
+    for python in (SDK4_PYTHON, SDK5_PYTHON):
+        records = dispatch.validate_row_classes(base_spec(
+            python=python, tags=["dl380g10"], classes={"default": {}}))
+        assert records[0]["python"] == python
+
 
 def test_active_sdk5_interpreter_validates_on_dl380g10():
     record = dispatch.load_fleet_interpreters()["tags"]["dl380g10"][
