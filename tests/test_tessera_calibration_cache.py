@@ -785,3 +785,83 @@ def test_guarded_hash_advises_only_consumed_pages_and_keeps_the_content_digest(t
             changed.append(True)
     with pytest.raises(RuntimeError, match='changed during guarded capture hashing'):
         cc.sha256(path, resource_check=change)
+
+
+@pytest.mark.parametrize("selected,requested,accepted", [
+    (True, "proj", True), (True, "other", False), (False, "other", True),
+])
+def test_cli_cache_reader_requires_coverage_not_equal_output_scope(
+        monkeypatch, tmp_path, selected, requested, accepted):
+    from test_tessera_campaign_resume import _main_fixture, UNIT
+    tc, _, argv, model, inputs = _main_fixture(monkeypatch, tmp_path)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    model.config = SimpleNamespace(_attn_implementation="eager")
+    model.model.layers[0].other = torch.nn.Linear(256, 32, bias=False, dtype=torch.bfloat16)
+    other = "model.layers.0.other"
+    fields = canonical_fields()
+    monkeypatch.setattr(prismaquant, "pretrained_initialization_contract",
+                        lambda _model: fields["model_load_contract"])
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    (source / "model.safetensors").write_bytes(b"cache consumer fixture source")
+    argv[argv.index("--model") + 1] = str(source)
+    argv[argv.index("--hessian") + 1] = "require"
+    calibration = tc.th.calibration_identity(
+        inputs["text"], inputs["tokens"], fit_tokens=4, source="wikitext-2-raw-v1/train",
+        split_role="calibration", model=str(source), seed=0, nsamples=32, seqlen=512,
+        fit_tokens_min=4)
+    rows = {UNIT: inputs["rows"], other: inputs["rows"] * 0.5}
+    hessians = {name: value.T @ value for name, value in rows.items()}
+    maxima = {name: float(value.abs().max()) for name, value in rows.items()}
+    census = tc.calibration_census(
+        {UNIT: 4, other: 4}, maxima, args=SimpleNamespace(
+            model=str(source), nsamples=32, seqlen=512, seed=0, layer_stride=1),
+        groups={"u:" + name: [name] for name in rows}, dense_targets=list(rows),
+        expert_targets=[], shapes={name: [32, 256] for name in rows},
+        identity=calibration, **fields)
+    census_path = tmp_path / "census.json"
+    census_path.write_text(json.dumps(census))
+    names = [UNIT] if selected else list(rows)
+    capture_id = cc.capture_identity(
+        census_path, calibration=calibration, max_act_rows=512,
+        model_load_contract=fields["model_load_contract"], attention_implementation="eager",
+        **({"unit_names": names} if selected else {}))
+    root = tmp_path / "capture"
+    record = cc.publish_capture(
+        root, census_path=census_path, identity=capture_id,
+        acts={name: rows[name] for name in names},
+        hessians={name: hessians[name] for name in names},
+        counts={name: 4 for name in names}, maxima={name: maxima[name] for name in names})
+    requested_name = "model.layers.0." + requested
+    selection = tmp_path / "units.json"
+    selection.write_text(json.dumps({"schema": tc.UNITS_SCHEMA, "model": str(source),
+        "layer_stride": 1, "groups": [{"key": "u:" + requested_name,
+                                       "members": [requested_name]}]}))
+    argv += ["--attention-implementation", "eager", "--nsamples", "32", "--seqlen", "512",
+             "--layer-stride", "1", "--calibration-census", str(census_path),
+             "--units", str(selection), "--calibration-cache", record["path"],
+             "--calibration-cache-sha256", record["sha256"]]
+    monkeypatch.setattr(tc, "_collect_activations",
+                        lambda *_args, **_kwargs: pytest.fail("cache reader repeated the forward"))
+    actual_prefetch = cc.prefetch_capture
+    observed = []
+
+    def read_capture(*args, **kwargs):
+        values, receipt = actual_prefetch(*args, **kwargs)
+        observed.append(values)
+        return values, receipt
+
+    monkeypatch.setattr(cc, "prefetch_capture", read_capture)
+    if not accepted:
+        with pytest.raises(RuntimeError):
+            tc.main(argv)
+        assert observed == []
+        return
+    assert tc.main(argv) == tc.EXIT_EMPTY_MENU
+    acts, loaded_h, counts, loaded_maxima = observed[0]
+    assert set(acts) == {requested_name}
+    torch.testing.assert_close(acts[requested_name], rows[requested_name], rtol=0, atol=0)
+    torch.testing.assert_close(loaded_h[requested_name], hessians[requested_name], rtol=0, atol=0)
+    assert counts == {requested_name: 4}
+    assert loaded_maxima == {requested_name: maxima[requested_name]}
