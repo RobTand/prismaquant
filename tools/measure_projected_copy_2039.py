@@ -330,15 +330,59 @@ def clock_probe(host, *, rounds=3):
     return {"host": host, "rounds": rows}
 
 
-def both_host_netdata(after, before):
+def both_host_netdata(after, before, arms):
     """Both Sparks' validated Netdata windows, or the reason one is missing."""
     try:
         from tools.collect_row_netdata import collect_window
         document = collect_window(after, before)
         return {"complete": True, "document": document,
+                "arm_means": netdata_arm_means(document, arms),
                 "clock_probes": [clock_probe(host) for host in document["hosts"]]}
     except BaseException as error:  # noqa: BLE001 - SystemExit included, recorded
         return {"complete": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def _netdata_key(chart, label):
+    """A readable name for one Netdata dimension, or ``None`` when we do not report it."""
+    if chart == "system.cpu":
+        return "cpu_idle_percent" if label == "idle" else None
+    if chart == "system.ram":
+        return "ram_used_mib" if label == "used" else None
+    if chart == "system.io":
+        return {"reads": "io_reads_kib_s", "writes": "io_writes_kib_s"}.get(label)
+    if chart.startswith("nvidia_smi.") and chart.endswith("_power_draw"):
+        return "gpu_power_w"
+    return None
+
+
+def netdata_arm_means(document, arms):
+    """Each reported Netdata dimension's mean over each arm's own seconds, per host.
+
+    The load context of an arm, on both boxes: the host that ran it and the
+    other Spark. ``cpu_busy_percent`` is 100 less the idle share. Netdata rows
+    are one second apart (the GPU power chart repeats a ten-second reading), so
+    a plain mean over the rows inside the arm is its mean over the arm.
+    """
+    rows = []
+    for arm in arms:
+        hosts = {}
+        for host, body in document["hosts"].items():
+            means = {}
+            for chart, series in body["series"].items():
+                inside = [row for row in series["data"]
+                          if arm["epoch_start"] <= row[0] <= arm["epoch_end"]]
+                for index, label in enumerate(series["labels"][1:], 1):
+                    key = _netdata_key(chart, label)
+                    values = [row[index] for row in inside if row[index] is not None]
+                    if key is not None and values:
+                        means[key] = statistics.fmean(values)
+                        means[key + "_rows"] = len(values)
+            if "cpu_idle_percent" in means:
+                means["cpu_busy_percent"] = 100.0 - means["cpu_idle_percent"]
+            hosts[host] = means
+        rows.append({"kind": arm["kind"], "epoch_start": arm["epoch_start"],
+                     "epoch_end": arm["epoch_end"], "hosts": hosts})
+    return rows
 
 
 def head_binding():
@@ -610,7 +654,7 @@ def run_cuda(args, fixture, binding):
         wait = before + NETDATA_LAG_S - time.time()
         if wait > 0:
             time.sleep(wait)
-        netdata = both_host_netdata(after, before)
+        netdata = both_host_netdata(after, before, arms)
     return {"calibration_median_s": medians, "passes": passes, "order": list(ORDER),
             "arms": arms, "paired": paired_summary(arms), "stage_gate_problems": problems,
             "netdata": netdata, "power_errors": power.errors[:5],

@@ -153,6 +153,38 @@ def test_a_real_profile_attributes_copies_to_their_frames(tmp_path):
     assert sorted(path.name for path in tmp_path.iterdir()) == ["kept"]
 
 
+def _netdata_document():
+    def series(labels, rows):
+        return {"points": len(rows), "labels": ["time", *labels], "data": rows}
+
+    def host(idle, power):
+        return {"charts": [], "series": {
+            "system.cpu": series(["idle", "user"], [[t, idle, 100 - idle] for t in range(100, 110)]),
+            "system.ram": series(["free", "used"], [[t, 5.0, 7.0] for t in range(100, 110)]),
+            "system.io": series(["reads", "writes"], [[t, 1.0, 3.0] for t in range(100, 110)]),
+            "nvidia_smi.gpu_x_power_draw": series(
+                ["power_draw"], [[t, power if t < 105 else None] for t in range(100, 110)])}}
+
+    return {"hosts": {"sparky": host(90.0, 12.0), "sparklina": host(99.0, 4.0)}}
+
+
+def test_netdata_arm_means_give_each_arm_the_load_of_both_hosts():
+    arms = [{"kind": "before", "epoch_start": 100, "epoch_end": 104},
+            {"kind": "after", "epoch_start": 105, "epoch_end": 109}]
+    rows = measure.netdata_arm_means(_netdata_document(), arms)
+    before, after = rows
+    assert before["kind"] == "before" and after["kind"] == "after"
+    sparky, sparklina = before["hosts"]["sparky"], before["hosts"]["sparklina"]
+    assert sparky["cpu_busy_percent"] == pytest.approx(10.0)
+    assert sparklina["cpu_busy_percent"] == pytest.approx(1.0)
+    assert sparky["ram_used_mib"] == 7.0 and sparky["io_writes_kib_s"] == 3.0
+    assert sparky["gpu_power_w"] == 12.0 and sparklina["gpu_power_w"] == 4.0
+    # A row the chart has no reading for does not count as a zero.
+    assert sparky["gpu_power_w_rows"] == 5
+    assert "gpu_power_w" not in after["hosts"]["sparky"]
+    assert after["hosts"]["sparky"]["cpu_busy_percent"] == pytest.approx(10.0)
+
+
 def test_the_fixture_stages_every_unit_and_the_read_comes_off_the_stage(
         tmp_path, source_bound_reader_sdk):
     fixture = measure.build_fixture(tmp_path / "fx", units=3, rows=8, cols=16)
