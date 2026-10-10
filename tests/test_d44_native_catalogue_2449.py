@@ -25,21 +25,29 @@ class CatalogueTests(unittest.TestCase):
             blob.write_bytes(f'retained {kind}'.encode())
             encode = self.root / f'{kind}-encode.json'
             held = self.root / f'{kind}-held.json'
-            self.tasks.append({'id': f'unit-{i}', 'output_id': f'unit-{i}', 'payload': {'qname': name}})
+            leaf = name.split('.')[-1]
+            self.tasks.append({'id': f'unit-{i}', 'output_id': f'unit-{i}', 'payload': {
+                'qname': name, 'reads': [
+                    {'path': f'/frozen/{leaf}.fit.pt', 'sha256': 'a' * 64},
+                    {'path': f'/frozen/{leaf}.heldout.pt', 'sha256': 'b' * 64},
+                    {'path': '/frozen/selection-subsample-20261007.json', 'sha256': 'c' * 64}]}})
             dimensions = [4, 8] if kind != 'down' else [8, 4]
             roles = {'fit': {'count': 10, 'sha256': 'a' * 64},
                      'heldout': {'count': 3, 'sha256': 'b' * 64}}
+            conditioning = {'selection_sha256': 'c' * 64}
             encode.write_text(json.dumps({'qname': name, 'dry_run': False,
                 'blob_path': str(blob), 'blob_sha256': digest(blob), 'blob_bytes': blob.stat().st_size,
-                'rendered_shape': dimensions, **roles}))
+                'rendered_shape': dimensions, 'conditioning': conditioning, **roles}))
             held.write_text(json.dumps({'qname': name, 'dry_run': False,
-                'actual_source_shape': dimensions, **roles, 'replacement': {
+                'actual_source_shape': dimensions, 'conditioning': conditioning,
+                **roles, 'replacement': {
                     'blob': str(blob), 'blob_sha256': digest(blob), 'bytes': blob.stat().st_size,
                     'receipt': str(encode), 'receipt_sha256': digest(encode)}}))
             self.units.append({'qname': name, 'encode': {'path': str(encode), 'sha256': digest(encode)},
                                'held': {'path': str(held), 'sha256': digest(held)}})
         self.tasks.append({'id': 'unit-remaining', 'output_id': 'unit-remaining',
-                           'payload': {'qname': 'model.language_model.layers.40.mlp.experts.1.up_proj'}})
+                           'payload': {'qname': 'model.language_model.layers.40.mlp.experts.1.up_proj',
+                                       'reads': []}})
         self.request = {'roster': {'tasks': self.tasks}}
         self.manifest = {'schema': 'd44.retained_units.v1', 'units': self.units}
 

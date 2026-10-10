@@ -1,9 +1,9 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-10 (PQ #2446): the D44 native controller binds retained adoption to the frozen task scope.
-`adopt_retained_units` refuses retained fit rows, held-out rows, or a selection digest that differ from the current task payload.
+Re-stamped 2026-10-10 (PQ #2446): the D44 native controller binds retained adoption to the frozen task reads.
+`adopt_retained_units` refuses retained fit digests, held-out digests, or a selection digest that differ from the task frozen reads before retained results remove work. A task without those frozen reads refuses adoption once a retained manifest is supplied. Each retained document must carry a selection digest; the check reads both the encode and the HELD document and refuses a missing digest.
 `routed_main` refuses a supplied retained manifest that differs from the stored catalogue population before resume admits work.
-Matching retained recovery admits once without duplicate admission. Completion, ledger, disk, ship, memory, and native-owner controls stay unchanged.
+Matching retained recovery admits once without duplicate admission. Completion, ledger, disk, ship, memory, and native-owner controls stay unchanged. Both new refusals are correctness comparisons against the admitted frozen inputs, not run-identity seals: they bind input bytes the current admission reads, so they refuse in both dev and certified modes.
 
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.

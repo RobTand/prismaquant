@@ -3,9 +3,13 @@
 ## Unreleased
 
 ### Added
-- Bind D44 retained adoption and catalogue resume to the frozen task scope (#2446).
-  `adopt_retained_units` refuses retained fit rows, held-out rows, or a selection digest
-  that differ from the current task payload before retained results remove work.
+- Bind D44 retained adoption and catalogue resume to the frozen task reads (#2446).
+  `adopt_retained_units` refuses retained fit digests, held-out digests, or a selection digest
+  that differ from the task frozen reads before retained results remove work. A task without
+  those frozen reads refuses adoption once a retained manifest is supplied. Each retained
+  document must carry a selection digest; the check reads both the encode and the HELD
+  document and refuses a missing digest. Both new refusals are correctness comparisons,
+  not run-identity seals.
   `routed_main` refuses a supplied retained manifest that differs from the stored catalogue
   population before resume admits work. Matching retained recovery admits once without
   duplicate admission. Completion, ledger, disk, ship, memory, and native-owner controls stay unchanged.
