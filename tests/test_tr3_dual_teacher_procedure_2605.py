@@ -90,8 +90,20 @@ def test_doc_gives_parseable_dual_teacher_serve_and_score_commands():
 def test_doc_defines_the_receipt_path_and_format():
     text = _read_doc()
     assert "docs/measurements" in text
+    assert "docs/measurements/tr3-dual-teacher-masked-tile-20261010/" in text
+    assert "hook-qualification.json" in text
+    assert "full-vocabulary-kl.json" in text
     assert "second_teacher_full_vocabulary_kl" in text
     assert "teacher2_sha256" in text
     assert "runtime_binding" in text
     assert "candidate_identity" in text
     assert "prismaquant.glm_tr3_full_vocabulary_kl/1" in text
+
+
+def test_doc_exports_tr3_arm_and_runs_from_tessera_worktree():
+    text = _read_doc()
+    assert re.search(r"^export TR3_ARM=\S+", text, re.M), \
+        "TR3_ARM must be exported before RECEIPT_ROOT uses it"
+    assert "TESSERA_CHECKOUT" in text
+    assert "cd $TESSERA_CHECKOUT" in text
+    assert "--cwd $PRISMAQUANT_CHECKOUT" in text

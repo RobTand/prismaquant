@@ -5,9 +5,11 @@ PrismaBuild (PB) procedure for served TR3 on both teachers. The scorer is
 `experiments/measure_glm_tr3_vllm.py`. It scores the candidate against both
 teachers in one pass when `--teacher2` is set.
 
-Run the client commands from a tessera worktree. Point `PRISMAQUANT_CHECKOUT`
-at a PrismaQuant checkout at a commit that contains this doc. Record that
-commit in the receipt. PB snapshots that checkout and runs the snapshot.
+Run the client commands from a tessera worktree. Set `TESSERA_CHECKOUT` to
+that worktree and run each `pbrun.py` command from it. Point
+`PRISMAQUANT_CHECKOUT` at a PrismaQuant checkout at a commit that contains
+this doc. Record that commit in the receipt. PB snapshots the PrismaQuant
+checkout named by `--cwd` and runs the snapshot.
 
 ## Teachers and matched input set
 
@@ -66,7 +68,10 @@ Submit one PB GPU action per reservation. It serves the candidate and writes
 the one-window hook qualification. Set the shell variables first.
 
 ```bash
+export TESSERA_CHECKOUT=/path/to/tessera
+cd $TESSERA_CHECKOUT
 export PRISMAQUANT_CHECKOUT=/path/to/prismaquant
+export TR3_ARM=masked-tile
 export SERVE_IMAGE=localhost/prismaquant/spark-vllm-nccl230@sha256:5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a
 export SERVING_PYTHON=/path/to/serve-image-python
 export CANDIDATE_DIR=/path/to/masked-tile-candidate
@@ -99,8 +104,9 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --output $RECEIPT_ROOT/hook-qualification.json
 ```
 
-Name `$TR3_ARM` after the masked-tile arm in tessera#1176. Keep the two k2
-jobs on separate reservations. Hash the qualification after it completes:
+`$TR3_ARM` defaults to `masked-tile` above. Use the masked-tile arm name
+from tessera#1176 when it differs. Keep the two k2 jobs on separate
+reservations. Hash the qualification after it completes:
 
 ```bash
 QUAL_SHA=$(sha256sum $RECEIPT_ROOT/hook-qualification.json | cut -d' ' -f1)
@@ -108,8 +114,10 @@ QUAL_SHA=$(sha256sum $RECEIPT_ROOT/hook-qualification.json | cut -d' ' -f1)
 
 ## Job 2: dual-teacher score (full panel)
 
-Run this only after job 1 passes. It replays the qualification binding, then
-scores all 25 windows against both teachers in one engine load.
+Run this only after job 1 passes, from the same tessera worktree shell
+(`cd $TESSERA_CHECKOUT` with the job 1 variables still set). It replays the
+qualification binding, then scores all 25 windows against both teachers in
+one engine load.
 
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
@@ -150,12 +158,15 @@ TP 2 above is the default.
 
 ## Receipt path and format
 
-Keep every receipt under this doc's scope in `docs/measurements`. The
-measured JSON receipts live at `$RECEIPT_ROOT`:
+The worker writes the measured JSON receipts to `$RECEIPT_ROOT` on shared
+storage. Copy each receipt into this repository at
+`docs/measurements/tr3-dual-teacher-masked-tile-20261010/` with the same
+file name, and commit the copy. The committed copy under
+`docs/measurements` is the receipt of record:
 
-- `$RECEIPT_ROOT/hook-qualification.json`: schema `prismaquant.glm_tr3_hook_qualification/1`, one window.
-- `$RECEIPT_ROOT/full-vocabulary-kl.json`: schema `prismaquant.glm_tr3_full_vocabulary_kl/1`, 25 windows, 51175 positions.
-- `$RECEIPT_ROOT/full-vocabulary-kl.runtime-<sha256>.json`: the initialized runtime observation, written before scoring.
+- `docs/measurements/tr3-dual-teacher-masked-tile-20261010/hook-qualification.json`: schema `prismaquant.glm_tr3_hook_qualification/1`, one window.
+- `docs/measurements/tr3-dual-teacher-masked-tile-20261010/full-vocabulary-kl.json`: schema `prismaquant.glm_tr3_full_vocabulary_kl/1`, 25 windows, 51175 positions.
+- `docs/measurements/tr3-dual-teacher-masked-tile-20261010/full-vocabulary-kl.runtime-<sha256>.json`: the initialized runtime observation, written before scoring.
 
 The full-panel result must carry these fields:
 
