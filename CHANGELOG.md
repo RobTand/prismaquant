@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Bind D44 retained adoption and catalogue resume to the frozen task scope (#2446).
+  `adopt_retained_units` refuses retained fit rows, held-out rows, or a selection digest
+  that differ from the current task payload before retained results remove work.
+  `routed_main` refuses a supplied retained manifest that differs from the stored catalogue
+  population before resume admits work. Matching retained recovery admits once without
+  duplicate admission. Completion, ledger, disk, ship, memory, and native-owner controls stay unchanged.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers

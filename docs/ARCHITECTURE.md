@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (PQ #2446): the D44 native controller binds retained adoption to the frozen task scope.
+`adopt_retained_units` refuses retained fit rows, held-out rows, or a selection digest that differ from the current task payload.
+`routed_main` refuses a supplied retained manifest that differs from the stored catalogue population before resume admits work.
+Matching retained recovery admits once without duplicate admission. Completion, ledger, disk, ship, memory, and native-owner controls stay unchanged.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
