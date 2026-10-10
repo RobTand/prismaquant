@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import io
 import json
 import math
@@ -39,6 +38,10 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX, LengthFramedSourceSha256,
+    bytes_sha256hex, file_sha256hex)
 
 SCHEMA = "prismaquant.pq2530.mtp_layer45_audit.v1"
 WORKSPACE = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925")
@@ -98,23 +101,15 @@ EXCLUDED_M3_ATTEMPTS = {
 
 
 # --------------------------------------------------------------------------- helpers
-def log(message, *, always=False):
+def audit_note(message, *, always=False):
     """Progress goes to stderr only on request, so a passing run's stdout is exactly its JSON record."""
     if always or os.environ.get("PQ2530_AUDIT_VERBOSE") == "1":
         print(f"[audit] {message}", file=sys.stderr, flush=True)
 
 
-def sha256_bytes(raw) -> str:
-    return hashlib.sha256(raw).hexdigest()
-
-
-def sha256_file(path) -> str:
-    with open(path, "rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def canonical(value) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+def compact_json_sha256(value) -> str:
+    """The SHA-256 of a value in the compact sorted-JSON spelling that PrismaBuild receipts use."""
+    return bytes_sha256hex(DIRECT_ASCII_LAX.encoded(value))
 
 
 def unit_class(name):
@@ -134,7 +129,7 @@ class Ledger:
     def check(self, name, ok, detail=""):
         self.checks.append({"name": name, "ok": bool(ok), "detail": str(detail)[:600]})
         if not ok:
-            log(f"FAIL {name}: {str(detail)[:300]}", always=True)
+            audit_note(f"FAIL {name}: {str(detail)[:300]}", always=True)
         return bool(ok)
 
 
@@ -147,7 +142,7 @@ class Inputs:
     def read(self, role, path) -> bytes:
         raw = Path(path).read_bytes()
         self.rows[(role, str(path))] = {"role": role, "path": str(path),
-                                        "sha256": sha256_bytes(raw), "bytes": len(raw)}
+                                        "sha256": bytes_sha256hex(raw), "bytes": len(raw)}
         return raw
 
     def json(self, role, path):
@@ -159,7 +154,7 @@ class Inputs:
     def bind(self, role, path) -> str:
         """Record a file by streaming digest, for files the audit does not parse whole."""
         path = Path(path)
-        digest = sha256_file(path)
+        digest = file_sha256hex(path)
         self.rows[(role, str(path))] = {"role": role, "path": str(path), "sha256": digest,
                                         "bytes": path.stat().st_size}
         return digest
@@ -197,7 +192,7 @@ class Identities:
 
     def add(self, kind, where, value):
         if value is not None:
-            self.seen.setdefault(kind, {}).setdefault(json.dumps(value, sort_keys=True), []).append(where)
+            self.seen.setdefault(kind, {}).setdefault(DIRECT_ASCII_SPACED_LAX.text(value), []).append(where)
 
     def table(self, ledger, allowed_split=()):
         rows = []
@@ -248,7 +243,7 @@ def resolve_key(pb_root, key):
     return found[0]
 
 
-def _spec_of(request):
+def sealed_spec_of(request):
     """The container spec and inner command of a campaign row's sealed shell command."""
     argv = (request.get("task") or {}).get("argv") or []
     text = argv[-1] if argv else ""
@@ -307,7 +302,7 @@ def verify_action(pb_root, key, role) -> dict:
     logs = (adopted.get("logs") or {}).get("stdout") or {}
     log_path = queue / logs.get("path", "missing")
     raw = log_path.read_bytes() if log_path.is_file() else b""
-    row["stdout"] = {"sha256": sha256_bytes(raw), "bytes": len(raw)}
+    row["stdout"] = {"sha256": bytes_sha256hex(raw), "bytes": len(raw)}
     if (row["stdout"]["sha256"], row["stdout"]["bytes"]) != (logs.get("sha256"), logs.get("bytes")):
         problem("stdout log differs from the attempt record")
     marker = raw.rfind(b'\n{"local_result_claim_sha256"')
@@ -315,14 +310,14 @@ def verify_action(pb_root, key, role) -> dict:
         problem("stdout has no worker receipt line")
         return row
     payload, trailer = raw[:marker + 1], json.loads(raw[marker + 1:])
-    row["payload"] = {"sha256": sha256_bytes(payload), "bytes": len(payload)}
+    row["payload"] = {"sha256": bytes_sha256hex(payload), "bytes": len(payload)}
     receipt_path = cas / "actions" / "v3" / key[:2] / f"{key}.json"
     receipt = json.loads(receipt_path.read_bytes()) if receipt_path.is_file() else {}
     body = {name: value for name, value in receipt.items() if name != "receipt_sha256"}
     result = receipt.get("result") or {}
     row["receipt"] = {"sha256": receipt.get("receipt_sha256"), "schema": receipt.get("schema"),
                       "result_sha256": result.get("sha256"), "result_bytes": result.get("bytes"),
-                      "recomputed_sha256": sha256_bytes(canonical(body)) if receipt else None}
+                      "recomputed_sha256": compact_json_sha256(body) if receipt else None}
     if not receipt or receipt.get("action_key") != key:
         problem("CAS receipt is absent or names another action")
     if row["receipt"]["sha256"] != row["receipt"]["recomputed_sha256"]:
@@ -335,19 +330,19 @@ def verify_action(pb_root, key, role) -> dict:
         problem(f"worker receipt status {trailer.get('status')!r}")
     blob_path = cas / "blobs" / str(result.get("sha256", "00"))[:2] / str(result.get("sha256"))
     blob = blob_path.read_bytes() if blob_path.is_file() else b""
-    row["blob"] = {"sha256": sha256_bytes(blob), "bytes": len(blob)}
+    row["blob"] = {"sha256": bytes_sha256hex(blob), "bytes": len(blob)}
     if (row["blob"]["sha256"], row["blob"]["bytes"]) != (result.get("sha256"), result.get("bytes")):
         problem("CAS blob differs from the receipt result")
     request_path = cas / "requests" / key[:2] / f"{key}.json"
     request = json.loads(request_path.read_bytes()) if request_path.is_file() else {}
     row["request"] = {"action_key": request.get("action_key"),
-                      "manifest_sha256": sha256_bytes(canonical(request)) if request else None}
+                      "manifest_sha256": compact_json_sha256(request) if request else None}
     if request.get("action_key") != key or row["request"]["manifest_sha256"] != receipt.get("action_manifest_sha256"):
         problem("sealed request differs from the receipt's action manifest")
     snapshot = (request.get("params") or {}).get("checkout_snapshot") or {}
     row["snapshot"] = {"commit": snapshot.get("commit"), "parent": snapshot.get("parent"),
                        "bundle_sha256": (snapshot.get("input") or {}).get("sha256")}
-    spec, inner = _spec_of(request)
+    spec, inner = sealed_spec_of(request)
     if spec is not None:
         mounts = (spec.get("container") or {}).get("mounts", [])
         row["spec"] = {"dev_mode": (spec.get("env") or {}).get("PRISMAQUANT_DEV_MODE"),
@@ -449,21 +444,20 @@ def package_profile(root):
     paths = sorted(p for p in root.rglob("*")
                    if p.is_file() and "__pycache__" not in p.relative_to(root).parts
                    and p.suffix not in {".pyc", ".pyo"})
-    digest = hashlib.sha256()
+    digest = LengthFramedSourceSha256()
     files = {}
     for path in paths:
         relative = path.relative_to(root).as_posix()
         payload = path.read_bytes()
-        encoded = relative.encode()
-        digest.update(len(encoded).to_bytes(4, "big") + encoded + len(payload).to_bytes(8, "big") + payload)
-        files[relative] = sha256_bytes(payload)
+        digest.update(relative, payload)
+        files[relative] = bytes_sha256hex(payload)
     return digest.hexdigest(), files
 
 
 def recover_tree(pb_root, bundle_sha256, scratch):
     """The package tree a PrismaBuild snapshot executed, extracted from its git bundle."""
     bundle = Path(pb_root) / "cas" / "blobs" / bundle_sha256[:2] / bundle_sha256
-    if sha256_file(bundle) != bundle_sha256:
+    if file_sha256hex(bundle) != bundle_sha256:
         raise RuntimeError(f"snapshot bundle {bundle_sha256} does not hash to its address")
     clone = Path(scratch) / f"clone-{bundle_sha256[:12]}"
     subprocess.run(["git", "clone", "--quiet", "--no-checkout", str(bundle), str(clone)], check=True,
@@ -570,7 +564,7 @@ def audit_projection(ws, inputs, ledger, census, ids):
     ledger.check("projection.equals_census_copy", census["expert_projection"] == projection,
                  "the census carries the producer projection unchanged")
     files = projection["producer"]["source"]["files"]
-    ids.add("source.shard_digests_sha256", "producer-projection", sha256_bytes(canonical(files)))
+    ids.add("source.shard_digests_sha256", "producer-projection", compact_json_sha256(files))
     return projection, {"units": len(names), "geometry": dict(sorted(geometry.items())),
                         "source_shards": len(files)}
 
@@ -589,11 +583,11 @@ def audit_calibration(inputs, ledger, census, ids):
         provenance[key] == census[key] for key in ("text_sha256", "fit_ids_sha256", "nsamples", "seqlen", "seed"))
         and provenance["fit_tokens"] == 262144 and metadata["original_census_sha256"]
         == census["mtp_extension"]["base_census"]["sha256"], "text, fit ids, draw size and seed; prepared for the base census")
-    ids.add("calibration.artifact_sha256", "calibration-tokens-file", sha256_bytes(raw))
-    ids.add("calibration.calibration_sha256", "calibration-tokens-file", sha256_bytes(data))
+    ids.add("calibration.artifact_sha256", "calibration-tokens-file", bytes_sha256hex(raw))
+    ids.add("calibration.calibration_sha256", "calibration-tokens-file", bytes_sha256hex(data))
     ids.add("calibration.text_sha256", "calibration-tokens-file", provenance["text_sha256"])
     ids.add("calibration.fit_ids_sha256", "calibration-tokens-file", provenance["fit_ids_sha256"])
-    return {"artifact_sha256": sha256_bytes(raw), "token_bytes_sha256": sha256_bytes(data),
+    return {"artifact_sha256": bytes_sha256hex(raw), "token_bytes_sha256": bytes_sha256hex(data),
             "shape": tensor["shape"], "dtype": tensor["dtype"], "provenance": provenance}
 
 
@@ -767,7 +761,7 @@ def recompute_checkpoint_seal(path, rate, declared, ledger, ids):
     ids.add("producer.encoder_source_sha256", where, [identity["encoder_source_sha256"]])
     ids.add("producer.m3_campaign_source_sha256", where, identity["prismaquant_source_sha256"])
     ids.add("calibration.fit_ids_sha256", where, identity["calibration"]["fit_ids_sha256"])
-    ids.add("source.shard_digests_sha256", where, sha256_bytes(canonical(identity["expert_projection"]["source"]["files"])))
+    ids.add("source.shard_digests_sha256", where, compact_json_sha256(identity["expert_projection"]["source"]["files"]))
     del manifest, identity
     gc.collect()
     return recomputed
@@ -921,8 +915,8 @@ def audit_stage_b(ws, rate, inputs, ledger, facts, a, ids):
         ids.add("calibration.fit_ids_sha256", where, results["calibration_input"]["provenance"]["fit_ids_sha256"])
         ids.add("calibration.text_sha256", where, results["calibration_input"]["provenance"]["text_sha256"])
         ids.add("producer.prismaquant_source_sha256", where, results["dev_mode"]["producer_source_sha256"])
-    ids.add("source.shard_digests_sha256", f"m4-{rate}-prepared-authentication", sha256_bytes(canonical(
-        {f["name"]: f["sha256"] for f in auth["verified_files"] if f["name"].startswith("model-")})))
+    ids.add("source.shard_digests_sha256", f"m4-{rate}-prepared-authentication", compact_json_sha256(
+        {f["name"]: f["sha256"] for f in auth["verified_files"] if f["name"].startswith("model-")}))
     ids.add("source.identity_file_sha256", f"m4-{rate}", identity_files[0])
     return {"price": price, "production": production, "verified": verified, "prepared": prepared,
             "prepare_results": prepare_results, "run_results": run_results, "price_path": price_path,
@@ -943,7 +937,7 @@ def audit_source_immutability(identity_path, ledger, ids):
     shards = {Path(s["path"]).name: s["sha256"] for s in document["identity"]["shards"]}
     ledger.check("source.fingerprints_unchanged", not changed and len(document["fingerprints"]) == 120,
                  f"{len(document['fingerprints'])} shards, {len(changed)} changed since they were hashed")
-    ids.add("source.shard_digests_sha256", "source-identity-file", sha256_bytes(canonical(shards)))
+    ids.add("source.shard_digests_sha256", "source-identity-file", compact_json_sha256(shards))
     ids.add("source.model_content_sha256", "source-identity-file", document["identity"]["content_sha256"])
     return {"shards": len(shards), "changed": changed, "content_sha256": document["identity"]["content_sha256"]}
 
@@ -1002,7 +996,7 @@ def audit_chain(ws, inputs, ledger, parts_by_rate, ids, out_dir):
     out_dir = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="pq2530-merged-", dir=os.environ.get("TMPDIR")))
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "merged-cost-current.pkl").write_bytes(raw)
-    current_record = {"sha256": sha256_bytes(raw), "bytes": len(raw), "file": "merged-cost-current.pkl",
+    current_record = {"sha256": bytes_sha256hex(raw), "bytes": len(raw), "file": "merged-cost-current.pkl",
                       "path": str(out_dir / "merged-cost-current.pkl")}
     return {"original": original, "original_sha256": original_sha, "original_join": original_join,
             "current": current, "current_record": current_record, "enriched": enriched, "probe": probe}
@@ -1033,7 +1027,7 @@ def offered_menus(payload):
         payload, _mtp_rung_attestation(target, profile), stats=stats, context_by_unit=contexts,
         target_profile=TARGET_PROFILE)
     with as_file(contract.contract_path()) as path:
-        contract_sha256 = sha256_file(path)
+        contract_sha256 = file_sha256hex(path)
     return {"contract_sha256": contract_sha256,
             "unattested": {rung: len(units) for rung, units in unattested.items()},
             "menus": {name: sorted(rung for rung in menu if rung != "BF16") for name, menu in rows.items()}}
@@ -1134,7 +1128,7 @@ def _verify_wire_batch(batch):
             error = None
         except Exception as exc:  # the producer names its own refusal
             error = f"{type(exc).__name__}: {exc}"[:200]
-        out.append((path, sha256_bytes(blob), len(blob), error))
+        out.append((path, bytes_sha256hex(blob), len(blob), error))
     return out
 
 
@@ -1159,7 +1153,7 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
         progress.advance("capture")
         return name, row
 
-    log(f"capture: verifying {len(names)} entries through the owner")
+    audit_note(f"capture: verifying {len(names)} entries through the owner")
     with ThreadPoolExecutor(max_workers=min(workers, 8)) as pool:
         for name, row in pool.map(one, names):
             capture_rows[name] = row
@@ -1177,7 +1171,7 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
                                        "wire_dir": a["wire_dir"], "verified": b["verified"][(name, rung)],
                                        "render": b["production"].weights[(name, rung)]}
     keys = sorted(cells)[:limit * 4] if limit else sorted(cells)
-    log(f"wires: producer verification of {len(keys)} blobs")
+    audit_note(f"wires: producer verification of {len(keys)} blobs")
     batches = [[(str(cells[k]["wire_dir"] / cells[k]["record"]["file"]), cells[k]["record"]) for k in keys[i:i + 16]]
                for i in range(0, len(keys), 16)]
     wire_rows = {}
@@ -1192,10 +1186,10 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
         cell = cells[key]
         digest, size, error = wire_rows[str(cell["wire_dir"] / cell["record"]["file"])]
         cell.update(wire_sha256=digest, wire_file_bytes=size, producer_error=error)
-    log(f"renders: hashing {len(keys)} rendered shards")
+    audit_note(f"renders: hashing {len(keys)} rendered shards")
 
     def render(key):
-        digest = sha256_file(cells[key]["render"])
+        digest = file_sha256hex(cells[key]["render"])
         progress.advance("renders")
         return key, digest
 
@@ -1294,7 +1288,7 @@ def write_csv(path, columns, rows):
     writer.writerows(rows)
     raw = buffer.getvalue().encode()
     Path(path).write_bytes(raw)
-    return {"file": Path(path).name, "sha256": sha256_bytes(raw), "bytes": len(raw), "rows": len(rows),
+    return {"file": Path(path).name, "sha256": bytes_sha256hex(raw), "bytes": len(raw), "rows": len(rows),
             "columns": list(columns)}
 
 
@@ -1471,14 +1465,14 @@ def main(argv=None):
     extra = [tuple(item.split("=", 1)) for item in args.extra_action]
     if args.verify_actions_only:
         rows = [verify_action(pb, key, role) for role, key in extra]
-        print(json.dumps({"schema": SCHEMA + ".actions", "actions": rows}, sort_keys=True))
+        print(DIRECT_ASCII_LAX.text({"schema": SCHEMA + ".actions", "actions": rows}))
         return 0 if all(r.get("ok") for r in rows) else 1
     summary = {"schema": SCHEMA, "issue": "RobTand/prismaquant#2530", "parent": "RobTand/prismaquant#1271",
                "layer": LAYER, "limit_units": args.limit_units, "sections": sorted(sections),
                "skip_seal_recompute": args.skip_seal_recompute,
                "interpreter": {"path": sys.executable, "python": sys.version.split()[0]},
                "argv": [str(a) for a in (argv if argv is not None else sys.argv[1:])],
-               "tool": {"path": "tools/audit_glm_mtp_layer45.py", "sha256": sha256_file(__file__)}}
+               "tool": {"path": "tools/audit_glm_mtp_layer45.py", "sha256": file_sha256hex(__file__)}}
     census_path = ws / "m1/v2/mtp-census.json"
     census = inputs.json("authenticated-census", census_path)
     census_sha = inputs.sha("authenticated-census", census_path)
@@ -1565,9 +1559,9 @@ def main(argv=None):
                 ledger.check(f"record.{item}", False, "offline validator on the tables just written")
     failed = [c for c in ledger.checks if not c["ok"]]
     summary.update({"checks": ledger.checks, "passed": len(ledger.checks) - len(failed), "failed": len(failed)})
-    sys.stdout.write(json.dumps(summary, sort_keys=True, indent=1) + "\n")
+    sys.stdout.write(DIRECT_ASCII_INDENT2_LAX.text(summary) + "\n")
     sys.stdout.flush()
-    log(f"{summary['passed']} checks passed, {summary['failed']} failed")  # verbose only
+    audit_note(f"{summary['passed']} checks passed, {summary['failed']} failed")  # verbose only
     return 0 if not failed else 1
 
 
