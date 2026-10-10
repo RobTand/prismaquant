@@ -19,6 +19,7 @@ ordinal. Fewer dispatch nodes, not fewer asserted outcomes.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import os
 from pathlib import Path
@@ -189,3 +190,143 @@ def test_file_sha256hex_keeps_read_all_and_type_refusals(tmp_path):
     assert digests.file_sha256hex(path, block_size=None) == _ABC
     with pytest.raises(TypeError):
         digests.file_sha256hex(path, block_size=0.0)
+
+
+# --- the package-digest route (prismaquant#2648) ----------------------------------
+#
+# Census call ``hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13``
+# (refresh_2540 owner ``prismaquant.digests.LengthFramedSourceSha256``) keeps its
+# exact bytes: be32 name length, strict UTF-8 name, be64 payload length, payload.
+# The Path-component sort, the file reads, and the hexdigest wrapper stay with
+# the caller. Every row below pins the pre-route outcome.
+
+#: The census call this section freezes.
+_PACKAGE_DIGEST_CENSUS_ID = (
+    "hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13")
+
+#: Small inputs shaped like the real argument: plain, nested, non-ASCII, empty.
+_PACKAGE_DIGEST_INPUTS = {
+    "ascii": {"b.py": b"keep\n", "a.py": b"one\n"},
+    "nested": {"a.py": b"payload for a.py\n", "a/b.py": b"payload for a/b.py\n"},
+    "unicode": {"caf\u00e9.py": b"x", "\u00e9/b.py": b"\x00\xff", "a.py": b"first"},
+    "empty": {},
+}
+
+
+def _package_digest_path_framed(files):
+    """The exact pre-route byte recipe, in the caller's Path-component order."""
+    framed = hashlib.sha256()
+    for name, payload in sorted(files.items(), key=lambda item: Path(item[0])):
+        encoded = name.encode("utf-8")
+        framed.update(len(encoded).to_bytes(4, "big"))
+        framed.update(encoded)
+        framed.update(len(payload).to_bytes(8, "big"))
+        framed.update(payload)
+    return framed
+
+
+@pytest.mark.parametrize("name", list(_PACKAGE_DIGEST_INPUTS))
+def test_package_digest_keeps_its_bytes(name):
+    """The routed site keeps its digest on each shaped input (PQ #2648)."""
+    from tools.generate_transition_rewrites import _package_digest
+
+    files = _PACKAGE_DIGEST_INPUTS[name]
+    GOLDEN.value((_PACKAGE_DIGEST_CENSUS_ID, name))
+    GOLDEN.call(lambda: _package_digest(files))
+    assert _package_digest(files) == _package_digest_path_framed(files).hexdigest()
+
+
+def test_package_digest_keeps_path_order_not_posix_order():
+    """``a/b.py`` precedes ``a.py``: Path parts, not POSIX strings (PQ #2648)."""
+    from tools.generate_transition_rewrites import _package_digest
+
+    files = _PACKAGE_DIGEST_INPUTS["nested"]
+    GOLDEN.value((_PACKAGE_DIGEST_CENSUS_ID, "path-order"))
+    forward = _package_digest(files)
+    backward = _package_digest(dict(reversed(list(files.items()))))
+    GOLDEN.call(lambda: forward)
+    GOLDEN.call(lambda: backward)
+    assert forward == backward
+    assert forward == _package_digest_path_framed(files).hexdigest()
+    posix = hashlib.sha256()
+    for name in sorted(files):
+        encoded, payload = name.encode("utf-8"), files[name]
+        posix.update(len(encoded).to_bytes(4, "big") + encoded)
+        posix.update(len(payload).to_bytes(8, "big") + payload)
+    assert forward != posix.hexdigest()
+
+
+def test_package_digest_truncation_changes_the_digest():
+    """A payload prefix never stands in for the full payload (PQ #2648)."""
+    from tools.generate_transition_rewrites import _package_digest
+
+    GOLDEN.value((_PACKAGE_DIGEST_CENSUS_ID, "truncation"))
+    full = _package_digest({"a.py": b"abc"})
+    short = _package_digest({"a.py": b"ab"})
+    GOLDEN.call(lambda: full)
+    GOLDEN.call(lambda: short)
+    assert full != short
+    assert full == _package_digest_path_framed({"a.py": b"abc"}).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("label", "files", "raised"),
+    (("surrogate-name", {"a\ud800.py": b"x"}, "builtins.UnicodeEncodeError"),
+     ("str-payload", {"a.py": "not bytes"}, "builtins.TypeError"),
+     ("none-payload", {"a.py": None}, "builtins.TypeError")),
+    ids=["surrogate-name", "str-payload", "none-payload"])
+def test_package_digest_refuses(label, files, raised):
+    """Strict UTF-8 names and byte payloads refuse as before (PQ #2648)."""
+    from tools.generate_transition_rewrites import _package_digest
+
+    GOLDEN.value((_PACKAGE_DIGEST_CENSUS_ID, label))
+    row = GOLDEN.call(lambda: _package_digest(files))
+    assert row["raised"] == raised
+
+
+def test_package_digest_routes_through_the_framed_source_owner(monkeypatch):
+    """The site feeds caller-ordered records to LengthFramedSourceSha256."""
+    import tools.generate_transition_rewrites as generator
+    from prismaquant import digests as owners
+
+    seen = []
+    real = owners.LengthFramedSourceSha256
+
+    class _Spy(real):
+        def update(self, name, payload):
+            seen.append((name, payload))
+            super().update(name, payload)
+
+    monkeypatch.setattr(generator, "LengthFramedSourceSha256", _Spy)
+    files = _PACKAGE_DIGEST_INPUTS["unicode"]
+    Routable = getattr(generator, "LengthFramedSourceSha256", None)
+    assert Routable is _Spy
+    digest = generator._package_digest(files)
+    ordered = sorted(files.items(), key=lambda item: Path(item[0]))
+    assert seen == ordered
+    check = real()
+    for name, payload in ordered:
+        check.update(name, payload)
+    assert digest == check.hexdigest()
+
+
+def test_package_digest_generator_output_matches_frozen(tmp_path, capsys):
+    """A small sealed/executing pair emits the frozen rewrite block (PQ #2648)."""
+    from tools.generate_transition_rewrites import main
+
+    GOLDEN.value((_PACKAGE_DIGEST_CENSUS_ID, "generator"))
+    sealed = tmp_path / "sealed"
+    executing = tmp_path / "executing"
+    (sealed / "a.py").parent.mkdir(parents=True, exist_ok=True)
+    (sealed / "a.py").write_text("one\ntwo\nthree\nfour\n")
+    (sealed / "b.py").write_text("keep\n")
+    (sealed / "c.py").write_text("same\n")
+    (executing / "a.py").parent.mkdir(parents=True, exist_ok=True)
+    (executing / "a.py").write_text("one\ntwo\nthree\nfour\n")
+    (executing / "b.py").write_text("keep\nchanged\n")
+    (executing / "c.py").write_text("same\n")
+    (executing / "new.py").write_text("verifier\n")
+    assert main(["--sealed-dir", str(sealed), "--executing-dir", str(executing),
+                 "--new-file", "new.py"]) == 0
+    out, _ = capsys.readouterr()
+    GOLDEN.value(out)
