@@ -149,6 +149,7 @@ from .fixed_head import (
 )
 from .footprint import whole_artifact_budget_stamp
 from .footprint import (
+    GB,
     NVFP4_WEIGHT_ONLY_STATS_KEY,
     nvfp4_global_sidecar_bytes,
 )
@@ -883,6 +884,34 @@ def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowabi
             for name, fmt in assignment.items()}
 
 
+def _load_mtp_inputs(args, *, serving_target=None, profile=None, rung_allowability=None,
+                     target_profile=None) -> dict:
+    """Parse the MTP inputs every MTP path reads (PQ #1346).
+
+    The winner selector and the Option B enumerator share this owner, so a
+    declared menu, group pin, scope input or attestation cannot drift between
+    the two. Acceptance points are parsed here and consumed only by the winner
+    selector; enumeration admits every feasible declared choice instead.
+    """
+    from .glm_mtp_selection import load_mtp_cost
+
+    payload = load_mtp_cost(args.mtp_joint_cost)
+    constants = json.loads(Path(args.mtp_serve_constants).read_text())
+    points = (json.loads(Path(args.mtp_acceptance_points).read_text())
+              if args.mtp_acceptance_points else [])
+    fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
+             if getattr(args, "mtp_fixed_formats", None) else None)
+    stats, contexts = _mtp_scope_inputs(payload, serving_target, profile,
+        routing=getattr(args, "mtp_routing", None))
+    declared = getattr(args, "mtp_formats", None)
+    return {
+        "payload": payload, "constants": constants, "acceptance_points": points,
+        "fixed_formats": fixed, "stats": stats, "contexts": contexts,
+        "eligible": _mtp_rung_attestation(serving_target, profile),
+        "formats": (None if declared is None else declared.split(",")),
+    }
+
+
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
                 target_profile=None) -> tuple[dict, dict]:
     """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
@@ -896,29 +925,25 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
     are intersected with it, and a declaration that leaves a unit or a group
     without a rung exits 2 rather than falling back to the attested menu.
     """
-    from .glm_mtp_selection import MtpMenuRefused, load_mtp_cost, select_mtp_rungs
+    from .glm_mtp_selection import MtpMenuRefused, select_mtp_rungs
 
     if args.mtp_byte_budget is None or not args.mtp_serve_constants:
         raise SystemExit("[alloc] --mtp-joint-cost requires --mtp-byte-budget "
                          "and --mtp-serve-constants")
-    declared = getattr(args, "mtp_formats", None)
     try:
-        payload = load_mtp_cost(args.mtp_joint_cost)
-        constants = json.loads(Path(args.mtp_serve_constants).read_text())
-        points = (json.loads(Path(args.mtp_acceptance_points).read_text())
-                  if args.mtp_acceptance_points else [])
-        fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
-                 if getattr(args, "mtp_fixed_formats", None) else None)
-        stats, contexts = _mtp_scope_inputs(payload, serving_target, profile,
-            routing=getattr(args, "mtp_routing", None))
-        record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
-                                  constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile),
-                                  fixed_formats=fixed, rung_allowability=rung_allowability,
-                                  stats=stats, context_by_unit=contexts, target_profile=target_profile,
+        inputs = _load_mtp_inputs(args, serving_target=serving_target, profile=profile,
+                                  rung_allowability=rung_allowability, target_profile=target_profile)
+        record = select_mtp_rungs(inputs["payload"], byte_budget=args.mtp_byte_budget,
+                                  constants=inputs["constants"],
+                                  acceptance_points=inputs["acceptance_points"],
+                                  eligible=inputs["eligible"],
+                                  fixed_formats=inputs["fixed_formats"],
+                                  rung_allowability=rung_allowability,
+                                  stats=inputs["stats"], context_by_unit=inputs["contexts"],
+                                  target_profile=target_profile,
                                   allowability_m=getattr(args, "mtp_regime", None),
                                   allowability_tensor_parallel=getattr(args, "mtp_tensor_parallel", None) or 1,
-                                  formats=(None if declared is None else declared.split(",")))
+                                  formats=inputs["formats"])
     except MtpMenuRefused as exc:
         import sys
 
@@ -926,7 +951,7 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
         raise SystemExit(2) from exc
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
-    return payload, record
+    return inputs["payload"], record
 
 
 def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
@@ -958,6 +983,346 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
     print(f"[alloc] MTP selection: {record['rung']} "
           f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
           f"({record['selection']['regime']})", flush=True)
+
+
+@dataclass
+class _MtpOptionBContext:
+    """Explicit inputs the Option B runner borrows from ``main`` (PQ #2532).
+
+    The runner enumerates MTP choices and prices bodies, but every policy it
+    applies arrives here: the ship ratchet's predicates, the shared pricing
+    closures, and the run's budgets and manifests. Nothing is re-derived.
+    """
+    args: object
+    budget_bytes: int
+    overhead_reserve_bytes: int
+    curve: list
+    targets: list
+    specs_sorted: list
+    src_total_full: int
+    src_manifest: object
+    stats: dict
+    accounting_stats: dict
+    fixed_stats: dict
+    serving_target: object
+    profile: object
+    rung_allowability: object
+    target_profile: object
+    serving_constraints_active: bool
+    pact_pricing: object
+    artifact_for_target: Callable
+    menu_floor_target_bits: Callable
+    fits_bytes: Callable
+    fits: Callable
+    beats: Callable
+    excluded_source_total: Callable
+    write_layer_config: Callable
+
+
+def _option_b_body_for(ctx: _MtpOptionBContext, priced_source_total) -> tuple:
+    """Min-dloss body probe under the cap for one MTP remainder (PQ #2532).
+
+    Mirrors the ship ratchet through the same predicates, pricing and exact
+    filter: grid over the Pareto curve, menu-floor extension, min predicted
+    dloss with ties to the larger footprint. Returns ``(probe, info)``, or
+    ``(None, rejection)`` when nothing fits the remainder.
+    """
+    from .saturation_select import select_under_byte_budget
+
+    artifact_for_target = ctx.artifact_for_target
+    budget_bytes = ctx.budget_bytes
+
+    def _artifact_c(t):
+        return artifact_for_target(float(t), source_total=int(priced_source_total))
+
+    grid_c = []
+    for _row in ctx.curve:
+        if not _row.get("feasible"):
+            continue
+        _probe_c = _artifact_c(float(_row["target_bits"]))
+        if _probe_c is not None:
+            grid_c.append(_probe_c)
+    sel_c = select_under_byte_budget(
+        grid_c, budget_bytes, bytes_key="whole_artifact_upper_bound_bytes")
+    if not sel_c["feasible"]:
+        _floor_bits = ctx.menu_floor_target_bits()
+        _swept_min = min(ctx.targets) if ctx.targets else None
+        if (_floor_bits is not None and _swept_min is not None
+                and float(_swept_min) > _floor_bits + 1e-9):
+            _ratio = (float(_swept_min) / _floor_bits) ** (1.0 / 8)
+            for _step in range(8):
+                _probe_c = _artifact_c(float(_floor_bits * (_ratio ** _step)))
+                if _probe_c is not None:
+                    grid_c.append(_probe_c)
+            grid_c.sort(key=lambda c: float(c["target_bits"]))
+            sel_c = select_under_byte_budget(
+                grid_c, budget_bytes, bytes_key="whole_artifact_upper_bound_bytes")
+    if not sel_c["feasible"]:
+        _cheapest = sel_c.get("rejected_next") or (grid_c[0] if grid_c else None)
+        return None, {
+            "reason": "below_floor",
+            "cheapest_whole_artifact_upper_bound_bytes": (
+                _cheapest["whole_artifact_upper_bound_bytes"]
+                if _cheapest is not None else None),
+        }
+    _best_c, _emit_c = None, None
+    _trace_c, _serve_rej_c, _serve_rows_c = [], [], []
+
+    def _record_c(cand, target, stage):
+        if cand is None or not ctx.serving_constraints_active:
+            return
+        _serve = cand["serve"]
+        _serve_rows_c.append({
+            "label": f"{stage}@{float(target):.4f}",
+            "feasible": bool(_serve.feasible),
+            "predicted": dict(_serve.predicted),
+        })
+        if not _serve.feasible:
+            _serve_rej_c.append(rejection_record(
+                _serve, stage=stage, target_bits=float(target),
+                achieved_bits=float(cand["achieved_bits"]),
+                dloss=float(cand["dloss"])))
+
+    def _consider_c(cand, target, stage):
+        nonlocal _best_c, _emit_c
+        _fits_c = ctx.fits(cand)
+        _accepted = bool(_fits_c and ctx.beats(cand, _best_c))
+        _record_c(cand, target, stage)
+        _trace_c.append({
+            "stage": stage, "target_bits": float(target),
+            "achieved_bits": (
+                float(cand["achieved_bits"]) if cand is not None else None),
+            "tensor_payload_gb": (
+                cand["tensor_payload_bytes"] / GB
+                if cand is not None else None),
+            "whole_artifact_upper_bound_gb": (
+                cand["whole_artifact_upper_bound_bytes"] / GB
+                if cand is not None else None),
+            "dloss": float(cand["dloss"]) if cand is not None else None,
+            "fits": _fits_c, "accepted": _accepted,
+            **({
+                "fits_bytes": ctx.fits_bytes(cand),
+                "serve_feasible": (
+                    bool(cand["serve"].feasible)
+                    if cand is not None else None),
+                "serve_binding_constraint": (
+                    cand["serve"].binding_constraint
+                    if cand is not None else None),
+                "serve_violated_constraints": (
+                    list(cand["serve"].violation_names())
+                    if cand is not None else None),
+            } if ctx.serving_constraints_active else {}),
+        })
+        if _accepted:
+            _best_c, _emit_c = cand, float(target)
+        return _fits_c
+
+    _fitting_c = [c for c in grid_c if ctx.fits(c)]
+    for _cand in grid_c:
+        _record_c(_cand, float(_cand["target_bits"]), "grid")
+    _grid_pick_c = None
+    for _cand in _fitting_c:
+        if ctx.beats(_cand, _grid_pick_c):
+            _grid_pick_c = _cand
+    if _grid_pick_c is None:
+        return None, {
+            "reason": "serve_constraints",
+            "binding_constraints": sorted({
+                str(r["binding_constraint"]) for r in _serve_rej_c
+                if r.get("binding_constraint")}),
+        }
+    _search_hi_cap_c = float(max(int(s.weight_bits) for s in ctx.specs_sorted)) + 1.0
+    _over_c = [c for c in grid_c
+               if c["whole_artifact_upper_bound_bytes"] > budget_bytes]
+    _tightening_c = (min(float(c["target_bits"]) for c in _over_c)
+                     if _over_c else None)
+    _search_hi_c = (_search_hi_cap_c if _tightening_c is None
+                    else min(_search_hi_cap_c, _tightening_c))
+    _consider_c(_grid_pick_c, float(_grid_pick_c["target_bits"]), "grid_pick")
+    _consider_c(_artifact_c(_search_hi_c), _search_hi_c, "search_hi_cap")
+    if _best_c is not None:
+        _a_t, _b_t = float(_grid_pick_c["target_bits"]), _search_hi_c
+        for _ in range(40):
+            if (_b_t - _a_t) <= 0.005:
+                break
+            _mid = 0.5 * (_a_t + _b_t)
+            if _consider_c(_artifact_c(_mid), _mid, "bisect"):
+                _a_t = _mid
+            else:
+                _b_t = _mid
+    return _best_c, {
+        "grid_pick_target_bits": float(_grid_pick_c["target_bits"]),
+        "chosen_target_bits": _emit_c,
+        "ratchet_trace": _trace_c,
+        "serve_rejections": _serve_rej_c,
+        "serve_probe_rows": _serve_rows_c,
+    }
+
+
+def _run_mtp_option_b(ctx: _MtpOptionBContext) -> dict:
+    """Enumerate MTP choices with a body each under one cap (PQ #2532).
+
+    Every declared group choice feasible under ``--mtp-byte-budget`` is paired
+    with a body allocated under the remaining bytes. Each candidate charges
+    body payload, selected MTP bytes, immutable regions, sidecars and the
+    metadata reserve exactly once through the shared footprint owner, retains
+    exact prices, assignments and wire receipts, and binds the combined
+    assignment digest. MTP self-KL never enters the body objective. No winner
+    is selected. Exits 2 when no choice fits the cap.
+    """
+    import sys as _sys_option_b
+
+    from . import footprint as _fp
+    from .glm_mtp_selection import MtpMenuRefused, enumerate_mtp_rungs
+
+    args = ctx.args
+    budget_bytes = ctx.budget_bytes
+    overhead_reserve_bytes = ctx.overhead_reserve_bytes
+    if ctx.pact_pricing is not None:
+        raise SystemExit(
+            "[alloc] ERROR: --mtp-option-b-dir is not supported with PACT "
+            "shape-time search: the candidate body objective is the "
+            "byte-budget ratchet, not the runtime hull")
+    try:
+        _mtp = _load_mtp_inputs(
+            args, serving_target=ctx.serving_target, profile=ctx.profile,
+            rung_allowability=ctx.rung_allowability, target_profile=ctx.target_profile)
+    except ValueError as exc:
+        raise SystemExit(f"[alloc] ERROR: MTP option B inputs: {exc}") from exc
+    try:
+        _choices = enumerate_mtp_rungs(
+            _mtp["payload"], byte_budget=args.mtp_byte_budget,
+            constants=_mtp["constants"], eligible=_mtp["eligible"],
+            fixed_formats=_mtp["fixed_formats"], formats=_mtp["formats"],
+            rung_allowability=ctx.rung_allowability, stats=_mtp["stats"],
+            context_by_unit=_mtp["contexts"], target_profile=ctx.target_profile,
+            allowability_m=getattr(args, "mtp_regime", None),
+            allowability_tensor_parallel=getattr(args, "mtp_tensor_parallel", None) or 1)
+    except MtpMenuRefused as exc:
+        print(f"[alloc] ERROR: MTP option B menu (--mtp-formats): {exc}",
+              file=_sys_option_b.stderr, flush=True)
+        raise SystemExit(2) from exc
+    except ValueError as exc:
+        raise SystemExit(f"[alloc] ERROR: MTP option B enumeration: {exc}") from exc
+    if not _choices:
+        raise SystemExit(
+            "[alloc] ERROR: MTP option B: no declared MTP group choice fits "
+            f"--mtp-byte-budget={args.mtp_byte_budget}")
+    _option_b_dir = Path(args.mtp_option_b_dir)
+    _option_b_dir.mkdir(parents=True, exist_ok=True)
+    _payload = _mtp["payload"]
+    # The partition without any MTP rebase: each candidate swaps in its own
+    # selected bytes below. The winner path already refused an excluded prefix
+    # that also removes MTP units, so the overlap check below only guards the
+    # body/MTP span accounting.
+    _assigned = {**ctx.accounting_stats, **ctx.fixed_stats, **ctx.stats}
+    _partitioned, _ = ctx.excluded_source_total(
+        _fp, ctx.src_total_full, ctx.src_manifest, where="option-b candidate partition",
+        assigned_names=_assigned)
+    _candidates, _rejected = [], []
+    for _index, _choice in enumerate(_choices):
+        _label = f"option-b {_choice['rung']}"
+        try:
+            _rebase = _fp.mtp_selection_rebased_bytes(
+                _partitioned, _payload, _choice["resident_bytes"],
+                context=_label, manifest=ctx.src_manifest, assigned_names=_assigned)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        _chosen, _info = _option_b_body_for(ctx, _rebase["total_bytes"])
+        if _chosen is None:
+            _rejected.append({
+                "mtp_rung": _choice["rung"],
+                "mtp_resident_bytes": int(_choice["resident_bytes"]),
+                **{k: v for k, v in _info.items() if k != "reason"},
+                "reason": _info["reason"],
+            })
+            continue
+        _body_assignment = dict(sorted(_chosen["assignment"].items()))
+        _mtp_assignment = dict(sorted(_choice["assignment"].items()))
+        _clash = sorted(set(_body_assignment) & set(_mtp_assignment))
+        if _clash:
+            raise SystemExit(
+                f"[alloc] ERROR: MTP option B names {len(_clash)} unit(s) the "
+                f"body allocation also assigned: {_clash[:4]}")
+        try:
+            _fp.resolve_reencoded_source_bytes(
+                ctx.src_manifest, [*_body_assignment, *_mtp_assignment], context=_label)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        _combined = {**_body_assignment, **_mtp_assignment}
+        _stamp = whole_artifact_budget_stamp(
+            budget_bytes=budget_bytes,
+            selection_tensor_payload_bytes=int(_chosen["tensor_payload_bytes"]),
+            selection_non_tensor_reserve_bytes=overhead_reserve_bytes,
+            selection_assignment=_combined,
+            excluded_source_prefixes=(
+                getattr(args, "exclude_source_prefix", None) or ()))
+        _file = f"candidate_{_index:03d}.json"
+        ctx.write_layer_config(
+            _chosen["assignment_raw"], float(_chosen["achieved_bits"]),
+            float(_chosen["dloss"]), float(_chosen["dloss"]),
+            selected_whole_artifact_budget_stamp=_stamp,
+            mtp_record=_choice, output_path=str(_option_b_dir / _file))
+        _written = json.loads((_option_b_dir / _file).read_text())
+        _written_meta = _written.get(LAYER_CONFIG_META_KEY, {})
+        _floor = int(_chosen["floor_bytes"])
+        _candidates.append({
+            "id": f"candidate_{_index:03d}",
+            "layer_config": _file,
+            "mtp_rung": _choice["rung"],
+            "mtp_assignment": _mtp_assignment,
+            "mtp_selection": _written_meta.get("mtp_selection", {}),
+            "body_assignment": _body_assignment,
+            "body_achieved_bits": float(_chosen["achieved_bits"]),
+            "body_predicted_dloss": float(_chosen["dloss"]),
+            "body_byte_allowance": (
+                budget_bytes - overhead_reserve_bytes - _floor),
+            "immutable_and_fixed_bytes": _floor - int(_choice["resident_bytes"]),
+            "tensor_payload_bytes": int(_chosen["tensor_payload_bytes"]),
+            "floor_bytes": _floor,
+            "whole_artifact_upper_bound_bytes": int(
+                _chosen["whole_artifact_upper_bound_bytes"]),
+            "whole_artifact_budget": _written_meta.get("whole_artifact_budget", {}),
+            "combined_assignment_sha256": _written_meta.get(
+                "whole_artifact_budget", {}).get("selection_assignment_sha256"),
+            "grid_pick_target_bits": _info["grid_pick_target_bits"],
+            "chosen_target_bits": _info["chosen_target_bits"],
+            "ratchet_fitting_probes": sum(
+                1 for _row in _info["ratchet_trace"] if _row["fits"]),
+            "ratchet_trace": _info["ratchet_trace"],
+        })
+    _manifest = {
+        "schema": "prismaquant.mtp_option_b_candidates.v1",
+        "mode": "mtp_option_b",
+        "target_disk_gb": float(args.target_disk_gb),
+        "budget_bytes": budget_bytes,
+        "artifact_overhead_reserve_bytes": overhead_reserve_bytes,
+        "mtp_joint_cost": str(args.mtp_joint_cost),
+        "mtp_joint_cost_sha256": file_sha256hex(args.mtp_joint_cost),
+        "mtp_byte_budget": int(args.mtp_byte_budget),
+        "constants_source": str(_mtp["constants"].get("source", "undeclared")),
+        "winner_selected": False,
+        "candidates": _candidates,
+        "rejected": _rejected,
+    }
+    (_option_b_dir / "manifest.json").write_text(
+        json.dumps(_manifest, indent=2, sort_keys=True) + "\n")
+    if not _candidates:
+        print(
+            f"[alloc] MTP option B: 0 of {len(_choices)} MTP choice(s) fit "
+            f"the {args.target_disk_gb:.3f}GB card; manifest written to "
+            f"{_option_b_dir / 'manifest.json'}", flush=True)
+        print(
+            "[alloc] ERROR: MTP option B: no declared MTP group choice fits "
+            "the whole-artifact cap with any body allocation. Raise the cap, "
+            "widen --formats, or narrow the MTP menu.",
+            file=_sys_option_b.stderr, flush=True)
+        raise SystemExit(2)
+    print(
+        f"[alloc] MTP option B: {len(_candidates)} candidate(s), "
+        f"{len(_rejected)} rejected MTP choice(s) "
+        f"-> {_option_b_dir / 'manifest.json'}", flush=True)
+    return _manifest
 
 
 def _is_mtp_linear(name: str) -> bool:
@@ -2257,6 +2622,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Optional JSON list of served acceptance points "
                          "({measured_acceptance, rung_name|bits}) for the MTP "
                          "selector's acceptance fit.")
+    ap.add_argument("--mtp-option-b-dir", default=None,
+                    help="Opt-in Option B enumeration (PQ #2532): enumerate every feasible "
+                         "declared MTP group choice and allocate the body separately for each "
+                         "remaining byte allowance under --target-disk-gb. Writes one layer "
+                         "config per candidate plus a manifest with no winner decision. "
+                         "Requires --mtp-joint-cost, --mtp-byte-budget, --mtp-serve-constants "
+                         "and --target-disk-gb. Without it the independent MTP selector and "
+                         "body allocation are unchanged.")
     ap.add_argument(
         "--lm-head-format",
         choices=_format_cli_choices(),
@@ -2558,6 +2931,24 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "headroom and needs --target-disk-gb to name the whole-artifact "
             "cap it is measured from"
         )
+    if getattr(args, "mtp_option_b_dir", None) is not None:
+        if args.mtp_joint_cost is None:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir enumerates declared MTP choices "
+                "and requires --mtp-joint-cost")
+        if args.mtp_byte_budget is None or not args.mtp_serve_constants:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir requires --mtp-byte-budget "
+                "and --mtp-serve-constants")
+        if args.target_disk_gb is None:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir allocates each body under the "
+                "remaining whole-artifact bytes and requires --target-disk-gb")
+        if args.routed_unit_rates:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir cannot combine with "
+                "--routed-unit-rates: the headroom spender prices the single "
+                "winner choice, not each enumerated remainder")
 
     # ---- Hard serving constraints, resolved once (ultraplan P5c) ----
     # Built before any expensive work so a malformed table, an unbalanced
@@ -4326,7 +4717,17 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         return None, float("nan"), float("inf"), float("inf")
 
     def _write_layer_config(assignment, achieved, total, mutable_total, *,
-                            selected_whole_artifact_budget_stamp=None, replay=None):
+                            selected_whole_artifact_budget_stamp=None, replay=None,
+                            mtp_record=None, output_path=None):
+        """Write the emitted layer config, or one Option B candidate (PQ #2532).
+
+        ``mtp_record`` replaces the winner selection the main path stamps, and
+        ``output_path`` replaces ``--layer-config``. Both default to the main
+        path, which is then byte-identical to before. Candidate files skip the
+        lane selection-request write (it names the main output) and the
+        attribution reports (they name the main paths); their own budget stamp
+        and MTP record ride in their metadata.
+        """
         print(
             f"[alloc] target_bits={args.target_bits}: "
             f"achieved_bits={achieved:.3f}, Δloss={total:.3e}",
@@ -4763,9 +5164,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # no keys, and a table carrying a population but no projection carries
         # only the population.
         if args.mtp_joint_cost:
-            _stamp_mtp_selection(args, layer_cfg, assignment_expanded, _mtp_selection()[1])
+            _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
+                                 _mtp_selection()[1] if mtp_record is None else mtp_record)
         selection_request = lane.allocation_selection_request_path(args)
-        if selection_request:
+        if selection_request and output_path is None:
             lane.write_allocation_selection_request(selection_request,
                 layer_config=layer_cfg, assignment=assignment_expanded,
                 cost_path=args.costs, cost_payload=cost_data, output_path=args.layer_config)
@@ -4773,7 +5175,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         layer_cfg[LAYER_CONFIG_META_KEY].update(
             lane.allocation_expert_projection(cost_data, assignment_expanded))
 
-        out = Path(args.layer_config)
+        out = Path(output_path if output_path is not None else args.layer_config)
         out.parent.mkdir(parents=True, exist_ok=True)
         if replay is not None:
             from .cost_stage_checkpoint import publish_new_bytes
@@ -4797,18 +5199,21 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
         # Optional read-only "where did the budget go?" attribution over the final
         # resolved body assignment. Derived from already-resolved data; no re-probe.
-        _write_bit_attribution_reports(
-            args.bit_attribution_json,
-            args.bit_attribution_csv,
-            target_bits=args.target_bits,
-            achieved_bits=final_body_achieved,
-            assignment_expanded=assignment_expanded,
-            candidates=candidates,
-            stats_entry_for=_stats_entry_for_assignment_name,
-            format_specs=format_specs,
-            visual_decision_names=visual_decision_names,
-            profile=model_profile,
-        )
+        # Main output only: the report names the main attribution paths, so a
+        # candidate must not overwrite them (PQ #2532).
+        if output_path is None:
+            _write_bit_attribution_reports(
+                args.bit_attribution_json,
+                args.bit_attribution_csv,
+                target_bits=args.target_bits,
+                achieved_bits=final_body_achieved,
+                assignment_expanded=assignment_expanded,
+                candidates=candidates,
+                stats_entry_for=_stats_entry_for_assignment_name,
+                format_specs=format_specs,
+                visual_decision_names=visual_decision_names,
+                profile=model_profile,
+            )
 
 
     # --- deterministic tensor payload + conservative artifact bound --------
@@ -5719,7 +6124,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # function prices exactly the tensors the inlined copy did.
         _footprint_stats = {**accounting_stats, **fixed_stats, **stats}
 
-        def _artifact_for_target(t: float):
+        def _artifact_for_target(t: float, *, source_total=None):
+            """Price the body solve at ``t`` against a whole-artifact source total.
+
+            ``source_total`` defaults to the winner-rebased card total. Option B
+            passes each enumerated MTP remainder instead, so every candidate
+            prices through this same owner with its own floor (PQ #2532).
+            """
+            priced_total = int(source_total) if source_total is not None else int(src_total)
             assign_t, ach_t, tot_t, _mut = _solve_for_target(t)
             if assign_t is None:
                 return None
@@ -5742,7 +6154,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             try:
                 info = _fp.assignment_artifact_bytes(
                     expanded_t, _footprint_stats,
-                    source_total_bytes=int(src_total),
+                    source_total_bytes=priced_total,
                     source_manifest=src_manifest,
                     regime=regime,
                     context=ctx,
@@ -5783,6 +6195,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "target_bits": float(t), "achieved_bits": float(ach_t),
                 "bpp": float(ach_t), "dloss": float(tot_t),
                 "assignment": expanded_t,
+                # The pre-expansion DP assignment. Option B writes each
+                # candidate through the shared layer-config writer, which
+                # expands, promotes and stamps itself (PQ #2532).
+                "assignment_raw": dict(assign_t),
                 "tensor_payload_bytes": int(info["artifact_payload_bytes"]),
                 "whole_artifact_upper_bound_bytes": int(
                     info["artifact_payload_bytes"]
@@ -5889,10 +6305,93 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             grid.sort(key=lambda c: float(c["target_bits"]))
             return record
 
+        # Among allocations whose conservative selection upper bound fits the
+        # card, ship the
+        # one with the LOWEST predicted Δloss — ties broken toward the larger
+        # footprint (spend the budget only when it costs nothing in predicted
+        # quality). "Fill the card" was a proxy for that, valid only while
+        # more bytes implied lower Δloss; it does not (5.5 bpp has beaten 6.0
+        # bpp on served PPL, and serving-unit promotion can flip a group into
+        # a denser-but-worse format), so ratcheting on MAX bytes could
+        # actively select a denser artifact with WORSE predicted Δloss than a
+        # sparser one that also fits. Same objective and same tie-break the
+        # solver's own feasible-iterate ratchet uses (solve_with_promotion).
+        #
+        # Δloss is comparable across rungs: every rung's value is
+        # compute_assignment_predicted_dloss over the SAME DP item set (the
+        # multi-choice knapsack assigns every item exactly one candidate at
+        # every target), in the same ½·h_trace·MSE units, and the fixed
+        # auxiliary (MTP/visual) Δloss excluded from all of them is a
+        # rung-invariant constant, so it cannot reorder them.
+        #
+        # Selection feasibility is tensor spans + reserve <= budget. Final
+        # feasibility is intentionally deferred to the exporter, which stats
+        # the recursive regular-file set and fails closed. The ratchet is
+        # seeded at the grid pick already proven selection-feasible.
+        def _fits_bytes(cand) -> bool:
+            return (
+                cand is not None
+                and cand["whole_artifact_upper_bound_bytes"] <= budget_bytes
+            )
+
+        def _serve_ok(cand) -> bool:
+            """The second hard axis. Always True when constraints are absent.
+
+            Deliberately a separate predicate from the byte test so the two
+            reasons a probe was rejected stay distinguishable in the trace —
+            and so that with no constraints supplied ``_fits`` is the
+            pre-P5c function, evaluated on the pre-P5c inputs.
+            """
+            if cand is None:
+                return False
+            serve = cand.get("serve")
+            return serve is None or bool(serve.feasible)
+
+        def _fits(cand) -> bool:
+            """Feasibility = BOTH hard axes (policy §1).
+
+            Bytes and SLOs are constraints, never terms in the objective. A
+            probe that misses either is removed from the candidate set; it is
+            not ranked below the others. The ratchet below then minimises
+            predicted Δloss over exactly the survivors, with its tie-break
+            unchanged.
+            """
+            return _fits_bytes(cand) and _serve_ok(cand)
+
+        def _beats(cand, best) -> bool:
+            """The ratchet objective: min Δloss, ties -> larger footprint."""
+            if best is None:
+                return True
+            if cand["dloss"] != best["dloss"]:
+                return cand["dloss"] < best["dloss"]
+            return (
+                cand["whole_artifact_upper_bound_bytes"]
+                > best["whole_artifact_upper_bound_bytes"]
+            )
+        # Option B runs before the winner gate: a cap that fits no MTP choice
+        # refuses here with the candidate manifest (exit 2), before the
+        # single-winner floor exit below can fire. On success the winner path
+        # continues unchanged.
+        if getattr(args, "mtp_option_b_dir", None) is not None:
+            _run_mtp_option_b(_MtpOptionBContext(
+                args=args, budget_bytes=budget_bytes,
+                overhead_reserve_bytes=overhead_reserve_bytes,
+                curve=curve, targets=targets, specs_sorted=specs_sorted,
+                src_total_full=src_total_full, src_manifest=src_manifest,
+                stats=stats, accounting_stats=accounting_stats, fixed_stats=fixed_stats,
+                serving_target=tessera_serving_target, profile=model_profile,
+                rung_allowability=rung_allowability, target_profile=target_profile,
+                serving_constraints_active=serving_constraints_active,
+                pact_pricing=pact_pricing,
+                artifact_for_target=_artifact_for_target,
+                menu_floor_target_bits=_menu_floor_target_bits,
+                fits_bytes=_fits_bytes, fits=_fits, beats=_beats,
+                excluded_source_total=_excluded_source_total,
+                write_layer_config=_write_layer_config))
         # select_under_byte_budget is used here as the FEASIBILITY gate
         # (feasible / below_floor / rejected_next). Its own `chosen` is the
         # largest-footprint fitting candidate, which is deliberately NOT the
-        # ship pick — see the objective note below; it is recorded as
+        # ship pick — see the objective note above; it is recorded as
         # `max_bytes_pick_*` so the two objectives stay comparable in the
         # artifact.
         sel = select_under_byte_budget(
@@ -6030,69 +6529,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "(--allow-pinned lm_head), or widen the format menu. "
                 f"Selection written to {sel_path}." + floor_caveat)
 
-        # Among allocations whose conservative selection upper bound fits the
-        # card, ship the
-        # one with the LOWEST predicted Δloss — ties broken toward the larger
-        # footprint (spend the budget only when it costs nothing in predicted
-        # quality). "Fill the card" was a proxy for that, valid only while
-        # more bytes implied lower Δloss; it does not (5.5 bpp has beaten 6.0
-        # bpp on served PPL, and serving-unit promotion can flip a group into
-        # a denser-but-worse format), so ratcheting on MAX bytes could
-        # actively select a denser artifact with WORSE predicted Δloss than a
-        # sparser one that also fits. Same objective and same tie-break the
-        # solver's own feasible-iterate ratchet uses (solve_with_promotion).
-        #
-        # Δloss is comparable across rungs: every rung's value is
-        # compute_assignment_predicted_dloss over the SAME DP item set (the
-        # multi-choice knapsack assigns every item exactly one candidate at
-        # every target), in the same ½·h_trace·MSE units, and the fixed
-        # auxiliary (MTP/visual) Δloss excluded from all of them is a
-        # rung-invariant constant, so it cannot reorder them.
-        #
-        # Selection feasibility is tensor spans + reserve <= budget. Final
-        # feasibility is intentionally deferred to the exporter, which stats
-        # the recursive regular-file set and fails closed. The ratchet is
-        # seeded at the grid pick already proven selection-feasible.
-        def _fits_bytes(cand) -> bool:
-            return (
-                cand is not None
-                and cand["whole_artifact_upper_bound_bytes"] <= budget_bytes
-            )
-
-        def _serve_ok(cand) -> bool:
-            """The second hard axis. Always True when constraints are absent.
-
-            Deliberately a separate predicate from the byte test so the two
-            reasons a probe was rejected stay distinguishable in the trace —
-            and so that with no constraints supplied ``_fits`` is the
-            pre-P5c function, evaluated on the pre-P5c inputs.
-            """
-            if cand is None:
-                return False
-            serve = cand.get("serve")
-            return serve is None or bool(serve.feasible)
-
-        def _fits(cand) -> bool:
-            """Feasibility = BOTH hard axes (policy §1).
-
-            Bytes and SLOs are constraints, never terms in the objective. A
-            probe that misses either is removed from the candidate set; it is
-            not ranked below the others. The ratchet below then minimises
-            predicted Δloss over exactly the survivors, with its tie-break
-            unchanged.
-            """
-            return _fits_bytes(cand) and _serve_ok(cand)
-
-        def _beats(cand, best) -> bool:
-            """The ratchet objective: min Δloss, ties -> larger footprint."""
-            if best is None:
-                return True
-            if cand["dloss"] != best["dloss"]:
-                return cand["dloss"] < best["dloss"]
-            return (
-                cand["whole_artifact_upper_bound_bytes"]
-                > best["whole_artifact_upper_bound_bytes"]
-            )
 
         best = None
         emit_target = None
