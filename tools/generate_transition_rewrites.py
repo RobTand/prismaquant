@@ -28,24 +28,22 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
 import pprint
 import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant.digests import LengthFramedSourceSha256
+
 
 def _package_digest(files):
     """The complete-package hash every transition's ``source_proof`` computes."""
-    digest = hashlib.sha256()
+    digest = LengthFramedSourceSha256()
     # source_proof sorts Path objects component-wise, not POSIX strings:
     # a/b.py precedes a.py. Preserve that order for directory and Git inputs.
     for name, payload in sorted(files.items(), key=lambda item: Path(item[0])):
-        encoded = name.encode()
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
+        digest.update(name, payload)
     return digest.hexdigest()
 
 

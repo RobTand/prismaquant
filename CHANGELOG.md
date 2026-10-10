@@ -44,6 +44,10 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The transition generator hashes packages through `digests.LengthFramedSourceSha256` (#2648, part of #2541).
+  `_package_digest` feeds caller-ordered records to the shared framed source owner.
+  The Path-component sort, file reads, and hexdigest wrapper stay with the caller.
+  Digests, framed bytes, and refusals stay identical. No `digests.py` code changes.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
