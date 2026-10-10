@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (PQ #2600, revision 3): a pin update is refused
+unless the four named v12 scope fixture classes pass.
+`check_pin_update` reads the tracked pin file and runs the census,
+derived, absent and malformed classes against the reader.
+Each class reports its failure reason, and no check uses `assert`.
+A missing or failing class refuses exactly as a broken reader does.
+The absent class holds the v11 row shape: 18 entries, the image
+entry at index 13, and no entry carries launch scopes.
+The producer side ships as a rule plus unit tests only:
+`check_producer_schema_pr` refuses a schema PR body without linked
+consumer compatibility work and without fixture results for all four
+classes, and `tests/test_tessera_pin_v12_scope_gate.py` guards it.
+No caller wires that rule into a PR check in this repository.
+Tessera-side adoption of the producer rule is a child issue of PQ #2600.
+The pin stays at lane schema v11; no pin moves in this change.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
@@ -26141,6 +26157,21 @@ installed Tessera's version and demands the pin follow it. That would redden
 `main` on the next Tessera bump with a message saying "re-pin to 0.2.0", which
 is a moving `master` made into a review event — the rule
 `TESSERA_DEV_PIN_COMMIT`'s docstring states, read backwards.
+Moving the pin also requires the v12 scope proof (PQ #2600).
+`check_pin_update` in `prismaquant/tessera_pin_scope_gate.py` reads the
+tracked pin file and runs the census, derived, absent and malformed
+fixture classes against the reader. A missing or failing class refuses
+the update, and the refusal carries the failure reason. No check uses
+`assert`, so `python -O` changes no verdict. The producer side ships as
+a rule plus unit tests only: a Tessera schema PR body without linked
+consumer compatibility work and without fixture results for all four
+classes is refused by `check_producer_schema_pr`
+(`prismaquant/tessera_pin_scope_gate.py`), and
+`tests/test_tessera_pin_v12_scope_gate.py` guards that rule with one
+real-check regression test per scope class. No caller wires the rule
+into a PR check in this repository; the Tessera-side adoption of the
+producer rule is a child issue of PQ #2600.
+
 `tests/test_tessera_lane_v6.py` is the guard on the v6 grammar and the evidence
 gate, including that a cell whose published smoke status is refused is
 refused and every dense cell is not; `tests/test_tessera_lane_v8.py` pins the
