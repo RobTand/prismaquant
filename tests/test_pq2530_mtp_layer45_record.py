@@ -286,6 +286,21 @@ def test_the_package_profile_frames_files_exactly_as_the_producer_stamp_does(tmp
     assert audit.package_profile(root) == _production_cache_source_profile(root)
 
 
+def test_a_sealed_command_must_do_the_job_its_role_names():
+    row = "python3 -u -m prismaquant.tessera_campaign --out /x/m3/r896/workspace/rows/row-0000/cost.pkl --cache-dir y"
+    assert audit.sealed_command_matches("m3-r896-row-0000", row) is True
+    assert audit.sealed_command_matches("m3-r896-row-0002", row) is False
+    assert audit.sealed_command_matches("m3-r1024-row-0000", row) is False
+    run = "python3 -m prismaquant.tessera_joint_aura run --plan /x/m4/r1024/plan-run.json --plan-sha256 s"
+    assert audit.sealed_command_matches("m4-r1024-run", run) is True
+    assert audit.sealed_command_matches("m4-r1024-prepare", run) is False
+    assert audit.sealed_command_matches("m4-r896-run", run) is False
+    capture = "python3 -m tools.glm_mtp_capture --phase final-hidden --plan p"
+    assert audit.sealed_command_matches("final-hidden", capture) is True
+    assert audit.sealed_command_matches("capture-v2", capture) is False
+    assert audit.sealed_command_matches("reselect-owner-join", capture) is None
+
+
 def test_flat_diff_names_the_leaves_two_plans_differ_at():
     plan = {"a": 1, "inputs": {"x": "p", "y": "q"}}
     other = {"a": 1, "inputs": {"x": "p", "y": "r"}, "source_identity_cache": {"path": "f", "sha256": "s"}}

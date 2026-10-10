@@ -376,6 +376,19 @@ def excluded_state(pb_root, key, role):
             "cas_receipt": (pb_root / "cas" / "actions" / "v3" / key[:2] / f"{key}.json").is_file()}
 
 
+def sealed_command_matches(role, command):
+    """Whether the command sealed into an action does the job its role names (None: nothing to compare)."""
+    if role.startswith("m3-"):
+        found = re.search(r"/m3/(r\d+)/workspace/rows/(row-\d{4})/cost\.pkl", command)
+        return bool(found) and role == f"m3-{found[1]}-{found[2]}"
+    if role.startswith("m4-"):
+        _, rate, phase = role.split("-")
+        return f" {phase} --plan " in command and f"/m4/{rate}/" in command
+    if role in {"capture-v2", "projection", "final-hidden"}:
+        return f"tools.glm_mtp_capture --phase {role.split('-v')[0]} " in command
+    return None
+
+
 def audit_actions(pb_root, ledger, ws, extra=()):
     """Verify every qualifying action; list, without counting, the ones that do not qualify."""
     named = dict(ACTIONS)
@@ -389,6 +402,10 @@ def audit_actions(pb_root, ledger, ws, extra=()):
     for row in rows:
         ledger.check(f"action.{row['role']}", row.get("ok", False),
                      "; ".join(row["problems"]) or f"{row['key'][:12]} rc {row.get('returncode')} on {row.get('host')}")
+        command = (row.get("spec") or {}).get("inner_command") or ""
+        expected = sealed_command_matches(row["role"], command)
+        if expected is not None:
+            ledger.check(f"action.{row['role']}.sealed_command_is_its_role", expected, command[:160])
     excluded = [excluded_state(pb_root, key, role) for role, key in EXCLUDED.items()]
     for role, relative in EXCLUDED_M3_ATTEMPTS.items():
         for item in json.loads((ws / relative).read_bytes())["rows"]:
@@ -593,7 +610,8 @@ def audit_census_authentication(inputs, ledger, census, census_sha, report, proj
                  and auth["capture_manifest_sha256"] == canonical_capture["sha256"]
                  and auth["derived_census_sha256"] == [census_sha]
                  and auth["authentication"].startswith("fresh SHA256 through held")
-                 and sum(f["bytes_hashed"] for f in auth["verified_files"]) == auth["payload_bytes_hashed"],
+                 and sum(f["bytes_hashed"] for f in auth["verified_files"] if f["name"].endswith(".safetensors"))
+                 == auth["payload_bytes_hashed"],
                  f"{len(auth['verified_files'])} files, {auth['payload_bytes_hashed']} payload bytes hashed")
     seal = projection["producer"]["source"]["files"]
     shards = [f for f in auth["verified_files"] if f["name"] in seal]
@@ -1192,7 +1210,10 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
                  f"{len(keys)} wire blobs re-hashed, producer-verified, equal to receipt and prepared wire_sha256; {len(bad_wire)} off: {bad_wire[:2]}")
     ledger.check("io.renders_match_prepared_evidence", not bad_render,
                  f"{len(keys)} rendered shards re-hashed against prepared render_file_sha256; {len(bad_render)} off")
-    return capture_rows, cells
+    totals = {"capture_entries": len(capture_rows), "capture_bytes": sum(r["bytes"] for r in capture_rows.values()),
+              "wire_blobs": len(keys), "wire_bytes": sum(cells[k]["wire_file_bytes"] for k in keys),
+              "rendered_shards": len(keys), "render_bytes": sum(Path(cells[k]["render"]).stat().st_size for k in keys)}
+    return capture_rows, cells, totals
 
 
 # --------------------------------------------------------------------------- tables
@@ -1511,8 +1532,8 @@ def main(argv=None):
     summary["rosters"] = rosters
     capture_rows, cells = {}, {}
     if "io" in sections and "structure" in sections:
-        capture_rows, cells = audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, args.workers,
-                                       args.limit_units)
+        capture_rows, cells, summary["io"] = audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress,
+                                                      args.workers, args.limit_units)
     if "pb" in sections:
         actions, excluded = audit_actions(pb, ledger, ws, [tuple(item) for item in extra])
         summary["actions"], summary["excluded_attempts"] = actions, excluded
