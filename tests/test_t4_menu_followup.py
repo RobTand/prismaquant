@@ -1,14 +1,13 @@
-"""Failing-first T-4 E2M1 menu tests through the canonical consumer path.
+"""T-4 E2M1 menu tests through the canonical consumer path.
 
 Synthetic tables prove source integration only. They qualify no speed,
 weight error, served loss or serving frontier. The T-4 whole-bit rungs
 come from the existing registry owner. The classes come from the real
 producer. The verdicts come from the existing consumer owners.
 
-Two tests fail on the current base. The pinned producer owns an empty
-T-4 menu, so each measured T-4 rung waits with
-``performance_admission_not_established``. Three controls pass and show
-the fixture refuses where it must.
+Only the approved q896 menu admits. Every synthetic T-4 rung waits with
+``performance_admission_not_established``, including the whole-bit cap
+R768. The controls show the fixture refuses where it must.
 """
 from __future__ import annotations
 
@@ -102,15 +101,15 @@ def _t4_owner(monkeypatch, rung):
         producer, MappingProxyType({rung: True}), frozenset({rung}))
 
 
-def test_t4_whole_bit_cap_admits_unscoped_and_scoped(monkeypatch):
+def test_t4_whole_bit_cap_still_waits(monkeypatch):
     rung = _t4_cap_rung()
     owner = _t4_owner(monkeypatch, rung)
-    assert owner.allows(rung), owner.refusal(rung)
-    assert owner.allows(rung, scope=dict(DENSE_SCOPE)), owner.refusal(
+    assert not owner.allows(rung), owner.refusal(rung)
+    assert not owner.allows(rung, scope=dict(DENSE_SCOPE)), owner.refusal(
         rung, scope=dict(DENSE_SCOPE))
 
 
-def test_t4_lane_seam_admits_research_menu(monkeypatch):
+def test_t4_lane_seam_refuses_unapproved_menu(monkeypatch):
     from prismaquant import allocator_candidates as candidates
     rung = _t4_cap_rung()
     owner = _t4_owner(monkeypatch, rung)
@@ -119,9 +118,9 @@ def test_t4_lane_seam_admits_research_menu(monkeypatch):
         rung_allowability={T4: owner},
         allowability_scope=dict(DENSE_SCOPE))
     assert admission is not None
-    assert admission.measured_allowable, owner.refusal(
+    assert not admission.measured_allowable, owner.refusal(
         rung, scope=dict(DENSE_SCOPE))
-    assert admission.admits("research"), admission.detail
+    assert not admission.admits("research"), admission.detail
 
 
 def test_t4_unresolved_scope_still_waits(monkeypatch):
