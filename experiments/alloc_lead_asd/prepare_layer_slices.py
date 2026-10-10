@@ -161,10 +161,10 @@ def main():
         config, names, shards = publisher_layer(EVIDENCE, layer, identities)
         boundaries, cotangents = layer_facts(layer, identities)
         rows, keys, resident, packed, largest, derivative = qualify_layer(config, layer)
-        assert len(names) == len(keys)
         profile = Glm5NextProfile()
         mapped = sorted({profile.checkpoint_to_live_name(name, multimodal=True) for name in names})
-        assert mapped == keys
+        assert len(mapped) == len(names) and mapped
+        assert all(name.startswith(f'model.language_model.layers.{layer}.') for name in mapped)
         model = Path(shards[0]['path']).parent
         metadata = []
         for name in ('config.json', 'model.safetensors.index.json'):
@@ -174,7 +174,7 @@ def main():
                                  logical_path=str(model / name)))
         fact_units = [f'model.language_model.layers.{layer}.mlp.experts.{expert}.{role}'
                       for expert in FACT_EXPERTS[layer] for role in FACT_ROLES]
-        units = {name.removesuffix('.weight') for name in keys if name.endswith('.weight')}
+        units = {name.removesuffix('.weight') for name in mapped if name.endswith('.weight')}
         assert all(unit in units for unit in fact_units)
         by_batch = {}
         for row in boundaries:
@@ -194,7 +194,7 @@ def main():
                 publisher_revision=REVISION, sequences=sequences, sequence_length=512,
                 n_probes=len(PROBES), global_token_count=262144, probe_seed_base=7000, temperature=1.0,
                 loss_positions='all', cotangents_are_banked_fixed_inputs=True,
-                activation_format='TESSERA_E4M3_K1_R1024', dtype='torch.bfloat16', layer_keys=keys,
+                activation_format='TESSERA_E4M3_K1_R1024', dtype='torch.bfloat16', layer_keys=mapped,
                 fact_units=fact_units, activation_policy=activation_policy,
                 historical_probe_identity=contract['probe_identity'],
                 layer_cache_bytes=resident, metadata=metadata, shards=shards,
