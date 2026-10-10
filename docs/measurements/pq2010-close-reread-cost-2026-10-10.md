@@ -29,14 +29,16 @@ monolith CPU capture file (`test_capture_single_pass_source_1896.py`) takes
 79 s for 28 tests with 2 full captures on the same box class
 (action `dc7648deb9bf2c7caa50ee81be45925a766d8ae05f188fca4fee4e6b1493ed95`).
 Its roster is tens of MiB. Its close reread is a fraction of a second. The
-share is below 1 percent.
+share is estimated below 1 percent.
 
-## Full-scale bound
+## Full-scale estimate
 
 The added cost equals the roster bytes divided by the sequential read rate.
 The measured floor is 260 MB/s under heavy load. Production captures run
-minutes of GPU forward first. The close reread stays below 10 percent of
-capture wall with wide margin. No ZFS snapshot read path is needed.
+minutes of GPU forward first. The close reread is estimated below 10 percent
+of capture wall with wide margin. No real-capture measurement backs that
+share yet. A follow-up measures a real capture and prices a ZFS snapshot
+read path.
 
 ## Limits
 

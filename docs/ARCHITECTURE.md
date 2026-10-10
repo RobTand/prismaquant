@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-10 (PQ #2010): the capture source owner rereads each fresh file once at close.
-Admission still hashes inside the consuming read, with no separate admission read. The close reread runs on CPU, off the GPU hot path, under the owner resource guard. Lease exits and JSON reads keep the stat fence only. Adopted and recorded rows keep zero-read proofs and refuse by stat. The profile in [pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md) bounds the cost below 10 percent of capture wall. No default, format, pin, or serving gate moves.
+Admission still hashes inside the consuming read, with no separate admission read. The close reread runs on CPU, off the GPU hot path, under the owner resource guard. Lease exits and JSON reads keep the stat fence only. Adopted and recorded rows keep zero-read proofs and refuse by stat. The profile in [pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md) estimates the cost below 10 percent of capture wall. A real-capture measurement decides the ZFS snapshot path. No default, format, pin, or serving gate moves.
 
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
@@ -1394,10 +1394,10 @@ unchanged. Stat fences detect metadata-observable mutation. Same-signature
 byte mutation now refuses by one guarded held-digest reread per file at
 owner close (#2010). Admission still hashes inside the consuming read.
 Lease exits and JSON reads keep the stat fence only, so the extra cost is
-one sequential read per file whatever the lease count; the profile in
+one sequential read per file whatever the lease count. The profile in
 [pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md)
-bounds it below 10 percent of capture wall, so no ZFS snapshot path is
-needed. Adopted and recorded rows keep their zero-read proof
+estimates it below 10 percent of capture wall. A real-capture measurement
+decides the ZFS snapshot path. Adopted and recorded rows keep their zero-read proof
 optimization and refuse by stat. #2010 recorded two same-signature admissions
 in a bounded ZFS diagnostic, with no end-to-end corrupted artifact
 demonstrated. The deterministic drift fixture and the mtime-restoration

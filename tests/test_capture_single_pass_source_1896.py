@@ -92,6 +92,9 @@ def test_the_read_that_consumes_a_file_hashes_it_through_its_own_descriptor(tmp_
     # The close rereads the file once through its held descriptor (#2010).
     assert hashes == [(shard.name, held), (shard.name, held)]
     assert receipt['schema'] == cc.RECORDING_RECEIPT_SCHEMA
+    assert [(row['name'], row['sha256'], row['payload_reads'])
+            for row in receipt['verified_files']] == [(shard.name, _digest(shard), 2)]
+    assert receipt['metadata_only_shards'] == []
 
 
 def test_bytes_that_change_between_the_hash_and_the_read_refuse(tmp_path):

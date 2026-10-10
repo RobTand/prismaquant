@@ -229,6 +229,7 @@ def test_complete_source_finish_reuses_authenticated_shard_and_refuses_mutation(
         # Admission only here; the seal hash has no lease and the one close
         # reread runs after this block (#2010).
         assert hashed.count('selected.safetensors') == 1
+        assert hashed.count('unused.safetensors') == 1
         assert receipt['metadata_only_shards'] == []
 
     owner = cc.authenticate_selected_capture_source(**f.kwargs)
