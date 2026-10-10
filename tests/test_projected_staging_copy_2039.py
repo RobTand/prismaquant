@@ -159,3 +159,27 @@ def test_device_prepare_reports_shape_mismatch_without_staging(monkeypatch):
     assert check.pinned is None
     assert counter.staging == 0
     assert released == ['u']
+
+
+def test_device_prepare_requests_pinned_read_and_adopts_without_copy(monkeypatch):
+    """CPU attribution: the device path asks for pinned bytes and keeps one copy."""
+    class _StubWeight:
+        dtype = torch.bfloat16
+        shape = (2, 3)
+        def is_pinned(self):
+            return True
+        def is_contiguous(self):
+            return True
+    stub = _StubWeight()
+    released = []
+    def read(name, unit, **kwargs):
+        assert kwargs.get('pinned_host') is True
+        return stub, lambda: released.append(name)
+    monkeypatch.setattr(campaign, '_read_projected_unit', read)
+    counter = _CopyCounter(monkeypatch)
+    unit = dict(source_tensor='w', rows=2, cols=3)
+    check = campaign._prepare_device_projected_check('u', unit, **_prepare_kwargs())
+    assert counter.staging == 0
+    assert check.pinned is stub
+    assert check.differs is None
+    assert released == ['u']
