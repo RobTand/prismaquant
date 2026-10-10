@@ -1,0 +1,98 @@
+{
+  "schema": "pq2546.selectable-matrix.v1",
+  "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "platform": "sm_121",
+  "contract": {
+    "pin_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+    "contract_version": 60,
+    "lane_schema": "tessera.lane-eligibility.v11"
+  },
+  "scope": {
+    "execution_modes": ["eager"],
+    "regimes": ["decode", "batch"],
+    "residency": ["resident"],
+    "serve_flag": "TESSERA_SERVE_MODE=resident",
+    "tensor_parallel": {
+      "semantics": "closed_world",
+      "max_world_size": 2,
+      "world_size_receipt": "glm53_a4_stub_tp2_sm121",
+      "receipt_scope": "four-layer stub, not the full model"
+    },
+    "expert_parallel": {"semantics": "closed_world", "units": []}
+  },
+  "geometry": {
+    "hidden_size": 4096,
+    "dense_intermediate_size": 12288,
+    "moe_intermediate_size": 2048,
+    "routed_experts_per_layer": 288,
+    "top_k": 8,
+    "dense_mlp": {"gate_proj": [12288, 4096], "up_proj": [12288, 4096], "down_proj": [4096, 12288]},
+    "shared_expert": {"gate_proj": [2048, 4096], "up_proj": [2048, 4096], "down_proj": [4096, 2048]},
+    "routed_expert": {"per_expert": "same 2048-wide geometry as the shared expert", "packed_stack_params": 7247757312}
+  },
+  "families": [
+    {
+      "family": "TESSERA_E4M3_K1",
+      "structures": [
+        {
+          "structure": "dense",
+          "cell_rungs_q256": [256, 384, 512, 640, 768, 832, 864, 896, 928, 960, 1024, 1088, 1152, 1280, 1408, 1536, 1664, 1792, 1920, 2048],
+          "activation_contract": "fp8_per_token_dynamic",
+          "picked_by": {"x_picks": ["R832", "R1024", "R1088"], "a8s": ["R1024"], "balanced": ["R1024"]}
+        },
+        {
+          "structure": "routed_moe",
+          "cell_rungs_q256": [832, 864, 896, 928, 944, 960, 1024, 1088],
+          "activation_contract": "fp8_per_token_dynamic",
+          "picked_by": {"x_picks": ["R896"], "a8s": ["R1024"], "balanced": ["R1024"]}
+        }
+      ]
+    },
+    {
+      "family": "TESSERA_BF16_K1",
+      "structures": [
+        {
+          "structure": "dense",
+          "cell_rungs_q256": [256, 384, 512, 640, 768, 832, 864, 880, 896, 928, 960, 1024, 1088, 1152, 1280, 1408, 1536, 1664, 1792, 1920, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944, 3072, 3200, 3328, 3456, 3584],
+          "activation_contract": "bf16_unquantized",
+          "picked_by": {"x_picks": ["R832", "R1088", "R1024"], "a8s": ["R1024"], "balanced": ["R1024"]}
+        },
+        {
+          "structure": "routed_moe",
+          "cell_rungs_q256": [1024],
+          "activation_contract": "bf16_unquantized",
+          "picked_by": {"x_picks": ["R1024"], "a8s": ["R1024"], "balanced": ["R1024"]}
+        }
+      ]
+    },
+    {
+      "family": "TESSERA_E2M1_K2",
+      "structures": [
+        {
+          "structure": "dense",
+          "cell_rungs_q256": [896],
+          "activation_contract": "e2m1_group16_ue4m3_static",
+          "picked_by": {"x_picks": [], "a8s": [], "balanced": []}
+        },
+        {
+          "structure": "routed_moe",
+          "cell_rungs_q256": [896],
+          "activation_contract": "e2m1_group16_ue4m3_static",
+          "picked_by": {"x_picks": [], "a8s": [], "balanced": ["R896"]}
+        }
+      ]
+    }
+  ],
+  "non_selectable": {
+    "attention_qkv": "profile-pinned BF16, no fused attention group carries a Tessera member",
+    "bf16_passthrough": "238 units in x_picks and a8s, 127 in balanced; carry no Tessera family and name no cell",
+    "layer_45_mtp": "ships verbatim at source precision through passthrough_prefixes"
+  },
+  "sources": {
+    "cells": "packaged contract lane_eligibility block, read 2026-10-09",
+    "geometry": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json text_config",
+    "picks": "source-probe format histograms over the three retained assignments",
+    "priced_grid": "docs/measurements CELL-COVERAGE-2026-09-28.md over joint-allocation.topology.pkl"
+  }
+}
