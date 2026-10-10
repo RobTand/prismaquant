@@ -8,6 +8,151 @@ The manifest selects no winner, and real-model qualification stays outside this 
 Without the flag the independent selector and body allocation are unchanged.
 Gate: `tests/test_mtp_option_b_2532.py`.
 
+Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
+The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
+Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
+The issuegraph branch supplies this harness for normal exact-head review.
+No earlier standalone report counts as approval of the imported head.
+
+The harness leaves the pinned `/pq` package, candidates, teachers, and action `1cb0d64a` unchanged.
+The source reader retains every tensor that any requested forward uses as source.
+It also retains a tensor when the replacement shape is partial or unknown.
+Each omitted tensor receives correctly shaped writable storage before its complete candidate replacement.
+Used source and rendered candidate bytes retain their digest checks before a forward.
+The harness reuses the existing G3 arithmetic and EXL3 decoder without changes to those owners.
+Its hash, wire, teacher, and decode tasks use the shared IO engine.
+
+Run `tools/g3job/g3_readset.py` through PB with `--tag x86` to construct the data manifest.
+Set `G3_PQ_ROOT` to the pinned host package for this metadata step.
+Supply the source model, requested arms, wire roots, both teachers, and the panel.
+Supply the reference binding and source execution JSON through `--setup-file`.
+Supply `--arrays-root` when the panel arrays do not reside beside the panel.
+This step reads headers and metadata, not omitted BF16 tensor bodies.
+The manifest orders setup, `layer-00` through `layer-44`, and teachers.
+The profile owns each layer prefix, including the GLM language-model wrapper.
+
+Use `tools/g3job/g3_submit.py` with explicit CPU, host memory, and GPU memory demands.
+Pass the launch arguments after `--`.
+The submitter uses PB stage residency, share auto, RAM auto, and priority zero.
+PB admission and its published RAM policy remain the qualification authority.
+The container retains the admitted helper, environment, writable queue, and read-only input mounts.
+Each phase holds batched leases for its published ranges, grouped by tier and RAM epoch.
+The reader caches the map by atomic file identity, including same-generation RAM updates.
+Newly published ranges use another batch; tensor reads do not repeat cover lookups or pin cycles.
+The source, wire, and teacher readers close their descriptors before phase leases release.
+Its RAM epoch and own digest must agree before the reader returns bytes.
+Completed layer and window events advance matching progress phases.
+The phased launcher refuses `--pilot` because that mode has no arm completion plan.
+
+PB `81dd844a14e0` passes 88 CPU cases, including the source guards, with no skips.
+PB `9f10a29c7f0c` compiles the harness and exercises its CLI and tiny one-arm comparison.
+PB `a58f8bd4ac5c` passes all 79 harness cases after the fixture import correction.
+Fleet asset tests use the existing `fleet_data` opt-in and the PB-qualified installed reader.
+They do not put the old Tessera source ahead of the installed package.
+PB `31b249361cb2` builds the actual 47-phase manifest for `a8_w`.
+It declares 37,858 ranges and omits 36,423 fully replaced source tensors.
+The retained manifest is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-data-manifest-v2.json.gz`.
+These counts describe declared reads, not measured I/O savings.
+
+The initial GPU smoke, PB `eb14b4b4cb4a`, reads one 96-MiB range from PB RAM inside the producer container.
+It preserves the source digest through a GPU round trip.
+Its tiny Linear comparison preserves logits and FP64 KL bytes across source-read and source-omission paths.
+Its profiles reside in `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke/reader-smoke-ig-a3.one-arm/`.
+The comparison has three positions and two vocabulary columns, not the whole GLM panel.
+PB `c8c75f6aa414` passes the final shared-engine smoke on Sparklina at priority zero.
+It repeats the RAM read and the bitwise comparison in the actual producer container.
+Its result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a3-smoke-final/reader-smoke-ig-a3-final.json`.
+Its two traces reside beside that result in `reader-smoke-ig-a3-final.one-arm/`.
+No speed, energy, whole-model residency gain, serving, or promotion claim follows from these checks.
+Netdata power has a ten-second native interval, which cannot resolve the tiny comparison for work per joule.
+
+The real-runner correction uses `tools/g3job/g3_real_arm_smoke.py`, not the tiny Linear as its correctness evidence.
+Its manifest builder reuses `g3_readset.build_manifest` for both diagnostic passes.
+PB `40d6777d7f0c` constructs their 12-phase union with 2,124 declared ranges.
+PB `a5b0cd9de3ca` exposes the former premature phase release in the new regression.
+PB `37f2a621460a` passes all 94 selected harness and source-contract cases, with no skips.
+PB `9db4949220b2` compiles the harness.
+
+PB `7e53e8a836b9` compares one original TR3 window through four real GLM layers on Sparky.
+PB `9466fc282260` repeats the comparison through `g3_submit` and the producer container on Sparklina.
+Both actions use priority zero, the pinned source loader, `SourceReads.install`, expert packing, and `unit_view`.
+The comparison retains the original 2,048 tokens, candidate artifacts, teachers, head, and FP64 KL arithmetic.
+It reads all source tensors in one pass and omits complete replacements in the other.
+Each pass installs and verifies 876 candidate units, including 867 units in the first routed layer.
+The actual logits and both 2,047-position KL arrays match bitwise between the two passes.
+These are truncated diagnostic logits, not full-model quality or promotion evidence.
+
+The revision-4 result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a4-final/real-arm-ig-a4-final/comparison.json`.
+The two in-process traces are `source-read/runner.trace.json` and `omission/runner.trace.json` beside that result.
+The reader records three map parses per pass, versus 2,009 and 1,220 staged reads.
+It records three and six phase acquisitions; partial publication can require another batch.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a4/netdata-power.json`.
+Their native interval is ten seconds.
+Work per joule remains null because this correctness smoke is not a controlled energy comparison.
+No speed, energy, whole-model residency gain, serving, or promotion claim follows from this comparison.
+
+The revision-5 merge retains both documentation additions from `origin/main` at `b597fc363b74`.
+The merge changes no G3 code or pinned numerical code.
+PB `42ee5b235134` passes all 113 selected CPU cases, with no skips.
+PB `07921c3dd917` repeats the real container comparison on Sparky at priority zero.
+Both passes verify 876 replacements; the logits and both FP64 KL arrays match bitwise.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a5-merge/real-arm-ig-a5-merge/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a5/netdata-power.json`.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
+
+The revision-6 merge includes `origin/main` at `3d2841dc9605` and retains both changelog additions.
+The initial container check, PB `5ae3bcef04c9`, fails at `omission-setup` on an unavailable RAM cover.
+PB `35251b1db6f4` reproduces that refusal in the new CPU regression.
+The correction reuses the shared lease owner's refusal classification.
+An unavailable RAM cover can select published stage covers for the same phase and expected bytes.
+Integrity and unknown refusals still fail; the reader never substitutes origin bytes for a named range.
+The existing phase leases, digest checks, omission rule, numerical code, and D32 behavior remain unchanged.
+PB `7b2fd0569f8c` passes all 117 selected CPU cases, with no skips.
+PB `36269dbc3563` completes the real container comparison on Sparklina at priority zero.
+Both passes verify 876 replacements; the logits and both FP64 KL arrays match bitwise.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a6-corrected/real-arm-ig-a6-corrected/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a6/netdata-power.json`.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
+
+The revision-7 merge retains `origin/main` at `0a3f9df953`.
+The G3 reader calls only PB's public client for maps, queue records, and leases.
+Its admitted context supplies the claimed manifest to the shared `staged_lease.load_claimed_manifest` byte reader.
+The normal production entry point retains its exact SDK pin and discovery checks.
+The host loads the container adapter from the pinned source file.
+It does not read the checkout adapter's changed image-digest API.
+The omission rule, phase batches, digest checks, numerical code, and D32 behavior remain unchanged.
+PB `064d872a4635` passes all 164 selected CPU cases, with no skips.
+The suite includes the G3 import checks, PB boundary checks, shared manifest checks, and complete harness population.
+PB `74f166933103` repeats the real container comparison on Sparklina at priority zero.
+Both passes verify 876 replacements; logits and both FP64 KL arrays match bitwise.
+The source-read pass records three map parses and four phase acquisitions.
+The omission pass records two map parses and four phase acquisitions.
+PB records all 12 phases, 14 completed units, zero OOM events, and a stopped, empty, released scope.
+The result is `/mnt/shared/tessera-measurements/g3-readset-2301/ig-a7-public-client/real-arm-ig-a7-public-client/comparison.json`.
+Both Torch traces reside beside it under `source-read/` and `omission/`.
+Both Spark power series reside in `/home/rob/fleet/ceo/exec/ig-pq-2301-l3-a7/netdata-power.json`.
+PB `0bc4c1cc86af` compiles the harness and shared manifest owner on x86.
+This correctness comparison adds no speed, energy, or whole-model residency claim.
+Work per joule remains null.
+
+The revision-8 correction proves the launcher's image seal on the pinned adapter.
+`g3_launch.py` loads teacher-04's pinned `tools/tessera_campaign_container.py` by path.
+That adapter imports `image_content_sha256`, and its `main()` calls the name from its own namespace.
+In default dev mode (D32) the launcher wraps that name.
+A differing image then prints one `[DEV-MODE]` stamp, and the container receives the observed digest.
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) leaves the adapter's own refusal in place.
+The checkout's `tools/tessera_campaign_container.py` binds `_runtime_identity` instead.
+The launcher never loads that file.
+`tests/g3job/test_g3_launch_image_seal.py` starts the real launcher on the real pinned adapter in both modes.
+Only the docker executable is replaced.
+The launcher logic, numerical code, and D32 behavior remain unchanged.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
