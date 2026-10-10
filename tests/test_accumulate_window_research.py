@@ -60,8 +60,8 @@ def test_buffered_arm_matches_checkout_within_rounding():
                 research.buffered_observe_rows(buffered, "u", x, x2, g2, calls=1)
                 pending += 1
                 if pending % size == 0:
-                    buf.flush(buffered._observe_rows)
-            buf.flush(buffered._observe_rows)
+                    buf.flush(joint_aura.JointOperatorStatisticsLease._observe_rows)
+            buf.flush(joint_aura.JointOperatorStatisticsLease._observe_rows)
         finally:
             research.CURRENT_BUFFER = None
         assert set(buffered._operators) == set(ref._operators)
