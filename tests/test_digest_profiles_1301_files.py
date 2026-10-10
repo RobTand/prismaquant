@@ -72,6 +72,7 @@ FILE_SITES = [
     ("prismaquant.tessera_materialization._sha", True, {}),
     ("prismaquant.union_production_cache._file_sha256", False, {}),
     ("tools.measure_vllm_full_kl._file_sha256", True, {}),
+    ("prismaquant.shipcard._file_content_sha256", True, {}),
 ]
 _FILE_INPUTS = [f"b{size}" for size in _SIZES] + ["missing", "directory", "link"]
 
