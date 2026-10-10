@@ -143,8 +143,8 @@ def test_selected_campaign_hashes_only_consumed_shards_and_preserves_identity(
         for name in ('head.safetensors', 'selected.safetensors'))
     print({'hashed_shards': hashed, 'hashed_payload_bytes': sum(size for _,size in hashed),
            'required_payload_bytes': sum(size for _,size in expected)})
-    # Admission, lease-exit reread and close reread each (#2010).
-    assert Counter(hashed) == Counter(expected * 3)
+    # Admission plus the one close reread each; lease exits add none (#2010).
+    assert Counter(hashed) == Counter(expected * 2)
 
 
 @pytest.fixture
@@ -226,9 +226,9 @@ def test_complete_source_finish_reuses_authenticated_shard_and_refuses_mutation(
         assert sorted(row['name'] for row in receipt['verified_files']) == sorted(
             [*f.tensors, 'config.json', 'model.safetensors.index.json',
              'chat_template.jinja'])
-        # Admission plus lease-exit reread; the seal hash has no lease (#2010).
-        assert hashed.count('selected.safetensors') == 2
-        assert hashed.count('unused.safetensors') == 1
+        # Admission only here; the seal hash has no lease and the one close
+        # reread runs after this block (#2010).
+        assert hashed.count('selected.safetensors') == 1
         assert receipt['metadata_only_shards'] == []
 
     owner = cc.authenticate_selected_capture_source(**f.kwargs)
@@ -446,8 +446,8 @@ def test_unconsumed_payload_is_not_hashed_but_later_consumption_is_refused(compl
         with pytest.raises(RuntimeError, match='content differs'):
             with owner.safe_open(safe_open, f.root/'unused.safetensors', framework='pt') as handle:
                 handle.get_slice('model.layers.1.a.weight')[:]
-        # Admission plus lease-exit reread for the consumed shard (#2010).
-        assert hashed == ['selected.safetensors', 'selected.safetensors', 'unused.safetensors']
+        # Admission only per consumed file; lease exits add none (#2010).
+        assert hashed == ['selected.safetensors', 'unused.safetensors']
         assert owner.receipt()['payload_bytes_hashed'] == (f.root/'selected.safetensors').stat().st_size
 
 
@@ -478,8 +478,9 @@ def test_threaded_shared_shard_hashes_once_and_preserves_read_bytes(complete_sou
         for a, b in values:
             assert torch.equal(a, f.tensors['selected.safetensors']['model.layers.0.a.weight'])
             assert torch.equal(b, f.tensors['selected.safetensors']['model.layers.0.b.weight'])
-        # One admission hash plus one exit reread per lease (#2010).
-        assert len(hashed) == 9
+        # One admission hash for eight concurrent leases; the one close
+        # reread runs after this block (#2010).
+        assert len(hashed) == 1
         row = next(row for row in owner.receipt()['verified_files'] if row['name'].endswith('.safetensors'))
         assert row['payload_reads'] == 16
         fd = hashed[0][1]
@@ -627,9 +628,9 @@ def test_projected_tensor_and_scale_readers_share_source_authentication(complete
         assert ls._apply_fp8_dequant_inplace(out, scales, torch.device('cpu'),
             source_authentication=owner) == 1
         assert torch.equal(out['quantized'], torch.ones(4,4)*9)
-        # Two selected leases give admission plus two exits; unused gives admission plus exit (#2010).
-        assert hashed == ['selected.safetensors', 'selected.safetensors', 'selected.safetensors',
-                          'unused.safetensors', 'unused.safetensors']
+        # Admission only per consumed file; two selected leases and one
+        # unused lease add no exit reread (#2010).
+        assert hashed == ['selected.safetensors', 'unused.safetensors']
 
 
 def test_metadata_read_lease_prevents_concurrent_close(complete_source, monkeypatch):
