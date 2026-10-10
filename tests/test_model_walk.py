@@ -19,6 +19,7 @@ coverage recording an unexecuted module.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -368,9 +369,16 @@ def test_qwen3_walk_is_stable_across_two_runs(qwen3_walk):
 # 2026-08-21 on torch 2.11). The contract's fallback applies: root B runs a
 # real tiny-tensor CPU forward instead. The fake block is pinned as a
 # ratchet so a torch/vendored change that lifts it turns the test red with
-# an instruction to promote the fake path.
+# an instruction to promote the fake path. The ratchet walks the checked-in
+# repeating-cell config below, never a host checkpoint path, so it runs on
+# workers without the source tree (PQ #2594).
 
-DSV4_CONFIG = "/home/rob/dq-runs/dsv4-flash-0731/source/config.json"
+#: Repository copy of the DSv4 repeating-cell config the fake-trace ratchet
+#: walks: the same tiny topology `_shrunken_dsv4` builds, checked in so the
+#: ratchet exercises the vendored `from_pretrained` resolution path on every
+#: worker instead of skipping without the source checkpoint.
+DSV4_FAKE_TRACE_CELL = (
+    Path(__file__).resolve().parent / "fixtures" / "dsv4_fake_trace_cell")
 
 
 def test_dsv4_profile_rules_decide_the_grouped_linear_weight():
@@ -488,25 +496,20 @@ def test_dsv4_walk_fails_without_the_profile_rules():
 
 @pytest.mark.slow
 def test_dsv4_fake_trace_block_is_still_real():
-    """Ratchet on the documented block: the fake trace of the real source
-    config stops at `int(position_ids[0, 0])` (DataDependentOutputException
+    """Ratchet on the documented block: the fake trace of the DSv4 cell
+    stops at `int(position_ids[0, 0])` (DataDependentOutputException
     on `aten._local_scalar_dense`). If torch or the vendored code ever
     lifts it, this turns red: switch acceptance c to the fake path and
     delete the real-CPU fallback note from the module docstring."""
-    import pathlib
-
     from torch._subclasses.fake_tensor import DataDependentOutputException
 
-    if not pathlib.Path(DSV4_CONFIG).is_file():
-        pytest.skip(f"DSv4 source config not on this host: {DSV4_CONFIG}")
     import prismaquant  # noqa: F401
     from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
     from transformers import AutoConfig, AutoModelForCausalLM
 
     profile = DeepseekV4Profile()
     profile.register_vendored_modeling()
-    cfg = AutoConfig.from_pretrained(str(pathlib.Path(DSV4_CONFIG).parent))
-    cfg.num_hidden_layers = 4  # walk the repeating cell, not 43 copies
+    cfg = AutoConfig.from_pretrained(str(DSV4_FAKE_TRACE_CELL))
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(cfg)
     model.eval()
