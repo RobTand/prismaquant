@@ -22,7 +22,7 @@ MLA page nor vice versa, so slot-sharing would need preconditions this
 patch does not claim. The pool grows by the draft block; the eager serve
 measures the cost.
 
-Twelve edits. Each edit carries an already-applied marker that is absent
+Eleven edits. Each edit carries an already-applied marker that is absent
 in the base file, so a rerun completes a partial run and a foreign file
 is refused instead of double-applied. The file is refused unless it is
 byte-identical to the base image's.
@@ -319,6 +319,13 @@ EDITS = (
      "        int,\n        list[str],\n    ]", 1),
     ("draft names fill", OLD_TAIL_FILL, NEW_TAIL_FILL,
      "draft_names: list[str] = []", 1),
+    # The layout grows by the draft names, so both consumers that unpack
+    # it positionally (the config builder and the memory estimator) take
+    # the ninth element. One entry with count 2: the two sites are byte
+    # identical, and either site left at eight names breaks every
+    # GLM5-next serve at config time, drafter or not.
+    ("layout unpack", OLD_UNPACK, NEW_UNPACK,
+     "draft_names,\n        ) = glm5_layout", 2),
     ("pool block bytes", OLD_BYTES_RETURN, NEW_BYTES_RETURN,
      "for spec in _glm5_next_draft_specs(", 1),
     ("config block bytes", OLD_CONFIG_BYTES, NEW_CONFIG_BYTES,
@@ -331,7 +338,7 @@ EDITS = (
 
 
 def patched_source(data: bytes) -> bytes:
-    """Apply the twelve edits; refuse foreign bytes, complete partial runs."""
+    """Apply the eleven edits; refuse foreign bytes, complete partial runs."""
     text = data.decode()
     for tag, old, new, marker, count in EDITS:
         if marker in text:

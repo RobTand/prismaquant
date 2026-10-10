@@ -233,6 +233,11 @@ def test_kv_patch_partitions_the_drafter_and_keeps_the_guard():
     assert "type(spec) is MLAAttentionSpec" in fixed
     assert "draft_group" in fixed
     assert "MambaSpec, KpoolTailSpec" in fixed
+    # The layout grows by the draft names, so both positional consumers
+    # bind the ninth element. One site left at eight names breaks every
+    # GLM5-next serve at config time, drafter or not.
+    assert fixed.count("draft_names,\n        ) = glm5_layout") == 2
+    assert KV.OLD_UNPACK not in fixed
     # A rerun completes instead of doubling the edits.
     assert KV.patched_source(fixed.encode()).decode() == fixed
 
@@ -244,9 +249,9 @@ def test_patch_scripts_are_the_recorded_bytes():
         ("patch_glm5next_eagle3.py",
          "fc1afc2e5fde1c12a587022fa48859dfea65659cc35521200d4195b5f8b97b76"),
         ("patch_glm5_drafter_kv_group.py",
-         "86663be2310167dd448d8d270aaa8d19a75cfd3d044f428ca34df76d9a3ed009"),
+         "af57080f2e6acdbc1d255df37a32b8d75f6220e4395284cb3b8baa6428547c86"),
         ("selfcheck_glm53_dflash2_drafter.py",
-         "631c90d7f79f34e374ed8952d38eced23491810556e20a5f1c9faef6fcf4a96a"),
+         "e7f562928a61f621f6eb1ad18bf1c85d0fd06ecc905d449cd471441b03ef0e9b"),
     ):
         body = (PATCH_DIR / name).read_bytes()
         assert hashlib.sha256(body).hexdigest() == digest, name
