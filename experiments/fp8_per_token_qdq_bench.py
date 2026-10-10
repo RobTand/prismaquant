@@ -181,14 +181,21 @@ def _bench_case(width: int, out: Path) -> dict:
         for _ in range(WARMUP):
             fp8_dynamic_activation_qdq_vllm(inputs).dequant
         torch.cuda.synchronize()
+        timed_start = time.time()
         per_call = [
             _timed_calls(inputs, CALLS_PER_ROUND) for _ in range(ROUNDS)
         ]
+        timed_end = time.time()
         case[arm] = {
             "ms_per_call_median": statistics.median(per_call),
             "ms_per_call_min": min(per_call),
+            "timed_epoch_start": timed_start,
+            "timed_epoch_end": timed_end,
         }
+        power_start = time.time()
         case[arm].update(_power_phase(inputs, POWER_PHASE_S))
+        case[arm]["power_epoch_start"] = power_start
+        case[arm]["power_epoch_end"] = time.time()
     for arm, flag in (("reference", "1"), ("fused", "0")):
         traced = _profile_arm_trace(width, flag)
         case[arm]["cuda_kernels_per_call"] = traced["kernels_per_call"]
@@ -223,6 +230,16 @@ def main() -> None:
             flush=True,
         )
     print("SUMMARY_JSON:" + json.dumps(summary), flush=True)
+    print("EPOCHS_JSON:" + json.dumps({
+        str(case["width"]): {
+            arm: {
+                "timed": [case[arm]["timed_epoch_start"], case[arm]["timed_epoch_end"]],
+                "power": [case[arm]["power_epoch_start"], case[arm]["power_epoch_end"]],
+            }
+            for arm in ("reference", "fused")
+        }
+        for case in summary
+    }), flush=True)
     del os.environ[DISABLE_FUSED_ENV]
 
 
