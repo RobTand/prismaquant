@@ -1,0 +1,13 @@
+{
+  "schema": "pq2546.route-gaps.v1",
+  "note": "Contract-dependent route gaps, recorded apart from the allocation grouping proof. None of these changes the fused-module coherence result.",
+  "gaps": [
+    {"gap": "No image-X cell declares compiled execution; all 14 image-X cells list eager only.", "scope": "every selectable family, structure, and rung"},
+    {"gap": "Rungs 880 and 912 have no E4M3 census cell on image X; the E4M3 dense cell names 20 rungs and the routed cell names 8, neither lists 880 or 912.", "scope": "TESSERA_E4M3_K1 routed 880/912; measured allocations pick neither"},
+    {"gap": "BF16 routed_moe admits only R1024 on image X.", "scope": "all three allocations pick routed BF16 only at R1024"},
+    {"gap": "E2M1_K2 admits only R896 in both structures on image X.", "scope": "only the balanced allocation picks E2M1, at R896"},
+    {"gap": "Every image-X cell carries grade route_only with smoke not_recorded.", "scope": "all 14 image-X cells"},
+    {"gap": "TP2 attestation is the four-layer stub receipt glm53_a4_stub_tp2_sm121; no full-model TP2 receipt exists.", "scope": "all families at world size 2"},
+    {"gap": "kv_head_replication.exercised_by_receipt is false.", "scope": "tensor_parallel block"}
+  ]
+}
