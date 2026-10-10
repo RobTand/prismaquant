@@ -16,6 +16,8 @@ import hashlib
 import io
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -141,6 +143,19 @@ def test_the_execution_record_names_every_action_with_a_verified_cas_chain(recor
 def test_no_performance_claim_is_made(record, manifest):
     summary, _units, _cells = record
     assert summary["performance_claims"] == [] and manifest["performance_claims"] == []
+
+
+def test_the_record_states_what_it_does_not_establish(record):
+    summary, _units, _cells = record
+    assert {item["id"] for item in summary["limitations"]} == {
+        "dev_uncertified", "certified_run_refuses_routed_shapes",
+        "dense_wires_have_no_selection_receipt_path", "body_refusal_rests_on_payload_provenance"}
+    admission = summary["body_admission"]
+    assert [row["payload"] for row in admission["payloads"]] == [
+        "r1024_part", "r896_part", "merged_original", "merged_current"]
+    assert all(row["refused"] and row["message"] == audit.MTP_BODY_REFUSAL for row in admission["payloads"])
+    # The refusal reads payload provenance, so the same rows relabelled as body AURA pass it.
+    assert admission["probe_relabelled_provenance"]["outcome"] == "admitted"
 
 
 def test_the_report_cites_the_record_it_rests_on(manifest, record):
@@ -333,3 +348,13 @@ def test_body_cost_admission_refuses_an_mtp_payload():
         cost_currency.require_run_currency(_payload())
     source = (Path(cost_currency.__file__)).read_text()
     assert audit.MTP_BODY_REFUSAL in source
+
+
+def test_the_verifier_imports_without_the_scientific_stack():
+    """``--verify-actions-only`` must run on a host without torch: loading the tool imports only the digest owner."""
+    code = ("import sys; sys.modules['torch'] = None; sys.modules['transformers'] = None; "
+            f"sys.path.insert(0, {str(ROOT)!r}); import tools.audit_glm_mtp_layer45 as tool; "
+            "assert 'prismaquant' not in sys.modules; print(tool.bytes_sha256hex(b''))")
+    result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == hashlib.sha256(b"").hexdigest()

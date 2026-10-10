@@ -38,10 +38,15 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from prismaquant.digests import (  # noqa: E402
-    DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX, LengthFramedSourceSha256,
-    bytes_sha256hex, file_sha256hex)
+# The digest owner imports only the standard library. Loading it from its own directory keeps this tool
+# importable without torch, so ``--verify-actions-only`` runs on any host that mounts the fleet.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+try:
+    from digests import (  # noqa: E402
+        DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX, LengthFramedSourceSha256,
+        bytes_sha256hex, file_sha256hex)
+finally:
+    sys.path.pop(0)
 
 SCHEMA = "prismaquant.pq2530.mtp_layer45_audit.v1"
 WORKSPACE = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925")
