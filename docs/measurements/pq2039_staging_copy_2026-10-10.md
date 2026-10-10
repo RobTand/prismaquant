@@ -63,9 +63,9 @@ pbrun --cwd <checkout> --tag gb10 --demand gpu=1,mem_gb=8 --cpus 2 --gpu-memory-
 
 ## Method
 
-- Fixture: one declared shard of 32 BF16 tensors `[2048, 4096]` (16 MiB each, the GLM-5.3-Flash
-  expert projection), one staged range file per tensor on local NVMe, and a residency map that
-  names them. The staged bytes equal the declared bytes. Live CUDA tensors equal the source.
+- Fixture: one declared shard of 32 BF16 tensors `[2048, 4096]`, 16 MiB each (the GLM-5.3-Flash
+  expert projection). Each tensor has one staged range file on local NVMe. A residency map names
+  them. The staged bytes equal the declared bytes. Live CUDA tensors equal the source.
 - A pass is the production serial check: `_start_projected_unit_check` for each of 32 units,
   then one `_settle_projected_unit_checks` and a CUDA synchronize. One pass reads 512 MiB.
   Source-page retirement is on in both arms.
@@ -73,8 +73,8 @@ pbrun --cwd <checkout> --tag gb10 --demand gpu=1,mem_gb=8 --cpus 2 --gpu-memory-
   before the change. `after` is the shipped code. Order is before, after, after, before, with 426
   passes per arm. Four warm-up passes per kind size the arms from the median of the last three, so the slower arm lasts 30 s.
 - Timing and profiling never share a pass. The timed passes run with no profiler. Three profiled
-  passes follow each arm. Torch 2.11 keeps no Python stack on its events, so the profile reads the
-  Python frames from the exported Chrome trace and charges each `aten::copy_` to the innermost
+  passes follow each arm. Torch 2.11 keeps no Python stack on its events. The profile reads the
+  Python frames from the exported Chrome trace. It charges each `aten::copy_` to the innermost
   frame outside torch on its thread. The frame line is the function's first line, so the split is
   per function. Profile microseconds include the profiler's own cost: they locate the work, and
   the timed passes measure it.
@@ -159,11 +159,11 @@ Same ABBA, 30 passes per arm, no map bound, pages resident.
 
 Pooled wall median 47.52 ms before, 47.74 ms after (+0.46%). Pooled CPU 47.41 ms before, 47.65 ms after (+0.49%).
 
-With no map the pool serves every unit, `source_unit_weight` pins after the read, and the copy
+With no map the pool serves every unit and `source_unit_weight` pins after the read. The copy
 moves from the check into the read (`_prepare_device_projected_check` before,
 `source_unit_weight` after). The cost stays within noise. This pass is faster than the staged
-`before` pass (47.5 against 73.2 ms) because the pool read is one copy from mapped resident
-pages, where the staged read made two passes over the bytes. The change brings the staged read
+`before` pass (47.5 against 73.2 ms). The pool read is one copy from mapped resident
+pages. The staged read made two passes over the bytes. The change brings the staged read
 to within 2.4 ms of it (49.9 ms). The control keeps its pages resident. In an earlier run the control
 retired its pages after each read. Every pass then re-read the mapped file from disk at 2.5 GB/s,
 and a CPU change could not have shown.
@@ -188,9 +188,9 @@ The control arms last 1 to 2 s, so their means rest on one or two Netdata rows.
 Clock probes (peer minus local, by `ssh date`): sparklina: offset +0.003 to +0.004 s, bound ±0.003 to ±0.004 s over 3 probes.
 
 The arms ran on `sparky`. Its CPU busy share stayed between 10.4% and 11.6% over the four paired
-arms, and `sparklina` between 9.3% and 10.0%. Both series were complete: every required chart on
-both hosts returned fresh, finite samples for the whole window (140 rows per chart over 139 s), and each
-chart passed `validate_netdata_window`. Netdata hides its `idle` dimension, so busy is the sum of
+arms, and `sparklina` between 9.3% and 10.0%. Both series were complete. Every required chart on
+both hosts returned fresh, finite samples for the whole window (140 rows per chart over 139 s).
+Each chart passed `validate_netdata_window`. Netdata hides its `idle` dimension, so busy is the sum of
 the other dimensions without `iowait`. The raw series are in the result record.
 
 ## Reservations
@@ -236,8 +236,8 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
   `test_collect_row_netdata_2039`, `test_projected_preparation_2039` and
   `test_projected_unit_check_1935`. The CUDA tests ran for the first time. They found a bug in the
   test helper that counts copies, now fixed.
-- CPU sweep at the measured head, 27 files that name a changed module or guard the tree
-  (529 tests, 4 shards, 0 failed, the 10 skips need CUDA):
+- CPU sweep at the measured head: 27 files that name a changed module or guard the tree.
+  529 tests, 4 shards, 0 failed. The 10 skips need CUDA.
   `579cdf9d883da92313881d2865eb157ffea9263d54f879b7def3d7775458f41b`,
   `94fb60ddc50cd034617a9baece6758b62d1780493f65d1071a9f74f7e6b4ae4d`,
   `782642076c45c33ba749384959d931bcb388d5e1b1145e7861a302674981a194`,
@@ -253,16 +253,16 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
 - CPU dry run of the measure's entry point (D38), `--cpu-dry-run` with the sealed SDK 5 bundle, at
   the final head: `023d3ecd7cf0823d5329314f8515c75d63f406da274ed1991079c568a61902d6`. Four
   units read through the stage, 0 pool bytes, 0 fallbacks, SDK version 5.
-- Documentation and tmpfs-sensitive tests at the final head, default scratch `/home/rob/tmp` (the
-  Stage B spill and cotangent scratch guards refuse tmpfs, so these run off `/tmp`):
+- Documentation and tmpfs-sensitive tests at the final head, on default scratch `/home/rob/tmp`.
+  The Stage B spill and cotangent scratch guards refuse tmpfs, so these run off `/tmp`:
   `44213282a56713a08ed37bd0756041deb118a5d9c65c4bc6e0d5b9637d0db023`: 132 passed, 1 skipped. The
   skip needs a DIO-capable worker and has nothing to do with this change.
 
 ## HOLD and limits
 
 - **Energy and work per joule: HOLD.** The only power reading is the GPU board's, by
-  `nvidia-smi`: 15.5 to 16.1 W in the `before` arms and 17.2 to 17.3 W in the `after` arms, about
-  11 to 12% of the 140 W envelope. It does not see the CPU and memory side, where the removed
+  `nvidia-smi`. It reads 15.5 to 16.1 W in the `before` arms and 17.2 to 17.3 W in the `after`
+  arms. That is about 11 to 12% of the 140 W envelope. It does not see the CPU and memory side, where the removed
   copy ran, so joules per pass from it would not describe the change. This run read no sensor
   that closes that gap.
 - **Clock alignment: HOLD.** The probe from `sparky` to `sparklina` gave an offset of +0.003 to
@@ -271,14 +271,14 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
 - No saturation claim. The pass is host-bound: 43 of 50 ms is the staged read. GPU utilization is
   not diagnostic on GB10, and board power stays near 17 W.
 - The fixture's stage is local NVMe with a warm page cache. A production stage serves from NFS,
-  SSD or RAM. The removed work is a memcpy and an allocation, so it should cost the same per
+  SSD or RAM. The removed work is a memcpy and an allocation. It should cost the same per
   unit on any stage (0.73 ms per 16 MiB here). That is expected, not measured. The share of a
   pass changes with the read.
 - The chunked read of an NFS stage fills the same pinned buffer in disjoint windows. The tests
   cover that path with a four-stream mount table, and no NFS stage was measured.
 - **Live reachability.** The saving needs the residency map to validate. An ordinary admitted
-  action today resolves the live SDK 6 generation and refuses the map (the probe above), so the
-  staged read, and with it this saving, is reachable in a live campaign row only when the SDK pin
+  action today resolves the live SDK 6 generation and refuses the map (the probe above). The
+  staged read, and this saving with it, is reachable in a live campaign row only when the SDK pin
   and the live generation agree. This measure binds the sealed SDK 5 bundle explicitly to show the
   read path. It does not show that a live row binds that bundle. The follow-up issue filed with
   this change names the open decision: which side moves.
