@@ -128,6 +128,25 @@ _CRI_REFUSE = (
     "else:\n"
     "    raise SystemExit('duplicate member accepted')\n"
 )
+_RESEAL_ACCEPT = (
+    "import hashlib\n"
+    "assert mod.sha256_bytes(b'\\x00abc') == hashlib.sha256(b'\\x00abc').hexdigest()\n"
+    "assert mod.identity_sha256({'a': 1}) == hashlib.sha256(mod.canonical_bytes({'a': 1})).hexdigest()\n"
+    "assert mod.unit_path('parts', 'caf\\u00e9').name == hashlib.sha256('caf\\u00e9'.encode('utf-8')).hexdigest() + '.pkl'\n"
+    "assert mod.sha256_file(__import__('pathlib').Path(payload)) == hashlib.sha256(__import__('pathlib').Path(payload).read_bytes()).hexdigest()\n"
+    "print('RESEAL-OK')\n"
+)
+_RESEAL_REFUSE = (
+    "import pathlib\n"
+    "assert 'import prismaquant' not in pathlib.Path(tool).read_text(), 'import fallback present'\n"
+    "try:\n"
+    "    mod.sha256_bytes(b'abc')\n"
+    "except mod.Refused as exc:\n"
+    "    assert 'cannot load required source digest owner' in str(exc), exc\n"
+    "    print('RESEAL-NO-OWNER-OK')\n"
+    "else:\n"
+    "    raise SystemExit('missing digest owner accepted')\n"
+)
 
 
 def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
@@ -198,6 +217,25 @@ def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> N
                         _CRI_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "CRI-DUP-OK" in out
+
+
+def test_reseal_tool_loader_runs_without_the_package(tmp_path: Path) -> None:
+    """The reseal tool binds the public digest owner by file path."""
+    root = _stage(tmp_path, "tools/reseal_campaign_identity.py")
+    owner = root / "prismaquant/digests.py"
+    owner.parent.mkdir(parents=True)
+    shutil.copy2(REPO / "prismaquant/digests.py", owner)
+    out = _run_isolated(root, "tools/reseal_campaign_identity.py",
+                        _RESEAL_ACCEPT, _write(root, "seal.bin", "seal-bytes"))
+    assert "RESEAL-OK" in out
+
+
+def test_reseal_tool_loader_refuses_a_missing_owner_without_fallback(tmp_path: Path) -> None:
+    """Without the owner beside it, the reseal tool refuses; no import fallback."""
+    root = _stage(tmp_path, "tools/reseal_campaign_identity.py")
+    out = _run_isolated(root, "tools/reseal_campaign_identity.py",
+                        _RESEAL_REFUSE, _write(root, "unused", ""))
+    assert "RESEAL-NO-OWNER-OK" in out
 
 
 @pytest.mark.parametrize("script,option", [
