@@ -44,6 +44,11 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The allocator layer config stamps the solved target with provenance (#2623).
+  Each writer call passes its explicit solve target, and the metadata keeps
+  the parsed `--target-bits` value beside the stamped one. A candidate write
+  stamps its own target instead of the ambient CLI default. The stock and
+  Tessera pin digests move by that block only; all allocations stay identical.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

@@ -959,6 +959,36 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
           f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
           f"({record['selection']['regime']})", flush=True)
 
+def resolve_layer_config_target_stamp(*, cli_target_bits, args_target_bits,
+                                      solved_target_bits=None):
+    """Build the layer-config ``target_bits`` stamp and its provenance (PQ #2623).
+
+    The writer stamps the target the assignment was solved at: the explicit
+    per-write ``solved_target_bits`` when the caller passes one (a candidate
+    or emit target), else the code-path ``args_target_bits``. The provenance
+    always names the parsed ``--target-bits`` value beside the stamped one,
+    so an emit override stays visible instead of silently replacing the CLI
+    value.
+    """
+    if solved_target_bits is not None:
+        stamped = float(solved_target_bits)
+        source = "solved_target_bits"
+    else:
+        stamped = float(args_target_bits)
+        source = "args_target_bits"
+    return {
+        "target_bits": stamped,
+        "target_bits_provenance": {
+            "cli_target_bits": float(cli_target_bits),
+            "args_target_bits": float(args_target_bits),
+            "solved_target_bits": (
+                None if solved_target_bits is None
+                else float(solved_target_bits)),
+            "stamped_target_bits": stamped,
+            "stamped_from": source,
+        },
+    }
+
 
 def _is_mtp_linear(name: str) -> bool:
     """True when `name` refers to an MTP Linear-like quantization target."""
@@ -4105,6 +4135,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # Solver diagnostics per target, kept beside the memo so a cache hit never
     # loses them: an INFEASIBLE rung's only explanation lives here.
     _solve_diagnostics: dict[float, dict] = {}
+    # The parsed --target-bits value before any emit override: the
+    # byte-budget path reassigns args.target_bits to the chosen emit target,
+    # so the layer-config provenance reads the CLI value from here (PQ #2623).
+    cli_target_bits = float(args.target_bits)
 
     def _solve_for_target(target_bits: float):
         """Solve additively, then exact-filter the expanded assignment.
@@ -4326,6 +4360,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         return None, float("nan"), float("inf"), float("inf")
 
     def _write_layer_config(assignment, achieved, total, mutable_total, *,
+                            solved_target_bits=None,
                             selected_whole_artifact_budget_stamp=None, replay=None):
         print(
             f"[alloc] target_bits={args.target_bits}: "
@@ -4648,7 +4683,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 else "profile_pinned_bf16"
             ),
             "lm_head_cost_pricing": fixed_lm_head_cost_pricing,
-            "target_bits": float(args.target_bits),
+            # The target this assignment was solved at: the caller's explicit
+            # solve target when one is passed, else the code-path target. The
+            # provenance keeps the parsed CLI value beside it (PQ #2623).
+            **resolve_layer_config_target_stamp(
+                cli_target_bits=cli_target_bits,
+                args_target_bits=args.target_bits,
+                solved_target_bits=solved_target_bits),
             "achieved_bits": final_body_achieved,
             "achieved_bits_scope": (
                 "body_assignment_tensor_payload_including_deduplicated_cb_sidecars"
@@ -5199,6 +5240,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # Replay owns only its explicit output, never sweep-side attribution files.
             args.bit_attribution_json = args.bit_attribution_csv = None
             _write_layer_config(assign, record["achieved_bits"], dloss, dloss, replay=provenance,
+                                solved_target_bits=float(args.target_bits),
                                 selected_whole_artifact_budget_stamp=budget_stamp)
 
         def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
@@ -5312,7 +5354,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             args.target_bits = float(target_bits)
             # Replay owns only its explicit output, never sweep-side attribution files.
             args.bit_attribution_json = args.bit_attribution_csv = None
-            _write_layer_config(assign, achieved, total, mutable, replay=provenance)
+            _write_layer_config(assign, achieved, total, mutable, replay=provenance,
+                                solved_target_bits=float(target_bits))
 
         measured_runtime_sweep(MeasuredRuntimeSweep(
             solve=_solve_at_prefill_slo,
@@ -6455,7 +6498,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                else "")
             + ". Raise --target-bits above the achievable value above, or "
               "widen --formats so the floor drops.")
+    # The emit solves at args.target_bits: the parsed CLI value, or the
+    # byte-budget emit target after the override above. Stamp exactly that.
     _write_layer_config(assignment, achieved, total, mutable_total,
+                        solved_target_bits=float(args.target_bits),
                         selected_whole_artifact_budget_stamp=selected_whole_artifact_budget_stamp)
 
 
