@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (Refs #2039): the device projected-unit check adopts a
+page-locked source buffer. A read that the residency map stages fills that
+buffer in `StagedShardReader` (opt-in `pinned_host`), so the check makes no
+second host copy. A pool read, an unmapped read and the qualified-original
+owner's read keep one private pin copy, now made after the read in
+`source_unit_weight`. First-mismatch order, dtype and equality semantics,
+source-page retirement, private-buffer ownership and cancellation do not
+change. No default, stage, format, lane or ship gate changes. The paired
+measure, its scope control and its both-Spark Netdata record are in
+[the 2026-10-10 staging-copy report](measurements/pq2039_staging_copy_2026-10-10.md).
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
