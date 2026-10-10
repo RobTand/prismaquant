@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (PQ #2600): a pin update is refused
+unless the four named v12 scope fixture classes pass.
+The gate runs the census, derived, absent and malformed classes
+in `prismaquant/tessera_pin_scope_gate.py` against the reader.
+A missing or failing class refuses exactly as a broken reader does.
+A Tessera schema PR is refused unless it links consumer compatibility
+work and names fixture results for all four classes.
+The guard test is `tests/test_tessera_pin_v12_scope_gate.py`.
+The pin stays at lane schema v11; no pin moves in this change.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
@@ -25996,6 +26006,17 @@ installed Tessera's version and demands the pin follow it. That would redden
 `main` on the next Tessera bump with a message saying "re-pin to 0.2.0", which
 is a moving `master` made into a review event — the rule
 `TESSERA_DEV_PIN_COMMIT`'s docstring states, read backwards.
+Moving the pin also requires the v12 scope proof (PQ #2600).
+`prismaquant/tessera_pin_scope_gate.py` runs the census, derived,
+absent and malformed fixture classes against the reader, and
+`require_v12_scope_proof` refuses the pin update when any class
+is missing or fails. The producer rule is mechanical: a Tessera
+schema PR without linked consumer compatibility work and without
+fixture results for all four classes is refused
+(`check_producer_schema_pr`). `tests/test_tessera_pin_v12_scope_gate.py`
+guards both halves; the Tessera-side adoption of the producer rule
+is tracked as a child issue of PQ #2600.
+
 `tests/test_tessera_lane_v6.py` is the guard on the v6 grammar and the evidence
 gate, including that a cell whose published smoke status is refused is
 refused and every dense cell is not; `tests/test_tessera_lane_v8.py` pins the
