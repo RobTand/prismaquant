@@ -30,6 +30,7 @@ import math
 import os
 import pickle
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,8 @@ PB_ROOT = Path("/mnt/shared/prismabuild-fleet")
 TESSERA_PIN_SRC = Path("/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63/src")
 SECTIONS = ("structure", "io", "pb", "trees", "refusals")
 
+CALIBRATION_TOKENS = Path("/mnt/shared/tessera-measurements/glm-canonical-census-20260908/"
+                          "exact-calibration-input-01/calibration_tokens.safetensors")
 LAYER = 45
 PREFIX = f"model.language_model.layers.{LAYER}.mlp."
 PROJECTIONS = ("down_proj", "gate_proj", "up_proj")
@@ -95,8 +98,10 @@ EXCLUDED_M3_ATTEMPTS = {
 
 
 # --------------------------------------------------------------------------- helpers
-def log(message):
-    print(f"[audit] {message}", file=sys.stderr, flush=True)
+def log(message, *, always=False):
+    """Progress goes to stderr only on request, so a passing run's stdout is exactly its JSON record."""
+    if always or os.environ.get("PQ2530_AUDIT_VERBOSE") == "1":
+        print(f"[audit] {message}", file=sys.stderr, flush=True)
 
 
 def sha256_bytes(raw) -> str:
@@ -129,7 +134,7 @@ class Ledger:
     def check(self, name, ok, detail=""):
         self.checks.append({"name": name, "ok": bool(ok), "detail": str(detail)[:600]})
         if not ok:
-            log(f"FAIL {name}: {str(detail)[:300]}")
+            log(f"FAIL {name}: {str(detail)[:300]}", always=True)
         return bool(ok)
 
 
@@ -551,6 +556,52 @@ def audit_projection(ws, inputs, ledger, census, ids):
     ids.add("source.shard_digests_sha256", "producer-projection", sha256_bytes(canonical(files)))
     return projection, {"units": len(names), "geometry": dict(sorted(geometry.items())),
                         "source_shards": len(files)}
+
+
+def audit_calibration(inputs, ledger, census, ids):
+    """The calibration draw: the token file, its shape and bytes, and the census it was prepared for."""
+    raw = inputs.read("calibration-tokens", CALIBRATION_TOKENS)
+    (length,) = struct.unpack("<Q", raw[:8])
+    header = json.loads(raw[8:8 + length])
+    metadata = header.pop("__metadata__")
+    tensor, data = header["calibration_ids"], raw[8 + length:]
+    provenance = json.loads(metadata["calibration_provenance"])
+    ledger.check("calibration.draw_is_512_by_512_int64", tensor["dtype"] == "I64" and tensor["shape"] == [512, 512]
+                 and len(data) == 512 * 512 * 8, f"{tensor['dtype']} {tensor['shape']} {len(data)} bytes")
+    ledger.check("calibration.provenance_equals_the_census_draw", all(
+        provenance[key] == census[key] for key in ("text_sha256", "fit_ids_sha256", "nsamples", "seqlen", "seed"))
+        and provenance["fit_tokens"] == 262144 and metadata["original_census_sha256"]
+        == census["mtp_extension"]["base_census"]["sha256"], "text, fit ids, draw size and seed; prepared for the base census")
+    ids.add("calibration.artifact_sha256", "calibration-tokens-file", sha256_bytes(raw))
+    ids.add("calibration.calibration_sha256", "calibration-tokens-file", sha256_bytes(data))
+    ids.add("calibration.text_sha256", "calibration-tokens-file", provenance["text_sha256"])
+    ids.add("calibration.fit_ids_sha256", "calibration-tokens-file", provenance["fit_ids_sha256"])
+    return {"artifact_sha256": sha256_bytes(raw), "token_bytes_sha256": sha256_bytes(data),
+            "shape": tensor["shape"], "dtype": tensor["dtype"], "provenance": provenance}
+
+
+def audit_census_authentication(inputs, ledger, census, census_sha, report, projection):
+    """What makes the census authenticated: its base census, the canonical capture, and the shards read."""
+    extension = census["mtp_extension"]
+    base, canonical_capture = extension["base_census"], extension["canonical_capture"]
+    ledger.check("census.base_census_file", inputs.bind("base-census", base["path"]) == base["sha256"],
+                 f"base census {base['sha256'][:12]}")
+    ledger.check("census.canonical_capture_file", inputs.bind("canonical-capture-manifest", canonical_capture["path"])
+                 == canonical_capture["sha256"], f"canonical capture manifest {canonical_capture['sha256'][:12]}")
+    auth = report["source_authentication"]
+    ledger.check("census.derivation_authenticated", auth["census_sha256"] == base["sha256"]
+                 and auth["capture_manifest_sha256"] == canonical_capture["sha256"]
+                 and auth["derived_census_sha256"] == [census_sha]
+                 and auth["authentication"].startswith("fresh SHA256 through held")
+                 and sum(f["bytes_hashed"] for f in auth["verified_files"]) == auth["payload_bytes_hashed"],
+                 f"{len(auth['verified_files'])} files, {auth['payload_bytes_hashed']} payload bytes hashed")
+    seal = projection["producer"]["source"]["files"]
+    shards = [f for f in auth["verified_files"] if f["name"] in seal]
+    ledger.check("census.authenticated_shards_equal_the_producer_seal",
+                 bool(shards) and all(seal[f["name"]] == f["sha256"] for f in shards),
+                 f"{len(shards)} shards read by the capture carry the producer's digests")
+    return {"base_census_sha256": base["sha256"], "canonical_capture_sha256": canonical_capture["sha256"],
+            "shards_read_by_capture": len(shards), "payload_bytes_hashed": auth["payload_bytes_hashed"]}
 
 
 def audit_capture_manifest(ws, inputs, ledger, census, census_sha, ids):
@@ -1405,6 +1456,7 @@ def main(argv=None):
                "layer": LAYER, "limit_units": args.limit_units, "sections": sorted(sections),
                "skip_seal_recompute": args.skip_seal_recompute,
                "interpreter": {"path": sys.executable, "python": sys.version.split()[0]},
+               "argv": [str(a) for a in (argv if argv is not None else sys.argv[1:])],
                "tool": {"path": "tools/audit_glm_mtp_layer45.py", "sha256": sha256_file(__file__)}}
     census_path = ws / "m1/v2/mtp-census.json"
     census = inputs.json("authenticated-census", census_path)
@@ -1417,6 +1469,10 @@ def main(argv=None):
     projection, summary["projection"] = audit_projection(ws, inputs, ledger, census, ids)
     facts["projection"] = census["expert_projection"]
     manifest, capture_roster, summary["capture"] = audit_capture_manifest(ws, inputs, ledger, census, census_sha, ids)
+    capture_report = json.loads((ws / "m1/v2/capture/capture-run.json").read_bytes())
+    summary["capture"]["census_authentication"] = audit_census_authentication(
+        inputs, ledger, census, census_sha, capture_report, projection)
+    summary["calibration"] = audit_calibration(inputs, ledger, census, ids)
     facts["capture_manifest"] = manifest
     facts["capture_sha"] = inputs.sha("capture-manifest", ws / "m1/v2/capture/capture_manifest.json")
     rosters = [capture_roster]
@@ -1490,7 +1546,7 @@ def main(argv=None):
     summary.update({"checks": ledger.checks, "passed": len(ledger.checks) - len(failed), "failed": len(failed)})
     sys.stdout.write(json.dumps(summary, sort_keys=True, indent=1) + "\n")
     sys.stdout.flush()
-    log(f"{summary['passed']} checks passed, {summary['failed']} failed")
+    log(f"{summary['passed']} checks passed, {summary['failed']} failed")  # verbose only
     return 0 if not failed else 1
 
 
