@@ -243,6 +243,7 @@ def test_dispatch_is_explicit_and_fails_fast():
 
 
 @pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 @pytest.mark.slow
 def test_real_dsv4_wo_a_gets_a_priced_probe_row():
     """End to end on the REAL vendored DSv4 modeling code (toy dims): the

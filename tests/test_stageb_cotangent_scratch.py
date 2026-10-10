@@ -258,7 +258,8 @@ def require_direct_io(directory):
     import pytest
     if not _direct_io_supported(directory):
         pytest.skip(f"{directory} lacks statx direct I/O on an 8 KiB grid; "
-                    "requires a DIO-capable local PB worker")
+                    "requires a DIO-capable local PB worker; "
+                    "Stage B spill qualification stays incomplete")
 
 
 def test_grid_slots_write_without_a_sync_or_page_drop_per_slot(tmp_path, monkeypatch):
