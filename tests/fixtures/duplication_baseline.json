@@ -47,7 +47,6 @@
   "hashlib:prismaquant/sample_parallel_probe.py::_open_regular_bytes_at",
   "hashlib:prismaquant/sample_parallel_probe_contract.py::activation_priority_key",
   "hashlib:prismaquant/sample_parallel_probe_merge.py::_reference_activation_priority_key",
-  "hashlib:prismaquant/shipcard.py::_file_content_sha256",
   "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd",
   "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
   "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",

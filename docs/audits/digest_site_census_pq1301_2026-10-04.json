@@ -14077,7 +14077,14 @@
     "retention_evidence": null,
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "byte-digest:hashlib:prismaquant/shipcard.py::_file_content_sha256@519:13"
+    "cohort": "byte-digest:hashlib:prismaquant/shipcard.py::_file_content_sha256@519:13",
+    "migration": {
+     "route": "prismaquant.digests.file_sha256hex",
+     "block_size": 1048576,
+     "read_boundary": "Shipcard 1 MiB block preserved via block_size. Block size changes reads only, never the digest.",
+     "consumer_contract": "file_sha256 keeps its error-to-None wrapper. Publication contracts stay unchanged.",
+     "leaf": "prismaquant#2635"
+    }
    },
    {
     "id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18",
@@ -14183,10 +14190,15 @@
     },
     "contract_kind": "dual-span-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "No owner recipe owns this shape: one forward traversal of a held descriptor with one stat fence, a container digest plus per-span tensor digests. Retained on raw hashlib, with no new owner recipe.",
+    "retention_evidence": {
+     "kind": "dual-span-stream",
+     "reference": "prismaquant/shipcard.py:_verify_open_safetensors_fd",
+     "read_trace": "One forward traversal: 8-byte prefix, bounded header, then contiguous tensor spans via _read_exact_fd (os.read at most 1048576 bytes per call). Container digest and per-span digests consume the same reads. os.fstat drift refuses.",
+     "leaf": "prismaquant#2635"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
     "cohort": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18"
@@ -14299,10 +14311,15 @@
     },
     "contract_kind": "dual-span-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "No owner recipe owns this shape: one forward traversal of a held descriptor with one stat fence, a container digest plus per-span tensor digests. Retained on raw hashlib, with no new owner recipe.",
+    "retention_evidence": {
+     "kind": "dual-span-stream",
+     "reference": "prismaquant/shipcard.py:_verify_open_safetensors_fd",
+     "read_trace": "One forward traversal: 8-byte prefix, bounded header, then contiguous tensor spans via _read_exact_fd (os.read at most 1048576 bytes per call). Container digest and per-span digests consume the same reads. os.fstat drift refuses.",
+     "leaf": "prismaquant#2635"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
     "cohort": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24"
@@ -138241,9 +138258,9 @@
    "eligible_cohorts": 652,
    "calls_by_disposition": {
     "migrate-exact-route": 270,
-    "retain": 25,
+    "retain": 27,
     "owner-implementation": 16,
-    "add-exact-owner-recipe": 109
+    "add-exact-owner-recipe": 107
    },
    "modules_by_epic": {
     "k2": 124,
