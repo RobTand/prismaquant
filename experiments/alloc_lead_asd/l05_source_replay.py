@@ -94,17 +94,12 @@ def validate_original_binding(binding, args):
         return False
     layer = binding.get('layer')
     sequences = binding.get('sequences')
-    if binding['scope'] == LEGACY_L05_SCOPE:
-        if layer != 5 or sequences != [0, 1, 2, 3]:
-            raise RuntimeError('legacy local control scope differs from its accepted contract')
-    elif isinstance(layer, int) and layer in REPLAY_LAYERS and isinstance(sequences, list) and sequences:
-        if (sequences != list(range(sequences[0], sequences[-1] + 1))
-                or sequences[0] < 0 or sequences[-1] > 511
-                or len(sequences) not in REPLAY_SLICE_LENGTHS
-                or binding['scope'] != replay_slice_scope(layer, sequences)):
-            raise RuntimeError('replay slice scope differs from its layer and sequence range')
-    else:
-        raise RuntimeError('original local control lacks a known replay scope')
+    legacy = (binding['scope'] == LEGACY_L05_SCOPE and layer == 5 and sequences == [0, 1, 2, 3])
+    sliced = (isinstance(layer, int) and layer in REPLAY_LAYERS and isinstance(sequences, list) and sequences
+              and sequences == list(range(sequences[0], sequences[-1] + 1))
+              and 0 <= sequences[0] and sequences[-1] <= 511
+              and len(sequences) in REPLAY_SLICE_LENGTHS
+              and binding['scope'] == replay_slice_scope(layer, sequences))
     expected = dict(publisher_revision=PUBLISHER_REVISION,
         sequence_length=512, n_probes=4, global_token_count=262144,
         probe_seed_base=7000, temperature=1.0, loss_positions='all',
@@ -112,7 +107,8 @@ def validate_original_binding(binding, args):
         activation_format='TESSERA_E4M3_K1_R1024')
     keys = binding.get('layer_keys', [])
     prefix = f'model.language_model.layers.{layer}.'
-    if (not getattr(args, 'original_local_control', False) or args.device != 'cuda'
+    if ((not legacy and not sliced)
+            or not getattr(args, 'original_local_control', False) or args.device != 'cuda'
             or any(binding.get(name) != value for name, value in expected.items())
             or not keys or len(set(keys)) != len(keys)
             or any(not isinstance(name, str) or not name.startswith(prefix) for name in keys)
