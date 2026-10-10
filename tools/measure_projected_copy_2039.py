@@ -77,6 +77,10 @@ class Fixture:
         self.units, self.tensors = units, tensors
         self.map_path, self.unit_bytes = map_path, nbytes
         self.names = sorted(units)
+        #: Retire each unit's source pages after its read, as a campaign row
+        #: does. The pool control turns it off: retiring a mapped file's pages
+        #: makes every pass re-read it from disk, which would hide a CPU saving.
+        self.release_source_pages = True
 
 
 def build_fixture(root, *, units, rows, cols, seed=0):
@@ -494,7 +498,8 @@ def run_pass(campaign, fixture, live, phases):
     start = time.perf_counter()
     checks = [campaign._start_projected_unit_check(
         name, fixture.units[name], live=live[name], model_path=str(fixture.model),
-        source=fixture.source, release_source_pages=True, source_authentication=None)
+        source=fixture.source, release_source_pages=fixture.release_source_pages,
+        source_authentication=None)
         for name in fixture.names]
     settling = time.perf_counter()
     outcomes = campaign._settle_projected_unit_checks(checks)
@@ -577,6 +582,7 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
     reads = (passes + profile_passes + 1) * len(fixture.names)
     return {
         "kind": kind, "passes": passes, "units_per_pass": len(fixture.names),
+        "release_source_pages": fixture.release_source_pages,
         "epoch_start": started, "epoch_end": ended,
         "wall_s": walls, "wall_median_s": statistics.median(walls),
         "wall_mean_s": statistics.fmean(walls),
@@ -684,8 +690,11 @@ def run_cuda(args, fixture, binding):
             # Scope control: the same ABBA with no map, so the pool serves every
             # unit. This is the path a read the stage did not serve takes, and
             # the one the original-source owner takes. The change must leave it
-            # as it was: one private pin copy, now made after the read.
+            # as it was: one private pin copy, now made after the read. Pages
+            # stay resident (see ``Fixture.release_source_pages``), so the pass is
+            # bound by the copy and not by the disk.
             unbind_fixture()
+            fixture.release_source_pages = False
             for kind in ORDER:
                 arm = timed_arm(campaign, fixture, live, kind, passes=args.control_passes,
                                 profile_passes=args.profile_passes, power=power,
