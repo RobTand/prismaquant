@@ -41,6 +41,7 @@ PB `f086b5bfd5ac` executes the repository entry and compiles its three Python fi
 It completes eight native CPU children after restart, passes eight fresh actual D1 checks, and preserves a maximum of one live child.
 Duplicate resume exits zero. The native group receipt retains all eight results. The isolated queue and CAS roots are removed.
 The terminal payload is `cas:sha256:46532b28a08a4ffceb235a5377ef37eb84f226183c13c72c9344bf7170771322`.
+These CPU proofs establish control behavior only. They qualify no GPU arithmetic, accepted science, or production deployment.
 
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
@@ -185,6 +186,7 @@ The checkout's `tools/tessera_campaign_container.py` binds `_runtime_identity` i
 The launcher never loads that file.
 `tests/g3job/test_g3_launch_image_seal.py` starts the real launcher on the real pinned adapter in both modes.
 Only the docker executable is replaced.
+The launcher logic, numerical code, and D32 behavior remain unchanged.
 
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
