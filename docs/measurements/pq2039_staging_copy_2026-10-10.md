@@ -109,8 +109,10 @@ Where each pass spends its time (ms per pass, timed passes):
 The removed work is user-space work. User CPU per pass falls from 40.5 to 17.7 ms. System CPU
 stays at about 32 ms: it is the kernel's copy out of the staged file, which both arms still make.
 Of the 23.3 ms saved per pass, 18.8 ms is prepare work outside the read: the private copy and its
-second page-locked allocation. 4.6 ms is a cheaper read, because the destination is already
-page-locked and faulted in. The launch stage differs by 0.1 ms.
+second page-locked allocation. 4.6 ms is a cheaper read: the pageable read allocated and
+zero-filled a 16 MiB buffer for each unit, and the page-locked read takes a cached buffer. The
+measure does not isolate that further. Minor faults per pass are equal in both arms. The launch
+stage differs by 0.1 ms.
 
 Every arm read all of its bytes from the stage (230,854,492,160 bytes per arm, 0 from the pool, 0
 fallbacks). The mismatch pass named `w1` and `w9` in both arms with identical text.
@@ -269,16 +271,17 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
 - No saturation claim. The pass is host-bound: 43 of 50 ms is the staged read. GPU utilization is
   not diagnostic on GB10, and board power stays near 17 W.
 - The fixture's stage is local NVMe with a warm page cache. A production stage serves from NFS,
-  SSD or RAM. The saving is the removed copy and allocation, so it is the same in absolute CPU
-  time per unit (0.73 ms per 16 MiB). The share of a pass changes with the read.
+  SSD or RAM. The removed work is a memcpy and an allocation, so it should cost the same per
+  unit on any stage (0.73 ms per 16 MiB here). That is expected, not measured. The share of a
+  pass changes with the read.
 - The chunked read of an NFS stage fills the same pinned buffer in disjoint windows. The tests
   cover that path with a four-stream mount table, and no NFS stage was measured.
 - **Live reachability.** The saving needs the residency map to validate. An ordinary admitted
   action today resolves the live SDK 6 generation and refuses the map (the probe above), so the
   staged read, and with it this saving, is reachable in a live campaign row only when the SDK pin
   and the live generation agree. This measure binds the sealed SDK 5 bundle explicitly to show the
-  read path. It does not show that a live row binds that bundle. The result file says which
-  decision is open.
+  read path. It does not show that a live row binds that bundle. The follow-up issue filed with
+  this change names the open decision: which side moves.
 - No full-campaign, export, serving, KL or bpp claim. The L20 original-source control that
   motivated the issue reads through the qualified-original owner. That owner's read keeps its one
   private copy under this change.
