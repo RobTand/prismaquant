@@ -17,8 +17,10 @@ fixture in ``tests/test_tessera_lane_v12.py``, not a new copy:
 * ``malformed``: a malformed launch scope is refused, and a v12 key under
   v11 is refused.
 
-``require_v12_scope_proof`` refuses when any named class is missing or
-fails, so a dropped fixture class refuses exactly as a broken reader does.
+``check_pin_update`` is the wired entry point: it reads the tracked pin
+file (a malformed pin is refused by its own reader) and then runs the
+four classes and refuses when any is missing or fails. ``run_v12_scope_proof``
+keeps the failure reason per class, so the refusal names the cause.
 ``check_producer_schema_pr`` is the producer-side rule: a Tessera schema PR
 is refused unless it links consumer compatibility work and names fixture
 results for all four classes. The check is mechanical string matching, not
@@ -28,11 +30,13 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from . import lane_eligibility as lane
 from . import tessera_runtime_contract as runtime
+from . import tessera_serving_runtime_pin as pin_module
 
 __all__ = [
     "CLASS_DECODER",
@@ -40,8 +44,10 @@ __all__ = [
     "HISTORICAL_RUNGS",
     "ProducerSchemaPRError",
     "REQUIRED_SCOPE_CLASSES",
+    "ScopeClassProof",
     "TesseraPinScopeGateError",
     "V12_FIXTURE",
+    "check_pin_update",
     "check_producer_schema_pr",
     "require_v12_scope_proof",
     "run_v12_scope_proof",
@@ -77,6 +83,19 @@ class ProducerSchemaPRError(ValueError):
     """A producer schema PR without consumer work or fixture results."""
 
 
+@dataclass(frozen=True)
+class ScopeClassProof:
+    """One fixture class outcome: pass flag plus failure reason."""
+
+    passed: bool
+    reason: str = ""
+
+
+def _fail(message: str) -> None:
+    """Refuse the fixture class with an explicit reason (never ``assert``)."""
+    raise TesseraPinScopeGateError(message)
+
+
 def _payload() -> dict:
     return json.loads(V12_FIXTURE.read_bytes())
 
@@ -98,28 +117,39 @@ def _parsed(payload=None):
     if payload is None:
         payload = _payload()
     return runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
+
+
 def _check_census() -> None:
     payload = _payload()
-    assert payload["lane_eligibility"]["schema"] == "tessera.lane-eligibility.v12"
-    assert payload["contract_version"] == 66
+    if payload["lane_eligibility"]["schema"] != "tessera.lane-eligibility.v12":
+        _fail("census: lane schema is not v12")
+    if payload["contract_version"] != 66:
+        _fail("census: contract version is not 66")
     cells = payload["lane_eligibility"]["cells"]
-    assert {c["id"] for c in cells} == {
+    if {c["id"] for c in cells} != {
         "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
         "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
-    }
+    }:
+        _fail("census: fixture cell pair is not the v66 pair")
     for cell in cells:
-        assert cell["rungs_q256"] == [768] + list(HISTORICAL_RUNGS)
+        if cell["rungs_q256"] != [768] + list(HISTORICAL_RUNGS):
+            _fail(f"census: cell rung census moved for {cell['id']}")
         scopes = {e["decoder"]: e.get("rungs_q256") for e in cell["executes"]}
-        assert scopes[CLASS_DECODER] == [768]
+        if scopes[CLASS_DECODER] != [768]:
+            _fail("census: class decoder scope is not [768]")
         for decoder in HISTORICAL:
-            assert scopes[decoder] == list(HISTORICAL_RUNGS)
+            if scopes[decoder] != list(HISTORICAL_RUNGS):
+                _fail(f"census: historical scope moved for {decoder}")
     table = _table(payload)
-    assert table.schema == "tessera.lane-eligibility.v12"
+    if table.schema != "tessera.lane-eligibility.v12":
+        _fail("census: parsed table schema is not v12")
     for cell in table.cells:
         scopes = dict(zip([d for _, d in cell.executes], cell.launch_rungs_q256))
-        assert scopes[CLASS_DECODER] == (768,)
+        if scopes[CLASS_DECODER] != (768,):
+            _fail("census: reader drops the class decoder scope")
         for decoder in HISTORICAL:
-            assert scopes[decoder] == HISTORICAL_RUNGS
+            if scopes[decoder] != HISTORICAL_RUNGS:
+                _fail(f"census: reader drops a historical scope for {decoder}")
 
 
 def _check_derived() -> None:
@@ -127,20 +157,23 @@ def _check_derived() -> None:
     table = _table()
     route = next(c for c in parsed.cells if c.cell_id == _CELL_ID)
     cell = next(c for c in table.cells if c.id == route.cell_id)
-    assert tuple(route.launch_covered_rungs_q256) == tuple(
-        cell.launch_covered_rungs_q256
-    )
+    if tuple(route.launch_covered_rungs_q256) != tuple(cell.launch_covered_rungs_q256):
+        _fail("derived: route cell loses the derived launch coverage")
     index = next(
         i for i, (_, decoder) in enumerate(route.executes) if decoder in HISTORICAL
     )
-    assert 800 in route.launch_covered_rungs_q256[index]
-    assert route.launch_covers_rate(index, 800)
-    assert route.launch_covers_rate(index, 832)
+    if 800 not in route.launch_covered_rungs_q256[index]:
+        _fail("derived: covered rungs miss the derived rate 800")
+    if not route.launch_covers_rate(index, 800):
+        _fail("derived: launch_covers_rate misses the derived rate 800")
+    if not route.launch_covers_rate(index, 832):
+        _fail("derived: launch_covers_rate misses the census rate 832")
     class_index = next(
         i for i, (_, decoder) in enumerate(route.executes)
         if decoder == CLASS_DECODER
     )
-    assert not route.launch_covers_rate(class_index, 800)
+    if route.launch_covers_rate(class_index, 800):
+        _fail("derived: class launch wrongly covers rate 800")
 
 
 def _check_absent() -> None:
@@ -151,9 +184,12 @@ def _check_absent() -> None:
     del cell["executes"][0]["rungs_q256"]
     table = _table(payload)
     parsed_cell = next(c for c in table.cells if c.id == cell["id"])
-    assert parsed_cell.launch_rungs_q256[0] is None
-    assert parsed_cell.launch_covers_rate(0, 768)
-    assert parsed_cell.launch_covers_rate(0, 832)
+    if parsed_cell.launch_rungs_q256[0] is not None:
+        _fail("absent: launch without scope key keeps no cell scope")
+    if not parsed_cell.launch_covers_rate(0, 768):
+        _fail("absent: scopeless launch misses its cell rate 768")
+    if not parsed_cell.launch_covers_rate(0, 832):
+        _fail("absent: scopeless launch misses its cell rate 832")
     v11 = _payload()
     v11["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
     for v11_cell in v11["lane_eligibility"]["cells"]:
@@ -163,9 +199,11 @@ def _check_absent() -> None:
     answer = runtime.contract_answer(
         runtime._parse(v11, commit="fixture", sha="fixture", path="fixture")
     )
-    assert runtime._answer_drift(before, before) == []
+    if runtime._answer_drift(before, before) != []:
+        _fail("absent: answer drift baseline is not empty")
     row = next(r for r in answer["cells"] if r[0] == _CELL_ID)
-    assert "launch_scopes" not in row
+    if "launch_scopes" in row:
+        _fail("absent: v11 answer row carries launch scopes")
 
 
 def _check_malformed() -> None:
@@ -188,14 +226,14 @@ def _check_malformed() -> None:
             _table(payload)
         except lane.LaneEligibilityError:
             continue
-        raise AssertionError(f"malformed scope admitted: {mutation!r}")
+        _fail(f"malformed scope admitted: {mutation!r}")
     payload = _payload()
     payload["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
     try:
         _table(payload)
     except lane.LaneEligibilityError:
         return
-    raise AssertionError("v12 key admitted under v11")
+    _fail("v12 key admitted under v11")
 
 
 _CHECKS = {
@@ -206,28 +244,31 @@ _CHECKS = {
 }
 
 
-def run_v12_scope_proof() -> dict[str, bool]:
+def run_v12_scope_proof() -> dict[str, ScopeClassProof]:
     """Run the four named v12 scope fixture classes against the reader.
 
-    Returns one pass flag per class. A class that raises records ``False``
-    instead of propagating, so the gate refusal names the class.
+    Returns one outcome per class. A class that raises records its
+    failure reason instead of propagating, so the gate refusal names
+    the cause.
     """
-    results: dict[str, bool] = {}
+    results: dict[str, ScopeClassProof] = {}
     for name in REQUIRED_SCOPE_CLASSES:
         try:
             _CHECKS[name]()
-        except Exception:
-            results[name] = False
+        except Exception as exc:
+            results[name] = ScopeClassProof(
+                passed=False, reason=f"{type(exc).__name__}: {exc}"
+            )
         else:
-            results[name] = True
+            results[name] = ScopeClassProof(passed=True)
     return results
 
 
-def require_v12_scope_proof(results: Mapping[str, object]) -> None:
+def require_v12_scope_proof(results: Mapping[str, ScopeClassProof]) -> None:
     """Refuse a pin update unless all four scope classes pass.
 
     A missing class refuses exactly as a failing class does: a dropped
-    fixture is a dropped proof.
+    fixture is a dropped proof. The refusal carries each failure reason.
     """
     missing = [name for name in REQUIRED_SCOPE_CLASSES if name not in results]
     if missing:
@@ -235,11 +276,28 @@ def require_v12_scope_proof(results: Mapping[str, object]) -> None:
             "pin update refused: scope proof names no result for "
             + ", ".join(missing)
         )
-    failing = [name for name in REQUIRED_SCOPE_CLASSES if not results[name]]
+    failing = [name for name in REQUIRED_SCOPE_CLASSES if not results[name].passed]
     if failing:
-        raise TesseraPinScopeGateError(
-            "pin update refused: scope fixture class fails: " + ", ".join(failing)
+        detail = "; ".join(
+            f"{name} ({results[name].reason})" for name in failing
         )
+        raise TesseraPinScopeGateError(
+            "pin update refused: scope fixture class fails: " + detail
+        )
+
+
+def check_pin_update(pin_path: Path | str | None = None):
+    """Refuse a pin update unless the pin reads and the scope proof passes.
+
+    Reads the pin file at ``pin_path`` (the tracked
+    ``tessera_serving_runtime_pin.json`` when omitted), so a malformed
+    pin is refused by its own reader, then runs the four named v12
+    scope fixture classes against the reader. Returns the loaded pin
+    when the update is admitted.
+    """
+    pin = pin_module.load_tessera_serving_runtime_pin(pin_path)
+    require_v12_scope_proof(run_v12_scope_proof())
+    return pin
 
 
 def check_producer_schema_pr(body: str, linked: Sequence[str]) -> None:
