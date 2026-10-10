@@ -406,39 +406,60 @@ def routed_api():
 RETAINED_SCOPE_ROLES = ('fit', 'heldout')
 
 
+def retained_read_digest(task, filename):
+    """Return the frozen digest of one named input read of one roster task."""
+    for read in task.get('payload', {}).get('reads', []):
+        if read.get('path', '').split('/')[-1] == filename:
+            digest = read.get('sha256')
+            if isinstance(digest, str) and len(digest) == 64:
+                return digest
+    return None
+
+
 def retained_task_scope(task):
-    """Return the authoritative frozen scope for one roster task."""
+    """Return the authoritative frozen scope for one roster task.
+
+    The scope derives from the task frozen reads: per-unit fit and
+    held-out tensor digests plus the shared selection digest. A task
+    without those frozen reads carries no scope. The caller refuses
+    adoption for such a task once a retained manifest is supplied.
+    """
     payload = task.get('payload', {})
-    scope = payload.get('retained_scope')
-    if not isinstance(scope, dict):
+    qname = payload.get('qname', '')
+    leaf = qname.split('.')[-1]
+    fit = retained_read_digest(task, leaf + '.fit.pt')
+    heldout = retained_read_digest(task, leaf + '.heldout.pt')
+    selection = retained_read_digest(task, 'selection-subsample-20261007.json')
+    if selection is None:
+        for read in payload.get('reads', []):
+            if read.get('path', '').split('/')[-1].startswith('selection-subsample-'):
+                digest = read.get('sha256')
+                if isinstance(digest, str) and len(digest) == 64:
+                    selection = digest
+                    break
+    if fit is None or heldout is None or selection is None:
         return None
-    fit = scope.get('fit')
-    heldout = scope.get('heldout')
-    selection = scope.get('selection_sha256')
-    if not isinstance(fit, dict) or not isinstance(heldout, dict):
-        return None
-    if not isinstance(selection, str) or len(selection) != 64:
-        return None
-    return {'fit': dict(fit), 'heldout': dict(heldout), 'selection_sha256': selection}
+    return {'fit_sha256': fit, 'heldout_sha256': heldout, 'selection_sha256': selection}
 
 
 def check_retained_scope(name, encode, held, task):
     """Refuse retained rows or a selection that differ from the frozen task."""
     expected = retained_task_scope(task)
     if expected is None:
-        return
-    for role in RETAINED_SCOPE_ROLES:
-        if encode[role] != expected[role]:
-            raise ValueError(f'Retained {role} rows differ from the frozen task: {name}')
-        if held[role] != expected[role]:
-            raise ValueError(f'Retained {role} rows differ from the frozen task: {name}')
-    actual = (encode.get('conditioning') or {}).get('selection_sha256')
-    if actual is None:
-        actual = (held.get('conditioning') or {}).get('selection_sha256')
-    if actual is None:
-        return
-    if actual != expected['selection_sha256']:
-        raise ValueError(f'Retained selection differs from the frozen task: {name}')
+        raise ValueError(f'Retained unit has no frozen scope reads: {name}')
+    for role, key in (('fit', 'fit_sha256'), ('heldout', 'heldout_sha256')):
+        for document, label in ((encode, 'encode'), (held, 'HELD')):
+            actual = document.get(role, {}).get('sha256') if isinstance(document.get(role), dict) else None
+            if not isinstance(actual, str) or len(actual) != 64:
+                raise ValueError(f'Retained {label} {role} digest is missing: {name}')
+            if actual != expected[key]:
+                raise ValueError(f'Retained {role} rows differ from the frozen task: {name}')
+    for document, label in ((encode, 'encode'), (held, 'HELD')):
+        actual = (document.get('conditioning') or {}).get('selection_sha256')
+        if not isinstance(actual, str) or len(actual) != 64:
+            raise ValueError(f'Retained {label} selection digest is missing: {name}')
+        if actual != expected['selection_sha256']:
+            raise ValueError(f'Retained selection differs from the frozen task: {name}')
 
 
 def verified_retained_document(reference):
@@ -485,6 +506,8 @@ def adopt_retained_units(request, manifest):
                 digest.update(chunk)
         if digest.hexdigest() != encode['blob_sha256'] or blob.stat().st_size != encode['blob_bytes']:
             raise ValueError(f'Retained blob bytes or digest differ: {name}')
+        task = by_name[name]
+        check_retained_scope(name, encode, held, task)
         replacement = held['replacement']
         expected = {'blob': str(blob), 'blob_sha256': encode['blob_sha256'],
                     'bytes': encode['blob_bytes'], 'receipt': unit['encode']['path'],
@@ -496,8 +519,6 @@ def adopt_retained_units(request, manifest):
         for role in ('fit', 'heldout'):
             if encode[role] != held[role]:
                 raise ValueError(f'Retained paired {role} rows differ: {name}')
-        task = by_name[name]
-        check_retained_scope(name, encode, held, task)
         adopted.append({**unit, 'task_id': task['id'], 'output_id': task['output_id']})
         seen.add(name)
     pending = [task for task in tasks if task['payload']['qname'] not in seen]
