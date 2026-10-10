@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import bisect
-import hashlib
 import json
 import math
 import os
@@ -46,6 +45,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+from prismaquant.digests import bytes_sha256hex, file_sha256hex
+from prismaquant.io_spans import counter_delta
 
 SCHEMA = "prismaquant.pq2039_paired_copy_measure.v2"
 ORDER = ("before", "after", "after", "before")
@@ -142,10 +144,6 @@ def stage_counters():
     report = residency_report() or {}
     return {key: report.get(key, 0) for key in
             ("bytes_from_stage", "bytes_from_pool", "range_hits", "fallback_count")}
-
-
-def counter_delta(before, after):
-    return {key: after[key] - before[key] for key in after}
 
 
 # -- profile attribution ------------------------------------------------------
@@ -358,7 +356,7 @@ def head_binding():
                 for path in sorted(repo.glob(".pbrun-closure*.json"))}
     return {"head": git("rev-parse", "HEAD").strip(),
             "parent": git("rev-parse", "HEAD^").strip(),
-            "dirty_sha256": hashlib.sha256(git("status", "--porcelain").encode()).hexdigest(),
+            "dirty_sha256": bytes_sha256hex(git("status", "--porcelain").encode()),
             "pbrun_closure": closures}
 
 
@@ -484,7 +482,7 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
         usage = resource.getrusage(resource.RUSAGE_SELF)
         timed_phases = dict(phases.seconds)
         timed_reads = (phases.pinned_reads, phases.pageable_reads)
-        counters_timed = counter_delta(counters_before, stage_counters())
+        counters_timed = counter_delta(stage_counters(), counters_before)
 
         phases.reset()
         activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]
@@ -501,7 +499,7 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
         phases.reset()
         mismatch = mismatch_pass(campaign, fixture, live, phases,
                                  picks=(1, len(fixture.names) - 1))
-        counters_total = counter_delta(counters_before, stage_counters())
+        counters_total = counter_delta(stage_counters(), counters_before)
     finally:
         restore()
     reads = (passes + profile_passes + 1) * len(fixture.names)
@@ -568,7 +566,7 @@ def stage_gate(arms):
 
 # -- driver -------------------------------------------------------------------
 
-def calibrate(campaign, fixture, live, *, arm_seconds, min_passes):
+def size_arms(campaign, fixture, live, *, arm_seconds, min_passes):
     """Warm both paths, then size every arm so the slower one lasts ``arm_seconds``."""
     medians = {}
     for kind in ("before", "after"):
@@ -590,7 +588,7 @@ def run_cuda(args, fixture, binding):
     torch.cuda.set_device(0)
     live = {name: tensor.to("cuda") for name, tensor in fixture.tensors.items()}
     torch.cuda.synchronize()
-    passes, medians = calibrate(
+    passes, medians = size_arms(
         campaign, fixture, live, arm_seconds=args.arm_seconds, min_passes=args.min_passes)
     passes = args.passes or passes
     arms = []
@@ -631,7 +629,7 @@ def run_cpu_dry(fixture):
             raise RuntimeError(f"{name}: staged bytes differ from the source tensor")
         if weight.is_pinned():
             raise RuntimeError(f"{name}: a pageable read came back pinned")
-    delta = counter_delta(before, stage_counters())
+    delta = counter_delta(stage_counters(), before)
     problems = []
     if delta["bytes_from_stage"] != len(fixture.names) * fixture.unit_bytes:
         problems.append(f"stage served {delta['bytes_from_stage']} bytes")
@@ -738,7 +736,7 @@ def main(argv=None):
         temporary.write_text(json.dumps(result))
         os.replace(temporary, out)
         result["result_file"] = {"path": str(out), "bytes": out.stat().st_size,
-                                 "sha256": hashlib.sha256(out.read_bytes()).hexdigest()}
+                                 "sha256": file_sha256hex(out)}
     print(summary_text(result))
     return 1 if body["stage_gate_problems"] else 0
 
