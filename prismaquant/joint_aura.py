@@ -1384,7 +1384,7 @@ def sequence_attribution_sidecar(*, blocks, components_per_probe,
     the authoritative totals with the gate it must satisfy and the method
     that states its denominator, the attribution c_i = .5 mean_p a_pi*total_p
     computed against those authoritative totals, and — for genuine equal
-    whole single-sequence blocks — the delete-one leaveout prices with their
+    whole blocks — the delete-one leaveout prices with their
     jackknife standard error. All of it is conditional on the fixed
     calibration: no generalization or draw-sampling error is claimed.
     """
