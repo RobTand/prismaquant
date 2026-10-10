@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Consume the Tessera public serving runtime witness in the D50 task adapter (#2458).
+  Tessera issue 1056 is closed. PrismaQuant reads schema `tessera.endpoint_runtime_witness.v1` with the standard library only.
+  The adapter starts no rank, imports no serving runtime, and adds no identity seal. It refuses alias-only, size-only, absent, incomplete, or inconsistent evidence.
+  The PrismaQuant-owned witness, verifier, and collector are removed. The consumer test proves 34 CPU checks.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers

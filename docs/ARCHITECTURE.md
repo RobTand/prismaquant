@@ -26833,36 +26833,34 @@ The shared HF capability guard refuses unsupported declared formats before prefl
 The HF backend does not load Tessera serving bytes and cannot prove native task quality.
 Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
-Re-stamped 2026-10-09 (PQ #2458, parent #2430): Tessera owns the public runtime witness and standalone CPU verifier.
-PrismaQuant must consume that public contract, not publish a second runtime witness or verifier.
+Re-stamped 2026-10-10 (PQ #2458, parent #2430): Tessera owns the public runtime witness and standalone CPU verifier.
+PrismaQuant consumes that public contract with the standard library only. It publishes no second witness or verifier.
 The approved witness joins the observed endpoint, served alias, launch attempt, actual ranks, loaded artifact bytes, and server tokenizer facts.
-Each serving rank supplies actual load evidence with explicit coverage and representation changes.
-The tokenizer evidence describes source bytes and effective server settings.
-The consumer starts no rank, imports no serving runtime, and adds no identity seal.
-Existing lane gates and HF behavior remain unchanged.
+Each serving rank supplies actual load evidence with loader-input byte coverage. The tokenizer evidence carries source bytes, backend, vocabulary, and special IDs.
+The consumer (`prismaquant/served_task_backend.py`) starts no rank, imports no serving runtime, and adds no identity seal.
+Every join comparison uses plain equality and refuses in both dev and certified modes. Existing lane gates and HF behavior remain unchanged.
 
 Tessera PR #1089 merged as `35779f21290e6f27edae837b3f705cc06be79102` and closed Tessera #1056.
 Its public schema is `tessera.endpoint_runtime_witness.v1`; its CLI is `tools/verify_endpoint_witness.py`.
+Tessera master `b2875875a4` (change `f34305799d`) completes the approved CLI: explicit expected endpoint, alias, artifacts, tokenizer, attempt, and ranks, a machine-readable verdict, and an `--offline` recorded-launch check without a live endpoint.
 PB `3e5453caf4466439743c4cbbb74e49f0b8512393ca527a826ceb380ca696341b` records a real GPU serve and successful live verification.
 That historical TP1 witness covers rank zero, 12 source tensors, 336640 tensor payload bytes, and 16 tokenizer entries.
 It does not qualify D50 or establish current endpoint state.
 
-The approved public CLI also needs explicit expected endpoint, alias, artifact, tokenizer, attempt, and ranks.
-It must return a machine-readable verdict and support a CPU check of the recorded launch without a live endpoint.
-The merged CLI accepts artifact and tokenizer directories plus expected ranks, but no explicit expected endpoint, alias, or attempt.
-It prints a text verdict and requires a live listener observation.
-Consumer source work remains held until Tessera supplies that public verifier interface.
-The inherited PrismaQuant collector and verifier do not satisfy the approved boundary.
-The inherited D32 stamp-and-refuse defect also remains unresolved.
+The consumer pins schema `tessera.endpoint_runtime_witness.v1`, coverage kind `successful-loader-inputs-and-post-load-resident-state`, and scope `runtime_byte_binding`.
+It rechecks the producer self-join (attempt derivation, complete ranks, recomputed coverage, scope, fingerprint) and the expected-fact equality.
+It refuses alias-only, size-only, absent, incomplete, or inconsistent evidence. A pass proves the recorded launch only.
+An 8-case cross-check against Tessera `check_expectations` agrees on the pass and on 7 refusal classes.
+D50 GPU validation (fresh serve, witness, independent CPU verify) remains open as a non-blocking child; the campaign lane retains it.
 
-The four existing task-suite test modules carry the `task_suite` marker.
-The inherited witness test also carries this marker; it does not establish public producer acceptance.
+The four task-suite test modules carry the `task_suite` marker.
+The served-task consumer test (`tests/test_served_task_backend.py`) is an unmarked CPU test; it runs in the ordinary suite.
 Ordinary integration reports explicit skips with the layered action and receipt, rather than silently omitting these tests.
 The required gate uses `/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python` and selects `-m task_suite` or `PQ_TASK_SUITE_TESTS=1`.
 The SDK5 reader pin (PQ #2152) makes the pbtest pin guard refuse the earlier layer `/home/rob/venvs/pq-task-suite-layer-20261008/bin/python`, which holds PrismaBuild `dc4803da`.
 Its recorded action is `20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6`; receipt `0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913` reports 76 passes and zero skips.
 The earlier layer recorded action `5d7c88ee9cf64e6ca2d75bede43a9086c0ae6440ce08685b772039f42af7a859` with the same counts before the repin.
-These retained counts cover the four existing modules, not the inherited witness test.
+These retained counts cover the four task-suite modules.
 An ordinary skip does not replace that required gate. The gate must run all four existing modules and report zero skips.
 
 Task inputs declare tokenizer, tasks, device, dtype, sample count, few-shot count and all four seeds.
