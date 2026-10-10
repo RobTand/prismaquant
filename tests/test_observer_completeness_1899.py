@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tools.pq_profile_artifact import validate_netdata_window
+
 SOURCE=Path(__file__).resolve().parents[1]/'tools/pq_row_profile_observer.py'
 
 
@@ -56,7 +58,7 @@ def test_readiness_publication_is_atomic():
 def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
     tree=ast.parse(SOURCE.read_text())
     functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)
-               and n.name in ('validate_netdata_window','collect_netdata')]
+               and n.name == 'collect_netdata']
     payload={'labels':['time','power'], 'data':[[99,42.0]]}
     if damage=='null_only': payload['data']=[[99,None]]
     elif damage=='stale': payload['data']=[[0,42.0]]
@@ -65,6 +67,7 @@ def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
     else: payload.pop('labels')
     errors=[]
     space={'time':SimpleNamespace(time=lambda:100),'previous_netdata':95,
+           'validate_netdata_window':validate_netdata_window,
            'charts':{'sparky':['power'],'sparklina':['power']},
            'netdata':lambda *args:payload,
            'event':lambda *a,**kw:None,'out':tmp_path,'telemetry_errors':errors,
@@ -80,12 +83,13 @@ def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
 def test_fresh_finite_netdata_is_a_real_positive(tmp_path, partial_null, sample_time, padding):
     tree=ast.parse(SOURCE.read_text())
     functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)
-               and n.name in ('validate_netdata_window','collect_netdata')]
+               and n.name == 'collect_netdata']
     payload={'labels':['time','power'], 'data':[[sample_time,42.0]]}
     if partial_null:
         payload['data'].append([99.5,None])
     errors=[]
     space={'time':SimpleNamespace(time=lambda:100),'previous_netdata':95,
+           'validate_netdata_window':validate_netdata_window,
            'charts':{'sparky':['power'],'sparklina':['power']},
            'netdata':lambda *args:payload,
            'event':lambda *a,**kw:None,'out':tmp_path,'telemetry_errors':errors,
