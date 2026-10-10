@@ -160,7 +160,7 @@ def test_pin_gate_refuses_a_real_absent_leak(monkeypatch):
     monkeypatch.setattr(gate.runtime, "contract_answer", leaking_answer)
     with pytest.raises(gate.TesseraPinScopeGateError, match="absent") as refused:
         gate.check_pin_update()
-    assert "launch scopes" in str(refused.value)
+    assert "absent: v11 answer row" in str(refused.value)
 
 
 def test_pin_gate_refuses_a_real_malformed_regression(monkeypatch):
