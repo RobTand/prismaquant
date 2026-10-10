@@ -26827,31 +26827,35 @@ The whole configuration SHA and candidate input provenance use the existing `sea
 Default dev mode stamps drift and retains stored data. Schema, paired population,
 owned-byte, numerical and gate checks remain unconditional.
 
-The task backend is HF-only and uses `lm-eval[hf]` 0.4.12.
+The task backend measures through HF-only code and uses `lm-eval[hf]` 0.4.12.
 It requires a current checkpoint that its Hugging Face model classes can load.
 The shared HF capability guard refuses unsupported declared formats before preflight or measurement.
 The HF backend does not load Tessera serving bytes and cannot prove native task quality.
+A served binding-gate config (`backend.name == "served"`) validates the producer witness join and preflights the binding without model inference or HF fallback.
+Served measurement lands in the parent item (PQ #2430).
 Serving-backed Tessera task support with its vLLM plugin remains a production prerequisite.
 
 Re-stamped 2026-10-10 (PQ #2458, parent #2430): Tessera owns the public runtime witness and standalone CPU verifier.
-PrismaQuant consumes that public contract with the standard library only. It publishes no second witness or verifier.
+PrismaQuant consumes that public contract. It publishes no second witness or verifier.
 The approved witness joins the observed endpoint, served alias, launch attempt, actual ranks, loaded artifact bytes, and server tokenizer facts.
 Each serving rank supplies actual load evidence with loader-input byte coverage. The tokenizer evidence carries source bytes, backend, vocabulary, and special IDs.
-The consumer (`prismaquant/served_task_backend.py`) starts no rank, imports no serving runtime, and adds no identity seal.
-Every join comparison uses plain equality and refuses in both dev and certified modes. Existing lane gates and HF behavior remain unchanged.
+The consumer (`prismaquant/served_task_backend.py`) rechecks the pinned join with the standard library only. It starts no rank, imports no serving runtime, and adds no identity seal.
+The public CLI is the release authority. `prismaquant/served_task_public_verifier.py` calls it as a subprocess in offline mode and accepts only its valid recorded-launch verdict.
+The local recheck never overrules a public CLI refusal. Every join comparison uses plain equality and refuses in both dev and certified modes. Existing lane gates and HF behavior remain unchanged.
 
-Tessera PR #1089 merged as `35779f21290e6f27edae837b3f705cc06be79102` and closed Tessera #1056.
-Its public schema is `tessera.endpoint_runtime_witness.v1`; its CLI is `tools/verify_endpoint_witness.py`.
+Tessera PR #1089 merged as `36ca1dbd76e3e375d20be092d117e10bed644c64` and closed Tessera #1056.
+Tessera #1128 closed on 2026-10-09. Its public schema is `tessera.endpoint_runtime_witness.v1`; its CLI is `tools/verify_endpoint_witness.py`.
 Tessera master `b2875875a4` (change `f34305799d`) completes the approved CLI: explicit expected endpoint, alias, artifacts, tokenizer, attempt, and ranks, a machine-readable verdict, and an `--offline` recorded-launch check without a live endpoint.
 PB `3e5453caf4466439743c4cbbb74e49f0b8512393ca527a826ceb380ca696341b` records a real GPU serve and successful live verification.
 That historical TP1 witness covers rank zero, 12 source tensors, 336640 tensor payload bytes, and 16 tokenizer entries.
 It does not qualify D50 or establish current endpoint state.
 
-The consumer pins schema `tessera.endpoint_runtime_witness.v1`, coverage kind `successful-loader-inputs-and-post-load-resident-state`, and scope `runtime_byte_binding`.
+The consumer pins schema `tessera.endpoint_runtime_witness.v1`, coverage kind `successful-loader-inputs-and-post-load-resident-state`, scope `runtime_byte_binding`, and the Tessera commit `b2875875a4`.
 It rechecks the producer self-join (attempt derivation, complete ranks, recomputed coverage, scope, fingerprint) and the expected-fact equality.
 It refuses alias-only, size-only, absent, incomplete, or inconsistent evidence. A pass proves the recorded launch only.
-An 8-case cross-check against Tessera `check_expectations` agrees on the pass and on 7 refusal classes.
-D50 GPU validation (fresh serve, witness, independent CPU verify) remains open as a non-blocking child; the campaign lane retains it.
+An 8-case cross-check (`tests/test_served_task_tessera_crosscheck.py`) runs the real Tessera `check_expectations` at the pinned commit and agrees on the pass and on 7 refusal classes.
+The task suite wires the served binding gate (`validate_config`, `preflight_served`): served configs bind the witness without HF code, and served measurement waits for the parent item.
+This PR uses `Refs #2458`, not `Fixes`. D50 GPU validation (fresh serve, witness, independent CPU verify) remains open as a non-blocking child; the campaign lane retains it.
 
 The four task-suite test modules carry the `task_suite` marker.
 The served-task consumer test (`tests/test_served_task_backend.py`) is an unmarked CPU test; it runs in the ordinary suite.

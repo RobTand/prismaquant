@@ -4,9 +4,10 @@
 
 ### Added
 - Consume the Tessera public serving runtime witness in the D50 task adapter (#2458).
-  Tessera issue 1056 is closed. PrismaQuant reads schema `tessera.endpoint_runtime_witness.v1` with the standard library only.
+  Tessera issues 1056 and 1128 are closed. PrismaQuant consumes schema `tessera.endpoint_runtime_witness.v1` and the public verifier CLI at Tessera master `b2875875a4`.
   The adapter starts no rank, imports no serving runtime, and adds no identity seal. It refuses alias-only, size-only, absent, incomplete, or inconsistent evidence.
-  The PrismaQuant-owned witness, verifier, and collector are removed. The consumer test proves 34 CPU checks.
+  The public CLI is the release authority through `prismaquant/served_task_public_verifier.py`. The task suite wires the served binding gate. Served measurement waits for the parent item.
+  An 8-case cross-check runs the real Tessera verifier at the pinned commit. The PrismaQuant-owned witness, verifier, and collector are removed.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers
