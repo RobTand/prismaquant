@@ -83,7 +83,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import pickle
@@ -5510,7 +5509,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         for idx, record in enumerate(pareto_seed_records):
             assignment = record["assignment"]
             digest_src = json.dumps(assignment, sort_keys=True, separators=(",", ":"))
-            digest = hashlib.sha256(digest_src.encode()).hexdigest()[:12]
+            digest = bytes_sha256hex(digest_src.encode())[:12]
             if digest in seen_payloads:
                 continue
             seen_payloads.add(digest)

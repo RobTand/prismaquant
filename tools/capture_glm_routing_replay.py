@@ -1,7 +1,6 @@
 """PB-admitted replay from a completed capture and an independently owned boundary."""
 import argparse
 import copy
-import hashlib
 import io
 import json
 from pathlib import Path
@@ -12,6 +11,7 @@ import torch
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.cost_streaming import build_streamed_model_identity
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.glm_routing_replay import capture_replayed_glm_routes
 
 from prismaquant.joint_adjoint_checkpoints import reference_from_record
@@ -96,7 +96,7 @@ def main():
         if not publish_new_bytes(target, raw):
             raise ValueError("routing capture output already exists")
         receipt = {"schema": "prismaquant.glm_routing_replay_receipt.v1", "status": "complete",
-                   "spec": spec_binding, "boundary": {"path": str(target), "sha256": hashlib.sha256(raw).hexdigest()},
+                   "spec": spec_binding, "boundary": {"path": str(target), "sha256": bytes_sha256hex(raw)},
                    "metadata": result["metadata"],
                    # Absent at PyTorch's default (PQ #1028).
                    **bf16_reduction_stamp()}

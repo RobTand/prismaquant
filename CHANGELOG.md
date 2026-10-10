@@ -42,6 +42,11 @@
   The refresh retains every historical record. It adds 420 primitive calls across 320 scopes, 275 supplemental calls, and 22 protected layouts.
   Each load-bearing call records its exact algorithm, encoding options, input order, framing, digest width, result type, read boundary, and refusal behavior.
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
+- Twenty byte-digest sites now call the existing bytes owner (#2646, part of #2541, references #1301).
+  `prismaquant/allocator.py` and fourteen tools call `digests.bytes_sha256hex` with unchanged input bytes.
+  The allocator keeps its `[:12]` label slice and each caller keeps its refusals.
+  The frozen profiles in `tests/test_digest_profiles_1301.py` pin Unicode, mixed keys, nonfinite values, truncation, framing, and final-LF bytes.
+  The census marks the twenty rows `migrated-by-pq2646`, and the duplication baseline drops the sixteen emptied scopes.
 
 ### Fixed
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).

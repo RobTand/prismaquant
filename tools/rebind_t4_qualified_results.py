@@ -27,17 +27,16 @@ accepts one existing pair-keyed or legacy qname-keyed input, but refuses when
 both exist; the explicit layouts never fall back. No input file is changed.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
-from prismaquant.digests import DIRECT_ASCII_LAX
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
 
 def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
+    return bytes_sha256hex(raw)
 
 
 def cell_sha256(cell):
