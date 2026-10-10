@@ -193,3 +193,18 @@ def test_ram_integrity_or_unknown_refusal_never_selects_stage(tmp_path, refusal)
         reader.read("/host/source", 0, 6)
     assert tiers == ["ram:stage"]
     assert not live and reader.stats["staged_reads"] == 0
+
+
+def test_unmapped_path_after_setup_close_reads_origin(tmp_path):
+    reader, _, _, _, _, live = reader_fixture(tmp_path)
+    reader.finish_phase("setup")
+    assert reader.read("/host/other", 0, 9) is None
+    assert not live and reader.stats["staged_reads"] == 0
+
+
+def test_mapped_key_in_closed_phase_still_raises(tmp_path):
+    reader, _, _, _, _, live = reader_fixture(tmp_path)
+    reader.finish_phase("layer-00")
+    with pytest.raises(RuntimeError, match="0:/host/source.*completed phase"):
+        reader.read("/host/source", 0, 6)
+    assert not live and reader.stats["staged_reads"] == 0
