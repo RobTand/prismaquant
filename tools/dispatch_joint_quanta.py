@@ -49,7 +49,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import gzip
-import hashlib
 import json
 import math
 import re
@@ -854,7 +853,9 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest unreadable at "
             f"{path}: {exc}") from exc
-    if hashlib.sha256(wire).hexdigest() != staged_sha256:
+    from prismaquant.digests import bytes_sha256hex
+
+    if bytes_sha256hex(wire) != staged_sha256:
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest at {path} does "
             "not hash to the sealed digest")
@@ -2396,7 +2397,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # digest of the bytes just read. Certified mode refuses unless the
         # two are equal, so its argv is unchanged.
         from prismaquant.dev_mode import seal_check
-        plan_sha256 = hashlib.sha256(plan_raw).hexdigest()
+        from prismaquant.digests import bytes_sha256hex
+        plan_sha256 = bytes_sha256hex(plan_raw)
         seal_check("resource-bound plan", campaign["plan_sha256"], plan_sha256,
                    where=f"quantum {quantum_id!r}",
                    refusal=lambda: DispatchRefused(

@@ -81,7 +81,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import math
 import os
@@ -2072,7 +2071,7 @@ UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
 
 def _seed_workspace_rows(path, *, census, calibration_cache):
     """Bind a previous plan; each matching row keeps its own checkpoint owner."""
-    import hashlib
+    from prismaquant.digests import bytes_sha256hex
     root = Path(path).resolve()
     plan_path = root/'plan.json'
     raw = plan_path.read_bytes()
@@ -2087,12 +2086,12 @@ def _seed_workspace_rows(path, *, census, calibration_cache):
         if not key or key in rows:
             raise RuntimeError('seed workspace has empty or duplicate group bundles')
         rows[key] = row
-    return rows, {'path': str(root), 'plan_sha256': hashlib.sha256(raw).hexdigest()}
+    return rows, {'path': str(root), 'plan_sha256': bytes_sha256hex(raw)}
 
 
 def _seed_for_selection(rows, bundle, selection):
     """Only unchanged group membership and sampling may inherit this journal."""
-    import hashlib
+    from prismaquant.digests import bytes_sha256hex
     row = rows.get(tuple(sorted(bundle)))
     if row is None or json.loads(Path(row['units']).read_text()) != selection:
         raise RuntimeError('seed workspace selection differs; preserve group bundles and sampling')
@@ -2102,7 +2101,7 @@ def _seed_for_selection(rows, bundle, selection):
     raw = checkpoint.read_bytes()
     manifest = json.loads(raw)
     return {'checkpoint': str(checkpoint), 'wire_dir': str(Path(row['dir'])/'cache/wire'),
-            'manifest_sha256_at_plan': hashlib.sha256(raw).hexdigest(),
+            'manifest_sha256_at_plan': bytes_sha256hex(raw),
             'identity_sha256': manifest['identity_sha256'], 'row_id': row['row_id']}
 
 
@@ -3064,6 +3063,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     decoded = json.dumps(manifest, separators=(",", ":"), sort_keys=False).encode() + b"\n"
     blob = (gzip.compress(decoded, mtime=0) if manifest_path.suffix == ".gz"
             else decoded)
+    from prismaquant.digests import bytes_sha256hex
     phase_names = ()
     if entry_point == JOINT_ENTRY_POINT and command == "run":
         # The run declares the phase table it will read, for the same reason
@@ -3086,7 +3086,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                     "verified_streamed_identity_cache"):
             phase_names = _declared_phase_names(manifest)
             inner = [*inner, "--prewarm-manifest", str(manifest_path),
-                     "--prewarm-manifest-sha256", hashlib.sha256(blob).hexdigest()]
+                     "--prewarm-manifest-sha256", bytes_sha256hex(blob)]
     if residency is not None:
         # The action has to know which read set it was submitted with, or a
         # residency map composed for another manifest could answer for it. The
@@ -3095,7 +3095,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         # where the action can see it. Added only under --residency, so a
         # submission that asks for no stage keeps the argv, and therefore the
         # action key, it has today.
-        inner = [*inner, "--data-manifest-sha256", hashlib.sha256(blob).hexdigest()]
+        inner = [*inner, "--data-manifest-sha256", bytes_sha256hex(blob)]
     argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
                        progress_phases=phase_names, residency=residency,
                        gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)
@@ -3114,7 +3114,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
                                if residency is not None else {})},
         "manifest_bytes": len(blob),
         "decoded_manifest_bytes": len(decoded),
-        "manifest_sha256": hashlib.sha256(blob).hexdigest(),
+        "manifest_sha256": bytes_sha256hex(blob),
         "entry_count": manifest["entry_count"],
         "total_bytes": manifest["total_bytes"],
         "counts": manifest["annotations"]["counts"],

@@ -136,6 +136,26 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- **Bound-publication digest sites route to the digest owners** (Refs #1301, part of #2542).
+  `stage_b_prep_io._hash_range` delegates to the one new exact recipe,
+  `prismaquant.digests.file_range_sha256hex`: open once, seek to the offset,
+  and read to the exact size with the past-end refusal unchanged.
+  The manifest digest sites in `tools/dispatch_joint_quanta.py` (2 calls),
+  `tools/dispatch_tessera_campaign.py` (5 calls), and the union tool
+  `tools/union_tessera_census_tables.py` (`Table.load` twice, `_digest`,
+  `_indent_dump`, and the `write_plan` whole-bytes site) now call
+  `bytes_sha256hex`, `text_sha256hex`, or `DIRECT_UTF8_INDENT2_STRICT.text`
+  through the tools' stdlib bootstrap. Every routed digest is byte-identical:
+  manifest wire bytes, plan and prewarm seals, refusal order, and union
+  outputs stay unchanged. The streamed canonical identity encoder,
+  `read_manifest`, `_write_stream_atomic`, `_json_key`, the `write_plan`
+  resume stream, `check_source_coverage`, and `_require_equal` stay inline
+  as retentions; the streamed-recipe and named-profile requests are open
+  parent decisions in #1301, and no new JSON profile is added. The
+  per-scope census in `docs/audits/digest_site_census_pq1301_2026-10-04.json`
+  records each route and retention against the fresh #2540 manifest, and the
+  duplication baseline shrinks by exactly the nine routed scope rows.
+
 - **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
   `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
   `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
