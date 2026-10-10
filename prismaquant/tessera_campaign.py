@@ -3538,9 +3538,151 @@ class _AnchorPublicationLedger:
         return applied
 
 
+#: The legacy freeze file the census writes beside the reconcile log: the
+#: legacy anchors path and the SHA-256 of its manifest bytes. The manifest's
+#: unit envelopes already bind their shards through the checkpoint identity
+#: digest, so the manifest digest binds the whole journal. No legacy bytes
+#: ever enter the repo; only this digest does.
+LEGACY_FREEZE_SCHEMA = "prismaquant.tessera_legacy_freeze.v1"
+#: The census reconcile log: the rung census over the frozen legacy journal
+#: and the per-unit record-only gate decisions. Pricing rows re-run the full
+#: gate through ``--seed-checkpoint``; this log never adopts a byte.
+SEED_RECONCILE_SCHEMA = "prismaquant.tessera_seed_reconcile.v1"
+
+
+def freeze_legacy_anchors(legacy_path, *, out_path) -> dict:
+    """Bind the legacy anchors manifest to its SHA-256 (PQ #2559).
+
+    Reads only the manifest file named by ``legacy_path`` and writes
+    ``out_path`` with the path and the digest. When ``out_path`` already
+    holds a freeze, the stored digest must equal the fresh one: legacy
+    bytes never move under a frozen digest, so a mismatch refuses instead
+    of re-freezing. Mints no copy of the legacy bytes.
+    """
+    import hashlib
+
+    source = Path(legacy_path)
+    raw = source.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    record = {
+        "schema": LEGACY_FREEZE_SCHEMA,
+        "legacy_path": str(source),
+        "sha256": digest,
+    }
+    target = Path(out_path)
+    if target.is_file():
+        from . import schemas as _schemas
+
+        frozen = _schemas.validate_legacy_freeze(
+            json.loads(target.read_text()), path=str(target))
+        if frozen["sha256"] != digest or frozen["legacy_path"] != str(source):
+            raise RuntimeError(
+                f"{target}: frozen digest differs from {source}: the legacy "
+                "bytes moved under a frozen digest; refusing to re-freeze")
+        return frozen
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return record
+
+
+def read_legacy_freeze(freeze_path) -> dict:
+    """Read and shape-check a legacy freeze file (PQ #2559)."""
+    from . import schemas as _schemas
+
+    return _schemas.validate_legacy_freeze(
+        json.loads(Path(freeze_path).read_text()), path=str(freeze_path))
+
+
+def require_legacy_bytes(freeze) -> Path:
+    """Refuse when the frozen legacy bytes drifted or went missing (PQ #2559).
+
+    Recomputes the SHA-256 of the frozen path and compares it to the frozen
+    digest. Later tests and runs read the digest from the freeze file and
+    call this, so no reader trusts a path without its digest.
+    """
+    import hashlib
+
+    record = read_legacy_freeze(freeze) if isinstance(freeze, (str, Path)) else freeze
+    source = Path(record["legacy_path"])
+    if not source.is_file():
+        raise RuntimeError(
+            f"{source}: the frozen legacy anchors are missing; refusing drift")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    if digest != record["sha256"]:
+        raise RuntimeError(
+            f"{source}: SHA-256 {digest} differs from frozen {record['sha256']}; "
+            "the legacy bytes drifted, refusing them")
+    return source
+
+
+def reconcile_row_class(structure: str) -> str:
+    """Map a campaign unit structure to the reconcile rung row class."""
+    return {"dense": "dense", "routed_moe": "routed"}[structure]
+
+
+def legacy_anchor_rung_ids(anchors, *, row_class: str) -> set:
+    """Distinct ``(family, rate, row_class)`` rung ids over anchor rows."""
+    ids = set()
+    for row in anchors:
+        rate = row.get("body_rate_q256")
+        if not isinstance(row.get("family"), str) or type(rate) is not int:
+            raise RuntimeError(
+                f"legacy anchor {row.get('qname')!r}: rung identity needs a "
+                "string family and an integer body_rate_q256")
+        ids.add((row["family"], rate, row_class))
+    return ids
+
+
+def open_rung_ids_from_predispatch_packet(packet: dict) -> list:
+    """The 14 open ``(family, rate, row_class)`` rungs of PQ #1588 (PQ #2559)."""
+    ids = []
+    for row in packet.get("requested_rows", ()):
+        if row.get("producer_legal") is True and row.get("priced_in_joint_pkl") is False:
+            ids.append((row["family"], row["rate"], row["row_class"]))
+    return sorted(set(ids))
+
+
+def reconcile_seed_rungs(legacy_ids, open_ids) -> dict:
+    """Reconcile open requests against legacy rung ids (PQ #2559)."""
+    legacy = sorted(set(legacy_ids))
+    requested = sorted(set(open_ids))
+    fresh = sorted(set(requested) - set(legacy))
+    return {
+        "legacy_rung_ids": legacy,
+        "open_rung_ids": requested,
+        "new_rung_ids": fresh,
+        "total_rung_ids": sorted(set(legacy) | set(requested)),
+        "legacy_rung_count": len(legacy),
+        "new_rung_count": len(fresh),
+        "total_rung_count": len(set(legacy) | set(requested)),
+    }
+
+
+def require_reconcile_args(args) -> None:
+    """The four census reconcile flags travel together, on the census row."""
+    flags = ("reconcile_seed_checkpoint", "reconcile_open_packet",
+             "reconcile_log_out", "legacy_freeze_out")
+    given = [name for name in flags if getattr(args, name, None) is not None]
+    if not given:
+        return
+    if len(given) != len(flags):
+        missing = sorted(set(flags) - set(given))
+        raise RuntimeError(
+            f"reconcile needs all of {list(flags)}; missing {missing}")
+    if not getattr(args, "census_out", None):
+        raise RuntimeError(
+            "reconcile runs on the census row only (--census-out); pricing "
+            "rows adopt seeds through --seed-checkpoint")
+    if getattr(args, "streaming", False):
+        raise RuntimeError(
+            "reconcile needs the load-all census row; the streaming census "
+            "carries no static scales for the seed gates")
+
+
 def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
                            adopt, admits, identity_sha256, expected_identity,
-                           validate_state=None) -> dict:
+                           validate_state=None, record_only=False,
+                           row_class_by_unit=None) -> dict:
     """Offer another campaign's stored anchors to this run's row gates.
 
     A whole-scope campaign already priced rows this run would price again.  Its
@@ -3562,6 +3704,13 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
 
     Returns the record stamped into provenance: which manifest, which identity
     it was written under, and which units were adopted.
+
+    With ``record_only`` (PQ #2559) the same gates run but nothing is linked
+    or adopted: each unit gets a pass/fail decision citing every gate, gates
+    the caller cannot bind stay ``deferred`` with their reason, and manifest
+    damage is recorded instead of raised. The census reconciles legacy seeds
+    this way and mints no price row; pricing rows re-run the full gate
+    through ``--seed-checkpoint``.
     """
     from .cost_stage_checkpoint import unit_path, _load_unit, canonical_json_sha256
 
@@ -3582,6 +3731,12 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     except Exception as exc:
         raise RuntimeError(
             f"--seed-checkpoint {manifest}: unreadable manifest: {exc}") from exc
+    if record_only:
+        return _record_seed_checkpoint(
+            manifest, parts, seed_wire, seed_identity, seed_inputs,
+            targets=targets, admits=admits, identity_sha256=identity_sha256,
+            expected_identity=expected_identity, validate_state=validate_state,
+            row_class_by_unit=row_class_by_unit)
     for field in ('currency', 'calibration', 'input_global_scale_policy'):
         if (field not in seed_inputs or field not in expected_identity or
                 seed_inputs[field] != expected_identity[field]):
@@ -3621,6 +3776,218 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         "run_identity_sha256": identity_sha256,
         "units": sorted(adopted),
     }
+
+
+def _record_seed_checkpoint(manifest, parts, seed_wire, seed_identity,
+                            seed_inputs, *, targets, admits, identity_sha256,
+                            expected_identity, validate_state,
+                            row_class_by_unit=None) -> dict:
+    """Grade every seed unit through the adopt gates without adopting (PQ #2559)."""
+    from .cost_stage_checkpoint import unit_path, _load_unit, canonical_json_sha256
+
+    try:
+        if (not isinstance(seed_inputs, dict) or
+                canonical_json_sha256(seed_inputs, where='seed checkpoint identity') != seed_identity):
+            raise ValueError('seed checkpoint identity digest differs')
+        contract_reason = "seed contract matches this run"
+        for field in ('currency', 'calibration', 'input_global_scale_policy'):
+            if (field not in seed_inputs or field not in expected_identity or
+                    seed_inputs[field] != expected_identity[field]):
+                raise ValueError(f'seed checkpoint scoring identity mismatch at {field}')
+        contract = {"gate": "pass", "reason": contract_reason}
+    except ValueError as exc:
+        contract = {"gate": "fail", "reason": str(exc)}
+    decisions = []
+    passed = []
+    for name in targets:
+        gates: dict = {"contract": contract["gate"]}
+        reasons = [] if contract["gate"] == "pass" else [contract["reason"]]
+        path = unit_path(parts, name)
+        if not path.is_file():
+            decisions.append({"qname": name, "gate": "fail",
+                              "reason": f"seed journal names {name} and its shard is missing",
+                              "gates": {**gates, "envelope": "fail"}})
+            continue
+        seed_unit = seed_inputs.get('units', {}).get(name, {})
+        current_unit = expected_identity.get('units', {}).get(name, {})
+        scoring = {}
+        for field in ('scoring_rows', 'input_global_scale'):
+            if field not in current_unit:
+                scoring[field] = "deferred"
+                reasons.append(
+                    f"units.{name}.{field}: this run binds no receipt; "
+                    "pricing rows re-run the full gate via --seed-checkpoint")
+            elif field not in seed_unit or seed_unit[field] != current_unit[field]:
+                scoring[field] = "fail"
+                reasons.append(
+                    f"seed checkpoint scoring identity mismatch at units.{name}.{field}")
+            else:
+                scoring[field] = "pass"
+        gates["unit_scoring"] = scoring
+        try:
+            state = _load_unit(path, stage='Tessera campaign', qname=name,
+                               identity_sha256=seed_identity)
+            gates["envelope"] = "pass"
+        except Exception as exc:
+            state = None
+            gates["envelope"] = "fail"
+            reasons.append(f"seed envelope for {name} is unreadable: {exc}")
+        if validate_state is None:
+            gates["scope"] = "deferred"
+            reasons.append(
+                f"{name}: scope admission runs in pricing rows, not the census")
+        elif state is None:
+            gates["scope"] = "fail"
+        else:
+            try:
+                validate_state(name, state)
+                gates["scope"] = "pass"
+            except Exception as exc:
+                gates["scope"] = "fail"
+                reasons.append(f"{name}: scope refused the seed state: {exc}")
+        admitted = []
+        if state is not None:
+            try:
+                admitted = sorted(fmt for fmt in state.get("wire_records", {})
+                                  if admits(name, fmt))
+            except Exception as exc:
+                gates["envelope"] = "fail"
+                reasons.append(f"{name}: menu admission errored: {exc}")
+        gates["menu_admitted"] = admitted
+        structure = (row_class_by_unit or {}).get(name)
+        if state is None:
+            gates["rungs"] = "fail"
+        elif structure is None:
+            gates["rungs"] = "deferred"
+            reasons.append(
+                f"{name}: no unit structure bound, so its rung ids stay ungraded")
+        else:
+            try:
+                gates["rung_ids"] = sorted(
+                    legacy_anchor_rung_ids(state.get("anchors", ()),
+                                           row_class=reconcile_row_class(structure)))
+                gates["rungs"] = "pass"
+            except Exception as exc:
+                gates["rungs"] = "fail"
+                reasons.append(f"{name}: rung census refused its anchors: {exc}")
+        runnable: list = []
+        for key, value in gates.items():
+            if key in ("contract", "menu_admitted", "rung_ids"):
+                continue
+            if isinstance(value, dict):
+                runnable.extend(value.values())
+            else:
+                runnable.append(value)
+        verdict = "fail" if (contract["gate"] == "fail" or "fail" in runnable) else "pass"
+        if verdict == "pass":
+            passed.append(name)
+            reason = "adoptable on every gate this reconcile binds"
+            if "deferred" in runnable:
+                reason += ("; deferred gates complete in pricing rows "
+                           "via --seed-checkpoint")
+        else:
+            reason = "; ".join(reasons) if reasons else "a gate failed"
+        decisions.append({
+            "qname": name,
+            "gate": verdict,
+            "reason": reason,
+            "gates": gates,
+        })
+    complete = all(
+        decision["gates"].get("scope") != "deferred"
+        and all(v != "deferred" for v in decision["gates"].get("unit_scoring", {}).values())
+        and decision["gates"].get("rungs") != "deferred"
+        for decision in decisions)
+    print(f"[campaign] graded {len(passed)} of {len(decisions)} seed units "
+          f"from {manifest} without adopting", flush=True)
+    return {
+        "manifest": str(manifest),
+        "wire_dir": str(seed_wire),
+        "seed_identity_sha256": seed_identity,
+        "run_identity_sha256": identity_sha256,
+        "units": sorted(passed),
+        "record_only": True,
+        "contract": contract,
+        "run_binding_complete": complete,
+        "decisions": decisions,
+    }
+
+
+def reconcile_census_seeds(*, legacy_path, packet_path, freeze_out, log_out,
+                           census_payload, hessian_identity, static_scales,
+                           static_scale_policy, admits, row_class_by_unit,
+                           cache_dir) -> dict:
+    """Reconcile open requests against frozen legacy seeds (PQ #2559).
+
+    Freezes the legacy anchors manifest by digest, grades every legacy unit
+    through the seed adopt gates in record-only mode, and reconciles the
+    legacy rung ids against the pre-dispatch packet's open rungs. Writes
+    the freeze file and the reconcile log, mints no price row and adopts
+    nothing. Malformed seed input refuses; gate outcomes are recorded.
+    """
+    from .cost_stage_checkpoint import canonical_json_sha256
+
+    frozen = freeze_legacy_anchors(legacy_path, out_path=freeze_out)
+    source = require_legacy_bytes(frozen)
+    manifest = json.loads(source.read_text())
+    entries = manifest.get("identity", {}).get("units", {})
+    if not isinstance(entries, dict) or not entries:
+        raise RuntimeError(
+            f"{source}: seed journal names no units; refusing the reconcile")
+    targets = sorted(entries)
+    expected_identity = {
+        "currency": CURRENCY,
+        "calibration": hessian_identity,
+        "input_global_scale_policy": str(static_scale_policy),
+        # The census retains no scoring rows by contract (--census-out), so
+        # per-unit scoring-row identity stays deferred here; the static
+        # scale is bound and pricing rows complete the gate.
+        "units": {
+            name: {"input_global_scale": (
+                None if static_scales.get(name) is None
+                else float(static_scales[name]))}
+            for name in targets
+        },
+    }
+
+    def refuse_adopt(name, state, where):
+        raise AssertionError(
+            f"record-only reconcile adopts nothing, refused {name} from {where}")
+
+    census_sha256 = canonical_json_sha256(census_payload, where='census payload')
+    record = _adopt_seed_checkpoint(
+        source, None, targets=targets, wire_dir=Path(cache_dir),
+        adopt=refuse_adopt, admits=admits, identity_sha256=census_sha256,
+        expected_identity=expected_identity, validate_state=None,
+        record_only=True, row_class_by_unit=row_class_by_unit)
+    packet = json.loads(Path(packet_path).read_text())
+    legacy_ids = sorted({tuple(entry) for decision in record["decisions"]
+                         for entry in decision["gates"].get("rung_ids", ())})
+    rungs = reconcile_seed_rungs(legacy_ids, open_rung_ids_from_predispatch_packet(packet))
+    tally = {"pass": 0, "fail": 0}
+    for decision in record["decisions"]:
+        tally[decision["gate"]] += 1
+    log = {
+        "schema": SEED_RECONCILE_SCHEMA,
+        "census_sha256": census_sha256,
+        "freeze": frozen,
+        "legacy_units": len(targets),
+        "legacy_unit_names": targets,
+        "rung_reconciliation": rungs,
+        "gate_tally": tally,
+        "run_binding_complete": record["run_binding_complete"],
+        "record": record,
+    }
+    out = Path(log_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(log, indent=2, sort_keys=True) + "\n")
+    print(f"[campaign] reconciled {len(targets)} legacy units over "
+          f"{rungs['legacy_rung_count']} rungs against "
+          f"{len(rungs['open_rung_ids'])} open rungs "
+          f"({rungs['new_rung_count']} new, {rungs['total_rung_count']} total); "
+          f"legacy {frozen['sha256']}; gates pass={tally['pass']} "
+          f"fail={tally['fail']}; log {out}", flush=True)
+    return log
 
 
 def _require_seed_wire_filename(wire_dir: Path, filename, *,
@@ -6861,6 +7228,22 @@ def _main(argv, *, source_scope, waits) -> int:
                     help="collect the calibration census over the whole scope, "
                          "write it here and exit. No Hessians, no retained "
                          "scoring rows, no encodes.")
+    ap.add_argument("--reconcile-seed-checkpoint", default=None,
+                    help="a legacy anchors manifest to grade record-only on the "
+                         "census row (PQ #2559). Needs --reconcile-open-packet, "
+                         "--reconcile-log-out and --legacy-freeze-out, and only "
+                         "combines with --census-out. Mints no price row; "
+                         "pricing rows adopt through --seed-checkpoint.")
+    ap.add_argument("--reconcile-open-packet", default=None,
+                    help="the #1588 pre-dispatch packet JSON whose requested "
+                         "rows are the open rung ids the reconcile grades "
+                         "the legacy journal against.")
+    ap.add_argument("--reconcile-log-out", default=None,
+                    help="where the census row writes the seed reconcile log "
+                         "(prismaquant.tessera_seed_reconcile.v1).")
+    ap.add_argument("--legacy-freeze-out", default=None,
+                    help="where the census row writes the legacy freeze file "
+                         "(path plus SHA-256, no legacy bytes).")
     ap.add_argument("--attention-implementation", choices=("eager", "sdpa"), default=None,
                     help="Explicit HF attention backend required for canonical census/capture.")
     ap.add_argument("--streaming", action="store_true",
@@ -6995,6 +7378,10 @@ def _main(argv, *, source_scope, waits) -> int:
         ap.error("canonical census/capture requires explicit --attention-implementation")
     if args.calibration_cache_sha256 and not args.calibration_cache:
         ap.error("--calibration-cache-sha256 requires --calibration-cache")
+    try:
+        require_reconcile_args(args)
+    except RuntimeError as exc:
+        ap.error(str(exc))
     if args.capture_calibration_out or args.calibration_cache:
         if not args.calibration_census or args.census_out or args.hessian != "require":
             ap.error("capture/reuse requires --calibration-census and --hessian require")
@@ -7884,6 +8271,21 @@ def _main(argv, *, source_scope, waits) -> int:
         print(f"[campaign] wrote {out}: {len(payload['counts'])} units, rows "
               f"{min(payload['counts'].values())}..{max(payload['counts'].values())}, "
               f"{len(payload['anchor_groups'])} anchor groups", flush=True)
+        if args.reconcile_seed_checkpoint is not None:
+            structures = structure_by_unit or {}
+            reconcile_census_seeds(
+                legacy_path=args.reconcile_seed_checkpoint,
+                packet_path=args.reconcile_open_packet,
+                freeze_out=args.legacy_freeze_out,
+                log_out=args.reconcile_log_out,
+                census_payload=payload,
+                hessian_identity=hessian_identity,
+                static_scales=static_scales,
+                static_scale_policy=static_scale_policy,
+                admits=lambda name, fmt: any(
+                    entry.format_name == fmt for entry in menus.get(name, ())),
+                row_class_by_unit={name: structures[name] for name in structures},
+                cache_dir=args.cache_dir)
         return 0
 
     from .cost_stage_checkpoint import prepare_journal, write_unit

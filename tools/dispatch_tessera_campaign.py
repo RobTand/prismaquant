@@ -477,7 +477,9 @@ def load_spec(path: Path) -> dict:
                  "--calibration-census", "--census-out", "--seed-checkpoint",
                  "--seed-wire-dir", "--capture-calibration-out",
                  "--calibration-cache", "--calibration-cache-sha256",
-                 "--source-identity-cache", "--source-identity-cache-sha256"}
+                 "--source-identity-cache", "--source-identity-cache-sha256",
+                 "--reconcile-seed-checkpoint", "--reconcile-open-packet",
+                 "--reconcile-log-out", "--legacy-freeze-out"}
     named = forbidden.intersection(spec["campaign_argv"])
     if named:
         raise RuntimeError(
@@ -1718,18 +1720,41 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
 # census
 # ---------------------------------------------------------------------------
 
+def _census_reconcile_argv(args) -> list:
+    """The census row's seed-reconcile flags, or nothing (PQ #2559).
+
+    The four flags travel together; the campaign refuses partial sets the
+    same way. The legacy manifest is read on the worker that holds the
+    shared mount, never copied into the repo.
+    """
+    flags = ("reconcile_seed_checkpoint", "reconcile_open_packet",
+             "reconcile_log_out", "legacy_freeze_out")
+    given = {name: getattr(args, name, None) for name in flags}
+    if all(value is None for value in given.values()):
+        return []
+    if any(value is None for value in given.values()):
+        missing = sorted(name for name, value in given.items() if value is None)
+        raise RuntimeError(f"census reconcile needs all four flags; missing {missing}")
+    return ["--reconcile-seed-checkpoint", str(given["reconcile_seed_checkpoint"]),
+            "--reconcile-open-packet", str(given["reconcile_open_packet"]),
+            "--reconcile-log-out", str(given["reconcile_log_out"]),
+            "--legacy-freeze-out", str(given["legacy_freeze_out"])]
+
+
 def cmd_census(args) -> int:
     spec = load_spec(Path(args.spec))
     workspace = Path(args.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     census_path = workspace / "census.json"
     manifest = workspace / "census-manifest.json"
+    reconcile = _census_reconcile_argv(args)
     row = _row(
         spec,
         ["--model", spec["model"],
          "--out", str(workspace / "census-unused.pkl"),
          "--cache-dir", str(workspace / "census-cache"),
          "--census-out", str(census_path),
+         *reconcile,
          *spec["campaign_argv"]],
         mem_gb=_row_memory_gb(spec, [], {}),
         timeout_s=int(args.timeout_s),
@@ -4752,6 +4777,16 @@ def main(argv=None) -> int:
     census.add_argument("--timeout-s", type=int, default=7200)
     census.add_argument("--wait-s", type=int, default=14400)
     census.add_argument("--submit", action="store_true")
+    census.add_argument("--reconcile-seed-checkpoint", default=None,
+                        help="legacy anchors manifest the census row grades "
+                             "record-only (PQ #2559); needs the other three "
+                             "reconcile flags")
+    census.add_argument("--reconcile-open-packet", default=None,
+                        help="#1588 pre-dispatch packet JSON with the open rungs")
+    census.add_argument("--reconcile-log-out", default=None,
+                        help="where the census row writes the reconcile log")
+    census.add_argument("--legacy-freeze-out", default=None,
+                        help="where the census row writes the legacy freeze file")
     census.set_defaults(func=cmd_census)
 
     capture = sub.add_parser("capture", help="capture full-census X/H once before planning rows")

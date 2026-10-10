@@ -509,6 +509,26 @@ def validate_pq1588_predispatch_packet(payload, path: str | None = None):
     return payload
 
 
+def validate_legacy_freeze(payload, path: str | None = None):
+    """Validate the legacy anchors freeze file shape (PQ #2559).
+
+    The freeze binds a legacy anchors path to the SHA-256 of its manifest
+    bytes. It carries no legacy bytes, only the digest. Digest drift is
+    refused by the reader, not here.
+    """
+    if not _is_mapping(payload):
+        _fail(path, "", "legacy freeze is not a mapping")
+    if payload.get("schema") != "prismaquant.tessera_legacy_freeze.v1":
+        _fail(path, ".schema", "must be prismaquant.tessera_legacy_freeze.v1")
+    frozen_path = payload.get("legacy_path")
+    if not isinstance(frozen_path, str) or not frozen_path or not frozen_path.startswith("/"):
+        _fail(path, ".legacy_path", "must be an absolute path string")
+    digest = payload.get("sha256")
+    if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+        _fail(path, ".sha256", "must be a 64-char hex digest")
+    return payload
+
+
 def validate_layer_config_payload(payload, path: str | None = None):
     """Validate allocator/exporter layer_config JSON shape."""
     if not _is_mapping(payload):
