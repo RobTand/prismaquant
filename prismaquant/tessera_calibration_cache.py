@@ -1015,7 +1015,8 @@ class CaptureSourceAuthentication:
         """Let a census derived from this capture's source bind its roster.
 
         A derived capture covers units the canonical capture never ran (an
-        MTP layer outside the streamed text forward) over the same source
+        MTP layer outside the streamed text forward, or the scoped attention
+        roster the body campaign pins) over the same source
         checkpoint. It inherits this owner's hash-bound source roster instead
         of re-hashing every shard, and its payload reads are still
         authenticated one shard at a time. The derived census must name the

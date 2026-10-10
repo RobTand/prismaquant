@@ -97,6 +97,7 @@ from .schemas import strict_json_loads
 __all__ = [
     "CENSUS_SCHEMA",
     "EXIT_EMPTY_MENU",
+    "GLM_ATTENTION_ALLOW_PINNED",
     "PINNED_ROSTER_SCHEMA",
     "SCHEMA",
     "UNITS_SCHEMA",
@@ -4854,8 +4855,9 @@ def census_token_counts(census: "Mapping | None", observed: Mapping[str, int]):
     equal to the monolith's -- without any shard asserting a count it did not
     see (principle 14).
 
-    A **derived** census (``mtp_extension``: the GLM MTP layer's census,
-    covering units the body never ran over the body's draw) takes the pair
+    A **derived** census (``mtp_extension``: the GLM MTP layer's census;
+    ``attention_extension``: the scoped attention census; each covers units
+    the body never ran over the body's draw) takes the pair
     from the hash-bound base census it names instead, because the capture
     identity it carries is the base draw's. The run's own rows are still
     checked against the derived census's counts.
@@ -4897,12 +4899,19 @@ def _derived_census_base(census: Mapping):
     (:func:`require_census_draw`'s fields); an extension of another schema is
     refused rather than read as a body census.
     """
-    extension = census.get("mtp_extension")
-    if extension is None:
+    present = [key for key in ("mtp_extension", "attention_extension")
+               if census.get(key) is not None]
+    if len(present) > 1:
+        raise RuntimeError(
+            f"calibration census carries two derived extensions {present!r}")
+    if not present:
         return None
-    from .glm_mtp_capture import CENSUS_EXTENSION_SCHEMA
+    from .glm_mtp_capture import ATTENTION_CENSUS_EXTENSION_SCHEMA, CENSUS_EXTENSION_SCHEMA
 
-    if extension.get("schema") != CENSUS_EXTENSION_SCHEMA:
+    schemas = {"mtp_extension": CENSUS_EXTENSION_SCHEMA,
+               "attention_extension": ATTENTION_CENSUS_EXTENSION_SCHEMA}
+    extension = census[present[0]]
+    if extension.get("schema") != schemas[present[0]]:
         raise RuntimeError(
             f"calibration census carries an unknown extension {extension.get('schema')!r}")
     ref = extension["base_census"]
@@ -4957,6 +4966,17 @@ def _campaign_layer_scope(names, layer_stride: int) -> list[str]:
 #: The census block that records a lifted-pin roster (PQ #1843). Absent from a
 #: census taken without ``--allow-pinned``, so a body census is byte-identical.
 PINNED_ROSTER_SCHEMA = "prismaquant.tessera_campaign.pinned_roster.v1"
+
+
+#: The canonical ``--allow-pinned`` spelling of the GLM scoped attention roster
+#: (PQ #1842, #2579): every KDA and MLA Linear, kv_b_proj among them, except
+#: the DSA indexer, which stays pinned (no AURA cotangent). Census and
+#: allocation read one spelling, so a lift never shrinks silently.
+GLM_ATTENTION_ALLOW_PINNED = (
+    "self_attn.q_proj,self_attn.k_proj,self_attn.v_proj,self_attn.b_proj,f_a_proj,"
+    "f_b_proj,self_attn.g_a_proj,self_attn.g_b_proj,self_attn.o_proj,self_attn.q_a_proj,"
+    "self_attn.q_b_proj,self_attn.kv_a_proj_with_mqa,self_attn.kv_b_proj"
+)
 
 
 @dataclass(frozen=True)

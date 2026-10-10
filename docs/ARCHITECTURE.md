@@ -8476,6 +8476,21 @@ pinned: `Glm5NextTextIndexer.forward` is `@torch.no_grad` and only selects
 top-k indices, so it has no AURA cotangent. Gate:
 `tests/test_tessera_campaign_pinned_roster.py`.
 
+**Scoped attention census and H capture (PQ #2579, step 2 of #1842).** The
+scoped roster prices the lifted Linears, but the body campaign never observes
+them, so C1 takes its census and H tables from the same draw another way.
+`glm_mtp_capture.attention_census` builds the body census schema over exactly
+the lifted KDA, MLA and `kv_b_proj` units and stamps `attention_extension`
+(`prismaquant.glm_attention.census_extension.v1`) with the hash-bound base
+census it names; `census_token_counts` reads the draw pair off that base, the
+way the MTP census does. `publish_attention_capture` seals one H table per
+listed unit through the canonical writer after `admit_derived_census` binds
+the sealed source roster. The canonical lift spelling is
+`tessera_campaign.GLM_ATTENTION_ALLOW_PINNED`. Without the scoped flags the
+body census carries no new key and stays byte-identical. Allocator, export
+and the body roster are unchanged. Gate:
+`tests/test_glm_attention_census.py`.
+
 **Unit activation arithmetic (PQ #2096).** A lifted pin is still constrained
 by the operation being priced. The profile's generic
 `linear_requires_unquantized_activations(qname)` declares whether a Linear
