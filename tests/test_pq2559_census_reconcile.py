@@ -330,3 +330,43 @@ def test_census_refuses_partial_reconcile_flags(tmp_path):
     )
     with pytest.raises(RuntimeError, match="all four flags"):
         dispatch.cmd_census(args)
+
+
+def test_reconcile_driver_writes_freeze_and_log_without_a_price_row(tmp_path):
+    """The census reconcile entry point runs on CPU over fixtures (PQ #2559)."""
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    manifest = _seed_journal(
+        seed,
+        {
+            "a": _anchors("a", ("FAM", 1024), ("FAM", 2048)),
+            "b": _anchors("b", ("FAM", 1024)),
+        },
+    )
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    log = campaign.reconcile_census_seeds(
+        legacy_path=manifest,
+        packet_path=PACKET_PATH,
+        freeze_out=tmp_path / "freeze.json",
+        log_out=tmp_path / "reconcile.json",
+        census_payload={"counts": {"a": 8, "b": 8}, "model": "fixture"},
+        hessian_identity={"draw": "fixture"},
+        static_scales={"a": 1.0, "b": 1.0},
+        static_scale_policy="fixture",
+        admits=lambda name, fmt: True,
+        row_class_by_unit={"a": "dense", "b": "routed_moe"},
+        cache_dir=cache,
+    )
+    assert log["schema"] == "prismaquant.tessera_seed_reconcile.v1"
+    assert log["legacy_units"] == 2
+    assert log["gate_tally"] == {"pass": 2, "fail": 0}
+    assert log["run_binding_complete"] is False
+    rungs = log["rung_reconciliation"]
+    assert rungs["legacy_rung_count"] == 3
+    assert rungs["new_rung_count"] == 14
+    assert rungs["total_rung_count"] == 17
+    assert (tmp_path / "freeze.json").is_file()
+    assert (tmp_path / "reconcile.json").is_file()
+    assert list(tmp_path.rglob("cost.pkl")) == []
+    assert list(cache.iterdir()) == []
