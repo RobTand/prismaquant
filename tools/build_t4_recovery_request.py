@@ -1,29 +1,9 @@
 """Recover failed logical members; PB retains all partition and placement ownership."""
 import argparse,copy,json,os
-import importlib.util
-import sys
 from pathlib import Path
-if __package__:
-    from prismaquant.digests import bytes_sha256hex
-else:
-    # Stdlib-only script use binds the same tree's owner by file path, so the
-    # host needs no installed package. digests.py is stdlib-only: register the
-    # file module under a name carrying that path's exact bytes, so two
-    # checkouts in one process never share a cache entry.
-    _digest_owner_path = Path(__file__).resolve().parents[1] / "prismaquant" / "digests.py"
-    _digest_owner_name = "_prismaquant_standalone_digest_owner_" + os.fsencode(_digest_owner_path).hex()
-    if _digest_owner_name not in sys.modules:
-        _digest_owner_spec = importlib.util.spec_from_file_location(_digest_owner_name, _digest_owner_path)
-        _digest_owner_module = importlib.util.module_from_spec(_digest_owner_spec)
-        sys.modules[_digest_owner_name] = _digest_owner_module
-        try:
-            _digest_owner_spec.loader.exec_module(_digest_owner_module)
-        except BaseException:
-            del sys.modules[_digest_owner_name]
-            raise
-    bytes_sha256hex = sys.modules[_digest_owner_name].bytes_sha256hex
 QUEUE=Path('/mnt/shared/prismabuild-fleet/pb-queue')
-def sha(raw):return bytes_sha256hex(raw)
+def sha(raw):
+ from prismaquant.digests import bytes_sha256hex;return bytes_sha256hex(raw)
 def main():
  p=argparse.ArgumentParser();p.add_argument('--out',required=True);p.add_argument('--all-members',action='store_true');p.add_argument('--qualifier-checkout',required=True);p.add_argument('--parent',required=True,help='PB decomposition parent key of the logical request');p.add_argument('--request',required=True,help='logical request built by build_t4_logical_request.py');p.add_argument('--request-sha256',required=True);args=p.parse_args();PARENT=args.parent;out=Path(args.out);assert not out.exists()
  dep=Path('/mnt/shared/prismabuild-fleet/cas/decompositions')/PARENT[:2]/PARENT
