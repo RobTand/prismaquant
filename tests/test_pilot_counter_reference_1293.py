@@ -198,3 +198,28 @@ def test_record_cap_is_enforced_before_decode_or_encode(monkeypatch, over_cap):
             counters_sha256="a" * 64, counters_bytes=3,
             quantum_record_sha256=completion["quantum_record_sha256"])
         assert evidence["quantum_record"] == wire
+
+
+def test_sealed_record_passes_raised_cap():
+    """PQ #2603: the 2.7 MB sealed record passes the 4 MiB cap."""
+    wire = b"y" * int(2.7 * 1024 * 1024)
+    assert len(wire) < pilot.QUANTUM_RECORD_MAX_BYTES
+    result = {"quantum_id": "layer-007", "passed": True, "status": "complete",
+              "units_done": 1, "units_total": 1,
+              "counters": {"path": "/counters", "sha256": "a" * 64, "bytes": 3}}
+    completion = quantum.quantum_completion_record(result, record_bytes=wire)
+    evidence = pilot.validate_pilot_completion(
+        completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
+        counters_sha256="a" * 64, counters_bytes=3,
+        quantum_record_sha256=completion["quantum_record_sha256"])
+    assert evidence["quantum_record"] == wire
+
+
+def test_record_over_4mib_refuses():
+    """PQ #2603: a record above 4 MiB still refuses the cap."""
+    wire = b"z" * (4 * 1024 * 1024 + 1)
+    result = {"quantum_id": "layer-007", "passed": True, "status": "complete",
+              "units_done": 1, "units_total": 1,
+              "counters": {"path": "/counters", "sha256": "a" * 64, "bytes": 3}}
+    with pytest.raises(quantum.QuantumIdentityRefused, match="cap"):
+        quantum.quantum_completion_record(result, record_bytes=wire)

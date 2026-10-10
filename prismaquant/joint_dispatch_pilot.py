@@ -16,7 +16,12 @@ from .joint_replay_regime import normalize_replay_regime
 
 PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
 QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
-QUANTUM_RECORD_MAX_BYTES = 1024 * 1024
+#: Bound on control bytes in the wire protocol (PQ #2603, fleetgraph#16):
+#: Rob raised the cap to 4 MiB, the next power of two above the 3.10 MB
+#: candidate copy. ``validate_pilot_completion``,
+#: ``verify_quantum_identity`` and ``quantum_completion_record`` all read
+#: this one constant. A later trim of the record producer is separate work.
+QUANTUM_RECORD_MAX_BYTES = 4 * 1024 * 1024
 PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
 PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
 PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
