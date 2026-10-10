@@ -113,6 +113,8 @@ def _fill_all(path, model_sha, *, spec=False, passed=True):
             if passed:
                 metrics.update(
                     {"generated_chars": 128, "max_new_tokens": 16})
+                if arm == "graph":
+                    metrics.update(_graph_receipt_metrics(path.parent))
             fill_slot(path, slot, make_record(
                 slot=slot, tool="validate_native_export.py", passed=passed,
                 model_sha=model_sha, metrics=metrics,
@@ -431,7 +433,8 @@ def test_shipcard_fixed_reservation_survives_every_slot_fill(tmp_path):
                 model_sha=model_sha,
                 metrics={"arm": arm, "generated_chars": 128,
                          "enforce_eager": arm == "eager",
-                         "max_new_tokens": 16},
+                         "max_new_tokens": 16,
+                         **(_graph_receipt_metrics(model_dir) if arm == "graph" else {})},
                 detail="x" * 4096,
                 git_commit=_FAKE_COMMIT,
             )
@@ -1498,3 +1501,281 @@ def test_build_without_forensics_is_left_alone():
     assert verify(legacy, model_dir=None, required=[]) == []
     assert verify(_forensic_build(), model_dir=None, required=[]) == []
 
+
+
+def _graph_receipt_metrics(root):
+    """A tiny equality measurement, judged by Tessera, never a copied verdict."""
+    from tessera import graph_receipt
+
+    config_path = root / "config.json"
+    if not config_path.exists():
+        config_path.write_bytes(b"{}")
+    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    receipt = graph_receipt.finish({
+        "schema": graph_receipt.SCHEMA,
+        "runtime": {"image": "registry/serve@sha256:" + "1" * 64,
+                    "fabric": "socket"},
+        "model": {"config_sha256": config_sha256},
+        "tessera": {"src_sha256": "3" * 64},
+        "arms": [{
+            "name": "graph", "compilation_config": {"mode": "NONE"},
+            "speculative_tokens": 1, "max_model_len": 8448,
+            "max_num_seqs": 4, "tensor_parallel_size": 2,
+            "graph": {"managers": {"full": {
+                "captured_sizes": [1, 2], "replayed_sizes": {"1": 1, "2": 1},
+            }}, "classes": {"captured": {"full": {"2048": {}}},
+                            "replays": {"full|2048": 1}}},
+            "passes": [{"name": name, "members": 2, "choices": 2}
+                       for name in ("first", "second")],
+        }],
+    })
+    # validate_native_export consumes an existing external measurement; placing
+    # it beside the artifact must not change the sealed artifact's model_sha.
+    path = root.parent / f"{root.name}-graph-equals-eager.json"
+    raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    return {
+        "graph_receipt_path": str(path.resolve()),
+        "graph_receipt_sha256": hashlib.sha256(raw).hexdigest(),
+        "serve_scope": {field: receipt["attests"][0][field]
+                        for field in graph_receipt.SCOPE_FIELDS},
+    }
+
+
+def _graph_slot_record(tmp_path):
+    return {"passed": True, "metrics": {
+        "arm": "graph", "enforce_eager": False, "generated_chars": 2,
+        **_graph_receipt_metrics(tmp_path),
+    }}
+
+
+def test_graph_receipt_matching_equal_verifies(tmp_path):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    assert _verify_native_export_record("native_export.graph", _graph_slot_record(tmp_path), model_dir=tmp_path) == []
+
+
+def test_graph_receipt_socket_against_roce_serve_refuses(tmp_path, monkeypatch):
+    from tessera import graph_receipt
+    from prismaquant.shipcard import _verify_native_export_record
+    from test_validate_native_export import _graph_arm_fixture
+
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    monkeypatch.setenv("NCCL_IB_DISABLE", "0")
+    record = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert record["passed"], record
+    metrics = record["metrics"]
+    receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
+    assert receipt["schema"] == "tessera.graph_equals_eager.v2"
+    assert receipt["runtime"]["fabric"] == "socket"
+    reason = graph_receipt.verify(receipt, metrics["serve_scope"])
+    assert "no attested arm" in reason and "fabric" in reason, reason
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("graph equality receipt refused: " + reason in p
+               for p in problems), problems
+
+
+def test_graph_receipt_v1_refuses_before_equality_verification(tmp_path, monkeypatch):
+    from tessera import graph_receipt
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    path = pathlib.Path(record["metrics"]["graph_receipt_path"])
+    receipt = json.loads(path.read_bytes())
+    receipt["schema"] = "tessera.graph_equals_eager.v1"
+    del receipt["runtime"]["fabric"]
+    graph_receipt.finish(receipt)
+    assert receipt["verdict"] == "equal"
+    reason = graph_receipt.verify(receipt, record["metrics"]["serve_scope"])
+    assert "tessera.graph_equals_eager.v1" in reason and "fabric" in reason, reason
+    raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
+
+    def unexpected_verify(*args):
+        pytest.fail("the card must refuse a v1 schema before calling verify")
+
+    monkeypatch.setattr(graph_receipt, "verify", unexpected_verify)
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("schema" in p and "tessera.graph_equals_eager.v1" in p
+               and "tessera.graph_equals_eager.v2" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("field", [
+    "image", "model_config_sha256", "compilation_config",
+    "speculative_tokens", "max_model_len", "max_num_seqs", "tensor_parallel_size",
+])
+def test_graph_receipt_other_scope_refuses(tmp_path, field):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    record["metrics"]["serve_scope"][field] = "another serve"
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    assert any("no attested arm" in p and field in p for p in problems), problems
+
+
+def test_graph_receipt_other_source_stamps_and_continues(tmp_path, monkeypatch, capsys):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    record = _graph_slot_record(tmp_path)
+    record["metrics"]["serve_scope"]["tessera_src_sha256"] = "another source"
+    assert _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path) == []
+    stamps = capsys.readouterr().out
+    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
+    assert "tessera_src_sha256" in stamps
+    assert record["metrics"]["serve_scope"]["tessera_src_sha256"] == "another source"
+
+
+def test_graph_receipt_edited_not_equal_refuses(tmp_path):
+    from tessera import graph_receipt
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    path = pathlib.Path(record["metrics"]["graph_receipt_path"])
+    receipt = json.loads(path.read_bytes())
+    receipt["arms"][0]["passes"][1]["members"] = 1
+    graph_receipt.finish(receipt)
+    assert receipt["verdict"] == "not_equal"
+    receipt["verdict"] = "equal"
+    raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    assert any("not_equal" in p and "by the rule" in p for p in problems), problems
+
+
+def test_graph_receipt_changed_bytes_refuses(tmp_path):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    path = pathlib.Path(record["metrics"]["graph_receipt_path"])
+    path.write_bytes(path.read_bytes() + b" ")
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    assert any("graph_receipt_sha256" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("missing", ["graph_receipt_path", "graph_receipt_sha256",
+                                     "serve_scope", "file"])
+def test_graph_receipt_missing_refuses(tmp_path, missing):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    if missing == "file":
+        pathlib.Path(record["metrics"]["graph_receipt_path"]).unlink()
+    else:
+        del record["metrics"][missing]
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    assert any(("graph_receipt_path" if missing == "file" else missing) in p
+               for p in problems), problems
+
+
+def test_graph_receipt_missing_scope_field_names_reason(tmp_path):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    del record["metrics"]["serve_scope"]["max_num_seqs"]
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    assert any("the serve does not name" in p and "max_num_seqs" in p
+               for p in problems), problems
+
+
+@pytest.mark.parametrize("damage", ["not_object", "missing_graph"])
+def test_graph_receipt_malformed_refuses(tmp_path, damage):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    path = pathlib.Path(record["metrics"]["graph_receipt_path"])
+    if damage == "not_object":
+        raw = b"[]"
+    else:
+        receipt = json.loads(path.read_bytes())
+        del receipt["arms"][0]["graph"]
+        raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
+    if damage == "not_object":
+        assert any("malformed graph receipt" in p for p in problems), problems
+    else:
+        # PR 930's pushed owner raises; its next head returns the named reason.
+        assert any("graph receipt unreadable: KeyError" in p
+                   or "graph equality receipt refused: malformed receipt" in p
+                   for p in problems), problems
+
+
+def test_eager_slot_needs_no_graph_receipt_or_tessera(monkeypatch):
+    import sys
+    from prismaquant.shipcard import _verify_native_export_record
+
+    monkeypatch.setitem(sys.modules, "tessera", None)
+    monkeypatch.setitem(sys.modules, "tessera.graph_receipt", None)
+    assert _verify_native_export_record("native_export.eager", {
+        "passed": True, "metrics": {"arm": "eager", "enforce_eager": True,
+                                     "generated_chars": 2},
+    }) == []
+
+
+
+def test_graph_receipt_bare_image_refuses(tmp_path, monkeypatch):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    record = _graph_slot_record(tmp_path)
+    full = record["metrics"]["serve_scope"]["image"]
+    assert "@sha256:" in full
+    record["metrics"]["serve_scope"]["image"] = full.split("@", 1)[1]
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("graph equality receipt refused: no attested arm" in p
+               and "image" in p for p in problems), problems
+
+
+def test_graph_receipt_other_artifact_config_refuses(tmp_path, monkeypatch):
+    from tessera import graph_receipt
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    artifact = _artifact(tmp_path)
+    other = _artifact(tmp_path, name="other", model_type="llama")
+    path = _open_card(tmp_path, artifact)
+    metrics = {"arm": "graph", "enforce_eager": False, "generated_chars": 2,
+               **_graph_receipt_metrics(other)}
+    receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
+    # The matching receipt and scope must still bind to this card's own
+    # config bytes; borrowing both cannot bypass the integrity check.
+    assert graph_receipt.verify(receipt, metrics["serve_scope"]) is None
+    fill_slot(path, "native_export.graph", _native_record(
+        "native_export.graph", compute_model_sha(artifact), metrics))
+    problems = verify(load_shipcard(path), model_dir=artifact,
+                      required=["native_export.graph"])
+    assert any("serve_scope.model_config_sha256" in p
+               and "artifact config.json" in p for p in problems), problems
+
+
+def test_graph_receipt_without_artifact_context_refuses(tmp_path, monkeypatch):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    problems = _verify_native_export_record(
+        "native_export.graph", _graph_slot_record(tmp_path))
+    assert any("cannot verify serve_scope.model_config_sha256" in p
+               and "without the artifact model_dir" in p for p in problems), problems
+
+
+def test_graph_receipt_unreadable_artifact_config_refuses(tmp_path, monkeypatch):
+    from prismaquant import shipcard, digests
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    record = _graph_slot_record(tmp_path)
+
+    def unreadable(path):
+        raise OSError("config unavailable")
+
+    monkeypatch.setattr(digests, "file_sha256hex", unreadable)
+    problems = shipcard._verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("cannot read artifact config.json" in p
+               and "serve_scope.model_config_sha256" in p for p in problems), problems

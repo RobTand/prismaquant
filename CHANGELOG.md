@@ -44,6 +44,13 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- **Graph ship slots verify Tessera equality receipts** (#1586).
+  The native graph arm requires `--graph-receipt` and records its path, byte SHA-256, and observed scope.
+  Ship-card verification checks receipt bytes, v2 schema, and numeric equality.
+  Image, model, compilation, speculation, lengths, parallelism, and fabric mismatches refuse.
+  The artifact `config.json` re-hash must match the recorded scope digest.
+  Only the Tessera source pin stamps through `seal_check`.
+  No eager waiver exists, the research refusal stays, and CPU evidence is not serving qualification.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
