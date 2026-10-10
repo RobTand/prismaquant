@@ -344,8 +344,6 @@ def both_host_netdata(after, before, arms):
 
 def _netdata_key(chart, label):
     """A readable name for one Netdata dimension, or ``None`` when we do not report it."""
-    if chart == "system.cpu":
-        return "cpu_idle_percent" if label == "idle" else None
     if chart == "system.ram":
         return "ram_used_mib" if label == "used" else None
     if chart == "system.io":
@@ -355,13 +353,31 @@ def _netdata_key(chart, label):
     return None
 
 
+def _cpu_means(labels, rows):
+    """CPU busy and iowait shares. Netdata hides ``idle`` from its data API, so
+    busy is every returned dimension but ``iowait``, row by row."""
+    busy, wait = [], []
+    for row in rows:
+        values = dict(zip(labels, row[1:]))
+        if all(value is None for value in values.values()):
+            continue
+        busy.append(sum(value for label, value in values.items()
+                        if label not in ("idle", "iowait") and value is not None))
+        wait.append(values.get("iowait") or 0.0)
+    if not busy:
+        return {}
+    return {"cpu_busy_percent": statistics.fmean(busy), "cpu_iowait_percent": statistics.fmean(wait),
+            "cpu_busy_percent_rows": len(busy)}
+
+
 def netdata_arm_means(document, arms):
     """Each reported Netdata dimension's mean over each arm's own seconds, per host.
 
     The load context of an arm, on both boxes: the host that ran it and the
-    other Spark. ``cpu_busy_percent`` is 100 less the idle share. Netdata rows
-    are one second apart (the GPU power chart repeats a ten-second reading), so
-    a plain mean over the rows inside the arm is its mean over the arm.
+    other Spark. Netdata rows are one second apart (the GPU power chart repeats
+    a ten-second reading), so a plain mean over the rows inside the arm is its
+    mean over the arm. Netdata plots disk writes negative; they are reported as
+    a magnitude. A row with no reading is left out, never counted as a zero.
     """
     rows = []
     for arm in arms:
@@ -371,14 +387,17 @@ def netdata_arm_means(document, arms):
             for chart, series in body["series"].items():
                 inside = [row for row in series["data"]
                           if arm["epoch_start"] <= row[0] <= arm["epoch_end"]]
-                for index, label in enumerate(series["labels"][1:], 1):
+                labels = series["labels"][1:]
+                if chart == "system.cpu":
+                    means.update(_cpu_means(labels, inside))
+                    continue
+                for index, label in enumerate(labels, 1):
                     key = _netdata_key(chart, label)
                     values = [row[index] for row in inside if row[index] is not None]
                     if key is not None and values:
-                        means[key] = statistics.fmean(values)
+                        mean = statistics.fmean(values)
+                        means[key] = abs(mean) if key == "io_writes_kib_s" else mean
                         means[key + "_rows"] = len(values)
-            if "cpu_idle_percent" in means:
-                means["cpu_busy_percent"] = 100.0 - means["cpu_idle_percent"]
             hosts[host] = means
         rows.append({"kind": arm["kind"], "epoch_start": arm["epoch_start"],
                      "epoch_end": arm["epoch_end"], "hosts": hosts})
