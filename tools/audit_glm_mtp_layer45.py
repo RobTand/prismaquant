@@ -34,7 +34,6 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -176,17 +175,14 @@ class Progress:
 
     def __init__(self):
         import runpy
-        import threading
         helper = os.environ.get("PRISMABUILD_ACTION_PROGRESS_HELPER")
         self._commit = runpy.run_path(helper)["commit"] if helper else None
-        self._lock = threading.Lock()
         self.done = 0
 
     def advance(self, phase, units=1):
-        with self._lock:
-            self.done += units
-            if self._commit is not None:
-                self._commit(self.done, phase)
+        self.done += units
+        if self._commit is not None:
+            self._commit(self.done, phase)
 
 
 class Identities:
@@ -1139,28 +1135,52 @@ def audit_refusals(merged, original, parts_by_rate, ledger):
 
 
 # --------------------------------------------------------------------------- io
-def _pin_worker_init(pin_src):
-    sys.path.insert(0, str(pin_src))
+def run_wire_worker():
+    """Child mode: the producer-side check of wire blobs, with the pinned Tessera's own ``verify_cached_unit``.
 
-
-def _verify_wire_batch(batch):
-    """Producer-side check of wire blobs: the pinned tessera's own ``verify_cached_unit``."""
+    The parent puts the pinned Tessera tree first on ``PYTHONPATH``. Jobs arrive pickled on stdin.
+    One JSON line per blob leaves on stdout, so the parent can report progress as blobs finish.
+    """
     from tessera.cached_unit import verify_cached_unit
 
-    out = []
-    for path, record in batch:
+    for path, record in pickle.load(sys.stdin.buffer):
         blob = Path(path).read_bytes()
         try:
             verify_cached_unit(blob, record, record["identity"])
             error = None
         except Exception as exc:  # the producer names its own refusal
             error = f"{type(exc).__name__}: {exc}"[:200]
-        out.append((path, bytes_sha256hex(blob), len(blob), error))
-    return out
+        sys.stdout.write(DIRECT_ASCII_LAX.text({"path": path, "sha256": bytes_sha256hex(blob), "bytes": len(blob),
+                                                "error": error}) + "\n")
+        sys.stdout.flush()
+    return 0
 
 
-def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
-    """Re-read the capture entries, every wire blob and every rendered shard."""
+def verify_wires(jobs, progress, pin_src=TESSERA_PIN_SRC):
+    """Run the producer-side check of every ``(path, record)`` job in one child with the pinned Tessera tree.
+
+    Returns ``{path: (sha256, bytes, error)}``. A child that ends early, or answers for fewer blobs than it
+    was given, is an error: a missing answer is never a pass.
+    """
+    child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--wire-worker"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=dict(os.environ, PYTHONPATH=str(pin_src)))
+    try:
+        pickle.dump(list(jobs), child.stdin, protocol=4)
+        child.stdin.close()
+    except BrokenPipeError:
+        pass  # the child ended first; its return code says why
+    rows = {}
+    for line in child.stdout:
+        row = json.loads(line)
+        rows[row["path"]] = (row["sha256"], row["bytes"], row["error"])
+        progress.advance("wires")
+    if child.wait() != 0 or len(rows) != len(jobs):
+        raise RuntimeError(f"wire worker ended with code {child.returncode} after {len(rows)} of {len(jobs)} blobs")
+    return rows
+
+
+def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, limit):
+    """Re-read the capture entries, every wire blob and every rendered shard, one after another."""
     from prismaquant import tessera_calibration_cache as cc
 
     census = facts["census"]
@@ -1168,22 +1188,16 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
     entries = facts["capture_manifest"]["entries"]
     names = sorted(entries)[:limit] if limit else sorted(entries)
     capture_rows = {}
-
-    def one(name):
+    audit_note(f"capture: verifying {len(names)} entries through the owner")
+    for name in names:
         path = capture_root / entries[name]["path"]
         payload, _receipt = cc._verified_capture_entry(
             path, name, expected_sha256=entries[name]["sha256"], census=census, max_rows=512,
             policy=CAPTURE_POLICY, execution=None)
-        row = {"bytes": path.stat().st_size, "sha256": entries[name]["sha256"],
-               "hessian": list(payload["hessian"].shape), "activations": list(payload["inputs"].shape),
-               "count": int(payload["count"]), "max_abs": float(payload["max_abs"])}
+        capture_rows[name] = {"bytes": path.stat().st_size, "sha256": entries[name]["sha256"],
+                              "hessian": list(payload["hessian"].shape), "activations": list(payload["inputs"].shape),
+                              "count": int(payload["count"]), "max_abs": float(payload["max_abs"])}
         progress.advance("capture")
-        return name, row
-
-    audit_note(f"capture: verifying {len(names)} entries through the owner")
-    with ThreadPoolExecutor(max_workers=min(workers, 8)) as pool:
-        for name, row in pool.map(one, names):
-            capture_rows[name] = row
     bad = [n for n, r in capture_rows.items() if (r["count"], r["max_abs"]) != (
         census["counts"][n], float(census["max_abs"][n]))]
     ledger.check("io.capture_entries_verified", len(capture_rows) == len(names) and not bad,
@@ -1199,30 +1213,16 @@ def audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress, workers, limit):
                                        "render": b["production"].weights[(name, rung)]}
     keys = sorted(cells)[:limit * 4] if limit else sorted(cells)
     audit_note(f"wires: producer verification of {len(keys)} blobs")
-    batches = [[(str(cells[k]["wire_dir"] / cells[k]["record"]["file"]), cells[k]["record"]) for k in keys[i:i + 16]]
-               for i in range(0, len(keys), 16)]
-    wire_rows = {}
-    import multiprocessing
-    with ProcessPoolExecutor(max_workers=min(workers, 16), mp_context=multiprocessing.get_context("spawn"),
-                             initializer=_pin_worker_init, initargs=(str(TESSERA_PIN_SRC),)) as pool:
-        for result in pool.map(_verify_wire_batch, batches):
-            for path, digest, size, error in result:
-                wire_rows[path] = (digest, size, error)
-            progress.advance("wires", len(result))
+    wire_rows = verify_wires([(str(cells[k]["wire_dir"] / cells[k]["record"]["file"]), cells[k]["record"])
+                              for k in keys], progress)
     for key in keys:
         cell = cells[key]
         digest, size, error = wire_rows[str(cell["wire_dir"] / cell["record"]["file"])]
         cell.update(wire_sha256=digest, wire_file_bytes=size, producer_error=error)
     audit_note(f"renders: hashing {len(keys)} rendered shards")
-
-    def render(key):
-        digest = file_sha256hex(cells[key]["render"])
+    for key in keys:
+        cells[key]["render_sha256"] = file_sha256hex(cells[key]["render"])
         progress.advance("renders")
-        return key, digest
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for key, digest in pool.map(render, keys):
-            cells[key]["render_sha256"] = digest
     bad_wire = [k for k in keys if cells[k]["producer_error"] or cells[k]["wire_sha256"] != cells[k]["record"]["blob_sha256"]
                 or cells[k]["wire_file_bytes"] != cells[k]["record"]["blob_bytes"]
                 or cells[k]["wire_sha256"] != cells[k]["verified"]["wire_sha256"]]
@@ -1467,7 +1467,6 @@ def parse_args(argv=None):
     parser.add_argument("--workspace", type=Path, default=WORKSPACE)
     parser.add_argument("--pb-root", type=Path, default=PB_ROOT)
     parser.add_argument("--out-dir", type=Path, help="write units.csv and cells.csv here")
-    parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--sections", default=",".join(SECTIONS))
     parser.add_argument("--limit-units", type=int, default=None,
                         help="smoke slice: the io section reads only the first N units (D38 dry run)")
@@ -1475,6 +1474,7 @@ def parse_args(argv=None):
                         help="also verify this action's outcome and CAS receipt")
     parser.add_argument("--verify-actions-only", action="store_true",
                         help="print the PrismaBuild verification of --extra-action keys and stop")
+    parser.add_argument("--wire-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skip-seal-recompute", action="store_true",
                         help="smoke only: skip the 14 GiB checkpoint seal recompute; the result is not a record")
 
@@ -1483,6 +1483,8 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.wire_worker:
+        return run_wire_worker()
     sections = set(args.sections.split(","))
     unknown = sections - set(SECTIONS)
     if unknown:
@@ -1556,7 +1558,7 @@ def main(argv=None):
     capture_rows, cells = {}, {}
     if "io" in sections and "structure" in sections:
         capture_rows, cells, summary["io"] = audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress,
-                                                      args.workers, args.limit_units)
+                                                      args.limit_units)
     if "pb" in sections:
         actions, excluded = audit_actions(pb, ledger, ws, inputs, [tuple(item) for item in extra])
         summary["actions"], summary["excluded_attempts"] = actions, excluded

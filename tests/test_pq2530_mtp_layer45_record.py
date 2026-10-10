@@ -337,6 +337,38 @@ def test_flat_diff_names_the_leaves_two_plans_differ_at():
     assert audit.flat_diff(plan, plan) == {}
 
 
+def _fake_pinned_tree(tmp_path, body):
+    """A stand-in for the pinned Tessera tree: ``tessera.cached_unit.verify_cached_unit`` runs ``body``."""
+    package = tmp_path / "pin" / "tessera"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "cached_unit.py").write_text("import os\n\ndef verify_cached_unit(blob, record, identity):\n" + body)
+    return tmp_path / "pin"
+
+
+def test_wire_verification_runs_in_one_child_that_sees_the_pinned_tree_first(tmp_path):
+    pin = _fake_pinned_tree(tmp_path, "    assert identity == record['identity']\n"
+                                      "    if blob.startswith(b'bad'):\n        raise ValueError('wire refused')\n")
+    good, bad = tmp_path / "good.bin", tmp_path / "bad.bin"
+    good.write_bytes(b"good wire")
+    bad.write_bytes(b"bad wire")
+    jobs = [(str(good), {"identity": {"unit": "u"}}), (str(bad), {"identity": {"unit": "v"}})]
+    progress = audit.Progress()
+    rows = audit.verify_wires(jobs, progress, pin_src=pin)
+    assert rows[str(good)] == (hashlib.sha256(b"good wire").hexdigest(), 9, None)
+    assert rows[str(bad)] == (hashlib.sha256(b"bad wire").hexdigest(), 8, "ValueError: wire refused")
+    assert progress.done == 2
+
+
+def test_a_wire_child_that_ends_early_is_an_error_not_a_pass(tmp_path):
+    pin = _fake_pinned_tree(tmp_path, "    if blob.startswith(b'bad'):\n        os._exit(3)\n")
+    good, bad = tmp_path / "good.bin", tmp_path / "bad.bin"
+    good.write_bytes(b"good wire")
+    bad.write_bytes(b"bad wire")
+    with pytest.raises(RuntimeError, match="wire worker ended with code 3 after 1 of 2 blobs"):
+        audit.verify_wires([(str(good), {"identity": {}}), (str(bad), {"identity": {}})], audit.Progress(), pin_src=pin)
+
+
 def test_a_roster_difference_is_named_and_fails(tmp_path):
     ledger = audit.Ledger()
     row = audit.roster_row(ledger, "fixture", {"a", "b", "z"}, {"a", "b", "c"})
