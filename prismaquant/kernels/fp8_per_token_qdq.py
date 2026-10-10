@@ -38,13 +38,20 @@ def _torch_to_tl(dtype: torch.dtype):
     """Map a row dtype to its Triton counterpart, or None when unsupported."""
     import triton.language as tl
 
-    return {
+    # Triton 3.8 spells the FP8 types ``float8e4m3fn``/``float8e5m2``; 3.7
+    # and older spell them ``float8e4nv``/``float8e5`` for the same formats.
+    e4m3 = getattr(tl, "float8e4m3fn", getattr(tl, "float8e4nv", None))
+    e5m2 = getattr(tl, "float8e5m2", getattr(tl, "float8e5", None))
+    table = {
         torch.bfloat16: tl.bfloat16,
         torch.float16: tl.float16,
         torch.float32: tl.float32,
-        torch.float8_e4m3fn: tl.float8e4m3fn,
-        torch.float8_e5m2: tl.float8e5m2,
-    }.get(dtype)
+    }
+    if e4m3 is not None:
+        table[torch.float8_e4m3fn] = e4m3
+    if e5m2 is not None:
+        table[torch.float8_e5m2] = e5m2
+    return table.get(dtype)
 
 
 def triton_available() -> bool:
