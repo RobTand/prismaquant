@@ -70,7 +70,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-import hashlib
 import io
 import json
 import math
@@ -95,6 +94,10 @@ from prismaquant.digests import (
     bytes_sha256hex,
     canonical_json,
     text_sha256hex,
+)
+from prismaquant.tensor_digests import (
+    fp32_tensor_stream_identity,
+    tensor_view_stream_identity,
 )
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
@@ -2956,33 +2959,7 @@ _canonical_json_value = canonical_json
 def _source_weight_value_identity(
     weight: torch.Tensor,
 ) -> tuple[list[int], str]:
-    tensor = torch.as_tensor(weight).detach()
-    shape = [int(dim) for dim in tensor.shape]
-    digest = hashlib.sha256()
-    max_chunk_elements = 4 * 1024 * 1024  # <=16 MiB after fp32 conversion
-
-    def _chunks_c_order(value: torch.Tensor):
-        if value.numel() <= max_chunk_elements or value.ndim == 0:
-            yield value
-            return
-        trailing = math.prod(int(dim) for dim in value.shape[1:])
-        if trailing <= max_chunk_elements:
-            step = max(1, max_chunk_elements // max(trailing, 1))
-            for start in range(0, int(value.shape[0]), step):
-                yield value[start:start + step]
-            return
-        # A single leading slice is still too large. Recurse dimension by
-        # dimension; concatenating these chunks is exactly C-order traversal.
-        for index in range(int(value.shape[0])):
-            yield from _chunks_c_order(value[index])
-
-    for chunk in _chunks_c_order(tensor):
-        cpu = chunk.to(device="cpu", dtype=torch.float32).contiguous()
-        digest.update(
-            cpu.numpy().astype("<f4", copy=False).tobytes(order="C")
-        )
-        del cpu
-    return shape, digest.hexdigest()
+    return fp32_tensor_stream_identity(weight)
 
 
 _IDENTITY_MISSING = object()
@@ -3200,32 +3177,8 @@ def _production_cache_recent_writes(
     return f"{len(stamped)} hashed files under {root}; newest: {newest}"
 
 
-#: Feed width for host-tensor digests. ``hashlib`` releases the GIL for
-#: buffers this size, so one memoryview fed in wide slices hashes at the
-#: same single-core rate as one contiguous feed, without the ``tobytes()``
-#: copy that used to double resident bytes per tensored identity (PQ #725).
-_TENSOR_DIGEST_CHUNK_BYTES = 8 << 20
-
-
 def _cb_cache_tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
-    stored = tensor.detach().to(device="cpu").contiguous()
-    # ``cast("B")`` flattens the dimensions without copying, so slices below
-    # are byte windows, never copies. (A multi-dimensional memoryview's bare
-    # ``len`` would be the first axis, not the byte count.) An empty tensor
-    # has zeros in its shape, which ``cast`` refuses, so it takes the empty
-    # feed directly -- the same sha256 of zero bytes ``tobytes()`` produced.
-    nbytes = stored.nbytes
-    digest = hashlib.sha256()
-    if nbytes:
-        view = memoryview(stored.view(torch.uint8).numpy()).cast("B")
-        for offset in range(0, len(view), _TENSOR_DIGEST_CHUNK_BYTES):
-            digest.update(view[offset:offset + _TENSOR_DIGEST_CHUNK_BYTES])
-    return {
-        "shape": [int(dim) for dim in stored.shape],
-        "dtype": str(stored.dtype),
-        "logical_bytes": nbytes,
-        "content_sha256": digest.hexdigest(),
-    }
+    return tensor_view_stream_identity(tensor)
 
 
 def _render_nvfp4_progressive_candidate(
