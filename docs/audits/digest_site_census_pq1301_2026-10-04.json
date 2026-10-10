@@ -14646,7 +14646,13 @@
     "disposition": "add-exact-owner-recipe",
     "eligible": true,
     "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+        "retention_evidence": {
+     "status": "retained-by-pq2636-2026-10-10",
+     "guard": "resource_check loop, page release, descriptor alias, stat fence",
+     "page_window": "SOURCE_HASH_BLOCK_BYTES (16777216)",
+     "admission_charge": "source_hash_window = 2 * SOURCE_HASH_BLOCK_BYTES (33554432, RobTand/prismaquant#1491)",
+     "owner_gap": "digests stays stdlib-only and read-neutral; it owns no per-block page advice"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
     "cohort": "guarded-capture:hashlib:prismaquant/tessera_calibration_cache.py::sha256@69:21"
@@ -14776,6 +14782,12 @@
     "disposition": "migrate-exact-route",
     "eligible": true,
     "disposition_reason": "Use the exact owner route without changes to consumer policy.",
+        "migration": {
+     "status": "migrated-by-pq2636-2026-10-10",
+     "manifest": "refresh_2540 (2026-10-09, source 30b6231df000726beda55fb6706e641a5cb2ccb0): route prismaquant.digests.file_digest_sha256hex, migrate-exact-route, eligible",
+     "routed_expression": "file_digest_sha256hex(handle)",
+     "evidence": "tests/test_digest_calibration_cache_1512.py ordered-trace and digest-equality checks"
+    },
     "retention_evidence": null,
     "epic_key": "k3",
     "epic": "prismaquant#2542",
