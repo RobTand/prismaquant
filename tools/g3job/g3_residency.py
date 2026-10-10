@@ -137,13 +137,16 @@ class StagedReader:
     def read(self, path, offset, size):
         key = self.maps.residency_map_key(resolve_g3_origin(path), offset)
         with self.lock:
-            phase = self.key_phases.get(key, "setup" if self.phase_keys else "smoke")
-            if phase in self.closed_phases:
-                raise RuntimeError(f"{key}: read from completed phase {phase}")
+            # A map miss reads the declared origin, so it never raises:
+            # the default phase below only labels mapped keys with no
+            # tracked phase, and unmapped keys return before this check.
             mapping = self._map()
             entry = mapping["entries"].get(key)
             if entry is None:
                 return None
+            phase = self.key_phases.get(key, "setup" if self.phase_keys else "smoke")
+            if phase in self.closed_phases:
+                raise RuntimeError(f"{key}: read from completed phase {phase}")
             if entry["bytes"] != size:
                 raise RuntimeError(f"{key}: staged range length differs from requested {size}")
             window = self._window(mapping, key, phase)
