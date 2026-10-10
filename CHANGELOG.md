@@ -40,6 +40,11 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The GLM profile holds commissioned units out of the default dense enumeration (#2400).
+  Without `--allow-pinned`, `campaign_dense_unit_names` returns the quantizable body only;
+  attention, indexer, router, MLA key/value, and vision units enumerate solely under a matching token.
+  The rule reuses the profile pin and probe-exclusion declarations, so it cannot drift from the roster gate.
+  The default roster, the BF16 source model, and head/embedding handling stay unchanged.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.

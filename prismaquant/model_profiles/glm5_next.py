@@ -356,12 +356,29 @@ class Glm5NextProfile(ModelProfile):
     def fused_sibling_leaf_mapping(self) -> dict[str, tuple[str, ...]]:
         return self._fused_ownership_lane().glm_fused_sibling_leaf_mapping()
 
+    def is_explicit_select_unit(self, name: str) -> bool:
+        """Whether this unit prices only under an explicit allow token.
+
+        The commissioned attention, indexer, router, MLA key/value and
+        vision units stay out of the default enumeration: a run prices
+        them only when ``allow_pinned`` names them. The rule reuses the
+        profile's own pin and probe-exclusion declarations, so the set
+        cannot drift from the roster gate. The head and the embeddings
+        keep their own policies and never count here.
+        """
+        if name.endswith("lm_head") or "embed" in name:
+            return False
+        if self.is_pinned_name(name):
+            return True
+        extra = self.probe_linear_exclude_extra()
+        return bool(extra) and re.search(extra, name) is not None
+
     def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
         from prismaquant.fixed_head import parse_allow_pinned
         tokens = parse_allow_pinned(allow_pinned)
         names = super().campaign_dense_unit_names(model, allow_pinned=allow_pinned)
         if not tokens:
-            return names
+            return [name for name in names if not self.is_explicit_select_unit(name)]
         for name, module in model.named_modules():
             if (any(token in name for token in tokens) and name not in names
                     and self.is_dense_parameter_owner(name, module)):
