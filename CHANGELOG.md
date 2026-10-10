@@ -40,6 +40,17 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- Stage B spill qualification runs on provisioned private scratch with real direct I/O (#2594).
+  The `_spill_root` helper serves spill acquisition only from `PQ_STAGE_B_SPILL_TEST_ROOT`
+  with real statx direct I/O. Without either it skips and names the incomplete
+  qualification instead of passing on an unqualified disk. Refusal paths keep `tmp_path`
+  and never probe direct I/O. The DSv4 fake-trace ratchet walks the checked-in
+  repeating-cell config, owns its process with an explicit PB source scope, and joins
+  the native-import order matrix. Every other vendored DSv4 test keeps its `own_process`
+  boundary and gains the same explicit scope.
+  PB `b77df200bfdb` passes 7 host-capability tests, `b63327b84bed` passes 3 isolation
+  orders, `fbe76d599bc4` passes 3 walk tests standalone, and the remaining DSv4 shards
+  pass 36 tests on x86. The unprovisioned spill ceiling case skips with the new reason.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.

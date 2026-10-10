@@ -1442,6 +1442,23 @@ not a production/runtime/default/format/cache/export/serving-gate change or a
 GPU/model/performance qualification. Evidence and per-node acceptance:
 [DSv4 CPU fixture family](results/2026-10-02_dsv4_cpu_fixture_family.md).
 
+Re-stamped 2026-10-10 (PQ #2594): the DSv4 fake-trace ratchet walks the
+checked-in repeating-cell config
+`tests/fixtures/dsv4_fake_trace_cell/config.json` instead of a host
+checkpoint path, owns its process with an explicit PB source scope, and
+joins the native-import order matrix in
+`tests/test_dsv4_fixture_isolation.py`. Every other vendored DSv4 test keeps
+its `own_process` boundary and gains the same explicit scope. The
+`_spill_root` helper runs spill acquisition on administrator-provisioned
+private scratch (`PQ_STAGE_B_SPILL_TEST_ROOT`) with real statx direct I/O;
+without either, it skips and names the incomplete qualification, and
+`require_direct_io` carries the same notice. Refusal paths keep `tmp_path`
+and never probe direct I/O. This is test isolation and qualification gating,
+not a production/runtime/default/format/cache/export/serving-gate change or a
+GPU/model/performance qualification. Gates:
+`tests/test_declared_host_capabilities.py`,
+`tests/test_dsv4_fixture_isolation.py`.
+
 Re-stamped 2026-10-01 (Refs PQ #1171, forward preparation slice): newly
 built Stage A forward group manifests carry the same complete head/forward
 read set and round metadata. Group execution samples remain in the existing
