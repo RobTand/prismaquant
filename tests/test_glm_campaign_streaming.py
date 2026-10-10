@@ -328,22 +328,39 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(
         # Reuse that actual complete capture through the selected-source CLI,
         # including one real pinned-producer anchor and a checkpoint resume.
         import pickle
-        dense_group = next(key for key in result['anchor_groups']
-                           if key.startswith('u:') and '.experts.' not in key)
-        names = result['anchor_groups'][dense_group]
+        # The memory assertion needs a true steady-state batch: two batches of
+        # the same recipe and unit shapes, where the second reuses the first's
+        # warmed kernels and allocator segments (PQ #1243). One unit at two
+        # rungs never repeats a combination, so select the dense groups whose
+        # members share one shape, fused gate_up pairs included.
+        dense_groups = [(key, result['anchor_groups'][key])
+                        for key in result['anchor_groups']
+                        if (key.startswith('u:') or key.startswith('g:'))
+                        and '.experts.' not in key]
+        by_shape = {}
+        for key, members in dense_groups:
+            by_shape.setdefault(tuple(sorted(
+                tuple(result['unit_shapes'][name]) for name in members)), []).append(
+                    (key, members))
+        repeated = next((groups for groups in by_shape.values() if sum(
+            len(members) for _, members in groups) >= 2), None)
+        assert repeated, [(key, members) for key, members in dense_groups]
+        names = [name for _, members in repeated for name in members]
         selection_path = tmp_path/'selected-units.json'
         selection_path.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA,
             model=str(source), layer_stride=1,
-            groups=[dict(key=dense_group, members=names)])))
+            groups=[dict(key=key, members=members) for key, members in repeated])))
         def no_forward(*args, **kwargs):
             pytest.fail('selected anchor reuse repeated calibration')
         monkeypatch.setattr(campaign, '_collect_activations', no_forward)
         original_menus = campaign.expand_menus_for_targets
         def two_rungs(weights, targets, **kwargs):
-            # TWO rungs, so the row runs two encode steps. One step cannot
-            # separate the runtime's one-time first-use cost from the
-            # steady-state cost the plan charges for; the second step can
-            # (RobTand/prismaquant#390).
+            # TWO rungs, so each unit encodes twice: the plan charges the
+            # per-anchor steady state, never a rung's one-time first-use
+            # (RobTand/prismaquant#390). The steady sample is the second batch
+            # of a repeated (recipe, shapes) combination, never the second
+            # batch by position: a new rung warms its own kernels and segments
+            # (RobTand/prismaquant#1243).
             assert set(weights) == set(names)
             assert all(not value.is_meta for value in weights.values())
             menus = original_menus(weights, targets, **kwargs)
@@ -409,24 +426,39 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(
             # the raw cap.
             assert plan['memory_bytes'] <= (
                 selected_guard['budget_bytes'] - baseline['bytes'])
-            # The steady state, which the plan does charge for. The first
-            # encode step carries the runtime's one-time first-use cost (the
-            # first CUDA factorisation, the first encode_linear); every later
-            # step is the per-anchor cost the resident_anchors phase bounds,
-            # so THAT is what must fit, and a term someone forgets fails here
-            # rather than disappearing into headroom or into a whole-row
-            # figure the first batch dominates.
+            # The steady state, which the plan does charge for. Each (recipe,
+            # shapes) combination carries its own one-time first-use cost (the
+            # first CUDA factorisation, the first encode_linear, the fresh
+            # allocator segments); only a batch repeating a combination the row
+            # already ran is the per-anchor cost the resident_anchors phase
+            # bounds, so THAT is what must fit, and a term someone forgets
+            # fails here rather than disappearing into headroom or into a
+            # whole-row figure the first batches dominate.
             growths = receipt['anchor_batch_growth_bytes']
-            assert len(growths) >= 2, growths
+            descriptors = receipt['anchor_batch_descriptors']
+            assert len(growths) >= 2 and len(descriptors) == len(growths), (
+                growths, descriptors)
+            seen = set()
+            steady = []
+            for descriptor, growth in zip(descriptors, growths):
+                key = (descriptor['format_name'], tuple(sorted(
+                    tuple(shape) for shape in descriptor['unit_shapes'].values())))
+                if key in seen:
+                    steady.append(growth)
+                else:
+                    seen.add(key)
             resident = sum(plan['phases']['resident_anchors'].values())
             # A string, not a mapping: a repr is elided long before it
             # reaches peak_by_checkpoint_prefix.
             evidence = json.dumps(dict(anchor_batch_growth_bytes=growths,
+                anchor_batch_descriptors=descriptors,
+                steady_state_growth_bytes=steady,
                 resident_anchors_bytes=resident,
                 whole_row_growth=selected_guard['peak_conservative_bytes']
                                  - baseline['bytes'],
                 guard=selected_guard, plan=plan), indent=2, sort_keys=True)
-            assert max(growths[1:]) <= resident, evidence
+            assert steady, evidence
+            assert max(steady) <= resident, evidence
         else:
             assert selected_guard is None and baseline is None
         assert receipt['source_forward_count'] == 0

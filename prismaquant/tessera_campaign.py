@@ -8817,10 +8817,16 @@ def _main(argv, *, source_scope, waits) -> int:
             # One entry per encode step, in order, each the growth across that
             # step's own bracket. The list is stamped on the selected receipt now
             # and filled as the loop runs, so a reader gets the steady-state cost
-            # separately from the first batch's one-time runtime charge.
+            # separately from the first batch's one-time runtime charge. The
+            # parallel descriptor names each step's recipe and shapes: the first
+            # batch of each (recipe, shapes) warms kernels and allocator segments
+            # for that combination, so only a later batch of the same combination
+            # is the steady state the resident plan charges for (PQ #1243).
             anchor_batch_growth = []
+            anchor_batch_descriptors = []
             if selected_source and selected_source_preparation is not None:
                 selected_source_preparation['anchor_batch_growth_bytes'] = anchor_batch_growth
+                selected_source_preparation['anchor_batch_descriptors'] = anchor_batch_descriptors
             for batch_index, batch in enumerate(batches):
                 # Rows whose files landed while the last batch encoded. Applied at
                 # the top of the batch rather than the bottom, so the receipt read
@@ -8850,9 +8856,11 @@ def _main(argv, *, source_scope, waits) -> int:
                     # growth can only be read against whichever checkpoint
                     # happened to precede it, which is a different phase's charge,
                     # and the pair is taken PER OCCURRENCE because the first batch
-                    # carries the runtime's one-time first-use cost while later
-                    # batches are the steady state the plan actually charges for
-                    # (RobTand/prismaquant#390).
+                    # carries the runtime's one-time first-use cost while a later
+                    # batch of the same recipe and shapes is the steady state the
+                    # plan actually charges for (RobTand/prismaquant#390): a later
+                    # batch of another recipe or shape warms its own kernels and
+                    # allocator segments first (RobTand/prismaquant#1243).
                     selected_guard.check('before_selected_anchor_batch')
                     batch_floor = selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes']
@@ -8914,6 +8922,8 @@ def _main(argv, *, source_scope, waits) -> int:
                     selected_guard.check('after_selected_anchor_batch')
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
+                    anchor_batch_descriptors.append(dict(format_name=fmt, unit_shapes={
+                        name: [int(dim) for dim in weights[name].shape] for name in names}))
                 for anchor in anchors:
                     anchor_failures.pop((anchor.qname, anchor.format_name), None)
                     if row_stream is not None:
