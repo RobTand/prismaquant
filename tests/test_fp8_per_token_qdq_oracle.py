@@ -411,6 +411,10 @@ def test_fused_leg_uses_one_launch_per_call():
         event.count
         for event in prof.key_averages()
         if event.device_time_total > 0
-        and ("fp8_per_token" in event.key or event.key.startswith("triton"))
     )
-    assert launches == calls, f"one launch per call, saw {launches} for {calls}"
+    assert launches == calls, (
+        f"one launch per call, saw {launches} for {calls}: "
+        + ", ".join(
+            f"{event.key}x{event.count}" for event in prof.key_averages()
+        )
+    )
