@@ -847,6 +847,8 @@ def parse_args():
     p.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     p.add_argument('--original-local-control', action='store_true')
     p.add_argument('--output', type=Path)
+    p.add_argument('--sdk-root', type=Path,
+                   help='sealed reviewed SDK5 bundle for the staged readers (the pinned PB commit root)')
     args = p.parse_args()
     if not args.prepare_synthetic and not all((args.binding, args.binding_sha256, args.data_manifest_sha256, args.output)):
         p.error('replay requires immutable binding, bound data manifest and unused output directory')
@@ -858,6 +860,9 @@ def execute(args):
     if args.prepare_synthetic:
         prepare_synthetic(args.prepare_synthetic)
         return
+    if args.sdk_root:
+        from prismaquant.staged_lease import set_lease_helper_root
+        set_lease_helper_root(str(args.sdk_root.resolve(strict=True)))
     activate_staged_tier_policy('ram,ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     binding = json.loads(read_staged_whole_file(args.binding, args.binding_sha256, label='replay binding'))
