@@ -193,3 +193,55 @@ def test_ram_integrity_or_unknown_refusal_never_selects_stage(tmp_path, refusal)
         reader.read("/host/source", 0, 6)
     assert tiers == ["ram:stage"]
     assert not live and reader.stats["staged_reads"] == 0
+
+
+def test_ram_acquire_availability_refusal_retries_on_stage(tmp_path):
+    reader, mapping, map_path, _, events, live = reader_fixture(tmp_path)
+    mapping.update(ram_tier_id="ram:stage", ram_epoch="current")
+    for key in reader.phase_keys["layer-00"]:
+        mapping["entries"][key]["ram_path"] = "/ram/" + key.rsplit("/", 1)[-1]
+    map_path.write_text(json.dumps(mapping))
+    base_acquire = reader.lease.acquire_for
+    tiers = []
+
+    def acquire(ctx, **kwargs):
+        tiers.append(kwargs["tier_id"])
+        if kwargs["tier_id"] == "ram:stage":
+            return {"ok": False, "refusal": "stale-epoch"}
+        return base_acquire(ctx, **kwargs)
+
+    reader.lease.acquire_for = acquire
+    assert reader.read("/host/source", 0, 6) == b"source"
+    assert reader.read("/host/wire", 0, 4) == b"wire"
+    assert tiers == ["ram:stage", "stage"]
+    assert [keys for kind, keys in events if kind == "acquire"] == [{"0:/host/source", "0:/host/wire"}]
+    assert reader.stats["tiers"] == {"stage": {"reads": 2, "bytes": 10}}
+    reader.finish_phase("layer-00")
+    assert not live
+
+
+@pytest.mark.parametrize("refusal", ["source-coverage-gap", "ownership-uncertain: sidecar/fragment disagree",
+                                     "unknown"])
+def test_ram_acquire_integrity_or_unknown_refusal_selects_no_copy(tmp_path, refusal):
+    reader, mapping, map_path, _, _, live = reader_fixture(tmp_path)
+    mapping.update(ram_tier_id="ram:stage", ram_epoch="current")
+    mapping["entries"]["0:/host/source"]["ram_path"] = "/ram/source"
+    map_path.write_text(json.dumps(mapping))
+    base_covers = reader.lease.covers_for_keys
+    cover_tiers, acquire_tiers = [], []
+
+    def covers(root, owner, keys, **kwargs):
+        cover_tiers.append(kwargs["tier_id"])
+        return base_covers(root, owner, keys, **kwargs)
+
+    def acquire(_ctx, **kwargs):
+        acquire_tiers.append(kwargs["tier_id"])
+        return {"ok": False, "refusal": refusal}
+
+    reader.lease.covers_for_keys = covers
+    reader.lease.acquire_for = acquire
+    with pytest.raises(RuntimeError, match=refusal.split(":")[0]):
+        reader.read("/host/source", 0, 6)
+    assert cover_tiers == ["ram:stage"]
+    assert acquire_tiers == ["ram:stage"]
+    assert not live and reader.stats["staged_reads"] == 0
