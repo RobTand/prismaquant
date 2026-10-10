@@ -11,8 +11,13 @@ Arithmetic contract (bitwise against ``fp8_dynamic.fp8_qdq_reference`` on
 finite inputs):
 - The row scale divides in FP32 by a register denominator (``div.rn``), never
   by a reciprocal multiply, so no scale moves by one ULP across an FP8
-  midpoint (the 2026-09-07 native-parity repair).
+  midpoint (the 2026-09-07 native-parity repair). Triton lowers ``/`` to an
+  approximate divide, so both divides are ``div.rn.f32`` inline asm.
 - The quantize cast is direct with no zero point, so -0 survives.
+- The ``dx`` subtract rounds the product first and then subtracts
+  (``sub.rn.f32`` asm), like the torch reference. The opaque barrier also
+  stops FP fusion from contracting ``codes * scale - tile`` into one FMA,
+  whose skipped rounding shows up amplified through the cancellation.
 - Clamps use NaN-preserving select chains, and a row that holds a NaN keeps
   a NaN scale, matching torch's clamp/amax propagation. NaN rows are
   otherwise outside the hook's contract; the oracle pins the finite rows.
@@ -90,10 +95,21 @@ def _kernel():
 
     @triton.jit
     def _div_rn(a, b):
+        # Triton lowers ``/`` on FP32 to an approximate divide, which can move
         # a scale by one ULP and flip exact FP8 ties (PQ #1398). vLLM's native
         # kernel divides with ``div.rn`` (``common.cuh``); match it exactly.
         return tl.inline_asm_elementwise(
             "div.rn.f32 $0, $1, $2;", "=f,f,f", [a, b],
+            dtype=tl.float32, is_pure=True, pack=1,
+        )
+
+    @triton.jit
+    def _sub_rn(a, b):
+        # ``dx`` must round the product first and then subtract, like the
+        # torch reference. The opaque barrier also stops FP fusion from
+        # contracting ``codes * scale - tile`` into one FMA (PQ #1398).
+        return tl.inline_asm_elementwise(
+            "sub.rn.f32 $0, $1, $2;", "=f,f,f", [a, b],
             dtype=tl.float32, is_pure=True, pack=1,
         )
 
@@ -139,7 +155,7 @@ def _kernel():
             tl.store(scale_ptr + pid, scale)
             tl.store(dq_ptr + base + offs, dequant.to(OUT_DTYPE), mask=mask)
             if HAS_DX:
-                tl.store(dx_ptr + base + offs, dequant - tile, mask=mask)
+                tl.store(dx_ptr + base + offs, _sub_rn(dequant, tile), mask=mask)
         else:
             amax = tl.full((), 0.0, tl.float32)
             nan_total = tl.full((), 0, tl.int32)
@@ -166,7 +182,7 @@ def _kernel():
                 tl.store(quant_ptr + base + offs, codes, mask=mask)
                 tl.store(dq_ptr + base + offs, dequant.to(OUT_DTYPE), mask=mask)
                 if HAS_DX:
-                    tl.store(dx_ptr + base + offs, dequant - tile, mask=mask)
+                    tl.store(dx_ptr + base + offs, _sub_rn(dequant, tile), mask=mask)
 
     return _fp8_per_token_qdq_kernel
 
