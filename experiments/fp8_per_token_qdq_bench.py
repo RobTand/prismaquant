@@ -2,12 +2,14 @@
 
 Method follows docs/measurements/fp8-native-activation-parity-2026-09-07.md:
 call only ``fp8_dynamic_activation_qdq_vllm(...).dequant`` on GPU-resident
-inputs, time with CUDA events, count kernels under torch.profiler, and sample
-device power. The before arm forces the torch reference through
-``PRISMAQUANT_DISABLE_FP8_FUSED_QDQ=1`` (read per call, so one process runs
-both arms interleaved); the after arm uses the fused default path.
+inputs, time with CUDA events, count kernels from an exported profiler trace,
+and sample device power over a sustained phase. The before arm forces the
+torch reference through ``PRISMAQUANT_DISABLE_FP8_FUSED_QDQ=1``; the after
+arm uses the fused default path. Kernel counts come from one fresh process
+per arm because later profiler sessions in a shared process can miss CUDA
+launches and key_averages double-counts each kernel (PQ #1398).
 
-Usage (through PrismaBuild measurement admission on a GB10 worker):
+Usage (through PrismaBuild on a GB10 worker):
     python3 experiments/fp8_per_token_qdq_bench.py --out <dir>
 """
 
@@ -18,8 +20,9 @@ import json
 import os
 import statistics
 import subprocess
+import sys
+import tempfile
 import threading
-import time
 from pathlib import Path
 
 import torch
@@ -54,54 +57,46 @@ def _timed_calls(inputs: torch.Tensor, calls: int) -> float:
     return start.elapsed_time(end) / calls
 
 
-def _is_fused_key(key: str) -> bool:
-    return "fp8_per_token" in key or key.startswith("triton")
+_TRACE_CHILD = """\
+import json, os, sys, tempfile, torch
+from prismaquant.fp8_dynamic import DISABLE_FUSED_ENV, fp8_dynamic_activation_qdq_vllm
+rows, width, calls, arm, trace_path = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5]
+os.environ[DISABLE_FUSED_ENV] = arm
+generator = torch.Generator(device="cpu").manual_seed(1398 + rows + width)
+values = torch.randn((rows, width), generator=generator, dtype=torch.float32)
+outliers = torch.randint(0, width, (rows, 4), generator=generator)
+values.scatter_(1, outliers, values.gather(1, outliers) * 40.0)
+inputs = values.to(torch.bfloat16).to("cuda")
+for _ in range(20):
+    fp8_dynamic_activation_qdq_vllm(inputs).dequant
+torch.cuda.synchronize()
+with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
+    for _ in range(calls):
+        fp8_dynamic_activation_qdq_vllm(inputs).dequant
+    torch.cuda.synchronize()
+prof.export_chrome_trace(trace_path)
+kernels = [e for e in json.load(open(trace_path))["traceEvents"] if e.get("cat") == "kernel"]
+print(json.dumps({"kernels_per_call": len(kernels) / calls, "kernel_us_per_call": sum(e.get("dur", 0) for e in kernels) / calls, "kernel_names": sorted({e.get("name", "?") for e in kernels})}), flush=True)
+"""
 
 
-def _profile_both_arms(inputs: torch.Tensor) -> dict:
-    # One profiler session for both arms: a CPU-only session earlier in the
-    # process stops later sessions from seeing CUDA launches (PQ #1398), so
-    # the arms share the first session and split by kernel key afterwards.
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ]
-    ) as prof:
-        os.environ[DISABLE_FUSED_ENV] = "1"
-        for _ in range(CALLS_PER_ROUND):
-            fp8_dynamic_activation_qdq_vllm(inputs).dequant
-        torch.cuda.synchronize()
-        os.environ[DISABLE_FUSED_ENV] = "0"
-        for _ in range(CALLS_PER_ROUND):
-            fp8_dynamic_activation_qdq_vllm(inputs).dequant
-        torch.cuda.synchronize()
-    arms = {"reference": ([], 0.0), "fused": ([], 0.0)}
-    for event in prof.key_averages():
-        # Self device time only: parent CPU ops carry their children's device
-        # time and would double-count every kernel (PQ #1398).
-        if event.self_device_time_total <= 0:
-            continue
-        arm = "fused" if _is_fused_key(event.key) else "reference"
-        keys, _ = arms[arm]
-        keys.append(f"{event.key}x{event.count}")
-        arms[arm] = (keys, arms[arm][1] + event.self_device_time_total)
-    counts = {
-        arm: sum(
-            event.count for event in prof.key_averages()
-            if event.self_device_time_total > 0
-            and (_is_fused_key(event.key) == (arm == "fused"))
-        ) // CALLS_PER_ROUND
-        for arm in ("reference", "fused")
-    }
-    return {
-        arm: {
-            "cuda_kernels_per_call": counts[arm],
-            "kernel_us_per_call": arms[arm][1] / CALLS_PER_ROUND,
-            "kernel_keys": sorted(arms[arm][0]),
-        }
-        for arm in ("reference", "fused")
-    }
+def _profile_arm_trace(width: int, arm: str) -> dict:
+    # Count kernels from the exported trace in a fresh process. The first
+    # profiler session in a process sees CUDA launches reliably; later
+    # sessions after a CPU-only one can miss them, and key_averages counts
+    # each kernel twice (aten parent plus device kernel), so neither the
+    # shared session nor the averages give the true per-call count (PQ #1398).
+    with tempfile.TemporaryDirectory(prefix="fp8-bench-trace-") as tmp:
+        trace_path = os.path.join(tmp, "trace.json")
+        out = subprocess.run(
+            [sys.executable, "-c", _TRACE_CHILD,
+             str(ROWS), str(width), str(CALLS_PER_ROUND), arm, trace_path],
+            capture_output=True, text=True, timeout=1200, check=False,
+        )
+        if out.returncode != 0:
+            raise RuntimeError(
+                f"trace child failed for {arm} K={width}:\n{out.stderr[-3000:]}")
+        return json.loads(out.stdout.strip().splitlines()[-1])
 
 
 class _PowerSampler:
@@ -193,9 +188,11 @@ def _bench_case(width: int, out: Path) -> dict:
             "ms_per_call_min": min(per_call),
         }
         case[arm].update(_power_phase(inputs, POWER_PHASE_S))
-    profiled = _profile_both_arms(inputs)
-    for arm in ("reference", "fused"):
-        case[arm].update(profiled[arm])
+    for arm, flag in (("reference", "1"), ("fused", "0")):
+        traced = _profile_arm_trace(width, flag)
+        case[arm]["cuda_kernels_per_call"] = traced["kernels_per_call"]
+        case[arm]["kernel_us_per_call"] = traced["kernel_us_per_call"]
+        case[arm]["kernel_names"] = traced["kernel_names"]
     ref = case["reference"]["ms_per_call_median"]
     fused = case["fused"]["ms_per_call_median"]
     case["speedup"] = ref / fused if fused else None
