@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+import prismaquant.validate_native_export as vne
 from prismaquant.validate_native_export import (
     _flashinfer_runtime_package,
     _resolve_validation_target_profile,
@@ -146,3 +147,78 @@ def test_an_unquantized_checkpoint_keeps_its_legacy_behavior(tmp_path):
     change what a dense smoke does today, which is not this issue's bargain."""
     _write_config(tmp_path, None)
     assert require_native_lane_artifact(tmp_path) is None
+
+# ---------------------------------------------------------------------------
+# Explicit block size on MTP draft serves (RobTand/prismaquant#1514)
+# ---------------------------------------------------------------------------
+def _stub_vllm(monkeypatch):
+    """Record the kwargs the validator passes to vLLM."""
+    calls = {}
+
+    class _Resp:
+        prompt = "p"
+        outputs = [types.SimpleNamespace(text="smoke output")]
+
+    class LLM:
+        def __init__(self, **kwargs):
+            calls.update(kwargs)
+
+        def generate(self, prompts, params):
+            return [_Resp()]
+
+    module = types.ModuleType("vllm")
+    module.LLM = LLM
+    module.SamplingParams = lambda **kw: types.SimpleNamespace(**kw)
+    monkeypatch.setitem(sys.modules, "vllm", module)
+    return calls
+
+
+def _arm_args(**overrides):
+    base = {
+        "gpu_memory_utilization": 0.55,
+        "max_model_len": 2048,
+        "max_new_tokens": 16,
+        "prompt": "hi",
+        "route_sweep_out": None,
+        "block_size": 64,
+    }
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def test_draft_serve_keeps_an_explicit_user_block_size(monkeypatch, tmp_path):
+    """The engine build names a user block size with the draft dtype kept."""
+    calls = _stub_vllm(monkeypatch)
+    spec = {"method": "glm5_next_mtp", "num_speculative_tokens": 1,
+            "kv_cache_dtype": "fp8_ds_mla"}
+    verdict = vne._run_arm(_arm_args(), tmp_path, spec, enforce_eager=True)
+    assert verdict["passed"] is True
+    assert calls["block_size"] == 64
+    assert calls["speculative_config"]["kv_cache_dtype"] == "fp8_ds_mla"
+
+
+def test_one_explicit_block_size_covers_both_legs(monkeypatch, tmp_path):
+    """The spec arm and the no-spec arm build with the same block size."""
+    calls = _stub_vllm(monkeypatch)
+    vne._run_arm(_arm_args(), tmp_path, None, enforce_eager=True)
+    plain = calls["block_size"]
+    calls.clear()
+    spec = {"method": "glm5_next_mtp", "num_speculative_tokens": 1,
+            "kv_cache_dtype": "fp8_ds_mla"}
+    vne._run_arm(_arm_args(), tmp_path, spec, enforce_eager=True)
+    assert calls["block_size"] == plain == 64
+
+
+def test_block_size_lands_on_the_shipcard_record(monkeypatch, tmp_path):
+    """The verdict metrics carry the block size to the shipcard slot."""
+    _stub_vllm(monkeypatch)
+    verdict = vne._run_arm(_arm_args(), tmp_path, None, enforce_eager=False)
+    assert verdict["metrics"]["block_size"] == 64
+
+
+def test_block_size_default_is_64_and_stays_overridable():
+    """The parser defaults to 64 and honors an explicit override."""
+    parser = vne._build_parser()
+    assert parser.parse_args(["--model", "m"]).block_size == 64
+    assert parser.parse_args(
+        ["--model", "m", "--block-size", "16"]).block_size == 16
