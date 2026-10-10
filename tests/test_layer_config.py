@@ -125,3 +125,33 @@ def test_kl_assignment_loader_uses_shared_canonicalizer(tmp_path):
         "model.layers.0.mlp.down_proj": "FP8_E4M3",
         "model.layers.0.self_attn.o_proj": "NVFP4",
     }
+
+
+def test_layer_config_target_stamp_prefers_the_solved_target():
+    from prismaquant.allocator import resolve_layer_config_target_stamp
+
+    stamp = resolve_layer_config_target_stamp(
+        cli_target_bits=4.75, args_target_bits=5.25, solved_target_bits=5.25)
+    assert stamp["target_bits"] == 5.25
+    assert stamp["target_bits_provenance"] == {
+        "cli_target_bits": 4.75,
+        "args_target_bits": 5.25,
+        "solved_target_bits": 5.25,
+        "stamped_target_bits": 5.25,
+        "stamped_from": "solved_target_bits",
+    }
+
+
+def test_layer_config_target_stamp_falls_back_to_the_code_path_target():
+    from prismaquant.allocator import resolve_layer_config_target_stamp
+
+    stamp = resolve_layer_config_target_stamp(
+        cli_target_bits=4.75, args_target_bits=4.75, solved_target_bits=None)
+    assert stamp["target_bits"] == 4.75
+    assert stamp["target_bits_provenance"] == {
+        "cli_target_bits": 4.75,
+        "args_target_bits": 4.75,
+        "solved_target_bits": None,
+        "stamped_target_bits": 4.75,
+        "stamped_from": "args_target_bits",
+    }

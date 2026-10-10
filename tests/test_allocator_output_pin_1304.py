@@ -113,6 +113,13 @@ Only contract_version and reviewed_contract_sha256 differ in the retained fixtur
 The canonical layer digest excludes only those two fields and retains every other field.
 Both retained outputs produce the same digest after that normalization.
 The independent applicability and Pareto digests stay unchanged.
+Re-taken 2026-10-10 for PQ #2623. The writer stamps the solve target with
+provenance (``target_bits_provenance`` beside ``target_bits``). Only the two
+layer files change, and only by that block: the stock ``layer_config.json``
+gains the five-field provenance beside an unchanged ``target_bits`` of 6.0,
+and the Tessera ``layer.json`` gains the same block. The allocations, the
+applicability files, the Pareto CSVs, the knees and every Pareto seed are
+byte-identical.
 """
 from __future__ import annotations
 
@@ -128,7 +135,7 @@ STOCK_DIGESTS = {
         "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
     ),
     "layer_config.json": (
-        "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469"
+        "8209cad73ff2d274bc2e16f0f0872187e56868afb25d8ee7657b3e28508c961c"
     ),
     "pareto.csv": (
         "0805fbc4dbffb240025dc5bfb8a4e97ddb241eda8e3c80818f07cdec425cfb32"
@@ -157,7 +164,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9"
+        "2243b0a290c31cf46927fb2234a80d800343d81d912652b7198ddcca08113bb6"
     ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
