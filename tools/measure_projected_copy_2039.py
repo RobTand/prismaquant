@@ -633,6 +633,21 @@ def unbind_fixture():
     reset_residency_resolver_for_tests()
 
 
+def control_summary(arms):
+    """The control's paired timings, or ``None`` when it did not run.
+
+    The staged arms count a private copy as a read that came back pageable. A
+    read with no stage pins after the read, so it comes back pinned and the
+    count would say zero where one copy was made; the profile's call sites
+    carry that copy instead, and the count is dropped here.
+    """
+    if not arms:
+        return None
+    summary = paired_summary(arms)
+    del summary["private_staging_copies"]
+    return summary
+
+
 def stage_gate(arms):
     """Every arm's every unit read came off the stage and none off the pool."""
     problems = []
@@ -718,8 +733,7 @@ def run_cuda(args, fixture, binding):
         netdata = both_host_netdata(after, before, windowed)
     return {"calibration_median_s": medians, "passes": passes, "order": list(ORDER),
             "arms": arms, "paired": paired_summary(arms), "stage_gate_problems": problems,
-            "unmapped_control": {"arms": control,
-                                 "paired": paired_summary(control) if control else None},
+            "unmapped_control": {"arms": control, "paired": control_summary(control)},
             "power_samples": power.samples,
             "netdata": netdata, "power_errors": power.errors[:5],
             "power_samples_total": len(power.samples)}

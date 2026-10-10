@@ -66,6 +66,16 @@ def test_paired_summary_pools_the_two_arms_of_each_kind():
     assert summary["within_kind_spread_fraction"]["before"] == pytest.approx(0.04 / 0.42)
 
 
+def test_the_control_summary_drops_the_staged_copy_count_and_none_means_it_did_not_run():
+    arms = [_arm("before", 0.40, pageable=100), _arm("after", 0.40), _arm("after", 0.40),
+            _arm("before", 0.40, pageable=100)]
+    summary = measure.control_summary(arms)
+    # A pool read pins after the read: it returns pinned, so zero would lie.
+    assert "private_staging_copies" not in summary
+    assert summary["wall_median_s"]["reduction_fraction"] == pytest.approx(0.0)
+    assert measure.control_summary([]) is None
+
+
 def _frame(ident, parent, name, ts, dur, tid=1):
     return {"ph": "X", "cat": "python_function", "name": name, "tid": tid,
             "ts": ts, "dur": dur, "args": {"Python id": ident, "Python parent id": parent}}
