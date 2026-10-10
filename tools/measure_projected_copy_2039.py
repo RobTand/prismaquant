@@ -524,6 +524,8 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
         ended = time.time()
         cpu_s = time.process_time() - cpu_before
         usage = resource.getrusage(resource.RUSAGE_SELF)
+        user_s, system_s = (usage.ru_utime - usage_before.ru_utime,
+                            usage.ru_stime - usage_before.ru_stime)
         timed_phases = dict(phases.seconds)
         timed_reads = (phases.pinned_reads, phases.pageable_reads)
         counters_timed = counter_delta(stage_counters(), counters_before)
@@ -536,6 +538,8 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
             torch.cuda.synchronize()
         keep = Path(trace_dir) / f"{kind}-{started:.0f}.json" if trace_dir else None
         sites = trace_call_sites(trace_events(profile, fixture.root, keep))
+        trace = ({"path": str(keep), "bytes": keep.stat().st_size, "sha256": file_sha256hex(keep)}
+                 if keep is not None else None)
         totals = profile_totals(profile, {
             "aten::copy_", "aten::_to_copy", "aten::empty_strided", "aten::ne",
             "aten::any", "cudaMemcpyAsync", "cudaLaunchKernel"})
@@ -553,6 +557,7 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
         "wall_s": walls, "wall_median_s": statistics.median(walls),
         "wall_mean_s": statistics.fmean(walls),
         "cpu_s_per_pass": cpu_s / passes,
+        "cpu_user_s_per_pass": user_s / passes, "cpu_system_s_per_pass": system_s / passes,
         "minor_faults_per_pass": (usage.ru_minflt - usage_before.ru_minflt) / passes,
         "phase_s_per_pass": {key: value / passes for key, value in timed_phases.items()},
         "pinned_reads": timed_reads[0], "pageable_reads": timed_reads[1],
@@ -560,7 +565,7 @@ def timed_arm(campaign, fixture, live, kind, *, passes, profile_passes, power, t
         "stage_expected_bytes": reads * fixture.unit_bytes,
         "power": power.window(started, ended),
         "profile": {"passes": profile_passes, "python_frames": sites["python_frames"],
-                    "aten_copy_sites": sites["rows"], "ops": totals},
+                    "aten_copy_sites": sites["rows"], "ops": totals, "trace": trace},
         "mismatch": mismatch,
     }
 
@@ -589,6 +594,13 @@ def paired_summary(arms):
     summary["cpu_s_per_pass"]["reduction_fraction"] = (
         1 - summary["cpu_s_per_pass"]["after"] / summary["cpu_s_per_pass"]["before"])
     return summary
+
+
+def unbind_fixture():
+    """Drop the residency map: the next read is the pool's, as with no stage."""
+    from prismaquant.residency_map import ENV_VAR, reset_residency_resolver_for_tests
+    os.environ.pop(ENV_VAR, None)
+    reset_residency_resolver_for_tests()
 
 
 def stage_gate(arms):
@@ -643,20 +655,33 @@ def run_cuda(args, fixture, binding):
                                   trace_dir=args.trace_dir))
             print(f"[pq2039] {kind}: median {arms[-1]['wall_median_s'] * 1e3:.2f} ms/pass "
                   f"({passes} passes)", file=sys.stderr, flush=True)
+        control = None
+        if args.control_passes:
+            # Scope control, not a paired arm: the shipped code with no map, so
+            # the pool serves every unit and the one private copy is the pin the
+            # read makes after it. This is the path a read the stage did not serve
+            # takes, and the path the original-source owner takes.
+            unbind_fixture()
+            control = timed_arm(campaign, fixture, live, "after", passes=args.control_passes,
+                                profile_passes=args.profile_passes, power=power,
+                                trace_dir=args.trace_dir)
+            control["kind"] = "unmapped-control"
     problems = stage_gate(arms)
     netdata = None
     if not args.no_netdata:
         # Whole seconds, and a window that ends in the past: Netdata shifts a
         # window that ends at the present back by a second, so its first row
         # would fall before the bound it was asked for.
-        after = int(arms[0]["epoch_start"]) - NETDATA_PAD_S
-        before = int(arms[-1]["epoch_end"]) + NETDATA_PAD_S
+        windowed = arms + ([control] if control else [])
+        after = int(windowed[0]["epoch_start"]) - NETDATA_PAD_S
+        before = int(windowed[-1]["epoch_end"]) + NETDATA_PAD_S
         wait = before + NETDATA_LAG_S - time.time()
         if wait > 0:
             time.sleep(wait)
-        netdata = both_host_netdata(after, before, arms)
+        netdata = both_host_netdata(after, before, windowed)
     return {"calibration_median_s": medians, "passes": passes, "order": list(ORDER),
             "arms": arms, "paired": paired_summary(arms), "stage_gate_problems": problems,
+            "unmapped_control": control, "power_samples": power.samples,
             "netdata": netdata, "power_errors": power.errors[:5],
             "power_samples_total": len(power.samples)}
 
@@ -736,6 +761,8 @@ def main(argv=None):
     parser.add_argument("--arm-seconds", type=float, default=30.0)
     parser.add_argument("--min-passes", type=int, default=20)
     parser.add_argument("--profile-passes", type=int, default=3)
+    parser.add_argument("--control-passes", type=int, default=60,
+                        help="passes of the unmapped scope control; 0 skips it")
     parser.add_argument("--trace-dir", default="")
     parser.add_argument("--out", default="")
     parser.add_argument("--no-netdata", action="store_true")
