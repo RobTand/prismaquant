@@ -97,6 +97,92 @@ def test_pin_request_pins_pool_bytes_with_equal_content(tmp_path, monkeypatch):
     assert residency_report() is None
 
 
+def test_pin_request_without_map_never_reaches_raw_opener(tmp_path, monkeypatch):
+    """CPU cover for the unmapped path: raw ``safe_open`` takes no pin flag."""
+    from prismaquant import layer_streaming
+    model, source, unit, _map_path, _nbytes = _declared_and_staged(tmp_path)
+    seen = []
+    real_open = layer_streaming.safe_open
+    def spy(path, *args, **kwargs):
+        seen.append(dict(kwargs))
+        return real_open(path, *args, **kwargs)
+    monkeypatch.setattr(layer_streaming, 'safe_open', spy)
+    pinned_calls = _stub_pin_after_read(monkeypatch)
+    weight = source_unit_weight(model, source, unit, pin_memory=True)
+    assert torch.equal(weight, torch.ones((ROWS, COLS), dtype=torch.bfloat16))
+    assert seen, "expected at least one shard open"
+    # The first attempt offers the staged fast path; the open that succeeds
+    # on the raw opener carries no pin flag (the first raises TypeError).
+    assert seen[0].get('pinned_host') is True
+    assert 'pinned_host' not in seen[-1]
+    assert pinned_calls, "expected a pin-after-read on the unmapped path"
+    assert residency_report() is None
+
+
+def _nonqualified_owner(model):
+    """A sealed-roster owner over the declared shard, never original material."""
+    import hashlib
+    from prismaquant.tessera_calibration_cache import CaptureSourceAuthentication
+    declared = model / 'model-00001-of-00001.safetensors'
+    digest = hashlib.sha256(declared.read_bytes()).hexdigest()
+    owner = CaptureSourceAuthentication(model,
+        {'source_files': {declared.name: digest}, 'census_sha256': 'a' * 64}, {},
+        manifest_sha256='b' * 64)
+    assert not owner.is_qualified_original_material
+    return owner
+
+
+def _stub_pin_after_read(monkeypatch):
+    """Count pin-after-read calls without the CUDA pinned allocator."""
+    calls = []
+    real_pin = torch.Tensor.pin_memory
+    def fake_pin(self):
+        calls.append(True)
+        try:
+            return real_pin(self)
+        except RuntimeError:
+            return self
+    monkeypatch.setattr(torch.Tensor, 'pin_memory', fake_pin)
+    return calls
+
+
+def test_pin_request_with_owner_without_map_pins_after_read(tmp_path, monkeypatch):
+    """CPU cover for the owner branch with no map: the flag stops at the retry."""
+    model, source, unit, _map_path, _nbytes = _declared_and_staged(tmp_path)
+    owner = _nonqualified_owner(model)
+    try:
+        pinned_calls = _stub_pin_after_read(monkeypatch)
+        weight = source_unit_weight(model, source, unit,
+            source_authentication=owner, pin_memory=True)
+        assert torch.equal(weight, torch.ones((ROWS, COLS), dtype=torch.bfloat16))
+        assert pinned_calls, "expected a pin-after-read on the unmapped owner path"
+        assert residency_report() is None
+    finally:
+        owner.close()
+
+
+@_NEEDS_PINNED
+def test_pin_request_with_owner_reads_staged_bytes_without_private_copy(
+        tmp_path, monkeypatch):
+    """The owner branch keeps the staged fast path under a map."""
+    model, source, unit, map_path, nbytes = _declared_and_staged(tmp_path)
+    _bind(monkeypatch, map_path)
+    owner = _nonqualified_owner(model)
+    try:
+        counter = _CopyCounter(monkeypatch)
+        weight = source_unit_weight(model, source, unit,
+            source_authentication=owner, pin_memory=True)
+        assert weight.is_pinned()
+        assert torch.equal(weight, torch.full((ROWS, COLS), 2.0, dtype=torch.bfloat16))
+        assert counter.staging == 0
+        report = residency_report()
+        assert report is not None
+        assert report['bytes_from_pool'] == 0
+        assert report['bytes_from_stage'] == nbytes
+    finally:
+        owner.close()
+
+
 def _prepare_kwargs(**overrides):
     kwargs = dict(live_shape=(2, 3), live_dtype=torch.bfloat16,
                   model_path='unused', source={}, release_source_pages=False,

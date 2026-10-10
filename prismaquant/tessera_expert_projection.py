@@ -505,10 +505,20 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
                       and getattr(source_authentication,
                                   'is_qualified_original_material', False))
     extra = {'pinned_host': True} if pin_memory and not pin_after_read else {}
-    context = (_source_safe_open(str(path), framework="pt", device="cpu", **extra)
-               if source_authentication is None else
-               _source_safe_open(path, source_authentication=source_authentication,
-                                 framework="pt", device="cpu", **extra))
+    def _open(**kwargs):
+        if source_authentication is None:
+            return _source_safe_open(str(path), framework="pt", device="cpu", **kwargs)
+        return _source_safe_open(path, source_authentication=source_authentication,
+                                 framework="pt", device="cpu", **kwargs)
+    # With no residency map the opener is ``safe_open`` itself, which takes
+    # no ``pinned_host`` argument: fall back to the plain open, then pin
+    # below. TypeError only, so staged-payload refusals still surface.
+    try:
+        context = _open(**extra)
+    except TypeError:
+        if not extra:
+            raise
+        context = _open()
     with context as handle:
         if tensor not in handle.keys():
             raise ExpertProjectionError(f"{tensor}: absent from {path}")

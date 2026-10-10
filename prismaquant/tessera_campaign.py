@@ -5458,6 +5458,7 @@ def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
         if release is not None:
             release()
 
+
 def _launch_prepared_projected_check(check, live):
     """The ordered coordinator alone enqueues CUDA work."""
     staged = check.pinned.to(live.device, non_blocking=True)

@@ -25,7 +25,9 @@ shape. It makes no full-campaign claim.
   `prismaquant.pq2039_paired_copy_measure.v1`. Passes: 100 per arm.
   Units per pass: 32. Total per paired side: 6400 unit checks.
 - Netdata: worker `http://localhost:19999/api/v1/info` returns 200 with
-  16482 bytes. No second host takes part. Clock alignment stays on HOLD.
+  16482 bytes. Gap: this action ran on one worker host, so only the worker
+  series exists. Both-host Netdata (criterion 4) stays open. No second host
+  takes part. Clock alignment stays on HOLD.
 
 ## Result
 
