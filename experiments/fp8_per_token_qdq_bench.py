@@ -196,6 +196,11 @@ def _bench_case(width: int, out: Path) -> dict:
     profiled = _profile_both_arms(inputs)
     for arm in ("reference", "fused"):
         case[arm].update(profiled[arm])
+    ref = case["reference"]["ms_per_call_median"]
+    fused = case["fused"]["ms_per_call_median"]
+    case["speedup"] = ref / fused if fused else None
+    (out / f"case-r{ROWS}-k{width}.json").write_text(json.dumps(case, indent=2))
+    return case
 
 
 def main() -> None:
