@@ -11210,7 +11210,11 @@ off the running engine instead of received from it.
   own attributes (`method_attrs`, for served modules whose method carries no
   scheme object -- packed MoE, PQ #706), the kernel the scheme
   selected, `isinstance(quant_method, QuantizeMethodBase)`, and a forward-hook
-  dispatch count over the generate. Only the eager arm writes one: forward
+  dispatch count over the generate. Hooks sit on every module: vLLM 0.28's
+  modular MoE runner invokes its experts without passing through their
+  `__call__`, so each row also carries its parent's count and the gate
+  accepts a schemeless MoE row whose runner fired (PQ #706). Only the eager
+  arm writes one: forward
   hooks do not run under CUDA-graph replay, and a graph-arm sweep would report
   zeros that mean "not observed" while looking exactly like "never ran".
 - **The isinstance trap, recorded rather than inherited.** vLLM finalizes

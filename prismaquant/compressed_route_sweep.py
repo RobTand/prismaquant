@@ -58,10 +58,16 @@ Per module that the runtime gave a quantization method:
     the predicate as a field instead.  A false here is a refusal in the gate,
     not an absence in the record.
 ``dispatches``
-    A forward-hook count taken across a real generate.  A module can be priced,
-    resolved and still never run; a zero here says so.  Forward hooks fire in
+    A forward-hook count taken across a real generate. A module can be priced,
+    resolved and still never run; a zero here says so. Forward hooks fire in
     eager execution, so a sweep whose load was not ``enforce_eager`` is NOT
-    VERIFIED rather than trusted.
+    VERIFIED rather than trusted. Hooks sit on every module, not only the
+    quant-method ones, so a runner that invokes its experts without passing
+    through their ``__call__`` still leaves evidence.
+``parent_dispatches``
+    The same count on the swept module's parent. A schemeless MoE row whose
+    own count is zero but whose runner fired still ran: the runner IS the
+    dispatch path (PQ #706). Dense rows never read this field.
 
 ``packed_modules_mapping`` is read off the live model class because the
 checkpoint prices unfused leaves (``q_proj``, ``gate_proj``) that the runtime
@@ -123,14 +129,16 @@ def _is_quantize_method_base(quant_method: Any) -> bool | None:
 def install_route_sweep_hooks(model) -> int:
     """Attach a per-module forward counter. Returns the number attached.
 
-    Attached to EVERY module that carries a ``quant_method``, including one
-    whose method is not a ``QuantizeMethodBase`` subclass, because the point is
-    to see the module the runtime's own sweep would have skipped.
+    Attached to EVERY module, not only the ones that carry a
+    ``quant_method``. vLLM 0.28's modular MoE runner invokes its experts
+    without passing through the ``RoutedExperts`` ``__call__`` the
+    quant-method hook counts on (observed on sparklina: router 4,
+    runner 4, experts 0 across a generating serve), so the experts'
+    dispatch evidence lives on the runner. A hook that filtered on the
+    same predicate the rows filter on would inherit that blindness.
     """
     attached = 0
     for _name, mod in model.named_modules():
-        if getattr(mod, "quant_method", None) is None:
-            continue
         if getattr(mod, _HOOK_ATTR, None) is not None:
             continue
         setattr(mod, _COUNTER_ATTR, 0)
@@ -154,10 +162,16 @@ def collect_route_sweep(model) -> dict:
     import torch
 
     rank, world_size, rank_source = _rank_identity()
-    modules: list[dict] = []
+    counts: dict[str, int | None] = {}
+    modules_by_name = {}
     walked = 0
     for name, mod in model.named_modules():
         walked += 1
+        modules_by_name[name] = mod
+        counts[name] = (int(getattr(mod, _COUNTER_ATTR, 0))
+                        if hasattr(mod, _HOOK_ATTR) else None)
+    modules: list[dict] = []
+    for name, mod in modules_by_name.items():
         quant_method = getattr(mod, "quant_method", None)
         scheme = getattr(mod, "scheme", None)
         if quant_method is None and scheme is None:
@@ -175,7 +189,7 @@ def collect_route_sweep(model) -> dict:
                     continue
                 attrs[key] = _safe_repr(value, 80)
         kernel = getattr(scheme, "kernel", None) if scheme is not None else None
-        hooked = hasattr(mod, _HOOK_ATTR)
+        parent, _, _ = name.rpartition(".")
         modules.append({
             "name": name,
             "module_class": type(mod).__qualname__,
@@ -188,8 +202,8 @@ def collect_route_sweep(model) -> dict:
             "method_attrs": method_attrs,
             "kernel": _class_name(kernel),
             "kernel_module": _class_module(kernel),
-            "dispatches": (int(getattr(mod, _COUNTER_ATTR, 0)) if hooked
-                           else None),
+            "dispatches": counts[name],
+            "parent_dispatches": counts.get(parent),
         })
     return {
         "schema": SWEEP_SCHEMA,

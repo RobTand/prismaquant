@@ -447,7 +447,23 @@ def _served_activation(row: Mapping[str, Any]) -> tuple[dict | None, str]:
     return descriptor, "scheme"
 
 
-def compare_rank(body: Mapping[str, Any], *, groups, ignore) -> dict:
+def _runner_dispatched(row: Mapping[str, Any], reason: str) -> bool:
+    """Whether a zero-count schemeless MoE row still ran, via its runner.
+
+    vLLM 0.28's modular MoE runner invokes its experts without passing
+    through the ``RoutedExperts`` ``__call__`` the sweep's forward hook
+    counts on (observed on sparklina: router 4, runner 4, experts 0
+    across a generating serve). The runner's own forward count is the
+    dispatch evidence for such rows. Dense (scheme) rows never read it:
+    a fused Linear that shows zero while its parent ran is genuinely
+    suspect, not a runner shape.
+    """
+    if reason != "method":
+        return False
+    parent = row.get("parent_dispatches")
+    return parent is not None and int(parent) > 0
+
+
     """One rank's per-module comparison. Raises on a conflict."""
     mapping = body.get("packed_modules_mapping")
     conflicts: list[str] = []
@@ -514,7 +530,7 @@ def compare_rank(body: Mapping[str, Any], *, groups, ignore) -> dict:
             raise RouteSweepNotVerified(
                 f"{name}: no dispatch count was taken, so whether the module "
                 "ran was never observed")
-        if int(dispatches) <= 0:
+        if int(dispatches) <= 0 and not _runner_dispatched(row, reason):
             conflicts.append(
                 f"{name}: priced by config group {group['name']!r} and "
                 "resolved, but dispatched ZERO forwards")
