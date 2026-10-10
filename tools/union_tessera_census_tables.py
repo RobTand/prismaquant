@@ -307,7 +307,9 @@ def _same_price(a: Any, b: Any) -> bool:
 
 
 def _digest(value: Any) -> str:
-    return hashlib.sha256(_json_key(value).encode("utf-8")).hexdigest()
+    from prismaquant.digests import text_sha256hex
+
+    return text_sha256hex(_json_key(value))
 
 
 def _sha256_file(path: Path) -> str:
@@ -379,7 +381,9 @@ _CANON = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=Fa
 
 
 def _indent_dump(value: Any) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    from prismaquant.digests import DIRECT_UTF8_INDENT2_STRICT
+
+    return DIRECT_UTF8_INDENT2_STRICT.text(value)
 
 
 class _Memo:
@@ -615,7 +619,9 @@ class Table:
             if not path.is_dir():
                 raise UnionRefused(f"table {self.name}: {path} is missing")
         raw = self.cost_path.read_bytes()
-        self.cost_sha256 = hashlib.sha256(raw).hexdigest()
+        from prismaquant.digests import bytes_sha256hex
+
+        self.cost_sha256 = bytes_sha256hex(raw)
         self.cost_bytes = len(raw)
         self.cost = pickle.loads(raw)
         del raw
@@ -643,7 +649,9 @@ class Table:
         self.manifest_extra = {key: value for key, value in manifest.items()
                                if key not in {"schema", "stage", "identity", "identity_sha256", "units"}}
         raw = self.references_path.read_bytes()
-        self.references_sha256 = hashlib.sha256(raw).hexdigest()
+        from prismaquant.digests import bytes_sha256hex
+
+        self.references_sha256 = bytes_sha256hex(raw)
         self.references = json.loads(raw)
         del raw
         self.scales_sha256 = _sha256_file(self.scales_path)
@@ -1320,7 +1328,9 @@ def write_plan(plan: Plan, *, resume: bool) -> dict:
         counts["envelopes_" + envelope(item)] += 1
 
     cost_bytes = pickle.dumps(plan.cost, protocol=pickle.HIGHEST_PROTOCOL)
-    cost_sha = hashlib.sha256(cost_bytes).hexdigest()
+    from prismaquant.digests import bytes_sha256hex
+
+    cost_sha = bytes_sha256hex(cost_bytes)
     if paths["cost"].exists():
         if not resume or paths["cost"].read_bytes() != cost_bytes:
             raise UnionRefused(f"{paths['cost']} exists and is not the planned cost table")

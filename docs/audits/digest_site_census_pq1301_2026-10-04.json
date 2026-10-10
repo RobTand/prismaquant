@@ -1476,17 +1476,27 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "prismaquant/stage_b_prep_io.py",
    "linenos": [
     100
    ],
    "n_calls": 1,
-   "route_verdict": "distinct:non-hexdigest-shape",
+   "route_verdict": "file_range_sha256hex",
    "scope": "_hash_range",
    "site": "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "migrated_calls": [
+    {
+     "method": "file_range_sha256hex",
+     "base_line": 100,
+     "original_expression": "hashlib.sha256() with open/seek/min(remaining, 8 << 20) read loop, past-end ValueError, digest.hexdigest()",
+     "routed_expression": "file_range_sha256hex(path, offset, size)",
+     "recipe": "prismaquant.digests.file_range_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:prismaquant/stage_b_prep_io.py::_hash_range@100:13 with disposition add-exact-owner-recipe. prismaquant.digests.file_range_sha256hex now owns the exact open-seek-stream contract. _hash_range delegates to it. Wire proof: tests/test_stage_b_prep_io_1070.py, tests/test_stage_b_prep_produced_1070.py, tests/test_stage_b_prep_staged_reads_1092.py."
   },
   {
    "classification": "load-bearing",
@@ -2315,7 +2325,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/dispatch_joint_quanta.py",
    "linenos": [
@@ -2325,11 +2335,21 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "_executable_prepared_input",
    "site": "hashlib:tools/dispatch_joint_quanta.py::_executable_prepared_input",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 857,
+     "original_expression": "hashlib.sha256(wire).hexdigest()",
+     "routed_expression": "bytes_sha256hex(wire)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/dispatch_joint_quanta.py::_executable_prepared_input@857:7 with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Seal proof: tests/test_dispatch_joint_quanta.py, tests/test_dispatch_digest_routing_1670.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/dispatch_joint_quanta.py",
    "linenos": [
@@ -2339,11 +2359,21 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "quantum_argv",
    "site": "hashlib:tools/dispatch_joint_quanta.py::quantum_argv",
-   "usage": "arg:_container_wrap;arg:hexdigest;arg:seal_check"
+   "usage": "arg:_container_wrap;arg:hexdigest;arg:seal_check",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 2399,
+     "original_expression": "hashlib.sha256(plan_raw).hexdigest()",
+     "routed_expression": "bytes_sha256hex(plan_raw)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/dispatch_joint_quanta.py::quantum_argv@2399:22 with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Seal proof: tests/test_dispatch_joint_quanta.py, tests/test_dispatch_digest_routing_1670.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/dispatch_tessera_campaign.py",
    "linenos": [
@@ -2353,11 +2383,21 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "_seed_for_selection",
    "site": "hashlib:tools/dispatch_tessera_campaign.py::_seed_for_selection",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 2105,
+     "original_expression": "hashlib.sha256(raw).hexdigest()",
+     "routed_expression": "bytes_sha256hex(raw)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/dispatch_tessera_campaign.py::_seed_for_selection@2105:39 with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Seal proof: tests/test_dispatch_tessera_campaign_expert_partitions.py, tests/test_dispatch_digest_routing_1670.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/dispatch_tessera_campaign.py",
    "linenos": [
@@ -2367,11 +2407,21 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "_seed_workspace_rows",
    "site": "hashlib:tools/dispatch_tessera_campaign.py::_seed_workspace_rows",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 2090,
+     "original_expression": "hashlib.sha256(raw).hexdigest()",
+     "routed_expression": "bytes_sha256hex(raw)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/dispatch_tessera_campaign.py::_seed_workspace_rows@2090:52 with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Seal proof: tests/test_dispatch_tessera_campaign_expert_partitions.py, tests/test_dispatch_digest_routing_1670.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/dispatch_tessera_campaign.py",
    "linenos": [
@@ -2383,7 +2433,31 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "_submit_gpu_action",
    "site": "hashlib:tools/dispatch_tessera_campaign.py::_submit_gpu_action",
-   "usage": "arg:dumps;arg:hexdigest;key-use;store"
+   "usage": "arg:dumps;arg:hexdigest;key-use;store",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 3089,
+     "original_expression": "hashlib.sha256(blob).hexdigest()",
+     "routed_expression": "bytes_sha256hex(blob)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 3098,
+     "original_expression": "hashlib.sha256(blob).hexdigest()",
+     "routed_expression": "bytes_sha256hex(blob)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 3117,
+     "original_expression": "hashlib.sha256(blob).hexdigest()",
+     "routed_expression": "bytes_sha256hex(blob)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as three _submit_gpu_action calls with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Plan and prewarm seals stay unchanged. Seal proof: tests/test_dispatch_tessera_campaign_expert_partitions.py, tests/test_dispatch_digest_routing_1670.py."
   },
   {
    "classification": "load-bearing",
@@ -3402,7 +3476,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/union_tessera_census_tables.py",
    "linenos": [
@@ -3413,11 +3487,28 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "Table.load",
    "site": "hashlib:tools/union_tessera_census_tables.py::Table.load",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 618,
+     "original_expression": "hashlib.sha256(raw).hexdigest()",
+     "routed_expression": "bytes_sha256hex(raw)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 646,
+     "original_expression": "hashlib.sha256(raw).hexdigest()",
+     "routed_expression": "bytes_sha256hex(raw)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as two Table.load calls with disposition migrate-exact-route. The tool now calls bytes_sha256hex through the stdlib bootstrap. Fixture proof: tests/test_union_tessera_census_tables.py, tests/test_census_publisher_digest_owner_1301.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "hashlib",
    "file": "tools/union_tessera_census_tables.py",
    "linenos": [
@@ -3427,7 +3518,17 @@
    "route_verdict": "text_sha256hex",
    "scope": "_digest",
    "site": "hashlib:tools/union_tessera_census_tables.py::_digest",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "text_sha256hex",
+     "base_line": 310,
+     "original_expression": "hashlib.sha256(_json_key(value).encode(\"utf-8\")).hexdigest()",
+     "routed_expression": "text_sha256hex(_json_key(value))",
+     "owner": "prismaquant.digests.text_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/union_tessera_census_tables.py::_digest@310:11 with disposition migrate-exact-route. text_sha256hex hashes the same UTF-8 bytes. Fixture proof: tests/test_union_tessera_census_tables.py, tests/test_census_publisher_digest_owner_1301.py."
   },
   {
    "classification": "load-bearing",
@@ -3441,7 +3542,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "_write_stream_atomic",
    "site": "hashlib:tools/union_tessera_census_tables.py::_write_stream_atomic",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/union_tessera_census_tables.py::_write_stream_atomic@576:13 with disposition add-exact-owner-recipe and contract durable-write-stream. Retention: the site hashes each published chunk while it writes it durably. No owner exposes this exact stream without a new read, copy, framing change, or result change. No new recipe added here. The streamed-recipe request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "load-bearing",
@@ -3455,7 +3557,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "identity_sha256",
    "site": "hashlib:tools/union_tessera_census_tables.py::identity_sha256",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/union_tessera_census_tables.py::identity_sha256@421:13 with disposition add-exact-owner-recipe and contract memo-json-stream. Retention: the site streams the canonical encoder with the interned-menu memo, which the owner checkpoint recipe would re-encode in memory. No owner exposes this exact stream without a new read, copy, framing change, or result change. No new recipe added here. The streamed-recipe request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "load-bearing",
@@ -3469,7 +3572,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "read_manifest",
    "site": "hashlib:tools/union_tessera_census_tables.py::read_manifest",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as hashlib:tools/union_tessera_census_tables.py::read_manifest@486:13 with disposition add-exact-owner-recipe and contract parse-and-hash-stream. Retention: the site hashes the file once while it parses one unit at a time. No owner exposes this exact stream without a new read, copy, framing change, or result change. No new recipe added here. The streamed-recipe request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "load-bearing",
@@ -3484,7 +3588,17 @@
    "route_verdict": "route:MIXED",
    "scope": "write_plan",
    "site": "hashlib:tools/union_tessera_census_tables.py::write_plan",
-   "usage": "arg:hexdigest;persist;store"
+   "usage": "arg:hexdigest;persist;store",
+   "migrated_calls": [
+    {
+     "method": "bytes_sha256hex",
+     "base_line": 1323,
+     "original_expression": "hashlib.sha256(cost_bytes).hexdigest()",
+     "routed_expression": "bytes_sha256hex(cost_bytes)",
+     "owner": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as two write_plan calls. The 1323 whole-bytes call has disposition migrate-exact-route and now calls bytes_sha256hex. The 1331 incremental call over manifest_chunks has disposition add-exact-owner-recipe with contract byte-digest. No owner exposes that exact stream without a new read or framing change, so it stays inline. Open parent decision prismaquant#1301. Fixture proof: tests/test_union_tessera_census_tables.py, tests/test_census_publisher_digest_owner_1301.py."
   },
   {
    "classification": "load-bearing",
@@ -6880,7 +6994,8 @@
    "route_verdict": "distinct:unprofiled-options",
    "scope": "check_source_coverage",
    "site": "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage",
-   "usage": "display-only"
+   "usage": "display-only",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3365:14 with disposition add-exact-owner-recipe. Retention: display-only gaps report spelling. No public named owner reproduces these exact options. No profile added here. The named-JsonProfile request is an open decision in parent prismaquant#1301."
   },
   {
    "classification": "load-bearing",
@@ -6965,7 +7080,8 @@
    "route_verdict": "distinct:unprofiled-options",
    "scope": "_require_equal",
    "site": "sorted-json:tools/dispatch_tessera_campaign.py::_require_equal",
-   "usage": "arg:MergeRefused;arg:len;key-use;store"
+   "usage": "arg:MergeRefused;arg:len;key-use;store",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as two _require_equal calls with disposition add-exact-owner-recipe. Retention: sort_keys=True with default=str comparison spelling. No public named owner reproduces these exact options. No profile added here. The named-JsonProfile request is an open decision in parent prismaquant#1301."
   },
   {
    "classification": "load-bearing",
@@ -7893,7 +8009,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "retained: the owner has no public encoder-object API for this consumer",
    "family": "sorted-json",
    "file": "tools/union_tessera_census_tables.py",
    "linenos": [
@@ -7903,11 +8019,12 @@
    "route_verdict": "DIRECT_UTF8_STRICT",
    "scope": "<module>",
    "site": "sorted-json:tools/union_tessera_census_tables.py::<module>",
-   "usage": "manual: module-level canonical encoder bound to _CANON for the checkpoint manifest digest"
+   "usage": "manual: module-level canonical encoder bound to _CANON for the checkpoint manifest digest",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as sorted-json:tools/union_tessera_census_tables.py::<module>@377:9 with disposition add-exact-owner-recipe. Retention: _CANON feeds the streamed identity encoder without materializing JSON. The owner has no public encoder-object API for this consumer. No new recipe added here. The streamed-recipe request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2639-2026-10-10",
    "family": "sorted-json",
    "file": "tools/union_tessera_census_tables.py",
    "linenos": [
@@ -7917,7 +8034,17 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "_indent_dump",
    "site": "sorted-json:tools/union_tessera_census_tables.py::_indent_dump",
-   "usage": "return"
+   "usage": "return",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 382,
+     "original_expression": "json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False)",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.text(value)",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as sorted-json:tools/union_tessera_census_tables.py::_indent_dump@382:11 with disposition migrate-exact-route to DIRECT_UTF8_INDENT2_STRICT.text. The profile text is byte-identical to the old expression. indent2_json_file_bytes spells ensure_ascii=True with one trailing LF, so it would change the streamed manifest bytes and stays unused. Fixture proof: tests/test_union_tessera_census_tables.py, tests/test_census_publisher_digest_owner_1301.py."
   },
   {
    "classification": "load-bearing",
@@ -7931,7 +8058,8 @@
    "route_verdict": "distinct:custom-default",
    "scope": "_json_key",
    "site": "sorted-json:tools/union_tessera_census_tables.py::_json_key",
-   "usage": "return"
+   "usage": "return",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as sorted-json:tools/union_tessera_census_tables.py::_json_key@279:11 with disposition add-exact-owner-recipe. Retention: the custom default=repr encoding has no named owner. No profile added here. The named-profile request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "ephemeral",
@@ -7945,7 +8073,8 @@
    "route_verdict": "distinct:unprofiled-options",
    "scope": "main",
    "site": "sorted-json:tools/union_tessera_census_tables.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "note": "Fresh manifest prismaquant#2540 (source 30b6231, scan 13d998db) rechecks this site as sorted-json:tools/union_tessera_census_tables.py::main@1366:10 with disposition add-exact-owner-recipe. Retention: display-only summary spelling with indent 1 and default=str. No profile added here. The named-profile request is an open parent decision in prismaquant#1301."
   },
   {
    "classification": "load-bearing",
