@@ -26,6 +26,14 @@ from pathlib import Path
 
 _DEFAULT_FLASHINFER_PACKAGES = ("flashinfer-python", "flashinfer-cubin")
 
+#: Explicit user block size for validation serves (PQ #1514). vLLM's
+#: `CacheConfig` validator mistakes a resolved auto block size for a user
+#: choice when the MTP/EAGLE draft copy re-validates it, which constrains
+#: draft backend selection to block 16. An explicit size marks both legs
+#: user-specified, so the draft inherits the target's constraint unchanged.
+#: 64 is valid for both legs and sits in the sparse-MLA kernel support list.
+DEFAULT_BLOCK_SIZE = 64
+
 #: The quantization this gate loads with (``LLM(..., quantization=...)`` in
 #: `_run_arm`). A module constant so the lane check below reads the same value
 #: the load uses, rather than a second spelling of it that can drift.
@@ -233,6 +241,7 @@ def _write_route_sweep(llm, sweep_path: Path | None, hooks, *, model_dir: Path,
         "quantization": NATIVE_QUANTIZATION,
         "enforce_eager": bool(enforce_eager),
         "speculative_config": spec is not None,
+        "block_size": args.block_size,
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": args.max_model_len,
         "prompt": args.prompt,
@@ -264,6 +273,28 @@ def _route_sweep_path(args, arm: str) -> Path | None:
     return Path(args.route_sweep_out)
 
 
+def _llm_kwargs(args, model_dir: Path, spec: dict | None, *,
+                enforce_eager: bool) -> dict:
+    """The kwargs one validation arm builds its vLLM engine with.
+
+    A separate helper so tests read the served configuration without a GPU.
+    `block_size` stays explicit (PQ #1514): with a user-specified size the
+    MTP/EAGLE draft dtype copy keeps the target's provenance on both legs,
+    while the draft `kv_cache_dtype` in `spec` is preserved untouched.
+    """
+    return {
+        "model": str(model_dir),
+        "quantization": NATIVE_QUANTIZATION,
+        "trust_remote_code": True,
+        "enforce_eager": enforce_eager,
+        "block_size": args.block_size,
+        "gpu_memory_utilization": args.gpu_memory_utilization,
+        "max_model_len": args.max_model_len,
+        "max_num_seqs": 1,
+        "speculative_config": spec,
+    }
+
+
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
@@ -280,16 +311,8 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
 
     llm = None
     try:
-        llm = LLM(
-            model=str(model_dir),
-            quantization=NATIVE_QUANTIZATION,
-            trust_remote_code=True,
-            enforce_eager=enforce_eager,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            max_model_len=args.max_model_len,
-            max_num_seqs=1,
-            speculative_config=spec,
-        )
+        llm = LLM(**_llm_kwargs(args, model_dir, spec,
+                                enforce_eager=enforce_eager))
         hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
@@ -307,6 +330,7 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             args=args, prompt_ran=produced > 0)
         metrics = {"arm": arm, "generated_chars": produced,
                    "enforce_eager": enforce_eager,
+                   "block_size": args.block_size,
                    "max_new_tokens": args.max_new_tokens}
         if sweep_written is not None:
             metrics["route_sweep"] = str(sweep_written)
@@ -367,7 +391,7 @@ def _record_arm(args, model_dir: Path, spec: dict | None, verdict: dict) -> None
     fill_if_requested(args.shipcard, f"native_export.{arm}", record)
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     from .serving_profiles import serving_profile_names
 
     ap = argparse.ArgumentParser()
@@ -377,6 +401,12 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.55)
     ap.add_argument("--max-model-len", type=int, default=2048)
+    ap.add_argument("--block-size", type=int, default=DEFAULT_BLOCK_SIZE,
+                    help="Explicit user block size for the validation serve "
+                         "(PQ #1514). An explicit size keeps the MTP/EAGLE "
+                         "draft dtype copy user-specified on both legs, so "
+                         "draft backend selection keeps the target's "
+                         "constraint. The draft kv_cache_dtype stays set.")
     ap.add_argument("--target-profile", default=None,
                     choices=serving_profile_names(),
                     help="Serving profile whose runtime package pins should "
@@ -415,7 +445,11 @@ def main():
                     help="Path to the artifact's shipcard.json; the arm's "
                          "verdict is appended to native_export.<arm> "
                          "(see python -m prismaquant.shipcard_cli).")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = _build_parser().parse_args()
 
     model_dir = Path(args.model)
     target_profile = _resolve_validation_target_profile(

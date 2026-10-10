@@ -27801,14 +27801,22 @@ provenance, not a gate. `metric_era` matters — records lacking `eval_split` we
 wikitext **train** and are not face-value comparable (`:147-152`).
 
 **`validate_native_export.py`** — does vLLM accept the checkpoint and emit tokens. Defaults
-`--max-new-tokens 16`, `--gpu-memory-utilization 0.55`, `--max-model-len 2048` (`:206-209`);
-eager by default, `--no-enforce-eager` `:226` is the graph-mode arm, and **`--both-arms`
-`:229` runs both in one invocation** — the run-both-arms rule used to live only in the CLI
-help text with nothing in code enforcing the second arm; it is now two named shipcard slots
-(`_run_arm` `:112`, `_record_arm` `:174`, `--shipcard` `:234`), and each arm tears its engine
+`--max-new-tokens 16`, `--gpu-memory-utilization 0.55`, `--max-model-len 2048`,
+`--block-size 64` (`_build_parser`); eager by default, `--no-enforce-eager` is the graph-mode
+arm, and **`--both-arms` runs both in one invocation** — the run-both-arms rule used to live
+only in the CLI help text with nothing in code enforcing the second arm; it is now two named
+shipcard slots (`_run_arm`, `_record_arm`, `--shipcard`), and each arm tears its engine
 down before the next loads. A failed arm exits 1 instead of raising. Flashinfer pinned from
-the profile's `runtime_package("flashinfer")` (`:30-71`); `--speculative-config` exercises MTP
-(and marks the record `spec_decode_detected`).
+the profile's `runtime_package("flashinfer")` (`maybe_upgrade_flashinfer`);
+`--speculative-config` exercises MTP (and marks the record `spec_decode_detected`).
+
+**Explicit block size 64 on validation serves (2026-10-10, PQ #1514).** vLLM's `CacheConfig`
+validator mistakes a resolved auto block size for a user choice when the MTP/EAGLE draft copy
+re-validates it, which constrains draft backend selection to block 16. The validator therefore
+builds every arm with an explicit user block size (`_llm_kwargs`), so the draft inherits the
+target's constraint unchanged while the draft `kv_cache_dtype` stays set. The arm metrics and
+the route-sweep load record the served size, and the shipcard slot carries it in
+`metrics.block_size`. No image change; the kernel support tables are untouched.
 
 **The profile flashinfer version is a FLOOR, not an exact pin (2026-08-14).**
 `maybe_upgrade_flashinfer` compared `installed == version` and pip-installed the profile
