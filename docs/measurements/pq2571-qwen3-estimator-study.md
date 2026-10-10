@@ -11,18 +11,26 @@ Part of prismaquant#1962. No source changes. All runs reuse
 - Global tokens N = 2048, scope all, temperature 1, dz storage FP32.
 - Units: 196 decoder Linears, identical roster in all legs.
 - Arms (8): A_all, A_attn, A_mlp, A_all_nopos0, W4_all, W4_attn, W4_mlp, W4A8_all.
-- Draw 1 probes: seeds 7000..7007 (banked). Draw 2 probes: seeds 7100..7107 (new).
-- FP32 legs use plain backward. BF16 legs use strict deterministic backward.
+- Draw 1 FP32 comes from wrapper `a2ad6761` (FP32 leg complete; wrapper exit 1 came only from the BF16-leg refusal). Draw 1 BF16 comes from re-run `cec83e22`.
+- Draw 2 probes: seeds 7100..7107 (new). FP32 legs use plain backward. BF16 legs use strict deterministic backward.
 
 ## Actions and receipts
 
-| Leg | Action | Host | Elapsed | Exit | Log path |
+| Leg | Action | Host | Elapsed | Exit | Receipt |
 | --- | --- | --- | --- | --- | --- |
-| Draw 1 FP32 | `a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de` (FP32 leg retained; BF16 leg refused) | sparklina | - | 1 (wrapper; FP32 leg complete) | `/mnt/shared/prismabuild-fleet/pb-queue/failed/a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de.json` |
-| Draw 1 BF16 | `cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400` | spark | 61 s | 0 | `/mnt/shared/prismabuild-fleet/pb-queue/done/cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400.json` |
+| Draw 1 FP32 | `a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de` (wrapper; FP32 leg complete, BF16 leg refused) | sparky | - | 1 (FP32 output complete) | `/mnt/shared/prismabuild-fleet/pb-queue/failed/a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de.json` |
+| Draw 1 BF16 | `cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400` | sparklina | 61 s | 0 | `/mnt/shared/prismabuild-fleet/pb-queue/done/cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400.json` |
 | Smoke (this issue) | `1878f26e4603e00df936ee0a987dfabf7cadcd9e2e9417d9d55e80f46199c639` (`cpu_check_v2`, exit 0) | sparklina | 11 s | 0 | `/mnt/shared/prismabuild-fleet/pb-queue/done/1878f26e4603e00df936ee0a987dfabf7cadcd9e2e9417d9d55e80f46199c639.json` |
 | Draw 2 FP32 | `f730b73f2b4a514cb26a675af2a73c2c3c7877f2801929b2c50e555ab9f603e1` | sparklina | 63 s | 0 | `/mnt/shared/prismabuild-fleet/pb-queue/done/f730b73f2b4a514cb26a675af2a73c2c3c7877f2801929b2c50e555ab9f603e1.json` |
 | Draw 2 BF16 | `9e3fba132e90336518c3840ee18df6b46f05f1d7dfa6707e7518005d5402df3b` | sparky | 59 s | 0 | `/mnt/shared/prismabuild-fleet/pb-queue/done/9e3fba132e90336518c3840ee18df6b46f05f1d7dfa6707e7518005d5402df3b.json` |
+
+Run stdout logs (under `/mnt/shared/prismabuild-fleet/pb-queue/`):
+
+- Draw 1 FP32 (wrapper): `attempts/a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de/640621421a0f5b724b76dc24041be09c2538b0521808c2fbf37f9338c8c5546e/00000001.stdout.bb99698cd49450145652cdaf5005a8f5f9d2b3c2b22f84d10c1e144c0b8bbe8a.log` (sha `bb99698cd4945014`; records `wrote /output/pair2/float32.json (complete, 51s)` at 2026-10-02 04:38:57 UTC, then the BF16-leg v1-vs-v2 refusal with `kl_rel 9.61e-16`).
+- Draw 1 BF16: `attempts/cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400/6a252b2ebfe489424a7f44d06a528c74c082b38f15aeaaca7e7e5142710c13af/00000001.stdout.a1a9a782c1f160457fa006c885f39c1ef509c8ad0c392f0db17777b55efd9753.log` (sha `a1a9a782c1f16045`).
+- Smoke: `attempts/1878f26e4603e00df936ee0a987dfabf7cadcd9e2e9417d9d55e80f46199c639/179e98d53b9e3be91f1e66a6cf29576473229dd992538eb3fc7146ae0f77c107/00000001.stdout.b55dad9fcec6f8e2d8127a8d48aa66fb9d64a9b431f5cb9365ddeb18a9b4e1d0.log` (sha `b55dad9fcec6f8e2`).
+- Draw 2 FP32: `attempts/f730b73f2b4a514cb26a675af2a73c2c3c7877f2801929b2c50e555ab9f603e1/2fd352b0454948e2f0ced63ed224d36a9e6c868cab0ec4058ae1e03dd7c73fd0/00000001.stdout.c1ca890b02409ebf885a8974a344048700b9f2b84ad4302a375f684941ff7d63.log` (sha `c1ca890b02409ebf`).
+- Draw 2 BF16: `attempts/9e3fba132e90336518c3840ee18df6b46f05f1d7dfa6707e7518005d5402df3b/84f7b2ed302491ebed92edda728fdbf88d13d6d4fcf041bf512f4cd6c55c57dd/00000001.stdout.a60f1e0cfac06a6ba0bbb3dd6af9710e146b1d1b47ca3776aecb00dfe642c490.log` (sha `a60f1e0cfac06a6b`).
 
 Result tables:
 
@@ -92,7 +100,7 @@ Draw 2 crosschecks (v1 lease vs v2, profile on):
 
 ## Read
 
-- Q_real and KL_true are probe independent, so they match across draws by design.
-- P_add, P_joint, S_real and corr move with the probe draw.
-- Corr is unstable across draws at 8 probes (for example A_all BF16 0.58 then -0.07).
-- The parent item owns the bias-vs-MoE separation. This study only supplies the numbers.
+- Q_real and KL_true are probe independent, so they match across draws by design. Both draws share the token scope above, so the match is exact.
+- P_add, P_joint, S_real and corr move with the probe draw. All four result files record `complete: true`.
+- Corr is unstable across draws at 8 probes. Sign flips: A_all BF16 0.58 then -0.07, A_mlp BF16 0.52 then -0.32, W4A8_all FP32 0.70 then -0.08. Stable only at W4_attn (FP32 0.94 then 0.82; BF16 0.95 then 0.84).
+- Do not read corr at 8 probes as estimator bias. The parent item owns the bias-vs-MoE separation. This study only supplies the numbers.
