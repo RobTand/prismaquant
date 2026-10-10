@@ -20,6 +20,11 @@ that follow carry Python stacks and attribute ``aten::copy_`` to its call site.
 Profile microseconds include the profiler's own cost: they locate the work, the
 timed passes measure it.
 
+A scope control follows the paired arms: the same ABBA with no residency map
+bound, so the pool serves every unit. That is the path a read the stage did not
+serve takes, and the one the original-source owner takes. The change must leave
+it as it was, and the control says whether it did.
+
 Both Sparks' Netdata series come from ``tools/collect_row_netdata.py`` over the
 whole window. Local power is a descriptive sample against the envelope. Clock
 alignment and energy qualification stay on HOLD, and no work-per-joule claim is
@@ -399,7 +404,7 @@ def netdata_arm_means(document, arms):
                         means[key] = abs(mean) if key == "io_writes_kib_s" else mean
                         means[key + "_rows"] = len(values)
             hosts[host] = means
-        rows.append({"kind": arm["kind"], "epoch_start": arm["epoch_start"],
+        rows.append({"kind": arm.get("label", arm["kind"]), "epoch_start": arm["epoch_start"],
                      "epoch_end": arm["epoch_end"], "hosts": hosts})
     return rows
 
@@ -674,24 +679,28 @@ def run_cuda(args, fixture, binding):
                                   trace_dir=args.trace_dir))
             print(f"[pq2039] {kind}: median {arms[-1]['wall_median_s'] * 1e3:.2f} ms/pass "
                   f"({passes} passes)", file=sys.stderr, flush=True)
-        control = None
+        control = []
         if args.control_passes:
-            # Scope control, not a paired arm: the shipped code with no map, so
-            # the pool serves every unit and the one private copy is the pin the
-            # read makes after it. This is the path a read the stage did not serve
-            # takes, and the path the original-source owner takes.
+            # Scope control: the same ABBA with no map, so the pool serves every
+            # unit. This is the path a read the stage did not serve takes, and
+            # the one the original-source owner takes. The change must leave it
+            # as it was: one private pin copy, now made after the read.
             unbind_fixture()
-            control = timed_arm(campaign, fixture, live, "after", passes=args.control_passes,
+            for kind in ORDER:
+                arm = timed_arm(campaign, fixture, live, kind, passes=args.control_passes,
                                 profile_passes=args.profile_passes, power=power,
                                 trace_dir=args.trace_dir)
-            control["kind"] = "unmapped-control"
+                arm["label"] = f"unmapped-{kind}"
+                control.append(arm)
+                print(f"[pq2039] {arm['label']}: median {arm['wall_median_s'] * 1e3:.2f} ms/pass "
+                      f"({args.control_passes} passes)", file=sys.stderr, flush=True)
     problems = stage_gate(arms)
     netdata = None
     if not args.no_netdata:
         # Whole seconds, and a window that ends in the past: Netdata shifts a
         # window that ends at the present back by a second, so its first row
         # would fall before the bound it was asked for.
-        windowed = arms + ([control] if control else [])
+        windowed = arms + control
         after = int(windowed[0]["epoch_start"]) - NETDATA_PAD_S
         before = int(windowed[-1]["epoch_end"]) + NETDATA_PAD_S
         wait = before + NETDATA_LAG_S - time.time()
@@ -700,7 +709,9 @@ def run_cuda(args, fixture, binding):
         netdata = both_host_netdata(after, before, windowed)
     return {"calibration_median_s": medians, "passes": passes, "order": list(ORDER),
             "arms": arms, "paired": paired_summary(arms), "stage_gate_problems": problems,
-            "unmapped_control": control, "power_samples": power.samples,
+            "unmapped_control": {"arms": control,
+                                 "paired": paired_summary(control) if control else None},
+            "power_samples": power.samples,
             "netdata": netdata, "power_errors": power.errors[:5],
             "power_samples_total": len(power.samples)}
 
@@ -756,7 +767,7 @@ def observed_peaks():
 def summary_text(result):
     """The record without the raw series: what the CAS-captured stdout carries."""
     slim = json.loads(json.dumps(result))
-    for arm in slim.get("arms", ()):
+    for arm in [*slim.get("arms", ()), *(slim.get("unmapped_control") or {}).get("arms", ())]:
         arm["wall_s"] = f"{len(arm['wall_s'])} samples in the result file"
     netdata = slim.get("netdata") or {}
     document = netdata.pop("document", None)
@@ -780,8 +791,8 @@ def main(argv=None):
     parser.add_argument("--arm-seconds", type=float, default=30.0)
     parser.add_argument("--min-passes", type=int, default=20)
     parser.add_argument("--profile-passes", type=int, default=3)
-    parser.add_argument("--control-passes", type=int, default=60,
-                        help="passes of the unmapped scope control; 0 skips it")
+    parser.add_argument("--control-passes", type=int, default=30,
+                        help="passes per arm of the unmapped scope control; 0 skips it")
     parser.add_argument("--trace-dir", default="")
     parser.add_argument("--out", default="")
     parser.add_argument("--no-netdata", action="store_true")
