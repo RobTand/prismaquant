@@ -10,13 +10,17 @@ scores the rest of the panel.
 ``--execution-mode compiled`` builds the same engine with ``enforce_eager`` off
 and one declared ``--compilation-config`` (PQ #1634). The declared config is
 recorded in the engine kwargs, checked against the configuration the
-coordinator and every worker resolved, and stamped on the runtime binding as
-``execution_mode``, so a compiled qualification never replays an eager run or
-the reverse. Speculative decoding stays refused in both modes. Scope: the
-scorer reads prompt log-probabilities from one prefill per window. Under
-FULL_DECODE_ONLY that prefill runs outside the captured graphs, so a compiled
-receipt measures the engine the compiled serve builds, not its graph-replayed
-decode steps.
+coordinator and every worker resolved, and stamped on every dump as
+``execution_mode`` (and on the runtime binding for a compiled run), so a
+compiled qualification never replays an eager run or the reverse. Speculative
+decoding stays refused in both modes. ``check_paired_execution_dumps`` pairs
+one compiled dump with one eager dump on the same tree, panel, tokenizer and
+topology (PQ #2566): same fidelity and calibration, bindings equal except the
+declared mode keys. Scope: the scorer reads prompt log-probabilities from one
+prefill per window. Under FULL_DECODE_ONLY that prefill runs outside the
+captured graphs, so a compiled receipt measures the engine the compiled serve
+builds, not its graph-replayed decode steps. Graph coverage is prefill only:
+no hook scores a decode step, and no dump attests graph-replayed decode.
 """
 from __future__ import annotations
 
@@ -523,6 +527,146 @@ def require_native_qualification(qualification, runtime_binding):
                          "first differing paths (up to 8): " + "; ".join(differences))
 
 
+#: Dump schemas a paired graph/eager comparison covers: the one-window hook
+#: qualification and the whole-panel batch KL dump. Both score the same sealed
+#: panel through the same instrument; only the engine execution differs.
+PAIRED_EXECUTION_SCHEMAS = ("prismaquant.glm_tr3_hook_qualification/1",
+                            "prismaquant.glm_tr3_full_vocabulary_kl/1")
+
+#: Schema of the receipt check_paired_execution_dumps returns.
+PAIRED_EXECUTION_SCHEMA = "prismaquant.glm_tr3_paired_execution/1"
+
+
+def execution_mode_of(result):
+    """The dump's execution mode, eager unless stated compiled.
+
+    New dumps stamp it at the top level; older dumps carry it only on the
+    runtime binding (a compiled run) or not at all (eager reads as absent).
+    """
+    if not isinstance(result, dict):
+        raise ValueError("paired execution dump must be an object")
+    binding = result.get("runtime_binding")
+    mode = result.get("execution_mode")
+    if mode is None:
+        mode = binding.get("execution_mode", "eager") if isinstance(binding, dict) else "eager"
+    if mode not in EXECUTION_MODES:
+        raise ValueError("execution mode must be one of " + ", ".join(EXECUTION_MODES))
+    return mode
+
+
+def _binding_without_declared_mode(binding):
+    """The runtime binding minus the keys the declared execution mode owns.
+
+    The pairing check compares these remainders through the same replay
+    comparison a qualification passes: same tree, panel, tokenizer and
+    topology, with the mode's own declaration factored out. The engine's
+    ``model`` path is excluded too: a host path is not the tree, and the
+    content-bound ``candidate_identity`` already states it.
+    """
+    value = copy.deepcopy(binding)
+    value.pop("execution_mode", None)
+    engine = value.get("engine_kwargs")
+    if isinstance(engine, dict):
+        engine.pop("enforce_eager", None)
+        engine.pop("compilation_config", None)
+        engine.pop("model", None)
+    observed = value.get("observed_engine_configuration")
+    if isinstance(observed, dict):
+        model_config = observed.get("model_config")
+        if isinstance(model_config, dict):
+            model_config.pop("enforce_eager", None)
+        observed.pop("compilation_config", None)
+    workers = value.get("observed_worker_configuration")
+    if isinstance(workers, list):
+        for row in workers:
+            configuration = row.get("configuration") if isinstance(row, dict) else None
+            if not isinstance(configuration, dict):
+                continue
+            worker_model = configuration.get("model_config")
+            if isinstance(worker_model, dict):
+                worker_model.pop("enforce_eager", None)
+            configuration.pop("compilation_config", None)
+    return value
+
+
+def check_paired_execution_dumps(first, second):
+    """Refuse unless the two dumps are the same measurement in the two modes.
+
+    One dump reads compiled and the other eager, in either order. Both must
+    share the schema and a passing state, the measurement fidelity and the
+    calibration contract (panel, teacher, tokenizer), the candidate tree and
+    the serving topology; the runtime bindings must match except the declared
+    execution-mode keys. KL values are never compared: the pair establishes
+    comparability, not equality. Returns a pairing receipt.
+    """
+    for name, result in (("first", first), ("second", second)):
+        if (not isinstance(result, dict) or result.get("schema") not in PAIRED_EXECUTION_SCHEMAS
+                or result.get("passed") is not True):
+            raise ValueError(f"paired {name} dump must be a passing paired-execution schema")
+    if first["schema"] != second["schema"]:
+        raise ValueError("paired dumps must share one dump schema")
+    sides = {"compiled": [], "eager": []}
+    for result in (first, second):
+        sides[execution_mode_of(result)].append(result)
+    if len(sides["compiled"]) != 1 or len(sides["eager"]) != 1:
+        raise ValueError("paired dumps must be one compiled and one eager dump")
+    compiled, eager = sides["compiled"][0], sides["eager"][0]
+    fidelity = compiled.get("measurement_fidelity")
+    if fidelity is None or fidelity != eager.get("measurement_fidelity"):
+        raise ValueError("paired dumps must share one measurement fidelity")
+    contract, contract_sha = compiled.get("calibration_contract"), compiled.get(
+        "calibration_contract_sha256")
+    if (not contract or not contract_sha or contract != eager.get("calibration_contract")
+            or contract_sha != eager.get("calibration_contract_sha256")):
+        raise ValueError("paired dumps must share one calibration contract")
+    compiled_binding, eager_binding = compiled["runtime_binding"], eager["runtime_binding"]
+    for key in ("teacher_sha256", "candidate_identity", "logits_layout", "panel_sha256"):
+        if compiled_binding.get(key) != eager_binding.get(key):
+            raise ValueError(f"paired dumps differ outside the declared execution mode: {key}")
+    if eager_binding.get("teacher2_sha256") != compiled_binding.get("teacher2_sha256"):
+        raise ValueError("paired dumps differ outside the declared execution mode: teacher2_sha256")
+    if compiled.get("teacher_source_execution") != eager.get("teacher_source_execution"):
+        raise ValueError("paired dumps differ outside the declared execution mode: teacher_source_execution")
+
+    def _configurations(binding, side):
+        try:
+            return [binding["observed_engine_configuration"]] + [
+                row["configuration"] for row in binding["observed_worker_configuration"]]
+        except (KeyError, TypeError):
+            raise ValueError(f"paired {side} dump has no observed configuration") from None
+
+    def _dump_sha(dump):
+        # Rank-call tuples serialize as arrays; hash the JSON projection so a
+        # well-formed dump always yields a receipt, never a hash error.
+        return canonical_sha256(json.loads(json.dumps(dump)))
+
+    declared = compiled_binding.get("engine_kwargs", {}).get("compilation_config")
+    try:
+        stated = parse_compilation_config(json.dumps(declared))
+    except (TypeError, ValueError):
+        raise ValueError("paired compiled dump states no canonical compilation config") from None
+    if stated != declared or compiled_binding.get("engine_kwargs", {}).get("enforce_eager") is not False:
+        raise ValueError("paired compiled dump states no canonical compilation config")
+    for configuration in _configurations(compiled_binding, "compiled"):
+        if configuration.get("compilation_config") != declared:
+            raise ValueError("paired compiled dump did not resolve its declared compiled contract")
+    for configuration in _configurations(eager_binding, "eager"):
+        if "compilation_config" in configuration:
+            raise ValueError("paired eager dump must not state a compilation config")
+    if eager_binding.get("engine_kwargs", {}).get("enforce_eager") is not True:
+        raise ValueError("paired eager dump must hold the eager engine contract")
+    differences = qualification_runtime_differences(
+        _binding_without_declared_mode(compiled_binding),
+        _binding_without_declared_mode(eager_binding))
+    if differences:
+        raise ValueError("paired dumps differ outside the declared execution mode; "
+                         "first differing paths (up to 8): " + "; ".join(differences))
+    return {"schema": PAIRED_EXECUTION_SCHEMA, "passed": True,
+            "execution_modes": ["compiled", "eager"], "dump_schema": compiled["schema"],
+            "calibration_contract_sha256": contract_sha, "measurement_fidelity": fidelity,
+            "compiled_sha256": _dump_sha(compiled), "eager_sha256": _dump_sha(eager)}
+
+
 def scorer_engine_kwargs(args, *, model, topology):
     """Build the recorded native-engine request before model construction."""
     compilation = declared_compilation(args)
@@ -729,7 +873,8 @@ def measure(args):
                                        for window in panel["windows"][:scored]],
                            "measurement_fidelity": fidelity}
             result = {"schema": schema,
-                    "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
+                    "passed": True, "execution_mode": "compiled" if compilation is not None else "eager",
+                    "runtime_binding": runtime_binding, "serve_manifest": manifest,
                     "measurement_fidelity": fidelity, "calibration_contract": calibration,
                     "calibration_contract_sha256": canonical_sha256(calibration),
                     "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
