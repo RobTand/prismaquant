@@ -554,3 +554,414 @@ def test_streamed_candidate_selector_refuses_unknown_candidate():
             model_identity=_model_identity("joint-source"),
             sequence_attribution={"candidates": [["absent", "FP8_E4M3"]]})
     assert context.install_calls == 0
+
+# ---- routed spill replay ----------------------------------------------------
+#
+# Routed MoE rows reach the sidecar only through the Stage B spill's own
+# reader: the replay delivers already-selected X/G rows (an expert's routed
+# rows, never the full grouped input) and the builder contracts them per
+# invocation. These checks drive SpillSequenceAttribution with routed shapes:
+# varying row counts per block, a block where the expert routes no rows, a
+# packed-style column-sliced gradient, coarse equal blocks, and a selector
+# that names one routed candidate.
+
+def _routed_oracle(weight, delta, x, gradient, spec):
+    x2 = x.reshape(-1, weight.shape[1]).float()
+    g2 = gradient.reshape(-1, weight.shape[0]).float()
+    quantized = spec.activation_quantize_dequantize(x.clamp(-1.0, 1.0))
+    dx = quantized.reshape_as(x2).float() - x2
+    gw = g2.T @ x2
+    ga = g2.T @ dx
+    part = {"weight": float((gw * delta).sum()),
+            "activation": float((ga * weight.float()).sum()),
+            "mixed": float((ga * delta).sum())}
+    part["total"] = part["weight"] + part["activation"] + part["mixed"]
+    return part
+
+
+def _routed_collector(monkeypatch, routed, *, n_probes=2, n_samples=2,
+                      candidates="all", in_w=8, out_w=4, seed=7):
+    from types import SimpleNamespace
+    from prismaquant.joint_cost_quantum import SpillSequenceAttribution
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
+    torch.manual_seed(seed)
+    weight = torch.randn(out_w, in_w)
+    delta = torch.randn_like(weight) * 0.1
+    spec = _spec("f8", lambda x: torch.round(x * 2) / 2)
+    module = _linear(weight)
+
+    def replay_records(window_index, probe_index, feed, charge):
+        for block, pair in enumerate(routed[probe_index]):
+            if pair is None:
+                continue
+            x, gradient = pair
+            feed("expert", x, gradient, block)
+
+    collector = SpillSequenceAttribution(
+        config=joint.normalize_sequence_attribution(
+            {"candidates": candidates}),
+        linears={"expert": module},
+        formats_by_qname={"expert": {"f8": spec}},
+        activation_maxima={"expert": 1.0}, projection_backend=None,
+        spill=SimpleNamespace(replay_records=replay_records), guard=None,
+        n_probes=n_probes, n_samples=n_samples, seqlen=4,
+        probe_microbatch=1, capture_batch=1, token_scope="all",
+        calibration_sha256="c" * 64)
+    oracle_blocks = {}
+    for probe in range(n_probes):
+        collector(key=("expert", "f8"), delta=delta, window_index=0,
+                  probe_index=probe)
+        oracle_blocks[probe] = [
+            (_routed_oracle(weight, delta, pair[0], pair[1], spec)
+             if pair is not None else
+             {"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0})
+            for pair in routed[probe]]
+    return collector, oracle_blocks, (weight, delta, spec)
+
+
+def _routed_row(oracle_blocks, sidecar):
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in sorted(oracle_blocks)]
+    authority = []
+    for probe in sorted(oracle_blocks):
+        parts = {key: math.fsum(block[key] for block in oracle_blocks[probe])
+                 for key in ("weight", "activation", "mixed")}
+        authority.append({**parts, "total": totals[probe]})
+    base = _row(UNIT_A, totals)
+    return joint.make_joint_aura_entry(
+        operator_identity=base["joint_operator_identity"],
+        probe_identity=base["probe_identity"],
+        signed_components=copy.deepcopy(authority),
+        sequence_attribution=sidecar), totals
+
+
+def test_routed_spill_sidecar_shows_per_block_parts(monkeypatch):
+    # Already-selected routed rows with varying counts; probe 1 routes this
+    # expert no rows in block 1. Each block's W/A/mixed must equal the
+    # per-invocation oracle exactly, with a zero residual and a stated gate.
+    torch.manual_seed(7)
+    routed = {
+        0: [(torch.randn(3, 8), torch.randn(3, 4)),
+            (torch.randn(5, 8), torch.randn(5, 4))],
+        1: [(torch.randn(2, 8), torch.randn(2, 4)), None],
+    }
+    collector, oracle_blocks, _ = _routed_collector(monkeypatch, routed)
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in range(2)]
+    sidecar = collector.row_sidecar(("expert", "f8"), totals)
+    assert sidecar["scope"] == "per_sequence"
+    assert sidecar["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
+    assert sidecar["reconciliation"]["gate_relative"] == 1e-3
+    for probe in range(2):
+        for index, expected in enumerate(oracle_blocks[probe]):
+            published = sidecar["components_per_probe"][probe][index]
+            for field, value in expected.items():
+                assert published[field] == value, (probe, index, field)
+    row, _ = _routed_row(oracle_blocks, sidecar)
+    assert joint.validate_joint_aura_entry(row)
+
+
+def test_routed_spill_sidecar_leaveout_recomputes_fresh_standard_error(
+        monkeypatch):
+    # Equal whole routed blocks publish delete-one prices whose jackknife SE
+    # is recomputed here from the published prices, not trusted from the row.
+    torch.manual_seed(9)
+    routed = {
+        0: [(torch.randn(3, 8), torch.randn(3, 4)),
+            (torch.randn(3, 8), torch.randn(3, 4)),
+            (torch.randn(3, 8), torch.randn(3, 4))],
+        1: [(torch.randn(4, 8), torch.randn(4, 4)),
+            (torch.randn(4, 8), torch.randn(4, 4)),
+            (torch.randn(4, 8), torch.randn(4, 4))],
+    }
+    collector, oracle_blocks, _ = _routed_collector(
+        monkeypatch, routed, n_samples=3, seed=9)
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in range(2)]
+    sidecar = collector.row_sidecar(("expert", "f8"), totals)
+    leaveout = sidecar["leaveout"]
+    assert leaveout["uncertainty_scope"] == LEAVEOUT_SCOPE
+    assert leaveout["assumption"].startswith("exchangeable")
+    prices = leaveout["price_per_block"]
+    assert len(prices) == 3
+    mean = math.fsum(prices) / 3
+    fresh_se = math.sqrt(
+        (2 / 3) * math.fsum((price - mean) ** 2 for price in prices))
+    assert leaveout["jackknife_standard_error"] == pytest.approx(fresh_se)
+    row, _ = _routed_row(oracle_blocks, sidecar)
+    assert joint.validate_joint_aura_entry(row)
+
+
+def test_routed_spill_sidecar_bitwise_inputs_untouched(monkeypatch):
+    # Collecting the sidecar must not move a byte of the replayed rows, the
+    # resident delta, or the authoritative totals it was given.
+    torch.manual_seed(15)
+    pairs = [(torch.randn(3, 8), torch.randn(3, 4)),
+             (torch.randn(5, 8), torch.randn(5, 4))]
+    routed = {0: [pair for pair in pairs], 1: [pair for pair in pairs]}
+    collector, oracle_blocks, _ = _routed_collector(monkeypatch, routed,
+                                                    seed=15)
+    before = [[(x.clone(), g.clone()) for x, g in routed[probe]]
+              for probe in range(2)]
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in range(2)]
+    frozen = list(totals)
+    sidecar = collector.row_sidecar(("expert", "f8"), totals)
+    assert totals == frozen
+    for probe in range(2):
+        for (x, g), (old_x, old_g) in zip(routed[probe], before[probe]):
+            assert torch.equal(x, old_x) and torch.equal(g, old_g)
+    assert sidecar["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
+
+
+def test_routed_spill_selector_scopes_one_candidate(monkeypatch):
+    from types import SimpleNamespace
+    from prismaquant.joint_cost_quantum import SpillSequenceAttribution
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
+    torch.manual_seed(17)
+    spec = _spec("f8", lambda x: torch.round(x * 2) / 2)
+    modules = {"expert": _linear(torch.randn(4, 8)),
+               "dense": _linear(torch.randn(4, 8))}
+
+    def replay_records(window_index, probe_index, feed, charge):
+        feed("expert", torch.randn(2, 8), torch.randn(2, 4), 0)
+        feed("dense", torch.randn(2, 8), torch.randn(2, 4), 0)
+        feed("expert", torch.randn(2, 8), torch.randn(2, 4), 1)
+        feed("dense", torch.randn(2, 8), torch.randn(2, 4), 1)
+
+    collector = SpillSequenceAttribution(
+        config=joint.normalize_sequence_attribution(
+            {"candidates": [["expert", "f8"]]}),
+        linears=modules,
+        formats_by_qname={name: {"f8": spec} for name in modules},
+        activation_maxima={name: 1.0 for name in modules},
+        projection_backend=None,
+        spill=SimpleNamespace(replay_records=replay_records), guard=None,
+        n_probes=2, n_samples=2, seqlen=4, probe_microbatch=1,
+        capture_batch=1, token_scope="all", calibration_sha256="c" * 64)
+    delta = torch.randn(4, 8) * 0.1
+    for probe in range(2):
+        collector(key=("expert", "f8"), delta=delta, window_index=0,
+                  probe_index=probe)
+        collector(key=("dense", "f8"), delta=delta, window_index=0,
+                  probe_index=probe)
+    assert collector.row_sidecar(("dense", "f8"), [0.0, 0.0]) is None
+    expert_totals = [
+        math.fsum(block["total"]
+                  for block in collector._components[(probe, ("expert", "f8"))])
+        for probe in range(2)]
+    sidecar = collector.row_sidecar(("expert", "f8"), expert_totals)
+    assert sidecar["scope"] == "per_sequence"
+    assert sidecar["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
+
+def test_routed_spill_packed_slices_match_oracle(monkeypatch):
+    # Packed F.linear style: the replay delivers the full-row input with a
+    # column-sliced gradient against the member's narrow weight, twice in
+    # block 0 and once in block 1. Parts must match the oracle exactly.
+    from types import SimpleNamespace
+    from prismaquant.joint_cost_quantum import SpillSequenceAttribution
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
+    torch.manual_seed(19)
+    in_w, slice_w = 8, 3
+    weight = torch.randn(slice_w, in_w)
+    delta = torch.randn_like(weight) * 0.1
+    spec = _spec("f8", lambda x: torch.round(x * 2) / 2)
+    module = _linear(weight)
+    routed = {
+        0: [[(torch.randn(6, in_w), torch.randn(6, slice_w)),
+             (torch.randn(6, in_w), torch.randn(6, slice_w))],
+            [(torch.randn(4, in_w), torch.randn(4, slice_w))]],
+        1: [[(torch.randn(5, in_w), torch.randn(5, slice_w))],
+            [(torch.randn(7, in_w), torch.randn(7, slice_w))]],
+    }
+
+    def replay_records(window_index, probe_index, feed, charge):
+        for block, records in enumerate(routed[probe_index]):
+            for x, gradient in records:
+                feed("expert", x, gradient, block)
+
+    collector = SpillSequenceAttribution(
+        config=joint.normalize_sequence_attribution({"candidates": "all"}),
+        linears={"expert": module},
+        formats_by_qname={"expert": {"f8": spec}},
+        activation_maxima={"expert": 1.0}, projection_backend=None,
+        spill=SimpleNamespace(replay_records=replay_records), guard=None,
+        n_probes=2, n_samples=2, seqlen=4, probe_microbatch=1,
+        capture_batch=1, token_scope="all", calibration_sha256="c" * 64)
+    oracle_blocks = {}
+    for probe in range(2):
+        collector(key=("expert", "f8"), delta=delta, window_index=0,
+                  probe_index=probe)
+        oracle_blocks[probe] = []
+        for records in routed[probe]:
+            total = {"weight": 0.0, "activation": 0.0, "mixed": 0.0,
+                     "total": 0.0}
+            for x, gradient in records:
+                part = _routed_oracle(weight, delta, x, gradient, spec)
+                for key in total:
+                    total[key] += part[key]
+            oracle_blocks[probe].append(total)
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in range(2)]
+    sidecar = collector.row_sidecar(("expert", "f8"), totals)
+    assert sidecar["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
+    for probe in range(2):
+        for index, expected in enumerate(oracle_blocks[probe]):
+            published = sidecar["components_per_probe"][probe][index]
+            for field, value in expected.items():
+                assert published[field] == value, (probe, index, field)
+    row, _ = _routed_row(oracle_blocks, sidecar)
+    assert joint.validate_joint_aura_entry(row)
+
+
+def test_routed_spill_coarse_blocks_publish_scaled_leaveout(monkeypatch):
+    # Coarse equal whole routed blocks (capture_batch=2 over four sequences)
+    # publish delete-one prices scaled by N/(N-k) with jackknife SE.
+    from types import SimpleNamespace
+    from prismaquant.joint_cost_quantum import SpillSequenceAttribution
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
+    torch.manual_seed(23)
+    weight = torch.randn(4, 8)
+    delta = torch.randn_like(weight) * 0.1
+    spec = _spec("f8", lambda x: torch.round(x * 2) / 2)
+    module = _linear(weight)
+    routed = {
+        0: [(torch.randn(6, 8), torch.randn(6, 4)),
+            (torch.randn(6, 8), torch.randn(6, 4))],
+        1: [(torch.randn(6, 8), torch.randn(6, 4)),
+            (torch.randn(6, 8), torch.randn(6, 4))],
+    }
+
+    def replay_records(window_index, probe_index, feed, charge):
+        for block, (x, gradient) in enumerate(routed[probe_index]):
+            feed("expert", x, gradient, block)
+
+    collector = SpillSequenceAttribution(
+        config=joint.normalize_sequence_attribution({"candidates": "all"}),
+        linears={"expert": module},
+        formats_by_qname={"expert": {"f8": spec}},
+        activation_maxima={"expert": 1.0}, projection_backend=None,
+        spill=SimpleNamespace(replay_records=replay_records), guard=None,
+        n_probes=2, n_samples=4, seqlen=4, probe_microbatch=2,
+        capture_batch=1, token_scope="all", calibration_sha256="c" * 64)
+    oracle_blocks = {}
+    for probe in range(2):
+        collector(key=("expert", "f8"), delta=delta, window_index=0,
+                  probe_index=probe)
+        oracle_blocks[probe] = [
+            _routed_oracle(weight, delta, x, gradient, spec)
+            for x, gradient in routed[probe]]
+    totals = [math.fsum(block["total"] for block in oracle_blocks[probe])
+              for probe in range(2)]
+    sidecar = collector.row_sidecar(("expert", "f8"), totals)
+    assert sidecar["scope"] == "capture_batch_block"
+    leaveout = sidecar["leaveout"]
+    assert leaveout["sequences_per_block"] == 2
+    assert leaveout["delete_one_scale"] == pytest.approx(2.0)
+    assert leaveout["uncertainty_scope"] == LEAVEOUT_SCOPE
+    prices = leaveout["price_per_block"]
+    mean = math.fsum(prices) / 2
+    fresh_se = math.sqrt(
+        0.5 * math.fsum((price - mean) ** 2 for price in prices))
+    assert leaveout["jackknife_standard_error"] == pytest.approx(fresh_se)
+    row, _ = _routed_row(oracle_blocks, sidecar)
+    assert joint.validate_joint_aura_entry(row)
+
+def test_routed_packed_observer_bitwise_on_off(monkeypatch):
+    # Authoritative totals stay bitwise identical with the packed block
+    # instrument on and off; per-block parts match the oracle exactly.
+    import torch.nn.functional as F
+    from torch import nn
+    from prismaquant.routed_experts import PackedExpertProjection
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
+    torch.manual_seed(29)
+    experts, out_w, in_w = 2, 4, 8
+    packed = nn.Parameter(torch.randn(experts, out_w, in_w))
+
+    class _PackedMod(nn.Module):
+        def forward(self, x):
+            return [F.linear(x, packed[e]) for e in range(experts)]
+
+    module = _PackedMod()
+    module.proj = packed
+    spec = _spec("f8", lambda x: torch.round(x * 2) / 2)
+    members = {
+        f"e{e}": PackedExpertProjection(
+            qname=f"e{e}", packed_qname="p", module_qname="m",
+            module=module, param_name="proj", expert_id=e,
+            projection_name="proj", weight=packed[e])
+        for e in range(experts)}
+    deltas = {f"e{e}": torch.randn(out_w, in_w) * 0.1
+              for e in range(experts)}
+    maxima = {f"e{e}": 1.0 for e in range(experts)}
+    invocations = [(torch.randn(2, 5, in_w), torch.randn(2, 5, out_w))
+                   for _ in range(2)]
+
+    def run(attribution):
+        with joint.SignedJointProjectionLease(
+                {f"e{e}": members[f"e{e}"] for e in range(experts)},
+                {f"e{e}": {"f8": spec} for e in range(experts)},
+                {(f"e{e}", "f8"): deltas[f"e{e}"] for e in range(experts)},
+                activation_max_abs=maxima,
+                attribution=attribution) as lease:
+            lease.begin_probe()
+            for index, (x, _gradient) in enumerate(invocations):
+                if attribution:
+                    lease.note_block(index, first_sequence=index, sequences=1)
+                outputs = module(x)
+                torch.autograd.backward(outputs, [invocations[index][1]] * experts)
+            result = lease.finish_probe()
+            sidecar = lease.finish_attribution() if attribution else None
+        return result, sidecar
+
+    off, _ = run(False)
+    on, sidecar = run(True)
+    assert on == off
+    assert [block["sequences"] for block in sidecar["blocks"]] == [1, 1]
+    for e in range(experts):
+        for index, (x, gradient) in enumerate(invocations):
+            expected = _routed_oracle(packed[e].detach(), deltas[f"e{e}"],
+                                      x, gradient, spec)
+            published = sidecar["components"][(f"e{e}", "f8")][index]
+            for field, value in expected.items():
+                assert published[field] == value, (e, index, field)
+
+
+def test_streamed_moe_rows_carry_sidecar_and_authoritative_bitwise():
+    # End to end on packed MoE experts: every non-passthrough routed row
+    # carries a validating sidecar, and the price and probe SE are bitwise
+    # identical with the instrument on and off.
+    from test_joint_aura_packed import _fixture as _packed_fixture
+    import prismaquant.aura_cost as _aura
+    from test_streamed_cost_checkpoints import _model_identity as _packed_identity
+    calib = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]])
+
+    def _run(state, **kwargs):
+        model, context, runner, profile, cache, _views = state
+        return _aura.compute_aura_cost_streamed(
+            runner, calib, ["FP8_DYNAMIC", "BF16"], n_probes=3,
+            probe_microbatch=1, min_free_gib=0, production_cache=cache,
+            joint_activation=True, include_routed_experts=True,
+            profile=profile,
+            model_identity=_packed_identity("packed-joint-source"), **kwargs)
+
+    off = _run(_packed_fixture())
+    on = _run(_packed_fixture(), sequence_attribution={"candidates": "all"})
+    seen = 0
+    for name, rows in on["costs"].items():
+        for fmt, row in rows.items():
+            assert joint.validate_joint_aura_entry(row), (name, fmt)
+            off_row = off["costs"][name][fmt]
+            for field in ("signed_per_probe", "x2_per_probe",
+                          "predicted_dloss", "predicted_dloss_stderr",
+                          "signed_components_per_probe"):
+                assert row[field] == off_row[field], (name, fmt, field)
+            assert "sequence_attribution" not in off_row
+            if fmt == "BF16":
+                assert "sequence_attribution" not in row
+            else:
+                sidecar = row["sequence_attribution"]
+                assert sidecar["scope"] == "per_sequence", (name, fmt)
+                assert len(sidecar["components_per_probe"]) == 3
+                seen += 1
+    assert seen > 0, "no routed row carried a sidecar"
