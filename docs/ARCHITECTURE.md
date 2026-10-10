@@ -11253,11 +11253,10 @@ off the running engine instead of received from it.
   principle 14 forbids.
 - **Not covered, deliberately.** The activation REPRESENTATION (#567) — a
   scheme class is a name, not the quantizer rule the kernel applied, the same
-  hole the Tessera trace has. And no packed-MoE method class is in the
-  decoder, because no small packed-MoE compressed-tensors artifact was
-  available to sweep; an MoE artifact reads NOT VERIFIED until one is
-  observed, which is the recorded gap rather than a table written from
-  reading source.
+  hole the Tessera trace has. The packed-MoE decoder held one entry since
+  2026-10-10 (PQ #706): `CompressedTensorsW8A8Fp8MoEMethod`, swept on a
+  packed-MoE FP8 artifact; any further schemeless method class still reads
+  NOT VERIFIED until it is swept.
 
 Measured: the real sweep in `tests/fixtures/compressed_route_sweep_0p6b/` was
 written by this path on sparklina (GB10, sm_121) inside
@@ -11265,7 +11264,13 @@ written by this path on sparklina (GB10, sm_121) inside
 `dq-runs/fc45-0p6b-nvfp4/exported`. 112 modules, all
 `CompressedTensorsW4A4Fp4(use_a16=False, group_size=16)` on
 `FlashInferCutlassNvFp4LinearKernel`, agreeing with all 252 priced targets.
-Gates: `tests/test_compressed_route_sweep_gate.py`,
+The second real sweep, `tests/fixtures/compressed_route_sweep_moe/`, was
+written by the same path on sparky (GB10, sm_121) inside the same pinned
+image against a packed-MoE FP8-dynamic artifact built from
+`hf-internal-testing/Mixtral-tiny` (PQ #706): 4 dense
+`CompressedTensorsW8A8Fp8` linears plus 2 `RoutedExperts` rows resolving
+`CompressedTensorsW8A8Fp8MoEMethod` with no scheme, agreeing with all 6
+priced targets. Gates: `tests/test_compressed_route_sweep_gate.py`,
 `tests/test_bite_631_route_sweep.py` (shown failing on base).
 
 Re-stamped (2026-09-17, `flash/624-a4-input-global-scale-20260917`) for **the

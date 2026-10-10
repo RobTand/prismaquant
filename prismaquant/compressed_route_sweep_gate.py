@@ -25,15 +25,20 @@ The served side is, per module the runtime gave a quantization method:
 * the resolved ``quant_method`` and ``scheme`` classes,
 * the scheme object's own attributes (``use_a16``, ``group_size``,
   ``is_static_input_scheme`` ...), which is where the served activation
-  descriptor's numbers come from,
+  descriptor's numbers come from -- and, for a served module whose method
+  carries no ``scheme`` object (packed MoE), the method object's own
+  attributes (``method_attrs``), read through :data:`METHOD_ACTIVATION`,
 * ``quantize_method_base`` -- ``isinstance(quant_method, QuantizeMethodBase)``,
-  the predicate vLLM's own post-load sweep filters on.  That sweep is nominal,
+  the predicate vLLM's own post-load sweep filters on. That sweep is nominal,
   not structural: a method that is not a subclass is finalized by nothing and
-  dies on the first forward.  A ``false`` here is a REFUSAL, because a sweep
+  dies on the first forward. A ``false`` here is a REFUSAL, because a sweep
   that merely filtered it out would have reported a shorter, cleaner and wrong
   histogram,
-* ``dispatches`` -- a forward-hook count over a real generate.  Zero on a
-  priced module is a refusal: priced, resolved, never run.
+* ``dispatches`` -- a forward-hook count over a real generate. Zero on a
+  priced module is a refusal: priced, resolved, never run. A schemeless MoE
+  row whose runner fired reads ``parent_dispatches`` instead: vLLM 0.28's
+  modular MoE runner invokes its experts without passing through their
+  ``__call__``.
 
 Every priced ``config_groups`` target must be accounted for, and unfused
 leaves (``q_proj``, ``gate_proj``) are reconciled through the
@@ -50,9 +55,10 @@ as it can be: the table says WHICH OBSERVED ATTRIBUTES to read, and the
 numbers themselves come from the scheme object (``use_a16``, ``group_size``).
 A scheme class the table does not name is NOT VERIFIED -- never a pass and
 never a guess -- and the refusal prints the class and its module so the next
-sweep can add it.  The roster was read from the pinned image
-(``vllm/vllm-openai@sha256:61fc8a89...``, vLLM 0.28.0), and only
-``CompressedTensorsW4A4Fp4`` has been observed end to end on a real serve.
+  sweep can add it. The roster was read from the pinned image
+  (``vllm/vllm-openai@sha256:61fc8a89...``, vLLM 0.28.0): the dense schemes
+  were observed end to end on real serves, plus the first MoE method class
+  in :data:`METHOD_ACTIVATION` (PQ #706).
 
 What this leg does NOT see
 ==========================
@@ -68,17 +74,12 @@ What this leg does NOT see
   principle 14 forbids.  The verdict prints the kernel histogram so the
   question is visible; answering it needs an attested table this lane does not
   have.
-* **MoE method classes.** No small packed-MoE compressed-tensors artifact was
-  available to sweep, so :data:`METHOD_ACTIVATION` is empty and an MoE
-  artifact reads NOT VERIFIED until one is observed.  That is the recorded
-  gap, deliberately, rather than a table written from reading source (#706).
-  Closing it takes one observation: run
-  ``validate_native_export --route-sweep-out`` in the pinned serving image
-  against any packed-MoE compressed-tensors artifact, read the resolved
-  ``quant_method`` class off the ``FusedMoE`` rows together with the method
-  object's own attributes, and add the entry with a test on the recorded
-  sweep as a fixture -- the same shape as
-  ``tests/fixtures/compressed_route_sweep_0p6b/``.
+* **MoE method classes.** :data:`METHOD_ACTIVATION` holds the one packed-MoE
+  method class swept so far: ``CompressedTensorsW8A8Fp8MoEMethod`` on
+  ``RoutedExperts`` rows, read off its own ``weight_quant``/``input_quant``
+  plus ``static_input_scales`` (swept 2026-10-10 in the pinned image;
+  fixture ``tests/fixtures/compressed_route_sweep_moe/``). Any other
+  schemeless method class is NOT VERIFIED until it is swept too (#706).
 * **A compiled or graph-captured forward.** Forward hooks do not run under
   CUDA-graph replay, so a sweep whose load was not ``enforce_eager`` is NOT
   VERIFIED rather than trusted with zeros.
@@ -200,6 +201,49 @@ def _weight_only(attrs: Mapping[str, Any]) -> dict | None:
     return _descriptor(False)
 
 
+_QUANT_ARGS_RE = re.compile(r"num_bits=(\d+).*?type='([^']+)'"
+                            r".*?group_size=(None|\d+)")
+
+
+def _parse_quant_args(text: Any) -> tuple[int, str, int | None] | None:
+    """``(num_bits, type, group_size)`` off a ``QuantizationArgs`` repr."""
+    if not isinstance(text, str):
+        return None
+    match = _QUANT_ARGS_RE.search(text)
+    if match is None:
+        return None
+    bits, kind, group = match.groups()
+    return int(bits), kind, None if group == "None" else int(group)
+
+
+def _moe_fp8_w8a8(row: Mapping[str, Any]) -> dict | None:
+    """The served contract off a schemeless W8A8-FP8 MoE method's own fields.
+
+    Swept, not read from source (PQ #706): sparklina/sparky (GB10, sm_121)
+    inside the pinned ``vllm/vllm-openai@sha256:61fc8a89...`` image
+    (vLLM 0.28.0, torch 2.13) against a packed-MoE FP8-dynamic
+    compressed-tensors artifact, 2026-10-10. The served
+    ``RoutedExperts`` rows resolve ``CompressedTensorsW8A8Fp8MoEMethod``
+    with no ``scheme``; the method object carries per-side
+    ``QuantizationArgs`` reprs plus ``static_input_scales``. Both sides
+    must parse and agree (W8A8 weights AND activations); the descriptor
+    follows the input side the price is written on, exactly as
+    :func:`_fp8_a8` does for schemes. Fixture:
+    ``tests/fixtures/compressed_route_sweep_moe/``.
+    """
+    attrs = row.get("method_attrs")
+    attrs = attrs if isinstance(attrs, Mapping) else {}
+    static = _as_bool(attrs.get("static_input_scales"))
+    weight = _parse_quant_args(attrs.get("weight_quant"))
+    act = _parse_quant_args(attrs.get("input_quant"))
+    if static is None or weight is None or act is None:
+        return None
+    if weight != act:
+        return None
+    num_bits, kind, group_size = act
+    return _descriptor(True, num_bits=num_bits, kind=kind,
+                       group_size=group_size, dynamic=not static)
+
 #: Scheme class -> reader for its OWN attributes.  Adding a class means having
 #: swept it; an absent class is NOT VERIFIED and says so by name.
 SCHEME_ACTIVATION = {
@@ -213,18 +257,20 @@ SCHEME_ACTIVATION = {
 }
 
 #: Method classes that carry their OWN activation contract, for served modules
-#: whose ``quant_method`` resolves with NO ``scheme`` object (PQ #706).  Each
+#: whose ``quant_method`` resolves with NO ``scheme`` object (PQ #706). Each
 #: entry reads the contract off the row the sweep took -- the method class and
 #: module plus the method object's own attributes -- exactly as
-#: :data:`SCHEME_ACTIVATION` does for schemes.  Adding a class means having
+#: :data:`SCHEME_ACTIVATION` does for schemes. Adding a class means having
 #: SWEPT it on a real serve in the pinned image
 #: (``validate_native_export --route-sweep-out`` against a packed-MoE
 #: compressed-tensors artifact); a method class absent here is NOT VERIFIED
-#: and says so by name.  No packed-MoE artifact has been swept, so this table
-#: is empty by deliberation rather than by omission, and an MoE artifact reads
-#: NOT VERIFIED until one is observed -- never a pass and never a guess from
-#: reading vLLM's source.
-METHOD_ACTIVATION: dict[str, Any] = {}
+#: and says so by name. Swept 2026-10-10:
+#: ``CompressedTensorsW8A8Fp8MoEMethod`` on ``RoutedExperts`` rows, FP8
+#: dynamic both sides (see :func:`_moe_fp8_w8a8` and
+#: ``tests/fixtures/compressed_route_sweep_moe/``).
+METHOD_ACTIVATION: dict[str, Any] = {
+    "CompressedTensorsW8A8Fp8MoEMethod": _moe_fp8_w8a8,
+}
 
 
 #: Quantization-method classes that carry NO weight contract from
@@ -464,6 +510,7 @@ def _runner_dispatched(row: Mapping[str, Any], reason: str) -> bool:
     return parent is not None and int(parent) > 0
 
 
+def compare_rank(body: Mapping[str, Any], *, groups, ignore) -> dict:
     """One rank's per-module comparison. Raises on a conflict."""
     mapping = body.get("packed_modules_mapping")
     conflicts: list[str] = []
