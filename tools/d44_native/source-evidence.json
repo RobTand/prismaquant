@@ -55,5 +55,10 @@
   },
   "runtime_dependencies": "Use published PrismaBuild native owners and this repository's prismaquant.dev_mode. The logical request supplies the existing worker guard.",
   "test_migration": "Repository tests retain the accepted assertions. Imports use the repository layout. The cache drift test explicitly selects development mode.",
-  "adoption": "The pipeline must review the exact delivery head. This delivery grants no GPU, scientific, deployment, or continuation authority."
+  "adoption": "The pipeline must review the exact delivery head. This delivery grants no GPU, scientific, deployment, or continuation authority.",
+  "repair_2446": {
+    "issue": "prismaquant#2446",
+    "base_next_wave_sha256": "563a7a2ea1550e15370985a5e427ed0e948c61ad5cdea5fed4150a42b13c7869",
+    "note": "Base digest above names accepted head fa37751. The 2446 repair changes next_wave.py on a separate head; its digest differs by design. Accepted completion, ledger, disk, ship, memory, and native-owner controls stay unchanged."
+  }
 }
