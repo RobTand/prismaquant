@@ -55,9 +55,19 @@ ENVELOPE_W = 140.0
 WARMUP_SEQUENCES = 64
 
 
+def _commit_progress(phase: str, units: int = 1) -> None:
+    """Report committed units to PrismaBuild's stall watchdog (never raises)."""
+    try:
+        from prismaquant.prismabuild_progress import report
+        report(phase, units)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Pure helpers (CPU-testable; no lease needed except where noted).
 # ---------------------------------------------------------------------------
+
 
 def kernel_family(name: str) -> str:
     """Map a profiler kernel name to one coarse family."""
@@ -351,6 +361,7 @@ def install(args) -> None:
             if (index + 1) % 64 == 0:
                 print(f"[acc-research] arm {arm} {index + 1}/{n} "
                       f"cuda={_cuda_mem()['allocated_gib']:.1f} GiB", flush=True)
+                _commit_progress(BUFFER_SIZE["phase"], BUFFER_SIZE["base"] + index + 1)
             if report is not None:
                 report(index + 1)
         if in_profile:  # short slices end inside the profiled region
@@ -391,9 +402,11 @@ def install(args) -> None:
         cap = args.max_buffer_bytes or policy["max_statistics_bytes"]
         reference_stats, reference_terms = {}, None
         arms = list(args.arms)
+        done = 0
+        _commit_progress("startup", 1)
         for arm in arms:
             size = int(arm[1:]) if arm.startswith("D") else None
-            BUFFER_SIZE.update(arm=arm, size=size)
+            BUFFER_SIZE.update(arm=arm, size=size, base=done, phase=f"arm-{arm}")
             torch.cuda.reset_peak_memory_stats()
             if arm == "C":
                 lease_cls._observe_rows = fused_observe_rows
@@ -476,6 +489,8 @@ def install(args) -> None:
             STATE["_terms"][arm] = {repr(k): t["total"] for k, t in terms.items()}
             STATE["_keys"] = {repr(k): list(k) for k in terms}
             STATE["arms"][arm]["term_totals"] = dict(STATE["_terms"][arm])
+            done += STATE["arms"][arm]["window_sequences"]
+            _commit_progress(f"arm-{arm}", 1 + done)
             _flush_report(out)
         for arm in arms[1:]:
             STATE["arms"][arm]["total_drift_vs_probe_spread"] = _against_spread(
