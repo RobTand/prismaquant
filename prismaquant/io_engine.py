@@ -22,10 +22,12 @@ of :class:`ReadEntry` and a :class:`budget <ReadBudget>`, and reads entries
 ahead of the consumer on this module's one thread pool. The caller never
 states a depth or a worker count:
 
-* **Depth** is the budget's live headroom. The engine admits the next entry
+* **Depth** is the budget's live headroom less the consumer's measured
+  per-window peak growth (PQ #1347). The engine admits the next entry
   only while its serialized buffer plus its decoded bytes fit the headroom the
-  budget reads now, less what is already in flight, so how far it runs ahead is
-  whatever the row's memory allows at that moment. Stage B's budget reads its
+  budget reads now, less what is already in flight and less that growth
+  reserve, so how far it runs ahead leaves room for the consumer's next
+  growth. Stage B's budget reads its
   capture guard (``CaptureMemoryGuard.headroom_bytes``): cgroup committed bytes
   plus the CUDA reservation, against the row's caps and host floor, less the
   reservation of the phase the consumer is in. Serialized buffers in flight are
@@ -840,6 +842,7 @@ class ReadStream:
             "peak_held_bytes": 0, "peak_workers": 0, "peak_workers_consumer_busy": 0,
             "consumer_wait_s": 0.0, "consumed_bytes": 0, "consumer_busy_s": 0.0,
             "consumer_work_s": 0.0, "consumer_steady_wait_s": 0.0,
+            "growth_reserve_bytes": 0,
             "groups_taken": [],
         }
 
@@ -937,6 +940,7 @@ class ReadStream:
                 raise RuntimeError("io stream is closed")
             if self._taken >= len(self._groups) or self._groups[self._taken] != group:
                 raise RuntimeError(f"io stream group {group!r} is not the next in order")
+            self._note_window_end_locked()
             now = time.monotonic()
             work_before = None
             if self._returned_at is not None:
@@ -1012,7 +1016,30 @@ class ReadStream:
             # any started while it waited (PQ #1533).
             self.counters["peak_workers_consumer_busy"] = max(
                 self.counters["peak_workers_consumer_busy"], self._active)
+            self._note_window_start_locked()
             return delivered
+
+    def _held_locked(self) -> int:
+        """Charged bytes the budget sees: read ahead plus taken, not released."""
+        return self._held + self._unreleased
+
+    def _note_window_end_locked(self) -> None:
+        """Close the budget's growth window for the consumer work just done."""
+        note = getattr(self._budget, "note_window_end", None)
+        if callable(note):
+            note(self._held_locked())
+            reserve = getattr(self._budget, "growth_reserve_bytes", None)
+            if isinstance(reserve, int):
+                self.counters["growth_reserve_bytes"] = reserve
+
+    def _note_window_start_locked(self) -> None:
+        """Open the budget's growth window for the consumer work just begun."""
+        note = getattr(self._budget, "note_window_start", None)
+        if callable(note):
+            note(self._held_locked())
+            reserve = getattr(self._budget, "growth_reserve_bytes", None)
+            if isinstance(reserve, int):
+                self.counters["growth_reserve_bytes"] = reserve
 
     def release(self) -> None:
         """The consumer is done with the group it took last, and has dropped it.
