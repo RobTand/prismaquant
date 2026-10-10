@@ -17,18 +17,17 @@ Arms:
 
 Per arm the report holds backward wall time per sequence, CUDA kernel time
 per sequence with a kernel-family breakdown, nvidia-smi power against the
-140 W envelope, max abs/rel drift of a fixed statistics-matrix sample
-against arm A, and drift of the priced signed terms and of the priced
-``predicted_dloss`` against arm A. Term drift is set against the reference
-payload's across-probe spread, and ``predicted_dloss`` drift against its
-``predicted_dloss_stderr``. That scale decides whether the drift matters.
+140 W envelope, statistics-matrix drift against arm A, and priced term and
+``predicted_dloss`` drift against arm A set against sampling stderr.
 
-Arm A's signed totals are also checked against the published M5 payload
-(``--reference-cost``, probe 0). That check proves the harness reproduces
-the production pass. No arm is adopted here; adoption needs a coordinator
-re-baseline. The row buffer refuses past ``--max-buffer-bytes`` (default:
-the statistics window budget), so an S choice cannot grow past the budget
-the window was planned under.
+The research plan copy prices candidates with the ``torch`` projection
+backend, not the campaign's fused binary: the packaged fused qualification
+names torch 2.13.0+cu130 while the fleet venvs run 2.11.0+cu130, so prewarm
+refuses the binary. The fused binary is qualified bit-equal to the torch
+reference, and the row fails closed unless arm A matches the published
+payload bitwise (``backend_substitution_valid``). No arm is adopted here;
+adoption needs a coordinator re-baseline. The row buffer refuses past
+``--max-buffer-bytes`` (default: the statistics window budget).
 """
 from __future__ import annotations
 
@@ -499,11 +498,16 @@ def install(args) -> None:
                 args.reference_cost, STATE["_terms"]["A"], STATE["_terms"][arm],
                 STATE["_keys"])
         STATE["finished_epoch"] = time.time()
+        check = STATE.get("reference_check", {})
+        STATE["backend_substitution_valid"] = (
+            check.get("bitwise_equal") == check.get("compared") and check.get("compared", 0) > 0)
         _flush_report(out)
         sampler = STATE.get("_sampler")
         if sampler is not None:
             sampler.terminate()
         sys.stdout.flush()
+        if "A" in arms and not STATE["backend_substitution_valid"]:
+            raise RuntimeError("arm A differs from the published payload: the torch-backend substitution is invalid")
         os._exit(0)
 
     jsr.observe_and_project_windows = research_windows
@@ -654,6 +658,8 @@ def main() -> None:
     (out / "prepare").mkdir(exist_ok=True)
     shutil.copyfile(source_root / "prepare/source-identity.json",
                     out / "prepare/source-identity.json")
+    original_backend = plan["execution"].get("projection_backend")
+    plan["execution"]["projection_backend"] = {"name": "torch"}
     plan_bytes = json.dumps(plan, indent=1, sort_keys=True).encode()
     plan_path = out / "plan-research.json"
     plan_path.write_bytes(plan_bytes)
@@ -662,7 +668,10 @@ def main() -> None:
                        "sha256": plan_sha},
                  host=os.uname().nodename, reference_cost=str(args.reference_cost),
                  arms_requested=args.arms, buffer_sizes=args.buffer_sizes,
-                 max_sequences=args.max_sequences)
+                 max_sequences=args.max_sequences,
+                 backend_substitution={"original": original_backend,
+                                       "replacement": {"name": "torch"},
+                                       "reason": "fleet torch 2.11.0+cu130 differs from the packaged fused-backend qualification (2.13.0+cu130), so prewarm refuses; the bitwise reference_check gates the substitution"})
     STATE["_sampler"] = subprocess.Popen(
         ["nvidia-smi", "--query-gpu=timestamp,power.draw,utilization.gpu,clocks.sm",
          "--format=csv,noheader", "-lms", "500"],
