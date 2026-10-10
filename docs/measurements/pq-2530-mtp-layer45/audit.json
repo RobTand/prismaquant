@@ -1,0 +1,3389 @@
+{
+  "actions": [
+    {
+      "blob": {
+        "bytes": 6613,
+        "sha256": "273073faadc02bc9b1b523f3c1bc583d9d259ce4ecdf66104637ce6585e6e4b0"
+      },
+      "disposition": "done",
+      "elapsed_s": 920.3,
+      "host": "sparklina",
+      "key": "7c78d20519be1a13b57daaf9c323ab08c0819c26360d9311c70bf7e995de7005",
+      "memory_peak_bytes": 77372907520,
+      "ok": true,
+      "payload": {
+        "bytes": 6613,
+        "sha256": "273073faadc02bc9b1b523f3c1bc583d9d259ce4ecdf66104637ce6585e6e4b0"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "6a15cd931d7ef73feebbdd4eb1534620547c166b96b05af246064544eff7a203",
+        "result_bytes": 6613,
+        "result_sha256": "273073faadc02bc9b1b523f3c1bc583d9d259ce4ecdf66104637ce6585e6e4b0",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "6a15cd931d7ef73feebbdd4eb1534620547c166b96b05af246064544eff7a203"
+      },
+      "request": {
+        "action_key": "7c78d20519be1a13b57daaf9c323ab08c0819c26360d9311c70bf7e995de7005",
+        "manifest_sha256": "d5483d86bb089c73b70d10db70529bb2a8c4b2a438ec029222f07a682439b819"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 80
+      },
+      "returncode": 0,
+      "role": "capture-v2",
+      "snapshot": {
+        "bundle_sha256": "aaf3024d4834a8ee12169fa9156c8098e22011eb7b19e3a13121dd65697f9a60",
+        "commit": "78e6a278f0e4b3af128697a98b64811906901936",
+        "parent": "8432710ff2aaa6579a42048f22b83051246523e9"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m tools.glm_mtp_capture --phase capture --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.json --plan-sha256 c9b879b48d96e7d6fa6a7d6bb57bc4f014cf1e8a5fe7ca1865ec36739f2aa3dc --prepared /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/prepare/prepared.json --prepared-sha256 2fb271d2febe9e206c081c57f46a602d41c502ec39326f588aad72b0eda8e83c --final-hidden /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/final-hidden/manifest.json --final-hidden-sha256 9819766aae872b78e4af54d9d93885e275789a73eda5315564a1f3c3540438d1 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture --census-out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/mtp-census.json --expert-projection /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/mtp-projection.json --expert-projection-sha256 33de456394904eb243aa595098f11f45c5211b4a73cb94474957e57fcc196e78",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 9184,
+        "sha256": "e769e71c0149e6c9a8731b482c2142b8c0c20861a1d9a0351347e2c2d2b6e766"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 921.8
+    },
+    {
+      "blob": {
+        "bytes": 2175,
+        "sha256": "38eb32f92a23b39511fc18079009bffd9ed97563c8de0266ab2955e823c9ed8c"
+      },
+      "disposition": "done",
+      "elapsed_s": 2137.4,
+      "host": "sparklina",
+      "key": "89369de5afb2457ff188fff4692661a1f0acdce540e3cda626ec32078168a3c2",
+      "memory_peak_bytes": 6442450944,
+      "ok": true,
+      "payload": {
+        "bytes": 2175,
+        "sha256": "38eb32f92a23b39511fc18079009bffd9ed97563c8de0266ab2955e823c9ed8c"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "1fc10924e282ec6f74cce133a9650d8c4dd034d92ed0d6b540e5f86c716a13df",
+        "result_bytes": 2175,
+        "result_sha256": "38eb32f92a23b39511fc18079009bffd9ed97563c8de0266ab2955e823c9ed8c",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "1fc10924e282ec6f74cce133a9650d8c4dd034d92ed0d6b540e5f86c716a13df"
+      },
+      "request": {
+        "action_key": "89369de5afb2457ff188fff4692661a1f0acdce540e3cda626ec32078168a3c2",
+        "manifest_sha256": "16c47209e3d10cd2bd4df1083b328b5bc3b37b49f769f44c20250617bc1b5d18"
+      },
+      "resources": {
+        "cpu": 8,
+        "mem_gb": 6
+      },
+      "returncode": 0,
+      "role": "projection",
+      "snapshot": {
+        "bundle_sha256": "512a2915fff51da8085afbebd7f78dafbe90d492b5749157e562f3a69faf58c3",
+        "commit": "155a027ab29bbf14ef139f43c08c533078b2d280",
+        "parent": "8781ca62a964b68d6a8da345c2f485f9a3c814d0"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m tools.glm_mtp_capture --phase projection --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.json --plan-sha256 c9b879b48d96e7d6fa6a7d6bb57bc4f014cf1e8a5fe7ca1865ec36739f2aa3dc --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 4746,
+        "sha256": "88f48fc7358cbb79b5d0819f7a71681270d449501c92fbb21071692ee05eb3a3"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 2138.9
+    },
+    {
+      "blob": {
+        "bytes": 3034,
+        "sha256": "375a744d54699b0af96a8b37d048f02484deccb4f0f89d24722e792b88842790"
+      },
+      "disposition": "done",
+      "elapsed_s": 219.1,
+      "host": "sparklina",
+      "key": "83dc1e8371bb8cc1efe1c5262d83858a2396db456cb7e769cb4e498c5a106667",
+      "memory_peak_bytes": 12530089984,
+      "ok": true,
+      "payload": {
+        "bytes": 3034,
+        "sha256": "375a744d54699b0af96a8b37d048f02484deccb4f0f89d24722e792b88842790"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "624dd662eaf5d97ca0eb6b17df3d3f0966270fb8f2c0e6f776ed6cbe24ca2863",
+        "result_bytes": 3034,
+        "result_sha256": "375a744d54699b0af96a8b37d048f02484deccb4f0f89d24722e792b88842790",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "624dd662eaf5d97ca0eb6b17df3d3f0966270fb8f2c0e6f776ed6cbe24ca2863"
+      },
+      "request": {
+        "action_key": "83dc1e8371bb8cc1efe1c5262d83858a2396db456cb7e769cb4e498c5a106667",
+        "manifest_sha256": "f4cae4991b53f6f93a9fe564c05281f4a55979ec0497678cd00d9d63a41efd7d"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 48
+      },
+      "returncode": 0,
+      "role": "final-hidden",
+      "snapshot": {
+        "bundle_sha256": "af1bb74b792ac4660ad6d61bfa85cc6f5d7e3230ce05857c4a856894a686ac7b",
+        "commit": "3ec6b01e7dc0a9e24214767c4ffc1043837ba906",
+        "parent": "a845814dca13ca25854737bfa30e1864c9fdce47"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m tools.glm_mtp_capture --phase final-hidden --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.json --plan-sha256 c9b879b48d96e7d6fa6a7d6bb57bc4f014cf1e8a5fe7ca1865ec36739f2aa3dc --boundaries /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/boundary-44/manifest.json --boundaries-sha256 e54de9315692d7098e3aaf8ffc2aa11dae937ab1fd4ed5a0297425a883c36d47 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/final-hidden --offload-folder /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/offload-phase1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 5605,
+        "sha256": "2db6a47637461f16ea56d7489263ee327dab9d8854fa7e5de0dcff3bee555f41"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10"
+      ],
+      "wall_seconds": 220.6
+    },
+    {
+      "blob": {
+        "bytes": 437613,
+        "sha256": "7ce0d6437388802a08d3dc471ae63c5d6c917288144b3130b93dc7b10485a0f7"
+      },
+      "disposition": "done",
+      "elapsed_s": 4670.3,
+      "host": "sparklina",
+      "key": "c3dc42c2ae32773fc516701dbf736b9b72df7e36c5ab1b4323c0bbd5f3db3f4b",
+      "memory_peak_bytes": 77373153280,
+      "ok": true,
+      "payload": {
+        "bytes": 437613,
+        "sha256": "7ce0d6437388802a08d3dc471ae63c5d6c917288144b3130b93dc7b10485a0f7"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "d1b6df5ddc7ae6ab0f655512ba26bade0711d29f404ec72c09457693515982c5",
+        "result_bytes": 437613,
+        "result_sha256": "7ce0d6437388802a08d3dc471ae63c5d6c917288144b3130b93dc7b10485a0f7",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "d1b6df5ddc7ae6ab0f655512ba26bade0711d29f404ec72c09457693515982c5"
+      },
+      "request": {
+        "action_key": "c3dc42c2ae32773fc516701dbf736b9b72df7e36c5ab1b4323c0bbd5f3db3f4b",
+        "manifest_sha256": "f115836f72940977b3b0e32261612f4ae77c31954942639182fc9c638048d2a8"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 80
+      },
+      "returncode": 0,
+      "role": "m4-r1024-prepare",
+      "snapshot": {
+        "bundle_sha256": "78ae48e9f0a4d9a5fc78970b7d4c6c5066863c0b2e2bdbaa7c6ee87278ea6ecd",
+        "commit": "62e2004e65d78a1911c1111be186c2415371ac48",
+        "parent": "849fa907e520be42f688227c1c45328d6c398b9e"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m prismaquant.tessera_joint_aura prepare --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan.json --plan-sha256 7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 440186,
+        "sha256": "ef43e84089c185861d1c6cdbcbbda5ef7e334cc844e33f6b780461b97cc9d75b"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 4671.9
+    },
+    {
+      "blob": {
+        "bytes": 12869,
+        "sha256": "32c0d8bda799603d94c37506f5738e107bdf3e26fee625df9f7277743784188a"
+      },
+      "disposition": "done",
+      "elapsed_s": 3889.7,
+      "host": "sparky",
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "memory_peak_bytes": 8158134272,
+      "ok": true,
+      "payload": {
+        "bytes": 12869,
+        "sha256": "32c0d8bda799603d94c37506f5738e107bdf3e26fee625df9f7277743784188a"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "c59c0ce0f441fe3d62e67ef13e0bac3982b2e327336b8083541b43004da5c5a4",
+        "result_bytes": 12869,
+        "result_sha256": "32c0d8bda799603d94c37506f5738e107bdf3e26fee625df9f7277743784188a",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "c59c0ce0f441fe3d62e67ef13e0bac3982b2e327336b8083541b43004da5c5a4"
+      },
+      "request": {
+        "action_key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+        "manifest_sha256": "b7f906488a9faeb2f0bb80c658d7c090d8c9cd4e3bd7f59e2f9556794b9bbc66"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 101
+      },
+      "returncode": 0,
+      "role": "m4-r1024-run",
+      "snapshot": {
+        "bundle_sha256": "136b4707470684dba83762d170c4b166224b0769de9ba32f59997efae7e457f6",
+        "commit": "9e4230e726b78cec92910d6e48786b80e5caccdd",
+        "parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m prismaquant.tessera_joint_aura run --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan-run.json --plan-sha256 35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649 --prepared /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/prepared.json --prepared-sha256 960a3d4eae4e0e237679ddff2d6eaea8e3f935ccda4aa2a7dfe8341065957703",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 15435,
+        "sha256": "9440e613166b7c285871a2cd9cfe2e21dc752359bc7a5998a0c7cf8edde7e28d"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 3891.2
+    },
+    {
+      "blob": {
+        "bytes": 435835,
+        "sha256": "f3b42f034ffce49d1b90207d4bda1125de12fbddfb545a5f2c08704a8c28c490"
+      },
+      "disposition": "done",
+      "elapsed_s": 367.2,
+      "host": "sparky",
+      "key": "64969134bf06a2eebcaeee8963d76acb66b87f3628c22d25f59ce4b3dea416ad",
+      "memory_peak_bytes": 6582112256,
+      "ok": true,
+      "payload": {
+        "bytes": 435835,
+        "sha256": "f3b42f034ffce49d1b90207d4bda1125de12fbddfb545a5f2c08704a8c28c490"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "601bcccac1321294728a144429a71272ea40cd4d01e1f7f34b27a368b6fd0a1e",
+        "result_bytes": 435835,
+        "result_sha256": "f3b42f034ffce49d1b90207d4bda1125de12fbddfb545a5f2c08704a8c28c490",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "601bcccac1321294728a144429a71272ea40cd4d01e1f7f34b27a368b6fd0a1e"
+      },
+      "request": {
+        "action_key": "64969134bf06a2eebcaeee8963d76acb66b87f3628c22d25f59ce4b3dea416ad",
+        "manifest_sha256": "a9d5c37a9d73e413f611f4512f4407c55527466d52108e37e5390c7f1740ee2f"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 80
+      },
+      "returncode": 0,
+      "role": "m4-r896-prepare",
+      "snapshot": {
+        "bundle_sha256": "0eaf9226125421ade36aa6e53d03afd15969265890fe554ff3572aa1a67ee900",
+        "commit": "4cced33c4ed37e3711fb71e643c488cc3c86acff",
+        "parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m prismaquant.tessera_joint_aura prepare --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json --plan-sha256 065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 438402,
+        "sha256": "f42dbbcd78c7b20d802d00c519899d92c6eb6c11eac206f915b9797c54d87d82"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 368.7
+    },
+    {
+      "blob": {
+        "bytes": 11663,
+        "sha256": "62cd2470e6cdebbad0645c086607437e1ef2ac4f889d21f5e56cd6bb9015d78e"
+      },
+      "disposition": "done",
+      "elapsed_s": 3930.1,
+      "host": "sparklina",
+      "key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898",
+      "memory_peak_bytes": 6809030656,
+      "ok": true,
+      "payload": {
+        "bytes": 11663,
+        "sha256": "62cd2470e6cdebbad0645c086607437e1ef2ac4f889d21f5e56cd6bb9015d78e"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "237f1657c53d09d830f6155cd5287e000257c2b0017017dc58c9bdcaa9d47226",
+        "result_bytes": 11663,
+        "result_sha256": "62cd2470e6cdebbad0645c086607437e1ef2ac4f889d21f5e56cd6bb9015d78e",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "237f1657c53d09d830f6155cd5287e000257c2b0017017dc58c9bdcaa9d47226"
+      },
+      "request": {
+        "action_key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898",
+        "manifest_sha256": "b5b555adb690f9314a4ff40d46ca5e11525a230f6863c6a0893f9bd8bc6ba8eb"
+      },
+      "resources": {
+        "cpu": 4,
+        "gpu": 1,
+        "mem_gb": 101
+      },
+      "returncode": 0,
+      "role": "m4-r896-run",
+      "snapshot": {
+        "bundle_sha256": "d48cb4ed8231e3f361d926ce7f5eb4b35ddb94d6ba5a059e55a5afa80e8e57fb",
+        "commit": "d1f07492cd92ea263763ab495e9302239ca80e8a",
+        "parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+      },
+      "spec": {
+        "container_admission_reference": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -m prismaquant.tessera_joint_aura run --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json --plan-sha256 065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2 --prepared /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/prepared.json --prepared-sha256 19b7d32737c9f48cf84fdd5ebd8db6ddbce8187a4f49607e4744b80c3d1a9cdd",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 14235,
+        "sha256": "5f21647ad833941ab8aaa367c9ef8d1260ffea9b649976d314df0fadee60cb86"
+      },
+      "tags": [
+        "gb10"
+      ],
+      "wall_seconds": 3931.8
+    },
+    {
+      "blob": {
+        "bytes": 4799,
+        "sha256": "8857c243a4c22a9d58e3b2616c57ac02a41574559181d118e1acd41523a243db"
+      },
+      "disposition": "done",
+      "elapsed_s": 87.1,
+      "host": "sparklina",
+      "key": "ef8afe37ea2e17f92e7ad6ac31609d256ade03b224cbc3b586a87eb560136661",
+      "memory_peak_bytes": 3809976320,
+      "ok": true,
+      "payload": {
+        "bytes": 4799,
+        "sha256": "8857c243a4c22a9d58e3b2616c57ac02a41574559181d118e1acd41523a243db"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "c21b10462b491848092582663bdd4b49bd440555a566b921fe43100c53278e42",
+        "result_bytes": 4799,
+        "result_sha256": "8857c243a4c22a9d58e3b2616c57ac02a41574559181d118e1acd41523a243db",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "c21b10462b491848092582663bdd4b49bd440555a566b921fe43100c53278e42"
+      },
+      "request": {
+        "action_key": "ef8afe37ea2e17f92e7ad6ac31609d256ade03b224cbc3b586a87eb560136661",
+        "manifest_sha256": "34967bbde5bde83f308da63ca14482505a093a965a5e63964cfc4258bf973b98"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 43
+      },
+      "returncode": 0,
+      "role": "m3-r1024-row-0000",
+      "snapshot": {
+        "bundle_sha256": "c6d765dca653a846ffc32d6242e8c3c90f15fc9fe9c3d829781312a83d5e466d",
+        "commit": "ad6d6557bdb3927bf798c0000e6c563215d8ce6e",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0000/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0000/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0000/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/units/row-0000.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 1024,1024 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 7499,
+        "sha256": "88c3dde54e0f9d1af6873b675acc31d41c9021bc19c552df71dcc7ba987ec4e5"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 88.6
+    },
+    {
+      "blob": {
+        "bytes": 20803,
+        "sha256": "ad85cc1c9e106887193c427398653c070b1da13a0efc7a00d34cdde10179a373"
+      },
+      "disposition": "done",
+      "elapsed_s": 3237.8,
+      "host": "sparklina",
+      "key": "0fe8686955508c0604712ffe67a214a900f9e19e665527a9b8d1533d1922be25",
+      "memory_peak_bytes": 32799973376,
+      "ok": true,
+      "payload": {
+        "bytes": 20803,
+        "sha256": "ad85cc1c9e106887193c427398653c070b1da13a0efc7a00d34cdde10179a373"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "c59008dcb96f42171d5bb96a17ccdc30077f40d51ce192ac2685ae98a4e99b9e",
+        "result_bytes": 20803,
+        "result_sha256": "ad85cc1c9e106887193c427398653c070b1da13a0efc7a00d34cdde10179a373",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "c59008dcb96f42171d5bb96a17ccdc30077f40d51ce192ac2685ae98a4e99b9e"
+      },
+      "request": {
+        "action_key": "0fe8686955508c0604712ffe67a214a900f9e19e665527a9b8d1533d1922be25",
+        "manifest_sha256": "f82b9cd3c9877be20278c55db9256fdae3c3a21975555908387b56e9d789dbc3"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 69
+      },
+      "returncode": 0,
+      "role": "m3-r1024-row-0001",
+      "snapshot": {
+        "bundle_sha256": "93cc8fa00f1d0948dcc887b50cd0d95af1abc510be5c73947551a759e441e42b",
+        "commit": "aba50cace2318c4b49297f55cfe393c3c84369e5",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0001/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0001/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0001/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/units/row-0001.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 1024,1024 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 23506,
+        "sha256": "251160608ea979566a227c70a21967ea9a6435fbd2835a9eb36e7bcef4ab3f17"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 3239.4
+    },
+    {
+      "blob": {
+        "bytes": 4657,
+        "sha256": "b38e29a9d33215c5fb74d2c32a62ff06df8e1769b972384728c5de3322765fa0"
+      },
+      "disposition": "done",
+      "elapsed_s": 57.9,
+      "host": "sparklina",
+      "key": "65f323e3764d39d6249e7d0269f66555102d1af9e6fed0ad09daeeda044257e3",
+      "memory_peak_bytes": 2507472896,
+      "ok": true,
+      "payload": {
+        "bytes": 4657,
+        "sha256": "b38e29a9d33215c5fb74d2c32a62ff06df8e1769b972384728c5de3322765fa0"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "e066a69396a630f952584f1033bff1d1d7b5cf6cced36aa0af3d8374180599ba",
+        "result_bytes": 4657,
+        "result_sha256": "b38e29a9d33215c5fb74d2c32a62ff06df8e1769b972384728c5de3322765fa0",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "e066a69396a630f952584f1033bff1d1d7b5cf6cced36aa0af3d8374180599ba"
+      },
+      "request": {
+        "action_key": "65f323e3764d39d6249e7d0269f66555102d1af9e6fed0ad09daeeda044257e3",
+        "manifest_sha256": "66c47ccf9c3648ddfc3559e2ff99e66ff3fec51e5095de790c97ff2629fb3c6b"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 42
+      },
+      "returncode": 0,
+      "role": "m3-r1024-row-0002",
+      "snapshot": {
+        "bundle_sha256": "cc72781b8c164bf7855874eae078103f3ea4711be5b65e23b94d5e2a648d6599",
+        "commit": "9516de65ba36ecca74931323ae4b28d6b90095f4",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0002/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0002/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/rows/row-0002/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/units/row-0002.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 1024,1024 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 7357,
+        "sha256": "a1ac2b99759018b6c0bb8cfa373b26f7b80739f70ea7733dbe5d263c649f6f69"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 59.3
+    },
+    {
+      "blob": {
+        "bytes": 5576,
+        "sha256": "bc832e2fc08fb740668cfd556692cce8e66efaeb764e17962d040c561133510b"
+      },
+      "disposition": "done",
+      "elapsed_s": 99.6,
+      "host": "sparklina",
+      "key": "b355042a99024c594bba2dbe8975ae48d08966c7bb8e521487aeb76c70d32198",
+      "memory_peak_bytes": 2816659456,
+      "ok": true,
+      "payload": {
+        "bytes": 5576,
+        "sha256": "bc832e2fc08fb740668cfd556692cce8e66efaeb764e17962d040c561133510b"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "72d8b0c7ce6a06ed258ee6c2130832996dad8dc1b5bc2986d6bbc8a98ae2807f",
+        "result_bytes": 5576,
+        "result_sha256": "bc832e2fc08fb740668cfd556692cce8e66efaeb764e17962d040c561133510b",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "72d8b0c7ce6a06ed258ee6c2130832996dad8dc1b5bc2986d6bbc8a98ae2807f"
+      },
+      "request": {
+        "action_key": "b355042a99024c594bba2dbe8975ae48d08966c7bb8e521487aeb76c70d32198",
+        "manifest_sha256": "92337df0702ac9e1ed539093954bc01192e664e05560354a282d0e5ecec2bd47"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 43
+      },
+      "returncode": 0,
+      "role": "m3-r896-row-0000",
+      "snapshot": {
+        "bundle_sha256": "3d2c448561a9009daba0e128c4507826c05a9ae099ac2700becd0493c4ed29c1",
+        "commit": "d53c4f5bd5892c2d1b5abd73df95b075eca9a929",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0000/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0000/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0000/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/units/row-0000.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 896,896 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 8276,
+        "sha256": "57d4a469b1458983d0669c5d1d69583dc2df5c38acf2e08749399d2510194414"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 101.3
+    },
+    {
+      "blob": {
+        "bytes": 107372,
+        "sha256": "ee563bcb851561c1a47e2c13c57b538ee8353fb10cd937edc8f783139e13607d"
+      },
+      "disposition": "done",
+      "elapsed_s": 4527.6,
+      "host": "sparky",
+      "key": "a994cdc5a3e802ffb0dde2a0ead0bf165612054c83819173842b938d5f2821af",
+      "memory_peak_bytes": 32689274880,
+      "ok": true,
+      "payload": {
+        "bytes": 107372,
+        "sha256": "ee563bcb851561c1a47e2c13c57b538ee8353fb10cd937edc8f783139e13607d"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "fe364c7f6b107382722095b3047f6326f48fceb80e5b3761f32b5c24dc4b70ff",
+        "result_bytes": 107372,
+        "result_sha256": "ee563bcb851561c1a47e2c13c57b538ee8353fb10cd937edc8f783139e13607d",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "fe364c7f6b107382722095b3047f6326f48fceb80e5b3761f32b5c24dc4b70ff"
+      },
+      "request": {
+        "action_key": "a994cdc5a3e802ffb0dde2a0ead0bf165612054c83819173842b938d5f2821af",
+        "manifest_sha256": "675fec353bc9dc2b571bac636368624e868eff7e7278d5466365c7928564ed43"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 69
+      },
+      "returncode": 0,
+      "role": "m3-r896-row-0001",
+      "snapshot": {
+        "bundle_sha256": "3e9d9219a055348b6fe96c0d384a393ec7b7661354a6df2e29c9e828026d22d8",
+        "commit": "a76fb634375e2e80aee52db3260576ea116ce4b6",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0001/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0001/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0001/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/units/row-0001.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 896,896 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 110070,
+        "sha256": "6eb737cfeb805d04d4d0d769464fdd86f63bf580a9ccd054eca9947104cae14c"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 4529.2
+    },
+    {
+      "blob": {
+        "bytes": 5044,
+        "sha256": "322ef7604d9312acfc1dcde6afd075a34485bb2b2bed7394f8efe8d597e94ded"
+      },
+      "disposition": "done",
+      "elapsed_s": 73.1,
+      "host": "sparklina",
+      "key": "a5ad8cc0fdc0eff441d5760bbf41b35522c4c847b127183361414d734f3f3bf8",
+      "memory_peak_bytes": 2701455360,
+      "ok": true,
+      "payload": {
+        "bytes": 5044,
+        "sha256": "322ef7604d9312acfc1dcde6afd075a34485bb2b2bed7394f8efe8d597e94ded"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "be3393d690d2de93c5e7c88770246fd8ed8fc55cbc373707292f486591b85da2",
+        "result_bytes": 5044,
+        "result_sha256": "322ef7604d9312acfc1dcde6afd075a34485bb2b2bed7394f8efe8d597e94ded",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "be3393d690d2de93c5e7c88770246fd8ed8fc55cbc373707292f486591b85da2"
+      },
+      "request": {
+        "action_key": "a5ad8cc0fdc0eff441d5760bbf41b35522c4c847b127183361414d734f3f3bf8",
+        "manifest_sha256": "50a720cec5d1ca1c706ac7ca79f8b1a5da62db819564a128135799b6d0f76366"
+      },
+      "resources": {
+        "cpu": 6,
+        "gpu": 1,
+        "mem_gb": 42
+      },
+      "returncode": 0,
+      "role": "m3-r896-row-0002",
+      "snapshot": {
+        "bundle_sha256": "353434f2ade9ce8f1cdbc49de3bbfce0dc40c8bc89fbfc64ecc020cffff53ff1",
+        "commit": "68fa2ff12af2e49a889f8c93f1bb2d1ceaa6a3b7",
+        "parent": "d2a04e4f77242cdb5d0c11c5f1e7c247b1afb5b5"
+      },
+      "spec": {
+        "container_admission_reference": null,
+        "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+        "container_image": "prismaquant-glm-derivative:causal-exp-v1-20260908",
+        "dev_mode": "1",
+        "inner_command": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0002/cost.pkl --cache-dir /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0002/cache --checkpoint /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/rows/row-0002/cost.anchors.json --units /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/units/row-0002.json --calibration-census /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/census.json --menu-mode readable --nsamples 512 --seqlen 512 --seed 0 --max-act-rows 512 --layer-stride 1 --anchors 3 --anchor-budget 12 --loo-gate 0.25 --max-artifact-bpp 0 --hessian require --tp-degree 1 --attention-implementation eager --streaming --streaming-cache-slots 2 --streaming-prefetch-workers 1 --streaming-cache-headroom-gb 24 --anchor-batch-size 8 --max-rounds 1 --export-hessian-reference-policy '{\"max_file_bytes\":629147557,\"max_hessian_bytes\":603979776,\"max_metadata_bytes\":134217728,\"schema\":\"tessera.hessian_reference_load.v1\"}' --rate-band 896,896 --capture-load-policy '{\"max_buffer_bytes\": 629147557, \"max_scratch_bytes\": 2097152, \"schema\": \"prismaquant.verified_activation_load.v1\"}' --source-snapshot-policy selected-tensors-v1 --source-scope mtp --calibration-cache /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json --calibration-cache-sha256 934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1",
+        "tessera_pin": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 7744,
+        "sha256": "f97633cb05ffd7163d76931de4064cc2b50ea62ecdad965140137cb76e892495"
+      },
+      "tags": [
+        "container-image-v1",
+        "gb10",
+        "progress-helper-v1",
+        "progress-v1"
+      ],
+      "wall_seconds": 74.7
+    },
+    {
+      "blob": {
+        "bytes": 823,
+        "sha256": "1235469e4984732b7e2ac9d5d64db960e680af9302be2d7b7ccc1fd1d3fd4e69"
+      },
+      "disposition": "done",
+      "elapsed_s": 43.6,
+      "host": "dl380g10",
+      "key": "370bdce3b3c2b59c19bc6a01fedcae9ee257a9826d4ace3fa9a0b639691d7213",
+      "memory_peak_bytes": 1738399744,
+      "ok": true,
+      "payload": {
+        "bytes": 823,
+        "sha256": "1235469e4984732b7e2ac9d5d64db960e680af9302be2d7b7ccc1fd1d3fd4e69"
+      },
+      "problems": [],
+      "queue_state": [
+        "done"
+      ],
+      "receipt": {
+        "recomputed_sha256": "d4d165eee8b6675aa48f138f19d5bd53f68866c022fff16465263b95963746e4",
+        "result_bytes": 823,
+        "result_sha256": "1235469e4984732b7e2ac9d5d64db960e680af9302be2d7b7ccc1fd1d3fd4e69",
+        "schema": "prismaquant.prismabuild.cas_receipt.v3",
+        "sha256": "d4d165eee8b6675aa48f138f19d5bd53f68866c022fff16465263b95963746e4"
+      },
+      "request": {
+        "action_key": "370bdce3b3c2b59c19bc6a01fedcae9ee257a9826d4ace3fa9a0b639691d7213",
+        "manifest_sha256": "419df09f8650e0557c93e524b66fc29c31ca6b25c333a7465c8d6811d7080202"
+      },
+      "resources": {
+        "cpu": 2,
+        "mem_gb": 8
+      },
+      "returncode": 0,
+      "role": "reselect-owner-join",
+      "snapshot": {
+        "bundle_sha256": "63e99a84574446d8c562eda7b2c267d2497f6fd47bb7df772d93e931d1ca10b8",
+        "commit": "52539e310629fdba5da6393409b6886c0754f55e",
+        "parent": "92d136d5e37f27212e371be0a23497ebd0316e77"
+      },
+      "status": "executed",
+      "stdout": {
+        "bytes": 3304,
+        "sha256": "d8f7d6ca180514fad3d83d9051444cf1e523f092dd70edec9276ff35158fdff3"
+      },
+      "tags": [
+        "x86"
+      ],
+      "wall_seconds": 47.3
+    }
+  ],
+  "argv": [
+    "--out-dir",
+    "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/qualification-pq2530/final-20261010-f"
+  ],
+  "body_admission": {
+    "payloads": [
+      {
+        "message": "joint AURA requires matching aura/joint provenance",
+        "payload": "r1024_part",
+        "refused": true
+      },
+      {
+        "message": "joint AURA requires matching aura/joint provenance",
+        "payload": "r896_part",
+        "refused": true
+      },
+      {
+        "message": "joint AURA requires matching aura/joint provenance",
+        "payload": "merged_original",
+        "refused": true
+      },
+      {
+        "message": "joint AURA requires matching aura/joint provenance",
+        "payload": "merged_current",
+        "refused": true
+      }
+    ],
+    "probe_relabelled_provenance": {
+      "outcome": "admitted",
+      "what": "the merged MTP rows under body-style provenance (cost_mode aura, joint_activation true)"
+    },
+    "raised_at": "prismaquant/cost_currency.py:308",
+    "reached_from": "prismaquant/allocator.py (--costs)"
+  },
+  "calibration": {
+    "artifact_sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "dtype": "I64",
+    "provenance": {
+      "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+      "fit_tokens": 262144,
+      "fit_tokens_min": 13,
+      "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+      "nsamples": 512,
+      "seed": 0,
+      "seqlen": 512,
+      "source": "wikitext-2-raw-v1/train",
+      "split_role": "calibration",
+      "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5"
+    },
+    "shape": [
+      512,
+      512
+    ],
+    "token_bytes_sha256": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1"
+  },
+  "capture": {
+    "capture_runtime": {
+      "cuda": "13.0",
+      "torch": "2.13.0+cu130",
+      "transformers": "5.16.1"
+    },
+    "census_authentication": {
+      "base_census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+      "canonical_capture_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+      "payload_bytes_hashed": 26811252024,
+      "shards_read_by_capture": 5
+    },
+    "entries": 867,
+    "final_hidden_mean_top1": 0.6398,
+    "final_hidden_sequences": 512,
+    "source_authentication_bytes": 26811252024,
+    "status": "complete"
+  },
+  "census": {
+    "count_max": 36716,
+    "count_min": 722,
+    "draw": {
+      "nsamples": 512,
+      "seed": 0,
+      "seqlen": 512
+    },
+    "fit_ids_sha256": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+    "geometry": {
+      "down_proj": [
+        4096,
+        2048
+      ],
+      "gate_proj": [
+        2048,
+        4096
+      ],
+      "up_proj": [
+        2048,
+        4096
+      ]
+    },
+    "max_abs_max": 59.25,
+    "max_abs_min": 3.09375,
+    "routed": 864,
+    "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f",
+    "shared": 3,
+    "shared_counts": [
+      261632
+    ],
+    "text_sha256": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5",
+    "units": 867
+  },
+  "checks": [
+    {
+      "detail": "867 units",
+      "name": "census.units_867",
+      "ok": true
+    },
+    {
+      "detail": "864 routed units",
+      "name": "census.routed_864",
+      "ok": true
+    },
+    {
+      "detail": "3 shared units",
+      "name": "census.shared_3",
+      "ok": true
+    },
+    {
+      "detail": "expert and dense targets",
+      "name": "census.targets_match_classes",
+      "ok": true
+    },
+    {
+      "detail": "one positive integer count per unit",
+      "name": "census.counts",
+      "ok": true
+    },
+    {
+      "detail": "one finite positive maximum per unit",
+      "name": "census.maxima",
+      "ok": true
+    },
+    {
+      "detail": "0 units off the layer geometry",
+      "name": "census.geometry",
+      "ok": true
+    },
+    {
+      "detail": "3 groups",
+      "name": "census.anchor_groups_partition",
+      "ok": true
+    },
+    {
+      "detail": "864 projected units",
+      "name": "projection.routed_864",
+      "ok": true
+    },
+    {
+      "detail": "{'down_proj 4096x2048': 288, 'gate_proj 2048x4096': 288, 'up_proj 2048x4096': 288}",
+      "name": "projection.geometry",
+      "ok": true
+    },
+    {
+      "detail": "the census carries the producer projection unchanged",
+      "name": "projection.equals_census_copy",
+      "ok": true
+    },
+    {
+      "detail": "complete",
+      "name": "capture.complete_v2",
+      "ok": true
+    },
+    {
+      "detail": "capture identity census digest equals the authenticated census",
+      "name": "capture.identity_names_census",
+      "ok": true
+    },
+    {
+      "detail": "{'units': 867, 'identity_units': 867, 'routed_units': 864, 'projection_checked_units': 864}",
+      "name": "capture.report_unit_counts",
+      "ok": true
+    },
+    {
+      "detail": "report digests",
+      "name": "capture.report_names_census_and_manifest",
+      "ok": true
+    },
+    {
+      "detail": "{'max': 36716, 'min': 722}",
+      "name": "capture.report_routed_rows",
+      "ok": true
+    },
+    {
+      "detail": "layer 44, 512 records",
+      "name": "final_hidden.layer44_512_sequences",
+      "ok": true
+    },
+    {
+      "detail": "census names the final-hidden manifest digest",
+      "name": "final_hidden.census_binding",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.capture_entries",
+      "ok": true
+    },
+    {
+      "detail": "base census b63f7bf6c432",
+      "name": "census.base_census_file",
+      "ok": true
+    },
+    {
+      "detail": "canonical capture manifest f4bcbf408d3a",
+      "name": "census.canonical_capture_file",
+      "ok": true
+    },
+    {
+      "detail": "12 files, 26811252024 payload bytes hashed",
+      "name": "census.derivation_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "5 shards read by the capture carry the producer's digests",
+      "name": "census.authenticated_shards_equal_the_producer_seal",
+      "ok": true
+    },
+    {
+      "detail": "I64 [512, 512] 2097152 bytes",
+      "name": "calibration.draw_is_512_by_512_int64",
+      "ok": true
+    },
+    {
+      "detail": "text, fit ids, draw size and seed; prepared for the base census",
+      "name": "calibration.provenance_equals_the_census_draw",
+      "ok": true
+    },
+    {
+      "detail": "the campaign's census file is byte-identical to the authenticated census",
+      "name": "stage_a.r1024.census_is_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "3 campaign rows",
+      "name": "stage_a.r1024.plan_rows",
+      "ok": true
+    },
+    {
+      "detail": "[('ef8afe37ea2e', 'executed', '0'), ('0fe868695550', 'executed', '0'), ('65f323e3764d', 'executed', '0')]",
+      "name": "stage_a.r1024.row_receipts",
+      "ok": true
+    },
+    {
+      "detail": "formats ['TESSERA_BF16_K1_R1024', 'TESSERA_E4M3_K1_R1024']",
+      "name": "stage_a.r1024.cost_header",
+      "ok": true
+    },
+    {
+      "detail": "the campaign priced the v2 capture",
+      "name": "stage_a.r1024.capture_binding",
+      "ok": true
+    },
+    {
+      "detail": "the campaign carries the producer projection unchanged",
+      "name": "stage_a.r1024.projection_binding",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.m3_r1024_costs",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_a.r1024.every_cell_measured",
+      "ok": true
+    },
+    {
+      "detail": "{(True, True, 262144, 'aa90b10ea6c5f3b8b3952870f46f0afa81cf869e50b9f893f89176238f3b92b8'): 1734}",
+      "name": "stage_a.r1024.one_hessian_identity",
+      "ok": true
+    },
+    {
+      "detail": "864 units against 864; missing 0, extra 0",
+      "name": "roster.m3_r1024_expert_wires",
+      "ok": true
+    },
+    {
+      "detail": "two wire receipts per routed unit",
+      "name": "stage_a.r1024.expert_wire_rungs",
+      "ok": true
+    },
+    {
+      "detail": "867 listed units",
+      "name": "stage_a.r1024.checkpoint_roster",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_a.r1024.checkpoint_matches_price",
+      "ok": true
+    },
+    {
+      "detail": "declared a565ca9c3b84 recomputed a565ca9c3b84",
+      "name": "stage_a.r1024.checkpoint_seal_recomputed",
+      "ok": true
+    },
+    {
+      "detail": "plan inputs equal the Stage A files by digest",
+      "name": "stage_b.r1024.plan_binds_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "capture manifest and calibration tokens",
+      "name": "stage_b.r1024.plan_binds_capture_and_calibration",
+      "ok": true
+    },
+    {
+      "detail": "{'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all'}",
+      "name": "stage_b.r1024.plan_draw_and_probes",
+      "ok": true
+    },
+    {
+      "detail": "prepare 7ed7820f8247 run 35ecd7c7de8f",
+      "name": "stage_b.r1024.plans_bind_their_passes",
+      "ok": true
+    },
+    {
+      "detail": "run plan differs from the prepare plan at ['/source_identity_cache']",
+      "name": "stage_b.r1024.run_plan_binds_the_identity_cache",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct digests over prepare and run",
+      "name": "stage_b.r1024.source_identity_files_equal",
+      "ok": true
+    },
+    {
+      "detail": "1734 cells, cache a1af9cda7263",
+      "name": "stage_b.r1024.prepared_complete",
+      "ok": true
+    },
+    {
+      "detail": "every unit lists its two Tessera rungs and the BF16 control",
+      "name": "stage_b.r1024.prepared_roster_3_formats",
+      "ok": true
+    },
+    {
+      "detail": "prepare and run results",
+      "name": "stage_b.r1024.results_passed",
+      "ok": true
+    },
+    {
+      "detail": "867 units with exactly this part's two rungs",
+      "name": "stage_b.r1024.price_header",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.m4_r1024_price",
+      "ok": true
+    },
+    {
+      "detail": "groups 2/864/1, params from census shapes",
+      "name": "stage_b.r1024.groups_params_dtype",
+      "ok": true
+    },
+    {
+      "detail": "M4 price provenance binds the M3 cost by path and digest",
+      "name": "stage_b.r1024.price_names_its_stage_a_cost",
+      "ok": true
+    },
+    {
+      "detail": "serialized byte count per cell equals the M3 price's",
+      "name": "stage_b.r1024.price_wire_bytes_equal_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "1734 verified cells, 1734 render paths",
+      "name": "stage_b.r1024.prepared_cells_cover_roster",
+      "ok": true
+    },
+    {
+      "detail": "prepared cache metadata names the Stage A files by digest",
+      "name": "stage_b.r1024.cache_binds_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "fresh SHA256 through held read-only source descriptors: 127 files, 642652070880 payload bytes",
+      "name": "stage_b.r1024.source_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_b.r1024.prepared_evidence_binds_receipts_and_prices",
+      "ok": true
+    },
+    {
+      "detail": "1 probe identities",
+      "name": "stage_b.r1024.one_probe_identity",
+      "ok": true
+    },
+    {
+      "detail": "{'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all'}",
+      "name": "stage_b.r1024.probe_draw",
+      "ok": true
+    },
+    {
+      "detail": "the campaign's census file is byte-identical to the authenticated census",
+      "name": "stage_a.r896.census_is_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "3 campaign rows",
+      "name": "stage_a.r896.plan_rows",
+      "ok": true
+    },
+    {
+      "detail": "[('b355042a9902', 'cache_hit', '-'), ('a994cdc5a3e8', 'executed', '0'), ('a5ad8cc0fdc0', 'cache_hit', '-')]",
+      "name": "stage_a.r896.row_receipts",
+      "ok": true
+    },
+    {
+      "detail": "formats ['TESSERA_BF16_K1_R896', 'TESSERA_E4M3_K1_R896']",
+      "name": "stage_a.r896.cost_header",
+      "ok": true
+    },
+    {
+      "detail": "the campaign priced the v2 capture",
+      "name": "stage_a.r896.capture_binding",
+      "ok": true
+    },
+    {
+      "detail": "the campaign carries the producer projection unchanged",
+      "name": "stage_a.r896.projection_binding",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.m3_r896_costs",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_a.r896.every_cell_measured",
+      "ok": true
+    },
+    {
+      "detail": "{(True, True, 262144, 'aa90b10ea6c5f3b8b3952870f46f0afa81cf869e50b9f893f89176238f3b92b8'): 1734}",
+      "name": "stage_a.r896.one_hessian_identity",
+      "ok": true
+    },
+    {
+      "detail": "864 units against 864; missing 0, extra 0",
+      "name": "roster.m3_r896_expert_wires",
+      "ok": true
+    },
+    {
+      "detail": "two wire receipts per routed unit",
+      "name": "stage_a.r896.expert_wire_rungs",
+      "ok": true
+    },
+    {
+      "detail": "867 listed units",
+      "name": "stage_a.r896.checkpoint_roster",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_a.r896.checkpoint_matches_price",
+      "ok": true
+    },
+    {
+      "detail": "declared 1fa700ee253f recomputed 1fa700ee253f",
+      "name": "stage_a.r896.checkpoint_seal_recomputed",
+      "ok": true
+    },
+    {
+      "detail": "plan inputs equal the Stage A files by digest",
+      "name": "stage_b.r896.plan_binds_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "capture manifest and calibration tokens",
+      "name": "stage_b.r896.plan_binds_capture_and_calibration",
+      "ok": true
+    },
+    {
+      "detail": "{'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all'}",
+      "name": "stage_b.r896.plan_draw_and_probes",
+      "ok": true
+    },
+    {
+      "detail": "prepare 065561a15c3a run 065561a15c3a",
+      "name": "stage_b.r896.plans_bind_their_passes",
+      "ok": true
+    },
+    {
+      "detail": "run plan differs from the prepare plan at nowhere",
+      "name": "stage_b.r896.run_plan_binds_the_identity_cache",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct digests over prepare and run",
+      "name": "stage_b.r896.source_identity_files_equal",
+      "ok": true
+    },
+    {
+      "detail": "1734 cells, cache 0dcd84463c82",
+      "name": "stage_b.r896.prepared_complete",
+      "ok": true
+    },
+    {
+      "detail": "every unit lists its two Tessera rungs and the BF16 control",
+      "name": "stage_b.r896.prepared_roster_3_formats",
+      "ok": true
+    },
+    {
+      "detail": "prepare and run results",
+      "name": "stage_b.r896.results_passed",
+      "ok": true
+    },
+    {
+      "detail": "867 units with exactly this part's two rungs",
+      "name": "stage_b.r896.price_header",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.m4_r896_price",
+      "ok": true
+    },
+    {
+      "detail": "groups 2/864/1, params from census shapes",
+      "name": "stage_b.r896.groups_params_dtype",
+      "ok": true
+    },
+    {
+      "detail": "M4 price provenance binds the M3 cost by path and digest",
+      "name": "stage_b.r896.price_names_its_stage_a_cost",
+      "ok": true
+    },
+    {
+      "detail": "serialized byte count per cell equals the M3 price's",
+      "name": "stage_b.r896.price_wire_bytes_equal_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "1734 verified cells, 1734 render paths",
+      "name": "stage_b.r896.prepared_cells_cover_roster",
+      "ok": true
+    },
+    {
+      "detail": "prepared cache metadata names the Stage A files by digest",
+      "name": "stage_b.r896.cache_binds_stage_a",
+      "ok": true
+    },
+    {
+      "detail": "cached full-file SHA256 bound to held source descriptors: 127 files, 0 payload bytes",
+      "name": "stage_b.r896.source_authenticated",
+      "ok": true
+    },
+    {
+      "detail": "0 cells off: []",
+      "name": "stage_b.r896.prepared_evidence_binds_receipts_and_prices",
+      "ok": true
+    },
+    {
+      "detail": "1 probe identities",
+      "name": "stage_b.r896.one_probe_identity",
+      "ok": true
+    },
+    {
+      "detail": "{'n_probes': 4, 'seed_base': 7000, 'token_scope': 'all'}",
+      "name": "stage_b.r896.probe_draw",
+      "ok": true
+    },
+    {
+      "detail": "120 shards, 0 changed since they were hashed",
+      "name": "source.fingerprints_unchanged",
+      "ok": true
+    },
+    {
+      "detail": "the original merge names the r1024 and r896 prices by path and digest",
+      "name": "chain.original_sources_are_the_stage_b_prices",
+      "ok": true
+    },
+    {
+      "detail": "{}",
+      "name": "chain.current_merge_prices_equal_the_original",
+      "ok": true
+    },
+    {
+      "detail": "the original merge provenance equals the current one without wire_rungs",
+      "name": "chain.original_provenance_lacks_only_wire_rungs",
+      "ok": true
+    },
+    {
+      "detail": "refused: MTP M4 part 0 wire roster differs from merged cost",
+      "name": "chain.current_owner_refuses_the_original_merge_format",
+      "ok": true
+    },
+    {
+      "detail": "3456 routed cells bound",
+      "name": "chain.owner_join_binds_every_routed_cell",
+      "ok": true
+    },
+    {
+      "detail": "the receipt join has no path for the 3 shared units (their wires are checkpoint receipts)",
+      "name": "chain.owner_join_leaves_dense_unbound",
+      "ok": true
+    },
+    {
+      "detail": "eab33bfbfc74",
+      "name": "chain.one_probe_for_all_cells",
+      "ok": true
+    },
+    {
+      "detail": "3468 priced cells",
+      "name": "chain.merged_cells",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.merged_price",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.merged_wire_bytes",
+      "ok": true
+    },
+    {
+      "detail": "867 units against 867; missing 0, extra 0",
+      "name": "roster.merged_params",
+      "ok": true
+    },
+    {
+      "detail": "installed ee065629b081 pin ee065629b081",
+      "name": "offered.installed_contract_is_the_repo_pin",
+      "ok": true
+    },
+    {
+      "detail": "derived {'TESSERA_BF16_K1_R896': 867, 'TESSERA_E4M3_K1_R1024': 864, 'TESSERA_E4M3_K1_R896': 3} recorded {'TESSERA_BF16_K1_R896': 867, 'TESSERA_E4M3_K1_R1024': 864, 'TESSERA_E4M3_K1_R896': 3}",
+      "name": "offered.m6_menu_rows_equal_its_unattested_counts",
+      "ok": true
+    },
+    {
+      "detail": "{'shared': {'TESSERA_BF16_K1_R1024+TESSERA_BF16_K1_R896+TESSERA_E4M3_K1_R1024+TESSERA_E4M3_K1_R896': 3}, 'routed': {'TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R1024+TESSERA_E4M3_K1_R896': 864}}",
+      "name": "offered.current_menu_is_uniform_per_class",
+      "ok": true
+    },
+    {
+      "detail": "{'shared': {'TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R1024': 3}, 'routed': {'TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R896': 864}}",
+      "name": "offered.recorded_m6_menu_is_uniform_per_class",
+      "ok": true
+    },
+    {
+      "detail": "selection merged_cost 052adde6bb66 audited 052adde6bb66",
+      "name": "selection.names_the_audited_merged_price",
+      "ok": true
+    },
+    {
+      "detail": "both Stage B parts by path, digest, rungs and probe identity",
+      "name": "selection.names_the_audited_stage_b_parts",
+      "ok": true
+    },
+    {
+      "detail": "objective mtp_head_self_kl, layer 45, probe eab33bfbfc74",
+      "name": "selection.objective_is_the_mtp_head",
+      "ok": true
+    },
+    {
+      "detail": "joint AURA requires matching aura/joint provenance",
+      "name": "refusal.body_currency.r1024_part",
+      "ok": true
+    },
+    {
+      "detail": "joint AURA requires matching aura/joint provenance",
+      "name": "refusal.body_currency.r896_part",
+      "ok": true
+    },
+    {
+      "detail": "joint AURA requires matching aura/joint provenance",
+      "name": "refusal.body_currency.merged_original",
+      "ok": true
+    },
+    {
+      "detail": "joint AURA requires matching aura/joint provenance",
+      "name": "refusal.body_currency.merged_current",
+      "ok": true
+    },
+    {
+      "detail": "867 entries hashed and validated (hessian, activations, count, maximum); 0 off",
+      "name": "io.capture_entries_verified",
+      "ok": true
+    },
+    {
+      "detail": "3468 wire blobs re-hashed, producer-verified, equal to receipt and prepared wire_sha256; 0 off: []",
+      "name": "io.wires_match_receipts_and_prepared_evidence",
+      "ok": true
+    },
+    {
+      "detail": "3468 rendered shards re-hashed against prepared render_file_sha256; 0 off",
+      "name": "io.renders_match_prepared_evidence",
+      "ok": true
+    },
+    {
+      "detail": "7c78d20519be rc 0 on sparklina",
+      "name": "action.capture-v2",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m tools.glm_mtp_capture --phase capture --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.json",
+      "name": "action.capture-v2.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "89369de5afb2 rc 0 on sparklina",
+      "name": "action.projection",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m tools.glm_mtp_capture --phase projection --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.j",
+      "name": "action.projection.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "83dc1e8371bb rc 0 on sparklina",
+      "name": "action.final-hidden",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m tools.glm_mtp_capture --phase final-hidden --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan",
+      "name": "action.final-hidden.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "c3dc42c2ae32 rc 0 on sparklina",
+      "name": "action.m4-r1024-prepare",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m prismaquant.tessera_joint_aura prepare --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan.json --pl",
+      "name": "action.m4-r1024-prepare.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "6d839e49e7c3 rc 0 on sparky",
+      "name": "action.m4-r1024-run",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m prismaquant.tessera_joint_aura run --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan-run.json --pl",
+      "name": "action.m4-r1024-run.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "64969134bf06 rc 0 on sparky",
+      "name": "action.m4-r896-prepare",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m prismaquant.tessera_joint_aura prepare --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json --pla",
+      "name": "action.m4-r896-prepare.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "b91a4554c003 rc 0 on sparklina",
+      "name": "action.m4-r896-run",
+      "ok": true
+    },
+    {
+      "detail": "python3 -m prismaquant.tessera_joint_aura run --plan /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json --plan-sh",
+      "name": "action.m4-r896-run.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "ef8afe37ea2e rc 0 on sparklina",
+      "name": "action.m3-r1024-row-0000",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r1024-row-0000.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "0fe868695550 rc 0 on sparklina",
+      "name": "action.m3-r1024-row-0001",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r1024-row-0001.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "65f323e3764d rc 0 on sparklina",
+      "name": "action.m3-r1024-row-0002",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r1024-row-0002.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "b355042a9902 rc 0 on sparklina",
+      "name": "action.m3-r896-row-0000",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r896-row-0000.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "a994cdc5a3e8 rc 0 on sparky",
+      "name": "action.m3-r896-row-0001",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r896-row-0001.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "a5ad8cc0fdc0 rc 0 on sparklina",
+      "name": "action.m3-r896-row-0002",
+      "ok": true
+    },
+    {
+      "detail": "python3 -u -m prismaquant.tessera_campaign --model /mnt/shared/models/GLM-5.3-Flash-BF16 --out /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/w",
+      "name": "action.m3-r896-row-0002.sealed_command_is_its_role",
+      "ok": true
+    },
+    {
+      "detail": "370bdce3b3c2 rc 0 on dl380g10",
+      "name": "action.reselect-owner-join",
+      "ok": true
+    },
+    {
+      "detail": "8 excluded attempts, none among the 14 qualifying actions",
+      "name": "excluded.attempts_are_not_qualifying",
+      "ok": true
+    },
+    {
+      "detail": "Counter({'checkpoint_seal': 4, 'projection_shape': 4, 'prepared_plan': 2, 'prepared_implementation': 2, 'source_rehash': 1})",
+      "name": "dev_ledger.every_line_classified",
+      "ok": true
+    },
+    {
+      "detail": "recorded f8c794ba2fcb reproduced f8c794ba2fcb",
+      "name": "trees.m4-r1024-prepare.digest",
+      "ok": true
+    },
+    {
+      "detail": "recorded 13863d663c58 reproduced 13863d663c58",
+      "name": "trees.m4-r1024-run.digest",
+      "ok": true
+    },
+    {
+      "detail": "recorded 13863d663c58 reproduced 13863d663c58",
+      "name": "trees.m4-r896-prepare.digest",
+      "ok": true
+    },
+    {
+      "detail": "recorded 13863d663c58 reproduced 13863d663c58",
+      "name": "trees.m4-r896-run.digest",
+      "ok": true
+    },
+    {
+      "detail": "r896 prepare and run",
+      "name": "trees.r896_prepare_and_run_share_one_tree",
+      "ok": true
+    },
+    {
+      "detail": "['cost_streaming.py', 'tessera_calibration_cache.py', 'tessera_joint_aura.py', 'tessera_source_digest_adoption.py']",
+      "name": "trees.r1024_split_is_identity_proof_code",
+      "ok": true
+    },
+    {
+      "detail": "pinned tree 07bfcc0e9b7d, 1424 files, encoder source da5805bc707c",
+      "name": "producer.pin_tree_is_commit_07bfcc0e",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.calibration.artifact_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.calibration.calibration_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.calibration.fit_ids_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.calibration.hessian_capture_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.calibration.text_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.probe.calibration_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.probe.identity_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.probe.objective",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.probe.producer_source_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.producer.encoder_fixture_id",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.producer.encoder_source_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.producer.m3_campaign_source_sha256",
+      "ok": true
+    },
+    {
+      "detail": "2 distinct value(s) (recorded split, see seals)",
+      "name": "identity.producer.prismaquant_source_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.producer.tessera_pin_mount",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.capture_torch",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.container_admission_reference",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.container_content_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.cuda",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.gpu",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.projection_backend_binary_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.projection_backend_qualification_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.runtime.torch",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.source.identity_file_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.source.model_content_sha256",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.source.model_path",
+      "ok": true
+    },
+    {
+      "detail": "1 distinct value(s)",
+      "name": "identity.source.shard_digests_sha256",
+      "ok": true
+    }
+  ],
+  "dev_ledger": [
+    {
+      "key": "c3dc42c2ae32773fc516701dbf736b9b72df7e36c5ab1b4323c0bbd5f3db3f4b",
+      "kind": "checkpoint_seal",
+      "line": 3,
+      "resolution": {
+        "evidence": "the canonical seal is recomputed from the checkpoint identity and equals the declared one (stage_a.*.checkpoint_seal_recomputed)",
+        "status": "verified_here"
+      },
+      "role": "m4-r1024-prepare",
+      "text": "[DEV-MODE] campaign checkpoint seal not recomputed under dev mode; using the manifest's declared identity_sha256 a565ca9c3b84a5923abfa819b617cdf9ec6b5a78068eff2d48fdde840512fdf1 (recorded, not gated)"
+    },
+    {
+      "key": "c3dc42c2ae32773fc516701dbf736b9b72df7e36c5ab1b4323c0bbd5f3db3f4b",
+      "kind": "source_rehash",
+      "line": 14,
+      "resolution": {
+        "evidence": "the prepare hashed all 120 shards inside its GPU reservation; the live shards still match their recorded stat fingerprints (source.fingerprints_unchanged)",
+        "status": "verified_here"
+      },
+      "role": "m4-r1024-prepare",
+      "text": "[DEV-MODE] source rehash of 642652070880 bytes: no usable identity cache at the declared /mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/source-identity.json; hashing every shard now"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "prepared_plan",
+      "line": 2,
+      "resolution": {
+        "evidence": "the r1024 prepare and run plans differ only in source_identity_cache, the path and digest of the identity file the prepare wrote (stage_b.r1024.run_plan_binds_the_identity_cache)",
+        "status": "explained"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal prepared plan_sha256 differs (prepared completion versus the running pass): expected 35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649, actual 7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172; sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "prepared_implementation",
+      "line": 3,
+      "resolution": {
+        "evidence": "both executing trees reproduce their stamps from the snapshot bundles and differ in four identity-proof files (trees.*)",
+        "status": "explained"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal prepared implementation_sha256 differs (prepared completion versus the running pass): expected 13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c, actual f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e; sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "checkpoint_seal",
+      "line": 5,
+      "resolution": {
+        "evidence": "the canonical seal is recomputed from the checkpoint identity and equals the declared one (stage_a.*.checkpoint_seal_recomputed)",
+        "status": "verified_here"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] campaign checkpoint seal not recomputed under dev mode; using the manifest's declared identity_sha256 a565ca9c3b84a5923abfa819b617cdf9ec6b5a78068eff2d48fdde840512fdf1 (recorded, not gated)"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "prepared_plan",
+      "line": 16,
+      "resolution": {
+        "evidence": "the r1024 prepare and run plans differ only in source_identity_cache, the path and digest of the identity file the prepare wrote (stage_b.r1024.run_plan_binds_the_identity_cache)",
+        "status": "explained"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal prepared plan_sha256 differs (prepared completion versus the running pass): expected 35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649, actual 7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172; sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "prepared_implementation",
+      "line": 17,
+      "resolution": {
+        "evidence": "both executing trees reproduce their stamps from the snapshot bundles and differ in four identity-proof files (trees.*)",
+        "status": "explained"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal prepared implementation_sha256 differs (prepared completion versus the running pass): expected 13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c, actual f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e; sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "projection_shape",
+      "line": 36,
+      "resolution": {
+        "evidence": "routed (4096,2048) and (2048,4096) are outside the fused kernel's qualified shapes, so the reference arithmetic ran; a certified run refuses these shapes",
+        "status": "limitation"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal joint projection qualified shape differs (joint projection qualification; this shape runs the reference arithmetic (left * right).sum()): expected [(512, 2048), (1792, 2048), (2048, 1792), (2048, 2048), (2048, 7168), (7168, 2048)], actual (4096, 2048); sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865",
+      "kind": "projection_shape",
+      "line": 37,
+      "resolution": {
+        "evidence": "routed (4096,2048) and (2048,4096) are outside the fused kernel's qualified shapes, so the reference arithmetic ran; a certified run refuses these shapes",
+        "status": "limitation"
+      },
+      "role": "m4-r1024-run",
+      "text": "[DEV-MODE] seal joint projection qualified shape differs (joint projection qualification; this shape runs the reference arithmetic (left * right).sum()): expected [(512, 2048), (1792, 2048), (2048, 1792), (2048, 2048), (2048, 7168), (7168, 2048)], actual (2048, 4096); sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "64969134bf06a2eebcaeee8963d76acb66b87f3628c22d25f59ce4b3dea416ad",
+      "kind": "checkpoint_seal",
+      "line": 3,
+      "resolution": {
+        "evidence": "the canonical seal is recomputed from the checkpoint identity and equals the declared one (stage_a.*.checkpoint_seal_recomputed)",
+        "status": "verified_here"
+      },
+      "role": "m4-r896-prepare",
+      "text": "[DEV-MODE] campaign checkpoint seal not recomputed under dev mode; using the manifest's declared identity_sha256 1fa700ee253f5500d8f6821237e496d9196c85716f094d9c8a9a394068eb2a07 (recorded, not gated)"
+    },
+    {
+      "key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898",
+      "kind": "checkpoint_seal",
+      "line": 3,
+      "resolution": {
+        "evidence": "the canonical seal is recomputed from the checkpoint identity and equals the declared one (stage_a.*.checkpoint_seal_recomputed)",
+        "status": "verified_here"
+      },
+      "role": "m4-r896-run",
+      "text": "[DEV-MODE] campaign checkpoint seal not recomputed under dev mode; using the manifest's declared identity_sha256 1fa700ee253f5500d8f6821237e496d9196c85716f094d9c8a9a394068eb2a07 (recorded, not gated)"
+    },
+    {
+      "key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898",
+      "kind": "projection_shape",
+      "line": 32,
+      "resolution": {
+        "evidence": "routed (4096,2048) and (2048,4096) are outside the fused kernel's qualified shapes, so the reference arithmetic ran; a certified run refuses these shapes",
+        "status": "limitation"
+      },
+      "role": "m4-r896-run",
+      "text": "[DEV-MODE] seal joint projection qualified shape differs (joint projection qualification; this shape runs the reference arithmetic (left * right).sum()): expected [(512, 2048), (1792, 2048), (2048, 1792), (2048, 2048), (2048, 7168), (7168, 2048)], actual (4096, 2048); sealing is off (PQ #1147), continuing with the stored data"
+    },
+    {
+      "key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898",
+      "kind": "projection_shape",
+      "line": 33,
+      "resolution": {
+        "evidence": "routed (4096,2048) and (2048,4096) are outside the fused kernel's qualified shapes, so the reference arithmetic ran; a certified run refuses these shapes",
+        "status": "limitation"
+      },
+      "role": "m4-r896-run",
+      "text": "[DEV-MODE] seal joint projection qualified shape differs (joint projection qualification; this shape runs the reference arithmetic (left * right).sum()): expected [(512, 2048), (1792, 2048), (2048, 1792), (2048, 2048), (2048, 7168), (7168, 2048)], actual (2048, 4096); sealing is off (PQ #1147), continuing with the stored data"
+    }
+  ],
+  "dev_stamps": {
+    "m4-r1024-prepare": {
+      "dev_mode": "1",
+      "dev_uncertified": true,
+      "producer_source_sha256": "f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e"
+    },
+    "m4-r1024-run": {
+      "dev_mode": "1",
+      "dev_uncertified": true,
+      "producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c"
+    },
+    "m4-r896-prepare": {
+      "dev_mode": "1",
+      "dev_uncertified": true,
+      "producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c"
+    },
+    "m4-r896-run": {
+      "dev_mode": "1",
+      "dev_uncertified": true,
+      "producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c"
+    }
+  },
+  "excluded_attempts": [
+    {
+      "attempts": [
+        {
+          "disposition": "done",
+          "returncode": 0,
+          "status": "executed"
+        }
+      ],
+      "cas_receipt": true,
+      "key": "d1e1681bd0711f6801b134d752af4cc9ab77fe292f7c8036238e69b7472708b9",
+      "queue_state": [
+        "done",
+        "intent"
+      ],
+      "role": "capture-v1-superseded"
+    },
+    {
+      "attempts": [],
+      "cas_receipt": false,
+      "key": "1f51251ce30ed6bcd8fdb2a8ab6db5c9c69560380cb3415c774a5e3f39fb9aba",
+      "queue_state": [
+        "intent"
+      ],
+      "role": "m4-r896-attempt1-withdrawn"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "4a68abb9fb0515755ddce8622c0aac8bb4d0d52ddf72423fa219d0fe3718f9a4",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt1-derivative-guard"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "3640fdaf805e9d8af015840004e3b0b5d6d95bf2ec32175520a2d0ec2f7fb284",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt1-derivative-guard"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "edd4019fb805988f119d58e4420a58add29335ee64bc514dc0bca75bb61a72fe",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt1-derivative-guard"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "9c3225d8ebe23ecb4eeb6b0118ff444089f7da8448b1415b1c8da0d0c10d15ef",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt2-no-datasets"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "ce3299a0f32e6ccad4c884fb8bf1ed27756c24ba39841d270ca459df3e46b9e8",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt2-no-datasets"
+    },
+    {
+      "attempts": [
+        {
+          "disposition": "failed",
+          "returncode": 1,
+          "status": "failed"
+        }
+      ],
+      "cas_receipt": false,
+      "key": "69901d3fe135c7eda75180f4f7e0cd8b1a77507e388deba4de71b09a8a93cb8b",
+      "queue_state": [
+        "failed",
+        "intent"
+      ],
+      "role": "m3-r1024-attempt2-no-datasets"
+    }
+  ],
+  "failed": 0,
+  "identities": [
+    {
+      "distinct": 1,
+      "kind": "calibration.artifact_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+          "where": [
+            "calibration-tokens-file",
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "calibration.calibration_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1",
+          "where": [
+            "calibration-tokens-file",
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "calibration.fit_ids_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "6b6a0c4283de3aae633fd2bf00f74ac80928a8c389c42aa6d5101b765115532e",
+          "where": [
+            "calibration-tokens-file",
+            "capture-identity",
+            "census",
+            "m3-r1024-checkpoint-identity",
+            "m3-r896-checkpoint-identity",
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "calibration.hessian_capture_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "aa90b10ea6c5f3b8b3952870f46f0afa81cf869e50b9f893f89176238f3b92b8",
+          "where": [
+            "m3-r1024-rows",
+            "m3-r896-rows"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "calibration.text_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "aee724fa58bfbdeb3fc6803297fb6bab27b203d7c40b39ddef9b9770e5d52fe5",
+          "where": [
+            "calibration-tokens-file",
+            "census",
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "probe.calibration_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1",
+          "where": [
+            "m4-r1024-price",
+            "m4-r896-price"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "probe.identity_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "eab33bfbfc744aa46d7bbb5072ded168804492331fb46c2214cb10ff63703b9e",
+          "where": [
+            "m4-r1024-price",
+            "m4-r896-price",
+            "merged-price"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "probe.objective",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": {
+            "global_token_count": 261632,
+            "logits_head": "target_lm_head",
+            "mtp_layer": 45,
+            "objective": "mtp_head_self_kl",
+            "position_zero_embedding": "zeroed",
+            "previous_hidden": "target_post_final_norm",
+            "reference": "bf16_mtp_head",
+            "rows": [
+              0,
+              510
+            ],
+            "schema": "prismaquant.joint_aura.mtp_objective.v1"
+          },
+          "where": [
+            "m4-r1024-price",
+            "m4-r896-price"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "probe.producer_source_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+          "where": [
+            "m4-r1024-price",
+            "m4-r896-price"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "producer.encoder_fixture_id",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": [
+            "03bbc5b1c56d55e1d7f5f0d1baa1107e462d5bad18a412d0c232c78d04c95519"
+          ],
+          "where": [
+            "m3-r1024-receipts",
+            "m3-r896-receipts"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "producer.encoder_source_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": [
+            "da5805bc707c041efaeb27c5083fb7809fd8cdc51d501f41103b791270b569cb"
+          ],
+          "where": [
+            "m3-r1024-checkpoint-identity",
+            "m3-r1024-receipts",
+            "m3-r896-checkpoint-identity",
+            "m3-r896-receipts",
+            "pinned-tree-07bfcc0e"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "producer.m3_campaign_source_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "d17e1480db118ef68210720eb83e785dea4596e052c201490901011760fcccf2",
+          "where": [
+            "m3-r1024-checkpoint-identity",
+            "m3-r896-checkpoint-identity"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 2,
+      "kind": "producer.prismaquant_source_sha256",
+      "split_allowed": true,
+      "values": [
+        {
+          "value": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+          "where": [
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run",
+            "pb-m4-r1024-run-tree",
+            "pb-m4-r896-run-tree"
+          ]
+        },
+        {
+          "value": "f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e",
+          "where": [
+            "m4-r1024-prepare"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "producer.tessera_pin_mount",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+          "where": [
+            "pb-capture-v2",
+            "pb-final-hidden",
+            "pb-m3-r1024-row-0000",
+            "pb-m3-r1024-row-0001",
+            "pb-m3-r1024-row-0002",
+            "pb-m3-r896-row-0000",
+            "pb-m3-r896-row-0001",
+            "pb-m3-r896-row-0002",
+            "pb-m4-r1024-prepare",
+            "pb-m4-r1024-run",
+            "pb-m4-r896-prepare",
+            "pb-m4-r896-run",
+            "pb-projection"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.capture_torch",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "2.13.0+cu130",
+          "where": [
+            "capture-identity"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.container_admission_reference",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "content:sha256:b5cfa805119cd6f502cc8fa601103e51d12289a3bb8e8129290da91539e42806",
+          "where": [
+            "pb-capture-v2",
+            "pb-final-hidden",
+            "pb-m4-r1024-prepare",
+            "pb-m4-r1024-run",
+            "pb-m4-r896-prepare",
+            "pb-m4-r896-run",
+            "pb-projection"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.container_content_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run",
+            "pb-capture-v2",
+            "pb-final-hidden",
+            "pb-m3-r1024-row-0000",
+            "pb-m3-r1024-row-0001",
+            "pb-m3-r1024-row-0002",
+            "pb-m3-r896-row-0000",
+            "pb-m3-r896-row-0001",
+            "pb-m3-r896-row-0002",
+            "pb-m4-r1024-prepare",
+            "pb-m4-r1024-run",
+            "pb-m4-r896-prepare",
+            "pb-m4-r896-run",
+            "pb-projection"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.cuda",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "13.0",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.gpu",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": {
+            "major": 12,
+            "minor": 1,
+            "multi_processor_count": 48,
+            "name": "NVIDIA GB10"
+          },
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.projection_backend_binary_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "9305c183c5214dc5ff1f73382963f8275eb1b6197cb8d173c6a93bffd700c115",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.projection_backend_qualification_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "935f83489314402f58d458afe066dd33c5ec0a8d7f11827cea118ab23a7272d1",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "runtime.torch",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "2.13.0+cu130",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "source.identity_file_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd",
+          "where": [
+            "m4-r1024",
+            "m4-r896"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "source.model_content_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "c45d2d35b4520d729e1026b926dc1eb0de9d8fc905d46733c7edd322af2009a0",
+          "where": [
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run",
+            "source-identity-file"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "source.model_path",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+          "where": [
+            "census",
+            "m3-r1024-cost",
+            "m3-r896-cost",
+            "m4-r1024-prepare",
+            "m4-r1024-run",
+            "m4-r896-prepare",
+            "m4-r896-run"
+          ]
+        }
+      ]
+    },
+    {
+      "distinct": 1,
+      "kind": "source.shard_digests_sha256",
+      "split_allowed": false,
+      "values": [
+        {
+          "value": "0bd675c57d6faceb57147dcd37f20eb6c3a9cf61a0fbb6d40af8109079afb263",
+          "where": [
+            "m3-r1024-checkpoint-identity",
+            "m3-r896-checkpoint-identity",
+            "m4-r1024-prepared-authentication",
+            "m4-r896-prepared-authentication",
+            "producer-projection",
+            "source-identity-file"
+          ]
+        }
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "bytes": 5722729,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/mtp-census.json",
+      "role": "authenticated-census",
+      "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"
+    },
+    {
+      "bytes": 62409468,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-r1024-02/workspace/census.json",
+      "role": "base-census",
+      "sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd"
+    },
+    {
+      "bytes": 2097904,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/exact-calibration-input-01/calibration_tokens.safetensors",
+      "role": "calibration-tokens",
+      "sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329"
+    },
+    {
+      "bytes": 12667963,
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+      "role": "canonical-capture-manifest",
+      "sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c"
+    },
+    {
+      "bytes": 323830,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json",
+      "role": "capture-manifest",
+      "sha256": "934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1"
+    },
+    {
+      "bytes": 4422,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture-run.json",
+      "role": "capture-report",
+      "sha256": "6a71391dd8073b8b8b7cbc42bd682243afa588cf1dadb23c2ee3c15fa470cc46"
+    },
+    {
+      "bytes": 847,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace-attempt1-derivative-guard/receipts.json",
+      "role": "excluded-m3-r1024-attempt1-derivative-guard",
+      "sha256": "cea241ab6a29528b23e2730a9dadb9ceab42ccf3d2f7cf0a2a2a9413e9831cb4"
+    },
+    {
+      "bytes": 846,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace-attempt2-no-datasets/receipts.json",
+      "role": "excluded-m3-r1024-attempt2-no-datasets",
+      "sha256": "169e5570ad431b34959cb1f4f0d6a4baa5f8af694b420293e5e98ec5020b96ad"
+    },
+    {
+      "bytes": 604770,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/final-hidden/manifest.json",
+      "role": "final-hidden",
+      "sha256": "9819766aae872b78e4af54d9d93885e275789a73eda5315564a1f3c3540438d1"
+    },
+    {
+      "bytes": 713,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/final-hidden/final-hidden-run.json",
+      "role": "final-hidden-run",
+      "sha256": "e8c02b901d7375196f4df86494e5c52600c6309ad696759fe489ed32237bcec6"
+    },
+    {
+      "bytes": 5722729,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/census.json",
+      "role": "m3-r1024-census",
+      "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"
+    },
+    {
+      "bytes": 198223601,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/merged/cost.anchors.json",
+      "role": "m3-r1024-checkpoint",
+      "sha256": "dd27c04bc04f65faad15c0fdcf2f07bbfaac1e31a6031beac91269aff35e5e3c"
+    },
+    {
+      "bytes": 8098684,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/merged/cost.pkl",
+      "role": "m3-r1024-cost",
+      "sha256": "94e8d180bef8993ca14fed560be6cbfd358dbd44e8d00babf2603d9e515fad42"
+    },
+    {
+      "bytes": 138693,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/plan.json",
+      "role": "m3-r1024-plan",
+      "sha256": "8f3cca0e9e09e0e03665962b41000974841f3712070e93a4dd1e8139d823c66f"
+    },
+    {
+      "bytes": 855,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/receipts.json",
+      "role": "m3-r1024-receipts",
+      "sha256": "23c811c68c66551a54c5bf2f3ab7aace0b43a95efb706cbb0308cf40550a3cc7"
+    },
+    {
+      "bytes": 18888,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/manifest.submitted.json",
+      "role": "m3-r1024-submitted-manifest",
+      "sha256": "66b53c7b8c334c434503a0abaa6367596ff792f5fada0038f45e0f631fc6cbe3"
+    },
+    {
+      "bytes": 5722729,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/census.json",
+      "role": "m3-r896-census",
+      "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"
+    },
+    {
+      "bytes": 198223599,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/merged/cost.anchors.json",
+      "role": "m3-r896-checkpoint",
+      "sha256": "f899c5de47cf3b1a8a70085893437e47d436415743007e08a84688e5397a19a5"
+    },
+    {
+      "bytes": 8096692,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/merged/cost.pkl",
+      "role": "m3-r896-cost",
+      "sha256": "8a2fee626276863fbc04324ef3b1e8f716434c1f6b010cb9ceba29e4d2f3864a"
+    },
+    {
+      "bytes": 138684,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/plan.json",
+      "role": "m3-r896-plan",
+      "sha256": "b5009f939af29be5e2fdfc60ab81ea40c8552e7751983b3844040d523e409aaf"
+    },
+    {
+      "bytes": 831,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/receipts.json",
+      "role": "m3-r896-receipts",
+      "sha256": "af884dbea0e71d3e205c3a8659c517bd80dbd9f8c0be95efe39b6d40603c7662"
+    },
+    {
+      "bytes": 18864,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/manifest.submitted.json",
+      "role": "m3-r896-submitted-manifest",
+      "sha256": "8a44a40754a8c26d872411536de036cdaa9ce5a3c9767e91ff0ff39ebdbcf5cd"
+    },
+    {
+      "bytes": 3611,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan.json",
+      "role": "m4-r1024-plan",
+      "sha256": "7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172"
+    },
+    {
+      "bytes": 3853,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan-run.json",
+      "role": "m4-r1024-plan-run",
+      "sha256": "35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649"
+    },
+    {
+      "bytes": 4350897,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/results.json",
+      "role": "m4-r1024-prepare-results",
+      "sha256": "69d9eac16eff9652692e85bf02d677241e448801598d3ec8263ec4aa60e94c46"
+    },
+    {
+      "bytes": 4345609,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/source-identity.json",
+      "role": "m4-r1024-prepare-source-identity",
+      "sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"
+    },
+    {
+      "bytes": 4448541,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/prepared.json",
+      "role": "m4-r1024-prepared",
+      "sha256": "960a3d4eae4e0e237679ddff2d6eaea8e3f935ccda4aa2a7dfe8341065957703"
+    },
+    {
+      "bytes": 8129035,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/run/joint-cost.pkl",
+      "role": "m4-r1024-price",
+      "sha256": "2e3dee29a974ad4b5e5de9ac5eb4116bf213e73ca25e1ba94eb6daec08443103"
+    },
+    {
+      "bytes": 5576571,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/production.pkl",
+      "role": "m4-r1024-production-cache",
+      "sha256": "a1af9cda72638ab1f302c6fcb2a1e8d8b881b789f4e732aa0f4e671c10e1b030"
+    },
+    {
+      "bytes": 4322937,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/run/results.json",
+      "role": "m4-r1024-run-results",
+      "sha256": "2f44ad0223efdd136df735a6112516aa21845e56ccfdc0cb9a06f5136b7957c6"
+    },
+    {
+      "bytes": 4345609,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/run/source-identity.json",
+      "role": "m4-r1024-run-source-identity",
+      "sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"
+    },
+    {
+      "bytes": 3847,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json",
+      "role": "m4-r896-plan",
+      "sha256": "065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2"
+    },
+    {
+      "bytes": 4357473,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/results.json",
+      "role": "m4-r896-prepare-results",
+      "sha256": "929a6bd1061ca1d0d9b69a867fe9be29e34966a96cd39d3f535c3dd726a73d3b"
+    },
+    {
+      "bytes": 4345609,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/source-identity.json",
+      "role": "m4-r896-prepare-source-identity",
+      "sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"
+    },
+    {
+      "bytes": 4446806,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/prepared.json",
+      "role": "m4-r896-prepared",
+      "sha256": "19b7d32737c9f48cf84fdd5ebd8db6ddbce8187a4f49607e4744b80c3d1a9cdd"
+    },
+    {
+      "bytes": 8127295,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/run/joint-cost.pkl",
+      "role": "m4-r896-price",
+      "sha256": "4338d1bd94a912867f317875db724435695aa5f45b87a1c24f26c7b687ff8fac"
+    },
+    {
+      "bytes": 5572234,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/production.pkl",
+      "role": "m4-r896-production-cache",
+      "sha256": "0dcd84463c82a8ebe4bc97bc6c1e589cb3d223dbfcf0f8ec9142f8cbc07eb8b7"
+    },
+    {
+      "bytes": 4322936,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/run/results.json",
+      "role": "m4-r896-run-results",
+      "sha256": "07fbbe8da8040112753e584bb5d19d09ee96da9b285c2fee279fab93561526af"
+    },
+    {
+      "bytes": 4345609,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/run/source-identity.json",
+      "role": "m4-r896-run-source-identity",
+      "sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"
+    },
+    {
+      "bytes": 26706,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/selection.json",
+      "role": "m6-selection",
+      "sha256": "40941983dc24fe596c7873e0c1d5a2a8617d7df17d2a42e462d9b3720c7a6199"
+    },
+    {
+      "bytes": 16365960,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/merged-cost.pkl",
+      "role": "merged-price-original",
+      "sha256": "052adde6bb66ff9b32eb05fd2326ee0aacd7435b812a48c0c7c29841f7d2fbba"
+    },
+    {
+      "bytes": 4691515,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/producer-answer.json",
+      "role": "producer-answer",
+      "sha256": "b9ec9bf2a4bbb0a8c3cba5c56669356191050e55490a27df9029872d13c1f350"
+    },
+    {
+      "bytes": 157,
+      "path": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63/.pinned-source.json",
+      "role": "producer-pin-record",
+      "sha256": "e580fa790c7bba9e7b007df62a8953afe066ab19eb50d8dbb43595cba06ce4d8"
+    },
+    {
+      "bytes": 5267786,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/mtp-projection.json",
+      "role": "producer-projection",
+      "sha256": "33de456394904eb243aa595098f11f45c5211b4a73cb94474957e57fcc196e78"
+    },
+    {
+      "bytes": 842,
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/projection-run.json",
+      "role": "projection-run",
+      "sha256": "6d5ba9c9cc1b75fa20eeafd08c3fc68383204e49d80c76bf3c3a23b4f6ae1649"
+    }
+  ],
+  "interpreter": {
+    "path": "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python",
+    "python": "3.14.4"
+  },
+  "io": {
+    "capture_bytes": 49700004815,
+    "capture_entries": 867,
+    "render_bytes": 58192191178,
+    "rendered_shards": 3468,
+    "wire_blobs": 3468,
+    "wire_bytes": 13743513490
+  },
+  "issue": "RobTand/prismaquant#2530",
+  "layer": 45,
+  "limit_units": null,
+  "limitations": [
+    {
+      "id": "dev_uncertified",
+      "text": "All four Stage B results carry the dev_uncertified stamp, and 13 sealed action specs set PRISMAQUANT_DEV_MODE=1. This record re-checks the seals those runs skipped. It does not turn the runs into certified runs."
+    },
+    {
+      "id": "certified_run_refuses_routed_shapes",
+      "text": "The routed expert shapes (4096,2048) and (2048,4096) are outside the fused projection kernel's qualified shapes. The original Stage B runs used the reference arithmetic. A run with PRISMAQUANT_DEV_MODE=0 refuses these shapes."
+    },
+    {
+      "id": "dense_wires_have_no_selection_receipt_path",
+      "text": "The 12 shared-unit cells have verified wires and checkpoint receipts. The owner's receipt join (enrich_mtp_cost_wires) binds routed cells only, so a selected dense Tessera rung is refused (tests/test_glm_mtp_priced_wires_1413.py)."
+    },
+    {
+      "id": "body_refusal_rests_on_payload_provenance",
+      "text": "Body-price admission refuses the MTP payloads because their provenance is not body-aura provenance. It does not read the row-level MTP objective: the same rows under body-style provenance are admitted."
+    }
+  ],
+  "merged_price": {
+    "cells": 3468,
+    "current": {
+      "bytes": 16380799,
+      "file": "merged-cost-current.pkl",
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/qualification-pq2530/final-20261010-f/merged-cost-current.pkl",
+      "sha256": "8224c7e4154f3e38c8ae9f0321866800cd7f790e7ced914fe0c4c0f4cfae6d85"
+    },
+    "original": {
+      "owner_join": "refused: MTP M4 part 0 wire roster differs from merged cost",
+      "sha256": "052adde6bb66ff9b32eb05fd2326ee0aacd7435b812a48c0c7c29841f7d2fbba"
+    },
+    "probe": {
+      "distribution": "rademacher",
+      "n_probes": 4,
+      "normalization": "global_kl_fisher",
+      "objective": {
+        "global_token_count": 261632,
+        "logits_head": "target_lm_head",
+        "mtp_layer": 45,
+        "objective": "mtp_head_self_kl",
+        "position_zero_embedding": "zeroed",
+        "previous_hidden": "target_post_final_norm",
+        "reference": "bf16_mtp_head",
+        "rows": [
+          0,
+          510
+        ],
+        "schema": "prismaquant.joint_aura.mtp_objective.v1"
+      },
+      "seed_base": 7000,
+      "token_scope": "all"
+    },
+    "probe_identity_sha256": "eab33bfbfc744aa46d7bbb5072ded168804492331fb46c2214cb10ff63703b9e"
+  },
+  "offered": {
+    "current": {
+      "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+      "menus": {
+        "routed": {
+          "TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R1024+TESSERA_E4M3_K1_R896": 864
+        },
+        "shared": {
+          "TESSERA_BF16_K1_R1024+TESSERA_BF16_K1_R896+TESSERA_E4M3_K1_R1024+TESSERA_E4M3_K1_R896": 3
+        }
+      },
+      "unattested": {
+        "TESSERA_BF16_K1_R896": 864
+      }
+    },
+    "recorded_m6": {
+      "menus": {
+        "routed": {
+          "TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R896": 864
+        },
+        "shared": {
+          "TESSERA_BF16_K1_R1024+TESSERA_E4M3_K1_R1024": 3
+        }
+      },
+      "note": "decided by the Tessera contract of the M6 run; its tree is not re-evaluable with the current owners",
+      "unattested": {
+        "TESSERA_BF16_K1_R896": 867,
+        "TESSERA_E4M3_K1_R1024": 864,
+        "TESSERA_E4M3_K1_R896": 3
+      }
+    },
+    "repo_pin": {
+      "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+      "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
+    },
+    "scope": [
+      "--tessera-platform",
+      "sm_121",
+      "--tessera-runtime-image",
+      "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+      "--tessera-execution-mode",
+      "eager",
+      "--tessera-residency",
+      "resident"
+    ],
+    "target_profile": "glm_packed_research_sm121"
+  },
+  "parent": "RobTand/prismaquant#1271",
+  "passed": 181,
+  "performance_claims": [],
+  "producer_pin": {
+    "commit": "07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+    "encoder_source_sha256": "da5805bc707c041efaeb27c5083fb7809fd8cdc51d501f41103b791270b569cb",
+    "tree_sha256": "215f3254edbeea32643697f3d6aeea4ee51494784f2573df42727035aff3b3d0"
+  },
+  "projection": {
+    "geometry": {
+      "down_proj 4096x2048": 288,
+      "gate_proj 2048x4096": 288,
+      "up_proj 2048x4096": 288
+    },
+    "source_shards": 120,
+    "units": 864
+  },
+  "rosters": [
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "capture_entries",
+      "scope": "census"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "m3_r1024_costs",
+      "scope": "census"
+    },
+    {
+      "count": 864,
+      "equals": true,
+      "expected": 864,
+      "extra": [],
+      "missing": [],
+      "name": "m3_r1024_expert_wires",
+      "scope": "routed"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "m4_r1024_price",
+      "scope": "census"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "m3_r896_costs",
+      "scope": "census"
+    },
+    {
+      "count": 864,
+      "equals": true,
+      "expected": 864,
+      "extra": [],
+      "missing": [],
+      "name": "m3_r896_expert_wires",
+      "scope": "routed"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "m4_r896_price",
+      "scope": "census"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "merged_price",
+      "scope": "census"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "merged_wire_bytes",
+      "scope": "census"
+    },
+    {
+      "count": 867,
+      "equals": true,
+      "expected": 867,
+      "extra": [],
+      "missing": [],
+      "name": "merged_params",
+      "scope": "census"
+    }
+  ],
+  "rung_matrix": [
+    {
+      "checkpoint_receipts": 864,
+      "class": "routed",
+      "expert_wire_receipts": 864,
+      "offered_current_units": 864,
+      "offered_m6_units": 864,
+      "priced_units": 864,
+      "rung": "TESSERA_BF16_K1_R1024",
+      "wire_bytes": 3657566880
+    },
+    {
+      "checkpoint_receipts": 3,
+      "class": "shared",
+      "expert_wire_receipts": 0,
+      "offered_current_units": 3,
+      "offered_m6_units": 3,
+      "priced_units": 3,
+      "rung": "TESSERA_BF16_K1_R1024",
+      "wire_bytes": 12699885
+    },
+    {
+      "checkpoint_receipts": 864,
+      "class": "routed",
+      "expert_wire_receipts": 864,
+      "offered_current_units": 864,
+      "offered_m6_units": 0,
+      "priced_units": 864,
+      "rung": "TESSERA_E4M3_K1_R1024",
+      "wire_bytes": 3643407648
+    },
+    {
+      "checkpoint_receipts": 3,
+      "class": "shared",
+      "expert_wire_receipts": 0,
+      "offered_current_units": 3,
+      "offered_m6_units": 3,
+      "priced_units": 3,
+      "rung": "TESSERA_E4M3_K1_R1024",
+      "wire_bytes": 12650721
+    },
+    {
+      "checkpoint_receipts": 864,
+      "class": "routed",
+      "expert_wire_receipts": 864,
+      "offered_current_units": 0,
+      "offered_m6_units": 0,
+      "priced_units": 864,
+      "rung": "TESSERA_BF16_K1_R896",
+      "wire_bytes": 3204571392
+    },
+    {
+      "checkpoint_receipts": 3,
+      "class": "shared",
+      "expert_wire_receipts": 0,
+      "offered_current_units": 3,
+      "offered_m6_units": 0,
+      "priced_units": 3,
+      "rung": "TESSERA_BF16_K1_R896",
+      "wire_bytes": 11126984
+    },
+    {
+      "checkpoint_receipts": 864,
+      "class": "routed",
+      "expert_wire_receipts": 864,
+      "offered_current_units": 864,
+      "offered_m6_units": 864,
+      "priced_units": 864,
+      "rung": "TESSERA_E4M3_K1_R896",
+      "wire_bytes": 3190412160
+    },
+    {
+      "checkpoint_receipts": 3,
+      "class": "shared",
+      "expert_wire_receipts": 0,
+      "offered_current_units": 3,
+      "offered_m6_units": 0,
+      "priced_units": 3,
+      "rung": "TESSERA_E4M3_K1_R896",
+      "wire_bytes": 11077820
+    }
+  ],
+  "schema": "prismaquant.pq2530.mtp_layer45_audit.v1",
+  "sections": [
+    "io",
+    "pb",
+    "refusals",
+    "structure",
+    "trees"
+  ],
+  "selection": {
+    "byte_budget": 3693739296,
+    "research_only": true,
+    "resident_bytes": 3682807998,
+    "selected_rung_by_group": {
+      "g:model.language_model.layers.45.mlp.shared_experts.gate_up_proj": "TESSERA_BF16_K1_R1024",
+      "s:model.language_model.layers.45.mlp.experts": "TESSERA_BF16_K1_R1024",
+      "u:model.language_model.layers.45.mlp.shared_experts.down_proj": "BF16"
+    },
+    "sha256": "40941983dc24fe596c7873e0c1d5a2a8617d7df17d2a42e462d9b3720c7a6199"
+  },
+  "skip_seal_recompute": false,
+  "source": {
+    "changed": [],
+    "content_sha256": "c45d2d35b4520d729e1026b926dc1eb0de9d8fc905d46733c7edd322af2009a0",
+    "shards": 120
+  },
+  "stage_a": {
+    "r1024": {
+      "rows": [
+        {
+          "groups": [
+            "g:model.language_model.layers.45.mlp.shared_experts.gate_up_proj"
+          ],
+          "members": 2,
+          "row_id": "row-0000"
+        },
+        {
+          "groups": [
+            "s:model.language_model.layers.45.mlp.experts"
+          ],
+          "members": 864,
+          "row_id": "row-0001"
+        },
+        {
+          "groups": [
+            "u:model.language_model.layers.45.mlp.shared_experts.down_proj"
+          ],
+          "members": 1,
+          "row_id": "row-0002"
+        }
+      ],
+      "seal": "a565ca9c3b84a5923abfa819b617cdf9ec6b5a78068eff2d48fdde840512fdf1",
+      "seal_recomputed": "a565ca9c3b84a5923abfa819b617cdf9ec6b5a78068eff2d48fdde840512fdf1"
+    },
+    "r896": {
+      "rows": [
+        {
+          "groups": [
+            "g:model.language_model.layers.45.mlp.shared_experts.gate_up_proj"
+          ],
+          "members": 2,
+          "row_id": "row-0000"
+        },
+        {
+          "groups": [
+            "s:model.language_model.layers.45.mlp.experts"
+          ],
+          "members": 864,
+          "row_id": "row-0001"
+        },
+        {
+          "groups": [
+            "u:model.language_model.layers.45.mlp.shared_experts.down_proj"
+          ],
+          "members": 1,
+          "row_id": "row-0002"
+        }
+      ],
+      "seal": "1fa700ee253f5500d8f6821237e496d9196c85716f094d9c8a9a394068eb2a07",
+      "seal_recomputed": "1fa700ee253f5500d8f6821237e496d9196c85716f094d9c8a9a394068eb2a07"
+    }
+  },
+  "stage_b": {
+    "r1024": {
+      "plan_difference": [
+        "/source_identity_cache"
+      ],
+      "plan_sha256": "7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172",
+      "run_plan_sha256": "35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649"
+    },
+    "r896": {
+      "plan_difference": [],
+      "plan_sha256": "065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2",
+      "run_plan_sha256": "065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2"
+    }
+  },
+  "tables": {
+    "cells": {
+      "bytes": 864378,
+      "columns": [
+        "unit",
+        "class",
+        "rung",
+        "stage_b_part",
+        "offered_current",
+        "offered_m6",
+        "stage_a_output_mse",
+        "stage_b_predicted_dloss",
+        "wire_bytes",
+        "wire_file_bytes",
+        "wire_sha256",
+        "receipt",
+        "producer_verified",
+        "prepared_wire_match",
+        "prepared_render_match"
+      ],
+      "file": "cells.csv",
+      "rows": 3468,
+      "sha256": "c8d30e8f73b2788af8b5813d7f496c35c18e0e79d080720064bbe0dca3c9c6b7"
+    },
+    "units": {
+      "bytes": 170038,
+      "columns": [
+        "unit",
+        "class",
+        "out_features",
+        "in_features",
+        "params",
+        "count",
+        "max_abs",
+        "capture_bytes",
+        "capture_sha256",
+        "hessian_shape",
+        "activation_shape",
+        "projection_geometry"
+      ],
+      "file": "units.csv",
+      "rows": 867,
+      "sha256": "64ce7611b5d7fbba2c39bd8b68f2a285fd15d1255eab05fb655a34a621807416"
+    }
+  },
+  "tool": {
+    "path": "tools/audit_glm_mtp_layer45.py",
+    "sha256": "322ab0f7d12ac5445186f94fa490ead2df44f63b0388fc2bcbaac94eec4bcc00"
+  },
+  "trees": {
+    "m4-r1024-prepare": {
+      "bundle_sha256": "78ae48e9f0a4d9a5fc78970b7d4c6c5066863c0b2e2bdbaa7c6ee87278ea6ecd",
+      "recorded_producer_source_sha256": "f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e",
+      "reproduced_producer_source_sha256": "f8c794ba2fcb10c79f236e8f15f65057e7efe1a680be506161a4d2bba20c807e",
+      "snapshot_commit": "62e2004e65d78a1911c1111be186c2415371ac48",
+      "snapshot_parent": "849fa907e520be42f688227c1c45328d6c398b9e"
+    },
+    "m4-r1024-run": {
+      "bundle_sha256": "136b4707470684dba83762d170c4b166224b0769de9ba32f59997efae7e457f6",
+      "recorded_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "reproduced_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "snapshot_commit": "9e4230e726b78cec92910d6e48786b80e5caccdd",
+      "snapshot_parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+    },
+    "m4-r896-prepare": {
+      "bundle_sha256": "0eaf9226125421ade36aa6e53d03afd15969265890fe554ff3572aa1a67ee900",
+      "recorded_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "reproduced_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "snapshot_commit": "4cced33c4ed37e3711fb71e643c488cc3c86acff",
+      "snapshot_parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+    },
+    "m4-r896-run": {
+      "bundle_sha256": "d48cb4ed8231e3f361d926ce7f5eb4b35ddb94d6ba5a059e55a5afa80e8e57fb",
+      "recorded_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "reproduced_producer_source_sha256": "13863d663c580ef80e7f267c8a977a4217d7d6138953e549bb5b5fd3cb96269c",
+      "snapshot_commit": "d1f07492cd92ea263763ab495e9302239ca80e8a",
+      "snapshot_parent": "8b68f621c75aeeefe41d04b98f8f92656a38cf36"
+    },
+    "r1024_prepare_vs_run": {
+      "changed_files": [
+        "cost_streaming.py",
+        "tessera_calibration_cache.py",
+        "tessera_joint_aura.py",
+        "tessera_source_digest_adoption.py"
+      ],
+      "files_compared": 315
+    }
+  }
+}
