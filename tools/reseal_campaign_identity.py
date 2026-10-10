@@ -208,9 +208,12 @@ def _source_digest_owner():
         sys.modules[name] = module
         try:
             spec.loader.exec_module(module)
-        except BaseException:
+        except Refused:
             del sys.modules[name]
             raise
+        except BaseException as exc:
+            del sys.modules[name]
+            raise Refused(f'cannot load required source digest owner: {path}') from exc
     return sys.modules[name]
 
 
@@ -236,7 +239,7 @@ def canonical_bytes(value):
 
 
 def identity_sha256(identity):
-    return hashlib.sha256(canonical_bytes(identity)).hexdigest()
+    return _source_digest_owner().bytes_sha256hex(canonical_bytes(identity))
 
 
 def manifest_bytes(manifest):
@@ -245,16 +248,16 @@ def manifest_bytes(manifest):
 
 
 def unit_path(parts_root, qname):
-    return Path(parts_root)/'units'/(hashlib.sha256(str(qname).encode('utf-8')).hexdigest()+'.pkl')
+    return Path(parts_root)/'units'/(_source_digest_owner().text_sha256hex(str(qname))+'.pkl')
 
 
 def sha256_bytes(data):
-    return hashlib.sha256(data).hexdigest()
+    return _source_digest_owner().bytes_sha256hex(data)
 
 
 def sha256_file(path):
     with open(path, 'rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        return _source_digest_owner().file_digest_sha256hex(stream)
 
 
 def pickle_protocol(data):

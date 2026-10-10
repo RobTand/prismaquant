@@ -44,6 +44,12 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The reseal tool routes four digest sites through the public digest owner (#2626).
+  Part of #2543. `identity_sha256`, `unit_path`, `sha256_bytes`, and `sha256_file`
+  bind `prismaquant/digests.py` by file path with no package import and no fallback.
+  Digests, refusals, and chained causes match the raw recipes byte for byte.
+  The tree digest keeps its raw length-framed recipe.
+  The census records the four migrations, the tree retention, and the runtime identity evidence.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

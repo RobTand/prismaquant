@@ -90,7 +90,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "prismaquant_source_sha256",
    "site": "hashlib:prismaquant/container_runtime_identity.py::prismaquant_source_sha256",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Single-file layout evidence: the deployed module loads without a package context, so raw hashlib stays. Witness tests/test_stdlib_tools_no_package_1605.py stages and executes this file alone. No code change in this leaf."
   },
   {
    "classification": "load-bearing",
@@ -3089,7 +3090,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2626-2026-10-10",
    "family": "hashlib",
    "file": "tools/reseal_campaign_identity.py",
    "linenos": [
@@ -3099,7 +3100,17 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "identity_sha256",
    "site": "hashlib:tools/reseal_campaign_identity.py::identity_sha256",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "hexdigest",
+     "base_line": 239,
+     "original_expression": "hashlib.sha256(canonical_bytes(identity)).hexdigest()",
+     "routed_expression": "_source_digest_owner().bytes_sha256hex(canonical_bytes(identity))",
+     "profile": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "File-path owner route: the tool binds prismaquant/digests.py from this tree by file path with no package import and no fallback. The hash call stays downstream of the unchanged canonical-bytes construction. Leaf test tests/test_reseal_campaign_identity.py proves byte-identical digests and refusals against the raw recipes. Standalone load witness: tests/test_stdlib_tools_no_package_1605.py."
   },
   {
    "classification": "load-bearing",
@@ -3113,11 +3124,12 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "prismaquant_tree_sha256",
    "site": "hashlib:tools/reseal_campaign_identity.py::prismaquant_tree_sha256",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Retained raw per prismaquant#2543: the tree digest keeps its length-framed roster recipe and framing. The frozen refresh_2540 record for this call carries disposition migrate-exact-route with null retention evidence, so the leaf records the retention here instead. Deployment contract reference tools/reseal_campaign_identity.py:1-35 grants no deployment change. Leaf test proves byte identity on a mixed-order roster."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2626-2026-10-10",
    "family": "hashlib",
    "file": "tools/reseal_campaign_identity.py",
    "linenos": [
@@ -3127,11 +3139,21 @@
    "route_verdict": "bytes_sha256hex",
    "scope": "sha256_bytes",
    "site": "hashlib:tools/reseal_campaign_identity.py::sha256_bytes",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "hexdigest",
+     "base_line": 252,
+     "original_expression": "hashlib.sha256(data).hexdigest()",
+     "routed_expression": "_source_digest_owner().bytes_sha256hex(data)",
+     "profile": "prismaquant.digests.bytes_sha256hex"
+    }
+   ],
+   "note": "File-path owner route: the tool binds prismaquant/digests.py from this tree by file path with no package import and no fallback. The hash call stays downstream of the unchanged canonical-bytes construction. Leaf test tests/test_reseal_campaign_identity.py proves byte-identical digests and refusals against the raw recipes. Standalone load witness: tests/test_stdlib_tools_no_package_1605.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2626-2026-10-10",
    "family": "hashlib",
    "file": "tools/reseal_campaign_identity.py",
    "linenos": [
@@ -3141,11 +3163,21 @@
    "route_verdict": "file_digest_sha256hex",
    "scope": "sha256_file",
    "site": "hashlib:tools/reseal_campaign_identity.py::sha256_file",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "hexdigest",
+     "base_line": 257,
+     "original_expression": "hashlib.file_digest(stream, 'sha256').hexdigest()",
+     "routed_expression": "_source_digest_owner().file_digest_sha256hex(stream)",
+     "profile": "prismaquant.digests.file_digest_sha256hex"
+    }
+   ],
+   "note": "File-path owner route: the tool binds prismaquant/digests.py from this tree by file path with no package import and no fallback. The hash call stays downstream of the unchanged canonical-bytes construction. Leaf test tests/test_reseal_campaign_identity.py proves byte-identical digests and refusals against the raw recipes. Standalone load witness: tests/test_stdlib_tools_no_package_1605.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2626-2026-10-10",
    "family": "hashlib",
    "file": "tools/reseal_campaign_identity.py",
    "linenos": [
@@ -3155,7 +3187,17 @@
    "route_verdict": "text_sha256hex",
    "scope": "unit_path",
    "site": "hashlib:tools/reseal_campaign_identity.py::unit_path",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "hexdigest",
+     "base_line": 248,
+     "original_expression": "hashlib.sha256(str(qname).encode('utf-8')).hexdigest()",
+     "routed_expression": "_source_digest_owner().text_sha256hex(str(qname))",
+     "profile": "prismaquant.digests.text_sha256hex"
+    }
+   ],
+   "note": "File-path owner route: the tool binds prismaquant/digests.py from this tree by file path with no package import and no fallback. The hash call stays downstream of the unchanged canonical-bytes construction. Leaf test tests/test_reseal_campaign_identity.py proves byte-identical digests and refusals against the raw recipes. Standalone load witness: tests/test_stdlib_tools_no_package_1605.py."
   },
   {
    "classification": "load-bearing",
@@ -8009,16 +8051,16 @@
   "historical_gated_rows": 485,
   "historical_owner_rows": 16,
   "historical_census_rows": 501,
-  "migrated_by_byte_hash_slice": 72,
+  "migrated_by_byte_hash_slice": 76,
   "migrated_by_json_profile_slice": 79,
-  "total_migrated_scopes": 151,
-  "remaining_gated_scopes": 334,
+  "total_migrated_scopes": 155,
+  "remaining_gated_scopes": 330,
   "remaining_by_family": {
-   "hashlib": 163,
+   "hashlib": 159,
    "sorted-json": 171
   },
   "remaining_by_classification": {
-   "load-bearing": 300,
+   "load-bearing": 296,
    "ephemeral": 34
   },
   "remaining_gated_scopes_breakdown": {
@@ -8028,7 +8070,7 @@
    "retained protected direct-file contract: loaded by file path with no package via spec_from_file_location; raw hashlib stays (excluded from owner routing)": 1,
    "retained protected packaged-source contract: qualified self-source binding; editing the file invalidates kernels/kda_chunk_qualification.json identity.source_sha256 (excluded from owner routing)": 1,
    "eligible-byte-route: deferred from this slice (sibling-lane file; coordinate via parent)": 2,
-   "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 88,
+   "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 84,
    "load-bearing distinct JSON identity: needs a new named JsonProfile decision before migration": 46,
    "eligible: mechanical byte-identical routing to the named owner": 92,
    "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays": 4,

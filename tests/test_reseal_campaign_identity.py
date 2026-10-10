@@ -786,3 +786,114 @@ def test_window_cells_need_no_fused_stage_but_the_bundle_needs_each_stage_from_s
     assert run('proof-bundle', '--pins', pins, '--fixture-id', fixture, '--arm', window, '--arm', fused, '--out', out) == 0
     bundle = json.loads(out.read_text())
     assert bundle['ok'] and bundle['engagement_missing'] == [] and bundle['engagement_required']
+
+
+# ---------------------------------------------------------------------------
+# prismaquant#2626: four digest sites route through prismaquant/digests.py
+# ---------------------------------------------------------------------------
+
+def _raw_identity_sha256(identity):
+    return hashlib.sha256(tool.canonical_bytes(identity)).hexdigest()
+
+
+def _raw_unit_path(parts_root, qname):
+    return Path(parts_root)/'units'/(hashlib.sha256(str(qname).encode('utf-8')).hexdigest()+'.pkl')
+
+
+def _raw_sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _raw_sha256_file(path):
+    with open(path, 'rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def _capture(call):
+    """A value or a refusal, with the chained cause, for equality checks."""
+    try:
+        return ('value', call())
+    except Exception as exc:
+        cause = exc.__cause__
+        return ('raise', type(exc).__name__, str(exc),
+                type(cause).__name__ if cause is not None else None,
+                str(cause) if cause is not None else None)
+
+
+def _routed_identity_case(payload):
+    identity = dict(campaign_schema='prismaquant.tessera_campaign.v1', payload=payload, pins=dict(OLD))
+    return (lambda: tool.identity_sha256(identity), lambda: _raw_identity_sha256(identity))
+
+
+def test_routed_digest_sites_match_their_raw_recipes(tmp_path):
+    """Each routed site returns the raw recipe digest on every fixture."""
+    nul_file = tmp_path/'nul.bin'
+    nul_file.write_bytes(b'\x00'*64+b'\x00payload\x00')
+    unicode_name = 'layers.0.mlp.experts.\u00e9\u2193\u4e2d.down_proj'
+    pairs = [
+        (lambda: tool.identity_sha256(dict(a=1)), lambda: _raw_identity_sha256(dict(a=1))),
+        _routed_identity_case('a\x00b\x00c'),
+        _routed_identity_case(unicode_name),
+        (lambda: tool.unit_path(tmp_path, unicode_name), lambda: _raw_unit_path(tmp_path, unicode_name)),
+        (lambda: tool.unit_path(tmp_path, 7), lambda: _raw_unit_path(tmp_path, 7)),
+        (lambda: tool.sha256_bytes(b'\x00'*64), lambda: _raw_sha256_bytes(b'\x00'*64)),
+        (lambda: tool.sha256_bytes(nul_file.read_bytes()), lambda: _raw_sha256_bytes(nul_file.read_bytes())),
+        (lambda: tool.sha256_file(nul_file), lambda: _raw_sha256_file(nul_file)),
+    ]
+    for routed, raw in pairs:
+        assert _capture(routed) == _capture(raw)
+
+
+def test_routed_digest_sites_refuse_like_their_raw_recipes(tmp_path):
+    """Missing files and nonfinite identities refuse with the same cause."""
+    missing = tmp_path/'absent.bin'
+    nonfinite = dict(value=float('nan'), other=float('inf'))
+    pairs = [
+        (lambda: tool.sha256_file(missing), lambda: _raw_sha256_file(missing)),
+        (lambda: tool.identity_sha256(nonfinite), lambda: _raw_identity_sha256(nonfinite)),
+    ]
+    for routed, raw in pairs:
+        assert _capture(routed) == _capture(raw)
+    kind, name, _, _, _ = _capture(lambda: tool.sha256_file(missing))
+    assert (kind, name) == ('raise', 'FileNotFoundError')
+    kind, name, _, _, _ = _capture(lambda: tool.identity_sha256(nonfinite))
+    assert (kind, name) == ('raise', 'ValueError')
+
+
+def test_tree_digest_stays_raw_on_a_mixed_order_roster(tmp_path):
+    """The retained tree digest matches the raw recipe whatever the order."""
+    first = tmp_path/'first'/'prismaquant'
+    second = tmp_path/'second'/'prismaquant'
+    names = ['zeta.py', 'alpha.py', 'mid/inner.py', 'mid/aaa.py']
+    for root, order in ((first, names), (second, reversed(names))):
+        for name in order:
+            path = root/name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f'content of {name}\0'.encode('utf-8'))
+    digest = hashlib.sha256()
+    for name in sorted(names):
+        rel = name.encode('utf-8')
+        payload = (first/name).read_bytes()
+        digest.update(len(rel).to_bytes(4, 'big'))
+        digest.update(rel)
+        digest.update(len(payload).to_bytes(8, 'big'))
+        digest.update(payload)
+    assert tool.prismaquant_tree_sha256(first) == (digest.hexdigest(), len(names))
+    assert tool.prismaquant_tree_sha256(second) == tool.prismaquant_tree_sha256(first)
+
+
+def test_dry_run_and_verify_outputs_stay_stable_on_a_seeded_row(tmp_path, capsys):
+    """A seeded sealed row gives byte-identical dry-run output and a clean verify."""
+    row = tmp_path/'row-seeded'
+    make_row(row)
+    before = {p: p.read_bytes() for p in row.rglob('*') if p.is_file()}
+    pins = write_pins(tmp_path/'pins.json')
+    assert run('dry-run', '--pins', pins, '--row', row) == 0
+    first_out = capsys.readouterr().out
+    assert run('dry-run', '--pins', pins, '--row', row) == 0
+    assert capsys.readouterr().out == first_out
+    assert {p: p.read_bytes() for p in row.rglob('*') if p.is_file()} == before
+    bundle = write_bundle(tmp_path/'bundle.json')
+    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', row) == 0
+    assert run('verify', '--pins', pins, '--row', row) == 0
+    assert run('verify', '--pins', pins, '--row', row) == 0
