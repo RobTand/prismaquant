@@ -1,9 +1,9 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #1347): the Stage B read-ahead budget holds back
+Re-stamped 2026-10-10 (PQ #1347): the Stage B read-ahead budget holds back
 the measured per-window peak consumer growth. Depth is live guard headroom
-less that reserve; reclaim stays for sudden growth past it. No format, pin,
-gate, or default moves in this change.
+less that reserve; reclaim stays for sudden growth past it. Row bounds for
+near-zero rereads and unchanged wait and idle are stated below.
 
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
@@ -4242,6 +4242,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   - Reclaim stays for sudden growth past the reserve; the reserve makes it
     the exception, not the steady state. `ReadStream.counters` reports
     `growth_reserve_bytes`.
+  - Row bounds for near zero: rereads target 0 with bound 5 groups.
+    Evicted bytes target 0 with bound 1 percent of consumed bytes.
+    Render-window consumer wait totals 0.05 s or less with each group wait 0.
+    Per-window idle stays within 5 percent of the after-3 level.
 - **Order and staging.** The quantum builds one stream over every pending
   window's renders, in window order, after the own-source phase starts
   (`joint_cost_quantum.py:2353`); window 0 loads while the own source
