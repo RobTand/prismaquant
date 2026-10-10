@@ -57,7 +57,9 @@ def test_manifest_binds_every_record_file_and_the_audit_payload(manifest, record
     assert _sha(base / "audit.json") == manifest["audit_action"]["payload_sha256"]
     assert summary["tables"]["units"]["sha256"] == manifest["record_files"]["units.csv"]
     assert summary["tables"]["cells"]["sha256"] == manifest["record_files"]["cells.csv"]
-    assert summary["tool"]["sha256"] == manifest["tool"]["sha256"] == _sha(ROOT / manifest["tool"]["path"])
+    assert summary["tool"]["sha256"] == manifest["tool"]["sha256"], "the manifest names another tool than the audit ran"
+    assert manifest["tool"]["sha256"] == _sha(ROOT / manifest["tool"]["path"]), (
+        "the tool changed after the audit ran: run it again through PrismaBuild and replace the record")
 
 
 def test_the_record_is_consistent(record):

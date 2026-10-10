@@ -241,6 +241,10 @@ It also compared the command sealed into each action with the job its role names
 
 Wall time and memory peak size future repeats. They are not performance claims.
 
+Two r896 campaign rows were CAS cache hits when the campaign ran.
+`receipts.json` (`af884dbea0e7`) records status `cache_hit` for `m3-r896-row-0000` and `m3-r896-row-0002`.
+The rows in the table are the original executions that those receipts reused.
+
 The audit action itself follows the same chain.
 Action `dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b` ran on `dl380g10` for 1,198 s with return code 0.
 Its CAS payload is `a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0` (128,600 bytes). This is `docs/measurements/pq-2530-mtp-layer45/audit.json`, byte for byte.
