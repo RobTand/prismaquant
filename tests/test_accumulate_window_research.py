@@ -69,7 +69,9 @@ def test_buffered_arm_matches_checkout_within_rounding():
             drift = research.matrix_drift(ref._operators[key],
                                           buffered._operators[key])
             assert drift["max_rel_to_max"] < 1e-4
-        assert buffered.telemetry["operator_gemms"] == ref.telemetry["operator_gemms"]
+        flushes = -(-5 // size)
+        assert buffered.telemetry["operator_gemms"] == 2 * flushes
+        assert buffered.telemetry["qdq_calls"] == flushes
         assert buffered._observed_tokens == ref._observed_tokens
         assert buffered._observed_calls == ref._observed_calls
         assert buf.peak_bytes > 0
