@@ -44,8 +44,43 @@
   The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
   Its central processor preflight checks the real runtime arguments without a graphics processor.
   Native serving qualification and all production defaults stay unchanged.
+- The digest census now records source commit `30b6231` at `docs/audits/digest_site_census_pq1301_2026-10-04.json` (#2540).
+  The refresh retains every historical record. It adds 420 primitive calls across 320 scopes, 275 supplemental calls, and 22 protected layouts.
+  Each load-bearing call records its exact algorithm, encoding options, input order, framing, digest width, result type, read boundary, and refusal behavior.
+  Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
+  It omits a source tensor only when every requested forward uses a complete replacement.
+  Used source tensors retain their byte-integrity checks.
+  The manifest follows setup, decoder layers, and teacher reads through the profile's layer names.
+  The consumers retain Docker mounts, the PB environment, reader leases, and RAM epochs.
+  The map cache follows atomic publication, including RAM updates at the same fragment count.
+  Phase leases batch published ranges by tier instead of each tensor.
+  The real four-layer comparison uses the pinned source loader, expert packing, and original panel window.
+  Its logits and both FP64 KL arrays match bitwise with omission on and off.
+  This diagnostic does not qualify full-model quality, performance, or promotion.
+  Hash batches use the shared IO engine and preserve their digests.
+  Development mode retains identity stamps without a new promotion gate.
+  The pinned `/pq` package and action `1cb0d64a` remain unchanged.
+  The merge with `origin/main` preserves the accepted fix and both documentation additions.
+  PB `42ee5b235134` passes 113 CPU cases; PB `07921c3dd917` preserves bitwise equality in the real container.
+  The next merge retains main at `3d2841dc9605` and its independent changelog addition.
+  An unavailable RAM cover now selects published stage covers for the same phase and expected bytes.
+  The shared lease owner classifies each refusal; integrity and unknown refusals still fail.
+  PB `35251b1db6f4` reproduces the old RAM refusal; PB `7b2fd0569f8c` passes all 117 affected CPU cases.
+  PB `36269dbc3563` completes the real comparison on Sparklina with bitwise logits and FP64 KL equality.
+  The next correction uses PB's public client instead of internal modules.
+  Both manifest entry points share the existing bounded byte checks and PB decoder.
+  The normal production entry point retains its exact SDK pin.
+  The host loads the container adapter from its pinned source file, not the checkout's `tools` package.
+  PB `064d872a4635` passes 164 affected CPU cases, including both G3 import and PB boundary guards.
+  PB `74f166933103` preserves real logits and both FP64 KL arrays bitwise in the producer container.
+  The next correction tests the launcher's image seal on the pinned adapter.
+  The tests start the real launcher with the real pinned adapter and a replaced docker executable.
+  Default dev mode stamps a differing image and starts the container with the observed digest.
+  Certified mode refuses the same image before any container starts.
+  The pinned adapter binds `image_content_sha256`; the checkout's own adapter binds `_runtime_identity` and is not loaded.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.

@@ -639,6 +639,11 @@ def resolve_sealed_readset(*, env=None):
         client, ctx = resolve_context(env=env)
     except TierPolicyRefused as refusal:
         raise ReadsetUnbound(f"lease context: {refusal}") from None
+    return _claimed_readset(client, ctx)
+
+
+def _claimed_readset(client, ctx):
+    """Read the manifest binding from an authenticated claim context."""
     queue_root = str(ctx.get("queue_root") or "")
     action_key = str(ctx.get("action_key") or "")
     if not queue_root or len(action_key) != 64:
@@ -714,6 +719,11 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
         client = client_sdk()
     except LeaseRefused as error:
         raise ReadsetUnbound(f"PB manifest reader unavailable: {error}") from None
+    return _read_manifest_payload(client, cas_root, digest, size)
+
+
+def _read_manifest_payload(client, cas_root, digest, size):
+    """Check bounded manifest bytes and use the supplied PB decoder."""
     DATA_MANIFEST_MAX_BYTES = client.DATA_MANIFEST_MAX_BYTES
     read_data_manifest = client.read_data_manifest
     # The ceiling is PB's own fixed bound, applied BEFORE anything is opened.
@@ -758,6 +768,17 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     if not isinstance(entries, list):
         raise ReadsetUnbound("sealed manifest declares no entries")
     return payload
+
+
+def load_claimed_manifest(client, ctx) -> dict:
+    """Read the manifest through a caller's admitted, launch-authenticated client.
+
+    The caller supplies the client that authenticated ``ctx``.
+    The normal production API keeps its pinned SDK discovery unchanged.
+    Both APIs share the same byte checks and PB decoder.
+    """
+    cas_root, digest, size = _claimed_readset(client, ctx)
+    return _read_manifest_payload(client, cas_root, digest, size)
 
 
 def load_sealed_manifest(bound_manifest_sha256: str) -> dict:
