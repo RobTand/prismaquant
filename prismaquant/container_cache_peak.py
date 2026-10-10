@@ -332,6 +332,82 @@ def derive_cache_ceiling(first_peak_bytes, *, headroom_bytes) -> dict:
             "formula": "C = G * ceil((P + H) / G)"}
 
 
+def _gpu_workload_ran(receipt) -> bool:
+    """Check the receipt for evidence that the GPU workload ran."""
+    from collections.abc import Mapping
+
+    workload = receipt.get("workload")
+    if not isinstance(workload, Mapping):
+        return False
+    candidates = [receipt.get("device"), workload.get("device")]
+    served = workload.get("served_compile")
+    if isinstance(served, Mapping):
+        candidates.append(served.get("device"))
+        probe = served.get("kda_probe")
+        if isinstance(probe, Mapping) and probe.get("status") == "ran":
+            return True
+    probe = workload.get("kda_probe")
+    if isinstance(probe, Mapping) and probe.get("status") == "ran":
+        return True
+    return any(isinstance(device, str) and device.startswith("cuda")
+               for device in candidates)
+
+
+def derive_cache_ceiling_from_receipt(receipt, *, headroom_bytes) -> dict:
+    """Derive the ceiling from a measured row receipt, never from bare numbers.
+
+    ``derive_cache_ceiling`` accepts any two integers, so a reservation
+    without peaks or a row without GPU work could produce a ceiling.
+    This gate refuses such receipts before it derives anything. A refused
+    receipt names its missing evidence. A complete receipt returns exactly
+    what ``derive_cache_ceiling`` returns for its peak.
+    """
+    from collections.abc import Mapping
+
+    if not isinstance(receipt, Mapping):
+        raise ValueError("refuse measured ceiling: receipt is not a mapping")
+    if receipt.get("failure") is not None:
+        raise ValueError("refuse measured ceiling: row failed: "
+                         f"{receipt.get('failure')}")
+    workload = receipt.get("workload")
+    if not isinstance(workload, Mapping) or not workload:
+        raise ValueError("refuse measured ceiling: receipt has no "
+                         "GPU workload evidence")
+    if workload.get("failure") is not None:
+        raise ValueError("refuse measured ceiling: row failed: "
+                         f"{workload.get('failure')}")
+    if not _gpu_workload_ran(receipt):
+        raise ValueError("refuse measured ceiling: receipt has no "
+                         "GPU workload evidence")
+    measurement = receipt.get("measurement")
+    if not isinstance(measurement, Mapping):
+        raise ValueError("refuse measured ceiling: receipt has no "
+                         "measurement evidence")
+    samples = measurement.get("samples")
+    if not isinstance(samples, list) or not samples:
+        raise ValueError("refuse measured ceiling: receipt has no peak samples")
+    peak = measurement.get("peak_allocated_bytes")
+    peak_index = measurement.get("peak_sample_index")
+    if (not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0
+            or not isinstance(peak_index, int)
+            or isinstance(peak_index, bool)
+            or not 0 <= peak_index < len(samples)):
+        raise ValueError("refuse measured ceiling: receipt has no accepted peak")
+    errors = list(measurement.get("errors") or [])
+    if measurement.get("child_exitcode") != 0:
+        errors.insert(0, "sampler child exit code: "
+                      f"{measurement.get('child_exitcode')}")
+    gaps = measurement.get("gaps") or []
+    if gaps:
+        errors.append(f"sampler coverage has gaps after {len(gaps)} samples")
+    if (not measurement.get("valid") or measurement.get("incomplete_scan")
+            or errors):
+        detail = "; ".join(errors) if errors else "incomplete sampler coverage"
+        raise ValueError("refuse measured ceiling: sampler did not cover "
+                         f"the complete row: {detail}")
+    return derive_cache_ceiling(peak, headroom_bytes=headroom_bytes)
+
+
 
 
 def measure_around(run, root, *, interval_s=SAMPLE_INTERVAL_S) -> dict:
