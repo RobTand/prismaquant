@@ -825,7 +825,8 @@ def prepare_synthetic(output):
                         bytes=binding['reference']['bytes'], sha256=binding['reference']['sha256']))
     for row in boundaries + cotangents:
         entries.append(dict(path=row['path'], offset=0, bytes=row['file_bytes'], sha256=row['sha256']))
-    source_commit = subprocess.check_output(['git', '-c', 'safe.directory=*', 'rev-parse', 'HEAD'], text=True).strip()
+    source_commit = os.environ.get('PRISMAQUANT_IDENTITY_GIT_COMMIT') or subprocess.check_output(
+        ['git', '-c', 'safe.directory=*', 'rev-parse', 'HEAD'], text=True).strip()
     total = sum(row['bytes'] for row in entries)
     write_json(output / 'data-manifest.json', {
         'schema': 'prismaquant.prismabuild.data_manifest.v1', 'mount_prefix': '/mnt/shared',

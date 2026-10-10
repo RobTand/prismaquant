@@ -220,7 +220,7 @@ def main():
                 raise RuntimeError('duplicate slice readset entries')
             total = sum(row['bytes'] for row in entries)
             manifest = dict(schema='prismaquant.prismabuild.data_manifest.v1', mount_prefix='/mnt/shared',
-                produced_by=dict(tool='pq2572-layer-slice-builder', source_commit=os.environ.get('PRISMAQUANT_IDENTITY_GIT_COMMIT', 'unstamped'),
+                produced_by=dict(tool='pq2572-layer-slice-builder', source_commit=os.environ['PRISMAQUANT_IDENTITY_GIT_COMMIT'],
                                  size_source='independently_bound_publisher_and_retained_entry_metadata'),
                 entry_count=len(entries), total_bytes=total,
                 annotations=dict(scope='slice readset: exact source/capture/code bytes before replay',
