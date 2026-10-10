@@ -44,6 +44,9 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The calibration-read fallback hashes through `digests.file_digest_sha256hex` (#2636).
+  The guarded loop keeps its resource checks, page release, descriptor alias, and stat fence.
+  Digests, read boundaries, and refusals stay identical. No owner recipe is added.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
