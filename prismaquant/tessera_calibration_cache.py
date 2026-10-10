@@ -895,6 +895,33 @@ class CaptureSourceAuthentication:
         seal_check('capture source pathname stat', expected, pathname, where=name,
             refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
+    def _verify_held_content(self, name, state):
+        """Reread held bytes once and refuse on digest mismatch (PQ #2010).
+
+        Only the owner close calls this, once per file, so the extra read
+        cost is bounded by the admission cost whatever the lease count.
+        Lease exits and JSON reads keep the cheap stat fence only. The
+        admission digest comes from the read that consumes the file
+        (:meth:`_authenticate`), so no separate read happens at admission.
+        The close reread runs on the CPU caller thread, off the GPU hot
+        path. It checks bytes against their own digest, a correctness
+        check. Only ``fresh_descriptor_sha256`` rows verify: adopted and
+        recorded rows keep their zero-read proof optimization and refuse
+        by stat. The reread keeps the owner's resource guard, and the
+        close runs its stat fence before this loop.
+        """
+        if self._original is not None:
+            return
+        if state.get('sha256') is None:
+            return
+        if state.get('sha256_source') != 'fresh_descriptor_sha256':
+            return
+        with state['lock']:
+            observed = sha256(self.root/name, file_descriptor=state['fd'],
+                resource_check=self.resource_check, release_read_pages=False)
+            if observed != state['sha256']:
+                raise RuntimeError(f'authenticated source changed during consumption: {name}')
+
     def require_unchanged(self):
         with self._lock:
             self._require_open()
@@ -1314,6 +1341,8 @@ class CaptureSourceAuthentication:
     def _finish_close_locked(self):
         try:
             self.require_unchanged()
+            for name, state in self._files.items():
+                self._verify_held_content(name, state)
         finally:
             self._closed = True
             for name, state in self._files.items():

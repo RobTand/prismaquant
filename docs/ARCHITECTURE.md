@@ -1,5 +1,8 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (PQ #2010): the capture source owner rereads each fresh file once at close.
+Admission still hashes inside the consuming read, with no separate admission read. The close reread runs on CPU, off the GPU hot path, under the owner resource guard. Lease exits and JSON reads keep the stat fence only. Adopted and recorded rows keep zero-read proofs and refuse by stat. The profile in [pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md) estimates the cost below 10 percent of capture wall. A real-capture measurement decides the ZFS snapshot path. No default, format, pin, or serving gate moves.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
@@ -1532,11 +1535,18 @@ can force tensor rereads. The #1885 prep/GPU wording below records its initial
 implementation, superseded by prep v2 and the original narrow GPU receipts;
 those receipts are not rebased-source GPU qualification. Existing parallel
 fallback hashing (#1889) remains. Numerical, serving, pins and export wire are
-unchanged. Stat fences detect metadata-observable mutation, not arbitrary
-same-signature byte mutation: #2010 records two same-signature admissions in
-a bounded ZFS diagnostic, with no end-to-end corrupted artifact demonstrated.
-That original integrity requirement remains unmet; the exit-only regression
-now constructs deterministic drift, not a stronger production guarantee.
+unchanged. Stat fences detect metadata-observable mutation. Same-signature
+byte mutation now refuses by one guarded held-digest reread per file at
+owner close (#2010). Admission still hashes inside the consuming read.
+Lease exits and JSON reads keep the stat fence only, so the extra cost is
+one sequential read per file whatever the lease count. The profile in
+[pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md)
+estimates it below 10 percent of capture wall. A real-capture measurement
+decides the ZFS snapshot path. Adopted and recorded rows keep their zero-read proof
+optimization and refuse by stat. #2010 recorded two same-signature admissions
+in a bounded ZFS diagnostic, with no end-to-end corrupted artifact
+demonstrated. The deterministic drift fixture and the mtime-restoration
+control remain.
 See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
 Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
 `sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
