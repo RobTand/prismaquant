@@ -3615,6 +3615,34 @@ def require_legacy_bytes(freeze) -> Path:
     return source
 
 
+def annotate_legacy_freeze(freeze_path, *, rung_ids) -> dict:
+    """Store the reconciled legacy rung ids beside the frozen digest (PQ #2559).
+
+    The freeze file starts as path plus SHA-256; after the rung census the
+    driver records the distinct legacy rung ids here so later stages (k4)
+    compare against a stored set. Re-verifies the frozen bytes first, so an
+    annotation never binds drifted bytes to a frozen digest.
+    """
+    target = Path(freeze_path)
+    frozen = read_legacy_freeze(target)
+    require_legacy_bytes(frozen)
+    ids = sorted({tuple(entry) for entry in rung_ids})
+    for family, rate, row_class in ids:
+        if (not isinstance(family, str) or type(rate) is not int
+                or row_class not in ("dense", "routed")):
+            raise RuntimeError(
+                f"{target}: refusing to freeze a malformed rung id "
+                f"{(family, rate, row_class)!r}")
+    record = {
+        **frozen,
+        "legacy_rung_ids": [[family, rate, row_class]
+                            for family, rate, row_class in ids],
+        "legacy_rung_count": len(ids),
+    }
+    target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return record
+
+
 def reconcile_row_class(structure: str) -> str:
     """Map a campaign unit structure to the reconcile rung row class."""
     return {"dense": "dense", "routed_moe": "routed"}[structure]
@@ -3964,6 +3992,7 @@ def reconcile_census_seeds(*, legacy_path, packet_path, freeze_out, log_out,
     legacy_ids = sorted({tuple(entry) for decision in record["decisions"]
                          for entry in decision["gates"].get("rung_ids", ())})
     rungs = reconcile_seed_rungs(legacy_ids, open_rung_ids_from_predispatch_packet(packet))
+    frozen = annotate_legacy_freeze(freeze_out, rung_ids=rungs["legacy_rung_ids"])
     tally = {"pass": 0, "fail": 0}
     for decision in record["decisions"]:
         tally[decision["gate"]] += 1

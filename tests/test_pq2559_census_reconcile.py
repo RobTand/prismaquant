@@ -225,6 +225,24 @@ def test_freeze_shape_refusals():
         )
 
 
+def test_freeze_annotation_refuses_drift_and_malformed_ids(tmp_path):
+    manifest = _seed_journal(tmp_path, {"a": _anchors("a", ("FAM", 1024))})
+    freeze_path = tmp_path / "freeze.json"
+    campaign.freeze_legacy_anchors(manifest, out_path=freeze_path)
+    annotated = campaign.annotate_legacy_freeze(
+        freeze_path, rung_ids=[("FAM", 1024, "dense")])
+    assert annotated["legacy_rung_ids"] == [["FAM", 1024, "dense"]]
+    assert annotated["legacy_rung_count"] == 1
+    with pytest.raises(RuntimeError, match="malformed rung id"):
+        campaign.annotate_legacy_freeze(freeze_path, rung_ids=[("FAM", "x", "dense")])
+    raw = bytearray(manifest.read_bytes())
+    raw[-2] ^= 0xFF
+    manifest.write_bytes(bytes(raw))
+    with pytest.raises(RuntimeError, match="drifted"):
+        campaign.annotate_legacy_freeze(
+            freeze_path, rung_ids=[("FAM", 1024, "dense")])
+
+
 def test_open_rungs_come_from_the_packet():
     packet = json.loads(PACKET_PATH.read_text(encoding="utf-8"))
     open_ids = campaign.open_rung_ids_from_predispatch_packet(packet)
@@ -367,6 +385,13 @@ def test_reconcile_driver_writes_freeze_and_log_without_a_price_row(tmp_path):
     assert rungs["new_rung_count"] == 14
     assert rungs["total_rung_count"] == 17
     assert (tmp_path / "freeze.json").is_file()
+    frozen = json.loads((tmp_path / "freeze.json").read_text())
+    assert frozen["legacy_rung_ids"] == [
+        ["FAM", 1024, "dense"],
+        ["FAM", 1024, "routed"],
+        ["FAM", 2048, "dense"],
+    ]
+    assert log["freeze"] == frozen
     assert (tmp_path / "reconcile.json").is_file()
     assert list(tmp_path.rglob("cost.pkl")) == []
     assert list(cache.iterdir()) == []
