@@ -1,0 +1,217 @@
+{
+ "candidate_overlay_left_out": true,
+ "cpu_s": 119.351,
+ "guard": {
+  "interval_s": 5.0,
+  "limit_ms": 40.0,
+  "trace": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ]
+ },
+ "host": "dl380g10",
+ "layer": 40,
+ "loadavg_after": [
+  11.81298828125,
+  13.8056640625,
+  25.00830078125
+ ],
+ "loadavg_before": [
+  7.8623046875,
+  16.57763671875,
+  28.1279296875
+ ],
+ "local_journal_written": {
+  "bytes": 0,
+  "files": 0
+ },
+ "metadata_loads": 1,
+ "mode": "scoped-walk",
+ "nfs_ops_mnt_shared": {},
+ "nfs_ops_total": 0,
+ "peak_rss_kib": 16646012,
+ "proc_io": {
+  "rchar": 15480862082,
+  "read_bytes": 1921196544,
+  "syscr": 33503,
+  "syscw": 23,
+  "wchar": 2098458,
+  "write_bytes": 2211840
+ },
+ "quantum_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+ "runs": [
+  {
+   "label": "baseline",
+   "measured_cells": 5,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10000,
+    10001
+   ],
+   "units_with_cells": 1,
+   "wall_s": 73.784,
+   "workers": 4
+  },
+  {
+   "label": "run0",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10001,
+    10250
+   ],
+   "units_with_cells": 249,
+   "wall_s": 7.743,
+   "workers": 4
+  },
+  {
+   "label": "run1",
+   "measured_cells": 1257,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10250,
+    10499
+   ],
+   "units_with_cells": 249,
+   "wall_s": 21.31,
+   "workers": 1
+  },
+  {
+   "label": "run2",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10499,
+    10748
+   ],
+   "units_with_cells": 249,
+   "wall_s": 4.195,
+   "workers": 8
+  },
+  {
+   "label": "run3",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10748,
+    10997
+   ],
+   "units_with_cells": 249,
+   "wall_s": 9.37,
+   "workers": 2
+  },
+  {
+   "label": "run4",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    10997,
+    11246
+   ],
+   "units_with_cells": 249,
+   "wall_s": 8.68,
+   "workers": 2
+  },
+  {
+   "label": "run5",
+   "measured_cells": 1257,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    11246,
+    11495
+   ],
+   "units_with_cells": 249,
+   "wall_s": 4.344,
+   "workers": 8
+  },
+  {
+   "label": "run6",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    11495,
+    11744
+   ],
+   "units_with_cells": 249,
+   "wall_s": 12.906,
+   "workers": 1
+  },
+  {
+   "label": "run7",
+   "measured_cells": 1245,
+   "nfs_ops": {},
+   "read_ops": 0,
+   "read_rtt_ms_mean": null,
+   "scope": [
+    11744,
+    11993
+   ],
+   "units_with_cells": 249,
+   "wall_s": 5.912,
+   "workers": 4
+  }
+ ],
+ "schema": "prismaquant.stage_b_head_profile.v1",
+ "sweep": {
+  "slice_units": 249,
+  "start": 10000,
+  "units_total": 1993,
+  "workers_order": [
+   4,
+   1,
+   8,
+   2,
+   2,
+   8,
+   1,
+   4
+  ]
+ },
+ "wall_s": 176.528
+}
