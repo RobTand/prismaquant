@@ -33,6 +33,12 @@ Per module that the runtime gave a quantization method:
     The scheme object's own public attributes (``use_a16``, ``group_size``,
     ``strategy`` ...).  The activation descriptor is read from these, so the
     gate reads observed numbers rather than inferring them from a class name.
+``method_attrs``
+    The method object's own public attributes, recorded the same way.  A
+    served module whose method carries no ``scheme`` object (packed MoE,
+    PQ #706) has no ``scheme_attrs`` to read, so the gate reads the method
+    class's entry off these instead.  Empty on older sweeps; readers treat
+    a missing key as no observed numbers.
 ``kernel``
     The kernel object a scheme selected, where it holds one (NVFP4 does:
     ``FlashInferCutlassNvFp4LinearKernel``).  RECORDED, NOT JUDGED -- vLLM
@@ -156,6 +162,12 @@ def collect_route_sweep(model) -> dict:
         scheme = getattr(mod, "scheme", None)
         if quant_method is None and scheme is None:
             continue
+        method_attrs: dict[str, str] = {}
+        if quant_method is not None:
+            for key, value in list(vars(quant_method).items()):
+                if key.startswith("_"):
+                    continue
+                method_attrs[key] = _safe_repr(value, 80)
         attrs: dict[str, str] = {}
         if scheme is not None:
             for key, value in list(vars(scheme).items()):
@@ -173,6 +185,7 @@ def collect_route_sweep(model) -> dict:
             "scheme": _class_name(scheme),
             "scheme_module": _class_module(scheme),
             "scheme_attrs": attrs,
+            "method_attrs": method_attrs,
             "kernel": _class_name(kernel),
             "kernel_module": _class_module(kernel),
             "dispatches": (int(getattr(mod, _COUNTER_ATTR, 0)) if hooked

@@ -11206,7 +11206,9 @@ off the running engine instead of received from it.
   the sweep from THE SAME loaded engine its eager smoke just generated on,
   through vLLM's own `LLM.apply_model` (one result per rank, so this is also
   the TP>1 shape). Per module it records the resolved `quant_method` and
-  `scheme` classes, the scheme object's own attributes, the kernel the scheme
+  `scheme` classes, the scheme object's own attributes, the method object's
+  own attributes (`method_attrs`, for served modules whose method carries no
+  scheme object -- packed MoE, PQ #706), the kernel the scheme
   selected, `isinstance(quant_method, QuantizeMethodBase)`, and a forward-hook
   dispatch count over the generate. Only the eager arm writes one: forward
   hooks do not run under CUDA-graph replay, and a graph-arm sweep would report
