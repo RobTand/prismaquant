@@ -1043,6 +1043,21 @@ class ReadStream:
         with self._cond:
             return self._held_actual
 
+
+    def growth_snapshot(self) -> tuple[int, int, int, int, int, int]:
+        """Held state and reclaim counters for a read budget's growth reserve.
+
+        ``(held, unreleased, peak_held_bytes, evictions, evicted_bytes,
+        rereads)`` under one lock. ``held`` is decoded bytes read ahead and
+        not yet taken. ``unreleased`` is the taken group the consumer still
+        holds. ``peak_held_bytes`` is the most read ahead at once. The rest
+        is the reclaim history. ``GuardReadBudget`` reads this (PQ #2602).
+        """
+        with self._cond:
+            return (self._held, self._unreleased,
+                    self.counters["peak_held_bytes"], self.counters["evictions"],
+                    self.counters["evicted_bytes"], self.counters["rereads"])
+
     def reclaim(self, shortfall_bytes: int) -> int:
         """Drop read-ahead entries, farthest first, until ``shortfall_bytes`` is freed.
 

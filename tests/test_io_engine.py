@@ -952,3 +952,101 @@ def test_terminal_read_ahead_error_survives_reclaim_without_retry(where):
         assert stream._reads[1] == (1 if where == "reader" else 0)
         error = stream._errors[1]
         assert error is not None and error.__traceback__ is None
+
+
+# -- growth reserve: read-ahead depth from measured consumer growth (PQ #2602)
+
+
+def _consumer_stream(groups=6, *, ready=None):
+    """A consumer stream of one range entry per group, all read ahead."""
+    entries, _calls = _range_entries(groups=groups)
+    return io_engine.read_stream(
+        entries,
+        budget=io_engine.FixedBudget(buffer_bytes=1, headroom=groups * SIZE),
+        ready=ready)
+
+
+def _live_guard(reading):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(headroom_bytes=lambda: reading["headroom"])
+
+
+def test_read_ahead_depth_responds_to_consumer_growth():
+    """The budget holds back what the consumer stream holds (PQ #2602).
+
+    A consumer that holds nothing reserves nothing, so the budget answers
+    the guard's reading unchanged. Once the consumer takes a group, its
+    unreleased bytes come off the headroom, bounded by the measured peak.
+    """
+    reading = {"headroom": 10 * SIZE}
+    guard = _live_guard(reading)
+    with _consumer_stream(ready=lambda group, cancel: False) as consumer:
+        budget = GuardReadBudget(guard, buffer_bytes=SIZE, growth_stream=consumer)
+        assert budget.growth_reserve_bytes() == 0
+        assert budget.headroom_bytes(0) == 10 * SIZE
+        assert len(consumer.take(("chunk", 0))) == 1
+        assert consumer.growth_snapshot() == (0, SIZE, SIZE, 0, 0, 0)
+        assert budget.growth_reserve_bytes() == SIZE
+        assert budget.headroom_bytes(0) == 9 * SIZE
+        consumer.release()
+        assert budget.growth_reserve_bytes() == 0
+        assert budget.headroom_bytes(0) == 10 * SIZE
+
+
+def test_growth_reserve_stays_safe_under_a_falling_reading():
+    """The floor survives the reserve, and the reserve keeps its bounds."""
+    reading = {"headroom": 10 * SIZE}
+    guard = _live_guard(reading)
+    with pytest.raises(TypeError, match="growth_snapshot"):
+        GuardReadBudget(guard, buffer_bytes=SIZE, growth_stream=object())
+    with _consumer_stream() as consumer:
+        assert _quiet(consumer)[1] == 6
+        budget = GuardReadBudget(guard, buffer_bytes=SIZE, floor_bytes=3 * SIZE,
+                                 growth_stream=consumer)
+        assert consumer.counters["peak_held_bytes"] == 6 * SIZE
+        assert budget.growth_reserve_bytes() == 6 * SIZE
+        assert budget.growth_reserve_bytes() <= consumer.counters["peak_held_bytes"]
+        assert budget.headroom_bytes(0) == 4 * SIZE
+        reading["headroom"] = SIZE
+        assert budget.headroom_bytes(0) == 3 * SIZE
+        assert budget.headroom_bytes(2 * SIZE) == SIZE
+        full = GuardReadBudget(guard, buffer_bytes=SIZE, yield_to=consumer,
+                               floor_bytes=SIZE, growth_stream=consumer)
+        assert full.growth_reserve_bytes() == 6 * SIZE
+
+
+def test_the_reserve_releases_when_the_consumer_drains():
+    """A drained consumer reserves nothing: the budget answers the reading."""
+    reading = {"headroom": 10 * SIZE}
+    guard = _live_guard(reading)
+    with _consumer_stream() as consumer:
+        assert _quiet(consumer)[1] == 6
+        budget = GuardReadBudget(guard, buffer_bytes=SIZE, growth_stream=consumer)
+        assert budget.growth_reserve_bytes() == 6 * SIZE
+        for group in range(6):
+            consumer.take(("chunk", group))
+            consumer.release()
+        assert consumer.growth_snapshot() == (0, 0, 6 * SIZE, 0, 0, 0)
+        assert budget.growth_reserve_bytes() == 0
+        plain = GuardReadBudget(guard, buffer_bytes=SIZE)
+        assert budget.headroom_bytes(7 * SIZE) == plain.headroom_bytes(7 * SIZE)
+        assert budget.headroom_bytes(7 * SIZE) == 10 * SIZE
+
+
+def test_emergency_reclaim_frees_read_ahead_and_rereads_it():
+    """Past the reserve the budget admits nothing new; reclaim gives room back."""
+    reading = {"headroom": 0}
+    guard = _live_guard(reading)
+    with _consumer_stream() as consumer:
+        assert _quiet(consumer)[1] == 6
+        budget = GuardReadBudget(guard, buffer_bytes=SIZE, growth_stream=consumer)
+        assert budget.headroom_bytes(0) == 0
+        assert budget.reclaim(2 * SIZE) == 2 * SIZE
+        assert consumer.counters["evictions"] == 2
+        assert consumer.counters["evicted_bytes"] == 2 * SIZE
+        for group in range(6):
+            consumer.take(("chunk", group))
+            consumer.release()
+        assert consumer.counters["rereads"] == 2
+    assert GuardReadBudget(guard, buffer_bytes=SIZE).reclaim(SIZE) == 0

@@ -253,23 +253,74 @@ class GuardReadBudget:
     ``floor_bytes`` is what the phase already reserved for this stream at its
     guard check (the spill's own read buffers): the stream may always hold
     that much, read ahead or taken, whatever the reading says.
+
+    A third term holds back the consumer's measured per-window growth
+    (PQ #2602). ``growth_stream`` is the consumer stream whose growth the
+    budget watches: the spill replay's budget watches the render stream,
+    whose takes and read-ahead are what evict spill chunks when unreserved.
+    The render stream's own budget takes none, since the guard's reading
+    already holds its own bytes. ``None`` (the default) reserves nothing,
+    so a budget without a growth source answers exactly what it did before.
     """
 
-    def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0):
+    def __init__(self, guard, *, buffer_bytes, yield_to=None, floor_bytes=0,
+                 growth_stream=None):
         if type(floor_bytes) is not int or floor_bytes < 0:
             raise ValueError('a read budget floor must be nonnegative bytes')
+        if growth_stream is not None and not callable(
+                getattr(growth_stream, 'growth_snapshot', None)):
+            raise TypeError('a read budget growth source needs growth_snapshot()')
         self.guard = guard
         self.buffer_bytes = int(buffer_bytes)
         self.yield_to = yield_to
         self.floor_bytes = floor_bytes
+        self.growth_stream = growth_stream
+
+    def growth_reserve_bytes(self) -> int:
+        """Bytes held back for the growth stream's measured growth (PQ #2602).
+
+        Derivation: the stream's live held bytes (``ReadStream.growth_snapshot``:
+        read ahead and not yet taken, plus taken and not yet released) predict
+        its next window's growth, since each window takes about what the last
+        one holds. Reclaim history holds the claim up: a stream whose past
+        growth already evicted read-ahead (``evictions`` or ``rereads``) keeps
+        at least its evicted bytes reserved while it still holds bytes, since
+        a dip after takes is transient. The measured ``peak_held_bytes``
+        bounds the reserve from above. The reserve is live: a drained consumer
+        holds nothing and reserves nothing, and zero growth reserves zero.
+        """
+        if self.growth_stream is None:
+            return 0
+        held, unreleased, peak, evictions, evicted, rereads = (
+            self.growth_stream.growth_snapshot())
+        current = held + unreleased
+        if current <= 0:
+            return 0
+        reserve = current
+        if evictions or rereads:
+            reserve = max(reserve, min(evicted, peak))
+        return min(reserve, peak)
 
     def headroom_bytes(self, held_bytes: int) -> int:
         live = self.guard.headroom_bytes()
+        live -= self.growth_reserve_bytes()
         if self.yield_to is not None:
             group = self.yield_to.next_group()
             if group is not None:
                 live -= self.yield_to.unread_bytes(group)
         return max(live, self.floor_bytes - held_bytes)
+
+    def reclaim(self, shortfall_bytes: int) -> int:
+        """Free the growth stream's farthest-ahead groups first (PQ #2602).
+
+        When the guard's headroom drops past the reserve, the budget admits
+        nothing new and this gives the room back instead: it forwards to
+        ``ReadStream.reclaim``, so a later take rereads the dropped groups
+        and counts ``rereads``. Without a growth source it frees nothing.
+        """
+        if self.growth_stream is None:
+            return 0
+        return self.growth_stream.reclaim(shortfall_bytes)
 
 
 #: The device bytes a render cache may hold when no capture guard reads the
