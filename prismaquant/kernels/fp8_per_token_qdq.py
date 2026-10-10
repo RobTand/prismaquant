@@ -88,6 +88,15 @@ def _kernel():
     import triton
     import triton.language as tl
 
+    def _div_rn(a, b):
+        # Triton lowers ``/`` on FP32 to an approximate divide, which can move
+        # a scale by one ULP and flip exact FP8 ties (PQ #1398). vLLM's native
+        # kernel divides with ``div.rn`` (``common.cuh``); match it exactly.
+        return tl.inline_asm_elementwise(
+            "div.rn.f32 $0, $1, $2;", "=f,f,f", [a, b],
+            dtype=tl.float32, is_pure=True, pack=1,
+        )
+
     @triton.jit
     def _fp8_per_token_qdq_kernel(
         x_ptr,
@@ -119,9 +128,9 @@ def _kernel():
             amax = tl.max(tl.abs(tile))
             nan_total = tl.sum((tile != tile).to(tl.int32))
             amax = tl.where(nan_total > 0, float("nan"), amax)
-            scale = amax / denom
+            scale = _div_rn(amax, denom)
             scale = tl.where(scale < min_scale, min_scale, scale)
-            scaled = tile / scale
+            scaled = _div_rn(tile, tl.full([BLOCK], scale, tl.float32))
             scaled = tl.where(scaled > clamp_hi, clamp_hi, scaled)
             scaled = tl.where(scaled < clamp_lo, clamp_lo, scaled)
             codes = scaled.to(FP8_DTYPE)
@@ -141,14 +150,15 @@ def _kernel():
                 amax = tl.maximum(amax, tl.max(tl.abs(tile)))
                 nan_total = nan_total + tl.sum((tile != tile).to(tl.int32))
             amax = tl.where(nan_total > 0, float("nan"), amax)
-            scale = amax / denom
+            scale = _div_rn(amax, denom)
             scale = tl.where(scale < min_scale, min_scale, scale)
             tl.store(scale_ptr + pid, scale)
+            scale_vec = tl.full([BLOCK], scale, tl.float32)
             for k in range(0, n_cols, BLOCK):
                 offs = k + tl.arange(0, BLOCK)
                 mask = offs < n_cols
                 tile = tl.load(x_ptr + base + offs, mask=mask, other=0.0).to(tl.float32)
-                scaled = tile / scale
+                scaled = _div_rn(tile, scale_vec)
                 scaled = tl.where(scaled > clamp_hi, clamp_hi, scaled)
                 scaled = tl.where(scaled < clamp_lo, clamp_lo, scaled)
                 codes = scaled.to(FP8_DTYPE)
@@ -200,7 +210,9 @@ def fused_per_token_qdq(
     if out_tl is None or fp8_tl is None:  # pragma: no cover - eligible() guards this
         raise RuntimeError("fused per-token FP8 QDQ has no Triton dtype for this input")
     denom = torch.full((), float(element_max), dtype=torch.float32).item()
-    floor = 1.0 / (float(element_max) * 512.0)
+    floor = torch.full(
+        (), 1.0 / (float(element_max) * 512.0), dtype=torch.float32,
+    ).item()
     kernel[(n_rows,)](
         rows,
         quant,
