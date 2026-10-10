@@ -13,7 +13,8 @@ fixture in ``tests/test_tessera_lane_v12.py``, not a new copy:
   each launch scope on the record.
 * ``derived``: the route cell keeps the derived launch coverage.
 * ``absent``: a launch without the scope key keeps the scope of its cell,
-  and a v11-shaped answer keeps the v11 row shape.
+  and a v11-shaped answer keeps the v11 row shape (18 entries, the
+  image entry at index 13, no entry carries launch scopes).
 * ``malformed``: a malformed launch scope is refused, and a v12 key under
   v11 is refused.
 
@@ -196,13 +197,28 @@ def _check_absent() -> None:
         for launch in v11_cell["executes"]:
             launch.pop("rungs_q256", None)
     before = runtime.contract_answer(_parsed())
+    before_row = next(r for r in before["cells"] if r[0] == _CELL_ID)
+    if not any(
+        isinstance(entry, dict) and "launch_scopes" in entry
+        for entry in before_row
+    ):
+        _fail("absent: v12 answer row carries no launch scopes")
     answer = runtime.contract_answer(
         runtime._parse(v11, commit="fixture", sha="fixture", path="fixture")
     )
     if runtime._answer_drift(before, before) != []:
         _fail("absent: answer drift baseline is not empty")
     row = next(r for r in answer["cells"] if r[0] == _CELL_ID)
-    if "launch_scopes" in row:
+    if len(row) != 18:
+        _fail(f"absent: v11 answer row shape moved: len {len(row)}")
+    if not (
+        isinstance(row[13], dict)
+        and set(row[13]) >= {"image", "execution_modes"}
+    ):
+        _fail("absent: v11 answer row entry 13 is not the image entry")
+    if any(
+        isinstance(entry, dict) and "launch_scopes" in entry for entry in row
+    ):
         _fail("absent: v11 answer row carries launch scopes")
 
 

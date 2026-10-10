@@ -9,9 +9,15 @@ against the real pin, not a caller-built dict.
 
 A producer schema change is refused unless its PR links consumer
 compatibility work and names fixture results. That rule lives in
-``prismaquant/tessera_pin_scope_gate.py`` beside the pin gate.
+``prismaquant/tessera_pin_scope_gate.py`` beside the pin gate, as a rule
+plus unit tests: no caller wires it into a PR check in this repository.
+One test per scope class breaks the real check (not a ``_CHECKS`` stub)
+and asserts the refusal reason.
 """
 import pytest
+import dataclasses
+import json
+
 
 from prismaquant import tessera_pin_scope_gate as gate
 
@@ -93,3 +99,87 @@ def test_producer_schema_pr_admits_with_linked_work_and_all_fixture_results():
         body="fixtures: census pass, derived pass, absent pass, malformed pass",
         linked=["prismaquant#2600"],
     )
+
+
+def test_pin_gate_refuses_a_real_census_regression(monkeypatch):
+    real_payload = gate._payload
+
+    def bad_payload():
+        payload = real_payload()
+        payload["contract_version"] = 65
+        return payload
+
+    monkeypatch.setattr(gate, "_payload", bad_payload)
+    with pytest.raises(gate.TesseraPinScopeGateError, match="census") as refused:
+        gate.check_pin_update()
+    assert "contract version is not 66" in str(refused.value)
+
+
+def test_pin_gate_refuses_a_real_derived_regression(monkeypatch):
+    real_parsed = gate._parsed
+
+    def bad_parsed(payload=None):
+        parsed = real_parsed(payload)
+        cells = []
+        for cell in parsed.cells:
+            if cell.cell_id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident":
+                covered = tuple(
+                    tuple(r for r in entry if r != 800)
+                    if entry is not None else None
+                    for entry in cell.launch_covered_rungs_q256
+                )
+                cell = dataclasses.replace(
+                    cell, launch_covered_rungs_q256=covered)
+            cells.append(cell)
+        return dataclasses.replace(parsed, cells=tuple(cells))
+
+    monkeypatch.setattr(gate, "_parsed", bad_parsed)
+    with pytest.raises(gate.TesseraPinScopeGateError, match="derived") as refused:
+        gate.check_pin_update()
+    assert "derived" in str(refused.value)
+
+
+def test_pin_gate_refuses_a_real_absent_leak(monkeypatch):
+    real_answer = gate.runtime.contract_answer
+
+    def leaking_answer(contract):
+        answer = real_answer(contract)
+        cells = []
+        for row in answer["cells"]:
+            row = list(row)
+            if not any(
+                isinstance(entry, dict) and "launch_scopes" in entry
+                for entry in row
+            ):
+                row.append({"launch_scopes": [
+                    {"symbol": "leak", "decoder": "leak",
+                     "rungs_q256": [768]}]})
+            cells.append(row)
+        return {**answer, "cells": cells}
+
+    monkeypatch.setattr(gate.runtime, "contract_answer", leaking_answer)
+    with pytest.raises(gate.TesseraPinScopeGateError, match="absent") as refused:
+        gate.check_pin_update()
+    assert "launch scopes" in str(refused.value)
+
+
+def test_pin_gate_refuses_a_real_malformed_regression(monkeypatch):
+    real_parse_table = gate.lane._parse_table
+    good = json.loads(gate.V12_FIXTURE.read_bytes())
+
+    def soft_parse_table(*args, **kwargs):
+        try:
+            return real_parse_table(*args, **kwargs)
+        except gate.lane.LaneEligibilityError:
+            return real_parse_table(
+                good["lane_eligibility"], good["formats"],
+                "fixture", "fixture", "fixture",
+                native_extensions=good["native_extensions"],
+            )
+
+    monkeypatch.setattr(gate.lane, "_parse_table", soft_parse_table)
+    with pytest.raises(
+        gate.TesseraPinScopeGateError, match="malformed"
+    ) as refused:
+        gate.check_pin_update()
+    assert "malformed scope admitted" in str(refused.value)
