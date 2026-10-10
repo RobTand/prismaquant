@@ -7,6 +7,7 @@ re-run the full gate through ``--seed-checkpoint``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -252,6 +253,11 @@ def test_open_rungs_come_from_the_packet():
         assert row_class in ("dense", "routed")
 
 
+def test_open_rung_reader_refuses_an_empty_packet():
+    with pytest.raises(RuntimeError, match="empty open set"):
+        campaign.open_rung_ids_from_predispatch_packet({})
+
+
 def test_rung_reconciliation_counts_new_and_total():
     legacy = [("FAM", 1024, "dense"), ("FAM", 2048, "dense")]
     requested = [("FAM", 1024, "dense"), ("FAM", 4096, "dense")]
@@ -306,16 +312,18 @@ def test_census_manifest_carries_the_reconcile_flags(tmp_path):
         timeout_s=7200,
         submit=False,
         reconcile_seed_checkpoint="/mnt/shared/seed/cost.anchors.json",
-        reconcile_open_packet="packet.json",
+        reconcile_open_packet=str(PACKET_PATH),
         reconcile_log_out="reconcile.json",
         legacy_freeze_out="freeze.json",
     )
     assert dispatch.cmd_census(args) == 0
     (row,) = json.loads((tmp_path / "census-manifest.json").read_text())
     argv = dispatch._inner_campaign_argv(row)
+    staged = tmp_path / PACKET_PATH.name
+    assert staged.read_bytes() == PACKET_PATH.read_bytes()
     for flag, value in (
         ("--reconcile-seed-checkpoint", "/mnt/shared/seed/cost.anchors.json"),
-        ("--reconcile-open-packet", "packet.json"),
+        ("--reconcile-open-packet", str(staged)),
         ("--reconcile-log-out", "reconcile.json"),
         ("--legacy-freeze-out", "freeze.json"),
     ):
@@ -377,6 +385,8 @@ def test_reconcile_driver_writes_freeze_and_log_without_a_price_row(tmp_path):
         cache_dir=cache,
     )
     assert log["schema"] == "prismaquant.tessera_seed_reconcile.v1"
+    assert log["packet_sha256"] == hashlib.sha256(
+        PACKET_PATH.read_bytes()).hexdigest()
     assert log["legacy_units"] == 2
     assert log["gate_tally"] == {"pass": 2, "fail": 0}
     assert log["run_binding_complete"] is False

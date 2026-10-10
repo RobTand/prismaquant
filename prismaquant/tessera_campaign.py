@@ -3662,9 +3662,14 @@ def legacy_anchor_rung_ids(anchors, *, row_class: str) -> set:
 
 
 def open_rung_ids_from_predispatch_packet(packet: dict) -> list:
-    """The 14 open ``(family, rate, row_class)`` rungs of PQ #1588 (PQ #2559)."""
+    """The open ``(family, rate, row_class)`` rungs of PQ #1588 (PQ #2559)."""
+    rows = packet.get("requested_rows", ())
+    if not rows:
+        raise RuntimeError(
+            "reconcile needs the pre-dispatch packet requested_rows; "
+            "refusing an empty open set")
     ids = []
-    for row in packet.get("requested_rows", ()):
+    for row in rows:
         if row.get("producer_legal") is True and row.get("priced_in_joint_pkl") is False:
             ids.append((row["family"], row["rate"], row["row_class"]))
     return sorted(set(ids))
@@ -3988,7 +3993,9 @@ def reconcile_census_seeds(*, legacy_path, packet_path, freeze_out, log_out,
         adopt=refuse_adopt, admits=admits, identity_sha256=census_sha256,
         expected_identity=expected_identity, validate_state=None,
         record_only=True, row_class_by_unit=row_class_by_unit)
-    packet = json.loads(Path(packet_path).read_text())
+    import hashlib
+    packet_bytes = Path(packet_path).read_bytes()
+    packet = json.loads(packet_bytes)
     legacy_ids = sorted({tuple(entry) for decision in record["decisions"]
                          for entry in decision["gates"].get("rung_ids", ())})
     rungs = reconcile_seed_rungs(legacy_ids, open_rung_ids_from_predispatch_packet(packet))
@@ -3999,6 +4006,7 @@ def reconcile_census_seeds(*, legacy_path, packet_path, freeze_out, log_out,
     log = {
         "schema": SEED_RECONCILE_SCHEMA,
         "census_sha256": census_sha256,
+        "packet_sha256": hashlib.sha256(packet_bytes).hexdigest(),
         "freeze": frozen,
         "legacy_units": len(targets),
         "legacy_unit_names": targets,

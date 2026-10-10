@@ -1720,25 +1720,41 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
 # census
 # ---------------------------------------------------------------------------
 
-def _census_reconcile_argv(args) -> list:
-    """The census row's seed-reconcile flags, or nothing (PQ #2559).
+def _census_reconcile_paths(args, workspace: Path) -> dict | None:
+    """Resolve the census row's reconcile inputs, or nothing (PQ #2559).
 
-    The four flags travel together; the campaign refuses partial sets the
-    same way. The legacy manifest is read on the worker that holds the
-    shared mount, never copied into the repo.
+    The four flags travel together; partial sets refuse here and again in
+    the campaign. The open-packet JSON is staged byte-identical into the
+    workspace, so the worker reads the exact bytes dispatch reviewed and
+    the census row never depends on a submit-host path. The legacy
+    manifest is read on the worker that holds the shared mount, never
+    copied into the repo.
     """
     flags = ("reconcile_seed_checkpoint", "reconcile_open_packet",
              "reconcile_log_out", "legacy_freeze_out")
     given = {name: getattr(args, name, None) for name in flags}
     if all(value is None for value in given.values()):
-        return []
+        return None
     if any(value is None for value in given.values()):
         missing = sorted(name for name, value in given.items() if value is None)
         raise RuntimeError(f"census reconcile needs all four flags; missing {missing}")
-    return ["--reconcile-seed-checkpoint", str(given["reconcile_seed_checkpoint"]),
-            "--reconcile-open-packet", str(given["reconcile_open_packet"]),
-            "--reconcile-log-out", str(given["reconcile_log_out"]),
-            "--legacy-freeze-out", str(given["legacy_freeze_out"])]
+    staged = workspace / Path(given["reconcile_open_packet"]).name
+    if staged.resolve() != Path(given["reconcile_open_packet"]).resolve():
+        staged.write_bytes(Path(given["reconcile_open_packet"]).read_bytes())
+    return {"seed_checkpoint": str(given["reconcile_seed_checkpoint"]),
+            "open_packet": str(staged),
+            "log_out": str(given["reconcile_log_out"]),
+            "freeze_out": str(given["legacy_freeze_out"])}
+
+
+def _census_reconcile_argv(paths: dict | None) -> list:
+    """The census row's seed-reconcile flags from resolved paths (PQ #2559)."""
+    if paths is None:
+        return []
+    return ["--reconcile-seed-checkpoint", paths["seed_checkpoint"],
+            "--reconcile-open-packet", paths["open_packet"],
+            "--reconcile-log-out", paths["log_out"],
+            "--legacy-freeze-out", paths["freeze_out"]]
 
 
 def cmd_census(args) -> int:
@@ -1747,7 +1763,7 @@ def cmd_census(args) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
     census_path = workspace / "census.json"
     manifest = workspace / "census-manifest.json"
-    reconcile = _census_reconcile_argv(args)
+    reconcile = _census_reconcile_argv(_census_reconcile_paths(args, workspace))
     row = _row(
         spec,
         ["--model", spec["model"],
