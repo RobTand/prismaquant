@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from g3_pq_policy.digests import bytes_sha256hex
-from g3_pq_policy.staged_lease import _classify
+from g3_pq_policy.staged_lease import classify_refusal
 
 _LOCK = threading.Lock()
 _READER = None
@@ -96,7 +96,7 @@ class StagedReader:
                     and ("ram_path" in mapping["entries"][k]) == ("ram_path" in entry)}
         covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
                                           manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
-        if not covers["ok"] and "ram_path" in entry and _classify(covers["refusal"]) == "availability":
+        if not covers["ok"] and "ram_path" in entry and classify_refusal(covers["refusal"]) == "availability":
             # PB permits unavailable RAM covers to select the same bytes on stage.
             # Integrity and unknown refusals never select another copy.
             tier, epoch = mapping["tier_id"], ""

@@ -372,7 +372,6 @@
   ],
   "_classify": [
    "prismaquant/full_engine_resource_report.py",
-   "prismaquant/staged_lease.py",
    "tools/chain_roll_bench.py",
    "tools/pwc_window_load_bench.py"
   ],
