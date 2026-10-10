@@ -48,14 +48,14 @@ match the independent contract.
 
 The producer uses the shared `stage_inputs.read_bound` owner once for the
 quantum wire. Hashing, JSON parsing and completion publication consume that
-same owned byte string. The typed completion contains its original base64
-bytes, length and SHA-256, plus the committed counters reference and completed
-units. The quantum control cap is 1 MiB, checked before JSON parsing and
-completion encoding. The consumer checks the declared cap and encoded length
-before base64 decoding, then verifies exact decoded length and the sealed
-`--quantum-sha256`. It never stats or reopens the pilot's original record path.
-Counter/result documents are capped at 8 MiB; decoded JSON overhead is
-additional to these byte caps.
+same owned byte string. The typed completion names the wire as an external
+readset entry: path, length and SHA-256. It also carries the committed
+counters reference and completed units. The wire itself never crosses stdout.
+The quantum control cap is 1 MiB, checked on the readset read. The consumer
+checks the declared cap, reads the entry through the bound reader, then
+verifies exact read length and the sealed `--quantum-sha256`. A substituted
+path or altered bytes refuses at the digest check. Counter/result documents
+are capped at 8 MiB; decoded JSON overhead is additional to these byte caps.
 
 The shared quantum-record validator checks the authenticated record identity
 and adjoint binding. Counter identity, quantum ID and complete integer units

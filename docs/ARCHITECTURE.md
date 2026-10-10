@@ -781,6 +781,16 @@ worker activation and the genuine #1293 GPU pilot remain independent gates.
 No numerical, cache, pipeline-default, wire or serving change is introduced.
 See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
 
+Re-stamped 2026-10-10 (PQ #2625, producer no longer inlines the wire):
+the typed completion names the original bounded quantum wire as an
+external readset entry (path, length, SHA-256) instead of its base64
+bytes. The consumer reads the entry through the shared bound reader
+and matches digest and length to the sealed `--quantum-sha256`; any
+mismatch refuses. The 1 MiB cap now bounds the readset read only;
+stdout carries the descriptor. No numerical, cache, pipeline-default
+or serving change is introduced.
+
+
 Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
 the existing quantum output publisher records the exact SHA-256 and byte
 length of its committed counters in results.json. Its existing final stdout
