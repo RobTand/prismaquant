@@ -17,7 +17,7 @@ EXPECTED = {
         "f6a27dfd2306056f51335eed22cc4ffc666e35bad0aa9a457d27c33c6490e444"
     ),
     "v1/core/kv_cache_utils.py": (
-        "93769c6b6c43b880cb29ad7cfe6562f85142a8eb53bc89a86f00d39abe35828c"
+        "792d068189e3fd4703ae823d1bd223fba1f6fb220615f7ffb2b89e053a6f4e48"
     ),
     # The base image's own edits, carried through unchanged.
     "v1/worker/gpu/model_runner.py": (

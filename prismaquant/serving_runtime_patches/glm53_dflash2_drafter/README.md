@@ -10,7 +10,7 @@ It carries two edits:
   for the layers the DFlash2 draft config names. Without it the V2
   runner raises `Model does not support EAGLE3 interface` at load, and
   then asserts a tuple return the model never produces.
-- `patch_glm5_drafter_kv_group.py` (12 anchored edits on
+- `patch_glm5_drafter_kv_group.py` (11 anchored edits on
   `v1/core/kv_cache_utils.py`): exact-type `SlidingWindowSpec` drafter
   layers leave the GLM5-next fast-path guard and form one standalone
   native-page group appended last. Without it the model falls back to
@@ -30,7 +30,7 @@ Patched file hashes (reproduced locally from the verified base bytes):
 - `models/glm5next/nvidia/model.py`:
   `f6a27dfd2306056f51335eed22cc4ffc666e35bad0aa9a457d27c33c6490e444`
 - `v1/core/kv_cache_utils.py`:
-  `93769c6b6c43b880cb29ad7cfe6562f85142a8eb53bc89a86f00d39abe35828c`
+  `792d068189e3fd4703ae823d1bd223fba1f6fb220615f7ffb2b89e053a6f4e48`
 
 The base image already carries the DFlash2 model
 (`model_executor/models/qwen3_dflash2.py`) and the DFlash2 speculator
