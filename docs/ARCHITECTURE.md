@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-09 (PQ #2010): the capture source owner rereads held bytes at lease exit.
-Admission still hashes inside the consuming read, with no separate admission read. The exit and close rereads run on CPU, off the GPU hot path. They carry no new resource charge. Adopted and recorded rows keep zero-read proofs and refuse by stat. No default, format, pin, or serving gate moves.
+Re-stamped 2026-10-10 (PQ #2010): the capture source owner rereads each fresh file once at close.
+Admission still hashes inside the consuming read, with no separate admission read. The close reread runs on CPU, off the GPU hot path, under the owner resource guard. Lease exits and JSON reads keep the stat fence only. Adopted and recorded rows keep zero-read proofs and refuse by stat. The profile in [pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md) bounds the cost below 10 percent of capture wall. No default, format, pin, or serving gate moves.
 
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
@@ -1391,14 +1391,17 @@ implementation, superseded by prep v2 and the original narrow GPU receipts;
 those receipts are not rebased-source GPU qualification. Existing parallel
 fallback hashing (#1889) remains. Numerical, serving, pins and export wire are
 unchanged. Stat fences detect metadata-observable mutation. Same-signature
-byte mutation now refuses by held-digest reread (#2010). Each file hashed by
-its consuming read is reread at its lease exit. Every fresh file is reread
-at owner close. Both rereads run on the CPU caller thread. They carry no new
-resource charge. Adopted and recorded rows keep their zero-read proof
+byte mutation now refuses by one guarded held-digest reread per file at
+owner close (#2010). Admission still hashes inside the consuming read.
+Lease exits and JSON reads keep the stat fence only, so the extra cost is
+one sequential read per file whatever the lease count; the profile in
+[pq2010-close-reread-cost](measurements/pq2010-close-reread-cost-2026-10-10.md)
+bounds it below 10 percent of capture wall, so no ZFS snapshot path is
+needed. Adopted and recorded rows keep their zero-read proof
 optimization and refuse by stat. #2010 recorded two same-signature admissions
 in a bounded ZFS diagnostic, with no end-to-end corrupted artifact
-demonstrated. The exit-only regression retains its deterministic drift
-fixture. The mtime-restoration control remains.
+demonstrated. The deterministic drift fixture and the mtime-restoration
+control remain.
 See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
 Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
 `sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
