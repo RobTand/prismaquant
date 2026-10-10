@@ -88,8 +88,18 @@ def fused_eligible(
     return triton_available()
 
 
+_KERNEL = None
+
+
 def _kernel():
-    """Compile the row kernel on first use (Triton caches specializations)."""
+    """Build the row kernel once and reuse it (PQ #1398).
+
+    Rebuilding the ``@triton.jit`` wrapper per call reloads the compiled
+    binary every invocation, which costs milliseconds per QDQ.
+    """
+    global _KERNEL
+    if _KERNEL is not None:
+        return _KERNEL
     import triton
     import triton.language as tl
 
@@ -184,6 +194,7 @@ def _kernel():
                 if HAS_DX:
                     tl.store(dx_ptr + base + offs, _sub_rn(dequant, tile), mask=mask)
 
+    _KERNEL = _fp8_per_token_qdq_kernel
     return _fp8_per_token_qdq_kernel
 
 

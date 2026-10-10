@@ -31,6 +31,7 @@ ROWS = 256
 WARMUP = 20
 ROUNDS = 11
 CALLS_PER_ROUND = 32
+POWER_PHASE_S = 8.0
 
 
 def _real_activations(rows: int, cols: int) -> torch.Tensor:
@@ -77,16 +78,18 @@ def _profile_both_arms(inputs: torch.Tensor) -> dict:
         torch.cuda.synchronize()
     arms = {"reference": ([], 0.0), "fused": ([], 0.0)}
     for event in prof.key_averages():
-        if event.device_time_total <= 0:
+        # Self device time only: parent CPU ops carry their children's device
+        # time and would double-count every kernel (PQ #1398).
+        if event.self_device_time_total <= 0:
             continue
         arm = "fused" if _is_fused_key(event.key) else "reference"
         keys, _ = arms[arm]
         keys.append(f"{event.key}x{event.count}")
-        arms[arm] = (keys, arms[arm][1] + event.device_time_total)
+        arms[arm] = (keys, arms[arm][1] + event.self_device_time_total)
     counts = {
         arm: sum(
             event.count for event in prof.key_averages()
-            if event.device_time_total > 0
+            if event.self_device_time_total > 0
             and (_is_fused_key(event.key) == (arm == "fused"))
         ) // CALLS_PER_ROUND
         for arm in ("reference", "fused")
@@ -141,6 +144,28 @@ class _PowerSampler:
         return statistics.fmean(self.samples) if self.samples else None
 
 
+def _power_phase(inputs: torch.Tensor, seconds: float) -> dict:
+    # Sustained load: the timed rounds finish in milliseconds, far under the
+    # power sampling interval, so power needs its own wall-clock phase.
+    calls = 0
+    start = time.monotonic()
+    with _PowerSampler() as sampler:
+        while time.monotonic() - start < seconds:
+            for _ in range(32):
+                fp8_dynamic_activation_qdq_vllm(inputs).dequant
+                calls += 1
+            torch.cuda.synchronize()
+    elapsed = time.monotonic() - start
+    watts = sampler.mean()
+    return {
+        "power_w_mean": watts,
+        "power_samples": len(sampler.samples),
+        "power_phase_s": elapsed,
+        "power_phase_calls": calls,
+        "calls_per_joule": calls / (watts * elapsed) if watts else None,
+    }
+
+
 def _bench_case(width: int, out: Path) -> dict:
     inputs = _real_activations(ROWS, width)
     case: dict = {
@@ -150,6 +175,7 @@ def _bench_case(width: int, out: Path) -> dict:
         "element": "e4m3",
         "rounds": ROUNDS,
         "calls_per_round": CALLS_PER_ROUND,
+        "power_phase_s": POWER_PHASE_S,
         "torch": str(torch.__version__),
         "cuda": str(torch.version.cuda),
         "device": torch.cuda.get_device_name(0),
@@ -159,24 +185,17 @@ def _bench_case(width: int, out: Path) -> dict:
         for _ in range(WARMUP):
             fp8_dynamic_activation_qdq_vllm(inputs).dequant
         torch.cuda.synchronize()
-        with _PowerSampler() as sampler:
-            per_call = [
-                _timed_calls(inputs, CALLS_PER_ROUND) for _ in range(ROUNDS)
-            ]
+        per_call = [
+            _timed_calls(inputs, CALLS_PER_ROUND) for _ in range(ROUNDS)
+        ]
         case[arm] = {
             "ms_per_call_median": statistics.median(per_call),
             "ms_per_call_min": min(per_call),
-            "power_w_mean": sampler.mean(),
-            "power_samples": len(sampler.samples),
         }
+        case[arm].update(_power_phase(inputs, POWER_PHASE_S))
     profiled = _profile_both_arms(inputs)
     for arm in ("reference", "fused"):
         case[arm].update(profiled[arm])
-    ref = case["reference"]["ms_per_call_median"]
-    fused = case["fused"]["ms_per_call_median"]
-    case["speedup"] = ref / fused if fused else None
-    (out / f"case-r{ROWS}-k{width}.json").write_text(json.dumps(case, indent=2))
-    return case
 
 
 def main() -> None:
