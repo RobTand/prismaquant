@@ -3,39 +3,39 @@
     "checks_failed": 0,
     "checks_passed": 181,
     "clean_tree_proof": {
-      "closure_file": ".pbrun-closure.9432ba2158eacec2.json",
+      "closure_file": ".pbrun-closure.1ea8d4a7048c41d8.json",
       "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "equals_sha256_of_empty_input": true,
-      "head": "fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6"
+      "head": "73a2f9c9159a790993f284168431e60dd5cba7ac"
     },
     "host": "dl380g10",
-    "key": "dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
-    "memory_peak_bytes": 6335041536,
-    "payload_bytes": 128600,
-    "payload_sha256": "a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0",
+    "key": "9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934",
+    "memory_peak_bytes": 1404706816,
+    "payload_bytes": 128573,
+    "payload_sha256": "95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a",
     "receipt_schema": "prismaquant.prismabuild.cas_receipt.v3",
-    "receipt_sha256": "c80c0c53d67a3bf64d53ed256cf608d00aba11692f012dc21a564f3018e7c549",
-    "request_manifest_sha256": "8434357faf16eac8962f270a725902301c19fb181fddb21d540e074531ae2fb6",
+    "receipt_sha256": "02a4f63516b3763d13dc7a9d8a63290731ee8151baeda02eefd82509a7409af7",
+    "request_manifest_sha256": "25b0737ba03bb5cceb4902e554e903a9ec1716b090cbb0b4708745826d102928",
     "resources": {
-      "cpu": 16,
-      "mem_gb": 24
+      "cpu": 4,
+      "mem_gb": 12
     },
     "returncode": 0,
     "snapshot": {
-      "bundle_sha256": "054a1be0512ae14185a2a32b56809e8c902cff8ee4196af0a6286d546b2792f1",
-      "commit": "133768d716ea60677b3b2c21b1a62b49928702dd",
-      "parent": "fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6"
+      "bundle_sha256": "450841cf3014ced5587af693cca7295c48b44ad8e39cceac48e21512cb6b2443",
+      "commit": "668adbcbc46a343fc93165b94deffd9c94d0c495",
+      "parent": "73a2f9c9159a790993f284168431e60dd5cba7ac"
     },
     "status": "executed",
-    "stdout_sha256": "0f658c5b954882eb25ddc0dd22ae29b73096a0125f7f25bfa9b51e9f78d8fb40",
+    "stdout_sha256": "8b44c6a24dc4539d2048b2c137772c7d9678579df546250bc0bd79b857e5a533",
     "tags": [
       "interpreter-path-v1",
       "progress-helper-v1",
       "progress-v1",
       "x86"
     ],
-    "verify_command": "python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
-    "wall_seconds": 1198.1
+    "verify_command": "python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934",
+    "wall_seconds": 1683.7
   },
   "body_admission": {
     "message": "joint AURA requires matching aura/joint provenance",
@@ -63,7 +63,7 @@
   },
   "cross_checks": {
     "pb_receipts_mcp": {
-      "keys": "14 qualifying actions and the final audit action",
+      "keys": "14 accepted actions and the audit action",
       "keys_checked": 15,
       "read_only_tool": "pb_receipts",
       "verdict_green": 15
@@ -99,7 +99,7 @@
   "performance_claims": [],
   "record_dir": "docs/measurements/pq-2530-mtp-layer45",
   "record_files": {
-    "audit.json": "a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0",
+    "audit.json": "95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a",
     "cells.csv": "c8d30e8f73b2788af8b5813d7f496c35c18e0e79d080720064bbe0dca3c9c6b7",
     "units.csv": "64ce7611b5d7fbba2c39bd8b68f2a285fd15d1255eab05fb655a34a621807416"
   },
@@ -131,6 +131,11 @@
       "tool_commit": "559e401332"
     },
     {
+      "key": "dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
+      "note": "Selection binding and bound receipt reads, 181 checks. It used parallel readers, which the io site freeze refuses. Every evidence section equals this record.",
+      "tool_commit": "fa74f5bb7e"
+    },
+    {
       "key": "35029e831cfbc518f660be88d86a0a4e8644f8ea7189c3dd9d53dc7deffb8db6",
       "note": "Dry run on 6 units without the seal recompute, 175 checks. It is not a record.",
       "tool_commit": "da64adf400"
@@ -138,7 +143,7 @@
   ],
   "tool": {
     "path": "tools/audit_glm_mtp_layer45.py",
-    "sha256": "415db9e3a82bf052966b3835f76ecffbfa195ac69ccfb68fbab9a34d666d59c2"
+    "sha256": "322ab0f7d12ac5445186f94fa490ead2df44f63b0388fc2bcbaac94eec4bcc00"
   },
   "wire_bytes_by_rung": {
     "TESSERA_BF16_K1_R1024": 3670266765,

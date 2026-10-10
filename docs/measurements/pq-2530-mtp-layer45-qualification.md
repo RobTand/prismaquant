@@ -30,17 +30,17 @@ How to check this report:
 
 - `tests/test_pq2530_mtp_layer45_record.py` checks the committed record offline. It needs no fleet mount.
 - `tools/audit_glm_mtp_layer45.py` re-derives the record from the original files on the fleet mount.
-- `python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b` re-checks the PrismaBuild chain of the audit action. It needs no torch.
+- `python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934` re-checks the PrismaBuild chain of the audit action. It needs no torch.
 
 ## What this qualification ran
 
 The accepted evidence passes the audit, so no capture, campaign, preparation or Stage B job needed a new run.
-Only the audit ran. It ran on CPU as PrismaBuild action `dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b`.
+Only the audit ran. It ran on CPU as PrismaBuild action `9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934`.
 No GPU job ran for this qualification. No evidence is missing, so the audit lists no command for a new run.
 
 | Planned job | Result |
 | --- | --- |
-| Audit capture, M3/M4 prices, prepared caches, wire blobs and receipts | Run. Action `dc971e51bea2`. 181 checks pass. |
+| Audit capture, M3/M4 prices, prepared caches, wire blobs and receipts | Run. Action `9d713876e24d`. 181 checks pass. |
 | `tessera_joint_aura identity` (source digest cache) | Not needed. The identity file `4db808a769eb` exists and both Stage B parts bind it. The live shards match their recorded stat fingerprints. |
 | `glm_mtp_capture --phase projection` | Not needed. Action `89369de5afb2` holds the 864 routed units. The audit checks it. |
 | `glm_mtp_capture --phase final-hidden` | Not needed. Action `83dc1e8371bb` holds 512 layer-44 records. The audit checks them. |
@@ -246,12 +246,12 @@ Two r896 campaign rows were CAS cache hits when the campaign ran.
 The rows in the table are the original executions that those receipts reused.
 
 The audit action itself follows the same chain.
-Action `dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b` ran on `dl380g10` for 1,198 s with return code 0.
-Its CAS payload is `a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0` (128,600 bytes). This is `docs/measurements/pq-2530-mtp-layer45/audit.json`, byte for byte.
-Its CAS receipt is `c80c0c53d67a3bf64d53ed256cf608d00aba11692f012dc21a564f3018e7c549`. The stdout log is `0f658c5b954882eb25ddc0dd22ae29b73096a0125f7f25bfa9b51e9f78d8fb40`. The sealed request manifest is `8434357faf16eac8962f270a725902301c19fb181fddb21d540e074531ae2fb6`.
-The action ran from snapshot commit `133768d716ea60677b3b2c21b1a62b49928702dd` (parent `fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6`).
-The snapshot closure file `.pbrun-closure.9432ba2158eacec2.json` names head `fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6` and `dirty_sha256` `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. That is the SHA-256 of empty input, so the tree had no uncommitted edit.
-`python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b` repeats this check.
+Action `9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934` ran on `dl380g10` for 1,684 s with return code 0.
+Its CAS payload is `95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a` (128,573 bytes). This is `docs/measurements/pq-2530-mtp-layer45/audit.json`, byte for byte.
+Its CAS receipt is `02a4f63516b3763d13dc7a9d8a63290731ee8151baeda02eefd82509a7409af7`. The stdout log is `8b44c6a24dc4539d2048b2c137772c7d9678579df546250bc0bd79b857e5a533`. The sealed request manifest is `25b0737ba03bb5cceb4902e554e903a9ec1716b090cbb0b4708745826d102928`.
+The action ran from snapshot commit `668adbcbc46a343fc93165b94deffd9c94d0c495` (parent `73a2f9c9159a790993f284168431e60dd5cba7ac`).
+The snapshot closure file `.pbrun-closure.1ea8d4a7048c41d8.json` names head `73a2f9c9159a790993f284168431e60dd5cba7ac` and `dirty_sha256` `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. That is the SHA-256 of empty input, so the tree had no uncommitted edit.
+`python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934` repeats this check.
 
 The read-only PrismaBuild MCP tool `pb_receipts` gives a second check of the same state. It returns verdict `green` for all 14 accepted actions and for the audit action.
 
@@ -268,7 +268,7 @@ Attempts that are not accepted. The audit records them and never counts them.
 | m3-r1024-attempt2-no-datasets | `ce3299a0f32e6ccad4c884fb8bf1ed27756c24ba39841d270ca459df3e46b9e8` | failed+intent | failed rc 1 | no |
 | m3-r1024-attempt2-no-datasets | `69901d3fe135c7eda75180f4f7e0cd8b1a77507e388deba4de71b09a8a93cb8b` | failed+intent | failed rc 1 | no |
 
-Earlier audit runs. They used earlier versions of the tool. Their evidence sections equal this record.
+Earlier audit runs. They used earlier versions of the tool. Each note says whether the run equals this record.
 
 | Action key | Tool commit | Note |
 | --- | --- | --- |
@@ -277,6 +277,7 @@ Earlier audit runs. They used earlier versions of the tool. Their evidence secti
 | `65932b5915b02958a3955d419761beb009292ac7a0330487bfe3b46f0f6a26b3` | e2905ce1f0 | First committed tool, 178 checks. Every evidence section equals this record. |
 | `2c736f7d8a05b44277e106b944c755b65a29ee5326fec71da9c586ffa04c22bc` | da64adf400 | Digest owners in place of raw hashing, 178 checks. Every evidence section equals this record. |
 | `1a452539b99fd28719301983fd2dddeef7ad6e60a6df9fc2c80eff606cf9fe96` | 559e401332 | Light import of the digest owner, 178 checks. Every evidence section equals this record. |
+| `dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b` | fa74f5bb7e | Selection binding and bound receipt reads, 181 checks. It used parallel readers, which the io site freeze refuses. Every evidence section equals this record. |
 | `35029e831cfbc518f660be88d86a0a4e8644f8ea7189c3dd9d53dc7deffb8db6` | da64adf400 | Dry run on 6 units without the seal recompute, 175 checks. It is not a record. |
 
 Performance claims: none. `performance_claims` is empty in the record and in the manifest, and a test enforces it.
@@ -328,12 +329,12 @@ All files are under `docs/measurements/pq-2530-mtp-layer45/` unless noted.
 
 | File | SHA-256 | Bytes |
 | --- | --- | --- |
-| `audit.json` | `a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0` | 128,600 |
+| `audit.json` | `95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a` | 128,573 |
 | `units.csv` | `64ce7611b5d7fbba2c39bd8b68f2a285fd15d1255eab05fb655a34a621807416` | 170,038 |
 | `cells.csv` | `c8d30e8f73b2788af8b5813d7f496c35c18e0e79d080720064bbe0dca3c9c6b7` | 864,378 |
-| `tools/audit_glm_mtp_layer45.py` | `415db9e3a82bf052966b3835f76ecffbfa195ac69ccfb68fbab9a34d666d59c2` | 100,094 |
-| `docs/measurements/pq-2530-mtp-layer45-manifest.json` | this file binds the rows above |  |
+| `tools/audit_glm_mtp_layer45.py` | `322ab0f7d12ac5445186f94fa490ead2df44f63b0388fc2bcbaac94eec4bcc00` | 100,649 |
 
+`docs/measurements/pq-2530-mtp-layer45-manifest.json` binds the rows above.
 `audit.json` also lists every file that the audit parsed. It holds the path, the SHA-256 and the size of each of its 45 inputs.
 The audit passes 181 checks. This table counts them by family.
 
@@ -367,6 +368,8 @@ Revision 2 added numbers and corrected that digest. It also committed no tool an
 The review could not check either revision against the repository.
 
 Revision 3 commits the tool, the test and the record.
-The first committed tool broke the repository duplication ratchet (`tests/test_duplication_baseline.py`).
-It added raw `hashlib` and sorted-JSON sites, and four helper names that other modules define.
-The final tool calls the digest owners, and the ratchet passes.
+Two repository guards refused the first committed tool.
+The duplication ratchet (`tests/test_duplication_baseline.py`) found raw `hashlib` and sorted-JSON sites, and four helper names that other modules define.
+The io site freeze (`tests/test_io_site_freeze.py`) found three new thread and process pools.
+The final tool calls the digest owners and uses unique helper names.
+It reads the capture entries and the rendered shards in turn. One child process checks every wire blob with the pinned Tessera tree.
