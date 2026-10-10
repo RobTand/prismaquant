@@ -824,18 +824,6 @@ def _read_span_into(fd: int, view: memoryview, offset: int,
         raise failure
 
 
-def _read_span(fd: int, count: int, offset: int,
-               shape: tuple[int, int] | None) -> bytearray:
-    """``count`` bytes at ``offset``, on as many streams as the mount holds.
-
-    The buffer is writable, which is what ``torch.frombuffer`` wants,
-    and it is the tensor's own storage afterwards.
-    """
-    buffer = bytearray(count)
-    _read_span_into(fd, memoryview(buffer), offset, shape)
-    return buffer
-
-
 class _StrictSliceProxy:
     """Header-only slice metadata; payload materializes via the staged reader.
 
@@ -1249,6 +1237,29 @@ class StagedShardReader:
         except OSError:
             pass
 
+    def _read_payload(self, fd, signature, entry, start, end):
+        """The staged span's bytes as one flat ``uint8`` tensor, read once.
+
+        The buffer is the tensor's own storage, so its bytes are the only host
+        copy the caller holds. It is a page-locked tensor when this reader
+        stages for a device check (PQ #2039), which then adopts it with no
+        second host copy; otherwise a writable ``bytearray`` that
+        ``torch.frombuffer`` wraps. The stat fence runs after the read, so a
+        file that changed under it raises before any caller sees the buffer.
+        """
+        count = end - start
+        if self._pinned_host:
+            payload = torch.empty(count, dtype=torch.uint8, pin_memory=True)
+            window = memoryview(payload.numpy())
+        else:
+            buffer = bytearray(count)
+            payload = torch.frombuffer(buffer, dtype=torch.uint8)
+            window = memoryview(buffer)
+        _read_span_into(fd, window, start - entry["offset"], self._shape)
+        if file_stat_signature(os.fstat(fd)) != signature:
+            raise ValueError("changed during its content read")
+        return payload
+
     def _staged_tensor(self, name):
         span = self._span(name)
         if span is None:
@@ -1269,42 +1280,17 @@ class StagedShardReader:
         if row is None:
             return None
         fd, signature, entry, tier = row[2], row[3], row[4], row[5]
-        if self._pinned_host:
-            # Page-locked staging for the device check (PQ #2039): the stage
-            # bytes land in the pinned buffer itself, so the check adopts it
-            # with no second host copy. Same fences, same refusal, same bytes
-            # as the ``frombuffer`` path below. ``memoryview`` over the pinned
-            # tensor's own window is the established pread target
-            # (``joint_replay_spill`` stages the same way).
-            try:
-                staged = torch.empty(end - start, dtype=torch.uint8, pin_memory=True)
-                _read_span_into(fd, memoryview(staged.numpy()),
-                                start - entry["offset"], self._shape)
-                if file_stat_signature(os.fstat(fd)) != signature:
-                    raise ValueError("changed during its content read")
-            except (OSError, ValueError) as error:
-                self._drop(row)
-                reason = f"staged range {getattr(error, 'strerror', None) or error}"
-                if self._resolver is not None:
-                    self._resolver.record_fallback(self._declared, reason)
-                if self._strict:
-                    raise refuse_pool_bulk_read(self._declared, reason)
-                return None
-            tensor = staged.view(dtype).reshape(shape)
-        else:
-            try:
-                raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
-                if file_stat_signature(os.fstat(fd)) != signature:
-                    raise ValueError("changed during its content read")
-            except (OSError, ValueError) as error:
-                self._drop(row)
-                reason = f"staged range {getattr(error, 'strerror', None) or error}"
-                if self._resolver is not None:
-                    self._resolver.record_fallback(self._declared, reason)
-                if self._strict:
-                    raise refuse_pool_bulk_read(self._declared, reason)
-                return None
-            tensor = torch.frombuffer(raw, dtype=torch.uint8).view(dtype).reshape(shape)
+        try:
+            payload = self._read_payload(fd, signature, entry, start, end)
+        except (OSError, ValueError) as error:
+            self._drop(row)
+            reason = f"staged range {getattr(error, 'strerror', None) or error}"
+            if self._resolver is not None:
+                self._resolver.record_fallback(self._declared, reason)
+            if self._strict:
+                raise refuse_pool_bulk_read(self._declared, reason)
+            return None
+        tensor = payload.view(dtype).reshape(shape)
         if self._device is not None:
             tensor = tensor.to(self._device)
         if self._resolver is not None:
