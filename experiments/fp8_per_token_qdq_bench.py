@@ -200,6 +200,7 @@ def main() -> None:
             f'{fused["power_w_mean"]} W) -> {case["speedup"]:.2f}x',
             flush=True,
         )
+    print("SUMMARY_JSON:" + json.dumps(summary), flush=True)
     del os.environ[DISABLE_FUSED_ENV]
 
 
