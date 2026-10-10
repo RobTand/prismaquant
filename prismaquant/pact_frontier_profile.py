@@ -59,14 +59,6 @@ FRONTIER_MANIFEST_KEYS = (
 )
 
 
-def _config_value(config, *names, default=None):
-    """First present alias value. Top level beats nested text_config."""
-    from .model_profiles.base import _read_config_alias
-
-    value = _read_config_alias(config, *names)
-    return default if value is None else value
-
-
 def _require_profile(profile):
     """Return the profile, or refuse a call with no declared scope."""
     if profile is None or getattr(profile, "pact_scope_declared", None) is None:
@@ -176,7 +168,7 @@ def tp_splits_for_role(role, profile=None):
             f"profile {getattr(owner, 'name', 'unknown')} declares no TP split "
             f"for {role}"
         )
-    return 1
+    return owner.pact_tp_default_split(role)
 
 
 def _legacy_cohort():
@@ -229,3 +221,43 @@ def pact_hidden_layout(profile=None, config=None):
             "or declared config; no fallback supplies it"
         )
     return {"hidden_streams": streams, "hidden_size": width}
+
+
+# Canonical consumer sources (issue 2427, item 2485). Read-only names of the
+# campaign inputs a consumer migration must record before it starts. No live
+# harness, frontier or price-adapter workspace moves until the gate passes.
+PACT_CONSUMER_SOURCES = {
+    "harness": "/home/rob/tmp/eng-pact-pricing-20261006",
+    "frontier": "/mnt/shared/tessera-measurements/pact-frontier-d43-20261006/frontier.py",
+    "price_adapter": "/home/rob/tmp/eng-pact-energy-20261007",
+}
+
+# Prerequisite reasons the gate preserves (issue 2427 split): the shared
+# contract lands first, then the canonical consumer migration.
+PACT_CONSUMER_PREREQUISITES = ("prismaquant#2483", "prismaquant#2485")
+
+
+def require_pact_consumer_migration(
+    canonical_head=None, input_identities=None, caller_closure=None
+):
+    """Admit a consumer migration, or refuse its missing prerequisites."""
+    missing = []
+    if not canonical_head:
+        missing.append("canonical adapter head")
+    if not input_identities:
+        missing.append("input identities")
+    if not caller_closure:
+        missing.append("caller closure")
+    if missing:
+        raise ValueError(
+            "PACT consumer migration is gated on " + ", ".join(missing)
+            + "; prerequisites " + ", ".join(PACT_CONSUMER_PREREQUISITES)
+            + " require the shared contract first and the recorded head, "
+            + "identities and closure before any caller moves"
+        )
+    return {
+        "canonical_head": canonical_head,
+        "input_identities": dict(input_identities),
+        "caller_closure": tuple(caller_closure),
+        "prerequisites": list(PACT_CONSUMER_PREREQUISITES),
+    }

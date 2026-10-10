@@ -175,7 +175,7 @@ from __future__ import annotations
 
 import re
 
-from .base import ModelProfile, _read_config_alias_with_fallback
+from .base import ModelProfile
 
 # Body-indexed nextn/MTP block. transformers refuses these keys
 # (modeling_glm5_next.py:1359), so the skeleton has no home for them.
@@ -209,13 +209,6 @@ _GLM_PACT_COHORT = {
     "scored_positions_per_sequence": 511,
     "vocab_size": 154880,
 }
-
-
-def _config_entry(config, name):
-    """First present config value. Walk nested text_config."""
-    from .base import _read_config_value
-
-    return _read_config_value(config, name)
 
 
 # KDA leaves whose fused owner comes from the lane config-gated rule.
@@ -307,10 +300,9 @@ class Glm5NextProfile(ModelProfile):
         detection config; anything unstated keeps the exact
         running value.
         """
-        declared = self._declared_config
         values = dict(_GLM_PACT_COHORT)
-        prefix = _read_config_alias_with_fallback(
-            config, declared, "prefix_ids", "serving_prefix_ids"
+        prefix = self.pact_measurement_alias(
+            config, "prefix_ids", "serving_prefix_ids"
         )
         if prefix is not None:
             values["prefix_ids"] = prefix
@@ -319,11 +311,7 @@ class Glm5NextProfile(ModelProfile):
             "scored_positions_per_sequence",
             "raw_tokens_per_sequence",
         ):
-            explicit = _config_entry(config, key)
-            if explicit is not None:
-                values[key] = explicit
-                continue
-            stated = _config_entry(declared, key)
+            stated = self.pact_measurement_entry(config, key)
             if stated is not None:
                 values[key] = stated
         values["prefix_ids"] = list(values["prefix_ids"])

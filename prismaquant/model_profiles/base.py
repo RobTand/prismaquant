@@ -99,6 +99,16 @@ def _read_config_alias_with_fallback(explicit, declared, *names):
     return _read_config_alias(declared, *names)
 
 
+def read_pact_config_value(config, name):
+    """First present value for one key. Top level beats nested text_config."""
+    return _read_config_value(config, name)
+
+
+def read_pact_config_alias(config, *names):
+    """First present value for alias keys. Top level beats nested text_config."""
+    return _read_config_alias(config, *names)
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
@@ -463,7 +473,7 @@ class ModelProfile(ABC):
     def pact_dimension_value(self, key, config=None):
         """One dimension value. Explicit config wins, declared next."""
         for source in (config, self._declared_config):
-            value = _read_config_value(source, key)
+            value = read_pact_config_value(source, key)
             if value is None:
                 continue
             if type(value) is not int or isinstance(value, bool):
@@ -488,6 +498,26 @@ class ModelProfile(ABC):
     def pact_vocab_size(self, config: dict | None) -> int | None:
         """Vocabulary size from a config, or None when unstated."""
         return self.pact_dimension_value("vocab_size", config)
+
+
+    def pact_measurement_entry(self, explicit, name):
+        """One measurement entry. Explicit config wins, declared next."""
+        value = read_pact_config_value(explicit, name)
+        if value is not None:
+            return value
+        return read_pact_config_value(self._declared_config, name)
+
+    def pact_measurement_alias(self, explicit, *names):
+        """One measurement alias. Explicit aliases win, declared next."""
+        value = read_pact_config_alias(explicit, *names)
+        if value is not None:
+            return value
+        return read_pact_config_alias(self._declared_config, *names)
+
+    def pact_tp_default_split(self, role: str) -> int:
+        """Split for a role the declared scope does not name."""
+        del role
+        return 1
 
 
 

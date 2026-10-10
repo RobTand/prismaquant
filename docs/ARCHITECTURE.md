@@ -3274,6 +3274,12 @@ The base owner supplies one explicit-before-declared alias reader for GLM and Qw
 It preserves top-level precedence over `text_config` and keeps empty prefix lists as explicit values.
 The helper gate uses its unchanged baseline; neither profile defines a second prefix reader.
 
+Re-stamped 2026-10-10 (issue 2595, part of 2427): the base owner centralizes explicit-before-declared measurement entries and aliases in public readers.
+Both PACT profiles resolve through those readers. Undeclared role splits use the profile-owned default; `down_proj` without a declaration still refuses.
+The adapter keeps no private config reader. `require_pact_consumer_migration` refuses without a canonical head, input identities and caller closure, and preserves the 2483 and 2485 prerequisite reasons.
+Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs. The GLM oracle stays frozen.
+No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_profile_consumer.py`.
+
 The current CPU command uses `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
 Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
 Its installed PrismaBuild commit is `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
@@ -3290,11 +3296,11 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --workers-per-shard 1 --threads-per-shard 1 --mem-gb 4 \
   --timeout-s 600 --wait-s 300 \
   --pytest-args '["-m", "not integration and not slow"]' \
-  tests/test_pact_frontier_profile_adapter.py tests/test_model_structure.py \
-  tests/test_spec_match_profile.py tests/test_model_profile_conformance.py \
-  tests/test_name_projection.py tests/test_profile_detection_and_calibration.py \
-  tests/test_profile_name_remap_validation.py tests/test_qwen3_profile.py \
-  tests/test_glm5_next_attention_fused_groups.py tests/test_duplication_baseline.py
+  tests/test_pact_profile_consumer.py tests/test_pact_frontier_profile_adapter.py \
+  tests/test_model_structure.py tests/test_spec_match_profile.py \
+  tests/test_model_profile_conformance.py tests/test_name_projection.py \
+  tests/test_profile_detection_and_calibration.py tests/test_profile_name_remap_validation.py \
+  tests/test_qwen3_profile.py tests/test_glm5_next_attention_fused_groups.py tests/test_duplication_baseline.py
 ```
 
 The historical source `72ebedaf33de` used `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` with PrismaBuild `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
@@ -3311,6 +3317,9 @@ PB `8ca432821282` exercises the public GLM contract with an explicit KDA layer a
 It resolves the real fused owner, bands, cohort, hidden layout, and TP split count.
 PB `a3474080b037` exercises the revised GLM and Qwen3 public contracts and compiles the affected modules.
 It preserves explicit alias precedence, an empty Qwen3 prefix list, and the real GLM KDA owner.
+PB `089cd4ba6ac5` passes 341 cases across the new consumer checks, the profile conformance roster and the Qwen3 profile, with 12 skips, one expected failure and 60 deselected integration or slow cases.
+PB `36fb63107abbc`, PB `51a8da327fba` and PB `368d3a1a744` pass the adapter, structure, detection, duplication, spec-match and remap populations on the same tree.
+PB `c5013dcf027e` records the red run: the new consumer module fails to import on the base tree, which defines no migration gate.
 These CPU results do not qualify model output, serving, or performance.
 
 

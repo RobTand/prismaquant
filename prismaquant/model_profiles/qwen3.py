@@ -14,24 +14,7 @@ packed expert Parameters are present.
 """
 from __future__ import annotations
 
-from .base import ModelProfile, _read_config_alias_with_fallback, _read_config_value
-
-
-def _pact_config_entry(config, name):
-    """First present config value. Walk nested text_config."""
-    return _read_config_value(config, name)
-
-
-def _explicit_declared_entry(explicit, declared, name):
-    """One cohort entry. Explicit config wins, declared next."""
-    value = _pact_config_entry(explicit, name)
-    if value is not None:
-        return value, "explicit"
-    value = _pact_config_entry(declared, name)
-    if value is not None:
-        return value, "declared"
-    return None, None
-
+from .base import ModelProfile
 
 
 class Qwen3Profile(ModelProfile):
@@ -59,7 +42,6 @@ class Qwen3Profile(ModelProfile):
         return "Qwen3MoeForCausalLM"
     def pact_cohort_values(self, config: dict | None) -> dict:
         """PACT cohort from explicit plus declared config, no GLM fallback."""
-        declared = self._declared_config
         values = {}
         for key in (
             "vocab_size",
@@ -70,11 +52,11 @@ class Qwen3Profile(ModelProfile):
             "input_contract",
             "global_original_tokens",
         ):
-            entry, _origin = _explicit_declared_entry(config, declared, key)
+            entry = self.pact_measurement_entry(config, key)
             if entry is not None:
                 values[key] = entry
-        prefix = _read_config_alias_with_fallback(
-            config, declared, "prefix_ids", "serving_prefix_ids"
+        prefix = self.pact_measurement_alias(
+            config, "prefix_ids", "serving_prefix_ids"
         )
         missing = [
             key
