@@ -896,16 +896,19 @@ class CaptureSourceAuthentication:
             refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
     def _verify_held_content(self, name, state):
-        """Reread held bytes and refuse on digest mismatch (PQ #2010).
+        """Reread held bytes once and refuse on digest mismatch (PQ #2010).
 
-        The admission digest comes from the read that consumes the file
+        Only the owner close calls this, once per file, so the extra read
+        cost is bounded by the admission cost whatever the lease count.
+        Lease exits and JSON reads keep the cheap stat fence only. The
+        admission digest comes from the read that consumes the file
         (:meth:`_authenticate`), so no separate read happens at admission.
-        The exit reread runs on the CPU caller thread, off the GPU hot path.
-        It checks bytes against their own digest, a correctness check.
-        Only ``fresh_descriptor_sha256`` rows verify: adopted and recorded
-        rows keep their zero-read proof optimization and refuse by stat.
-        The reread carries no new resource charge: the bytes are already
-        admitted, and the held-descriptor guard still checks stat.
+        The close reread runs on the CPU caller thread, off the GPU hot
+        path. It checks bytes against their own digest, a correctness
+        check. Only ``fresh_descriptor_sha256`` rows verify: adopted and
+        recorded rows keep their zero-read proof optimization and refuse
+        by stat. The reread keeps the owner's resource guard, and the
+        close runs its stat fence before this loop.
         """
         if self._original is not None:
             return
@@ -915,7 +918,7 @@ class CaptureSourceAuthentication:
             return
         with state['lock']:
             observed = sha256(self.root/name, file_descriptor=state['fd'],
-                resource_check=None, release_read_pages=False)
+                resource_check=self.resource_check, release_read_pages=False)
             if observed != state['sha256']:
                 raise RuntimeError(f'authenticated source changed during consumption: {name}')
 
@@ -1189,7 +1192,6 @@ class CaptureSourceAuthentication:
                 with open(self._source_read_path(state), 'rb') as handle:
                     result = json.load(handle)
             self._check_file(name, state)
-            self._verify_held_content(name, state)
             return result
         finally:
             with self._lock:
@@ -1429,7 +1431,6 @@ class _CaptureSourceSafeOpen:
         try:
             self.context.__exit__(*args)
             self.owner._check_file(self.name, self.state)
-            self.owner._verify_held_content(self.name, self.state)
         finally:
             self.closed = True
             if self.owner._original is not None:
