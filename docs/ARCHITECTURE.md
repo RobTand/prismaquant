@@ -11351,9 +11351,15 @@ off the running engine instead of received from it.
   the sweep from THE SAME loaded engine its eager smoke just generated on,
   through vLLM's own `LLM.apply_model` (one result per rank, so this is also
   the TP>1 shape). Per module it records the resolved `quant_method` and
-  `scheme` classes, the scheme object's own attributes, the kernel the scheme
+  `scheme` classes, the scheme object's own attributes, the method object's
+  own attributes (`method_attrs`, for served modules whose method carries no
+  scheme object -- packed MoE, PQ #706), the kernel the scheme
   selected, `isinstance(quant_method, QuantizeMethodBase)`, and a forward-hook
-  dispatch count over the generate. Only the eager arm writes one: forward
+  dispatch count over the generate. Hooks sit on every module: vLLM 0.28's
+  modular MoE runner invokes its experts without passing through their
+  `__call__`, so each row also carries its parent's count and the gate
+  accepts a schemeless MoE row whose runner fired (PQ #706). Only the eager
+  arm writes one: forward
   hooks do not run under CUDA-graph replay, and a graph-arm sweep would report
   zeros that mean "not observed" while looking exactly like "never ran".
 - **The isinstance trap, recorded rather than inherited.** vLLM finalizes
@@ -11392,11 +11398,10 @@ off the running engine instead of received from it.
   principle 14 forbids.
 - **Not covered, deliberately.** The activation REPRESENTATION (#567) — a
   scheme class is a name, not the quantizer rule the kernel applied, the same
-  hole the Tessera trace has. And no packed-MoE method class is in the
-  decoder, because no small packed-MoE compressed-tensors artifact was
-  available to sweep; an MoE artifact reads NOT VERIFIED until one is
-  observed, which is the recorded gap rather than a table written from
-  reading source.
+  hole the Tessera trace has. The packed-MoE decoder held one entry since
+  2026-10-10 (PQ #706): `CompressedTensorsW8A8Fp8MoEMethod`, swept on a
+  packed-MoE FP8 artifact; any further schemeless method class still reads
+  NOT VERIFIED until it is swept.
 
 Measured: the real sweep in `tests/fixtures/compressed_route_sweep_0p6b/` was
 written by this path on sparklina (GB10, sm_121) inside
@@ -11404,7 +11409,13 @@ written by this path on sparklina (GB10, sm_121) inside
 `dq-runs/fc45-0p6b-nvfp4/exported`. 112 modules, all
 `CompressedTensorsW4A4Fp4(use_a16=False, group_size=16)` on
 `FlashInferCutlassNvFp4LinearKernel`, agreeing with all 252 priced targets.
-Gates: `tests/test_compressed_route_sweep_gate.py`,
+The second real sweep, `tests/fixtures/compressed_route_sweep_moe/`, was
+written by the same path on sparky (GB10, sm_121) inside the same pinned
+image against a packed-MoE FP8-dynamic artifact built from
+`hf-internal-testing/Mixtral-tiny` (PQ #706): 4 dense
+`CompressedTensorsW8A8Fp8` linears plus 2 `RoutedExperts` rows resolving
+`CompressedTensorsW8A8Fp8MoEMethod` with no scheme, agreeing with all 6
+priced targets. Gates: `tests/test_compressed_route_sweep_gate.py`,
 `tests/test_bite_631_route_sweep.py` (shown failing on base).
 
 Re-stamped (2026-09-17, `flash/624-a4-input-global-scale-20260917`) for **the
