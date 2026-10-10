@@ -44,6 +44,11 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The GLM profile holds commissioned units out of the default dense enumeration (#2400).
+  Without `--allow-pinned`, `campaign_dense_unit_names` returns the quantizable body only;
+  attention, indexer, router, MLA key/value, and vision units enumerate solely under a matching token.
+  The rule reuses the profile pin and probe-exclusion declarations, so it cannot drift from the roster gate.
+  The default roster, the BF16 source model, and head/embedding handling stay unchanged.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
