@@ -638,6 +638,7 @@ def main() -> None:
     parser.add_argument("--arms", default="A,C,D8,D32,D128")
     parser.add_argument("--max-buffer-bytes", type=int, default=0)
     parser.add_argument("--max-sequences", type=int, default=None)
+    parser.add_argument("--projection-backend", choices=("plan", "torch"), default="plan")
     parser.add_argument("--preflight", action="store_true")
     args = parser.parse_args()
     args.buffer_sizes = [int(s) for s in args.buffer_sizes.split(",") if s]
@@ -659,7 +660,8 @@ def main() -> None:
     shutil.copyfile(source_root / "prepare/source-identity.json",
                     out / "prepare/source-identity.json")
     original_backend = plan["execution"].get("projection_backend")
-    plan["execution"]["projection_backend"] = {"name": "torch"}
+    if args.projection_backend == "torch":
+        plan["execution"]["projection_backend"] = {"name": "torch"}
     plan_bytes = json.dumps(plan, indent=1, sort_keys=True).encode()
     plan_path = out / "plan-research.json"
     plan_path.write_bytes(plan_bytes)
@@ -670,12 +672,15 @@ def main() -> None:
                  arms_requested=args.arms, buffer_sizes=args.buffer_sizes,
                  max_sequences=args.max_sequences,
                  backend_substitution={"original": original_backend,
-                                       "replacement": {"name": "torch"},
-                                       "reason": "fleet torch 2.11.0+cu130 differs from the packaged fused-backend qualification (2.13.0+cu130), so prewarm refuses; the bitwise reference_check gates the substitution"})
-    STATE["_sampler"] = subprocess.Popen(
-        ["nvidia-smi", "--query-gpu=timestamp,power.draw,utilization.gpu,clocks.sm",
-         "--format=csv,noheader", "-lms", "500"],
-        stdout=open(out / "power.csv", "w"), stderr=subprocess.DEVNULL)
+                                       "replacement": plan["execution"]["projection_backend"]})
+    try:
+        STATE["_sampler"] = subprocess.Popen(
+            ["nvidia-smi", "--query-gpu=timestamp,power.draw,utilization.gpu,clocks.sm",
+             "--format=csv,noheader", "-lms", "500"],
+            stdout=open(out / "power.csv", "w"), stderr=subprocess.DEVNULL)
+    except Exception as error:
+        STATE["_sampler"] = None
+        STATE["power_sampler"] = {"running": False, "reason": repr(error)}
     _phase("start")
     install(args)
     from prismaquant import tessera_joint_aura
@@ -685,8 +690,8 @@ def main() -> None:
     try:
         tessera_joint_aura.main()
     finally:
-        STATE["_sampler"].terminate()
-    raise RuntimeError("the research row returned without reaching the statistics windows")
+        if STATE["_sampler"] is not None:
+            STATE["_sampler"].terminate()
 
 
 if __name__ == "__main__":
