@@ -389,11 +389,11 @@ def sealed_command_matches(role, command):
     return None
 
 
-def audit_actions(pb_root, ledger, ws, extra=()):
+def audit_actions(pb_root, ledger, ws, inputs, extra=()):
     """Verify every qualifying action; list, without counting, the ones that do not qualify."""
     named = dict(ACTIONS)
     for rate in RATES:
-        receipts = json.loads((ws / "m3" / rate / "workspace" / "receipts.json").read_bytes())
+        receipts = inputs.json(f"m3-{rate}-receipts", ws / "m3" / rate / "workspace" / "receipts.json")
         for index, row in enumerate(receipts["rows"]):
             named[f"m3-{rate}-row-{index:04d}"] = resolve_key(pb_root, row["key"])
     named.update(SUPPORT_ACTIONS)
@@ -408,7 +408,7 @@ def audit_actions(pb_root, ledger, ws, extra=()):
             ledger.check(f"action.{row['role']}.sealed_command_is_its_role", expected, command[:160])
     excluded = [excluded_state(pb_root, key, role) for role, key in EXCLUDED.items()]
     for role, relative in EXCLUDED_M3_ATTEMPTS.items():
-        for item in json.loads((ws / relative).read_bytes())["rows"]:
+        for item in inputs.json(f"excluded-{role}", ws / relative)["rows"]:
             try:
                 excluded.append(excluded_state(pb_root, item["key"], role))
             except ValueError:
@@ -772,13 +772,13 @@ def recompute_checkpoint_seal(path, rate, declared, ledger, ids):
     return recomputed
 
 
-def pinned_encoder_source(ledger, ids):
+def pinned_encoder_source(ledger, ids, inputs):
     """The producer's encoder source digest, recomputed from the pinned Tessera tree that encoded the wires."""
     environment = dict(os.environ, PYTHONPATH=str(TESSERA_PIN_SRC))
     digest = subprocess.run([sys.executable, "-c", "from tessera import cached_unit; print(cached_unit.encoder_source_sha256())"],
                             check=True, capture_output=True, text=True, env=environment).stdout.strip()
     ids.add("producer.encoder_source_sha256", "pinned-tree-07bfcc0e", [digest])
-    pin = json.loads((TESSERA_PIN_SRC.parent / ".pinned-source.json").read_bytes())
+    pin = inputs.json("producer-pin-record", TESSERA_PIN_SRC.parent / ".pinned-source.json")
     ledger.check("producer.pin_tree_is_commit_07bfcc0e", pin["commit"] == "07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
                  f"pinned tree {pin['commit'][:12]}, {pin['files']} files, encoder source {digest[:12]}")
     return {"commit": pin["commit"], "tree_sha256": pin["tree_sha256"], "encoder_source_sha256": digest}
@@ -1038,9 +1038,9 @@ def offered_menus(payload):
             "menus": {name: sorted(rung for rung in menu if rung != "BF16") for name, menu in rows.items()}}
 
 
-def m6_offered(merged):
+def m6_offered(merged, selection_document):
     """The menu the recorded M6 selection offered, read from the group rungs of its own menu rows."""
-    record = json.loads((WORKSPACE / "m6/layer45/selection.json").read_bytes())["record"]
+    record = selection_document["record"]
     memory = record["selection"]["memory"]
     per_group = {}
     for row in memory["excluded"] + memory["passing"]:
@@ -1051,14 +1051,14 @@ def m6_offered(merged):
     return menus, record["unattested_rungs"]
 
 
-def audit_offered(merged, ledger):
+def audit_offered(merged, ledger, selection_document):
     """Which priced cells are offered: by the repo-pinned Tessera contract now, and by the recorded M6 menu."""
     pin = json.loads((Path(__file__).resolve().parents[1] / "prismaquant/tessera_runtime/"
                       "tessera_serving_runtime_pin.json").read_bytes())
     current = offered_menus(merged)
     ledger.check("offered.installed_contract_is_the_repo_pin", current["contract_sha256"] == pin["contract_sha256"],
                  f"installed {current['contract_sha256'][:12]} pin {pin['contract_sha256'][:12]}")
-    m6_menus, recorded = m6_offered(merged)
+    m6_menus, recorded = m6_offered(merged, selection_document)
     priced = {rung for by_rung in merged["costs"].values() for rung in by_rung}
     derived = {rung: sum(rung not in menu for menu in m6_menus.values()) for rung in sorted(priced)}
     derived = {rung: count for rung, count in derived.items() if count}
@@ -1079,6 +1079,28 @@ def audit_offered(merged, ledger):
     offered = {"current": {(n, r) for n, menu in current["menus"].items() for r in menu},
                "m6": {(n, r) for n, menu in m6_menus.items() for r in menu}}
     return offered, summary
+
+
+def audit_selection_binding(ws, document, chain, parts_by_rate, ledger, inputs):
+    """The recorded M6 selection names the audited prices: merged payload, both Stage B parts, probe and objective."""
+    merged_path = ws / "m6" / "layer45" / "merged-cost.pkl"
+    parts = document["parts"]
+    wanted = [(str(parts_by_rate[rate]["price_path"]), inputs.sha(f"m4-{rate}-price", parts_by_rate[rate]["price_path"]),
+               list(RUNGS[rate])) for rate in RATES]
+    record = document["record"]
+    ledger.check("selection.names_the_audited_merged_price", document["merged_cost"] == {
+        "path": str(merged_path), "sha256": chain["original_sha256"]},
+        f"selection merged_cost {document['merged_cost']['sha256'][:12]} audited {chain['original_sha256'][:12]}")
+    ledger.check("selection.names_the_audited_stage_b_parts", [(p["path"], p["sha256"], p["rungs"]) for p in parts] == wanted
+                 and all(p["rows"] == 1734 and p["probe_identity_sha256"] == record["probe_identity_sha256"] for p in parts),
+                 "both Stage B parts by path, digest, rungs and probe identity")
+    ledger.check("selection.objective_is_the_mtp_head", record["objective"] == "mtp_head_self_kl" and record["mtp_layer"] == 45
+                 and record["probe_identity_sha256"] == parts_by_rate["r1024"]["probe_sha256"]
+                 and document["structure_counts"] == {"dense": 3, "routed": 864},
+                 f"objective {record['objective']}, layer {record['mtp_layer']}, probe {record['probe_identity_sha256'][:12]}")
+    return {"sha256": inputs.sha("m6-selection", ws / "m6/layer45/selection.json"),
+            "selected_rung_by_group": record["rung_by_group"], "research_only": document["research_only"],
+            "byte_budget": record["byte_budget"], "resident_bytes": record["resident_bytes"]}
 
 
 def audit_refusals(merged, original, parts_by_rate, ledger):
@@ -1515,7 +1537,9 @@ def main(argv=None):
         rosters += [roster_row(ledger, "merged_price", merged["costs"], census["unit_shapes"]),
                     roster_row(ledger, "merged_wire_bytes", merged["wire_bytes"], census["unit_shapes"]),
                     roster_row(ledger, "merged_params", merged["params"], census["unit_shapes"])]
-        offered, summary["offered"] = audit_offered(merged, ledger)
+        selection_document = inputs.json("m6-selection", ws / "m6/layer45/selection.json")
+        offered, summary["offered"] = audit_offered(merged, ledger, selection_document)
+        summary["selection"] = audit_selection_binding(ws, selection_document, chain, b_by_rate, ledger, inputs)
         summary["stage_a"] = {rate: {"rows": a_by_rate[rate]["rows"], "seal": a_by_rate[rate]["seal"],
                                      "seal_recomputed": a_by_rate[rate]["seal_recomputed"]} for rate in RATES}
         summary["dev_stamps"] = {
@@ -1534,11 +1558,11 @@ def main(argv=None):
         capture_rows, cells, summary["io"] = audit_io(ws, facts, a_by_rate, b_by_rate, ledger, progress,
                                                       args.workers, args.limit_units)
     if "pb" in sections:
-        actions, excluded = audit_actions(pb, ledger, ws, [tuple(item) for item in extra])
+        actions, excluded = audit_actions(pb, ledger, ws, inputs, [tuple(item) for item in extra])
         summary["actions"], summary["excluded_attempts"] = actions, excluded
         summary["dev_ledger"] = build_dev_ledger(pb, actions, ledger)
         summary["trees"] = audit_trees(pb, ledger, actions, ws) if "trees" in sections else None
-        summary["producer_pin"] = pinned_encoder_source(ledger, ids) if "trees" in sections else None
+        summary["producer_pin"] = pinned_encoder_source(ledger, ids, inputs) if "trees" in sections else None
         by_role = {a["role"]: a for a in actions}
         for role, row in by_role.items():
             if row.get("spec"):

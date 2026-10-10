@@ -158,6 +158,17 @@ def test_the_record_states_what_it_does_not_establish(record):
     assert admission["probe_relabelled_provenance"]["outcome"] == "admitted"
 
 
+def test_the_recorded_selection_names_the_audited_prices(record):
+    summary, _units, _cells = record
+    checks = {check["name"]: check["ok"] for check in summary["checks"]}
+    for name in ("selection.names_the_audited_merged_price", "selection.names_the_audited_stage_b_parts",
+                 "selection.objective_is_the_mtp_head"):
+        assert checks[name] is True, name
+    assert summary["selection"]["research_only"] is True
+    roles = {row["role"] for row in summary["inputs"]}
+    assert {"m6-selection", "producer-pin-record", "m3-r1024-receipts", "m3-r896-receipts"} <= roles
+
+
 def test_the_report_cites_the_record_it_rests_on(manifest, record):
     text = REPORT.read_text()
     summary, _units, _cells = record
