@@ -534,6 +534,12 @@ class ModelStructureSpec:
             for root in visual_roots
         ):
             raise ValueError("visual_root_prefixes must be nonempty dotted namespace strings without trailing dots")
+        for root in visual_roots:
+            if root in ("vis", "merger") or root.startswith(("vis_", "merger_")):
+                raise ValueError(
+                    "visual_root_prefixes must name module namespaces, not census "
+                    f"role tags (vis_*/merger_*): {root!r}"
+                )
         visual_layer_prefix = _optional_str(shard_regexes.get("visual_layer_prefix"))
         if visual_roots and (not visual_layer_prefix or not any(
             visual_layer_prefix == root or visual_layer_prefix.startswith(root + ".")
