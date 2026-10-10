@@ -1,0 +1,64 @@
+{
+  "schema": "prismaquant.d44.native_source_evidence.v1",
+  "issue": "prismaquant#2449",
+  "delivery": "Import the accepted controller without a second implementation.",
+  "accepted_head": "fa3775151f77dc713fd78882daf6e147ab471243",
+  "accepted_base": "b929a3dcfff487231b7d5d45ba2a52a1d2a4a1b1",
+  "bundle_sha256": "7ea79d62000dc4a41d940a9c72eb925e6dbd2b752e49dccd25b22b3a78c998e0",
+  "source_counter": 1,
+  "files": {
+    "next_wave.py": "563a7a2ea1550e15370985a5e427ed0e948c61ad5cdea5fed4150a42b13c7869",
+    "proof_autonomous_phase.py": "5b7336698efc4d4f3bbf999e56accf9960ccae3133efee78b8206de4f6ac23a1",
+    "proof_disk_client.py": "8e7a37f36fc95d92da9696fd2c18e883c4b310afa4f674ab612a0b1aa4befcf8",
+    "lifetime-seed.json": "df7fecca5a51f241e6afa785f50ce824bfaa253cb733dd6c267275370241d86a"
+  },
+  "retained_seed": {
+    "GPU_hours": 21.187425203522047,
+    "ceiling_GPU_hours": 110,
+    "after_L40_continuation_gate_GPU_hours": 24,
+    "scope": "Only the remaining current-manifest L40 encodes. The seed retains all prior charges and failures."
+  },
+  "retained_proof": {
+    "failing_first_action": "4eac174152cafd04b5af95cd8464f83f63c532f0eed7484889ac597e6600e686",
+    "failing_first_result": "Four failures and five errors expose absent resume, ledger, and D1 controls at the accepted base.",
+    "corrective_failing_first_action": "45ca108eb54257d7f61337b3734f2e145cf0af152cf2edc30749eecd8842892f",
+    "passed_action": "24bde1c19be96f76787056a1f0e53067f7f77273022cb99f226ac37d94b825e8",
+    "passed_payload_sha256": "48ab3638506a6474acf36477012fec63fd80386807a7674ca9fda08af9b5929a",
+    "passed_result": "27 tests pass. Both modes complete eight native CPU children, eight fresh D1 checks, and duplicate recovery.",
+    "Opus_review": "rev-1009-021827-0c9d",
+    "review_verdict": "APPROVE",
+    "review_head": "fa3775151f77dc713fd78882daf6e147ab471243",
+    "review_artifact_sha256": "ff4ba5664b259e257208d2d638107deead5f272199115639ca8aacd0ee5f2a6b"
+  },
+  "repository_smoke": {
+    "action_key": "f086b5bfd5ac5b8de77ee0f7b93d4d2f1ff494f2916ac0116baf12c56880e3e0",
+    "payload_sha256": "46532b28a08a4ffceb235a5377ef37eb84f226183c13c72c9344bf7170771322",
+    "result": "The delivered CLI completes eight native CPU children. Duplicate resume exits zero. Eight fresh D1 checks pass.",
+    "maximum_live_children": 1,
+    "GPU_admissions": 0,
+    "science_replayed": false
+  },
+  "repository_tests": {
+    "interpreter": "/home/rob/venvs/pq-task-suite-layer-sdk5-20261009/bin/python",
+    "placement": "x86",
+    "passed": 50,
+    "skipped": 0,
+    "actions": {
+      "tests/test_d44_native_phase_2449.py": "c684a852a45f6429b866f1cdea912a2b0563230727a69e3e263ccd5ed799cca3",
+      "tests/test_d44_native_controller_2449.py": "1dcd3e9e56fc3feec2733da127456f633e6a36e4f0e7ba1e99b60f6498d1db19",
+      "tests/test_d44_native_catalogue_2449.py": "97e47ebfa3d59073a031bcc381a2d9d865336b1f34cf064701a436544cf0f3b7",
+      "tests/test_architecture_doc.py": "f9c364b20e77fc4481a27b65f717bdcd4a968a066b5d7fa31a8de0b02e77727e",
+      "tests/test_docs_staleness.py": "5e21f08653b56c81be8a5a30252a335f33ef6b267a8d2eff6d24fb20a7f66727"
+    },
+    "extra_boundaries": "Exact ceiling admission, ambiguous native endings, missing partial history, and cleanup tombstone custody all pass.",
+    "prior_refusal": "Five SDK4 actions refuse the SDK5 dependency pin before pytest. No test verdict exists for those actions."
+  },
+  "runtime_dependencies": "Use published PrismaBuild native owners and this repository's prismaquant.dev_mode. The logical request supplies the existing worker guard.",
+  "test_migration": "Repository tests retain the accepted assertions. Imports use the repository layout. The cache drift test explicitly selects development mode.",
+  "adoption": "The pipeline must review the exact delivery head. This delivery grants no GPU, scientific, deployment, or continuation authority.",
+  "repair_2446": {
+    "issue": "prismaquant#2446",
+    "base_next_wave_sha256": "563a7a2ea1550e15370985a5e427ed0e948c61ad5cdea5fed4150a42b13c7869",
+    "note": "Base digest above names accepted head fa37751. The 2446 repair changes next_wave.py on a separate head; its digest differs by design. Accepted completion, ledger, disk, ship, memory, and native-owner controls stay unchanged."
+  }
+}
