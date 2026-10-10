@@ -1,0 +1,25 @@
+{
+ "schema": "pq1317.candidate-manifest.v3",
+ "binds": "All accepted results bind to this one candidate.",
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+ "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "harness_head": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7",
+ "files": {
+  "candidate.json": "0ee08986969b7f897dc647d8e96c456c1bc6c552528232c89f4c403ea8335a67",
+  "roster.json": "0f2607af14e20b383666891fcbb0922664a8a40a8219792bc5bbfa14a8628889",
+  "corrections.json": "370df2fae9c7e641607eca0dc384386fa08afac31dc6586b2640bfa45c5844ca",
+  "results/summary.json": "1c97040ffc63d8001ffe7ac6157cd6de84b50158bbb9a63e821ca240ccc712d3",
+  "results/moe.json": "5bc0ed8cafcef63b3ae3d4438d59c669118a41c09d887ff00910fd83a1d6eade",
+  "results/dense.json": "f22b0d63041cac1d6320e92c67d35cc7c0db17c1f97083dcccf11302d7d4e0b9",
+  "results/pb-receipts.json": "491b9252acaf32bcbc3b780448e567f9bfa88d73b47a4bb72a904c7952de5a06",
+  "results/log-digests.json": "37cf3aa74f913d654c30df6e5c4ec365168550e1e4aaf8f6a084f6e6e8f14af7"
+ },
+ "result_files": [
+  "results/moe.json",
+  "results/dense.json",
+  "results/summary.json",
+  "results/pb-receipts.json"
+ ],
+ "requalify_rule": "After any change to the candidate commit, the image, or the harness, requalify. Any change under src/tessera/, csrc/, the five roster test files or the test modules they import is a change to measured code: rerun both suites. For any other change, write a dependency analysis that names each retained node and why the change cannot reach it."
+}

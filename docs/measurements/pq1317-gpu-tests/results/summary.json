@@ -1,0 +1,351 @@
+{
+ "schema": "pq1317.summary.v3",
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "target": {
+  "device": "NVIDIA GB10",
+  "capability": "sm_121"
+ },
+ "verdict": "complete",
+ "verdict_text": "All 136 required nodes passed on sm_121 in image X at the candidate commit, in two independent runs. 0 failed, 0 skipped, 0 not collected.",
+ "required_nodes": 136,
+ "passed": 136,
+ "failed": 0,
+ "skipped": 0,
+ "not_collected": 0,
+ "gpu_classes": {
+  "device-allocating": 84,
+  "cuda-gated-no-allocation": 18,
+  "host-only": 34
+ },
+ "gpu_classes_note": "device-allocating: Tessera's instrument saw a new CUDA allocation during the test call (a floor). cuda-gated-no-allocation: the node passed under --strict-cuda but refuses or checks before it allocates. host-only: the node needs no CUDA. Only device-allocating nodes count as GPU proof.",
+ "correction_nodes": {
+  "total": 54,
+  "passed": 54,
+  "device_allocating": 54,
+  "by_issue": {
+   "610": 9,
+   "611": 45
+  }
+ },
+ "original_failures_covered": {
+  "610": 4,
+  "611": 39
+ },
+ "primary_runs": {
+  "moe": "7a3dac4d75437bb570b7c27379112cf65bff1fcc8bc6728d72a6b6c07e19db4d",
+  "dense": "ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6"
+ },
+ "corroborating_runs": {
+  "moe": "fe1ae1f2402b865d7dc84a6f86e56745f4767db4b8aee0bddeec73d964d03462",
+  "dense": "370fead21f36ad81db81b7f6b536e85c09ccc97baae95f297105510dd2931fac"
+ },
+ "harness_head": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7",
+ "snapshot_clean": true,
+ "source_identity": {
+  "instrument": "tessera.suite_source.v1",
+  "verification": "verified",
+  "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+  "files_verified": 2005,
+  "workers_agree": true
+ },
+ "contract": {
+  "sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "version": 60
+ },
+ "device": {
+  "capability": [
+   12,
+   1
+  ],
+  "multi_processor_count": 48,
+  "name": "NVIDIA GB10",
+  "total_memory": 130594091008,
+  "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+ },
+ "gpu_hosts": {
+  "moe": "sparky",
+  "dense": "sparky"
+ },
+ "driver_version": "595.99.02",
+ "software": {
+  "torch": "2.13.0+cu130",
+  "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "triton": "3.7.1",
+  "python": "3.12.3",
+  "pytest": "8.4.2",
+  "pytest_xdist": "3.8.0"
+ },
+ "image_inspect": {
+  "architecture": "arm64",
+  "created": "2026-09-25T16:46:23.284603861-04:00",
+  "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "repo_digests": [
+   "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+   "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+  ]
+ },
+ "native_evidence": {
+  "dense": {
+   "libraries_mapped_by_worker": {
+    "gw0": {
+     "tessera_routed_fused_value": {
+      "sha256": "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46",
+      "path": "torch-ext/gw0/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+      "nfs_renamed": false
+     },
+     "tessera_window_gemv": {
+      "sha256": "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2",
+      "path": "torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+      "nfs_renamed": false
+     }
+    },
+    "gw1": {
+     "tessera_routed_fused_mma_e4m3": {
+      "sha256": "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf",
+      "path": "torch-ext/gw1/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+      "nfs_renamed": false
+     },
+     "tessera_window_gemv": {
+      "sha256": "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6",
+      "path": "torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+      "nfs_renamed": false
+     }
+    },
+    "main": {}
+   },
+   "libraries_built": [
+    {
+     "path": "torch-ext/gw0/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+     "sha256": "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46"
+    },
+    {
+     "path": "torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "sha256": "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2"
+    },
+    {
+     "path": "torch-ext/gw1/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+     "sha256": "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf"
+    },
+    {
+     "path": "torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "sha256": "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6"
+    }
+   ],
+   "stamped_launches": [
+    {
+     "file": "bf16",
+     "symbol": "tessera::fused_window_dense",
+     "decoder": "native_fused_window_dense_folded",
+     "nodes": 12
+    },
+    {
+     "file": "bf16",
+     "symbol": "tessera::window_gemm_dense",
+     "decoder": "native_window_gemm_folded",
+     "nodes": 6
+    },
+    {
+     "file": "fp8",
+     "symbol": "tessera::fused_window_dense",
+     "decoder": "native_fused_window_dense_e4m3mma",
+     "nodes": 11
+    }
+   ],
+   "triton_kernels": {
+    "_copy_front": 1,
+    "_init": 1,
+    "_step": 3,
+    "_traceback": 3,
+    "_window_gemm_kernel": 2,
+    "_window_repack_kernel": 2
+   }
+  },
+  "moe": {
+   "libraries_mapped_by_worker": {
+    "gw0": {},
+    "gw1": {},
+    "main": {}
+   },
+   "libraries_built": [],
+   "triton_kernels": {
+    "_grouped_window_gemm_kernel": 22,
+    "_unpack_body_kernel": 2,
+    "_window_repack_kernel": 1,
+    "fused_moe_kernel": 2
+   },
+   "note": "The MoE files load no Tessera shared object. They run the compact Triton adapter."
+  }
+ },
+ "runs": {
+  "run1-moe": {
+   "pb_action": "fe1ae1f2402b865d7dc84a6f86e56745f4767db4b8aee0bddeec73d964d03462",
+   "role": "GPU run",
+   "host": "sparky",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 27.2,
+   "snapshot_parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+  },
+  "run1-dense": {
+   "pb_action": "370fead21f36ad81db81b7f6b536e85c09ccc97baae95f297105510dd2931fac",
+   "role": "GPU run",
+   "host": "sparklina",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 128.1,
+   "snapshot_parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+  },
+  "run1-preflight": {
+   "pb_action": "57575b6ee1afe4f3c41496acdfaf46501186e2c25126da36760e901734467a22",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "host": "sparky",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 11.8,
+   "snapshot_parent": "c1015cbe08ca24c1b80094af6382ac7ac81cb0ad"
+  },
+  "run2-moe": {
+   "pb_action": "7a3dac4d75437bb570b7c27379112cf65bff1fcc8bc6728d72a6b6c07e19db4d",
+   "role": "GPU run",
+   "host": "sparky",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 47.6,
+   "snapshot_parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+  },
+  "run2-dense": {
+   "pb_action": "ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6",
+   "role": "GPU run",
+   "host": "sparky",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 130.0,
+   "snapshot_parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+  },
+  "run2-preflight-moe": {
+   "pb_action": "fc2fb0448f13f5f3b5472c8a54e825410c8c5ca502d5dcb8e4ddc1c414410676",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "host": "sparklina",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 14.3,
+   "snapshot_parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+  },
+  "run2-preflight-dense": {
+   "pb_action": "e51a6b63c2676f5a68566ced603a4b458af5f6b3550245fd1fd7a648bd32a207",
+   "role": "D38 CPU preflight (collect only, no GPU)",
+   "host": "sparklina",
+   "state": "done",
+   "returncode": 0,
+   "elapsed_s": 13.1,
+   "snapshot_parent": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7"
+  }
+ },
+ "development_actions": {
+  "dev-h1-preflight-moe": {
+   "pb_action": "c381bc053516e487ef3b8bb829ae4f951c6447e9344b8b343b8fe7726cf32baf",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparky",
+   "what": "collect, harness v1",
+   "head": "af39b08452ff"
+  },
+  "dev-h1-preflight-dense": {
+   "pb_action": "bb51e74aa08607cc7d2a7a919481da4d8053c0f1b188f2fa1b1c6167c66e2b3a",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "collect, harness v1",
+   "head": "af39b08452ff"
+  },
+  "dev-h1-gpu-moe": {
+   "pb_action": "77996bb0676f23a739dddd83cee155151103e11c3d70bff9fc181e26414106eb",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparky",
+   "what": "GPU, harness v1 (float assertions only; shared extension directory)",
+   "head": "af39b08452ff"
+  },
+  "dev-h1-gpu-dense": {
+   "pb_action": "6fed7903565318a2c488fc430bba07266824ec902e8f8b035c3c8e12697ebad2",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparky",
+   "what": "GPU, harness v1",
+   "head": "af39b08452ff"
+  },
+  "dev-h2-preflight-moe": {
+   "pb_action": "02194acda9e3c11e20f1c50a617f399c3223f7e4721ba30b0e2429dccbae2b8c",
+   "state": "failed",
+   "returncode": 1,
+   "host": "sparklina",
+   "what": "collect, harness v2: probe self-test refused (pytest elides long values); fixed",
+   "head": "4a8efb287b"
+  },
+  "dev-h2-preflight-dense": {
+   "pb_action": "18b54a414a8555aa881b55263651424cf26f500ce5db3328ecc7246778df46ba",
+   "state": "failed",
+   "returncode": 1,
+   "host": "sparklina",
+   "what": "collect, harness v2: probe self-test refused; fixed",
+   "head": "4a8efb287b"
+  },
+  "dev-h3-preflight-moe": {
+   "pb_action": "2a738ffa930777348caf9fa86cfdf641fdf98c7dc949afdd28b260cfed770b5f",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "collect, harness v3",
+   "head": "b65b706062"
+  },
+  "dev-h3-preflight-dense": {
+   "pb_action": "cb0fff9e1d029d93ab31ea5879508643033f3004659858fd3938183f70a657ff",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "collect, harness v3",
+   "head": "b65b706062"
+  },
+  "dev-h3-gpu-moe": {
+   "pb_action": "be95289d8741ea83bfb718382514a3b71e4f402d1c0ac9b476ca25cfb66f0b29",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "GPU, harness v3 (on the other Spark than the accepted MoE run)",
+   "head": "b65b706062"
+  },
+  "dev-h3-gpu-dense": {
+   "pb_action": "4c32d75fd0a947f5d68d83dc381efa787ae300a2061f3df6e43bff6701b78aae",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparky",
+   "what": "GPU, harness v3",
+   "head": "b65b706062"
+  },
+  "diag-worksteal-dense": {
+   "pb_action": "2e99a8b611f4472cb14c53f73d7e97cd6535b189a6e5ab3a375d20df59a9ff66",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "diagnostic GPU run, dirty snapshot",
+   "head": "b65b706062 + uncommitted edit (--dist worksteal)"
+  },
+  "diag-rawmaps-dense": {
+   "pb_action": "b217becc58b4c04c03b1a6b0af584f25ee29c69e8c30d289cd68b007133a071d",
+   "state": "done",
+   "returncode": 0,
+   "host": "sparklina",
+   "what": "diagnostic GPU run, dirty snapshot; showed NFS .nfs renames of mapped libraries",
+   "head": "b65b706062 + uncommitted edit (--dist worksteal, raw maps)"
+  }
+ },
+ "harness_sha256": {
+  "harness/container_entry.py": "bde7261695af8f0a630e3720d7a866a85764ce65d0ad0461579e79dad67acfa9",
+  "harness/native_probe.py": "6b709393dc91c67ac87e656fdbe1f913d9094514e160451a2c7e171990d535bd",
+  "harness/probe_selftest.py": "1e4c3b41e10a8170f93d212a7ed56cc42a46f34dd66ef1477f6e11828b011931",
+  "harness/run_suite.py": "cac4344bdb87d0c752634a6794655ae96ba86b3fa2dbcaaab91798fd0c635566"
+ }
+}

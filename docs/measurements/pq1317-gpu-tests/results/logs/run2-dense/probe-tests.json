@@ -1,0 +1,1401 @@
+[
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_bresenham_mix_inside_the_supported_set_is_eligible",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0014,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_mixed_schedule_with_one_unsupported_column_is_not_eligible",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.3001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[1792]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.3363,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[768]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.2268,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_shard_start_state_is_not_eligible",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.4067,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_a_window_outside_the_supported_set_is_not_eligible",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0015,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_is_gemv_is_the_m_rule_in_one_place",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0009,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0546,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.2651,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0554,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.265,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.061,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0607,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0678,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0672,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0727,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0722,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-fused]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0905,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-triton]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0909,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::window_gemm_dense",
+    "native_window_gemm_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_eligibility_is_derived_from_the_kernel_constants",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0233,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_gemv_and_torch_agree_with_measured_differences",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 32.4242,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_gemv_max_m_is_the_kernel_build_limit",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0006,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_gemv_symbol_and_module_name_are_the_kernel_and_contract_values",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0007,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[1024]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.235,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[256]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 2.2117,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[512]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.2197,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_m_tile_is_the_kernel_build_rule",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0006,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0434,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[16]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0512,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[64]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0556,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_rate1_columns_keep_dense_dispatch_across_decode_sizes",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.4806,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_resident_also_holds_only_the_packed_native_bundle",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0416,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_rung_outside_reference_gemv_range_uses_dense_native",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.0119,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_streamed_apply_routes_by_m_and_rate_one",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.5471,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_streamed_prepares_folded_native_without_materialized_planes",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 43.8156,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 1,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_supported_rungs_declare_the_same_dense_compile_graph",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1073,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_the_census_expectations_come_from_the_route",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0033,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 5
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.3285,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_folded"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[prefill-m16]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0663,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[rate1-fallback-m4]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1123,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_bf16_gemv.py::test_the_retained_run_descriptor_lives_on_the_host",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0617,
+  "native_modules_mapped": [
+   "tessera_routed_fused_value",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1629,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 39.25) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1739,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 39.25) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[3]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1817,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 39.75) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[4]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1558,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 43.0) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[5]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1531,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 43.0) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[8]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1528,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 200,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 43.0) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 34.114,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 252,
+    "assertion": "same >= 0.90",
+    "evaluated": "1.0 >= 0.9"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[4]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1652,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 252,
+    "assertion": "same >= 0.90",
+    "evaluated": "1.0 >= 0.9"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 1,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_does_not_change_dense_compile_identity",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.4439,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1719,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 318,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 44.0) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[32]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.153,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 215,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.000244140625 / 43.75) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[64]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1526,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 215,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.000244140625 / 43.75) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[9]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1523,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [
+   {
+    "line": 215,
+    "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+    "evaluated": "(0.0 / 41.75) < 0.008"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_rate1_columns_fall_back_inside_the_decode_regime",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.023,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 2,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_resident_also_holds_only_the_packed_native_bundle",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1516,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_streamed_prepares_native_without_materialized_planes",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 70.2925,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 1,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_census_expectations_come_from_the_route",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0045,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 7
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 2.2031,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [
+   [
+    "tessera::fused_window_dense",
+    "native_fused_window_dense_e4m3mma"
+   ]
+  ],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_gemv_prefix_is_the_constant_the_load_path_asks_for",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0044,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1768,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 294,
+    "assertion": "lost > 3 * kept",
+    "evaluated": "0.00047622411019445 > (3 * 9.251352804267802e-08)"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1559,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 294,
+    "assertion": "lost > 3 * kept",
+    "evaluated": "0.0005239778405917457 > (3 * 1.7054151148421932e-07)"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[4]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.156,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 294,
+    "assertion": "lost > 3 * kept",
+    "evaluated": "0.0008008403018444929 > (3 * 1.4949175734128812e-07)"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[8]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1556,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 294,
+    "assertion": "lost > 3 * kept",
+    "evaluated": "0.0008372047661601469 > (3 * 1.9896366657928076e-07)"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_fp8_gemv.py::test_the_published_source_is_the_file_the_loader_compiles",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0023,
+  "native_modules_mapped": [
+   "tessera_routed_fused_mma_e4m3",
+   "tessera_window_gemv"
+  ],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ }
+]

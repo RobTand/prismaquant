@@ -1,0 +1,2105 @@
+{
+ "schema": "pq1317.suite-result.v3",
+ "suite": "dense",
+ "issue": 611,
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "primary_run": {
+  "run": "run2-dense",
+  "pb_action": "ec7d9d959d863db83a37063203f0d34d32dc4a588230c7f4856ad25921c8cbd6",
+  "host": "sparky",
+  "returncode": 0,
+  "harness_head": "dffc6a6b72949a5d149406c66bcb16ccfd74e4e7",
+  "snapshot_clean": true,
+  "device": {
+   "capability": [
+    12,
+    1
+   ],
+   "multi_processor_count": 48,
+   "name": "NVIDIA GB10",
+   "total_memory": 130594091008,
+   "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+  },
+  "torch": "2.13.0+cu130",
+  "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "triton": "3.7.1",
+  "gpu_query": {
+   "query": "name,uuid,driver_version,compute_cap,memory.total",
+   "rows": [
+    "NVIDIA GB10, GPU-e76c7efc-c157-b1f4-1348-83e4eb5092f4, 595.99.02, 12.1, [N/A]"
+   ]
+  },
+  "image_inspect": {
+   "architecture": "arm64",
+   "created": "2026-09-25T16:46:23.284603861-04:00",
+   "id": "sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+   "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+   "repo_digests": [
+    "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+    "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+   ]
+  },
+  "strict_cuda": true,
+  "counts": {
+   "passed": 65,
+   "failed": 0,
+   "error": 0,
+   "skipped": 0,
+   "xfailed": 0,
+   "xpassed": 0
+  },
+  "cuda_surface_executed": 46,
+  "source_identity": {
+   "verification": "verified",
+   "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+   "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+   "files_verified": 2005
+  },
+  "source_identity_workers": {
+   "gw0": "agrees",
+   "gw1": "agrees"
+  },
+  "source_identity_span_agrees": true,
+  "distribution": "pytest-xdist --dist loadfile, 2 workers",
+  "worker_of_file": {
+   "tests/test_serving_bf16_gemv.py": [
+    "gw0"
+   ],
+   "tests/test_serving_fp8_gemv.py": [
+    "gw1"
+   ]
+  },
+  "native_libraries_mapped_by_worker": {
+   "gw0": {
+    "tessera_routed_fused_value": {
+     "sha256": "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46",
+     "path": "torch-ext/gw0/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+     "nfs_renamed": false
+    },
+    "tessera_window_gemv": {
+     "sha256": "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2",
+     "path": "torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "nfs_renamed": false
+    }
+   },
+   "gw1": {
+    "tessera_routed_fused_mma_e4m3": {
+     "sha256": "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf",
+     "path": "torch-ext/gw1/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+     "nfs_renamed": false
+    },
+    "tessera_window_gemv": {
+     "sha256": "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6",
+     "path": "torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "nfs_renamed": false
+    }
+   },
+   "main": {}
+  },
+  "native_libraries_built": [
+   {
+    "path": "torch-ext/gw0/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+    "sha256": "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46"
+   },
+   {
+    "path": "torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+    "sha256": "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2"
+   },
+   {
+    "path": "torch-ext/gw1/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+    "sha256": "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf"
+   },
+   {
+    "path": "torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+    "sha256": "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6"
+   }
+  ],
+  "mapped_digests_are_built_digests": true,
+  "triton_kernels": {
+   "_copy_front": 1,
+   "_init": 1,
+   "_step": 3,
+   "_traceback": 3,
+   "_window_gemm_kernel": 2,
+   "_window_repack_kernel": 2
+  },
+  "triton_targets": [
+   "{\"arch\": 121, \"backend\": \"cuda\", \"warp_size\": 32}"
+  ],
+  "assertions_recorded": 164,
+  "probe_errors": []
+ },
+ "corroborating_run": {
+  "run": "run1-dense",
+  "pb_action": "370fead21f36ad81db81b7f6b536e85c09ccc97baae95f297105510dd2931fac",
+  "counts": {
+   "passed": 65,
+   "failed": 0,
+   "error": 0,
+   "skipped": 0,
+   "xfailed": 0,
+   "xpassed": 0
+  },
+  "cuda_surface_executed": 46,
+  "source_identity_verification": "unknown",
+  "note": "Source read from the shared pin directory, which holds no git metadata, so the Tessera instrument could not bind it. The directory equals a tarball of the commit (candidate.json, source_tree)."
+ },
+ "counts": {
+  "passed": 65,
+  "failed": 0,
+  "error": 0,
+  "skipped": 0
+ },
+ "gpu_classes": {
+  "device-allocating": 46,
+  "cuda-gated-no-allocation": 0,
+  "host-only": 19
+ },
+ "nodes": {
+  "tests/test_serving_bf16_gemv.py::test_a_bresenham_mix_inside_the_supported_set_is_eligible": {
+   "outcome": "passed",
+   "seconds": 0.003,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.002,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_a_mixed_schedule_with_one_unsupported_column_is_not_eligible": {
+   "outcome": "passed",
+   "seconds": 0.301,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.231,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[1792]": {
+   "outcome": "passed",
+   "seconds": 0.338,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.268,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[768]": {
+   "outcome": "passed",
+   "seconds": 0.228,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.161,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_a_shard_start_state_is_not_eligible": {
+   "outcome": "passed",
+   "seconds": 0.408,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 3
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.219,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_a_window_outside_the_supported_set_is_not_eligible": {
+   "outcome": "passed",
+   "seconds": 0.003,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.003,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_is_gemv_is_the_m_rule_in_one_place": {
+   "outcome": "passed",
+   "seconds": 0.002,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.002,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-fused]": {
+   "outcome": "passed",
+   "seconds": 0.056,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.054,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-triton]": {
+   "outcome": "passed",
+   "seconds": 0.266,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.25,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-fused]": {
+   "outcome": "passed",
+   "seconds": 0.056,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.043,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-triton]": {
+   "outcome": "passed",
+   "seconds": 0.266,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 2
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.253,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-fused]": {
+   "outcome": "passed",
+   "seconds": 0.062,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.043,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-triton]": {
+   "outcome": "passed",
+   "seconds": 0.062,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.043,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-fused]": {
+   "outcome": "passed",
+   "seconds": 0.069,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.043,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-triton]": {
+   "outcome": "passed",
+   "seconds": 0.068,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.042,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-fused]": {
+   "outcome": "passed",
+   "seconds": 0.074,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.043,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-triton]": {
+   "outcome": "passed",
+   "seconds": 0.074,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.042,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-fused]": {
+   "outcome": "passed",
+   "seconds": 0.092,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 2
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.042,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-triton]": {
+   "outcome": "passed",
+   "seconds": 0.092,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::window_gemm_dense",
+     "native_window_gemm_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.042,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_eligibility_is_derived_from_the_kernel_constants": {
+   "outcome": "passed",
+   "seconds": 0.025,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.125,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_gemv_and_torch_agree_with_measured_differences": {
+   "outcome": "passed",
+   "seconds": 32.426,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 31.886,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_gemv_max_m_is_the_kernel_build_limit": {
+   "outcome": "passed",
+   "seconds": 0.002,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.002,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_gemv_symbol_and_module_name_are_the_kernel_and_contract_values": {
+   "outcome": "passed",
+   "seconds": 0.001,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.002,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[1024]": {
+   "outcome": "passed",
+   "seconds": 0.236,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.167,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[256]": {
+   "outcome": "passed",
+   "seconds": 2.213,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 2.383,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[512]": {
+   "outcome": "passed",
+   "seconds": 0.221,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.152,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_m_tile_is_the_kernel_build_rule": {
+   "outcome": "passed",
+   "seconds": 0.001,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.004,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch": {
+   "outcome": "passed",
+   "seconds": 0.044,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.045,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[16]": {
+   "outcome": "passed",
+   "seconds": 0.053,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 47.32,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[64]": {
+   "outcome": "passed",
+   "seconds": 0.057,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.066,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_rate1_columns_keep_dense_dispatch_across_decode_sizes": {
+   "outcome": "passed",
+   "seconds": 0.481,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 3
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.458,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_resident_also_holds_only_the_packed_native_bundle": {
+   "outcome": "passed",
+   "seconds": 0.043,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.042,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_rung_outside_reference_gemv_range_uses_dense_native": {
+   "outcome": "passed",
+   "seconds": 1.013,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 1.05,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_streamed_apply_routes_by_m_and_rate_one": {
+   "outcome": "passed",
+   "seconds": 0.548,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.553,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_streamed_prepares_folded_native_without_materialized_planes": {
+   "outcome": "passed",
+   "seconds": 43.817,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 1,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 41.95,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_supported_rungs_declare_the_same_dense_compile_graph": {
+   "outcome": "passed",
+   "seconds": 0.109,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 3
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.126,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_the_census_expectations_come_from_the_route": {
+   "outcome": "passed",
+   "seconds": 0.004,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 5
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.026,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim": {
+   "outcome": "passed",
+   "seconds": 1.33,
+   "tier": "correction",
+   "elements": [
+    "611.E"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_folded"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 6
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 1.969,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[prefill-m16]": {
+   "outcome": "passed",
+   "seconds": 0.067,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.054,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[rate1-fallback-m4]": {
+   "outcome": "passed",
+   "seconds": 0.113,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.057,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_bf16_gemv.py::test_the_retained_run_descriptor_lives_on_the_host": {
+   "outcome": "passed",
+   "seconds": 0.062,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw0",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_value",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 2
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.048,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[1]": {
+   "outcome": "passed",
+   "seconds": 0.164,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 39.25) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.154,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[2]": {
+   "outcome": "passed",
+   "seconds": 0.175,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 39.25) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.252,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[3]": {
+   "outcome": "passed",
+   "seconds": 0.183,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 39.75) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.22,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[4]": {
+   "outcome": "passed",
+   "seconds": 0.157,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 43.0) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.311,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[5]": {
+   "outcome": "passed",
+   "seconds": 0.155,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 43.0) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.311,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[8]": {
+   "outcome": "passed",
+   "seconds": 0.154,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 200,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 43.0) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.284,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[1]": {
+   "outcome": "passed",
+   "seconds": 34.116,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 252,
+     "assertion": "same >= 0.90",
+     "evaluated": "1.0 >= 0.9"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.592,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[4]": {
+   "outcome": "passed",
+   "seconds": 0.167,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 252,
+     "assertion": "same >= 0.90",
+     "evaluated": "1.0 >= 0.9"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 1,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.344,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_does_not_change_dense_compile_identity": {
+   "outcome": "passed",
+   "seconds": 0.446,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 4
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.453,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch": {
+   "outcome": "passed",
+   "seconds": 0.173,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 318,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 44.0) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.154,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[32]": {
+   "outcome": "passed",
+   "seconds": 0.155,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 215,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.000244140625 / 43.75) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 65.206,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[64]": {
+   "outcome": "passed",
+   "seconds": 0.154,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 215,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.000244140625 / 43.75) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.161,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[9]": {
+   "outcome": "passed",
+   "seconds": 0.154,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [
+    {
+     "line": 215,
+     "assertion": "err / max(want.float().abs().max().item(), 1e-9) < 8e-3",
+     "evaluated": "(0.0 / 41.75) < 0.008"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 1
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.273,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_rate1_columns_fall_back_inside_the_decode_regime": {
+   "outcome": "passed",
+   "seconds": 0.024,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 2,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.013,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_resident_also_holds_only_the_packed_native_bundle": {
+   "outcome": "passed",
+   "seconds": 0.153,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.302,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_streamed_prepares_native_without_materialized_planes": {
+   "outcome": "passed",
+   "seconds": 70.294,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 1,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 31.908,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_census_expectations_come_from_the_route": {
+   "outcome": "passed",
+   "seconds": 0.006,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 7
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.002,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim": {
+   "outcome": "passed",
+   "seconds": 2.205,
+   "tier": "correction",
+   "elements": [
+    "611.E"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [
+    [
+     "tessera::fused_window_dense",
+     "native_fused_window_dense_e4m3mma"
+    ]
+   ],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 6
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 1.142,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_gemv_prefix_is_the_constant_the_load_path_asks_for": {
+   "outcome": "passed",
+   "seconds": 0.005,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.005,
+    "cuda_allocated": false
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[1]": {
+   "outcome": "passed",
+   "seconds": 0.178,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 294,
+     "assertion": "lost > 3 * kept",
+     "evaluated": "0.00047622411019445 > (3 * 9.251352804267802e-08)"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.348,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[2]": {
+   "outcome": "passed",
+   "seconds": 0.157,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 294,
+     "assertion": "lost > 3 * kept",
+     "evaluated": "0.0005239778405917457 > (3 * 1.7054151148421932e-07)"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.377,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[4]": {
+   "outcome": "passed",
+   "seconds": 0.158,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 294,
+     "assertion": "lost > 3 * kept",
+     "evaluated": "0.0008008403018444929 > (3 * 1.4949175734128812e-07)"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.343,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[8]": {
+   "outcome": "passed",
+   "seconds": 0.16,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "cuda_gated": true,
+   "cuda_allocated": true,
+   "gpu_class": "device-allocating",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [
+    {
+     "line": 294,
+     "assertion": "lost > 3 * kept",
+     "evaluated": "0.0008372047661601469 > (3 * 1.9896366657928076e-07)"
+    }
+   ],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.338,
+    "cuda_allocated": true
+   }
+  },
+  "tests/test_serving_fp8_gemv.py::test_the_published_source_is_the_file_the_loader_compiles": {
+   "outcome": "passed",
+   "seconds": 0.003,
+   "tier": "regression",
+   "elements": [],
+   "cuda_gated": false,
+   "cuda_allocated": false,
+   "gpu_class": "host-only",
+   "worker": "gw1",
+   "native_modules_mapped_in_worker": [
+    "tessera_routed_fused_mma_e4m3",
+    "tessera_window_gemv"
+   ],
+   "stamped_launch": [],
+   "float_comparisons": [],
+   "other_assertions_counted": {
+    "torch.equal": 0,
+    "boolean reductions": 0,
+    "other": 0
+   },
+   "run1": {
+    "outcome": "passed",
+    "seconds": 0.005,
+    "cuda_allocated": false
+   }
+  }
+ }
+}
