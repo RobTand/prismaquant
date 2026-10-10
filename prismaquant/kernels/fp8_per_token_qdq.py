@@ -88,8 +88,8 @@ def _kernel():
     import triton
     import triton.language as tl
 
+    @triton.jit
     def _div_rn(a, b):
-        # Triton lowers ``/`` on FP32 to an approximate divide, which can move
         # a scale by one ULP and flip exact FP8 ties (PQ #1398). vLLM's native
         # kernel divides with ``div.rn`` (``common.cuh``); match it exactly.
         return tl.inline_asm_elementwise(
