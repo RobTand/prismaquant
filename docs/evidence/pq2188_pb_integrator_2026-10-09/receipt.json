@@ -1,0 +1,96 @@
+{
+  "schema": "prismaquant.original_cuda_test_dependencies.v1",
+  "meaning": "unchanged existing installed artifacts; not new install/provenance",
+  "archive": {
+    "path": "/mnt/shared/astra-pq-2188-evidence-20261009/original-cuda-test-deps-02/pure-python-installs.tar",
+    "size": 16885760,
+    "sha256": "9923cb74caa5e5fa1c41c9aef809941bf21c4687e53fd0b30ed781a0ce49023c"
+  },
+  "distributions": [
+    {
+      "distribution": "prismabuild",
+      "version": "0.1.0",
+      "direct_url": {
+        "url": "https://github.com/RobTand/prismabuild.git",
+        "vcs_info": {
+          "commit_id": "027103d9a8417e06c7f13356e58779a313cd7088",
+          "requested_revision": "027103d9a8417e06c7f13356e58779a313cd7088",
+          "vcs": "git"
+        }
+      },
+      "verified_record_files": 47,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/prismabuild-0.1.0.dist-info"
+    },
+    {
+      "distribution": "tessera-quant",
+      "version": "0.1.0",
+      "direct_url": {
+        "url": "https://github.com/RobTand/tessera.git",
+        "vcs_info": {
+          "commit_id": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+          "requested_revision": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+          "vcs": "git"
+        }
+      },
+      "verified_record_files": 135,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/tessera_quant-0.1.0.dist-info"
+    },
+    {
+      "distribution": "pytest",
+      "version": "9.1.1",
+      "direct_url": {},
+      "verified_record_files": 90,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/pytest-9.1.1.dist-info"
+    },
+    {
+      "distribution": "pytest-timeout",
+      "version": "2.4.0",
+      "direct_url": {},
+      "verified_record_files": 8,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/pytest_timeout-2.4.0.dist-info"
+    },
+    {
+      "distribution": "pytest-xdist",
+      "version": "3.8.0",
+      "direct_url": {},
+      "verified_record_files": 25,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/pytest_xdist-3.8.0.dist-info"
+    },
+    {
+      "distribution": "execnet",
+      "version": "2.1.2",
+      "direct_url": {},
+      "verified_record_files": 23,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/execnet-2.1.2.dist-info"
+    },
+    {
+      "distribution": "pluggy",
+      "version": "1.6.0",
+      "direct_url": {},
+      "verified_record_files": 15,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/pluggy-1.6.0.dist-info"
+    },
+    {
+      "distribution": "packaging",
+      "version": "26.3",
+      "direct_url": {},
+      "verified_record_files": 30,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/packaging-26.3.dist-info"
+    },
+    {
+      "distribution": "iniconfig",
+      "version": "2.3.1",
+      "direct_url": {},
+      "verified_record_files": 11,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/iniconfig-2.3.1.dist-info"
+    },
+    {
+      "distribution": "pygments",
+      "version": "2.21.0",
+      "direct_url": {},
+      "verified_record_files": 350,
+      "source_install": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009/lib/python3.12/site-packages/pygments-2.21.0.dist-info"
+    }
+  ],
+  "files": 744
+}

@@ -1,0 +1,40 @@
+{
+ "schema": "pb-integrator.build_provenance.v1",
+ "written_by": "pb-integrator",
+ "at": "2026-10-09T23:22:09+00:00",
+ "why": "PQ #2188 routed to pb-integrator by issuegraph (effect 81ebe16dacfc): new Python 3.12 pure-Python SDK5 artifact. The packer receipt.json in this directory carries the packer's fixed text \"unchanged existing installed artifacts; not new install/provenance\". That text does not describe this artifact: this one is a NEW install. receipt.json is unedited.",
+ "pb_action_key": "cc8658368b74c2f3b842a83933740c7e97caf350f3c1da2b75f3108f84f0ddb6",
+ "pb_run": "pbrun --transport pool --tag dl380g10 (CPU only, no GPU), executed on dl380g10 in 53 s",
+ "script": "/mnt/shared/fleet-ceo/pb-2188/build.sh (git repo /home/rob/tmp/pb-2188-job commit 80e7781)",
+ "logs": [
+  "/mnt/shared/fleet-ceo/pb-2188/run2.log"
+ ],
+ "python": "CPython 3.12.11 (uv-managed, /home/rob/.local/share/uv/python/cpython-3.12.11-linux-x86_64-gnu), pip 25.0.1",
+ "venv": "/home/rob/venvs/pq-cpu312-pb027103d9-pure-20261009 (new; on dl380g10)",
+ "sources": {
+  "prismabuild": "git+https://github.com/RobTand/prismabuild.git@027103d9a8417e06c7f13356e58779a313cd7088, non-editable, --no-deps",
+  "tessera-quant": "git+https://github.com/RobTand/tessera.git@fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb (the pin tools/resolve_tessera_dev_pin.py prints), non-editable, --no-deps",
+  "prismaquant_packer": "experiments/original_cuda_pack_dependencies.py at prismaquant main 30b6231df000726beda55fb6706e641a5cb2ccb0, unmodified"
+ },
+ "artifact": {
+  "path": "/mnt/shared/astra-pq-2188-evidence-20261009/original-cuda-test-deps-02/pure-python-installs.tar",
+  "sha256": "9923cb74caa5e5fa1c41c9aef809941bf21c4687e53fd0b30ed781a0ce49023c",
+  "bytes": 16885760,
+  "members": 744,
+  "member_bytes": 15543043
+ },
+ "extraction_bound": {
+  "max_files": 20000,
+  "max_bytes": 67108864,
+  "max_member_bytes": 16777216,
+  "result": "744 members, 15543043 bytes, regular files only, no absolute or .. names; 734 RECORD hashes checked, 0 bad",
+  "file": "extraction-check.json"
+ },
+ "import_check": "under CPython 3.12.11 with -S and the extracted directory on sys.path: prismabuild, tessera and pytest import from the extracted copy",
+ "not_checked": "the import was not run inside the GPU container image prismaquant-glm-derivative@sha256:c0e532d28a78b3bf425bbbc0d862e2840ba624249162aedfadd09748a6c68c37; it ran on the host CPython 3.12.11 on dl380g10 (x86_64). The Sparks are arm64. The packages are pure Python.",
+ "old_artifact_unchanged": {
+  "path": "/mnt/shared/astra-pq-2010-evidence-20261002/original-cuda-test-deps-01/pure-python-installs.tar",
+  "sha256": "4de0875963849b7f0207a6bea09f361ac206498ab66591afc9c429f38e6ae00e (checked again after the build)"
+ },
+ "untouched": "SDK guard, every existing venv, the old artifact, every repository file"
+}

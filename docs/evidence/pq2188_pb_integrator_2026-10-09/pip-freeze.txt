@@ -1,0 +1,11 @@
+execnet==2.1.2
+iniconfig==2.3.1
+packaging==26.3
+pip==25.0.1
+pluggy==1.6.0
+prismabuild @ git+https://github.com/RobTand/prismabuild.git@027103d9a8417e06c7f13356e58779a313cd7088
+Pygments==2.21.0
+pytest==9.1.1
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+tessera-quant @ git+https://github.com/RobTand/tessera.git@fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb

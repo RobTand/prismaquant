@@ -1,0 +1,15 @@
+{
+  "members": 744,
+  "bytes": 15543043,
+  "limits": {
+    "files": 20000,
+    "bytes": 67108864,
+    "member": 16777216
+  },
+  "record_hashes_checked": 734,
+  "record_hashes_bad": 0,
+  "import_rc": 0,
+  "import_out": "3.12.11 True True True",
+  "import_err": "",
+  "python": "3.12.11"
+}
