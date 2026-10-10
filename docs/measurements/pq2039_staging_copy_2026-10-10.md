@@ -56,7 +56,10 @@ pbrun --cwd <checkout> --tag gb10 --demand gpu=1,mem_gb=8 --cpus 2 --gpu-memory-
   live fleet generation serves SDK 6, which PrismaQuant refuses by version, and no GB10
   interpreter carries SDK 5 installed. The action therefore binds the sealed source bundle at
   `027103d9` (`SDK_VERSION` 5) with `staged_lease.set_lease_helper_root`, as the repo's
-  `reader_sdk_bound` fixture does. The record names the bound file.
+  `reader_sdk_bound` fixture does. The record names the bound file. Probe action
+  `a835c07427dc5c545acc22ca12724abde2c6e838e265e149a73736841e0cd21d` shows the refusal an
+  ordinary admitted action meets today: `lease-helper-unsupported: prismabuild.client SDK_VERSION
+  6, this package needs 5`.
 
 ## Method
 
@@ -245,8 +248,13 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
   1 failed, 171 passed. `test_io_site_freeze` refused the old measure's new thread
   (`tools/measure_projected_copy_2039.py::main.run_arm`). Green at the measured head in the sweep
   above: the new measure uses the shared `PeriodicSampler`.
-- CPU dry run of the measure's entry point (D38), `--cpu-dry-run` with the sealed SDK 5 bundle:
-  `d612e2a5072eca9776dbd91a83330dfbd805883ea90ec00a586201a044a2d3f8`.
+- CPU dry run of the measure's entry point (D38), `--cpu-dry-run` with the sealed SDK 5 bundle, at
+  the final head: `023d3ecd7cf0823d5329314f8515c75d63f406da274ed1991079c568a61902d6`. Four
+  units read through the stage, 0 pool bytes, 0 fallbacks, SDK version 5.
+- Documentation and tmpfs-sensitive tests at the final head, default scratch `/home/rob/tmp` (the
+  Stage B spill and cotangent scratch guards refuse tmpfs, so these run off `/tmp`):
+  `44213282a56713a08ed37bd0756041deb118a5d9c65c4bc6e0d5b9637d0db023`: 132 passed, 1 skipped. The
+  skip needs a DIO-capable worker and has nothing to do with this change.
 
 ## HOLD and limits
 
@@ -265,6 +273,12 @@ All tests ran through PrismaBuild. CPU runs used `--tag x86` and the SDK 5 inter
   time per unit (0.73 ms per 16 MiB). The share of a pass changes with the read.
 - The chunked read of an NFS stage fills the same pinned buffer in disjoint windows. The tests
   cover that path with a four-stream mount table, and no NFS stage was measured.
+- **Live reachability.** The saving needs the residency map to validate. An ordinary admitted
+  action today resolves the live SDK 6 generation and refuses the map (the probe above), so the
+  staged read, and with it this saving, is reachable in a live campaign row only when the SDK pin
+  and the live generation agree. This measure binds the sealed SDK 5 bundle explicitly to show the
+  read path. It does not show that a live row binds that bundle. The result file says which
+  decision is open.
 - No full-campaign, export, serving, KL or bpp claim. The L20 original-source control that
   motivated the issue reads through the qualified-original owner. That owner's read keeps its one
   private copy under this change.
