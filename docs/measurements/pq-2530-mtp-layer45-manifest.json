@@ -1,1 +1,149 @@
-{"actions": [{"elapsed_s": 920.2616174221039, "host": "sparklina", "key": "7c78d20519be1a13b57daaf9c323ab08c0819c26360d9311c70bf7e995de7005", "rc": 0, "role": "capture-v2"}, {"elapsed_s": 2137.427948951721, "host": "sparklina", "key": "89369de5afb2457ff188fff4692661a1f0acdce540e3cda626ec32078168a3c2", "rc": 0, "role": "projection"}, {"elapsed_s": 219.05768609046936, "host": "sparklina", "key": "83dc1e8371bb8cc1efe1c5262d83858a2396db456cb7e769cb4e498c5a106667", "rc": 0, "role": "final-hidden"}, {"elapsed_s": 823.1952886581421, "host": "sparky", "key": "d1e1681bd0711f6801b134d752af4cc9ab77fe292f7c8036238e69b7472708b9", "rc": 0, "role": "capture-v1-superseded"}, {"elapsed_s": 87.12801718711853, "host": "sparklina", "key": "ef8afe37ea2e17f92e7ad6ac31609d256ade03b224cbc3b586a87eb560136661", "rc": 0, "role": "m3-r1024-row"}, {"elapsed_s": 3237.798429965973, "host": "sparklina", "key": "0fe8686955508c0604712ffe67a214a900f9e19e665527a9b8d1533d1922be25", "rc": 0, "role": "m3-r1024-row"}, {"elapsed_s": 57.885568618774414, "host": "sparklina", "key": "65f323e3764d39d6249e7d0269f66555102d1af9e6fed0ad09daeeda044257e3", "rc": 0, "role": "m3-r1024-row"}, {"elapsed_s": 73.09659028053284, "host": "sparklina", "key": "a5ad8cc0fdc0eff441d5760bbf41b35522c4c847b127183361414d734f3f3bf8", "rc": 0, "role": "m3-r896-row"}, {"elapsed_s": 4527.616935014725, "host": "sparky", "key": "a994cdc5a3e802ffb0dde2a0ead0bf165612054c83819173842b938d5f2821af", "rc": 0, "role": "m3-r896-row"}, {"elapsed_s": 99.62942671775818, "host": "sparklina", "key": "b355042a99024c594bba2dbe8975ae48d08966c7bb8e521487aeb76c70d32198", "rc": 0, "role": "m3-r896-row"}, {"elapsed_s": 3889.6754937171936, "host": "sparky", "key": "6d839e49e7c3d10e6b31665fbc1f048fd550753648cbd24746afd3d6fa551865", "rc": 0, "role": "m4-r1024"}, {"elapsed_s": 4670.296713590622, "host": "sparklina", "key": "c3dc42c2ae32773fc516701dbf736b9b72df7e36c5ab1b4323c0bbd5f3db3f4b", "rc": 0, "role": "m4-r1024"}, {"elapsed_s": 367.15941762924194, "host": "sparky", "key": "64969134bf06a2eebcaeee8963d76acb66b87f3628c22d25f59ce4b3dea416ad", "rc": 0, "role": "m4-r896"}, {"elapsed_s": 3930.1299369335175, "host": "sparklina", "key": "b91a4554c0034915c3d133c073502b54602249e8e59e13d91dc124bf492a0898", "rc": 0, "role": "m4-r896"}, {"elapsed_s": 43.62325048446655, "host": "dl380g10", "key": "370bdce3b3c2b59c19bc6a01fedcae9ee257a9826d4ace3fa9a0b639691d7213", "rc": 0, "role": "reselect-support"}], "audit": {"action": "179ddafaa0f88101f3126a5409e8cea690531b08f3e377955b7d4134088525f4", "checks_passed": 104, "elapsed_s": 260.1688196659088, "host": "dl380g10", "payload_sha256": "9203e78d0d8eff4ce8414d577b34966c552f2e74b82026347d6af56f4d3416cb", "rc": 0, "receipt_sha256": "cd1e5a33b2b61c33963395183e0ec6e32fe44398f0a321a2fbf127c89b791a16"}, "counts": {"priced_cells": 3468, "routed": 864, "shared": 3, "units": 867, "wire_bound": 3456}, "files": [{"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/mtp-census.json", "role": "authenticated-census", "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture_manifest.json", "role": "capture-manifest", "sha256": "934f151727c6a370e8a9199a8594d17dae49b91e37401edbb9fc3da826b78eb1"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/v2/capture/capture-run.json", "role": "capture-report", "sha256": "6a71391dd8073b8b8b7cbc42bd682243afa588cf1dadb23c2ee3c15fa470cc46"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/final-hidden/manifest.json", "role": "final-hidden", "sha256": "9819766aae872b78e4af54d9d93885e275789a73eda5315564a1f3c3540438d1"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/mtp-projection.json", "role": "producer-projection", "sha256": "33de456394904eb243aa595098f11f45c5211b4a73cb94474957e57fcc196e78"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m1/projection/producer-answer.json", "role": "producer-answer", "sha256": "b9ec9bf2a4bbb0a8c3cba5c56669356191050e55490a27df9029872d13c1f350"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/census.json", "role": "m3-census", "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/census.json", "role": "m3-census", "sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/receipts.json", "role": "m3-rows", "sha256": "23c811c68c66551a54c5bf2f3ab7aace0b43a95efb706cbb0308cf40550a3cc7"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/receipts.json", "role": "m3-rows", "sha256": "af884dbea0e71d3e205c3a8659c517bd80dbd9f8c0be95efe39b6d40603c7662"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r1024/workspace/merged/cost.pkl", "role": "m3-cost", "sha256": "94e8d180bef8993ca14fed560be6cbfd358dbd44e8d00babf2603d9e515fad42"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m3/r896/workspace/merged/cost.pkl", "role": "m3-cost", "sha256": "8a2fee626276863fbc04324ef3b1e8f716434c1f6b010cb9ceba29e4d2f3864a"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan.json", "role": "m4-plan-prepare", "sha256": "7ed7820f8247114f853091a3daf50fed3ae57e0a61cd279e7ec0dde679c87172"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/plan-run.json", "role": "m4-plan-run", "sha256": "35ecd7c7de8fd59154d3b0008ffccb1dc44bc37da4e69c72fde27a278c889649"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/plan.json", "role": "m4-plan", "sha256": "065561a15c3ab81100a51ce66a589a7a9fdd8241d3b1f320d860a3db80d293a2"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/prepared.json", "role": "m4-prepared", "sha256": "960a3d4eae4e0e237679ddff2d6eaea8e3f935ccda4aa2a7dfe8341065957703"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/prepared.json", "role": "m4-prepared", "sha256": "19b7d32737c9f48cf84fdd5ebd8db6ddbce8187a4f49607e4744b80c3d1a9cdd"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/production.pkl", "role": "m4-cache", "sha256": "a1af9cda72638ab1f302c6fcb2a1e8d8b881b789f4e732aa0f4e671c10e1b030"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/prepare/production.pkl", "role": "m4-cache", "sha256": "0dcd84463c82a8ebe4bc97bc6c1e589cb3d223dbfcf0f8ec9142f8cbc07eb8b7"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/source-identity.json", "role": "m4-source-identity", "sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/prepare/qualification/manifest.json", "role": "m4-qualification", "sha256": "e904ba71d3e89bd617f424cb7ae3acd232709e534d6ea473135f737cddfbc62f"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/run/results.json", "role": "m4-results", "sha256": "2f44ad0223efdd136df735a6112516aa21845e56ccfdc0cb9a06f5136b7957c6"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/run/results.json", "role": "m4-results", "sha256": "07fbbe8da8040112753e584bb5d19d09ee96da9b285c2fee279fab93561526af"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r1024/run/joint-cost.pkl", "role": "m4-price", "sha256": "2e3dee29a974ad4b5e5de9ac5eb4116bf213e73ca25e1ba94eb6daec08443103"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m4/r896/run/joint-cost.pkl", "role": "m4-price", "sha256": "4338d1bd94a912867f317875db724435695aa5f45b87a1c24f26c7b687ff8fac"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/merged-cost.pkl", "role": "merged-price", "sha256": "052adde6bb66ff9b32eb05fd2326ee0aacd7435b812a48c0c7c29841f7d2fbba"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/selection.json", "role": "selection", "sha256": "40941983dc24fe596c7873e0c1d5a2a8617d7df17d2a42e462d9b3720c7a6199"}, {"path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/layer45-layer-config.json", "role": "selection-config", "sha256": "f28627925d40d6458742abab3f79d0df22d2b7222b8ac7852f824aaad01a88e0"}], "identities": {"calibration_sha256": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1", "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026", "model": "/mnt/shared/models/GLM-5.3-Flash-BF16", "objective": "mtp_head_self_kl", "probe_identity_sha256": "eab33bfbfc744aa46d7bbb5072ded168804492331fb46c2214cb10ff63703b9e", "source_identity_sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd"}, "schema": "pq2530.evidence_manifest.v1"}
+{
+  "audit_action": {
+    "checks_failed": 0,
+    "checks_passed": 181,
+    "clean_tree_proof": {
+      "closure_file": ".pbrun-closure.9432ba2158eacec2.json",
+      "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "equals_sha256_of_empty_input": true,
+      "head": "fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6"
+    },
+    "host": "dl380g10",
+    "key": "dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
+    "memory_peak_bytes": 6335041536,
+    "payload_bytes": 128600,
+    "payload_sha256": "a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0",
+    "receipt_schema": "prismaquant.prismabuild.cas_receipt.v3",
+    "receipt_sha256": "c80c0c53d67a3bf64d53ed256cf608d00aba11692f012dc21a564f3018e7c549",
+    "request_manifest_sha256": "8434357faf16eac8962f270a725902301c19fb181fddb21d540e074531ae2fb6",
+    "resources": {
+      "cpu": 16,
+      "mem_gb": 24
+    },
+    "returncode": 0,
+    "snapshot": {
+      "bundle_sha256": "054a1be0512ae14185a2a32b56809e8c902cff8ee4196af0a6286d546b2792f1",
+      "commit": "133768d716ea60677b3b2c21b1a62b49928702dd",
+      "parent": "fa74f5bb7ee89530d29317c6aa446d2e05f1e4c6"
+    },
+    "status": "executed",
+    "stdout_sha256": "0f658c5b954882eb25ddc0dd22ae29b73096a0125f7f25bfa9b51e9f78d8fb40",
+    "tags": [
+      "interpreter-path-v1",
+      "progress-helper-v1",
+      "progress-v1",
+      "x86"
+    ],
+    "verify_command": "python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
+    "wall_seconds": 1198.1
+  },
+  "body_admission": {
+    "message": "joint AURA requires matching aura/joint provenance",
+    "payloads_refused": [
+      "r1024_part",
+      "r896_part",
+      "merged_original",
+      "merged_current"
+    ],
+    "raised_at": "prismaquant/cost_currency.py:308",
+    "relabelled_provenance_probe": "admitted"
+  },
+  "counts": {
+    "capture_entries": 867,
+    "checkpoint_only_cells": 12,
+    "expert_wire_cells": 3456,
+    "offered_cells_recorded_m6_menu": 1734,
+    "offered_cells_repo_pinned_contract": 2604,
+    "priced_cells": 3468,
+    "rendered_shards": 3468,
+    "routed": 864,
+    "shared": 3,
+    "units": 867,
+    "wire_blobs": 3468
+  },
+  "cross_checks": {
+    "pb_receipts_mcp": {
+      "keys": "14 qualifying actions and the final audit action",
+      "keys_checked": 15,
+      "read_only_tool": "pb_receipts",
+      "verdict_green": 15
+    }
+  },
+  "identities": {
+    "calibration_artifact_sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "calibration_sha256": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1",
+    "census_sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f",
+    "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+    "merged_price_original_sha256": "052adde6bb66ff9b32eb05fd2326ee0aacd7435b812a48c0c7c29841f7d2fbba",
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "objective": "mtp_head_self_kl",
+    "probe_identity_sha256": "eab33bfbfc744aa46d7bbb5072ded168804492331fb46c2214cb10ff63703b9e",
+    "producer_encoder_source_sha256": "da5805bc707c041efaeb27c5083fb7809fd8cdc51d501f41103b791270b569cb",
+    "producer_pin_commit": "07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+    "source_identity_file_sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd",
+    "source_model_content_sha256": "c45d2d35b4520d729e1026b926dc1eb0de9d8fc905d46733c7edd322af2009a0"
+  },
+  "inputs": {
+    "count": 45,
+    "listed_in": "audit.json, section inputs (path, SHA-256 and size of every parsed file)"
+  },
+  "issue": "RobTand/prismaquant#2530",
+  "layer": 45,
+  "limits": [
+    "dev_uncertified",
+    "certified_run_refuses_routed_shapes",
+    "dense_wires_have_no_selection_receipt_path",
+    "body_refusal_rests_on_payload_provenance"
+  ],
+  "parent": "RobTand/prismaquant#1271",
+  "performance_claims": [],
+  "record_dir": "docs/measurements/pq-2530-mtp-layer45",
+  "record_files": {
+    "audit.json": "a5b69fbd9f5c846a3f2abdeacd4f0af3ed020bde78fd0a60bf53896d6aeed5f0",
+    "cells.csv": "c8d30e8f73b2788af8b5813d7f496c35c18e0e79d080720064bbe0dca3c9c6b7",
+    "units.csv": "64ce7611b5d7fbba2c39bd8b68f2a285fd15d1255eab05fb655a34a621807416"
+  },
+  "schema": "pq2530.evidence_manifest.v2",
+  "superseded_audit_runs": [
+    {
+      "key": "4a811283fc0379f28ee8bca64908424a81fe79dde55810439634f24a406620ba",
+      "note": "Revision 1 audit script, 50 checks. The script was never committed.",
+      "tool_commit": "none"
+    },
+    {
+      "key": "179ddafaa0f88101f3126a5409e8cea690531b08f3e377955b7d4134088525f4",
+      "note": "Revision 2 audit script, 104 checks. The script was never committed.",
+      "tool_commit": "none"
+    },
+    {
+      "key": "65932b5915b02958a3955d419761beb009292ac7a0330487bfe3b46f0f6a26b3",
+      "note": "First committed tool, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "e2905ce1f0"
+    },
+    {
+      "key": "2c736f7d8a05b44277e106b944c755b65a29ee5326fec71da9c586ffa04c22bc",
+      "note": "Digest owners in place of raw hashing, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "da64adf400"
+    },
+    {
+      "key": "1a452539b99fd28719301983fd2dddeef7ad6e60a6df9fc2c80eff606cf9fe96",
+      "note": "Light import of the digest owner, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "559e401332"
+    },
+    {
+      "key": "35029e831cfbc518f660be88d86a0a4e8644f8ea7189c3dd9d53dc7deffb8db6",
+      "note": "Dry run on 6 units without the seal recompute, 175 checks. It is not a record.",
+      "tool_commit": "da64adf400"
+    }
+  ],
+  "tool": {
+    "path": "tools/audit_glm_mtp_layer45.py",
+    "sha256": "415db9e3a82bf052966b3835f76ecffbfa195ac69ccfb68fbab9a34d666d59c2"
+  },
+  "wire_bytes_by_rung": {
+    "TESSERA_BF16_K1_R1024": 3670266765,
+    "TESSERA_BF16_K1_R896": 3215698376,
+    "TESSERA_E4M3_K1_R1024": 3656058369,
+    "TESSERA_E4M3_K1_R896": 3201489980
+  }
+}
