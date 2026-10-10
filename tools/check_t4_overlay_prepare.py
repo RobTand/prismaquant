@@ -21,7 +21,6 @@ streamed source model or a full read of every render. This tool refuses any
 open under the plan's source model directory and declares no data manifest.
 """
 import argparse
-import hashlib
 import json
 import os
 import pickle
@@ -33,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
+    from prismaquant.digests import bytes_sha256hex
+    return bytes_sha256hex(raw)
 
 
 def bound_json(binding):

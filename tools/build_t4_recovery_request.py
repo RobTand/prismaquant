@@ -1,8 +1,9 @@
 """Recover failed logical members; PB retains all partition and placement ownership."""
-import argparse,copy,hashlib,json,os
+import argparse,copy,json,os
 from pathlib import Path
 QUEUE=Path('/mnt/shared/prismabuild-fleet/pb-queue')
-def sha(raw):return hashlib.sha256(raw).hexdigest()
+def sha(raw):
+ from prismaquant.digests import bytes_sha256hex;return bytes_sha256hex(raw)
 def main():
  p=argparse.ArgumentParser();p.add_argument('--out',required=True);p.add_argument('--all-members',action='store_true');p.add_argument('--qualifier-checkout',required=True);p.add_argument('--parent',required=True,help='PB decomposition parent key of the logical request');p.add_argument('--request',required=True,help='logical request built by build_t4_logical_request.py');p.add_argument('--request-sha256',required=True);args=p.parse_args();PARENT=args.parent;out=Path(args.out);assert not out.exists()
  dep=Path('/mnt/shared/prismabuild-fleet/cas/decompositions')/PARENT[:2]/PARENT
