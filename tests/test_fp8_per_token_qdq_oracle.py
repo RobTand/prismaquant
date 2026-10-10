@@ -390,31 +390,29 @@ def test_fused_leg_serves_noncontiguous_and_empty_rows():
 
 
 @needs_cuda_triton
-def test_fused_leg_uses_one_launch_per_call():
+def test_fused_leg_uses_one_launch_per_call(monkeypatch):
+    # The profiler cannot count launches here: a CPU-only profiler session
+    # earlier in the process stops later sessions from seeing CUDA launches.
+    # Spy the launch grid instead: one application at exactly ``(M,)``.
     from prismaquant.kernels import fp8_per_token_qdq as fused
 
+    real_kernel = fused._kernel()
+
+    class _GridSpy:
+        def __init__(self):
+            self.grids = []
+
+        def __getitem__(self, grid):
+            self.grids.append(tuple(grid))
+            return real_kernel[grid]
+
+    spy = _GridSpy()
+    monkeypatch.setattr(fused, "_kernel", lambda: spy)
     rows = _real_activations(64, 2048, torch.bfloat16, "cuda").reshape(-1, 2048)
-    calls = 8
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-    ) as prof:
-        for _ in range(calls):
-            fused.fused_per_token_qdq(
-                rows, element_dtype=E4M3, element_max=448.0,
-                dequant_dtype=torch.float32,
-            )
-        torch.cuda.synchronize()
-    launches = sum(
-        event.count
-        for event in prof.key_averages()
-        if event.device_time_total > 0
+    quant, scale, dequant, _ = fused.fused_per_token_qdq(
+        rows, element_dtype=E4M3, element_max=448.0, dequant_dtype=torch.float32
     )
-    assert launches == calls, (
-        f"one launch per call, saw {launches} for {calls}: "
-        + ", ".join(
-            f"{event.key}x{event.count}" for event in prof.key_averages()
-        )
-    )
+    assert spy.grids == [(64,)]
+    want = _reference(rows, element_dtype=E4M3, element_max=448.0)
+    _assert_bit_identical(quant.reshape(-1), want.quant.reshape(-1))
+    _assert_bit_identical(dequant.reshape(-1), want.dequant.reshape(-1))

@@ -53,22 +53,52 @@ def _timed_calls(inputs: torch.Tensor, calls: int) -> float:
     return start.elapsed_time(end) / calls
 
 
-def _kernel_count(inputs: torch.Tensor) -> tuple[int, float]:
+def _is_fused_key(key: str) -> bool:
+    return "fp8_per_token" in key or key.startswith("triton")
+
+
+def _profile_both_arms(inputs: torch.Tensor) -> dict:
+    # One profiler session for both arms: a CPU-only session earlier in the
+    # process stops later sessions from seeing CUDA launches (PQ #1398), so
+    # the arms share the first session and split by kernel key afterwards.
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ]
     ) as prof:
+        os.environ[DISABLE_FUSED_ENV] = "1"
         for _ in range(CALLS_PER_ROUND):
             fp8_dynamic_activation_qdq_vllm(inputs).dequant
         torch.cuda.synchronize()
-    device_events = [
-        event for event in prof.key_averages() if event.device_time_total > 0
-    ]
-    total_us = sum(event.device_time_total for event in device_events) / CALLS_PER_ROUND
-    launches = sum(event.count for event in device_events) // CALLS_PER_ROUND
-    return launches, total_us
+        os.environ[DISABLE_FUSED_ENV] = "0"
+        for _ in range(CALLS_PER_ROUND):
+            fp8_dynamic_activation_qdq_vllm(inputs).dequant
+        torch.cuda.synchronize()
+    arms = {"reference": ([], 0.0), "fused": ([], 0.0)}
+    for event in prof.key_averages():
+        if event.device_time_total <= 0:
+            continue
+        arm = "fused" if _is_fused_key(event.key) else "reference"
+        keys, _ = arms[arm]
+        keys.append(f"{event.key}x{event.count}")
+        arms[arm] = (keys, arms[arm][1] + event.device_time_total)
+    counts = {
+        arm: sum(
+            event.count for event in prof.key_averages()
+            if event.device_time_total > 0
+            and (_is_fused_key(event.key) == (arm == "fused"))
+        ) // CALLS_PER_ROUND
+        for arm in ("reference", "fused")
+    }
+    return {
+        arm: {
+            "cuda_kernels_per_call": counts[arm],
+            "kernel_us_per_call": arms[arm][1] / CALLS_PER_ROUND,
+            "kernel_keys": sorted(arms[arm][0]),
+        }
+        for arm in ("reference", "fused")
+    }
 
 
 class _PowerSampler:
@@ -133,15 +163,15 @@ def _bench_case(width: int, out: Path) -> dict:
             per_call = [
                 _timed_calls(inputs, CALLS_PER_ROUND) for _ in range(ROUNDS)
             ]
-        launches, kernel_us = _kernel_count(inputs)
         case[arm] = {
             "ms_per_call_median": statistics.median(per_call),
             "ms_per_call_min": min(per_call),
-            "cuda_kernels_per_call": launches,
-            "kernel_us_per_call": kernel_us,
             "power_w_mean": sampler.mean(),
             "power_samples": len(sampler.samples),
         }
+    profiled = _profile_both_arms(inputs)
+    for arm in ("reference", "fused"):
+        case[arm].update(profiled[arm])
     ref = case["reference"]["ms_per_call_median"]
     fused = case["fused"]["ms_per_call_median"]
     case["speedup"] = ref / fused if fused else None
