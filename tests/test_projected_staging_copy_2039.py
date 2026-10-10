@@ -71,12 +71,15 @@ class _CopyCounter:
 
     def __init__(self, monkeypatch):
         self.staging = 0
-        self._original = torch.Tensor.copy_
-        monkeypatch.setattr(torch.Tensor, 'copy_', self._count)
+        original, counter = torch.Tensor.copy_, self
 
-    def _count(self, target, source, *args, **kwargs):
-        self.staging += 1
-        return self._original(target, source, *args, **kwargs)
+        # A plain function, so the class binds it as a method: a bound method
+        # stored on the class would never receive the tensor it was called on.
+        def counting(target, source, *args, **kwargs):
+            counter.staging += 1
+            return original(target, source, *args, **kwargs)
+
+        monkeypatch.setattr(torch.Tensor, 'copy_', counting)
 
 
 class _PinnedMemory:
