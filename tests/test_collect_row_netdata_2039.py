@@ -63,6 +63,15 @@ def test_a_sample_outside_the_requested_window_refuses(monkeypatch):
         collector.collect_window(AFTER, BEFORE)
 
 
+def test_a_refused_window_names_its_host_chart_and_stamps(monkeypatch):
+    _fake_fetch(monkeypatch, window=_window(stamps=(999.0, 1010.0)))
+    with pytest.raises(RuntimeError) as error:
+        collector.collect_window(AFTER, BEFORE)
+    text = str(error.value)
+    assert "sparklina chart." in text and "asked 1000.0..1030.0" in text
+    assert "samples 999.0..1010.0" in text
+
+
 def test_a_window_with_no_measured_dimension_refuses(monkeypatch):
     _fake_fetch(monkeypatch, window={"labels": ["time", "dim"], "data": [[1001.0, None]]})
     with pytest.raises(RuntimeError, match="no measured samples"):
