@@ -52,8 +52,11 @@ ORDER = ("before", "after", "after", "before")
 #: One BF16 expert projection of GLM-5.3-Flash: [I=2048, H=4096], 16 MiB.
 EXPERT_ROWS, EXPERT_COLS = 2048, 4096
 POWER_ENVELOPE_W = 140.0
-#: Netdata's slowest required chart (GPU power) updates every ten seconds.
-NETDATA_PAD_S = 12.0
+#: Netdata's slowest required chart (GPU power) updates every ten seconds, so a
+#: window reaches that far beyond the arms on each side; the lag is how long
+#: the last sample takes to land after its second.
+NETDATA_PAD_S = 12
+NETDATA_LAG_S = 3
 SHARD = "model-00001-of-00001.safetensors"
 
 
@@ -601,10 +604,15 @@ def run_cuda(args, fixture, binding):
     problems = stage_gate(arms)
     netdata = None
     if not args.no_netdata:
-        wait = arms[-1]["epoch_end"] + NETDATA_PAD_S - time.time()
+        # Whole seconds, and a window that ends in the past: Netdata shifts a
+        # window that ends at the present back by a second, so its first row
+        # would fall before the bound it was asked for.
+        after = int(arms[0]["epoch_start"]) - NETDATA_PAD_S
+        before = int(arms[-1]["epoch_end"]) + NETDATA_PAD_S
+        wait = before + NETDATA_LAG_S - time.time()
         if wait > 0:
             time.sleep(wait)
-        netdata = both_host_netdata(arms[0]["epoch_start"] - NETDATA_PAD_S, time.time())
+        netdata = both_host_netdata(after, before)
     return {"calibration_median_s": medians, "passes": passes, "order": list(ORDER),
             "arms": arms, "paired": paired_summary(arms), "stage_gate_problems": problems,
             "netdata": netdata, "power_errors": power.errors[:5],
@@ -662,6 +670,8 @@ def observed_peaks():
 def summary_text(result):
     """The record without the raw series: what the CAS-captured stdout carries."""
     slim = json.loads(json.dumps(result))
+    for arm in slim.get("arms", ()):
+        arm["wall_s"] = f"{len(arm['wall_s'])} samples in the result file"
     netdata = slim.get("netdata") or {}
     document = netdata.pop("document", None)
     if document is not None:
