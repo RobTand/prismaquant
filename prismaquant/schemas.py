@@ -367,6 +367,148 @@ def validate_cost_payload(payload, path: str | None = None):
     return payload
 
 
+#: Exact (family, rate, row class) rows of the #1588 pre-dispatch packet
+#: (PQ #2558). Fourteen (rung, unit-class) pairs over 11 unique
+#: (family, rate) rates: BF16 R1152, E4M3 R1152 and E2M1 R768 each
+#: appear once as routed and once as dense.
+PQ1588_PREDISPATCH_ROWS = (
+    ("TESSERA_BF16_K1", 960, "routed"),
+    ("TESSERA_BF16_K1", 1088, "routed"),
+    ("TESSERA_BF16_K1", 1152, "routed"),
+    ("TESSERA_BF16_K1", 1152, "dense"),
+    ("TESSERA_BF16_K1", 1408, "dense"),
+    ("TESSERA_BF16_K1", 1792, "dense"),
+    ("TESSERA_E4M3_K1", 768, "routed"),
+    ("TESSERA_E4M3_K1", 1152, "routed"),
+    ("TESSERA_E4M3_K1", 1152, "dense"),
+    ("TESSERA_E4M3_K1", 1536, "dense"),
+    ("TESSERA_E4M3_K1", 2048, "dense"),
+    ("TESSERA_E2M1_K2", 640, "routed"),
+    ("TESSERA_E2M1_K2", 768, "routed"),
+    ("TESSERA_E2M1_K2", 768, "dense"),
+)
+
+#: Hour-math constants of the #1588 pre-dispatch packet (PQ #2558).
+#: The 30-41 GPU-h receipt half is gone under per-shape time; the
+#: encode-plus-joint cost half remains at 145-190 GPU-h. Shape-time
+#: rows count (7 routed x 1 shape + 7 dense x 4 shapes) x 4 regimes.
+PQ1588_PREDISPATCH_ENCODE_LOW = 145
+PQ1588_PREDISPATCH_ENCODE_HIGH = 190
+PQ1588_PREDISPATCH_JOINT_RECEIPT = 0
+PQ1588_PREDISPATCH_SHAPE_TIME_ROWS = 140
+
+_PQ1588_PIN_KEYS = (
+    "reader_dev_pin_commit",
+    "reader_dev_pin_contract_sha256",
+    "serving_runtime_pinned_commit",
+    "serving_runtime_pinned_version",
+    "serving_runtime_pinned_contract_sha256",
+    "producer_installed_contract_sha256",
+)
+_PQ1588_DIGEST_KEYS = (
+    "tessera_export_sha256",
+    "tessera_grammar_sha256",
+    "installed_contract_sha256",
+)
+_GIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def validate_pq1588_predispatch_packet(payload, path: str | None = None):
+    """Validate the #1588 pre-dispatch packet shape and hour math (PQ #2558).
+
+    This checks the packet's own structure: the exact 14-row set, the
+    40-char source SHA bound to the namespace short id, the pin and
+    digest key sets, and the hour-math constants. It does not check
+    the values against the live repo state; the packet test re-derives
+    pins, digests, legal rates and cell state through the repo APIs,
+    so a stale value fails there.
+    """
+    if not _is_mapping(payload):
+        _fail(path, "", "predispatch packet is not a mapping")
+    if payload.get("schema") != "prismaquant.predispatch_packet.v1":
+        _fail(path, ".schema", "must be prismaquant.predispatch_packet.v1")
+    source = payload.get("source_commit")
+    if not isinstance(source, str) or _GIT_SHA_RE.fullmatch(source) is None:
+        _fail(path, ".source_commit", "must be a 40-char lowercase git SHA")
+    provenance = payload.get("provenance")
+    if not _is_mapping(provenance) or provenance.get("source_commit") != source:
+        _fail(path, ".provenance.source_commit", "must equal .source_commit")
+    short_id = payload.get("short_id", provenance.get("short_id"))
+    if short_id != source[:8]:
+        _fail(path, ".short_id", "must be the first 8 chars of .source_commit")
+    pins = payload.get("pins")
+    if not _is_mapping(pins) or set(pins) != set(_PQ1588_PIN_KEYS):
+        _fail(path, ".pins", f"must hold exactly {sorted(_PQ1588_PIN_KEYS)}")
+    digests = payload.get("input_digests")
+    if not _is_mapping(digests) or set(digests) != set(_PQ1588_DIGEST_KEYS):
+        _fail(path, ".input_digests", f"must hold exactly {sorted(_PQ1588_DIGEST_KEYS)}")
+    for key in _PQ1588_DIGEST_KEYS:
+        if not isinstance(digests[key], str) or _SHA256_RE.fullmatch(digests[key]) is None:
+            _fail(path, f".input_digests.{key}", "must be a 64-char hex digest")
+    rows = payload.get("requested_rows")
+    if not isinstance(rows, list) or len(rows) != 14:
+        _fail(path, ".requested_rows", "must list exactly 14 rows")
+    seen = []
+    for pos, row in enumerate(rows):
+        where = f".requested_rows[{pos}]"
+        if not _is_mapping(row):
+            _fail(path, where, "row is not a mapping")
+        for field in ("family", "rate", "row_class"):
+            if field not in row:
+                _fail(path, f"{where}.{field}", "required field missing")
+        if row.get("producer_legal") is not True:
+            _fail(path, f"{where}.producer_legal", "must be true")
+        if row.get("priced_in_joint_pkl") is not False:
+            _fail(path, f"{where}.priced_in_joint_pkl", "must be false")
+        if not isinstance(row.get("qualified_structures"), list):
+            _fail(path, f"{where}.qualified_structures", "must be a list")
+        if not isinstance(row.get("cell_for_requested_class"), bool):
+            _fail(path, f"{where}.cell_for_requested_class", "must be a boolean")
+        seen.append((row["family"], row["rate"], row["row_class"]))
+    if sorted(seen) != sorted(PQ1588_PREDISPATCH_ROWS):
+        _fail(path, ".requested_rows", "row set differs from PQ1588_PREDISPATCH_ROWS")
+    unique = payload.get("unique_rates")
+    if not _is_mapping(unique):
+        _fail(path, ".unique_rates", "missing or not a mapping")
+    flat = sorted(
+        (family, rate) for family, rates in unique.items() for rate in rates
+    )
+    expect_unique = sorted({(family, rate) for family, rate, _ in PQ1588_PREDISPATCH_ROWS})
+    if flat != expect_unique or len(flat) != 11:
+        _fail(path, ".unique_rates", "must hold the 11 unique packet rates")
+    estimate = payload.get("estimate")
+    if not _is_mapping(estimate):
+        _fail(path, ".estimate", "missing or not a mapping")
+    cost = estimate.get("cost_rows_gpu_h")
+    if not _is_mapping(cost):
+        _fail(path, ".estimate.cost_rows_gpu_h", "missing or not a mapping")
+    if cost.get("encode_low") != PQ1588_PREDISPATCH_ENCODE_LOW:
+        _fail(path, ".estimate.cost_rows_gpu_h.encode_low", "must be 145")
+    if cost.get("encode_high") != PQ1588_PREDISPATCH_ENCODE_HIGH:
+        _fail(path, ".estimate.cost_rows_gpu_h.encode_high", "must be 190")
+    if cost.get("joint_receipt") != PQ1588_PREDISPATCH_JOINT_RECEIPT:
+        _fail(path, ".estimate.cost_rows_gpu_h.joint_receipt", "must be 0")
+    shape_rows = estimate.get("shape_time_rows")
+    if not _is_mapping(shape_rows):
+        _fail(path, ".estimate.shape_time_rows", "missing or not a mapping")
+    routed = sum(1 for _, _, cls in PQ1588_PREDISPATCH_ROWS if cls == "routed")
+    dense = sum(1 for _, _, cls in PQ1588_PREDISPATCH_ROWS if cls == "dense")
+    if shape_rows.get("count") != (routed * 1 + dense * 4) * 4:
+        _fail(path, ".estimate.shape_time_rows.count", "hour math is stale")
+    if shape_rows.get("count") != PQ1588_PREDISPATCH_SHAPE_TIME_ROWS:
+        _fail(path, ".estimate.shape_time_rows.count", "must be 140")
+    namespace = payload.get("namespace")
+    if not _is_mapping(namespace):
+        _fail(path, ".namespace", "missing or not a mapping")
+    if namespace.get("created") is not False:
+        _fail(path, ".namespace.created", "must be false: the root stays a plan")
+    root = namespace.get("proposed_root")
+    if not isinstance(root, str) or source[:8] not in root:
+        _fail(path, ".namespace.proposed_root", "must carry the packet short id")
+    return payload
+
+
 def validate_layer_config_payload(payload, path: str | None = None):
     """Validate allocator/exporter layer_config JSON shape."""
     if not _is_mapping(payload):
