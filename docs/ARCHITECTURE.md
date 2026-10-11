@@ -19,7 +19,33 @@ The patched indexer hash is `5f4b6c672dafb9e9f4ab0d9e18e4fab7b98de6c11d41ba4e754
 The same action passes GPU row equality for every short length.
 It also passes captured general-path replay after the lengths change.
 The manifest records index-row proof only, with zero qualified model layers and no ready serving modes.
-The eager versus FULL_DECODE_ONLY draft comparison and decode latency require separate serve evidence.
+PB `6d8b1871` completed three latency arms and five eager stub serves with MTP k=2.
+Its first FULL_DECODE_ONLY serve failed before any request.
+The pinned Tessera runtime refuses that drafter's metadata at `max_model_len=4096`.
+`tessera.serving.glm53_graphs.branch_plan` admits this class capture only for MTP k<=1.
+The same guard exists on Tessera master at this inspection.
+Tessera #695 owns the required metadata qualification.
+Neither a shorter model limit nor a weaker gate supplies the requested comparison.
+
+The latency probe used batch one, five repeats, and 128 generated tokens per repeat:
+
+| Prompt tokens | Base mean client ITL, ms | Forced general path, ms | Patched fast path, ms | General minus base, ms |
+|---|---:|---:|---:|---:|
+| 128 | 41.304 | 41.568 | 41.508 | +0.264 |
+| 1024 | 41.997 | 42.237 | 42.108 | +0.240 |
+
+These are observed client intervals from one serve per latency arm.
+They include HTTP streaming overhead and do not establish a speed ranking.
+The corresponding traces and Netdata series from both Sparks reside at:
+`/mnt/shared/tessera-runs/receipts/1631-short-decode-20261011-r3/`.
+PB `39c84048` verifies the retained reports, traces, and series.
+The fallback trace contains 23 calls each to paged logits, persistent top-k, and pool expansion.
+The base and patched fast-path traces contain none of these three operations.
+Each trace has eight recorded model steps.
+Netdata windows include startup and requests, so they do not establish an energy ranking.
+The failed qualification action remains failed.
+Its completed eager observations do not prove FULL draft equivalence.
+
 No serving default, stage, format, plugin pin, or ship gate changes.
 Provenance: `serving_runtime_patch_set.load_serving_runtime_patch_set` and `ServingRuntimePatchSet.require_qualified_for`.
 

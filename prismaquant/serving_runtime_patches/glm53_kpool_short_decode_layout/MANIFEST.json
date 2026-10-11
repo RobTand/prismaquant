@@ -66,21 +66,61 @@
       "That base action fails row equality at 1536 lengths. The patched action f6d62786 passes every length 0 through 2048.",
       "The patched action also captures persistent_topk and expansion. Replay with reversed lengths still equals the eager fast-path rows.",
       "The Dockerfile self-check passes on CPU for every short length and all recorded source hashes.",
-      "CPU action ebc840bc passes nine layout and base-byte refusal cases. Action 77192115 passes the existing sixteen patch-set cases."
+      "CPU action 484265fa passes nine layout and base-byte refusal cases. Action c8bdea80 passes seventeen patch-set cases.",
+      "Metadata projection 39c84048 verifies the three completed latency arms, their profiler traces, and Netdata series from both Sparks."
     ],
     "not_qualified": [
       "This record qualifies index rows, not a served model. It admits no positive model layer count.",
-      "The eager versus FULL_DECODE_ONLY draft comparison is not yet recorded for this image.",
-      "Decode latency and the general-path fallback cost are not yet recorded for this image.",
+      "The eager versus FULL_DECODE_ONLY draft comparison remains blocked by Tessera's branch_plan guard for MTP k=2 at max_model_len 4096.",
+      "Tessera issue 695 must qualify that drafter metadata before this image can receive FULL serving evidence.",
+      "Client ITL includes HTTP streaming overhead. One latency serve per arm does not establish a speed or energy ranking.",
       "The 45-layer body, TP2, padded capture lists, and contexts above 2048 tokens have no new qualification."
     ],
     "measured_on": "sparklina, NVIDIA GB10, sm121",
     "measured_at": "2026-10-11"
   },
+  "partial_serve_evidence": {
+    "action_key": "6d8b187116c7d3c7f1322285bb846c72974a64578df9f0fafe84415e53b0be5f",
+    "action_outcome": "failed",
+    "tessera_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    "receipt_directory": "/mnt/shared/tessera-runs/receipts/1631-short-decode-20261011-r3",
+    "model": "/mnt/shared/tessera-runs/moe/glm53-4layer-a4-e2m1x2-q896-l2-mtp1",
+    "mtp_k": 2,
+    "max_model_len": 4096,
+    "max_num_seqs": 4,
+    "eager_serves_completed": ["e0", "e1", "e2", "e3", "e4"],
+    "equality_passes_per_eager_serve": 2,
+    "full_decode_only_serves_completed": [],
+    "refusal_owner": "tessera.serving.glm53_graphs.branch_plan",
+    "blocking_issue": "https://github.com/RobTand/tessera/issues/695",
+    "latency": {
+      "cases": ["n1_p128", "n1_p1024"],
+      "repeats_per_case": 5,
+      "tokens_per_case": 640,
+      "base_mean_client_itl_ms": [41.3042154440869, 41.99729854173181],
+      "fallback_mean_client_itl_ms": [41.56771714956771, 42.23685346302709],
+      "patched_mean_client_itl_ms": [41.50808666774079, 42.107518998434855],
+      "fallback_minus_base_ms": [0.2635017054808131, 0.2395549212952801],
+      "patched_minus_base_ms": [0.20387122365389132, 0.11022045670304692],
+      "limit": "One serve per latency arm. These are observed client intervals, not a statistically qualified runtime ranking."
+    },
+    "profile": {
+      "steps_per_arm": 8,
+      "fallback_scoring_topk_expansion_calls_each": 23,
+      "base_scoring_topk_expansion_calls_each": 0,
+      "patched_scoring_topk_expansion_calls_each": 0,
+      "trace_paths": ["lat_base.prof/trace.json", "lat_fallback.prof/trace.json", "lat_patched.prof/trace.json"],
+      "netdata_hosts": ["sparky", "sparklina"],
+      "limit": "Netdata windows include startup and requests. No energy ranking follows from these windows."
+    },
+    "projection_action": "39c8404833274107087722a5590f86bb1481370e319eea3d9c7d5e777a0943c6"
+  },
   "receipts": {
     "issue": "https://github.com/RobTand/prismaquant/issues/1631",
     "base_gpu_repro_action": "800a707ad64d5fce88ed842b00ff576a9f1d631c5ba40912b61346745fcfb4ef",
     "cpu_repro_action": "01562a4ac42665add6d4bb02121d69c292ab74644e939336209082c24aebdda6",
-    "build_and_gpu_action": "f6d62786bb2c83778dce9170fee197d3b753bdfeab924463bbe8c8987accd353"
+    "build_and_gpu_action": "f6d62786bb2c83778dce9170fee197d3b753bdfeab924463bbe8c8987accd353",
+    "partial_serve_action": "6d8b187116c7d3c7f1322285bb846c72974a64578df9f0fafe84415e53b0be5f",
+    "measurement_projection_action": "39c8404833274107087722a5590f86bb1481370e319eea3d9c7d5e777a0943c6"
   }
 }
