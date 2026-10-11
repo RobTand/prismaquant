@@ -602,3 +602,18 @@ def test_foreign_selector_refuses(tmp_path, campaign, records_dir, monkeypatch):
     args += ["--pilot-selector", "8" * 64, "1.0", "1"]
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 3
     assert not gateway.submitted
+
+
+def test_original_wire_survives_a_distinct_producer_namespace(
+        tmp_path, campaign, records_dir, monkeypatch):
+    receipt = _ready(tmp_path, campaign, records_dir)
+    gateway = FakeGateway()
+    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
+    for result in gateway.results.values():
+        completion = json.loads(result["payload"])
+        completion["quantum_record"]["path"] = "/workspace/producer-only/quantum.json"
+        assert not Path(completion["quantum_record"]["path"]).exists()
+        result["payload"] = json.dumps(completion).encode()
+    assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
+                _gateway=gateway) == 0
+    assert len(gateway.submitted) == 3

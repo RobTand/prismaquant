@@ -299,3 +299,31 @@ def test_join_routes_the_same_single_read_bytes_once(tmp_path, monkeypatch):
     assert result is raw
     assert actual == expected
     assert events == ["read", "owner"]
+
+
+def test_explicit_bound_applies_to_cached_bytes(tmp_path):
+    raw = b"owned bytes"
+    path = tmp_path / "owned.bin"
+    path.write_bytes(raw)
+    bound = record(path, raw)
+    assert inputs.read_bound(bound, "unit") == raw
+    with pytest.raises(ValueError, match="bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) == raw
+
+
+def test_explicit_bound_reaches_the_staged_reader_without_pool_stat(tmp_path, monkeypatch):
+    raw = b"staged bytes"
+    path = tmp_path / "absent.bin"
+    calls = []
+
+    def staged(observed, digest, label, *, max_bytes):
+        calls.append((observed, digest, label, max_bytes))
+        return raw
+
+    monkeypatch.setattr(inputs, "BOUND_READER", staged)
+    bound = record(path, raw)
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) is raw
+    assert calls == [(path, bound["sha256"], "unit", len(raw))]
+    with pytest.raises(ValueError, match="bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
