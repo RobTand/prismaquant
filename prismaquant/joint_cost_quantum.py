@@ -2720,10 +2720,16 @@ def run_layer_quantum_core(
             # PQ #1348: the spill replay reads its chunks through the IO
             # engine too, ahead as far as the row's memory allows less what
             # the render stream's next window still needs, and never below
-            # the two buffers its phase reserves.
+            # the two buffers its phase reserves. PQ #2602: less the render
+            # stream's measured growth as well, so spill read-ahead leaves
+            # room the consumer still grows into. The render stream's own
+            # budget takes no growth source: the guard reading already holds
+            # its own bytes. ``render_stream`` may be ``None`` when no window
+            # needs renders; then both terms are inert.
             spill.bind_replay_budget(GuardReadBudget(
                 guard, buffer_bytes=spill.replay_chunk_bytes, yield_to=render_stream,
-                floor_bytes=spill.replay_reserve_host_bytes))
+                floor_bytes=spill.replay_reserve_host_bytes,
+                growth_stream=render_stream))
         # PQ #1348: each window's renders stay on the device across its
         # probes while the row's device headroom admits them; a guard
         # shortfall drops them first, and a dropped render is copied again.
