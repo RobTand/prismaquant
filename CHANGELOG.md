@@ -44,6 +44,16 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Dense cost interpolation retains the anchors' activation contract and quantized-input observation (#2400, PR #2653).
+  It refuses incompatible anchor contracts, observations, and static scales before a rate fit, independent of development mode.
+  The direct indexer head retains FP32; the MLA direct consumer retains its BF16 contract.
+  This repairs an inherited metadata defect without any serving/export pin or GPU qualification change.
+- The model profile separates complete dense owner metadata from pricing candidates (#2400, PR #2653).
+  `campaign_dense_owner_names` uses the existing parameter-owner rule and retains all unselected GLM pins, including the source router.
+  The campaign roster and population report keep those names and their count.
+  GLM `campaign_dense_unit_names` excludes explicit-selection owners unless an allow token matches.
+  Head and embedding policies, the BF16 source model, and default campaign targets stay unchanged.
+  Serving/export pins and GPU qualification gates stay unchanged; #2400 remains open.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

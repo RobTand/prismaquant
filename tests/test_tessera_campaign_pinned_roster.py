@@ -325,3 +325,83 @@ def test_measure_anchor_direct_leaf_without_profile_refuses_before_encode(tmp_pa
             hessian_required=False, structure="dense")
     assert list(wire_dir.glob("*.tessera")) == []
     assert cache.weights == {}
+
+
+def _explicit_select_model():
+    """A GLM-shaped tree: quantizable body plus every commissioned family."""
+    import torch
+    from transformers.models.glm5_next.modeling_glm5_next import Glm5NextTextTopkRouter
+    from types import SimpleNamespace
+    model = torch.nn.Module()
+
+    def attach(dotted, module):
+        target = model
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            child = getattr(target, part, None)
+            if child is None:
+                child = torch.nn.Module()
+                setattr(target, part, child)
+            target = child
+        setattr(target, parts[-1], module)
+        return dotted
+
+    linear = lambda rows=8, cols=8: torch.nn.Linear(cols, rows, bias=False)
+    dense0 = [attach(f"{P}0.mlp.{leaf}", linear())
+              for leaf in ("gate_proj", "up_proj", "down_proj")]
+    kda0 = [attach(f"{P}0.self_attn.{leaf}", linear()) for leaf in KDA]
+    kda0.append(attach(f"{P}0.self_attn.f_a_proj", linear()))
+    mla3 = [attach(f"{P}3.self_attn.{leaf}", linear()) for leaf in MLA]
+    idx3 = [attach(f"{P}3.self_attn.{leaf}", linear()) for leaf in INDEXER]
+    shared3 = [attach(f"{P}3.mlp.shared_experts.{leaf}", linear())
+               for leaf in ("gate_proj", "up_proj", "down_proj")]
+    router = Glm5NextTextTopkRouter(SimpleNamespace(num_experts_per_tok=2, num_local_experts=4,
+        hidden_size=4, routed_scaling_factor=1.0, n_group=1, topk_group=1, norm_topk_prob=True))
+    router_name = attach(f"{P}3.mlp.gate", router)
+    kda4 = [attach(f"{P}4.self_attn.{leaf}", linear()) for leaf in ("q_proj", "o_proj")]
+    visual = [attach(name, linear()) for name in (
+        "model.visual.blocks.0.attn.proj", "model.visual.blocks.0.mlp.down_proj",
+        "model.visual.merger.proj")]
+    head = attach("lm_head", linear())
+    attach(f"{P}0.self_attn.conv1d", torch.nn.Conv1d(4, 8, 4))
+    head_mtp = attach(f"{P}45.eh_proj", linear())
+    commissioned = kda0 + mla3 + idx3 + [router_name] + kda4 + visual + [head_mtp]
+    quantizable = dense0 + shared3
+    return model, quantizable, commissioned, head
+
+
+def test_default_enumeration_holds_every_commissioned_unit_for_a_token():
+    model, quantizable, commissioned, head = _explicit_select_model()
+    profile = Glm5NextProfile()
+    assert set(profile.campaign_dense_unit_names(model)) == set(quantizable + [head])
+
+
+def test_explicit_token_enumerates_each_commissioned_family():
+    model, quantizable, commissioned, head = _explicit_select_model()
+    profile = Glm5NextProfile()
+    tokens = ",".join(commissioned)
+    assert set(profile.campaign_dense_unit_names(model, allow_pinned=tokens)) == set(
+        quantizable + commissioned + [head])
+    partial = profile.campaign_dense_unit_names(model, allow_pinned="indexer.weights_proj")
+    selected = [name for name in commissioned if "indexer.weights_proj" in name]
+    assert set(partial) == set(quantizable + selected + [head])
+
+
+@pytest.mark.parametrize("token", [None, "indexer.weights_proj"])
+def test_campaign_owner_metadata_preserves_unselected_pins(token):
+    model, quantizable, commissioned, head = _explicit_select_model()
+    profile = Glm5NextProfile()
+    roster = tc.campaign_roster(
+        profile.campaign_dense_owner_names(model), profile,
+        allow_pinned=token)
+    selected = [name for name in commissioned if token and token in name]
+    expected_pins = set(commissioned) - set(selected)
+    assert set(roster.dense) == set(quantizable + selected)
+    assert set(roster.lifted) == set(selected)
+    assert set(roster.pinned) == expected_pins
+    population = tc.campaign_population_block(
+        dense_targets=roster.dense, expert_targets=[], dense_all=roster.dense,
+        pinned=roster.pinned, population=tc.ExpertPopulation((), {}, {}, {}),
+        layer_stride=1, costs={}, menus={})
+    assert set(population["omitted"]["pinned"]) == expected_pins
+    assert population["counts"]["pinned"] == len(expected_pins)
