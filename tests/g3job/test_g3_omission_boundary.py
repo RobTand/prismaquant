@@ -1,7 +1,7 @@
 """Retain checkpoint tensors unless each requested use replaces the whole tensor."""
 import copy
 
-from test_g3_readset import fixture
+from .test_g3_readset import fixture
 from g3_readset import SourceReads
 
 

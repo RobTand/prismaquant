@@ -44,6 +44,10 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
+- Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
+- Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).
+- Give the G3 tests their own package namespace so mixed sessions retain the root fixtures (#2680).
 - Stage B spill qualification runs on provisioned private scratch with real direct I/O (#2594).
   The `_spill_root` helper serves spill acquisition only from `PQ_STAGE_B_SPILL_TEST_ROOT`
   with real statx direct I/O. Without either it skips and names the incomplete

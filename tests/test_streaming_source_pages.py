@@ -51,16 +51,17 @@ def test_release_only_complete_selected_payload_pages(tmp_path, monkeypatch):
 def test_unsupported_source_never_advised(tmp_path, monkeypatch, kind):
     path, *_ = checkpoint(tmp_path)
     calls = []
-    monkeypatch.setattr(os, 'posix_fadvise', lambda *args: calls.append(args))
-    if kind == 'fifo':
-        path.unlink()
-        os.mkfifo(path)
-    elif kind == 'character':
-        original = os.fstat
-        monkeypatch.setattr(os, 'fstat', lambda fd: SimpleNamespace(st_mode=stat.S_IFCHR, st_size=original(fd).st_size))
-    else:
-        monkeypatch.delattr(os, 'posix_fadvise')
-    ls._advise_consumed_safetensors_pages(str(path), ['selected'])
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'posix_fadvise', lambda *args: calls.append(args))
+        if kind == 'fifo':
+            path.unlink()
+            os.mkfifo(path)
+        elif kind == 'character':
+            original = os.fstat
+            patch.setattr(os, 'fstat', lambda fd: SimpleNamespace(st_mode=stat.S_IFCHR, st_size=original(fd).st_size))
+        else:
+            patch.delattr(os, 'posix_fadvise')
+        ls._advise_consumed_safetensors_pages(str(path), ['selected'])
     assert calls == []
 
 
