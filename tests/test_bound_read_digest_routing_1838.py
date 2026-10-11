@@ -312,6 +312,20 @@ def test_explicit_bound_applies_to_cached_bytes(tmp_path):
     assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) == raw
 
 
+@pytest.mark.parametrize("warm_memo", [False, True])
+def test_bounded_symlink_matches_unbounded_path_behavior(tmp_path, warm_memo):
+    raw = b"bound alias bytes"
+    target = tmp_path / "original.bin"
+    target.write_bytes(raw)
+    alias = tmp_path / "alias.bin"
+    alias.symlink_to(target)
+    bound = record(alias, raw)
+    if warm_memo:
+        assert inputs.read_bound(bound, "unit") == raw
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) == raw
+    with pytest.raises(inputs.BoundReadLimitExceeded):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+
 def test_explicit_bound_reaches_the_staged_reader_without_pool_stat(tmp_path, monkeypatch):
     raw = b"staged bytes"
     path = tmp_path / "absent.bin"
