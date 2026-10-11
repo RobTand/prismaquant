@@ -44,6 +44,8 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Approved-table R768 controls guard T4 menu expansion (#2364).
+  Dense and routed cases prove the real table still waits.
 - T4 consumer coverage uses the approved private q896 table through a declared input (#2364).
   Dense and routed cases prove admission and defect-specific shape and activation refusals.
   The public branch contains no copy of the private qualification packet.

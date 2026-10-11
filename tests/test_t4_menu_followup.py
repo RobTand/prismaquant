@@ -7,7 +7,8 @@ producer. The verdicts come from the existing consumer owners.
 
 The approved private table supplies positive q896 consumer cases.
 Missing shape or activation scope refuses for its own reason.
-The synthetic whole-bit cap still waits for performance admission.
+Approved-table R768 controls guard menu expansion: the synthetic cap
+shares its refusal reason, so only the real table can catch admission.
 """
 from __future__ import annotations
 
@@ -104,7 +105,7 @@ def _t4_owner(monkeypatch, rung):
 
 
 
-def _approved_t4_case(monkeypatch, kernel_kind):
+def _approved_t4_case(monkeypatch, rung, kernel_kind):
     table_path = os.environ.get("PQ_T4_MENU_TABLE")
     if not table_path:
         pytest.skip("q896 consumer proof needs the declared private table in PQ_T4_MENU_TABLE")
@@ -113,11 +114,13 @@ def _approved_t4_case(monkeypatch, kernel_kind):
     owner = RungAllowability(
         T4, MappingProxyType(dict(table["kernel_build"])), table["table_version"],
         "approved private producer table; source consumer proof only", table,
-        producer, MappingProxyType({896: True}), frozenset({896}))
-    row = next(row for row in table["rungs"] if row["rung"] == 896)
-    measurement = min(
-        (cell for cell in row["measurements"] if cell["kernel_kind"] == kernel_kind),
-        key=lambda cell: cell["M"])
+        producer, MappingProxyType({rung: True}), frozenset({rung}))
+    row = next(row for row in table["rungs"] if row["rung"] == rung)
+    cells = [cell for cell in row["measurements"] if cell["kernel_kind"] == kernel_kind]
+    if not cells:
+        row = next(row for row in table["rungs"] if row["rung"] == 896)
+        cells = [cell for cell in row["measurements"] if cell["kernel_kind"] == kernel_kind]
+    measurement = min(cells, key=lambda cell: cell["M"])
     evidence = measurement["evidence"]
     scope = {"kernel_kind": kernel_kind, "rows": evidence["rows"],
              "columns": evidence["columns"], "m": measurement["M"],
@@ -128,9 +131,22 @@ def _approved_t4_case(monkeypatch, kernel_kind):
 
 
 @pytest.mark.parametrize("kernel_kind", ["dense", "routed"])
+def test_approved_r768_still_waits(monkeypatch, kernel_kind):
+    from prismaquant import allocator_candidates as candidates
+    owner, scope = _approved_t4_case(monkeypatch, 768, kernel_kind)
+    assert owner.refusal(768, scope=scope) == "performance_admission_not_established"
+    admission = candidates.candidate_rung_admission(
+        f"{T4}_R768", target_profile="research",
+        rung_allowability={T4: owner}, allowability_scope=scope)
+    assert admission is not None
+    assert not admission.measured_allowable
+    assert not admission.admits("research"), admission.detail
+
+
+@pytest.mark.parametrize("kernel_kind", ["dense", "routed"])
 def test_approved_q896_admits_through_the_consumer(monkeypatch, kernel_kind):
     from prismaquant import allocator_candidates as candidates
-    owner, scope = _approved_t4_case(monkeypatch, kernel_kind)
+    owner, scope = _approved_t4_case(monkeypatch, 896, kernel_kind)
     assert owner.allows(896, scope=scope), owner.refusal(896, scope=scope)
     admission = candidates.candidate_rung_admission(
         f"{T4}_R896", target_profile="research",
@@ -165,7 +181,7 @@ def test_t4_lane_seam_refuses_unapproved_menu(monkeypatch):
 @pytest.mark.parametrize("kernel_kind", ["dense", "routed"])
 def test_t4_unresolved_scope_still_waits(monkeypatch, kernel_kind):
     from prismaquant import allocator_candidates as candidates
-    owner, scope = _approved_t4_case(monkeypatch, kernel_kind)
+    owner, scope = _approved_t4_case(monkeypatch, 896, kernel_kind)
     assert owner.allows(896, scope=scope), owner.refusal(896, scope=scope)
     incomplete = dict(scope)
     incomplete.pop("columns")
@@ -180,7 +196,7 @@ def test_t4_unresolved_scope_still_waits(monkeypatch, kernel_kind):
 
 @pytest.mark.parametrize("kernel_kind", ["dense", "routed"])
 def test_t4_wrong_activation_still_waits(monkeypatch, kernel_kind):
-    owner, scope = _approved_t4_case(monkeypatch, kernel_kind)
+    owner, scope = _approved_t4_case(monkeypatch, 896, kernel_kind)
     assert owner.allows(896, scope=scope), owner.refusal(896, scope=scope)
     wrong = dict(scope, activation_contract="wrong")
     assert owner.refusal(896, scope=wrong) == "unmeasured_activation_scope"
