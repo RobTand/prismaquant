@@ -387,11 +387,21 @@ def test_explicit_token_enumerates_each_commissioned_family():
     assert set(partial) == set(quantizable + linears + [head])
 
 
-def test_default_roster_from_default_enumeration_keeps_the_body_set():
+@pytest.mark.parametrize("token", [None, "indexer.weights_proj"])
+def test_campaign_owner_metadata_preserves_unselected_pins(token):
     model, quantizable, commissioned, head = _explicit_select_model()
     profile = Glm5NextProfile()
-    roster = tc.campaign_roster(profile.campaign_dense_unit_names(model), profile)
-    assert set(roster.dense) == set(quantizable)
-    assert roster.lifted == ()
-    assert set(profile.campaign_dense_unit_names(model)) == set(
-        profile.campaign_dense_unit_names(model))
+    roster = tc.campaign_roster(
+        profile.campaign_dense_unit_names(model, allow_pinned=token), profile,
+        allow_pinned=token)
+    selected = [name for name in commissioned if token and token in name]
+    expected_pins = set(commissioned) - set(selected)
+    assert set(roster.dense) == set(quantizable + selected)
+    assert set(roster.lifted) == set(selected)
+    assert set(roster.pinned) == expected_pins
+    population = tc.campaign_population_block(
+        dense_targets=roster.dense, expert_targets=[], dense_all=roster.dense,
+        pinned=roster.pinned, population=tc.ExpertPopulation((), {}, {}, {}),
+        layer_stride=1, costs={}, menus={})
+    assert set(population["omitted"]["pinned"]) == expected_pins
+    assert population["counts"]["pinned"] == len(expected_pins)
