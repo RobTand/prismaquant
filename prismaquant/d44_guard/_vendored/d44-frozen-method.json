@@ -1,0 +1,111 @@
+{
+  "10_G3": {
+    "CONFIRM": [
+      "mean dKL(swap-A8S)<0",
+      "abs(dKL)>=0.5*P",
+      "one-sided90percent paired interval excludes0",
+      "at least15/25 windows better"
+    ],
+    "PASS": "Weight-leg PASS and CONFIRM",
+    "arms": [
+      "swap",
+      "same-unit EXL3 ceiling"
+    ],
+    "flat_or_worse": "Stop for diagnosis",
+    "low_power": "If dceil <2 paired SE, weight-leg only, route to CEO",
+    "other": "FAIL(ship A8S), except weight-leg only and PASS-except-L3 route to CEO",
+    "preregister": "P=C_gap*dceil; dceil=KL(A8S)-KL(EXL3-ceiling), fixed before swap scoring",
+    "version": "G3v2",
+    "windows": "Same25 prefixed windows and same teacher, paired against A8S"
+  },
+  "1_selector": {
+    "final": "Reencode using full H_fit; score HELD once after selection",
+    "full_L3_recovery": "Diagnostic only: document-grouped4-fold comparison. Not a verdict prerequisite; stop if it competes with priority0 capture.",
+    "objective": "Summed raw validation SSE across experts with FIT count strictly greater than1024",
+    "rule": "512-row FIT prefix fold for every layer and role",
+    "scope": "Per layer/role, same selector for all six routed layers",
+    "small_experts": "Receive chosen setting and remain in bar",
+    "training": "H_rest = H_fit - X_prefix.T @ X_prefix",
+    "validation": "X_prefix"
+  },
+  "2_grid": {
+    "removed_damping": [
+      0.001,
+      0.01,
+      0.1
+    ],
+    "shrinkage_k": [
+      0,
+      1024,
+      4096,
+      16384
+    ],
+    "sigma": [
+      1,
+      3,
+      10
+    ]
+  },
+  "3_pool": {
+    "denominator": "Actual sum of routed rows over pooled experts, not global token count",
+    "formula": "(Hraw + k*Hpoolraw/pooled_routed_rows)/(ne+k)",
+    "mandatory_control": "A one-expert pool returns exactly Hraw/ne for every k; failing-before/passing-after proof",
+    "self_inclusion": "Include the target expert in its positive-FIT layer/role pool; state explicitly in output",
+    "zero_FIT_experts": "Exclude from pool"
+  },
+  "4_dense_rank": {
+    "contraction": "float64",
+    "population": "All24 dense/shared candidates",
+    "role": "FIT only"
+  },
+  "5_bar_scope": {
+    "dense_shared": "Separate line; prior fixed-byte six-unit subset closure0.04813849171193591",
+    "routed_only": true,
+    "site_selection_disclosure": "No all24 held-out ranking was run for the six-unit subset; all six early captured sites were included"
+  },
+  "6_primary_metric": {
+    "A8S_mass_weighted_C": "Secondary readout, not a gate",
+    "C_gap": "sum(A-N)/sum(A-X) over all routed units"
+  },
+  "7_roster": {
+    "experts": "Every routed expert",
+    "layers": [
+      3,
+      40,
+      41,
+      42,
+      43,
+      44
+    ],
+    "missing": "unmeasured, never PASS",
+    "roles": [
+      "gate",
+      "up",
+      "down"
+    ]
+  },
+  "8_v0": {
+    "input": "A8S own production H",
+    "required": "Exact A8S encoded-byte equality",
+    "unit": "L3 expert0"
+  },
+  "9_weight_leg": {
+    "C_gap_min": 0.5,
+    "bootstrap": {
+      "resamples": 2000,
+      "seed": 20261006,
+      "stratified_by": "layer",
+      "unit": "Whole experts"
+    },
+    "bootstrap_p10_min": 0.35,
+    "clearly_adverse": "f_l <0 and layer bootstrap p90 <0",
+    "exception": "If only L3 clearly adverse and C_gap_without_L3 >=0.50, report PASS-except-L3 to CEO",
+    "positive_layers_min": 4
+  },
+  "capture": "Continue existing chain toL44 at priority0; no new capture required",
+  "frozen_at": "2026-10-06T21:15:53.606923+00:00",
+  "heldout_policy": "Score held-out once only after the complete method is implemented and preregistered",
+  "new_HELD_scoring_allowed": false,
+  "scientific_selection_submitted": false,
+  "source": "CEO decision delivered mid-run; eng-d44-audit/report-full.md"
+}
