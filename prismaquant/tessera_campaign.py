@@ -1624,11 +1624,8 @@ def _stack_menu(sample: StackExpertSample, menus: "Mapping[str, list]") -> list:
     return next(iter(seen.values()))
 
 
-#: The anchor fields that must agree across every measured member of one stack
-#: rung, mapped to the row field they are written to.  Taking member zero's
-#: value the way the dense interpolation path takes ``ordered[0]``'s would let
-#: one expert scored under a different activation contract, or without the
-#: Hessian, disappear into a stack average.
+#: Uniform metadata for every measured member of one stack rung.
+#: A stack average must not combine different activation contracts or Hessian observations.
 _STACK_UNIFORM_FIELDS = (
     "family", "body_rate_q256", "activation_contract",
     "activation_quantized", "hessian_applied",
@@ -2287,6 +2284,10 @@ def campaign_cost_payload(
                 }
                 measured_names.add(anchor.format_name)
                 formats.add(anchor.format_name)
+            for field in ("activation_contract", "activation_quantized", "input_global_scale"):
+                if any(getattr(anchor, field) != getattr(ordered[0], field)
+                       for anchor in ordered[1:]):
+                    raise ValueError(f"{qname} {family}: incompatible anchor {field} values")
             try:
                 surface = TesseraRateSurface(
                     unit_name=qname,
@@ -2331,7 +2332,8 @@ def campaign_cost_payload(
                     "tessera_provenance": PROVENANCE_INTERPOLATED,
                     "tessera_family": family,
                     "tessera_body_rate_q256": rung.body_rate_q256,
-                    "activation_contract": rung.admission.activation_contract,
+                    "activation_contract": ordered[0].activation_contract,
+                    "activation_quantized": ordered[0].activation_quantized,
                     # An interpolated row inherits the applicability of the
                     # anchors it was interpolated between; they share a family,
                     # so they share a scale plane and therefore an answer --

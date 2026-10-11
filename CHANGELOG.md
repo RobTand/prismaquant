@@ -44,6 +44,10 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Dense cost interpolation retains the anchors' activation contract and quantized-input observation (#2400, PR #2653).
+  It refuses incompatible anchor contracts, observations, and static scales before a rate fit, independent of development mode.
+  The direct indexer head retains FP32; the MLA direct consumer retains its BF16 contract.
+  This repairs an inherited metadata defect without any serving/export pin or GPU qualification change.
 - The model profile separates complete dense owner metadata from pricing candidates (#2400, PR #2653).
   `campaign_dense_owner_names` uses the existing parameter-owner rule and retains all unselected GLM pins, including the source router.
   The campaign roster and population report keep those names and their count.
