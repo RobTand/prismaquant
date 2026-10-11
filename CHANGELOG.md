@@ -40,6 +40,11 @@
   Native serving qualification and all production defaults stay unchanged.
 
 ### Fixed
+- The measured cache ceiling consumer requires complete producer workload results and authoritative sampler evidence (#2608).
+  Device labels, a probe status, and top-level validity flags cannot replace those results.
+  The consumer derives the first observed maximum from every sample and rejects inconsistent peaks, counts, times, and lifecycle boundaries.
+  The ceiling formula stays unchanged. CPU tests and the API smoke establish parser logic only.
+  Issues #2608, #2601, and independent GPU qualification gates remain open.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.
