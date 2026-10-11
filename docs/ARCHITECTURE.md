@@ -768,9 +768,9 @@ and an independently digest-bound versioned source contract bind the exact
 PB snapshot input and complete selection (commit/parent/subdirectory/refs),
 reviewed package relation, known container/quantum entries,
 image and complete environments. Candidate counters cannot introduce an
-accepted source. The producer inlines the original bounded quantum wire from
-its shared owned read; the consumer authenticates those bytes and committed
-counters against the selected completion, validates record/adjoint identities,
+accepted source. The producer publishes the original quantum wire descriptor from
+its shared owned read. The consumer authenticates its explicit original-wire copy
+and committed counters against the selected completion, validates record/adjoint identities,
 and derives actual plan/regime/shape/cotangent admission before publication.
 Equivalent byte-bound inputs and output namespaces retain their existing
 admission semantics. Legacy, foreign, substituted and ambiguous evidence

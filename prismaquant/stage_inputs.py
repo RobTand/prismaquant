@@ -114,7 +114,7 @@ def read_bound(record, label, *, max_bytes: int | None = None):
         from .io_engine import read_file
 
         try:
-            raw, receipt, _signature = read_file(path, max_bytes)
+            raw, receipt, _signature = read_file(path.resolve(strict=True), max_bytes)
         except RuntimeError as error:
             raise ValueError(str(error)) from error
     if max_bytes is not None and len(raw) > max_bytes:

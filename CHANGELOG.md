@@ -5,6 +5,7 @@
 ### Added
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
+  Bounded local reads retain digest-valid symlink behavior, independent of memo state.
   `--pilot-quantum-record PATH SHA256` names a consumer-visible original wire copy.
   The producer path remains provenance across different filesystems.
   The approved 4 MiB cap and all digest, length, identity, and source checks remain.
