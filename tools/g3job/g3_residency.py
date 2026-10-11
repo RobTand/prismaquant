@@ -110,7 +110,7 @@ class StagedReader:
             span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
             acquire_token=uuid.uuid4().hex, residency_root=self.root)
         if not acq["ok"] and "ram_path" in entry and tier != mapping["tier_id"] \
-                and _classify(acq["refusal"]) == "availability":
+                and classify_refusal(acq["refusal"]) == "availability":
             # PB acquire proves availability after covers did: the RAM epoch
             # moved or the fragment dropped between the two calls (pinned SDK
             # reader_lease.acquire: unpublished, stale-epoch, retiring). The
