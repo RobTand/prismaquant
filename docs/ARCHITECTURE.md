@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-11 (Refs #2400, PR #2653): dense interpolation preserves the measured anchors' activation metadata.
+`campaign_cost_payload` refuses incompatible activation contracts, input observations, or static scales as a correctness error.
+The refusal does not depend on development mode. No serving/export pin or GPU qualification gate changes.
+
 Re-stamped 2026-10-11 (Refs #2400, PR #2653): the model profile separates owner metadata from dense pricing candidates.
 
 The dense owner inventory comes from `campaign_dense_owner_names` and the existing `is_dense_parameter_owner` rule.
@@ -32799,6 +32803,9 @@ The key keeps its dense activation contract.
 MLA decode uses the declared BF16 matrix in the stock absorbed BMM path.
 
 Fresh publication, resume, and seed derive their expected activation contract from the same direct-consumer rule.
+Dense interpolation uses the anchors' common activation contract and quantized-input observation.
+It refuses different activation contracts, quantized-input observations, or static input scales before it fits a rate surface.
+The DSA indexer head retains a32; the MLA direct consumer retains its distinct a16 contract.
 Both direct consumers refuse quantized input observations in development and certified modes.
 
 The activation rule and memory helper require the profile argument.

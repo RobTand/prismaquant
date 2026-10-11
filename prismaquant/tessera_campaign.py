@@ -2249,6 +2249,10 @@ def campaign_cost_payload(
         measured_names: set[str] = set()
         for family, family_anchors in by_family.items():
             ordered = sorted(family_anchors, key=lambda a: a.body_rate_q256)
+            for field in ("activation_contract", "activation_quantized", "input_global_scale"):
+                if any(getattr(anchor, field) != getattr(ordered[0], field)
+                       for anchor in ordered[1:]):
+                    raise ValueError(f"{qname} {family}: incompatible anchor {field} values")
             for anchor in ordered:
                 rows[anchor.format_name] = {
                     # ``output_mse`` ONLY, deliberately no ``predicted_dloss``.
@@ -2284,10 +2288,6 @@ def campaign_cost_payload(
                 }
                 measured_names.add(anchor.format_name)
                 formats.add(anchor.format_name)
-            for field in ("activation_contract", "activation_quantized", "input_global_scale"):
-                if any(getattr(anchor, field) != getattr(ordered[0], field)
-                       for anchor in ordered[1:]):
-                    raise ValueError(f"{qname} {family}: incompatible anchor {field} values")
             try:
                 surface = TesseraRateSurface(
                     unit_name=qname,
