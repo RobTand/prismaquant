@@ -122,6 +122,10 @@ including aggregation opt-outs. The baseline and selected paired report travel
 in allocator metadata. Legacy unpaired stock/uniform pricing stays unchanged.
 This source policy is not calibration, corrected campaign prices, held-out KL,
 GPU qualification, or closure of the measured #2281 defect.
+CPU qualification of this source policy lives in
+`docs/results/pq2281-source-qualification.md` (PQ #2531). It ranks the
+instrument, reconstruction, normalization, additivity, and noise evidence
+against digest-bound PB receipts. It claims no campaign closure.
 
 The existing `aura_additivity_gate` CLI accepts `--comparison-assignment` and
 `--paired-objective` to append this paired report. Its additivity prediction
