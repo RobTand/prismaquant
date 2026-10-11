@@ -208,3 +208,10 @@ def test_the_kpool_tail_set_records_the_graph_modes_tessera_508_measured() -> No
     assert patch["patched_sha256"] == (
         "1c30b8c0d3ffc96172cba57965cb7c3648156ce693ea6b3232edd2f36a9d1781")
     assert patch_set.raw["receipts"]["tessera_pr"].endswith("/tessera/pull/699")
+
+
+def test_short_decode_layout_proof_does_not_qualify_the_full_body() -> None:
+    patch_set = load_serving_runtime_patch_set("glm53_kpool_short_decode_layout")
+    assert not patch_set.is_fully_qualified
+    with pytest.raises(ServingRuntimePatchSetError, match="qualified on"):
+        patch_set.require_qualified_for(model_layers=45)

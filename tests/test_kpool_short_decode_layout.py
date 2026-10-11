@@ -1,17 +1,4 @@
-"""The short-decode fast path must write the general-path sparse-index row.
-
-Reproduces prismaquant#1631. The serving image builds the decode index two
-ways. The eager fast path writes the causal row ``[0 .. pos, -1 ..]``. The
-general path expands the selected pools into columns ``[0 .. 2047]`` and
-writes the incomplete pool at columns ``[2048 .. 2050]``. CUDA-graph capture
-freezes the general path, so every FULL decode graph replays it, even for
-short contexts. The rows hold the same tokens in a different grouping.
-
-The fix lives in the serving image, not here. The patch script carries two
-pure-torch helpers. This test executes those shipped bytes and checks their
-rows against the kernel layout. Before the patch set exists the loader
-fails. After it the rows match.
-"""
+"""Check short-decode layout, row bounds, and the base-byte refusal."""
 
 from __future__ import annotations
 
@@ -62,12 +49,11 @@ def _base_causal_fill(rows: torch.Tensor, positions: torch.Tensor) -> None:
     rows[causal_range[None, :] > positions[:, None]] = -1
 
 
-def _general_layout_row(seq_len: int) -> torch.Tensor:
-    """Reference row: expanded pools in order, -1 fill, tail at 2048."""
-    pool_len = seq_len // POOL
-    tail_start = pool_len * POOL
+def _general_layout_row(seq_len: int, pool_size: int = POOL) -> torch.Tensor:
+    """Place complete pools first and incomplete-pool tokens after top-k."""
+    tail_start = (seq_len // pool_size) * pool_size
     tail_count = seq_len - tail_start
-    row = torch.full((WIDTH,), -1, dtype=torch.int32)
+    row = torch.full((TOPK + pool_size - 1,), -1, dtype=torch.int32)
     row[:tail_start] = torch.arange(tail_start, dtype=torch.int32)
     row[TOPK : TOPK + tail_count] = torch.arange(tail_start, seq_len, dtype=torch.int32)
     return row
@@ -80,24 +66,15 @@ def _old_fast_path_row(seq_len: int) -> torch.Tensor:
     return row
 
 
-SHORT_LENGTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 100, 101, 1023, 1024, 1025, 2044, 2045, 2046, 2047, 2048]
-
-
-def test_old_fast_path_differs_from_general_layout_only_past_pool_edge() -> None:
-    """Characterize the defect: causal and general rows differ exactly then."""
-    for seq_len in SHORT_LENGTHS:
-        same = bool(((_old_fast_path_row(seq_len) == _general_layout_row(seq_len)).all()))
-        assert same == (seq_len % POOL == 0), seq_len
-
-
-def test_patched_fast_path_matches_general_layout() -> None:
-    """The shipped fast path writes the general row for every short length."""
-    helpers = _load_helpers()
-    fill = helpers["_fill_short_decode_general_layout"]
-    for seq_len in SHORT_LENGTHS:
-        buf = torch.full((1, WIDTH), -7, dtype=torch.int32)
-        fill(buf, torch.tensor([seq_len - 1]), TOPK, POOL)
-        assert bool(((buf[0] == _general_layout_row(seq_len)).all())), seq_len
+@pytest.mark.parametrize("pool_size", [2, 4, 8])
+def test_patched_fast_path_matches_general_layout(pool_size: int) -> None:
+    """Every short length matches the general row, including padded rows."""
+    fill = _load_helpers()["_fill_short_decode_general_layout"]
+    seq_lens = list(range(TOPK + 1))
+    buf = torch.full((len(seq_lens), TOPK + pool_size - 1), -7, dtype=torch.int32)
+    fill(buf, torch.tensor(seq_lens) - 1, TOPK, pool_size)
+    expected = torch.stack([_general_layout_row(length, pool_size) for length in seq_lens])
+    torch.testing.assert_close(buf, expected, rtol=0, atol=0)
 
 
 def test_patched_fast_path_matches_general_layout_batched() -> None:
@@ -125,26 +102,31 @@ def test_patched_fast_path_dispatches_on_kpool() -> None:
     assert dispatch(buf, torch.tensor([6]), 1, TOPK + 1, TOPK, 4) is False
 
 
-def test_canonicalize_sorts_short_rows_and_keeps_fill_last() -> None:
-    """Shuffled pool ids sort ascending; fill stays last; long rows stay."""
-    helpers = _load_helpers()
-    canonicalize = helpers["_canonicalize_short_row_pool_ids"]
-    short = torch.tensor([1, 0] + [-1] * 510, dtype=torch.int32)
-    full = torch.arange(511, -1, -1, dtype=torch.int32)
-    long = torch.arange(511, -1, -1, dtype=torch.int32)
-    pool_topk = torch.stack([short, full, long])
-    seq_lens = torch.tensor([7, 2048, 3000], dtype=torch.int32)
-    out = canonicalize(pool_topk, seq_lens, TOPK)
-    assert out[0, :2].tolist() == [0, 1]
-    assert (out[0, 2:] == -1).all()
-    assert out[1].tolist() == list(range(512))
-    assert out[2].tolist() == long.tolist()
+def test_short_dispatch_leaves_other_buffer_rows_untouched() -> None:
+    dispatch = _load_helpers()["_fill_short_decode_causal_indices"]
+    buf = torch.full((3, WIDTH), -7, dtype=torch.int32)
+    assert dispatch(buf, torch.tensor([6, 9, 99]), 2, 10, TOPK, POOL)
+    torch.testing.assert_close(buf[0], _general_layout_row(7), rtol=0, atol=0)
+    torch.testing.assert_close(buf[1], _general_layout_row(10), rtol=0, atol=0)
+    assert (buf[2] == -7).all()
 
 
-def test_canonicalize_without_short_rows_returns_input() -> None:
-    """No short row means no work and no copy."""
-    helpers = _load_helpers()
-    canonicalize = helpers["_canonicalize_short_row_pool_ids"]
-    pool_topk = torch.arange(511, -1, -1, dtype=torch.int32).unsqueeze(0)
-    out = canonicalize(pool_topk, torch.tensor([3000], dtype=torch.int32), TOPK)
-    assert out is pool_topk
+@pytest.mark.parametrize("positions", [None, torch.empty(0, dtype=torch.int64)])
+def test_missing_positions_do_not_use_the_fast_path(positions) -> None:
+    dispatch = _load_helpers()["_fill_short_decode_causal_indices"]
+    buf = torch.full((1, WIDTH), -7, dtype=torch.int32)
+    assert not dispatch(buf, positions, 1, 1, TOPK, POOL)
+    assert (buf == -7).all()
+
+
+def test_unknown_base_bytes_fail_before_a_write(tmp_path: Path) -> None:
+    import runpy
+
+    namespace = runpy.run_path(str(PATCH))
+    target = tmp_path / "indexer.py"
+    raw = b"not the pinned serving image"
+    target.write_bytes(raw)
+    namespace["main"].__globals__["target"] = target
+    with pytest.raises(SystemExit, match="indexer is not the base image"):
+        namespace["main"]()
+    assert target.read_bytes() == raw

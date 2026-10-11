@@ -1,30 +1,11 @@
 #!/usr/bin/env python3
-"""Write the general-path sparse-index row on the short-decode fast path.
+"""Match short-decode rows to the general path in the pinned GLM image.
 
-PQ #1631: in this image eager and FULL CUDA-graph serves build the decode
-index differently. The fast path (``_fill_short_decode_causal_indices``)
-writes the causal row ``[0 .. pos, -1 ..]`` when the batch's longest sequence
-fits the top-k budget. The general path expands the selected pools into
-columns ``[0 .. 2047]`` with ``-1`` in unused slots and writes the
-incomplete pool's newest tokens at columns ``[2048 .. 2050]``
-(``_expand_pools_and_append_tail_kernel``). The fast-path test reads
-``attn_metadata.max_seq_len`` on the host, so capture freezes the general
-path into every FULL graph and each replay runs it even for short contexts.
-
-The fix has two halves, both in
-``vllm/model_executor/layers/sparse_attn_indexer_kpool.py``:
-
-* The fast path writes the general layout directly: pools expanded in
-  order into columns ``[0 .. 4n)``, ``-1`` through column 2047, and the
-  incomplete pool at 2048 and up. Eager keeps its speed (no logits, no
-  top-k) and both modes build the same row.
-* The general path sorts each short row's selected pool ids ascending
-  before expansion, with fill (``-1``) kept last. ``persistent_topk``
-  orders a fully selected row by score, not by pool, so without this the
-  rows still differ by construction. Long rows are untouched.
-
-Five edits, each asserted to land exactly once, and the file is refused
-unless it is byte-identical to the base image's.
+The base fast path places incomplete-pool tokens beside the history.
+The general path places those tokens after the fixed top-k region.
+PrismaBuild action 800a707a proves ascending pool order for all short rows.
+Thus only the fast-path layout must change. The general path stays stock.
+The patch refuses different base bytes and requires each anchor once.
 """
 
 import hashlib
@@ -70,27 +51,6 @@ NEW_LAYOUT_HELPERS = '''def _fill_short_decode_general_layout(
     buffer_rows[:] = out
 
 
-def _canonicalize_short_row_pool_ids(
-    pool_topk: torch.Tensor,
-    seq_lens: torch.Tensor,
-    topk_tokens: int,
-) -> torch.Tensor:
-    """Sort each short row's selected pools ascending, fill last.
-
-    A short row selects every pool, but ``persistent_topk`` orders by
-    score, so expansion would group the same tokens differently from the
-    fast path. Sorting keeps the selected SET and canonicalizes the
-    ORDER; rows above the budget pass through untouched (PQ #1631).
-    """
-    short_rows = seq_lens.to(torch.int32) <= topk_tokens
-    if not bool(short_rows.any()):
-        return pool_topk
-    sentinel = torch.full((), torch.iinfo(pool_topk.dtype).max,
-                          dtype=pool_topk.dtype, device=pool_topk.device)
-    ranked, _ = torch.sort(torch.where(pool_topk >= 0, pool_topk, sentinel), dim=1)
-    fixed = torch.where(ranked == sentinel, -1, ranked)
-    return torch.where(short_rows[:, None], fixed, pool_topk)
-
 '''
 
 OLD_FAST_PATH_FUNC = '''def _fill_short_decode_causal_indices(
@@ -115,7 +75,7 @@ NEW_FAST_PATH_FUNC = '''def _fill_short_decode_causal_indices(
     num_decode_tokens: int,
     max_seq_len: int,
     topk_tokens: int,
-    index_kpool: int = 1,
+    index_kpool: int,
 ) -> bool:
     """Fill short-decode rows in the general-path layout (PQ #1631).
 
@@ -128,10 +88,10 @@ NEW_FAST_PATH_FUNC = '''def _fill_short_decode_causal_indices(
     """
     if positions is None or positions.numel() == 0 or max_seq_len > topk_tokens:
         return False
-    if index_kpool is not None and index_kpool > 1:
+    if index_kpool > 1:
         _fill_short_decode_general_layout(
             topk_indices_buffer[:num_decode_tokens],
-            positions[:num_decode_tokens].to(torch.int32),
+            positions[:num_decode_tokens],
             topk_tokens,
             index_kpool,
         )
@@ -159,54 +119,31 @@ NEW_DECODE_FAST_CALL = '''        if current_platform.is_cuda_alike() and _fill_
             index_kpool,
         ):'''
 
-OLD_DECODE_POOL_IDS = '''        # Resolve to token-level indices in the output buffer.
-        if index_kpool > 1:
-            pool_ids = pool_topk.to(torch.int64)
-            n = pool_topk.shape[0]'''
 
-NEW_DECODE_POOL_IDS = '''        # Resolve to token-level indices in the output buffer.
-        if index_kpool > 1:
-            n = pool_topk.shape[0]'''
-
-OLD_DECODE_EXPAND = '''            out = kpool_ops.expand_pools_and_append_tail(pool_ids, dec_seq, index_kpool)'''
-
-NEW_DECODE_EXPAND = '''            # GLM53_KPOOL_SHORT_DECODE_LAYOUT (PQ #1631): a short row selects
-            # every pool, so sort the ids before expansion; the fast path
-            # writes that same ascending row.
-            pool_ids = _canonicalize_short_row_pool_ids(
-                pool_topk, dec_seq, topk_tokens
-            ).to(torch.int64)
-            out = kpool_ops.expand_pools_and_append_tail(pool_ids, dec_seq, index_kpool)'''
-
-EDITS = [
-    ("insert_layout_helpers", "def _fill_short_decode_causal_indices(\n",
-     lambda text: text.replace(
-         "def _fill_short_decode_causal_indices(\n",
-         NEW_LAYOUT_HELPERS + "def _fill_short_decode_causal_indices(\n")),
-    ("fast_path_writes_general_layout", OLD_FAST_PATH_FUNC,
-     lambda text: text.replace(OLD_FAST_PATH_FUNC, NEW_FAST_PATH_FUNC)),
-    ("fast_path_takes_index_kpool", OLD_DECODE_FAST_CALL,
-     lambda text: text.replace(OLD_DECODE_FAST_CALL, NEW_DECODE_FAST_CALL)),
-    ("decode_pool_ids_canonicalized_below", OLD_DECODE_POOL_IDS,
-     lambda text: text.replace(OLD_DECODE_POOL_IDS, NEW_DECODE_POOL_IDS)),
-    ("decode_expand_reads_canonical_ids", OLD_DECODE_EXPAND,
-     lambda text: text.replace(OLD_DECODE_EXPAND, NEW_DECODE_EXPAND)),
-]
+EDITS = (
+    ("short_decode_general_layout", OLD_FAST_PATH_FUNC,
+     NEW_LAYOUT_HELPERS + NEW_FAST_PATH_FUNC),
+    ("short_decode_pool_size", OLD_DECODE_FAST_CALL, NEW_DECODE_FAST_CALL),
+)
 
 
-def main() -> None:
-    raw = target.read_bytes()
+def patch_indexer(raw: bytes) -> bytes:
     digest = hashlib.sha256(raw).hexdigest()
     if digest != BASE_INDEXER_SHA256:
         raise SystemExit(f"indexer is not the base image's (sha256 {digest})")
     text = raw.decode()
-    for tag, old, apply in EDITS:
+    for tag, old, new in EDITS:
         found = text.count(old)
         if found != 1:
             raise SystemExit(f"expected one {tag} anchor, found {found}")
-        text = apply(text)
-    target.write_text(text)
+        text = text.replace(old, new)
+    return text.encode()
+
+
+def main() -> None:
+    target.write_bytes(patch_indexer(target.read_bytes()))
     print("applied glm53_kpool_short_decode_layout")
 
 
-main()
+if __name__ == "__main__":
+    main()

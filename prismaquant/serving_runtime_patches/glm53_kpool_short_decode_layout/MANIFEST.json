@@ -1,0 +1,86 @@
+{
+  "schema": "prismaquant.serving_runtime_patch_set.v1",
+  "name": "glm53_kpool_short_decode_layout",
+  "purpose": "Make eager short-decode indices equal the general-path layout. Keep general decode, prefill, and MTP index sharing unchanged.",
+  "attested": false,
+  "base_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:c2e75e03cfc52c15489b40fe58e65acb7347f6fa3ddf2e81afda86760698147b",
+  "base_image_note": "The recorded glm53_kpool_tail_slot_mapping image. This patch carries its runner and MTP mapper edits without changes.",
+  "base_vllm_version": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "base_flashinfer_version": "0.6.18",
+  "derived_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:207f1661df548a97916bffc11cd1e13785c4bef49facde6fce89ef10a769da1d",
+  "derived_image_registry_tag": "c2e75e03-kpoolidx1631",
+  "derived_image_local_id": "sha256:04395e07c28357c01ca2b9d4566b5b690d0cbecbf8a9a588e6a9ed9e4ecf07fd",
+  "derived_image_built_on": "sparklina",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "builder_image": "gcr.io/kaniko-project/executor@sha256:b07687b489956cd5bc12c0c23d28cd2686f76023ddf770ae04a7ed987745a26f",
+    "builder_note": "PrismaBuild refuses daemon-side Docker builds. The Dockerfile runs inside an owned Kaniko container with the admitted CPU and memory limits.",
+    "command": "Run the pinned Kaniko image with --context=dir:///context --dockerfile=/context/Dockerfile --insecure-registry=192.168.1.107 --destination=192.168.1.107/prismaquant/spark-vllm-nccl230:c2e75e03-kpoolidx1631. Mount this directory at /context.",
+    "self_check": "The Docker RUN checks all short rows on CPU. It also checks the patched indexer hash and eight unchanged or carried source hashes.",
+    "contents": "Two patch scripts under /opt/glm53 and one changed vLLM source file. No runtime source tree or new serving dependency.",
+    "action_key": "f6d62786bb2c83778dce9170fee197d3b753bdfeab924463bbe8c8987accd353"
+  },
+  "patches": [
+    {
+      "script": "patch_kpool_short_decode_layout.py",
+      "sha256": "77d6a6fc5474f412c4102df81354ad1a3f5ac527e6b58be207a0ecb3fc9fac34",
+      "target_file": "vllm/model_executor/layers/sparse_attn_indexer_kpool.py",
+      "base_sha256": "631ae1cce792c18f2922af7763264c486317cb6f4318823b1482e55bec5d7f59",
+      "patched_sha256": "5f4b6c672dafb9e9f4ab0d9e18e4fab7b98de6c11d41ba4e7546de9628738dca",
+      "edits": [
+        {
+          "tag": "short_decode_general_layout",
+          "what": "Replace the short-decode helper with the fixed history region and incomplete-pool tail region. Keep the unpooled causal path."
+        },
+        {
+          "tag": "short_decode_pool_size",
+          "what": "Pass index_kpool at the existing decode fast-path call."
+        }
+      ]
+    }
+  ],
+  "self_check_script": "selfcheck_kpool_short_decode_layout.py",
+  "verification_script": "verify_kpool_short_decode_layout.py",
+  "unchanged_stock_sources": {
+    "models/glm5next/nvidia/ops/kpool_compress.py": "bd6f1d7b5e88a10d9756799a744d3e201421b6caabd32f7b3319d31904a91a0a",
+    "v1/worker/gpu/block_table.py": "61c004315d5af7e7eae4e2a9e6be92ea82c520327690a7f55a73bb9ce95f520a",
+    "v1/attention/backends/mla/flashinfer_mla_sparse_sm120.py": "a0023f72125cb0d5599b5bf940c86be1f0c9985bd62b0919f243a8fda76f4449",
+    "v1/attention/backends/mla/flashinfer_mla_sparse.py": "093181e4e0198b34075a3713fa62267c3f1fe74b1c96bb08298d553727d44478",
+    "v1/attention/backends/mla/sparse_utils.py": "20372237899fb0a0c9152e12eab40396119b76c1ac5f1c9bdfdbed53f8146559",
+    "v1/attention/backend.py": "8ddf8dd73c2b953a79f99e8de74db616b135590ac1f74e21e20b9ddc366b9994"
+  },
+  "carried_base_edits": {
+    "v1/worker/gpu/model_runner.py": "1c30b8c0d3ffc96172cba57965cb7c3648156ce693ea6b3232edd2f36a9d1781",
+    "models/glm5next/nvidia/mtp.py": "45124573a928ecd76e6bd4f595aec3c3d98d81a71fc7a41fb32564ace560b7d1"
+  },
+  "qualification": {
+    "status": "decode_index_rows_only",
+    "model": "Synthetic decode rows with GLM-5.3 geometry, top-k 2048, and pool size 4",
+    "model_layers": 0,
+    "full_model_layers": 45,
+    "dtype": "int32 sparse indices; float32 logits",
+    "tensor_parallel": 1,
+    "modes_ready": [],
+    "checks_passed": [
+      "Base GPU action 800a707ad64d5fce88ed842b00ff576a9f1d631c5ba40912b61346745fcfb4ef proves ascending pool order for every short length.",
+      "That base action fails row equality at 1536 lengths. The patched action f6d62786 passes every length 0 through 2048.",
+      "The patched action also captures persistent_topk and expansion. Replay with reversed lengths still equals the eager fast-path rows.",
+      "The Dockerfile self-check passes on CPU for every short length and all recorded source hashes.",
+      "CPU action ebc840bc passes nine layout and base-byte refusal cases. Action 77192115 passes the existing sixteen patch-set cases."
+    ],
+    "not_qualified": [
+      "This record qualifies index rows, not a served model. It admits no positive model layer count.",
+      "The eager versus FULL_DECODE_ONLY draft comparison is not yet recorded for this image.",
+      "Decode latency and the general-path fallback cost are not yet recorded for this image.",
+      "The 45-layer body, TP2, padded capture lists, and contexts above 2048 tokens have no new qualification."
+    ],
+    "measured_on": "sparklina, NVIDIA GB10, sm121",
+    "measured_at": "2026-10-11"
+  },
+  "receipts": {
+    "issue": "https://github.com/RobTand/prismaquant/issues/1631",
+    "base_gpu_repro_action": "800a707ad64d5fce88ed842b00ff576a9f1d631c5ba40912b61346745fcfb4ef",
+    "cpu_repro_action": "01562a4ac42665add6d4bb02121d69c292ab74644e939336209082c24aebdda6",
+    "build_and_gpu_action": "f6d62786bb2c83778dce9170fee197d3b753bdfeab924463bbe8c8987accd353"
+  }
+}

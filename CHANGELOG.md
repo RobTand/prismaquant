@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Record `glm53_kpool_short_decode_layout` for PQ #1631.
+  The short-decode fast path uses the general layout for complete pools and incomplete-pool tokens.
+  The base-byte guard and Docker self-check enforce the patch inputs.
+  GPU proof covers all short rows and captured replay, not a served model.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers

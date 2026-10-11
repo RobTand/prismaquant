@@ -1,5 +1,28 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-11 for PQ #1631.
+The recorded patch set `glm53_kpool_short_decode_layout` extends the `glm53_kpool_tail_slot_mapping` image.
+Its registry image is:
+`192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:207f1661df548a97916bffc11cd1e13785c4bef49facde6fce89ef10a769da1d`.
+
+The short-decode helper writes complete pools before the fixed top-k boundary.
+It writes incomplete-pool tokens after that boundary.
+The general decode path and prefill stay unchanged.
+PB `800a707a` proves ascending pool order for all selected short rows.
+The base image differs at 1,536 of the 2,049 lengths from zero through 2048.
+Thus the fix needs no pool sort or forced general-path fallback.
+
+PB `f6d62786` builds the Dockerfile inside an owned Kaniko container.
+The patch script refuses a different base file.
+The Docker self-check verifies the patched hash, row behavior, and unchanged or carried sources.
+The patched indexer hash is `5f4b6c672dafb9e9f4ab0d9e18e4fab7b98de6c11d41ba4e7546de9628738dca`.
+The same action passes GPU row equality for every short length.
+It also passes captured general-path replay after the lengths change.
+The manifest records index-row proof only, with zero qualified model layers and no ready serving modes.
+The eager versus FULL_DECODE_ONLY draft comparison and decode latency require separate serve evidence.
+No serving default, stage, format, plugin pin, or ship gate changes.
+Provenance: `serving_runtime_patch_set.load_serving_runtime_patch_set` and `ServingRuntimePatchSet.require_qualified_for`.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
