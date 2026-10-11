@@ -215,3 +215,48 @@ def test_record_cap_is_enforced_on_the_readset_read(tmp_path, monkeypatch, over_
             counters_sha256="a" * 64, counters_bytes=3,
             quantum_record_sha256=completion["quantum_record"]["sha256"])
         assert evidence["quantum_record"] == wire
+
+
+def test_oversized_replacement_never_reads_beyond_the_declared_record(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    wire = _record_bytes()
+    path = _record_file(tmp_path, wire)
+    result = {"quantum_id": "layer-007", "passed": True, "status": "complete",
+              "units_done": 1, "units_total": 1,
+              "counters": {"path": "/producer/counters.json", "sha256": "a" * 64, "bytes": 100}}
+    completion = _completion(result, path, wire)
+    path.write_bytes(b"x" * (pilot.QUANTUM_RECORD_MAX_BYTES + 17))
+    original_open = Path.open
+    observed = []
+
+    class TrackedRead:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def read(self, size=-1):
+            raw = self.handle.read(size)
+            observed.append((size, len(raw)))
+            return raw
+
+    def opened(self, *args, **kwargs):
+        handle = original_open(self, *args, **kwargs)
+        return TrackedRead(handle) if self == path and args and args[0] == "rb" else handle
+
+    monkeypatch.setattr(Path, "open", opened)
+    with pytest.raises(pilot.PilotRefused, match="bytes do not match"):
+        pilot.validate_pilot_completion(
+            completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
+            counters_sha256="a" * 64, counters_bytes=100,
+            quantum_record_sha256=hashlib.sha256(wire).hexdigest())
+    assert sum(count for _, count in observed) <= len(wire) + 1, observed
