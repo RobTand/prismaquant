@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use the existing incoming-boundary rule for quantum cache receipts (#2608).
+  A checkpoint must reach the declared layer plus one. CPU parser proof does not qualify GPU measurements.
 ### Added
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;

@@ -2,6 +2,8 @@
 
 Re-stamped (2026-10-11, `prismaquant-2608`) for the measured cache ceiling evidence gate.
 The consumer requires workload results and complete authoritative samples before it applies the unchanged ceiling formula.
+Quantum capture must include a checkpoint boundary at or above the declared layer plus one.
+The existing checkpoint geometry owner determines this boundary.
 CPU evidence proves parser behavior only. GPU and serving qualification remain open.
 
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and

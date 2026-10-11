@@ -25,6 +25,7 @@ def main():
     fixtures = runpy.run_path(str(ROOT / 'tests/test_container_cache_ceiling_2608.py'))
     valid = fixtures['_evidence_fixture']()
     quantum = fixtures['_quantum_fixture']()
+    quantum["workload"]["checkpoints"] = [2]
     results = []
     for name, receipt in [('compile_results', valid), ('quantum_results', quantum)]:
         value = derive_cache_ceiling_from_receipt(receipt, headroom_bytes=1073740801)
@@ -49,6 +50,9 @@ def main():
     receipt = copy.deepcopy(quantum)
     receipt['device'] = 'cpu'
     invalid.append(('cpu_quantum_with_cuda_compile', receipt))
+    receipt = copy.deepcopy(quantum)
+    receipt["workload"]["checkpoints"] = [0, 1]
+    invalid.append(('checkpoint_below_incoming_boundary', receipt))
     for name, receipt in invalid:
         try:
             derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0)

@@ -382,8 +382,13 @@ def _require_gpu_workload(receipt) -> None:
                           and all(_whole(item) for item in checkpoints)
                           and checkpoints == sorted(set(checkpoints)),
                           f"{prefix}.checkpoints", "missing or malformed capture results")
-        _require_evidence(workload.get("layer") in checkpoints,
-                          f"{prefix}.checkpoints", "no usable checkpoint for the declared layer")
+        from .joint_adjoint_slices import nearest_checkpoint_boundary
+
+        try:
+            nearest_checkpoint_boundary(checkpoints, workload["layer"])
+        except ValueError as error:
+            _require_evidence(False, f"{prefix}.checkpoints",
+                              f"no usable checkpoint: {error}")
         workload = workload.get("served_compile")
         prefix += ".served_compile"
         _require_evidence(isinstance(workload, Mapping), prefix,
