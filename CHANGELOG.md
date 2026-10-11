@@ -44,6 +44,9 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- T4 consumer coverage uses the approved private q896 table through a declared input (#2364).
+  Dense and routed cases prove admission and defect-specific shape and activation refusals.
+  The public branch contains no copy of the private qualification packet.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
