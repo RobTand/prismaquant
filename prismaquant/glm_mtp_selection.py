@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
@@ -467,31 +468,29 @@ def _restrict_to_declared(rows: dict, declared) -> tuple[dict, dict, list]:
     return kept, dict(sorted(removed.items())), sorted(wanted - offered)
 
 
-def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
-                     acceptance_points=(), k: int = 1, eligible=None,
-                     fixed_formats: Mapping[str, str] | None = None,
-                     formats=None, rung_allowability=None, stats=None, context_by_unit=None,
-                     target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> dict:
-    """The MTP assignment and its selection record under ``byte_budget``.
+@dataclass
+class _MtpMenu:
+    payload: dict
+    byte_budget: int
+    probe_sha256: str
+    probe: dict
+    groups: dict
+    rows: dict
+    menu: list
+    incomplete: dict
+    unattested: dict
+    declared_record: dict
+    fixed_formats: Mapping | None
+    quality_provenance: dict
+    scope_provenance: dict
+    rung_allowability: Mapping | None
 
-    ``constants`` are the caller's declared serve constants
-    (``t_ms``, ``d0_ms``, ``c_ms_per_bit`` and a ``source``); they are
-    recorded, and with no ``acceptance_points`` they cannot move the choice:
-    the selector is degenerate and returns the lowest-E rung within the budget.
-    Canonical owners enforce admission independently of the native callback.
-    Callers supply per-unit topology in stats or context_by_unit, plus regime M.
-    The shared scope owner derives rank-local geometry from validated source shapes.
-    Missing or unresolved v3 scope removes the option, never broadens admission.
-    The native eligible callback remains an additional gate.
-    ``fixed_formats`` restricts named whole groups to one format, intersected
-    with that same eligible menu. A missing or unpriced group format refuses.
-    ``formats``, when given, declares the layer's menu (PQ #1692), the MTP
-    twin of the body's ``--formats``: every unit's attested rungs, BF16
-    passthrough included, are intersected with it before any pin, and the
-    record names the declaration and what it removed. The groups remain
-    selections. A declaration that leaves a unit or a group without a rung
-    raises ``MtpMenuRefused``. ``None`` leaves the menu and record unchanged.
-    """
+
+def _prepare_mtp_menu(payload: Mapping, *, byte_budget: int, eligible=None,
+                      fixed_formats=None, formats=None, rung_allowability=None,
+                      stats=None, context_by_unit=None, target_profile=None,
+                      allowability_m=None, allowability_tensor_parallel=1) -> _MtpMenu:
+    """Admit the priced group menu without a winner decision."""
     from . import mtp_rung_selection as canon
 
     payload = dict(payload)
@@ -537,21 +536,27 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                 f"{sorted(bare)} with no complete rung; each member keeps a rung, but no "
                 f"rung is priced and attested for every member: {bare}")
     menu, incomplete = canon.group_product_menu(groups, rows, params=payload["params"])
-    serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
-                                 c_ms_per_bit=float(constants["c_ms_per_bit"]))
-    points = [canon.AcceptancePoint(**point) for point in acceptance_points]
-    result = canon.select_rung(menu, serve, points, mem_budget_bytes=byte_budget, k=k,
-                               h_source="joint_aura_mtp_head_self_kl")
-    chosen = dict(part.split("=", 1) for part in result.rung.name.split("|"))
+    return _MtpMenu(payload, byte_budget, probe_sha256, probe, groups, rows, menu,
+                    incomplete, unattested, declared_record, fixed_formats,
+                    quality_provenance, scope_provenance, rung_allowability)
+
+
+def _mtp_record(prepared: _MtpMenu, rung, *, constants_source: str, selection: dict) -> dict:
+    """Retain one admitted choice and its exact selected wire receipts."""
+    payload = prepared.payload
+    groups = prepared.groups
+    chosen = dict(part.split("=", 1) for part in rung.name.split("|"))
     assignment = {unit: chosen[group] for group, members in groups.items() for unit in members}
     selected_wires = {}
-    parts = payload.get("provenance", {}).get("parts", [])
+    enriched = payload
+    parts = enriched.get("provenance", {}).get("parts", [])
     if any(isinstance(part.get("source"), Mapping) and
            "sha256" in part["source"] for part in parts):
         # The original cost remains a valid historical input. For bound M4
         # parts, however, a selected Tessera cell must retain its exact M3
         # receipt and root or export would have to encode unpriced bytes.
-        payload = enrich_mtp_cost_wires(payload)
+        enriched = enrich_mtp_cost_wires(enriched)
+        prepared.payload = enriched
         priced = {key: {} for key in ("mtp_expert_wires", "mtp_expert_wire_roots",
                                       "mtp_expert_source_bindings")}
         for name, fmt in assignment.items():
@@ -559,38 +564,96 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                 continue
             for key in priced:
                 try:
-                    priced[key][name] = payload[key][name][fmt]
+                    priced[key][name] = enriched[key][name][fmt]
                 except KeyError as exc:
                     raise ValueError(f"MTP {name}@{fmt} has no {key}") from exc
-        selected_wires = {"mtp_expert_projection": payload["mtp_expert_projection"],
+        selected_wires = {"mtp_expert_projection": enriched["mtp_expert_projection"],
                           **priced, "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}
     return {
         "schema": RECORD_SCHEMA,
-        "objective": probe["objective"]["objective"],
+        "objective": prepared.probe["objective"]["objective"],
         "mtp_layer": int(payload["mtp_layer"]),
-        "probe_identity_sha256": probe_sha256,
-        "byte_budget": byte_budget,
-        "rung": result.rung.name,
+        "probe_identity_sha256": prepared.probe_sha256,
+        "byte_budget": prepared.byte_budget,
+        "rung": rung.name,
         "rung_by_group": chosen,
-        "resident_bytes": int(result.rung.resident_bytes),
-        "bits": float(result.rung.bits),
-        "E": float(result.rung.E),
-        "constants_source": str(constants.get("source", "undeclared")),
-        "incomplete_rungs": incomplete,
-        "unattested_rungs": {rung: len(units) for rung, units in unattested.items()},
-        **declared_record,
-        "selection": result.provenance,
-        **({"fixed_formats": dict(sorted(fixed_formats.items()))}
-           if fixed_formats is not None else {}),
-        **({"rung_allowability_scopes": {unit: scope_provenance[(unit, fmt)]
-               for unit, fmt in assignment.items() if (unit, fmt) in scope_provenance},
+        "resident_bytes": int(rung.resident_bytes),
+        "bits": float(rung.bits),
+        "E": float(rung.E),
+        "constants_source": constants_source,
+        "incomplete_rungs": prepared.incomplete,
+        "unattested_rungs": {rung: len(units) for rung, units in prepared.unattested.items()},
+        **prepared.declared_record,
+        "selection": selection,
+        **({"fixed_formats": dict(sorted(prepared.fixed_formats.items()))}
+           if prepared.fixed_formats is not None else {}),
+        **({"rung_allowability_scopes": {unit: prepared.scope_provenance[(unit, fmt)]
+               for unit, fmt in assignment.items() if (unit, fmt) in prepared.scope_provenance},
             "rung_allowability": {family: owner.provenance()
-                for family, owner in rung_allowability.items()}}
-           if rung_allowability is not None else {}),
+                for family, owner in prepared.rung_allowability.items()}}
+           if prepared.rung_allowability is not None else {}),
         "assignment": assignment,
-        **({"canonical_quality": quality_provenance} if quality_provenance else {}),
+        **({"canonical_quality": prepared.quality_provenance} if prepared.quality_provenance else {}),
         **selected_wires,
     }
+
+
+def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
+                     acceptance_points=(), k: int = 1, eligible=None,
+                     fixed_formats: Mapping[str, str] | None = None,
+                     formats=None, rung_allowability=None, stats=None, context_by_unit=None,
+                     target_profile=None, allowability_m=None, allowability_tensor_parallel=1) -> dict:
+    """Select the independent MTP winner under the declared sub-budget.
+
+    Canonical admission and the native callback both restrict the menu.
+    A declared menu or group pin cannot add an unpriced or ineligible rung.
+    Without acceptance points, the selector returns the lowest-E feasible rung.
+    """
+    from . import mtp_rung_selection as canon
+
+    prepared = _prepare_mtp_menu(payload, byte_budget=byte_budget, eligible=eligible,
+        fixed_formats=fixed_formats, formats=formats, rung_allowability=rung_allowability,
+        stats=stats, context_by_unit=context_by_unit, target_profile=target_profile,
+        allowability_m=allowability_m, allowability_tensor_parallel=allowability_tensor_parallel)
+    serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
+                                 c_ms_per_bit=float(constants["c_ms_per_bit"]))
+    points = [canon.AcceptancePoint(**point) for point in acceptance_points]
+    result = canon.select_rung(prepared.menu, serve, points,
+        mem_budget_bytes=prepared.byte_budget, k=k, h_source="joint_aura_mtp_head_self_kl")
+    return _mtp_record(prepared, result.rung,
+        constants_source=str(constants.get("source", "undeclared")), selection=result.provenance)
+
+
+def enumerate_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
+                        eligible=None, fixed_formats=None, formats=None, rung_allowability=None,
+                        stats=None, context_by_unit=None, target_profile=None,
+                        allowability_m=None, allowability_tensor_parallel=1) -> list[dict]:
+    """Enumerate the feasible declared group choices without a winner decision.
+
+    The stable order uses group names, member names, and rung names.
+    MTP self-KL remains a separate price, not a term in the body objective.
+    """
+    ordered = {**payload, "groups": {group: sorted(members)
+                                    for group, members in sorted(payload["groups"].items())}}
+    prepared = _prepare_mtp_menu(ordered, byte_budget=byte_budget, eligible=eligible,
+        fixed_formats=fixed_formats, formats=formats, rung_allowability=rung_allowability,
+        stats=stats, context_by_unit=context_by_unit, target_profile=target_profile,
+        allowability_m=allowability_m, allowability_tensor_parallel=allowability_tensor_parallel)
+    records = []
+    for rung in prepared.menu:
+        if rung.resident_bytes > prepared.byte_budget:
+            continue
+        record = _mtp_record(prepared, rung,
+            constants_source=str(constants.get("source", "undeclared")),
+            selection={"regime": "option_b_enumeration", "winner_selected": False})
+        record["unit_prices"] = {
+            unit: {"E": prepared.rows[unit][fmt][0],
+                   "resident_bytes": prepared.rows[unit][fmt][1],
+                   "joint_operator_identity_sha256":
+                       payload["costs"][unit].get(fmt, {}).get("joint_operator_identity_sha256")}
+            for unit, fmt in sorted(record["assignment"].items())}
+        records.append(record)
+    return records
 
 
 def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
@@ -688,4 +751,5 @@ if __name__ == "__main__":
 
 __all__ = ["SCHEMA", "RECORD_SCHEMA", "MERGE_SCHEMA", "WIRE_BINDING_SCHEMA",
            "load_mtp_cost", "merge_mtp_costs", "enrich_mtp_cost_wires", "select_mtp_rungs",
+           "enumerate_mtp_rungs",
            "backfill_mtp_selection_wires"]
