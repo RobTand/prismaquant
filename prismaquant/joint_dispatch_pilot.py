@@ -15,11 +15,10 @@ from .joint_replay_regime import normalize_replay_regime
 
 PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
 QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
-#: The largest quantum record the consumer reads back through the bound
-#: readset reader. The completion carries only this entry's descriptor, so
-#: stdout never holds the wire or its ~4/3 base64 form; the cap bounds the
-#: readset read, never the announcement.
-QUANTUM_RECORD_MAX_BYTES = 1024 * 1024
+#: The CEO approved this 4 MiB quantum control bound in PQ #2603.
+#: The producer and consumer use the same bound through the shared reader.
+#: The completion carries a descriptor, never the wire or its base64 form.
+QUANTUM_RECORD_MAX_BYTES = 4 * 1024 * 1024
 PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
 PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
 PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
