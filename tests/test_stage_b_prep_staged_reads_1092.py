@@ -195,8 +195,8 @@ def test_bytes_that_miss_the_entry_digest_refuse(tmp_path, monkeypatch, capsys):
     real = staged_whole_file.read_staged_entry
     receipt = os.path.normpath(str(receipt_path))
 
-    def altered(resolver, path, staged, *, label):
-        raw = real(resolver, path, staged, label=label)
+    def altered(resolver, path, staged, *, label, max_bytes=None):
+        raw = real(resolver, path, staged, label=label, max_bytes=max_bytes)
         return raw + b" " if os.path.normpath(str(path)) == receipt else raw
 
     monkeypatch.setattr(staged_whole_file, "read_staged_entry", altered)

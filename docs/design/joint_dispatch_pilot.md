@@ -1,9 +1,9 @@
 # Selected-result pilot admission
 
-PQ #2106 implements the CPU provenance and consumer portion of #1293. A
-fan-out of more than one quantum requires producer counters, an explicit
-`--pilot-selector ACTION_KEY PUBLISHED_UNIX ATTEMPT`, and an independently
-reviewed `--pilot-source-contract PATH SHA256`. These arguments are repeatable.
+PQ #2106 implements the CPU provenance and consumer portion of #1293.
+A fan-out requires producer counters, an explicit `--pilot-selector ACTION_KEY PUBLISHED_UNIX ATTEMPT`, and an independent `--pilot-source-contract PATH SHA256`.
+It also requires `--pilot-quantum-record PATH SHA256` for each original quantum wire.
+These arguments are repeatable.
 Selectors must name exactly the supplied counter actions, once each. One
 quantum can produce a pilot; `--force-unverified-pilot` remains an explicit,
 persistently stamped override.
@@ -51,11 +51,17 @@ quantum wire. Hashing, JSON parsing and completion publication consume that
 same owned byte string. The typed completion names the wire as an external
 readset entry: path, length and SHA-256. It also carries the committed
 counters reference and completed units. The wire itself never crosses stdout.
-The quantum control cap is 1 MiB, checked on the readset read. The consumer
-checks the declared cap, reads the entry through the bound reader, then
-verifies exact read length and the sealed `--quantum-sha256`. A substituted
-path or altered bytes refuses at the digest check. Counter/result documents
-are capped at 8 MiB; decoded JSON overhead is additional to these byte caps.
+The quantum control cap is 4 MiB, as approved in PQ #2603.
+Supply each original wire copy with `--pilot-quantum-record PATH SHA256`.
+The dispatcher selects one unique consumer reference by the sealed original digest.
+The reference names the original wire, not the proposed row or the producer path.
+The producer path remains provenance and need not exist in the consumer filesystem.
+The consumer checks the descriptor before it reads the explicit local reference.
+The shared reader bounds local reads, memo hits, and staged reads before allocation.
+The declared length bounds the read; the existing local reader permits one EOF sentinel byte.
+The consumer still checks exact length and the sealed `--quantum-sha256`.
+Missing, duplicate, altered, or oversized original references refuse.
+Counter and result documents retain their 8 MiB caps. JSON overhead is additional.
 
 The shared quantum-record validator checks the authenticated record identity
 and adjoint binding. Counter identity, quantum ID and complete integer units

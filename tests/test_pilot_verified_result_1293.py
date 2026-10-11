@@ -75,6 +75,9 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
             path.write_bytes(wire)
             extra += [word, str(path), hashlib.sha256(wire).hexdigest()]
     resealed = []
+    for index, word in enumerate(args):
+        if word == "--pilot-quantum-record":
+            extra += args[index:index + 3]
     for candidate in canned.results.values():
         request = candidate["request"]
         command = copy.deepcopy(request["params"]["command"])

@@ -145,9 +145,9 @@ ALLOWLIST = {
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
     ("prismaquant/joint_dispatch_pilot.py", "_authenticated_quantum_record"): (
-        2, INTEGRITY, "the external quantum readset entry, read through the bound reader, "
-        "against the bound argv digest and declared length, then read bytes against their "
-        "digest; no running identity"),
+        2, INTEGRITY, "the explicit consumer copy of the original quantum wire, read within "
+        "the declared bound, against the sealed argv digest and declared length; "
+        "the producer path remains provenance, with no running identity seal"),
     ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_completion"): (
         1, INTEGRITY, "supplied counters bytes against the authenticated PB producer reference"),
     ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_source_contract"): (

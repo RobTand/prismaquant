@@ -77,13 +77,14 @@ def test_publisher_binds_counter_bytes_before_results_and_status(tmp_path, compl
         evidence = pilot.validate_pilot_completion(
             completion, counters=counters, counters_sha256=reference["sha256"],
             counters_bytes=len(raw), quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
-            quantum_record_bytes=len(wire))
+            quantum_record_bytes=len(wire), quantum_record_path=record_path)
         assert evidence["quantum_record"] == wire
         with pytest.raises(pilot.PilotRefused, match="bytes differ"):
             pilot.validate_pilot_completion(
-                completion, counters=altered, counters_sha256=hashlib.sha256(changed).hexdigest(),
+                completion, counters=altered,
+                counters_sha256=hashlib.sha256(changed).hexdigest(),
                 counters_bytes=len(changed), quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
-                quantum_record_bytes=len(wire))
+                quantum_record_bytes=len(wire), quantum_record_path=record_path)
 
 
 def test_failed_counter_write_publishes_no_reference_or_success_files(tmp_path, monkeypatch):
@@ -145,7 +146,7 @@ def test_pb_completion_refuses_foreign_or_malformed_reference(tmp_path, fault):
         pilot.validate_pilot_completion(completion, counters=counters,
                                         counters_sha256="a" * 64, counters_bytes=100,
                                         quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
-                                        quantum_record_bytes=len(wire))
+                                        quantum_record_bytes=len(wire), quantum_record_path=record_path)
 
 
 @pytest.mark.parametrize("fault", ["missing_record", "bad_path", "wrong_length",
@@ -167,7 +168,7 @@ def test_pb_completion_refuses_a_foreign_or_malformed_quantum_record(
     if fault == "missing_record":
         del completion["quantum_record"]
     elif fault == "bad_path":
-        completion["quantum_record"]["path"] = str(tmp_path / "absent.json")
+        record_path = tmp_path / "absent.json"
     elif fault == "wrong_length":
         sealed_bytes = len(wire) + 1
     elif fault == "wrong_digest":
@@ -187,7 +188,7 @@ def test_pb_completion_refuses_a_foreign_or_malformed_quantum_record(
         pilot.validate_pilot_completion(completion, counters=counters,
                                         counters_sha256="a" * 64, counters_bytes=100,
                                         quantum_record_sha256=sealed_sha,
-                                        quantum_record_bytes=sealed_bytes)
+                                        quantum_record_bytes=sealed_bytes, quantum_record_path=record_path)
 
 
 @pytest.mark.parametrize("over_cap", [False, True])
@@ -198,7 +199,8 @@ def test_record_cap_is_enforced_on_the_readset_read(tmp_path, monkeypatch, over_
               "units_done": 1, "units_total": 1,
               "counters": {"path": "/counters", "sha256": "a" * 64, "bytes": 3}}
     completion = quantum.quantum_completion_record(
-        result, record_path=record_path, record_bytes=wire)
+        result, record_path=record_path, record_bytes=wire[:pilot.QUANTUM_RECORD_MAX_BYTES])
+    completion["quantum_record"]["bytes"] = len(wire)
     # The producer announcement stays small: the wire never crosses stdout.
     assert len(json.dumps(completion).encode()) < 4096
     if over_cap:
@@ -208,12 +210,14 @@ def test_record_cap_is_enforced_on_the_readset_read(tmp_path, monkeypatch, over_
             pilot.validate_pilot_completion(
                 completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
                 counters_sha256="a" * 64, counters_bytes=3,
-                quantum_record_sha256=completion["quantum_record"]["sha256"])
+                quantum_record_sha256=completion["quantum_record"]["sha256"],
+                quantum_record_path=record_path)
     else:
         evidence = pilot.validate_pilot_completion(
             completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
             counters_sha256="a" * 64, counters_bytes=3,
-            quantum_record_sha256=completion["quantum_record"]["sha256"])
+            quantum_record_sha256=completion["quantum_record"]["sha256"],
+            quantum_record_path=record_path)
         assert evidence["quantum_record"] == wire
 
 
@@ -253,12 +257,23 @@ def test_oversized_replacement_never_reads_beyond_the_declared_record(tmp_path, 
         handle = original_open(self, *args, **kwargs)
         return TrackedRead(handle) if self == path and args and args[0] == "rb" else handle
 
+
+    original_read_bytes = Path.read_bytes
+
+    def unbounded(self):
+        raw = original_read_bytes(self)
+        if self == path:
+            observed.append(("unbounded", len(raw)))
+        return raw
+
+    monkeypatch.setattr(Path, "read_bytes", unbounded)
     monkeypatch.setattr(Path, "open", opened)
     with pytest.raises(pilot.PilotRefused, match="bytes do not match"):
         pilot.validate_pilot_completion(
             completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
             counters_sha256="a" * 64, counters_bytes=100,
-            quantum_record_sha256=hashlib.sha256(wire).hexdigest())
+            quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
+            quantum_record_path=path)
     assert sum(count for _, count in observed) <= len(wire) + 1, observed
 
 
@@ -274,7 +289,8 @@ def test_sealed_record_passes_raised_cap(tmp_path):
     evidence = pilot.validate_pilot_completion(
         completion, counters={"quantum_id": "layer-007", "units": [1, 1]},
         counters_sha256="a" * 64, counters_bytes=3,
-        quantum_record_sha256=completion["quantum_record"]["sha256"])
+        quantum_record_sha256=completion["quantum_record"]["sha256"],
+        quantum_record_path=path)
     assert evidence["quantum_record"] == wire
 
 

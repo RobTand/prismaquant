@@ -109,7 +109,7 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
 
 
 def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=False,
-                      delivery_receipt=None):
+                      delivery_receipt=None, max_bytes: int | None = None):
     """The whole of one resolved map entry, read under a lifetime-pinned window.
 
     ``staged`` is the resolver's answer for ``path``: a whole-file entry
@@ -125,6 +125,11 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
     size = staged.get("bytes")
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise refuse_pool_bulk_read(where, "readset-not-staged")
+    if max_bytes is not None:
+        from .stage_inputs import BoundReadLimitExceeded
+
+        if size > max_bytes:
+            raise BoundReadLimitExceeded(f"{label}: staged input exceeds its read bound")
     window, key = acquire_entry_window(resolver, path, staged)
     witness = None
     raw = None

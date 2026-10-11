@@ -151,6 +151,7 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
 
         wire = record_path.read_bytes()
         sealed_sha = hashlib.sha256(wire).hexdigest()
+        args += ["--pilot-quantum-record", str(record_path), sealed_sha]
         completion = quantum_completion_record(
             {"quantum_id": record["quantum_id"], "passed": True,
              "status": "complete", "units_done": 1, "units_total": 1,
@@ -468,6 +469,8 @@ def test_replaced_record_shape_refuses(tmp_path, campaign, records_dir, monkeypa
                                         "bytes": len(wire)}
         command = result["request"]["params"]["command"]
         command[command.index("--quantum-sha256") + 1] = completion["quantum_record"]["sha256"]
+        position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
+        args[position - 1:position + 1] = [str(altered), completion["quantum_record"]["sha256"]]
         result["payload"] = json.dumps(completion).encode()
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
                 _gateway=gateway) == 3
@@ -590,6 +593,8 @@ def test_another_output_namespace_uses_only_the_authenticated_record(
         completion["counters"].update(sha256=digest, bytes=len(raw))
         start = args.index(str(path))
         args[start + 1] = digest
+        position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
+        args[position - 1:position + 1] = [str(moved), completion["quantum_record"]["sha256"]]
         result["payload"] = json.dumps(completion).encode()
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 0
     assert len(gateway.submitted) == 3
@@ -617,3 +622,21 @@ def test_original_wire_survives_a_distinct_producer_namespace(
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
                 _gateway=gateway) == 0
     assert len(gateway.submitted) == 3
+
+
+@pytest.mark.parametrize("reference_fault", ["missing", "duplicate"])
+def test_original_wire_reference_must_be_unique(
+        tmp_path, campaign, records_dir, monkeypatch, capsys, reference_fault):
+    receipt = _ready(tmp_path, campaign, records_dir)
+    gateway = FakeGateway()
+    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
+    position = args.index("--pilot-quantum-record")
+    reference = args[position:position + 3]
+    if reference_fault == "missing":
+        del args[position:position + 3]
+    else:
+        args += reference
+    assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
+                _gateway=gateway) == 3
+    assert not gateway.submitted
+    assert "one unique consumer reference" in capsys.readouterr().err

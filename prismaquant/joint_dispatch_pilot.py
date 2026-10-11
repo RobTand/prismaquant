@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import math
 from collections.abc import Mapping
+from pathlib import Path
 
 from .digests import bytes_sha256hex, canonical_json_sha256, is_sha256hex
 from .io_spans import EXPOSED_WAIT_SCHEMA, GB10_POWER_ENVELOPE_W, derive_wait_bound
@@ -23,8 +24,8 @@ PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
 PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
 PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
 #: The completion's external original-quantum-record entry names these three
-#: fields; the consumer reads ``path`` through the bound reader and matches
-#: the bytes to ``bytes`` and ``sha256`` and to the sealed ``--quantum-sha256``.
+#: fields. Its path is provenance; the consumer supplies an original wire copy
+#: and checks its bytes against the declared length and sealed digest.
 QUANTUM_RECORD_FIELDS = (
     "path", "sha256", "bytes")
 
@@ -35,7 +36,7 @@ class PilotRefused(ValueError):
 
 def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
                               counters_sha256: str, counters_bytes: int,
-                              quantum_record_sha256: str,
+                              quantum_record_sha256: str, quantum_record_path,
                               quantum_record_bytes: int | None = None) -> dict:
     """Match supplied counters to an authenticated PB producer completion.
 
@@ -44,14 +45,13 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
     does not establish this provenance. Paths are retained as provenance;
     the byte digest permits an exact copy of the counters to be consumed.
 
-    The completion also names the ORIGINAL quantum wire the producer
-    authenticated (PQ #1293) as an external readset entry (PQ #2625).
-    ``quantum_record_sha256``/``quantum_record_bytes`` authenticates the
-    sealed ``--quantum-sha256``; an optional independently known length must
-    agree too. The declared length is capped before the read, then checked
-    against the owned bytes. The caller derives the pilot binding from those
-    authenticated bytes, never from the record path, so
-    cross-output-namespace equivalence is preserved.
+    The completion names the original wire digest and length.
+    Both must match the sealed invocation and any independently known length.
+    The caller supplies quantum_record_path for an exact original wire copy.
+    The producer-local path remains provenance only.
+    The declared length bounds the read before allocation.
+    The caller derives the pilot binding from these authenticated original bytes.
+    Different producer and consumer namespaces do not change that binding.
     """
     try:
         if not isinstance(completion, Mapping) or completion.get("schema") != QUANTUM_COMPLETION_SCHEMA:
@@ -83,22 +83,23 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
             raise PilotRefused("pilot counters bytes differ from the PB producer result")
         record = _authenticated_quantum_record(
             completion, quantum_record_sha256=quantum_record_sha256,
-            quantum_record_bytes=quantum_record_bytes)
+            quantum_record_bytes=quantum_record_bytes,
+            quantum_record_path=quantum_record_path)
         return {**dict(reference), "quantum_record": record}
     except (KeyError, TypeError, AttributeError) as error:
         raise PilotRefused("pilot PB completion reference is incomplete or malformed") from error
 
 
 def _authenticated_quantum_record(completion, *, quantum_record_sha256,
-                                  quantum_record_bytes):
+                                  quantum_record_bytes, quantum_record_path):
     """The completion's external original record entry, authenticated.
 
     The entry is the producer's own descriptor for the wire its identity
     gate read, bounded before the read and matched byte for byte against
-    the sealed ``--quantum-sha256``. The bytes come off disk through the
-    bound reader, never over stdout. A missing, malformed, oversized,
-    unreadable, length-mismatched or digest-mismatched entry refuses; no
-    path is trusted and nothing is canonical-reencoded.
+    the sealed --quantum-sha256. The caller supplies a consumer-visible copy.
+    The producer path remains provenance and is never reopened here.
+    The shared reader bounds the copy before allocation and verifies its digest.
+    Missing, malformed, oversized, unreadable, or changed bytes refuse.
     """
     entry = completion.get("quantum_record")
     if not isinstance(entry, Mapping) or set(entry) != set(QUANTUM_RECORD_FIELDS):
@@ -120,10 +121,12 @@ def _authenticated_quantum_record(completion, *, quantum_record_sha256,
     if ((quantum_record_bytes is not None and declared_bytes != quantum_record_bytes)
             or declared_sha != quantum_record_sha256):
         raise PilotRefused("pilot completion names another quantum record than the sealed argv")
+    if not isinstance(quantum_record_path, (str, Path)) or not str(quantum_record_path):
+        raise PilotRefused("pilot consumer quantum record path is malformed")
     from .stage_inputs import read_bound as _read_bound
     try:
-        raw = _read_bound({"path": path, "sha256": declared_sha},
-                          "pilot completion quantum record")
+        raw = _read_bound({"path": str(quantum_record_path), "sha256": declared_sha},
+                          "pilot completion quantum record", max_bytes=declared_bytes)
     except (ValueError, OSError) as error:
         raise PilotRefused(
             "pilot completion quantum record bytes do not match their digest") from error

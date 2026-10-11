@@ -126,7 +126,7 @@ def test_staged_owned_buffer_does_not_read_the_pool_path(tmp_path, monkeypatch):
     def forbidden(_self):
         raise AssertionError("pool read forbidden")
 
-    def staged(observed_path, expected, label):
+    def staged(observed_path, expected, label, *, max_bytes=None):
         calls.append((observed_path, expected, label))
         return raw
 
@@ -144,7 +144,7 @@ def test_staged_refusal_propagates_exact_exception_and_cause(tmp_path, monkeypat
     refused.__cause__ = cause
     monkeypatch.setattr(inputs, "bound_stat_fence", lambda _path: None)
 
-    def staged(*_args):
+    def staged(*_args, **_kwargs):
         raise refused
 
     monkeypatch.setattr(inputs, "BOUND_READER", staged)
@@ -326,4 +326,16 @@ def test_explicit_bound_reaches_the_staged_reader_without_pool_stat(tmp_path, mo
     assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) is raw
     assert calls == [(path, bound["sha256"], "unit", len(raw))]
     with pytest.raises(ValueError, match="bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+    from prismaquant import stage_b_prep_io, staged_lease
+
+    class Resolver:
+        def staged_read(self, _path, *, expected_sha256):
+            return {"bytes": len(raw), "sha256": expected_sha256}
+
+    reads = stage_b_prep_io.StagedPreparationReads(Resolver(), manifest_sha256="a" * 64)
+    stage_b_prep_io._install_bound_reader(reads)
+    monkeypatch.setattr(staged_lease, "acquire_entry_window",
+                        lambda *_args: pytest.fail("an oversized staged entry must refuse before the pin"))
+    with pytest.raises(ValueError, match="staged input exceeds its read bound"):
         inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)

@@ -329,17 +329,17 @@ def verify_quantum_identity(
         # and a separate parse cannot smuggle a different, internally valid
         # record past the gate (PQ #2067). ``read_bound`` is the shared
         # bound-cache/staged-reader owner; a digest mismatch still refuses.
-        from .stage_inputs import read_bound as _read_bound
+        from .stage_inputs import BoundReadLimitExceeded, read_bound as _read_bound
+        from .joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
         try:
             raw = _read_bound(
                 {"path": str(quantum_path), "sha256": quantum_sha256},
-                "quantum record")
+                "quantum record", max_bytes=QUANTUM_RECORD_MAX_BYTES)
+        except BoundReadLimitExceeded as error:
+            raise QuantumIdentityRefused("quantum record exceeds the control-byte cap") from error
         except ValueError:
             raise QuantumIdentityRefused(
                 f"quantum record digest mismatch at {quantum_path}")
-        from .joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
-        if len(raw) > QUANTUM_RECORD_MAX_BYTES:
-            raise QuantumIdentityRefused("quantum record exceeds the control-byte cap")
         record_bytes = raw
         record = json.loads(record_bytes.decode("utf-8"))
         if record.get("schema") != QUANTUM_RECORD_SCHEMA:
@@ -4388,6 +4388,9 @@ def quantum_completion_record(result: Mapping, *, record_path, record_bytes: byt
     from .joint_dispatch_pilot import QUANTUM_COMPLETION_SCHEMA
     if not isinstance(record_bytes, bytes) or not record_bytes:
         raise QuantumIdentityRefused("completion quantum record is absent")
+    from .joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+    if len(record_bytes) > QUANTUM_RECORD_MAX_BYTES:
+        raise QuantumIdentityRefused("quantum record exceeds the control-byte cap")
     if not isinstance(record_path, (str, Path)) or not str(record_path):
         raise QuantumIdentityRefused("completion quantum record path is absent")
 
