@@ -172,20 +172,24 @@ def _resolve_validation_target_profile(
     fallback on a checkpoint it was just told it cannot reason about is
     validating the wrong thing.
     """
-    from .model_profiles.registry import DeadVendoredOverrideError, detect_profile
     from .serving_profiles import resolve_target_profile
 
-    try:
-        profile = detect_profile(str(model_dir))
-    except DeadVendoredOverrideError:
-        raise
-    except Exception:
-        profile = None
     return resolve_target_profile(
-        profile,
+        _validation_model_profile(model_dir),
         requested,
         default="vllm_packed_moe",
     )
+
+
+def _validation_model_profile(model_dir: str | Path):
+    from .model_profiles.registry import DeadVendoredOverrideError, detect_profile
+
+    try:
+        return detect_profile(str(model_dir))
+    except DeadVendoredOverrideError:
+        raise
+    except Exception:
+        return None
 
 
 def summarize_quantization_config(cfg_path: Path) -> None:
