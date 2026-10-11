@@ -348,7 +348,7 @@ def test_a_duplicate_selector_refuses(tmp_path, campaign, records_dir, monkeypat
 
 def test_a_substituted_quantum_record_refuses(tmp_path, campaign, records_dir,
                                               monkeypatch, capsys):
-    """A completion entry pointing at other bytes than the sealed digest refuses."""
+    """An explicit consumer copy with bytes outside the sealed digest refuses."""
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(
@@ -361,6 +361,10 @@ def test_a_substituted_quantum_record_refuses(tmp_path, campaign, records_dir,
                                "path": str(_tampered_copy(
                                    Path(completion["quantum_record"]["path"]),
                                    tmp_path, completion["quantum_id"]))}})
+    for index, word in enumerate(args):
+        if word == "--pilot-quantum-record":
+            original = json.loads(Path(args[index + 1]).read_bytes())
+            args[index + 1] = str(tmp_path / f"{original['quantum_id']}.tampered.json")
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
                 _gateway=gateway) == 3
     assert not gateway.submitted

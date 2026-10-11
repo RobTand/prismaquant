@@ -255,7 +255,7 @@ def test_the_bound_reader_serves_read_bound_while_bound(tmp_path, monkeypatch):
     monkeypatch.setenv(ENV_VAR, str(tmp_path / "absent-map.json"))
     reads = io.bind_staged_reads(manifest_sha256=MANIFEST, allowed_tiers="ram,ssd")
     calls = []
-    monkeypatch.setattr(reads, "whole", lambda path, *, sha256, where:
+    monkeypatch.setattr(reads, "whole", lambda path, *, sha256, where, max_bytes=None:
                         calls.append((str(path), sha256, where)) or b"{}")
     target = tmp_path / "control.json"
     target.write_bytes(b"{}")
