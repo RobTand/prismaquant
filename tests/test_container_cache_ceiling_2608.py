@@ -66,7 +66,7 @@ def _quantum_fixture():
     receipt["workload"] = {
         "row": "stage_a_capture_plus_stage_b_quantum", "layer": 1,
         "units": ["model.layers.1.proj"], "formats": ["BF16"],
-        "n_probes": 2, "seed_base": 7000, "checkpoints": [0, 2],
+        "n_probes": 2, "seed_base": 7000, "checkpoints": [0, 1, 2],
         "windows": 1, "served_compile": receipt["workload"]}
     return receipt
 
@@ -279,6 +279,23 @@ def test_quantum_cpu_request_disagrees_with_cuda_compile_results():
     receipt["device"] = "cpu"
     with pytest.raises(ValueError, match="GPU workload.*device"):
         peak_mod.derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0)
+
+
+def test_quantum_checkpoint_must_cover_declared_layer():
+    receipt = _quantum_fixture()
+    receipt["workload"]["checkpoints"] = [0, 2]
+    with pytest.raises(ValueError, match="no usable checkpoint"):
+        peak_mod.derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0)
+
+
+def test_distinct_cuda_indices_are_permitted_with_complete_results():
+    receipt = _quantum_fixture()
+    receipt["device"] = "cuda:1"
+    receipt["workload"]["served_compile"]["device"] = "cuda:0"
+    headroom = 4341760
+    assert (peak_mod.derive_cache_ceiling_from_receipt(
+        receipt, headroom_bytes=headroom)
+        == peak_mod.derive_cache_ceiling(1024, headroom_bytes=headroom))
 
 
 @pytest.mark.parametrize("make_receipt", [_evidence_fixture, _quantum_fixture])

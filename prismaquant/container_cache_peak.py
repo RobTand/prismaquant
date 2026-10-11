@@ -382,6 +382,8 @@ def _require_gpu_workload(receipt) -> None:
                           and all(_whole(item) for item in checkpoints)
                           and checkpoints == sorted(set(checkpoints)),
                           f"{prefix}.checkpoints", "missing or malformed capture results")
+        _require_evidence(workload.get("layer") in checkpoints,
+                          f"{prefix}.checkpoints", "no usable checkpoint for the declared layer")
         workload = workload.get("served_compile")
         prefix += ".served_compile"
         _require_evidence(isinstance(workload, Mapping), prefix,
@@ -392,11 +394,10 @@ def _require_gpu_workload(receipt) -> None:
     _require_evidence(_cuda_device(workload.get("device")),
                       f"{prefix}.device", "missing or non-CUDA result device")
     if "device" in receipt:
-        _require_evidence(_cuda_device(receipt["device"])
-                          and (receipt["device"] == "cuda"
-                               or workload["device"] == "cuda"
-                               or receipt["device"] == workload["device"]),
-                          f"{prefix}.device", "row and compilation devices disagree")
+        # Distinct CUDA indices are permitted: the row device and the
+        # compilation device may differ. Each must still name CUDA.
+        _require_evidence(_cuda_device(receipt["device"]),
+                          f"{prefix}.device", "missing or non-CUDA row device")
     _require_evidence(isinstance(workload.get("quantiser"), str)
                       and bool(workload["quantiser"]),
                       f"{prefix}.quantiser", "missing quantiser result")
