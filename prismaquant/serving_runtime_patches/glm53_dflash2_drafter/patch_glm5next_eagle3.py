@@ -10,11 +10,11 @@ before any CUDA graph is captured. The runner then asserts the model returns
 a ``(hidden_states, aux_hidden_states)`` tuple, which the current
 ``Glm5NextModel.forward`` never does.
 
-Seven edits on ``models/glm5next/nvidia/model.py``. Each edit carries an
-already-applied marker that is absent in the base file, so a rerun
-completes a partial run and a foreign file is refused instead of
-double-applied. The file is refused unless it is byte-identical to the
-base image's. The aux capture mirrors the served DeepSeek-V4 EAGLE3
+Seven edits target ``models/glm5next/nvidia/model.py``.
+Each edit has an already-applied marker that the base file does not contain.
+The pure helper can complete a partial edit set without a duplicate edit.
+The CLI accepts only base-image bytes and refuses partial or complete patch outputs.
+The aux capture mirrors the served DeepSeek-V4 EAGLE3
 pattern: capture after the layer whose 1-based index the drafter names
 (the DFlash2 draft config names ``target_layer_ids``; ``eagle3_utils``
 adds 1), and return the tuple only when at least one layer is named, so
@@ -176,7 +176,7 @@ EDITS = (
 
 
 def patched_source(data: bytes) -> bytes:
-    """Apply the seven edits; refuse foreign bytes, complete partial runs."""
+    """Apply the seven marker-aware edits to source text."""
     text = data.decode()
     for tag, old, new, marker in EDITS:
         if marker in text:
