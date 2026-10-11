@@ -102,6 +102,46 @@ def test_measured_and_interpolated_rows_are_told_apart():
     assert cost_entry_is_band_interpolated(interp)
 
 
+@pytest.mark.parametrize("contract", ["a32", "a16"])
+def test_interpolated_direct_consumer_rows_keep_the_anchor_activation(contract):
+    from dataclasses import replace
+    from prismaquant.tessera_campaign import campaign_cost_payload
+
+    leaf = "indexer.weights_proj" if contract == "a32" else "kv_b_proj"
+    q = "model.language_model.layers.3.self_attn." + leaf
+    fam = "TESSERA_E2M1_K2"
+    anchors = {q: {fam: [replace(_anchor(q, fam, r, d),
+        activation_contract=contract, activation_quantized=False)
+        for r, d in ((128, 1e-2), (512, 1e-3), (896, 1e-4))]}}
+    payload = campaign_cost_payload(
+        anchors, _menu(q, fam, {128, 384, 512, 896}), loo={}, provenance={})
+    row = payload["costs"][q][fam + "_R384"]
+    assert row["cost_source"] == "tessera_campaign_interpolated"
+    assert row["activation_contract"] == contract
+    assert row["activation_quantized"] is False
+
+
+@pytest.mark.parametrize("field,value", [
+    ("activation_contract", "a16"),
+    ("activation_quantized", True),
+    ("input_global_scale", 2.0),
+])
+def test_interpolation_refuses_incompatible_anchor_activation(field, value):
+    from dataclasses import replace
+    from prismaquant.tessera_campaign import campaign_cost_payload
+
+    q = "model.language_model.layers.3.self_attn.indexer.weights_proj"
+    fam = "TESSERA_E2M1_K2"
+    points = [replace(_anchor(q, fam, r, d),
+        activation_contract="a32", activation_quantized=False)
+        for r, d in ((128, 1e-2), (512, 1e-3), (896, 1e-4))]
+    points[1] = replace(points[1], **{field: value})
+    with pytest.raises(ValueError, match="incompatible anchor " + field):
+        campaign_cost_payload(
+            {q: {fam: points}}, _menu(q, fam, {128, 384, 512, 896}),
+            loo={}, provenance={})
+
+
 def test_an_interpolated_row_is_priced_in_output_space():
     """Not from weight_mse via h_trace: the fit IS an output-space number.
 
