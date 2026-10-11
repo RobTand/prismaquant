@@ -22,10 +22,10 @@ MLA page nor vice versa, so slot-sharing would need preconditions this
 patch does not claim. The pool grows by the draft block; the eager serve
 measures the cost.
 
-Eleven edits have markers that the base file does not contain.
-The pure helper can complete a partial edit set without a duplicate edit.
-The CLI accepts only base-image bytes and refuses partial or complete patch outputs.
-The CLI checks the base SHA-256 before it writes the target.
+Eleven edits. Each edit carries an already-applied marker that is absent
+in the base file, so a rerun completes a partial run and a foreign file
+is refused instead of double-applied. The file is refused unless it is
+byte-identical to the base image's.
 """
 
 import hashlib
@@ -338,7 +338,7 @@ EDITS = (
 
 
 def patched_source(data: bytes) -> bytes:
-    """Apply the eleven marker-aware edits to source text."""
+    """Apply the eleven edits; refuse foreign bytes, complete partial runs."""
     text = data.decode()
     for tag, old, new, marker, count in EDITS:
         if marker in text:
