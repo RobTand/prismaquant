@@ -792,11 +792,27 @@ def _report(name, value):
 
 
 def _spill_root(tmp_path, *, needs_direct_io=True):
-    """Declare DIO only for tests that reach spill acquisition, not refusals."""
+    """Provisioned private scratch for acquisition; `tmp_path` for refusals.
+
+    Tests that reach spill acquisition (Stage B spill qualification) run on
+    administrator-provisioned private scratch (`PQ_STAGE_B_SPILL_TEST_ROOT`)
+    with real statx direct I/O. Without either, the test skips, which keeps
+    the qualification incomplete instead of passing on an unqualified disk.
+    Refusal paths (`needs_direct_io=False`) keep the `tmp_path` fallback and
+    never probe direct I/O.
+    """
     from prismaquant.perturbed_x_cache import StageBSpillScratch
     from test_stageb_cotangent_scratch import require_direct_io
 
-    base = Path(os.environ.get("PQ_STAGE_B_SPILL_TEST_ROOT") or tmp_path)
+    if needs_direct_io:
+        provisioned = os.environ.get("PQ_STAGE_B_SPILL_TEST_ROOT")
+        if not provisioned:
+            pytest.skip("Stage B spill qualification needs "
+                        "administrator-provisioned private scratch in "
+                        "PQ_STAGE_B_SPILL_TEST_ROOT; qualification incomplete")
+        base = Path(provisioned)
+    else:
+        base = Path(os.environ.get("PQ_STAGE_B_SPILL_TEST_ROOT") or tmp_path)
     root = base / f"spill-{os.getpid()}-{tmp_path.name}"
     root.mkdir(parents=True, exist_ok=True)
     StageBSpillScratch.require_local_root(root)  # wrong declared roots still refuse
