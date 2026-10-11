@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- G3 RAM acquire tests require distinct covers for the stage retry (#2617).
+  The tests verify the complete retry sequence and no retained window after refusal.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers

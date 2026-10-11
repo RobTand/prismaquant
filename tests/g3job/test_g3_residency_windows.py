@@ -202,19 +202,39 @@ def test_ram_acquire_availability_refusal_retries_on_stage(tmp_path):
         mapping["entries"][key]["ram_path"] = "/ram/" + key.rsplit("/", 1)[-1]
     map_path.write_text(json.dumps(mapping))
     base_acquire = reader.lease.acquire_for
-    tiers = []
+    sequence = []
+    selected = {"0:/host/source", "0:/host/wire"}
+    covers_by_tier = {"ram:stage": [object()], "stage": [object()]}
+
+    def covers(_root, _owner, keys, **kwargs):
+        tier = kwargs["tier_id"]
+        sequence.append(("covers", tier, set(keys), kwargs["epoch"]))
+        return {"ok": True, "covers": covers_by_tier[tier]}
 
     def acquire(ctx, **kwargs):
-        tiers.append(kwargs["tier_id"])
-        if kwargs["tier_id"] == "ram:stage":
+        tier = kwargs["tier_id"]
+        sequence.append(("acquire", tier, set(kwargs["expected"]), kwargs["epoch"]))
+        assert kwargs["covers"] is covers_by_tier[tier]
+        assert kwargs["expected"] == {
+            key: {"bytes": mapping["entries"][key]["bytes"],
+                  "sha256": mapping["entries"][key]["sha256"]}
+            for key in selected
+        }
+        if tier == "ram:stage":
             return {"ok": False, "refusal": "stale-epoch"}
         return base_acquire(ctx, **kwargs)
 
+    reader.lease.covers_for_keys = covers
     reader.lease.acquire_for = acquire
     assert reader.read("/host/source", 0, 6) == b"source"
     assert reader.read("/host/wire", 0, 4) == b"wire"
-    assert tiers == ["ram:stage", "stage"]
-    assert [keys for kind, keys in events if kind == "acquire"] == [{"0:/host/source", "0:/host/wire"}]
+    assert sequence == [
+        ("covers", "ram:stage", selected, "current"),
+        ("acquire", "ram:stage", selected, "current"),
+        ("covers", "stage", selected, ""),
+        ("acquire", "stage", selected, ""),
+    ]
+    assert [keys for kind, keys in events if kind == "acquire"] == [selected]
     assert reader.stats["tiers"] == {"stage": {"reads": 2, "bytes": 10}}
     reader.finish_phase("layer-00")
     assert not live
@@ -244,4 +264,5 @@ def test_ram_acquire_integrity_or_unknown_refusal_selects_no_copy(tmp_path, refu
         reader.read("/host/source", 0, 6)
     assert cover_tiers == ["ram:stage"]
     assert acquire_tiers == ["ram:stage"]
+    assert reader.windows == {}
     assert not live and reader.stats["staged_reads"] == 0
