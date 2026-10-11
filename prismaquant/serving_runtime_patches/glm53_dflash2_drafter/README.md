@@ -25,6 +25,9 @@ after the recorded kpool edits; `mtp.py` reproduces the recorded mapper
 base sha `715768cd…`). Each patch script refuses any other base bytes,
 asserts each edit lands exactly its expected count, and exposes a pure
 `patched_source` that CPU tests exercise without a serving runtime.
+The pure helper completes partial edit sets without duplicate edits.
+The CLI accepts only the exact base bytes; it refuses partial and complete patched outputs.
+Foreign-byte refusal belongs to the CLI base check, not the marker-aware helper.
 Patched file hashes (reproduced locally from the verified base bytes):
 
 - `models/glm5next/nvidia/model.py`:

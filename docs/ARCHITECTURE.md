@@ -1,6 +1,63 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-09 (PQ #2481): the D44 source delivery uses the repository snapshot.
+The accepted standalone head is `fa3775151f77dc713fd78882daf6e147ab471243`.
+Its bundle SHA-256 is `7ea79d62000dc4a41d940a9c72eb925e6dbd2b752e49dccd25b22b3a78c998e0`.
+`prismaquant/d44_guard/standalone_source_pin.json` records the frozen owners and the external dependency bindings.
+The external owners and the container template reside on the shared fleet mount, not a workstation.
+
+Use the repository guard to route a frozen native request:
+
+```sh
+python3 prismaquant/d44_guard/campaign_launch.py route-plan PLAN.json --out ROUTED.json
+```
+
+The route selects the repository Git root as `common.cwd` and a relative guard entry.
+PrismaBuild then seals the repository source and supplies its snapshot to each selected worker.
+The guard selects each numerical child by its absolute repository path.
+The container client uses `_vendored` as its workspace, so `/workspace` contains the delivered numerical owners.
+Native request validation completes before the route writes its output.
+Explicit standalone delivery still uses `source_delivery.stage_tree` and refuses an existing destination.
+The native route does not submit that non-Git directory as a checkout.
+
+Use `D44_DELIVERED_OWNERS_DIR` only for guard identity tests.
+Numerical children retain the pinned external owners path.
+The override does not relocate child dependencies.
+
+External source, template, and module identities use the shared `dev_mode.seal_check`.
+Development mode prints `[DEV-MODE]` on a mismatch and continues.
+Certified mode keeps the refusal.
+Missing files, stored-byte integrity, native request correctness, and the D30 resource checks remain enforced.
+
+PB `8e922d3db1a9` passes 24 delivery cases; PB `080d37c1d157` passes 12 publication cases.
+PB `ea08af48600f` proves the real route, native script ownership, the selected CPU child parser, and compilation.
+The CPU proof deliberately refuses an incomplete child argument before numerical work.
+It proves source selection, not a scientific result, GPU execution, or container execution.
+The active campaign tree, retained receipts, and action `a435d3d42b75c875c51dfeee75956bef835a4daccfa2981535281ea90b6271a0` remain outside this delivery.
+
+Re-stamped 2026-10-09 (PQ #2481, merge proof): reviewed head `9afd1efee890` already contains the current base `0a3f9df9531b`.
+Its parents are approved source head `94c4fa0ee666` and that base.
+The retained merge resolution keeps both document additions.
+No further source correction is required for the three findings at `3bbecb5d2584`.
+PB `f1ba86d85911` passes all 24 delivery cases.
+PB `9fe6f5474779` passes all 12 publication cases.
+PB `74121d828e61` passes 13 architecture cases; PB `c35cba7a7f34` passes six documentation cases.
+PB `b3bc8f968a92` executes the actual route and all three delivered CPU child parsers.
+It verifies 14 frozen entries and eight external bindings, including the template.
+It also compiles 17 files and proves native refusal before output.
+Each child refuses an incomplete argument before numerical work.
+These proofs retain the reviewed guard digest and do not replace source files.
+Re-stamped 2026-10-10 (PQ #2602): the read-ahead budget holds back measured
+consumer growth. Cost rows, formats, lanes, and gates stay unchanged.
+Re-stamped 2026-10-09 (PQ #2532): the allocator gains an opt-in Option B enumeration path.
+`--mtp-option-b-dir` pairs every feasible declared MTP group choice with a body allocation under the remaining artifact bytes.
+`glm_mtp_selection.enumerate_mtp_rungs` admits the priced group menu without a winner decision.
+Each candidate reuses the shared footprint owner, retains exact prices and wire receipts, and binds the combined assignment digest.
+The manifest selects no winner, and real-model qualification stays outside this path.
+Without the flag the independent selector and body allocation are unchanged.
+Gate: `tests/test_mtp_option_b_2532.py`.
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
+
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
 The issuegraph branch supplies this harness for normal exact-head review.
@@ -4320,6 +4377,9 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   (`StageBReplaySpill.replay_reserve_host_bytes`) and the rest to the device.
   The sums are unchanged; a guard with no device envelope still charges the
   sum to its cgroup cap.
+  The spill budget also holds back the render stream's measured growth
+  (PQ #2602, Growth reserve below).
+
 - **Owned bytes, sealed and mapped.** A stream reads each file into a memfd
   the engine owns (`SealedBuffer`, `:107`): `preadv` into a populated shared
   mapping, one SHA-256 over those pages, then `F_SEAL_WRITE`, `GROW`,
@@ -4352,6 +4412,28 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   `:825`): on unified memory a stream that counted them free at the take
   would read a further window into memory the consumer still holds.
   `retained_window` drops its tensors before it releases the stream.
+- **Growth reserve (PQ #2602).** The budget holds back the consumer's
+  measured per-window growth before it admits read-ahead.
+  `GuardReadBudget` takes the consumer stream as `growth_stream`.
+  The spill replay's budget watches the render stream.
+  The render stream's own budget takes no growth source.
+  Its own bytes already live in the guard's reading.
+  Derivation: the reserve is the stream's live held bytes
+  (`ReadStream.growth_snapshot`: read-ahead held plus taken but
+  unreleased), with a floor of evicted bytes while reclaim history
+  (`evictions`, `rereads`) says past growth reclaimed read-ahead.
+  The measured `peak_held_bytes` bounds the reserve from above.
+  Bounds: the reserve never exceeds the measured peak.
+  Zero growth reserves zero, and a drained consumer releases all of it.
+  With zero growth `headroom_bytes` answers the old value.
+  When headroom still drops, `GuardReadBudget.reclaim` drops the
+  growth stream's farthest-ahead groups first, and a later take rereads
+  them and counts `rereads`.
+  `tests/test_io_engine.py` proves all four cases on the CPU: growth
+  response, safe admission, release, and emergency reclaim.
+  No cost row, format, lane, or gate changes.
+  `QUANTUM_RECORD_MAX_BYTES` is unchanged.
+
 - **Negative result: a `torch` CPU tensor does not return its pages here.**
   The first read-ahead row (GLM-5.3 layer 7, PB `7290d2373365`) decoded
   each read into a `torch.load(io.BytesIO(raw))` copy. The aggregate check in
@@ -8340,6 +8422,11 @@ prices a rung twice.
 - the record names the declaration (`mtp_formats`), each removed rung's unit count (`menu_restricted_rungs`) and any named format offered to no unit (`mtp_formats_unoffered`);
 - a unit or group left without a complete rung exits 2;
 - unset, the menu and the record are unchanged.
+
+`--mtp-option-b-dir` (PQ #2532, opt-in) enumerates every feasible declared group choice and allocates the body under each remainder.
+Each candidate charges body payload, selected MTP bytes, immutable regions, sidecars and reserve once under the global cap.
+The manifest records prices, assignments, wire receipts and the combined digest, and selects no winner.
+Gate: `tests/test_mtp_option_b_2532.py`.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained

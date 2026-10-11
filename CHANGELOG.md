@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- G3 RAM acquire tests require distinct covers for the stage retry (#2617).
+  The tests verify the complete retry sequence and no retained window after refusal.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers
@@ -44,6 +46,7 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Route the G3 RAM acquire retry through the public refusal classifier (#2617).
 - Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
 - Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
 - Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).
@@ -59,6 +62,16 @@
   PB `b77df200bfdb` passes 7 host-capability tests, `b63327b84bed` passes 3 isolation
   orders, `fbe76d599bc4` passes 3 walk tests standalone, and the remaining DSv4 shards
   pass 36 tests on x86. The unprovisioned spill ceiling case skips with the new reason.
+- Deliver the accepted D44 guard through the repository snapshot (#2481).
+  Preserve its accepted head, bundle digest, frozen owners, and external dependency bindings.
+  Select absolute child paths and the delivered container workspace.
+  Validate the native request before any output write.
+  Apply D32 to external source, template, and module identities.
+  PrismaBuild CPU proofs cover the real route, child argument parsers, and unchanged publication rules.
+  No GPU work or scientific replay ran.
+  The reviewed merge head already contains the current base and both document additions.
+  PB `f1ba86d85911` and `9fe6f5474779` pass all 36 delivery and publication cases after the merge.
+  PB `b3bc8f968a92` executes all three delivered CPU child parsers and compiles 17 files.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
