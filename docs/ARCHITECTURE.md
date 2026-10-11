@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-11 on `prismaquant-1514` for PR #2657 corrective revision 1.
+Native validation retains vLLM automatic block selection outside the declared GLM MTP workaround.
+The draft dtype, native gates, runtime images, and independent GPU qualification requirements remain unchanged.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
@@ -27801,8 +27805,9 @@ provenance, not a gate. `metric_era` matters — records lacking `eval_split` we
 wikitext **train** and are not face-value comparable (`:147-152`).
 
 **`validate_native_export.py`** — does vLLM accept the checkpoint and emit tokens. Defaults
-`--max-new-tokens 16`, `--gpu-memory-utilization 0.55`, `--max-model-len 2048`,
-`--block-size 64` (`_build_parser`); eager by default, `--no-enforce-eager` is the graph-mode
+The numeric defaults are `--max-new-tokens 16`, `--gpu-memory-utilization 0.55`, and `--max-model-len 2048`.
+Automatic block selection is the default, subject to the narrow profile rule below.
+Eager is the default. `--no-enforce-eager` selects the graph-mode
 arm, and **`--both-arms` runs both in one invocation** — the run-both-arms rule used to live
 only in the CLI help text with nothing in code enforcing the second arm; it is now two named
 shipcard slots (`_run_arm`, `_record_arm`, `--shipcard`), and each arm tears its engine
@@ -27810,13 +27815,21 @@ down before the next loads. A failed arm exits 1 instead of raising. Flashinfer 
 the profile's `runtime_package("flashinfer")` (`maybe_upgrade_flashinfer`);
 `--speculative-config` exercises MTP (and marks the record `spec_decode_detected`).
 
-**Explicit block size 64 on validation serves (2026-10-10, PQ #1514).** vLLM's `CacheConfig`
-validator mistakes a resolved auto block size for a user choice when the MTP/EAGLE draft copy
-re-validates it, which constrains draft backend selection to block 16. The validator therefore
-builds every arm with an explicit user block size (`_llm_kwargs`), so the draft inherits the
-target's constraint unchanged while the draft `kv_cache_dtype` stays set. The arm metrics and
-the route-sweep load record the served size, and the shipcard slot carries it in
-`metrics.block_size`. No image change; the kernel support tables are untouched.
+The native validation block size comes from the model profile, not a model-name substring.
+An explicit operator size wins. Otherwise, vLLM retains automatic selection.
+The only automatic workaround uses the detected GLM profile with embedded
+`mtp` or `glm5_next_mtp`, draft `kv_cache_dtype="fp8_ds_mla"`, and no separate draft model.
+`Glm5NextProfile.native_validation_block_size` supplies 64 for that configuration.
+Other configurations, including DeepSeek-V4, retain automatic selection.
+The speculative configuration and its draft dtype remain unchanged.
+
+Arm metrics and route-sweep load fields identify `block_size` as the requested engine input.
+`block_size_source` distinguishes the operator, model workaround, and vLLM automatic path.
+`block_size_semantics` is `requested_engine_input`, not the engine-resolved size.
+Hybrid cache alignment can change that resolved size.
+No image, backend support table, native gate, or qualification state changes.
+CPU source checks do not qualify eager or graph startup.
+Issues #1514 and #2656 retain GPU startup and matched MTP acceptance requirements.
 
 **The profile flashinfer version is a FLOOR, not an exact pin (2026-08-14).**
 `maybe_upgrade_flashinfer` compared `installed == version` and pip-installed the profile
