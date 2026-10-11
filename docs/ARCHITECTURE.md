@@ -89,6 +89,8 @@ It completes eight native CPU children after restart, passes eight fresh actual 
 Duplicate resume exits zero. The native group receipt retains all eight results. The isolated queue and CAS roots are removed.
 The terminal payload is `cas:sha256:46532b28a08a4ffceb235a5377ef37eb84f226183c13c72c9344bf7170771322`.
 These CPU proofs establish control behavior only. They qualify no GPU arithmetic, accepted science, or production deployment.
+Re-stamped 2026-10-10 (PQ #2602): the read-ahead budget holds back measured
+consumer growth. Cost rows, formats, lanes, and gates stay unchanged.
 
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 
@@ -4411,6 +4413,9 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   (`StageBReplaySpill.replay_reserve_host_bytes`) and the rest to the device.
   The sums are unchanged; a guard with no device envelope still charges the
   sum to its cgroup cap.
+  The spill budget also holds back the render stream's measured growth
+  (PQ #2602, Growth reserve below).
+
 - **Owned bytes, sealed and mapped.** A stream reads each file into a memfd
   the engine owns (`SealedBuffer`, `:107`): `preadv` into a populated shared
   mapping, one SHA-256 over those pages, then `F_SEAL_WRITE`, `GROW`,
@@ -4443,6 +4448,28 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   `:825`): on unified memory a stream that counted them free at the take
   would read a further window into memory the consumer still holds.
   `retained_window` drops its tensors before it releases the stream.
+- **Growth reserve (PQ #2602).** The budget holds back the consumer's
+  measured per-window growth before it admits read-ahead.
+  `GuardReadBudget` takes the consumer stream as `growth_stream`.
+  The spill replay's budget watches the render stream.
+  The render stream's own budget takes no growth source.
+  Its own bytes already live in the guard's reading.
+  Derivation: the reserve is the stream's live held bytes
+  (`ReadStream.growth_snapshot`: read-ahead held plus taken but
+  unreleased), with a floor of evicted bytes while reclaim history
+  (`evictions`, `rereads`) says past growth reclaimed read-ahead.
+  The measured `peak_held_bytes` bounds the reserve from above.
+  Bounds: the reserve never exceeds the measured peak.
+  Zero growth reserves zero, and a drained consumer releases all of it.
+  With zero growth `headroom_bytes` answers the old value.
+  When headroom still drops, `GuardReadBudget.reclaim` drops the
+  growth stream's farthest-ahead groups first, and a later take rereads
+  them and counts `rereads`.
+  `tests/test_io_engine.py` proves all four cases on the CPU: growth
+  response, safe admission, release, and emergency reclaim.
+  No cost row, format, lane, or gate changes.
+  `QUANTUM_RECORD_MAX_BYTES` is unchanged.
+
 - **Negative result: a `torch` CPU tensor does not return its pages here.**
   The first read-ahead row (GLM-5.3 layer 7, PB `7290d2373365`) decoded
   each read into a `torch.load(io.BytesIO(raw))` copy. The aggregate check in
