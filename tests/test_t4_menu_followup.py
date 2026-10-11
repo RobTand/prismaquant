@@ -138,7 +138,7 @@ def test_approved_q896_admits_through_the_consumer(monkeypatch, kernel_kind):
     assert admission is not None
     assert admission.measured_allowable
     assert admission.admits("research"), admission.detail
-    assert not admission.admits("vllm_packed_moe")
+    assert not admission.admits("attested")
 
 
 def test_t4_whole_bit_cap_still_waits(monkeypatch):
