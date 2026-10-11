@@ -1,0 +1,128 @@
+{
+  "schema": "pact.energy_instrument_contract.v3",
+  "entry": "stage1a_energy.py",
+  "scope": "The adapter covers routed, shared, dense, attention, and head units. Actual option locators supply research renders. Missing renders remain named gaps.",
+  "raw128": {
+    "sample_range": [
+      384,
+      512
+    ],
+    "input_contract": "raw_512",
+    "prefix_ids": [],
+    "global_original_tokens": 65536
+  },
+  "prefixed64": {
+    "sample_range": [
+      384,
+      448
+    ],
+    "input_contract": "prefixed_514",
+    "prefix_ids": [
+      154822,
+      154824
+    ],
+    "local_prefix_rows": "excluded",
+    "global_original_tokens": 32768,
+    "scored_positions_per_sequence": 511
+  },
+  "energies": {
+    "E_W": "sum ||X*(decoded_W-source_W)^T||^2",
+    "E_A": "sum ||(Q(X)-X)*source_W^T||^2",
+    "E_WA": "sum ||Q(X)*decoded_W^T-X*source_W^T||^2, including weight-activation interaction",
+    "precision": "FP32 products with TF32 disabled; FP64 sums",
+    "normalization": "Sequence JSONL retains raw sums. Closed-cohort unit aggregates normalize once by global original tokens, never expert row counts. Reducer consumes raw sums and does not re-normalize an already normalized aggregate.",
+    "amplitudes": "Measure amplitudes one, two, and four on the same clean rows. Preserve the quadratic joint interaction.",
+    "rounding": "T4 and T8 use decoded BF16 weights. T16 keeps BF16 values and FP32 row scales separate through the dot product.",
+    "measurement_device": "Resolve device aliases from the actual resident source tensor. Keep declared placement, live-row device, and open-sample checks strict in both modes.",
+    "batching": "Read each unit input once per chunk. Form E_A once per activation contract. Keep every actual anchor and per-sequence raw sum."
+  },
+  "collection": {
+    "owner": "Existing _PackedExpertActivationCollector with no retained qnames plus profile-owned derive_per_expert_activations; dense pre-hooks are synchronous.",
+    "prefix": "Remove two positions from clean module input before profile routing/SwiGLU derivation. No assumption about leading rows in an expert's slot-major order.",
+    "empty_routes": "Emit actual zero row counts and exact zero energies for every backed configured option/sample; no native quantizer launch. Missing wire/scale is an exception, never a zero row.",
+    "residency": "Use two source slots and one lookahead. Select explicit option names for each bounded quantum. Retain no activation rows.",
+    "boundaries": "pact.prefixed_clean_frontier.v1 through StreamedBoundaryArtifacts.attach, reference_from_record, existing exact prefetch/get and isolated_layer. Start states carry actual CPU pass_state. Borrow the start owner separately from the parent stop generation; only working intermediate entries are retired. Without receipt, the same owner supports clean layer-major traversal.",
+    "boundary_receipt": "Parent clean_prefix_capture.py schema: cohort, layer_start/layer_stop, sample_ids, dry_run, boundary_config/session, batch_state_path/references at stop, start_references/start_reference_owner/start_batch_state_path. The referenced start generation may be a predecessor. Actual token/shape/layer/owner comparability stays hard; source identity stamps remain advisory."
+  },
+  "quantizers": {
+    "shared_source": "mixed_manifest.py and mixed_injection.py copied from the sibling-owned bundle, not a duplicate scale convention",
+    "A8": "Public native_fp8_quant on GPU, accepted attested oracle on CPU; separate contiguous TP2 down slices, full gate/up input",
+    "A4": "Actual canonical A4 ExportScales config and complete layer roster; effective routed G is FP32 reciprocal(max(reciprocal(raw G))) for w13 and w2. Dense/shared use actual config-bound fused-module scalar. Preserve every raw G/source/group/member scope.",
+    "A16": "bf16_unquantized; no activation quantization",
+    "SOURCE": "Actual passthrough contract remains bf16_unquantized, never changed to A8"
+  },
+  "reducer": {
+    "gain_schema": "pact.band_gains.v1",
+    "anchor": "Every T8 rate uses one measured R1024 reference in its unit. Use the reference energy at the actual gain anchor amplitude.",
+    "T8_reference": "The actual reference must be compatible, present, and constant across rates and paired sequences. Legacy options select their backed R1024 option, not a non-R1024, SOURCE, or T16 primary. Explicit sample references stay common across the unit.",
+    "T16_reference": "The fixed T16 eight-bit sample keeps its separate R2048 reference. Do not substitute the T8 reference.",
+    "tokens": "The gain producer hashes64 actual prefixed token sequences. The price consumer compares the original-token hash with the energy and anchor populations.",
+    "coverage": "Require64 unique samples for each actual option. MLP units retain A8S, A4, and EXL3 coverage. New units require their actual baseline.",
+    "routed": "W_T4/A4 or W_T8/A8, count signed interaction once",
+    "nonrouted_T4": "Direct joint_T4_A4 gain on E_WA, never separate invented W_T4/A4 coefficients",
+    "nonrouted_T8": "Newly approved measured W_T8 plus A8 streams; missing measured gain is refused",
+    "nonrouted_T16": "The gain-transfer assumption does not qualify folded BF16 T16 renders. Canonical T16 must keep values and row scales separate through the dot product.",
+    "nonlinear": "dec-1006-222901-94f0: each own-unit positive leg T(E)=E_anchor*(E/E_anchor)^alpha, alpha inside0.8..1.25 linear; zero own anchor with positive candidate unidentifiable. No clipping or G3-arm fitting.",
+    "heterogeneity": "Use the published class contrasts, first_band, second_band, and paired_bootstrap_se. Keep the single-alpha and paired heterogeneity stops. Do not assume independent uncertainty.",
+    "routed_T16": "Use the measured routed W_T16 gain and the declared canonical T16 anchor. Permit different rates only when the actual numerical contracts match. Use the candidate only when no anchor_source is declared. Do not borrow a routed W_T8 coefficient.",
+    "attention_T4": "Use the direct joint_T4_A4 gain. Count the joint interaction once.",
+    "phase_axes": "Use pact.required_gain_axes.v1 to declare each required band, class and kind. Missing, duplicate and unrequested axes refuse.",
+    "amplitude_pair": "Retain the accepted 1/2 or 2/4 fit. Treat the third amplitude as a diagnostic and preserve the 2/4 fallback.",
+    "scientific_publication": "Require T1-T5, V1-V4, the prospective quality gate and the decisive T16 arm. Check actual proof bytes, cohort and gain axes. Pending or failed evidence does not authorize scientific publication.",
+    "matched_uncertainty": "Use 2048 matched sequence draws at seed20261006 for gains and energies. Resample panel experts inside those same draws. Use the declared anchor for both the point estimate and uncertainty. Report each decision unit separately. Do not claim a model-sum interval.",
+    "stack_scope": "Use pact.panel_stack_scope.v1 with explicit reference units, panel units, price sources and own-anchor sources. Preserve unrelated exact unit prices. Publish estimates only for declared stacks.",
+    "stack_equation": "Multiply the full measured R1024 reference energy by the panel candidate-to-reference ratio. A zero reference cannot identify this ratio. Exact BF16 activation energy remains zero.",
+    "T8_activation": "Retain the A8 term in every total T8 price. The one-eighth bound applies only to a component with its measured ratio."
+  },
+  "panels": "Keep the full allowable range. Price fractional quality through whole-bit energy chords. Admit no unmeasured D41 time row.",
+  "CPU_proof": "Same entry through /home/rob/venvs/pb-cpu/bin/python, tag x86, CPU1, memory8GiB, threads1, TMPDIR=/tmp. Real source/header/A8/A4/full-EXL3/scales/capture reads and same synchronous row consumer on real4096x2048 source Linear. Diagnostic retained rows are not clean full heldout energies, native GPU proof or prices.",
+  "GPU_readset": "Declare the complete source phase resident_before_launch true. Use the published PB runtime with PR1593. PB must retain every phase chunk until the consumer ends. A GPU cannot claim before all phase chunks and their map are resident.",
+  "CPU_readset": "Stage the complete CPU quantum in one setup phase. Keep every input lease live until the consumer finishes.",
+  "pilot_resource_bounds": {
+    "status": "unmeasured pilot bounds, not runtime qualification",
+    "time": "The CEO PACT order permits priority10 ordinary exclusive portable actions. Keep the1800-second cap, fresh D38/D1/D30 and D44 precedence.",
+    "memory": "Current layer BF16 A8/A4/EXL3 decoded planes plus two resident source layers, one decoded temporary, chunk256 products and exact boundary windows. Start only with parent-measured peak plus3GiB. In-run guard aborts below2GiB.",
+    "output": "Raw128 closed layer: selected_units*128*backed_options JSONL rows; prefixed64 uses64. Global original-token denominator is fixed for the cohort, not for a truncated prefix."
+  },
+  "identity_policy": "D32 recorded source/render identities stamp and continue; actual current bytes/digests, shapes, tokens and safety still refuse",
+  "replay": {
+    "entry": "band_replay.py",
+    "teacher": "Use a completed clean teacher receipt at layer45 for all64 prefixed samples.",
+    "teacher_content": "multi_stream_replay.py requires --teacher-content (pact.prefixed_teacher_validation.v1) and --teacher-content-sha256. Proof bytes, samples, cohort, tokens and array geometry refuse in both modes. Array bytes and batch-state bytes refuse when they differ from their content digests. Recorded paths and the recorded receipt digest use seal_check.",
+    "output": "One action publishes pact.band_stream.v1. The assembler emits pact.band_observations.v1 for the real gain producer.",
+    "classes": "Keep the routed and nonrouted MLP classes. Measure attention and head gains separately. Do not borrow MLP coefficients.",
+    "energy_comparability": "Resolve each replay option once before energy validation. Require the same family, rate, activation contract, TP split, and effective static scale. Refuse numerical differences in both modes. Reuse those resolved options for injection; historical labels remain advisory.",
+    "T16": "Measure actual routed W_T16 and separate attention/head W_T16. Keep canonical BF16 values and FP32 scales separate. Missing gains remain refused.",
+    "deadline": "Use a deadline of1700 seconds inside the job. The parent launcher must enforce the1800-second wall limit.",
+    "multi_stream_entry": "multi_stream_replay.py accepts an explicit pact.stream_roster.v1 roster and one exact window. Each layer install serves all independent streams.",
+    "coordinates": "band_start/band_stop identify perturbations. replay_start/replay_stop identify the tail. Each admitted window covers only window_start:window_stop.",
+    "checkpoint": "The owner validates every stream before publication. Unique batch files and an exclusive atomic JSON commit preserve existing state after failure.",
+    "checkpoint_reads": "Incoming JSON and batch files require staged leases. Restored token dtype, shape and bytes match actual inputs before any layer executes.",
+    "next_dependencies": "next_window_dependencies requires the actual checkpoint_file. It returns that exact JSON path and every batch path for the next window.",
+    "borrowed_owner": "Keep the original clean start owner. Retire only per-stream working entries. Never replace resumed perturbations with clean state.",
+    "roster": "Use one clean null per band. Resolve each stream option from the complete existing unit menu. Reuse that resolution for readsets and injection.",
+    "readset": "Use --prepare-readset through build_manifest.ReadPlan. Declare only the window source layers, exact energy rows, roster, teacher and prerequisite state.",
+    "readset_residency": "Keep each full input phase resident before launch. Stop lookahead at the admitted window boundary. Missing inputs refuse.",
+    "generation_identity": "Historical receipt digests and generation identities use the existing shared seal_check. Actual windows, tokens, shapes, coordinates and bytes-versus-own-digest checks stay strict.",
+    "null_telemetry": "A clean null has no injections. Keep empty-lease telemetry in empty_lease_telemetry. Preserve the assembler refusal for actual null injections.",
+    "output_parents": "Create each declared output parent before the first output write. A fresh CPU capture needs no manual directory step."
+  },
+  "source_leases": "GPU inputs require the published PB covering lease. A missing range refuses the run. The CPU entry can require the same policy.",
+  "footprint": "Record all installed layers, source cache entries, completed prefetches, the head, render planes, queues, and replay states. Keep sampled values separate from allocator peaks.",
+  "measurement": "A speed claim requires matched actual inputs, before-and-after Torch profiles and Netdata power on both Sparks. Footprint samples are not operator-time profiles.",
+  "source_qualification": "CPU fixtures and exact-head source review do not qualify native GPU arithmetic, full price coverage, D41 or serving admission.",
+  "whole_layer_GPU_readiness": "Admit each complete render lifetime before any render read or decode. Use ProductionWeightCache for every retained plane. Preserve separate canonical T16 scales. This budget excludes transient allocations, source tensors and replay states.",
+  "profiling": {
+    "entry": "Run profile_entry.py OUTPUT ENTRY ENTRY_ARGS_JSON cpu|cuda. Pass the unchanged entry arguments.",
+    "capture": "Capture the first sequence item only. Export that window before the next item. Retain no profiler or event collection after the window.",
+    "tables": "Build no operator tables in the GPU process. This entry produces no operator tables.",
+    "scope": "The bounded trace is a diagnostic window. It does not provide full-run operator totals or qualify a GPU rate.",
+    "timing": "Entry wall time includes the bounded trace export and one cycle collection. It excludes the wrapper Torch import."
+  },
+  "progress": {
+    "cadence": "Report each completed band sequence and teacher score through the existing helper. Flush and fsync each energy sequence before its report.",
+    "score_journal": "Append each teacher sequence_record to scores-WINDOW_START-WINDOW_STOP-STREAM_ID.jsonl. Flush and fsync the journal before the progress report. Keep prior partials. A crash replay can append repeated sample_id records. Remove duplicates by sample_id for diagnosis. Use final science documents for science.",
+    "scope": "Keep the 104 GiB roof and the 8 GiB margin. Keep all scientific populations, quality stops, tolerances, and lifetime counters."
+  },
+  "architecture_scope": "This standalone instrument changes no production default, stage graph, serving pin, format menu or ship gate. docs/ARCHITECTURE.md remains unchanged."
+}
