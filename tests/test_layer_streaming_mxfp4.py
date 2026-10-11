@@ -37,7 +37,8 @@ from prismaquant.layer_streaming import (
 # importing native DSv4 before these tests detect their synthetic checkpoints.
 # Reuse the suite's existing child-process isolation rather than weaken that
 # correctly fatal vendor-identity guard or rewrite another module's imports.
-pytestmark = pytest.mark.own_process
+pytestmark = [pytest.mark.own_process,
+              pytest.mark.usefixtures("pinned_pb_source")]
 
 CPU = torch.device("cpu")
 

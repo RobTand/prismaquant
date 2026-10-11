@@ -175,7 +175,7 @@ def _refuse(reason: str, *, kind: str) -> LeaseRefused:
     return LeaseRefused(reason, kind=kind)
 
 
-def _classify(refusal: str) -> str:
+def classify_refusal(refusal: str) -> str:
     """Integrity or availability for an SDK refusal string."""
     head = str(refusal).split(":", 1)[0]
     if head in _INTEGRITY_REFUSALS:
@@ -183,6 +183,11 @@ def _classify(refusal: str) -> str:
     if head in _AVAILABILITY_REFUSALS:
         return "availability"
     return "integrity"
+
+
+#: Private alias kept for one release (PQ #2616). New code imports
+#: ``classify_refusal``.
+_classify = classify_refusal
 
 
 def set_lease_helper_root(path: str | Path | None) -> None:
@@ -914,7 +919,7 @@ def resolve_ram_covers(resolver, declared, entry):
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     got = expected.get(key) if isinstance(expected, dict) else None
     if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
@@ -967,7 +972,7 @@ def resolve_stage_covers(resolver, declared, entry):
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     got = expected.get(key) if isinstance(expected, dict) else None
     if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
@@ -1064,7 +1069,7 @@ def _resolve_window_covers(resolver, items, *, tier_id: str, epoch: str,
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     for key, (_declared, entry) in zip(keys, items):
         got = expected.get(key) if isinstance(expected, dict) else None
@@ -1445,7 +1450,7 @@ class LeaseWindow:
                 if not isinstance(answer, dict) or not answer.get("ok"):
                     refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if not isinstance(answer, dict) or not answer.get("ok"):
-                raise _refuse(str(refusal), kind=_classify(refusal))
+                raise _refuse(str(refusal), kind=classify_refusal(refusal))
         # Successful acquire: bind state without reporting entry until the
         # very end. Any failure below releases exactly the just-acquired
         # ref (ids known) or retains the idempotent token for an explicit

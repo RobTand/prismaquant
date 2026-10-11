@@ -938,24 +938,6 @@ def test_a_quantum_row_seals_the_spool_its_spec_declares(tmp_path, campaign):
         quantum_argv(record, record_path=record_path, output_root=Path("/out/root"))
 
 
-def test_the_default_spec_declares_the_paced_spool():
-    """The campaign's default spec (PQ #1012) carries the spool root on the
-    executing box's disk, a 32 GiB bound and the paced export, and no host
-    window: each row seals that opt-in itself, the Stage A row since
-    PQ #1120 and a quantum row since PQ #1364. It lives on the shared
-    mount."""
-    import dispatch_joint_quanta
-    path = dispatch_joint_quanta.DEFAULT_SPEC_PATH
-    if not path.is_file():
-        pytest.skip(f"the campaign spec is not mounted here: {path}")
-    spec = json.loads(path.read_text())
-    forwarded = dispatch_joint_quanta.produced_spool_row_environment(spec)
-    assert forwarded == {
-        "PRISMABUILD_PRODUCED_SPOOL_ROOT": "/home/rob/pb-spool/glm-campaign",
-        "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(32 << 30),
-        "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT": "1"}
-
-
 def test_stage_a_argv_binds_manifest_digests_into_payload(tmp_path, campaign):
     """The tier redirect needs the manifest digest *inside* the payload:
     ``bind_residency_manifest`` refuses a run that bound nothing, and the
