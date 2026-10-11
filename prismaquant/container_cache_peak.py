@@ -423,10 +423,11 @@ def _require_gpu_workload(receipt) -> None:
                       f"{prefix}.shape", "missing or malformed probe shape")
     _require_evidence(_finite(probe.get("probe_s"), 0), f"{prefix}.probe_s",
                       "missing or malformed probe duration")
-    from .kernels.kda_chunk import KERNEL_KEYS
-
-    compiled_names = sorted(f"{name}_{'inclusive' if inclusive else 'strict'}"
-                            for name, inclusive in KERNEL_KEYS)
+    # The v1 probe result lists both modes of all three Gram kernels.
+    # Validate its grammar without importing the CUDA/Triton implementation.
+    compiled_names = sorted(f"{name}_{mode}"
+                            for name in ("gram_fwd", "gram_bwd_rows", "gram_bwd_cols")
+                            for mode in ("inclusive", "strict"))
     _require_evidence(probe.get("compiled") == compiled_names,
                       f"{prefix}.compiled", "missing complete compiled probe results")
 
