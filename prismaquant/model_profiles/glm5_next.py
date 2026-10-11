@@ -270,6 +270,15 @@ class Glm5NextProfile(ModelProfile):
     # ------------------------------------------------------------
     # Serving
     # ------------------------------------------------------------
+    def native_validation_block_size(self, speculative_config: dict | None) -> int | None:
+        """Keep the embedded sparse-MLA draft dtype without the auto-copy defect."""
+        if (speculative_config is not None
+                and speculative_config.get("method") in {"mtp", "glm5_next_mtp"}
+                and speculative_config.get("kv_cache_dtype") == "fp8_ds_mla"
+                and speculative_config.get("model") is None):
+            return 64
+        return None
+
     def vllm_architecture_class(self):
         # TODO(serving): unknown to this tree. No vLLM class for glm5_next
         # is importable from the pinned serving stacks, so nothing here can

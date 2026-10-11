@@ -164,20 +164,24 @@ def _resolve_validation_target_profile(
     fallback on a checkpoint it was just told it cannot reason about is
     validating the wrong thing.
     """
-    from .model_profiles.registry import DeadVendoredOverrideError, detect_profile
     from .serving_profiles import resolve_target_profile
 
-    try:
-        profile = detect_profile(str(model_dir))
-    except DeadVendoredOverrideError:
-        raise
-    except Exception:
-        profile = None
     return resolve_target_profile(
-        profile,
+        _validation_model_profile(model_dir),
         requested,
         default="vllm_packed_moe",
     )
+
+
+def _validation_model_profile(model_dir: str | Path):
+    from .model_profiles.registry import DeadVendoredOverrideError, detect_profile
+
+    try:
+        return detect_profile(str(model_dir))
+    except DeadVendoredOverrideError:
+        raise
+    except Exception:
+        return None
 
 
 def summarize_quantization_config(cfg_path: Path) -> None:
@@ -217,7 +221,8 @@ def _install_route_sweep_hooks(llm, sweep_path: Path | None):
 
 
 def _write_route_sweep(llm, sweep_path: Path | None, hooks, *, model_dir: Path,
-                       spec, enforce_eager: bool, args, prompt_ran: bool):
+                       spec, enforce_eager: bool, args, prompt_ran: bool,
+                       block_size: int | None):
     """Write this arm's served-route sweep beside the smoke's verdict.
 
     The sweep is taken from THE SAME loaded engine that just generated, so the
@@ -233,6 +238,7 @@ def _write_route_sweep(llm, sweep_path: Path | None, hooks, *, model_dir: Path,
         "quantization": NATIVE_QUANTIZATION,
         "enforce_eager": bool(enforce_eager),
         "speculative_config": spec is not None,
+        **_block_size_metrics(args, block_size),
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": args.max_model_len,
         "prompt": args.prompt,
@@ -264,6 +270,35 @@ def _route_sweep_path(args, arm: str) -> Path | None:
     return Path(args.route_sweep_out)
 
 
+def _validation_block_size(args, model_dir: Path, spec: dict | None) -> int | None:
+    if args.block_size is not None:
+        return args.block_size
+    profile = _validation_model_profile(model_dir)
+    return profile.native_validation_block_size(spec) if profile is not None else None
+
+
+def _block_size_metrics(args, block_size: int | None) -> dict:
+    source = ("operator" if args.block_size is not None else
+              "model_profile_workaround" if block_size is not None else "vllm_auto")
+    return {"block_size": block_size, "block_size_source": source,
+            "block_size_semantics": "requested_engine_input"}
+
+def _llm_kwargs(args, model_dir: Path, spec: dict | None, *,
+                enforce_eager: bool) -> dict:
+    """Build engine inputs without claiming runtime acceptance or resolved size."""
+    return {
+        "model": str(model_dir),
+        "quantization": NATIVE_QUANTIZATION,
+        "trust_remote_code": True,
+        "enforce_eager": enforce_eager,
+        "block_size": _validation_block_size(args, model_dir, spec),
+        "gpu_memory_utilization": args.gpu_memory_utilization,
+        "max_model_len": args.max_model_len,
+        "max_num_seqs": 1,
+        "speculative_config": spec,
+    }
+
+
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
@@ -280,16 +315,8 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
 
     llm = None
     try:
-        llm = LLM(
-            model=str(model_dir),
-            quantization=NATIVE_QUANTIZATION,
-            trust_remote_code=True,
-            enforce_eager=enforce_eager,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            max_model_len=args.max_model_len,
-            max_num_seqs=1,
-            speculative_config=spec,
-        )
+        llm_kwargs = _llm_kwargs(args, model_dir, spec, enforce_eager=enforce_eager)
+        llm = LLM(**llm_kwargs)
         hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
@@ -304,9 +331,11 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         sweep_written = _write_route_sweep(
             llm, sweep_path, hooks,
             model_dir=model_dir, spec=spec, enforce_eager=enforce_eager,
-            args=args, prompt_ran=produced > 0)
+            args=args, prompt_ran=produced > 0,
+            block_size=llm_kwargs["block_size"])
         metrics = {"arm": arm, "generated_chars": produced,
                    "enforce_eager": enforce_eager,
+                   **_block_size_metrics(args, llm_kwargs["block_size"]),
                    "max_new_tokens": args.max_new_tokens}
         if sweep_written is not None:
             metrics["route_sweep"] = str(sweep_written)
@@ -367,7 +396,7 @@ def _record_arm(args, model_dir: Path, spec: dict | None, verdict: dict) -> None
     fill_if_requested(args.shipcard, f"native_export.{arm}", record)
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     from .serving_profiles import serving_profile_names
 
     ap = argparse.ArgumentParser()
@@ -377,6 +406,10 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.55)
     ap.add_argument("--max-model-len", type=int, default=2048)
+    ap.add_argument("--block-size", type=int, default=None,
+                    help="Explicit operator block size. By default vLLM selects "
+                         "the size, except for the model-profile-owned embedded "
+                         "GLM MTP draft fp8_ds_mla workaround (64).")
     ap.add_argument("--target-profile", default=None,
                     choices=serving_profile_names(),
                     help="Serving profile whose runtime package pins should "
@@ -415,7 +448,11 @@ def main():
                     help="Path to the artifact's shipcard.json; the arm's "
                          "verdict is appended to native_export.<arm> "
                          "(see python -m prismaquant.shipcard_cli).")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = _build_parser().parse_args()
 
     model_dir = Path(args.model)
     target_profile = _resolve_validation_target_profile(

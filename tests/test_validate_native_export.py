@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+import prismaquant.validate_native_export as vne
 from prismaquant.validate_native_export import (
     _flashinfer_runtime_package,
     _resolve_validation_target_profile,
@@ -146,3 +147,121 @@ def test_an_unquantized_checkpoint_keeps_its_legacy_behavior(tmp_path):
     change what a dense smoke does today, which is not this issue's bargain."""
     _write_config(tmp_path, None)
     assert require_native_lane_artifact(tmp_path) is None
+
+# ---------------------------------------------------------------------------
+# Explicit block size on MTP draft serves (RobTand/prismaquant#1514)
+# ---------------------------------------------------------------------------
+def _stub_vllm(monkeypatch):
+    """Record engine inputs only. This stub cannot prove runtime acceptance."""
+    calls = {}
+
+    class _Resp:
+        prompt = "p"
+        outputs = [types.SimpleNamespace(text="smoke output")]
+
+    class LLM:
+        def __init__(self, **kwargs):
+            calls.update(kwargs)
+
+        def generate(self, prompts, params):
+            return [_Resp()]
+
+    module = types.ModuleType("vllm")
+    module.LLM = LLM
+    module.SamplingParams = lambda **kw: types.SimpleNamespace(**kw)
+    monkeypatch.setitem(sys.modules, "vllm", module)
+    return calls
+
+
+def _arm_args(**overrides):
+    base = {
+        "gpu_memory_utilization": 0.55,
+        "max_model_len": 2048,
+        "max_new_tokens": 16,
+        "prompt": "hi",
+        "route_sweep_out": None,
+        "block_size": 64,
+    }
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def test_draft_serve_keeps_an_explicit_user_block_size(monkeypatch, tmp_path):
+    """The engine build names a user block size with the draft dtype kept."""
+    calls = _stub_vllm(monkeypatch)
+    spec = {"method": "glm5_next_mtp", "num_speculative_tokens": 1,
+            "kv_cache_dtype": "fp8_ds_mla"}
+    verdict = vne._run_arm(_arm_args(), tmp_path, spec, enforce_eager=True)
+    assert verdict["passed"] is True
+    assert calls["block_size"] == 64
+    assert calls["speculative_config"]["kv_cache_dtype"] == "fp8_ds_mla"
+
+
+def test_explicit_operator_size_covers_speculative_and_plain_serves(monkeypatch, tmp_path):
+    """This unit wiring check does not qualify target or draft startup."""
+    calls = _stub_vllm(monkeypatch)
+    vne._run_arm(_arm_args(), tmp_path, None, enforce_eager=True)
+    plain = calls["block_size"]
+    calls.clear()
+    spec = {"method": "glm5_next_mtp", "num_speculative_tokens": 1,
+            "kv_cache_dtype": "fp8_ds_mla"}
+    vne._run_arm(_arm_args(), tmp_path, spec, enforce_eager=True)
+    assert calls["block_size"] == plain == 64
+
+
+def test_block_size_lands_on_the_shipcard_record(monkeypatch, tmp_path):
+    """The verdict metrics carry the block size to the shipcard slot."""
+    _stub_vllm(monkeypatch)
+    verdict = vne._run_arm(_arm_args(), tmp_path, None, enforce_eager=False)
+    assert verdict["metrics"]["block_size"] == 64
+
+
+def test_block_size_default_is_automatic_and_stays_overridable():
+    parser = vne._build_parser()
+    assert parser.parse_args(["--model", "m"]).block_size is None
+    assert parser.parse_args(
+        ["--model", "m", "--block-size", "16"]).block_size == 16
+
+
+@pytest.mark.parametrize("model_type,spec,expected", [
+    ("glm5_next", {"method": "glm5_next_mtp", "kv_cache_dtype": "fp8_ds_mla"}, 64),
+    ("glm5_next_text", {"method": "mtp", "kv_cache_dtype": "fp8_ds_mla"}, 64),
+    ("glm5_next", None, None),
+    ("glm5_next", {"method": "glm5_next_mtp"}, None),
+    ("glm5_next", {"method": "glm5_next_mtp", "kv_cache_dtype": "auto"}, None),
+    ("glm5_next", {"method": "ngram", "kv_cache_dtype": "fp8_ds_mla"}, None),
+    ("glm5_next", {"method": "qwen3_5_mtp", "kv_cache_dtype": "fp8_ds_mla"}, None),
+    ("glm5_next", {"method": "glm5_next_mtp", "kv_cache_dtype": "fp8_ds_mla", "model": "other"}, None),
+    ("qwen3", {"method": "mtp", "kv_cache_dtype": "fp8_ds_mla"}, None),
+    ("deepseek_v4", None, None),
+    ("deepseek_v4", {"method": "mtp", "kv_cache_dtype": "fp8_ds_mla"}, None),
+    ("unknown_glm5_next", {"method": "glm5_next_mtp", "kv_cache_dtype": "fp8_ds_mla"}, None),
+])
+@pytest.mark.parametrize("enforce_eager", [True, False])
+def test_block_policy_follows_the_model_contract(tmp_path, model_type, spec, expected, enforce_eager):
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+    args = vne._build_parser().parse_args(["--model", str(tmp_path)])
+    kwargs = vne._llm_kwargs(args, tmp_path, spec, enforce_eager=enforce_eager)
+    assert kwargs.get("block_size") == expected
+    assert kwargs["speculative_config"] == spec
+
+
+@pytest.mark.parametrize("size", [16, 64, 256])
+@pytest.mark.parametrize("model_type", ["glm5_next", "deepseek_v4", "qwen3"])
+def test_operator_block_size_wins_over_model_policy(tmp_path, model_type, size):
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+    args = vne._build_parser().parse_args(["--model", str(tmp_path), "--block-size", str(size)])
+    spec = {"method": "glm5_next_mtp", "kv_cache_dtype": "fp8_ds_mla"}
+    assert vne._llm_kwargs(args, tmp_path, spec, enforce_eager=True)["block_size"] == size
+
+
+def test_requested_block_size_metrics_do_not_claim_runtime_resolution(monkeypatch, tmp_path):
+    calls = _stub_vllm(monkeypatch)
+    (tmp_path / "config.json").write_text('{"model_type": "glm5_next"}')
+    spec = {"method": "glm5_next_mtp", "kv_cache_dtype": "fp8_ds_mla"}
+    verdict = vne._run_arm(_arm_args(block_size=None), tmp_path, spec, enforce_eager=True)
+    assert calls["block_size"] == 64
+    assert verdict["metrics"]["block_size"] == 64
+    assert verdict["metrics"]["block_size_source"] == "model_profile_workaround"
+    assert verdict["metrics"]["block_size_semantics"] == "requested_engine_input"
+

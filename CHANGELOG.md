@@ -44,6 +44,12 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- PR #2657 scopes the block-size workaround to the detected GLM model profile.
+  Embedded `mtp` or `glm5_next_mtp` with draft `kv_cache_dtype="fp8_ds_mla"` requests 64.
+  Other native validation serves retain vLLM automatic block selection. Explicit operator sizes remain unchanged.
+  Arm metrics and route sweeps identify the size as the requested engine input, not the runtime-resolved size.
+  The draft dtype, runtime images, backend tables, and independent native gates remain unchanged.
+  CPU tests do not qualify MTP startup or acceptance. Issues #1514 and #2656 remain open.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

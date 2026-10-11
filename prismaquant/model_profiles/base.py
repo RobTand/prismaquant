@@ -1161,6 +1161,10 @@ class ModelProfile(ABC):
             return spec.default_serving_profile
         return None
 
+    def native_validation_block_size(self, speculative_config: dict | None) -> int | None:
+        """Return a model-specific smoke workaround, or leave selection to vLLM."""
+        return None
+
     # ------------------------------------------------------------
     # Export-lane eligibility
     # ------------------------------------------------------------
