@@ -44,6 +44,8 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Native validation propagates staged metadata refusals instead of selecting an automatic engine configuration (#1514).
+  Unregistered architectures retain the profile owner's deliberate fallback.
 - PR #2657 scopes the block-size workaround to the detected GLM model profile.
   Embedded `mtp` or `glm5_next_mtp` with draft `kv_cache_dtype="fp8_ds_mla"` requests 64.
   Other native validation serves retain vLLM automatic block selection. Explicit operator sizes remain unchanged.

@@ -96,14 +96,34 @@ def test_flashinfer_absent_still_installs(monkeypatch):
     assert calls, "no flashinfer at all must still install the pinned version"
 
 
-def test_validation_target_profile_defaults_from_model_config(tmp_path):
-    (tmp_path / "config.json").write_text(
-        '{"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}'
-    )
+@pytest.mark.parametrize("model_type,architecture", [
+    ("qwen3", "Qwen3ForCausalLM"),
+    ("not_registered", "NotRegisteredForCausalLM"),
+])
+def test_validation_target_profile_defaults_from_model_config(tmp_path, model_type, architecture):
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"model_type": model_type, "architectures": [architecture]}
+    ))
 
     assert _resolve_validation_target_profile(tmp_path, None) == "vllm_packed_moe"
     assert _resolve_validation_target_profile(tmp_path, "research") == "research"
 
+
+@pytest.mark.parametrize("entrypoint", ["target_profile", "engine_kwargs"])
+def test_staged_config_refusal_never_becomes_a_validation_configuration(tmp_path, entrypoint):
+    from prismaquant import validate_native_export as validation
+    from prismaquant.staged_tier_policy import TierPolicyRefused, staged_tier_policy_test_context
+
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+    ))
+    args = validation._build_parser().parse_args(["--model", str(tmp_path)])
+    with staged_tier_policy_test_context("ram,ssd"):
+        with pytest.raises(TierPolicyRefused, match="metadata-readset-not-staged"):
+            if entrypoint == "target_profile":
+                validation._resolve_validation_target_profile(tmp_path, None)
+            else:
+                validation._llm_kwargs(args, tmp_path, None, enforce_eager=True)
 
 # ---------------------------------------------------------------------------
 # The gate's lane (RobTand/prismaquant#119 half 1)

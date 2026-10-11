@@ -1,6 +1,6 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-11 on `prismaquant-1514` for PR #2657 corrective revision 1.
+Re-stamped 2026-10-11 on `prismaquant-1514` for PR #2657 corrective revision 2.
 Native validation retains vLLM automatic block selection outside the declared GLM MTP workaround.
 The draft dtype, native gates, runtime images, and independent GPU qualification requirements remain unchanged.
 
@@ -27822,6 +27822,8 @@ The only automatic workaround uses the detected GLM profile with embedded
 `Glm5NextProfile.native_validation_block_size` supplies 64 for that configuration.
 Other configurations, including DeepSeek-V4, retain automatic selection.
 The speculative configuration and its draft dtype remain unchanged.
+The profile owner supplies the deliberate fallback for unregistered architectures.
+Staged metadata refusals and operator errors propagate; they do not select an automatic engine configuration.
 
 Arm metrics and route-sweep load fields identify `block_size` as the requested engine input.
 `block_size_source` distinguishes the operator, model workaround, and vLLM automatic path.

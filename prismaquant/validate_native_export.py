@@ -174,14 +174,11 @@ def _resolve_validation_target_profile(
 
 
 def _validation_model_profile(model_dir: str | Path):
-    from .model_profiles.registry import DeadVendoredOverrideError, detect_profile
+    from .model_profiles.registry import detect_profile
 
-    try:
-        return detect_profile(str(model_dir))
-    except DeadVendoredOverrideError:
-        raise
-    except Exception:
-        return None
+    # The owner returns DefaultProfile for an unregistered architecture.
+    # Source-integrity and operator errors are not unknown-profile fallbacks.
+    return detect_profile(str(model_dir))
 
 
 def summarize_quantization_config(cfg_path: Path) -> None:
@@ -273,8 +270,7 @@ def _route_sweep_path(args, arm: str) -> Path | None:
 def _validation_block_size(args, model_dir: Path, spec: dict | None) -> int | None:
     if args.block_size is not None:
         return args.block_size
-    profile = _validation_model_profile(model_dir)
-    return profile.native_validation_block_size(spec) if profile is not None else None
+    return _validation_model_profile(model_dir).native_validation_block_size(spec)
 
 
 def _block_size_metrics(args, block_size: int | None) -> dict:
