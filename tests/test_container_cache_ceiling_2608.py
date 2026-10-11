@@ -281,11 +281,20 @@ def test_quantum_cpu_request_disagrees_with_cuda_compile_results():
         peak_mod.derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0)
 
 
-def test_quantum_checkpoint_must_cover_declared_layer():
+@pytest.mark.parametrize("checkpoints", [[0], [0, 1], [1]])
+def test_quantum_checkpoint_must_reach_incoming_boundary(checkpoints):
     receipt = _quantum_fixture()
-    receipt["workload"]["checkpoints"] = [0, 2]
+    receipt["workload"]["checkpoints"] = checkpoints
     with pytest.raises(ValueError, match="no usable checkpoint"):
         peak_mod.derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0)
+
+
+@pytest.mark.parametrize("checkpoints", [[2], [0, 2], [3]])
+def test_quantum_checkpoint_at_or_above_incoming_boundary_is_usable(checkpoints):
+    receipt = _quantum_fixture()
+    receipt["workload"]["checkpoints"] = checkpoints
+    assert peak_mod.derive_cache_ceiling_from_receipt(receipt, headroom_bytes=0) == (
+        peak_mod.derive_cache_ceiling(1024, headroom_bytes=0))
 
 
 def test_distinct_cuda_indices_are_permitted_with_complete_results():
