@@ -44,6 +44,7 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).
 - Give the G3 tests their own package namespace so mixed sessions retain the root fixtures (#2680).
 - Stage B spill qualification runs on provisioned private scratch with real direct I/O (#2594).
   The `_spill_root` helper serves spill acquisition only from `PQ_STAGE_B_SPILL_TEST_ROOT`
