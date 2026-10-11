@@ -282,8 +282,8 @@ Scope recipes use the digest owner's strict, ASCII-escaped, default-spaced JSON 
 Class identities use its lax profile. Exact cache bytes and nonfinite policies remain unchanged.
 The selected table, explicit index, unit scopes, chord sources and class
 cost sources remain in allocation and frontier provenance.
-The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
-Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The pure metadata dependency is Tessera `8f881a7248f86321beee1c40f15ea3cc617591ff`.
+Its module SHA-256 is `c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c`.
 The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
 The existing isolated test adapter fetches that module when no source is
 supplied. No untracked producer, serving overlay or global feature skip is required.
