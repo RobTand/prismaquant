@@ -383,8 +383,8 @@ def test_explicit_token_enumerates_each_commissioned_family():
     assert set(profile.campaign_dense_unit_names(model, allow_pinned=tokens)) == set(
         quantizable + commissioned + [head])
     partial = profile.campaign_dense_unit_names(model, allow_pinned="indexer.weights_proj")
-    linears = [name for name in commissioned if not name.endswith(".mlp.gate")]
-    assert set(partial) == set(quantizable + linears + [head])
+    selected = [name for name in commissioned if "indexer.weights_proj" in name]
+    assert set(partial) == set(quantizable + selected + [head])
 
 
 @pytest.mark.parametrize("token", [None, "indexer.weights_proj"])
@@ -392,7 +392,7 @@ def test_campaign_owner_metadata_preserves_unselected_pins(token):
     model, quantizable, commissioned, head = _explicit_select_model()
     profile = Glm5NextProfile()
     roster = tc.campaign_roster(
-        profile.campaign_dense_unit_names(model, allow_pinned=token), profile,
+        profile.campaign_dense_owner_names(model), profile,
         allow_pinned=token)
     selected = [name for name in commissioned if token and token in name]
     expected_pins = set(commissioned) - set(selected)

@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-11 (Refs #2400, PR #2653): the model profile separates owner metadata from dense pricing candidates.
+
+The dense owner inventory comes from `campaign_dense_owner_names` and the existing `is_dense_parameter_owner` rule.
+The campaign roster consumes that complete inventory, so population metadata retains unselected pins and their count.
+GLM `campaign_dense_unit_names` excludes explicit-selection owners unless an allow token matches.
+Head and embedding policies, the BF16 source model, and default campaign targets stay unchanged.
+Serving and export pins do not move. GPU route proof and full integration acceptance remain open under #2400.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
@@ -32773,7 +32781,8 @@ It keeps no duplicate runtime group table.
 
 
 The source router has a two-dimensional parameter and a stock FP32 Linear operation.
-The profile can expose that actual parameter owner only when an explicit pin lift selects it.
+The owner inventory includes that router even when no explicit pin lift selects it.
+The default pricing enumeration excludes it; the existing pin-lift control alone selects it for a campaign.
 The campaign uses the existing module pre-hook and selected weight intake.
 It does not replace the source module or change its forward, dtype, bias, or tensor name.
 

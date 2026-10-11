@@ -7242,7 +7242,7 @@ def _main(argv, *, source_scope, waits) -> int:
                   _require_campaign_population(model, profile, args.layer_stride))
     # Names only: no module is retained after source teardown.
     roster = campaign_roster(
-        profile.campaign_dense_unit_names(model, allow_pinned=args.allow_pinned),
+        profile.campaign_dense_owner_names(model),
         profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
     all_dense = list(roster.dense)
     pinned = list(roster.pinned)

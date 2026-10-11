@@ -376,14 +376,9 @@ class Glm5NextProfile(ModelProfile):
     def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
         from prismaquant.fixed_head import parse_allow_pinned
         tokens = parse_allow_pinned(allow_pinned)
-        names = super().campaign_dense_unit_names(model, allow_pinned=allow_pinned)
-        if not tokens:
-            return [name for name in names if not self.is_explicit_select_unit(name)]
-        for name, module in model.named_modules():
-            if (any(token in name for token in tokens) and name not in names
-                    and self.is_dense_parameter_owner(name, module)):
-                names.append(name)
-        return names
+        return [name for name in self.campaign_dense_owner_names(model)
+                if not self.is_explicit_select_unit(name)
+                or any(token in name for token in tokens)]
 
     def is_dense_parameter_owner(self, name, module) -> bool:
         if super().is_dense_parameter_owner(name, module):
