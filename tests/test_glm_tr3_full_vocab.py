@@ -1231,3 +1231,139 @@ def test_a_qualification_from_the_other_mode_refuses(fake_measure, qualified_mod
     with pytest.raises(ValueError, match="native qualification differs"):
         served.measure(args)
     assert not Path(args.output).exists()
+
+# --- paired graph/eager dumps (PQ #2566) ---------------------------------------
+
+
+def _paired_engine_observation(llm, *, expected_kv_cache_dtype,
+                               requested_kv_cache_dtype=None, compilation=None):
+    return served.observed_configuration(
+        _resolved_config(enforce_eager=compilation is None),
+        expected_kv_cache_dtype=expected_kv_cache_dtype, compilation=compilation)
+
+
+def _paired_worker_rpc(self, fn, kwargs=None):
+    from types import SimpleNamespace as S
+    kwargs = dict(kwargs or {})
+    rows = []
+    for rank in (0, 1):
+        worker = S(vllm_config=_resolved_config(
+                       enforce_eager=kwargs.get("compilation") is None),
+                   cache_config=S(cache_dtype="fp8_ds_mla"),
+                   model_runner=S(cache_config=S(cache_dtype="fp8_ds_mla"),
+                                  kv_cache_dtype=torch.uint8,
+                                  model=S(_tr3_capture=S(rank=rank))))
+        rows.append(fn(worker, **kwargs))
+    return rows
+
+
+def _measured_pair(monkeypatch, fake_measure):
+    """One compiled and one eager full-panel dump on the same fake tree."""
+    args, _ = fake_measure
+    monkeypatch.setattr(served, "observed_engine_configuration", _paired_engine_observation)
+    monkeypatch.setattr(_FakeLLM, "collective_rpc", _paired_worker_rpc)
+    args.execution_mode, args.compilation_config = "compiled", json.dumps(_FDO)
+    compiled = served.measure(args)
+    eager_args = types.SimpleNamespace(**{**vars(args),
+                                           "output": str(Path(args.output).with_name("eager.json")),
+                                           "qualify_then_score": str(Path(
+                                               args.qualify_then_score).with_name(
+                                               "eager-qualification.json")),
+                                           "execution_mode": "eager",
+                                           "compilation_config": None})
+    eager = served.measure(eager_args)
+    return compiled, eager
+
+
+def test_execution_mode_is_stamped_on_every_dump(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    assert compiled["execution_mode"] == "compiled"
+    assert eager["execution_mode"] == "eager"
+    assert compiled["runtime_binding"]["execution_mode"] == "compiled"
+    assert "execution_mode" not in eager["runtime_binding"]
+
+
+def test_execution_mode_of_reads_legacy_binding_dumps():
+    assert served.execution_mode_of({"runtime_binding": {"execution_mode": "compiled"}}) == "compiled"
+    assert served.execution_mode_of({"runtime_binding": {}}) == "eager"
+    assert served.execution_mode_of({"execution_mode": "eager", "runtime_binding": {}}) == "eager"
+    with pytest.raises(ValueError, match="execution mode"):
+        served.execution_mode_of({"execution_mode": "graph", "runtime_binding": {}})
+    with pytest.raises(ValueError, match="object"):
+        served.execution_mode_of([])
+
+
+def test_paired_dumps_pass_on_the_same_tree_panel_and_topology(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    receipt = served.check_paired_execution_dumps(compiled, eager)
+    assert receipt["schema"] == "prismaquant.glm_tr3_paired_execution/1"
+    assert receipt["passed"] is True
+    assert receipt["execution_modes"] == ["compiled", "eager"]
+    assert receipt["dump_schema"] == "prismaquant.glm_tr3_full_vocabulary_kl/1"
+    assert receipt["calibration_contract_sha256"] == compiled["calibration_contract_sha256"]
+    assert served.check_paired_execution_dumps(eager, compiled) == receipt
+
+
+def test_pairing_accepts_a_legacy_eager_dump_without_the_top_level_stamp(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    del eager["execution_mode"]
+    receipt = served.check_paired_execution_dumps(compiled, eager)
+    assert receipt["passed"] is True
+
+
+def test_pairing_ignores_the_host_checkpoint_path(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    compiled["runtime_binding"]["engine_kwargs"]["model"] = "/another/host/checkout"
+    receipt = served.check_paired_execution_dumps(compiled, eager)
+    assert receipt["passed"] is True
+
+
+def test_pairing_refuses_two_dumps_in_the_same_mode(monkeypatch, fake_measure):
+    compiled, _ = _measured_pair(monkeypatch, fake_measure)
+    with pytest.raises(ValueError, match="one compiled and one eager"):
+        served.check_paired_execution_dumps(compiled, copy.deepcopy(compiled))
+
+
+def test_pairing_refuses_a_different_panel_tree_or_topology(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    other = copy.deepcopy(eager)
+    other["calibration_contract_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="calibration"):
+        served.check_paired_execution_dumps(compiled, other)
+    other = copy.deepcopy(eager)
+    other["runtime_binding"]["candidate_identity"] = {"ckpt": 2}
+    with pytest.raises(ValueError, match="candidate"):
+        served.check_paired_execution_dumps(compiled, other)
+    other = copy.deepcopy(eager)
+    other["runtime_binding"]["engine_kwargs"]["tensor_parallel_size"] = 4
+    with pytest.raises(ValueError, match="differing paths"):
+        served.check_paired_execution_dumps(compiled, other)
+
+
+def test_pairing_refuses_a_failed_or_mismatched_fidelity_dump(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    other = copy.deepcopy(eager)
+    other["passed"] = False
+    with pytest.raises(ValueError, match="passing"):
+        served.check_paired_execution_dumps(compiled, other)
+    other = copy.deepcopy(eager)
+    other["measurement_fidelity"] = {**eager["measurement_fidelity"], "n_windows": 1}
+    with pytest.raises(ValueError, match="fidelity"):
+        served.check_paired_execution_dumps(compiled, other)
+
+
+def test_pairing_refuses_a_compiled_dump_whose_observed_config_differs(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    other = copy.deepcopy(compiled)
+    other["runtime_binding"]["observed_engine_configuration"]["compilation_config"][
+        "cudagraph_capture_sizes"] = [1, 2, 4]
+    with pytest.raises(ValueError, match="declared compiled contract|differing paths"):
+        served.check_paired_execution_dumps(other, eager)
+
+
+def test_pairing_names_the_binding_path_that_differs(monkeypatch, fake_measure):
+    compiled, eager = _measured_pair(monkeypatch, fake_measure)
+    other = copy.deepcopy(eager)
+    other["runtime_binding"]["engine_kwargs"]["kv_cache_dtype"] = "bfloat16"
+    with pytest.raises(ValueError, match="kv_cache_dtype"):
+        served.check_paired_execution_dumps(compiled, other)
