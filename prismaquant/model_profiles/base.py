@@ -1384,6 +1384,21 @@ class ModelProfile(ABC):
         spec = self.structure_spec()
         return spec.visual_root_prefixes if spec is not None else ()
 
+    def visual_linear_roster(
+        self, model_path: str, *, strict: bool = True
+    ) -> dict[str, dict[str, object]]:
+        """Quantizable vision/merger roster under the declared roots.
+
+        Each entry carries its exact source shape, its name source
+        (`checkpoint_index` or `source_header`) and the admitting
+        `visual_root`. Embedding, conv, norm, router and fixed parts
+        stay out by name; body, audio and MTP names never enter.
+        Fail-closed: a missing checkpoint or unreadable shard raises.
+        """
+        from ..allocator import visual_linear_roster as _roster
+
+        return _roster(str(model_path), profile=self, strict=strict)
+
     def visual_layer_prefix(self) -> str | None:
         """Prefix used for visual-encoder block names, or None if this
         model has no visual encoder."""
