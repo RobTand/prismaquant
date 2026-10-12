@@ -408,3 +408,226 @@ def test_native_git_blob_profile_uses_git_type_length_and_payload(raw, expected)
     assert git_blob_sha1hex(raw) == expected
     assert git_blob_sha1hex(bytearray(raw)) == expected
     assert git_blob_sha1hex(memoryview(raw)) == expected
+# ---------------------------------------------------------------------------
+# PQ #2646 routes 20 byte-digest sites to bytes_sha256hex (part of #2541).
+# ---------------------------------------------------------------------------
+# Each site keeps its input bytes, its result slice and its refusals. The
+# rows below freeze the pre-route hashlib outcomes for small inputs shaped
+# like each site's real argument. The owner reproduces them byte for byte.
+
+_BYTE_DIGEST_IDS = (
+    "hashlib:prismaquant/allocator.py::main@5513:21",
+    "hashlib:tools/build_diverse_calibration.py::_json_digest@137:11",
+    "hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11",
+    "hashlib:tools/build_glm_derivative_image.py::main@100:24",
+    "hashlib:tools/build_glm_derivative_image.py::main@123:15",
+    "hashlib:tools/build_glm_derivative_image.py::main@125:15",
+    "hashlib:tools/build_glm_derivative_image.py::main@145:27",
+    "hashlib:tools/build_glm_derivative_image.py::main@85:19",
+    "hashlib:tools/build_t4_recovery_request.py::sha@5:20",
+    "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55",
+    "hashlib:tools/capture_glm_routing_replay.py::main@99:85",
+    "hashlib:tools/check_t4_overlay_prepare.py::sha@36:11",
+    "hashlib:tools/compose_tessera_cached_units.py::main@77:41",
+    "hashlib:tools/glm_mtp_capture.py::projection_phase@227:62",
+    "hashlib:tools/inspect_t4_binding.py::main@12:211",
+    "hashlib:tools/materialize_wikitext_corpus.py::main@82:22",
+    "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58",
+    "hashlib:tools/qualify_t4_overlay.py::decoder_provenance@19:303",
+    "hashlib:tools/rebind_t4_qualified_results.py::sha@40:11",
+    "hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11",
+)
+
+#: Small input bytes per site, shaped like the census recipe input. Only the
+#: allocator row keeps a result slice (its [:12] label digest).
+_BYTE_DIGEST_PAYLOADS = {
+    "hashlib:prismaquant/allocator.py::main@5513:21":
+        (b'{"model.layers.0.self_attn.q_proj":"NVFP4"}', True),
+    "hashlib:tools/build_diverse_calibration.py::_json_digest@137:11":
+        (b'{"a": null, "b": [1, "\xc3\xa9"]}', False),
+    "hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11":
+        (b'caf\xc3\xa9 \xe2\x98\x83 \xe2\x80\xa8\xe8\xb7\xa8', False),
+    "hashlib:tools/build_glm_derivative_image.py::main@100:24":
+        (b'{"architecture":"glm","os":"linux"}', False),
+    "hashlib:tools/build_glm_derivative_image.py::main@123:15":
+        (b"config-bytes-123", False),
+    "hashlib:tools/build_glm_derivative_image.py::main@125:15":
+        (b"layer-bytes-125", False),
+    "hashlib:tools/build_glm_derivative_image.py::main@145:27":
+        (b"hello-hub-kernels", False),
+    "hashlib:tools/build_glm_derivative_image.py::main@85:19":
+        (b"tar-layer\x00bytes-001", False),
+    "hashlib:tools/build_t4_recovery_request.py::sha@5:20":
+        (b'{"roster":{"tasks":[]}}', False),
+    "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55":
+        (b"torch-save-bytes-128", False),
+    "hashlib:tools/capture_glm_routing_replay.py::main@99:85":
+        (b"replay-boundary-bytes", False),
+    "hashlib:tools/check_t4_overlay_prepare.py::sha@36:11":
+        (b"catalog-cell-bytes", False),
+    "hashlib:tools/compose_tessera_cached_units.py::main@77:41":
+        (b'{"manifest":"child"}\n', False),
+    "hashlib:tools/glm_mtp_capture.py::projection_phase@227:62":
+        (b"mtp-projection-bytes", False),
+    "hashlib:tools/inspect_t4_binding.py::main@12:211":
+        (b"model.language_model.layers.10.mlp.experts.0.down_proj", False),
+    "hashlib:tools/materialize_wikitext_corpus.py::main@82:22":
+        (b"first row\n\nsecond row", False),
+    "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58":
+        (b"\x80\x04N.", False),
+    "hashlib:tools/qualify_t4_overlay.py::decoder_provenance@19:303":
+        (b'{"url":"https://example.invalid/r","vcs":"git"}', False),
+    "hashlib:tools/rebind_t4_qualified_results.py::sha@40:11":
+        (b"qualified-result-bytes", False),
+    "hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11":
+        (b"staged-input-bytes", False),
+}
+
+
+@pytest.mark.parametrize("site", _BYTE_DIGEST_IDS, ids=_BYTE_DIGEST_IDS)
+def test_byte_digest_site_keeps_its_bytes(site):
+    """The owner repeats the site's frozen pre-route digest."""
+    payload, sliced = _BYTE_DIGEST_PAYLOADS[site]
+    if sliced:
+        GOLDEN.call(lambda: digests.bytes_sha256hex(payload)[:12])
+    else:
+        GOLDEN.call(lambda: digests.bytes_sha256hex(payload))
+
+
+#: Owner contract probes: Unicode, mixed keys, nonfinite values, truncation,
+#: framing, the final line feed, and the non-bytes refusals.
+_BYTE_DIGEST_CONTRACT = (
+    ("unicode-utf8", "café ☃ 日本語".encode("utf-8"), False),
+    ("unicode-escaped", b'{"a": "\\u00e9\\u2028"}', False),
+    ("mixed-keys", b'{"9": "y", "10": "x"}', False),
+    ("nonfinite-lax", b'{"x": NaN, "y": Infinity, "z": -Infinity}', False),
+    ("truncation", b"0123456789abcdef", False),
+    ("truncation-slice", b"0123456789abcdef", True),
+    ("framing-length", b"\x00\x00\x00\x05hello", False),
+    ("framing-b64", b"aGVsbG8gd29ybGQ=", False),
+    ("final-lf", b'{"a": 1}\n', False),
+    ("no-lf", b'{"a": 1}', False),
+    ("empty", b"", False),
+    ("bytearray", bytearray(b"abc"), False),
+    ("memoryview", memoryview(b"abc"), False),
+    ("refusal-str", "text", False),
+    ("refusal-none", None, False),
+    ("refusal-int", 42, False),
+)
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "sliced"),
+    _BYTE_DIGEST_CONTRACT,
+    ids=[name for name, _, _ in _BYTE_DIGEST_CONTRACT],
+)
+def test_byte_digest_owner_contract(name, value, sliced):
+    """The owner keeps the contract bytes and the non-bytes refusals."""
+    if sliced:
+        GOLDEN.call(lambda: digests.bytes_sha256hex(value)[:12])
+    else:
+        GOLDEN.call(lambda: digests.bytes_sha256hex(value))
+
+
+#: Pinned call per site: census id, input source kept at the caller, and
+#: whether the caller keeps a result slice.
+_BYTE_DIGEST_CALLS = (
+    ("hashlib:prismaquant/allocator.py::main@5513:21", "digest_src.encode()", True),
+    ("hashlib:tools/build_diverse_calibration.py::_json_digest@137:11", "payload", False),
+    ("hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11", 'text.encode("utf-8")', False),
+    ("hashlib:tools/build_glm_derivative_image.py::main@100:24", "encoded", False),
+    ("hashlib:tools/build_glm_derivative_image.py::main@123:15", "outer.extractfile(config_name).read()", False),
+    ("hashlib:tools/build_glm_derivative_image.py::main@125:15", "actual_layer", False),
+    ("hashlib:tools/build_glm_derivative_image.py::main@145:27", "base64.b64decode(read['hub'])", False),
+    ("hashlib:tools/build_glm_derivative_image.py::main@85:19", "added_layer", False),
+    ("hashlib:tools/build_t4_recovery_request.py::sha@5:20", "raw", False),
+    ("hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55", "raw", False),
+    ("hashlib:tools/capture_glm_routing_replay.py::main@99:85", "raw", False),
+    ("hashlib:tools/check_t4_overlay_prepare.py::sha@36:11", "raw", False),
+    ("hashlib:tools/compose_tessera_cached_units.py::main@77:41", "raw", False),
+    ("hashlib:tools/glm_mtp_capture.py::projection_phase@227:62", "raw", False),
+    ("hashlib:tools/inspect_t4_binding.py::main@12:211", "q.encode()", False),
+    ("hashlib:tools/materialize_wikitext_corpus.py::main@82:22", "raw", False),
+    ("hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58", "data", False),
+    ("hashlib:tools/qualify_t4_overlay.py::decoder_provenance@19:303", "direct_url.encode()", False),
+    ("hashlib:tools/rebind_t4_qualified_results.py::sha@40:11", "raw", False),
+    ("hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11", "raw", False),
+)
+
+_OWNER_CALLEES = frozenset({
+    "prismaquant.digests.bytes_sha256hex",
+    "digests.bytes_sha256hex",
+})
+
+
+def _scoped_calls(path, scope):
+    """Every call in the dotted scope, with its enclosing subscript."""
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for name in node.names:
+                aliases[name.asname or name.name] = name.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for name in node.names:
+                aliases[name.asname or name.name] = f"{node.module}.{name.name}"
+
+    def resolved(func):
+        if isinstance(func, ast.Name):
+            return aliases.get(func.id, func.id)
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            return aliases.get(func.value.id, func.value.id) + "." + func.attr
+        return None
+
+    calls = []
+    subscripts = {}
+    stack = [(tree, [])]
+    while stack:
+        node, chain = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            sub = chain
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                sub = chain + [child.name]
+            if isinstance(child, ast.Subscript) and isinstance(child.value, ast.Call):
+                subscripts[id(child.value)] = child
+            if isinstance(child, ast.Call) and (".".join(sub) or "<module>") == scope:
+                calls.append(child)
+            stack.append((child, sub))
+    binds_file_owner = "digests.py" in source and "bytes_sha256hex" in source
+    return calls, subscripts, resolved, binds_file_owner
+
+
+def test_byte_digest_sites_call_the_owner():
+    """Every pinned site calls bytes_sha256hex on its kept input bytes."""
+    root = Path(__file__).resolve().parents[1]
+    missed = []
+    for site, kept, sliced in _BYTE_DIGEST_CALLS:
+        rel, _, scoped = site.partition(":")[2].partition("::")
+        scope = scoped.split("@")[0]
+        calls, subscripts, resolved, binds_file_owner = _scoped_calls(root / rel, scope)
+        wanted = ast.dump(ast.parse(kept, mode="eval").body)
+        raw = []
+        owned = []
+        for call in calls:
+            func = call.func
+            if (isinstance(func, ast.Attribute) and func.attr == "hexdigest"
+                    and isinstance(func.value, ast.Call)
+                    and resolved(func.value.func) == "hashlib.sha256"):
+                raw.append(call)
+                continue
+            callee = resolved(func)
+            if callee in _OWNER_CALLEES or (
+                    callee == "bytes_sha256hex" and binds_file_owner):
+                owned.append(call)
+        match = [call for call in owned
+                 if call.args and ast.dump(call.args[0]) == wanted]
+        if raw or not match:
+            missed.append(site)
+            continue
+        if sliced:
+            if not any(id(call) in subscripts
+                       and isinstance(subscripts[id(call)].slice, ast.Slice)
+                       for call in match):
+                missed.append(site)
+    assert not missed, f"sites not routed to bytes_sha256hex: {missed}"

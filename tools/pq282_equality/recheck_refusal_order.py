@@ -7,7 +7,6 @@ remaining price, population, capture and journal identity fields.
 """
 import argparse
 from collections import Counter
-import hashlib
 import json
 from pathlib import Path
 import pickle
@@ -17,6 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from dispatch_tessera_campaign import cmd_merge
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.tessera_campaign import canonical_refusals
 
 
@@ -48,7 +48,7 @@ result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subpr
 print(result.stdout, flush=True)
 (args.out / "comparison.log").write_text(result.stdout)
 (args.out / "recheck.json").write_text(json.dumps({
-    "inputs": {name: {"path": str(paths[name]), "sha256": hashlib.sha256(data).hexdigest()}
+    "inputs": {name: {"path": str(paths[name]), "sha256": bytes_sha256hex(data)}
                for name, data in raw.items()},
     "normalization": "canonical_refusals only, on a separate monolith comparison copy",
     "historical_refusals_multiset_equal": True,

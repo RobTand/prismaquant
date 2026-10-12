@@ -42,12 +42,33 @@ Run inside the campaign container (the plan's source derivative needs it)::
 from __future__ import annotations
 
 import argparse
-import hashlib
+import importlib.util
 import json
+import os
 import sys
 import time
 from contextlib import closing
 from pathlib import Path
+
+if __package__:
+    from prismaquant.digests import bytes_sha256hex
+else:
+    # Stdlib-only script use binds the same tree's owner by file path, so the
+    # host needs no installed package. digests.py is stdlib-only: register the
+    # file module under a name carrying that path's exact bytes, so two
+    # checkouts in one process never share a cache entry.
+    _digest_owner_path = Path(__file__).resolve().parents[1] / "prismaquant" / "digests.py"
+    _digest_owner_name = "_prismaquant_standalone_digest_owner_" + os.fsencode(_digest_owner_path).hex()
+    if _digest_owner_name not in sys.modules:
+        _digest_owner_spec = importlib.util.spec_from_file_location(_digest_owner_name, _digest_owner_path)
+        _digest_owner_module = importlib.util.module_from_spec(_digest_owner_spec)
+        sys.modules[_digest_owner_name] = _digest_owner_module
+        try:
+            _digest_owner_spec.loader.exec_module(_digest_owner_module)
+        except BaseException:
+            del sys.modules[_digest_owner_name]
+            raise
+    bytes_sha256hex = sys.modules[_digest_owner_name].bytes_sha256hex
 
 
 def _capture_arguments(argv):
@@ -224,7 +245,7 @@ def projection_phase(args):
     atomic_write_bytes(path, raw)
     return {
         "phase": "projection",
-        "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
+        "projection": {"path": str(path.resolve()), "sha256": bytes_sha256hex(raw)},
         "plan": {"path": str(Path(args.plan).resolve()), "sha256": plan_sha256},
         "stacks": sorted(carried["stacks"]),
         "units": sum(len(units) for units in carried["stacks"].values()),

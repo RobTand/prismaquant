@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import io
 import json
 from pathlib import Path
@@ -25,7 +24,7 @@ _contract_path = Path(__file__).resolve().parents[1] / "prismaquant/glm_source_d
 sys.path.insert(0, str(_contract_path.parent))
 try:
     _contract = runpy.run_path(str(_contract_path))
-    from digests import DIRECT_ASCII_SPACED_LAX
+    from digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 finally:
     sys.path.pop(0)
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
@@ -82,7 +81,7 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         member.mode, member.size = 0o644, len(patched)
         layer.addfile(member, io.BytesIO(patched))
     added_layer = buffer.getvalue()
-    layer_sha256 = hashlib.sha256(added_layer).hexdigest()
+    layer_sha256 = bytes_sha256hex(added_layer)
     layer_name = layer_sha256 + '/layer.tar'
     archive = args.out/'corrected-image.tar'
     with tarfile.open(original_archive, 'r:') as old:
@@ -97,7 +96,7 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         config['rootfs']['diff_ids'].append('sha256:' + layer_sha256)
         config.setdefault('history', []).append(dict(created_by='prismaquant reviewed GLM causal exponent v1'))
         encoded = json.dumps(config, sort_keys=True, separators=(',', ':')).encode()
-        config_digest = hashlib.sha256(encoded).hexdigest()
+        config_digest = bytes_sha256hex(encoded)
         config_name = config_digest + '.json'
         updated = DIRECT_ASCII_SPACED_LAX.encoded([dict(Config=config_name, RepoTags=[image],
             Layers=[*manifest['Layers'], layer_name])])
@@ -120,9 +119,9 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
     with tarfile.open(archive, 'r:') as outer:
         manifest = json.load(outer.extractfile('manifest.json'))
         assert len(manifest) == 1 and manifest[0]['Config'] == config_name
-        assert hashlib.sha256(outer.extractfile(config_name).read()).hexdigest() == config_digest
+        assert bytes_sha256hex(outer.extractfile(config_name).read()) == config_digest
         actual_layer = outer.extractfile(manifest[0]['Layers'][-1]).read()
-        assert hashlib.sha256(actual_layer).hexdigest() == layer_sha256
+        assert bytes_sha256hex(actual_layer) == layer_sha256
         with tarfile.open(fileobj=io.BytesIO(actual_layer), mode='r:') as layer:
             changed = []
             for member in layer:
@@ -142,7 +141,7 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         corrected_image_content_sha256=_runtime_identity["image_content_sha256"](after),
         original_modeling_sha256=ORIGINAL_MODELING_SHA256,
         corrected_modeling_sha256=CORRECTED_MODELING_SHA256,
-        hub_kernels_sha256=hashlib.sha256(base64.b64decode(read['hub'])).hexdigest(),
+        hub_kernels_sha256=bytes_sha256hex(base64.b64decode(read['hub'])),
         added_layer_sha256=layer_sha256, corrected_config_sha256=config_digest,
         original_archive_bytes=original_archive.stat().st_size,
         declared_archive_disk_bound_bytes=disk_bound, persistent_python_layer_bytes=len(added_layer),
