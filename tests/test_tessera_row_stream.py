@@ -628,15 +628,19 @@ def test_a_finalized_row_relaunches_on_the_stream_head_and_encodes_nothing(
     assert [name for name in sorted(clean) if clean[name] != after[name]
             and name != "cost.pkl"] == []
     # The one difference is execution telemetry, not identity: the per-step
-    # growth list is stamped only when a round plans encode steps, and the
-    # round loop leaves before planning any when nothing is pending.
+    # growth list and its parallel batch descriptors are stamped only when a
+    # round plans encode steps, and the round loop leaves before planning any
+    # when nothing is pending.
     import pickle
     before, relaunched = pickle.loads(clean["cost.pkl"]), pickle.loads(after["cost.pkl"])
     preparation = before["provenance"]["selected_source_preparation"]
     assert "anchor_batch_growth_bytes" in preparation
+    assert "anchor_batch_descriptors" in preparation
     del preparation["anchor_batch_growth_bytes"]
-    assert "anchor_batch_growth_bytes" not in \
-        relaunched["provenance"]["selected_source_preparation"]
+    del preparation["anchor_batch_descriptors"]
+    relaunched_preparation = relaunched["provenance"]["selected_source_preparation"]
+    assert "anchor_batch_growth_bytes" not in relaunched_preparation
+    assert "anchor_batch_descriptors" not in relaunched_preparation
     assert relaunched == before
 
 
