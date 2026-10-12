@@ -409,9 +409,9 @@ def test_cli_exits_3_on_a_graph_arm_sweep(tmp_path):
 
 # --------------------------------------------------------------------------
 # PQ #706: method classes that carry no scheme read through METHOD_ACTIVATION.
-# No packed-MoE artifact has been swept, so the table is empty and the gap
-# refuses by name. The mechanics below run on a synthetic test-only entry
-# that is removed again, never on a method name read from vLLM's source.
+# The table holds the one swept class; unobserved classes still refuse by
+# name. The mechanics below run on a synthetic test-only entry that is
+# removed again, never on a method name read from vLLM's source.
 # --------------------------------------------------------------------------
 def test_an_unobserved_moe_method_names_its_method_class():
     sweep = _sweep()
@@ -455,3 +455,99 @@ def test_a_swept_method_missing_its_numbers_is_not_verified():
         del gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"]
     assert verdict["status"] == gate.NOT_VERIFIED
     assert "do not carry the numbers" in verdict["detail"]
+
+
+# --------------------------------------------------------------------------
+# PQ #706: the recorded packed-MoE sweep agrees with its own price.
+# --------------------------------------------------------------------------
+MOE_FIXTURE = Path(__file__).parent / "fixtures" / "compressed_route_sweep_moe"
+
+
+def _moe_config() -> dict:
+    return json.loads((MOE_FIXTURE / "config.json").read_text())
+
+
+def _moe_sweep() -> dict:
+    return json.loads((MOE_FIXTURE / "sweep_rank0.json").read_text())
+
+
+def _compare_moe(sweep: dict | None, *, config=None):
+    text = None if sweep is None else json.dumps(sweep)
+    return gate.compare_route_sweeps(
+        [("rank0:sweep_rank0.json", text)],
+        expected_ranks=1,
+        config=_moe_config() if config is None else config,
+    )
+
+
+def _moe_rows(sweep: dict) -> list[dict]:
+    return [row for row in sweep["ranks"][0]["modules"]
+            if row.get("quant_method") == "CompressedTensorsW8A8Fp8MoEMethod"]
+
+
+def test_packed_moe_sweep_agrees_with_its_price():
+    """The fail-before test for #706: a real packed-MoE sweep agrees."""
+    sweep = _moe_sweep()
+    assert len(_moe_rows(sweep)) == 2
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.AGREE, verdict["detail"]
+
+
+def test_packed_moe_verdict_is_deterministic_so_verify_can_replay_it():
+    assert _compare_moe(_moe_sweep()) == _compare_moe(_moe_sweep())
+
+
+def test_an_unobserved_moe_method_class_is_still_not_verified():
+    """The table holds one swept class; any other schemeless class refuses."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["quant_method"] = "CompressedTensorsW4A4MoeMethod"
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "CompressedTensorsW4A4MoeMethod" in verdict["detail"]
+
+
+def test_a_swept_moe_method_missing_its_numbers_is_not_verified():
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["method_attrs"] = {}
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "do not carry the numbers" in verdict["detail"]
+
+
+def test_a_swept_moe_method_with_mismatched_sides_is_not_verified():
+    """W8A8 means both sides: weight/activation disagreement reads nothing."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["method_attrs"] = dict(row["method_attrs"])
+        row["method_attrs"]["weight_quant"] = row["method_attrs"][
+            "input_quant"].replace("num_bits=8", "num_bits=4")
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "do not carry the numbers" in verdict["detail"]
+
+
+def test_a_moe_row_whose_runner_never_fired_is_refused():
+    """Parent evidence rescues a bypassed __call__, never an idle runner."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["parent_dispatches"] = 0
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.REFUSED
+    assert "ZERO forwards" in verdict["detail"]
+
+
+def test_a_dense_row_never_reads_its_parent_count():
+    """A fused Linear at zero is suspect even when its parent ran."""
+    sweep = _moe_sweep()
+    for row in sweep["ranks"][0]["modules"]:
+        if row.get("scheme") == "CompressedTensorsW8A8Fp8":
+            row["dispatches"] = 0
+            row["parent_dispatches"] = 4
+            break
+    else:  # pragma: no cover - the fixture carries dense FP8 rows
+        pytest.fail("fixture carries no dense FP8 row")
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.REFUSED
+    assert "ZERO forwards" in verdict["detail"]
