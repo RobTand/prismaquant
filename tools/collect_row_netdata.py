@@ -50,15 +50,21 @@ def fetch(host: str, endpoint: str) -> dict:
 
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--after", type=float, required=True)
-    parser.add_argument("--before", type=float, required=True)
-    args = parser.parse_args(argv)
-    if not args.after < args.before:
-        parser.error("need --after < --before")
+def collect_window(after: float, before: float) -> dict:
+    """The validated chart windows of both Sparks over ``[after, before]``.
+
+    Pass whole seconds, and a ``before`` that is already in the past: Netdata
+    shifts a window that ends at the present back by one second, so its first
+    row falls before ``after`` and the window fails its own bound.
+
+    Raises ``SystemExit`` when a host lacks a required context and
+    ``RuntimeError`` when a window fails ``validate_netdata_window``; a failed
+    transport raises its own ``OSError`` or ``subprocess`` error. Nothing is
+    returned for a host that did not answer, so a caller never reads half a
+    pair as the pair.
+    """
     document: dict = {"schema": "prismaquant.row_netdata.v1",
-                      "after": args.after, "before": args.before,
+                      "after": after, "before": before,
                       "fetched_epoch": time.time(),
                       "fetch_host": socket.gethostname().split(".")[0],
                       "hosts": {}}
@@ -74,16 +80,34 @@ def main(argv=None) -> int:
         series = {}
         for chart in charts:
             query = urllib.parse.urlencode(dict(
-                chart=chart, after=args.after, before=args.before,
-                points=max(10, int(args.before - args.after) + 4),
+                chart=chart, after=after, before=before,
+                points=max(10, int(before - after) + 4),
                 group="average", format="json", options="seconds"))
             data = fetch(host, "data?" + query)
-            validate_netdata_window(data, after=args.after, before=args.before)
+            try:
+                validate_netdata_window(data, after=after, before=before)
+            except RuntimeError as error:
+                stamps = [row[0] for row in data.get("data", [])
+                          if isinstance(row, list) and row]
+                raise RuntimeError(
+                    f"{host} {chart}: {error} (asked {after}..{before}; "
+                    f"samples {min(stamps, default=None)}..{max(stamps, default=None)})"
+                ) from error
             series[chart] = {"points": len(data["data"]),
                              "labels": data["labels"],
                              "data": data["data"]}
         document["hosts"][host] = {"charts": charts, "series": series}
-    print(DIRECT_ASCII_SPACED_LAX.text(document))
+    return document
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--after", type=float, required=True)
+    parser.add_argument("--before", type=float, required=True)
+    args = parser.parse_args(argv)
+    if not args.after < args.before:
+        parser.error("need --after < --before")
+    print(DIRECT_ASCII_SPACED_LAX.text(collect_window(args.after, args.before)))
     return 0
 
 

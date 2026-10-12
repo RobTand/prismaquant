@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-10 (Refs #2039): the device projected-unit check adopts a
+page-locked source buffer. A read that the residency map stages fills that
+buffer in `StagedShardReader` (opt-in `pinned_host`), so the check makes no
+second host copy. A pool read, an unmapped read and the qualified-original
+owner's read keep one private pin copy, now made after the read in
+`source_unit_weight`. First-mismatch order, dtype and equality semantics,
+source-page retirement, private-buffer ownership and cancellation do not
+change. No default, stage, format, lane or ship gate changes. The paired
+measure, its scope control and its both-Spark Netdata record are in
+[the 2026-10-10 staging-copy report](measurements/pq2039_staging_copy_2026-10-10.md).
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.

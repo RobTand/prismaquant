@@ -309,6 +309,23 @@ def pinned_pb_source():
         yield
 
 
+@pytest.fixture
+def source_bound_reader_sdk():
+    """PQ's one PrismaBuild client SDK, bound to the reviewed SDK5 source bundle.
+
+    The residency resolver validates a map with PrismaBuild's own validator.
+    ``installed_client_sdk`` needs an interpreter that holds SDK5 installed
+    non-editable, and no GB10 interpreter does yet. The pinned bundle needs only
+    the shared mount and any installed ``prismabuild`` (the test skips where
+    there is none), so a map-bound read test also runs on a GB10. Every declared
+    file of the bundle is digest-checked before it is bound.
+    """
+    from fullstack_pb_generation import reader_sdk_bound
+
+    with reader_sdk_bound():
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.

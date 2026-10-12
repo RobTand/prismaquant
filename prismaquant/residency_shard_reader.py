@@ -787,27 +787,27 @@ def _pread_into(fd: int, view: memoryview, offset: int) -> None:
         done += moved
 
 
-def _read_span(fd: int, count: int, offset: int,
-               shape: tuple[int, int] | None) -> bytearray:
-    """``count`` bytes at ``offset``, on as many streams as the mount holds.
+def _read_span_into(fd: int, view: memoryview, offset: int,
+                    shape: tuple[int, int] | None) -> None:
+    """Fill ``view`` with ``len(view)`` bytes at ``offset``.
 
-    One buffer, cut into disjoint pieces that are read at the same time and
-    written straight into their own slice of it, so the bytes are the bytes a
-    single sequential read would have produced, piece by piece and offset by
-    offset. The buffer is writable, which is what ``torch.frombuffer`` wants,
-    and it is the tensor's own storage afterwards.
+    The buffer is the caller's: a plain ``bytearray`` window, or the writable
+    window of a pinned host tensor when the caller stages straight into
+    page-locked memory. One buffer, cut into disjoint pieces that are read at
+    the same time and written straight into their own slice of it, so the
+    bytes are the bytes a single sequential read would have produced, piece
+    by piece and offset by offset.
 
     A span shorter than one read per stream is read on one stream: splitting it
     would hand some streams nothing and cost a round trip to find out. Every
-    piece is waited for before the result is looked at, including on a failure,
-    so no thread is still writing into the buffer -- or reading the descriptor
+    piece is waited for before this returns, including on a failure, so no
+    thread is still writing into the buffer -- or reading the descriptor
     the caller is about to close -- when this returns.
     """
-    buffer = bytearray(count)
-    view = memoryview(buffer)
+    count = len(view)
     if shape is None or count < shape[0] * shape[1]:
         _pread_into(fd, view, offset)
-        return buffer
+        return
     streams, chunk = shape
     cuts = _cuts(offset, count, chunk)
     pool = _chunk_pool(streams)
@@ -822,7 +822,6 @@ def _read_span(fd: int, count: int, offset: int,
                 failure = error
     if failure is not None:
         raise failure
-    return buffer
 
 
 class _StrictSliceProxy:
@@ -886,6 +885,9 @@ class StagedShardReader:
         self._path = os.fspath(path)
         self._resolver = resolver
         self._device = kwargs.get("device")
+        # Opt-in page-locked staging for device-bound consumers (PQ #2039):
+        # not a ``safe_open`` argument, so it never reaches the pool opener.
+        self._pinned_host = bool(kwargs.pop("pinned_host", False))
         self._owner_pid = os.getpid()
         # Captured at construction (opener time): the entrypoints activate
         # the process-global policy before any read, so every reader built
@@ -1235,6 +1237,29 @@ class StagedShardReader:
         except OSError:
             pass
 
+    def _read_payload(self, fd, signature, entry, start, end):
+        """The staged span's bytes as one flat ``uint8`` tensor, read once.
+
+        The buffer is the tensor's own storage, so its bytes are the only host
+        copy the caller holds. It is a page-locked tensor when this reader
+        stages for a device check (PQ #2039), which then adopts it with no
+        second host copy; otherwise a writable ``bytearray`` that
+        ``torch.frombuffer`` wraps. The stat fence runs after the read, so a
+        file that changed under it raises before any caller sees the buffer.
+        """
+        count = end - start
+        if self._pinned_host:
+            payload = torch.empty(count, dtype=torch.uint8, pin_memory=True)
+            window = memoryview(payload.numpy())
+        else:
+            buffer = bytearray(count)
+            payload = torch.frombuffer(buffer, dtype=torch.uint8)
+            window = memoryview(buffer)
+        _read_span_into(fd, window, start - entry["offset"], self._shape)
+        if file_stat_signature(os.fstat(fd)) != signature:
+            raise ValueError("changed during its content read")
+        return payload
+
     def _staged_tensor(self, name):
         span = self._span(name)
         if span is None:
@@ -1246,7 +1271,7 @@ class StagedShardReader:
             # No bytes to serve: an empty tensor is built locally rather
             # than read from any tier, pool included.
             if self._strict:
-                tensor = torch.empty(shape, dtype=dtype)
+                tensor = torch.empty(shape, dtype=dtype, pin_memory=self._pinned_host)
                 if self._device is not None:
                     tensor = tensor.to(self._device)
                 return tensor
@@ -1256,9 +1281,7 @@ class StagedShardReader:
             return None
         fd, signature, entry, tier = row[2], row[3], row[4], row[5]
         try:
-            raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
-            if file_stat_signature(os.fstat(fd)) != signature:
-                raise ValueError("changed during its content read")
+            payload = self._read_payload(fd, signature, entry, start, end)
         except (OSError, ValueError) as error:
             self._drop(row)
             reason = f"staged range {getattr(error, 'strerror', None) or error}"
@@ -1267,7 +1290,7 @@ class StagedShardReader:
             if self._strict:
                 raise refuse_pool_bulk_read(self._declared, reason)
             return None
-        tensor = torch.frombuffer(raw, dtype=torch.uint8).view(dtype).reshape(shape)
+        tensor = payload.view(dtype).reshape(shape)
         if self._device is not None:
             tensor = tensor.to(self._device)
         if self._resolver is not None:
