@@ -768,18 +768,31 @@ and an independently digest-bound versioned source contract bind the exact
 PB snapshot input and complete selection (commit/parent/subdirectory/refs),
 reviewed package relation, known container/quantum entries,
 image and complete environments. Candidate counters cannot introduce an
-accepted source. The producer inlines the original bounded quantum wire from
-its shared owned read; the consumer authenticates those bytes and committed
-counters against the selected completion, validates record/adjoint identities,
+accepted source. The producer publishes the original quantum wire descriptor from
+its shared owned read. The consumer authenticates its explicit original-wire copy
+and committed counters against the selected completion, validates record/adjoint identities,
 and derives actual plan/regime/shape/cotangent admission before publication.
 Equivalent byte-bound inputs and output namespaces retain their existing
 admission semantics. Legacy, foreign, substituted and ambiguous evidence
-refuses; the explicit unverified override remains stamped. The 1 MiB record
-cap precedes parsing/encoding/decoding; 8 MiB documents bound result/counter
-reads, with JSON overhead additional. This is CPU consumer/source qualification;
+refuses; the explicit unverified override remains stamped. The 4 MiB record
+cap precedes parsing. Result and counter reads retain their 8 MiB document caps,
+with JSON overhead additional. This is CPU consumer/source qualification;
 worker activation and the genuine #1293 GPU pilot remain independent gates.
 No numerical, cache, pipeline-default, wire or serving change is introduced.
 See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
+
+Re-stamped 2026-10-11 for PQ #2625 and the approved PQ #2603 cap:
+The completion carries the original quantum descriptor, never base64 wire bytes.
+Supply `--pilot-quantum-record PATH SHA256` for each original consumer-visible wire copy.
+The dispatcher selects one unique reference by the existing sealed original digest.
+The producer path remains provenance; the consumer does not reopen it.
+The shared `stage_inputs.read_bound` reader applies an explicit bound to local reads, memo hits, and staged reads.
+Local reads use the existing IO engine and permit one EOF sentinel byte.
+The 4 MiB control cap bounds accepted wire bytes.
+The declared length further bounds each consumer read.
+Exact digest, length, identity, source, and invocation checks remain unconditional.
+No new identity seal, wire copy, reader, cache, or serving qualification follows.
+
 
 Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
 the existing quantum output publisher records the exact SHA-256 and byte

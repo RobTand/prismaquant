@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- External quantum completions retain original descriptors without base64 bytes (#2625).
+  The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
+  Bounded local reads retain digest-valid symlink behavior, independent of memo state.
+  `--pilot-quantum-record PATH SHA256` names a consumer-visible original wire copy.
+  The producer path remains provenance across different filesystems.
+  The approved 4 MiB cap and all digest, length, identity, and source checks remain.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers

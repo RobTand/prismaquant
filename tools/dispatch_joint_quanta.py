@@ -3539,7 +3539,8 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
         if key not in verified:
             try:
                 verified[key] = _verify_pilot_result(
-                    gateway, selector, counters, reference, contracts=contracts)
+                    gateway, selector, counters, reference, contracts=contracts,
+                    quantum_records=args.pilot_quantum_record)
             except PilotRefused as exc:
                 raise DispatchRefused(
                     f"pilot for {row['quantum_id']}: {exc}") from exc
@@ -3583,7 +3584,8 @@ def _bounded_pilot_bytes(path: Path, cap: int) -> bytes:
     return raw
 
 
-def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
+def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
+                         quantum_records):
     """Authenticate a selected result, then bind independent source approval."""
     from prismaquant.joint_dispatch_pilot import PilotRefused, validate_pilot_completion
 
@@ -3604,10 +3606,15 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
     if not isinstance(payload, bytes) or len(payload) > PILOT_RESULT_MAX_BYTES:
         raise PilotRefused("pilot PB result carries no bounded owned result payload")
     completion = _single_completion(payload)
+    original_paths = [path for path, digest in quantum_records
+                      if digest == invocation["--quantum-sha256"]]
+    if len(original_paths) != 1:
+        raise PilotRefused("pilot requires one unique consumer reference for the sealed original quantum record")
     evidence = validate_pilot_completion(
         completion, counters=counters,
         counters_sha256=reference["sha256"], counters_bytes=reference["bytes"],
-        quantum_record_sha256=invocation["--quantum-sha256"])
+        quantum_record_sha256=invocation["--quantum-sha256"],
+        quantum_record_path=original_paths[0])
     record = _owned_record_from_completion(completion, evidence)
     if counters.get("identity_sha256") != record.get("identity_sha256"):
         raise PilotRefused("pilot counters name another quantum record identity")
@@ -3628,6 +3635,10 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
         "receipt_sha256": (result.get("receipt") or {}).get("receipt_sha256"),
         "quantum_sha256": invocation["--quantum-sha256"],
         "quantum_bytes": len(evidence["quantum_record"]),
+        "quantum_record_producer": dict(completion["quantum_record"]),
+        "quantum_record_consumer": {"path": original_paths[0],
+                                    "sha256": invocation["--quantum-sha256"],
+                                    "bytes": len(evidence["quantum_record"])},
         "record_identity_sha256": record["identity_sha256"],
         "source_contract": source_ref,
         "source_snapshot": source["snapshot"],
@@ -3858,6 +3869,10 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         metavar=("PATH", "SHA256"),
                         help="independently reviewed versioned source and invocation contract; "
                              "must bind the exact PB snapshot input and expected environments")
+    parser.add_argument("--pilot-quantum-record", action="append", nargs=2, default=[],
+                        metavar=("PATH", "SHA256"),
+                        help="consumer-visible copy of the original pilot quantum wire; "
+                             "one unique reference per sealed original digest")
     parser.add_argument("--force-unverified-pilot", action="store_true",
                         help="explicitly bypass pilot admission; stamp the "
                              "override in dry-run output and dispatch state")

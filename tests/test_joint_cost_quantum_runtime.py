@@ -341,21 +341,22 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     substituted_bytes = json.dumps(substituted).encode("utf-8")
     assert substituted["identity_sha256"] != original["identity_sha256"]
 
-    real_read_bytes = Path.read_bytes
+    from prismaquant import io_engine
+
+    real_read_file = io_engine.read_file
     consumed: list[Path] = []
 
-    def racing_read_bytes(self):
-        if self == record_path:
-            consumed.append(self)
-            payload = real_read_bytes(self)
-            # Replace the live file before any second read can see it.
+    def racing_read_file(path, limit, **kwargs):
+        owned = real_read_file(path, limit, **kwargs)
+        if path == record_path:
+            consumed.append(path)
+            # Replace the path after the one bounded read owns its bytes.
             swap = record_path.with_suffix(".swap")
             swap.write_bytes(substituted_bytes)
             os.replace(swap, record_path)
-            return payload
-        return real_read_bytes(self)
+        return owned
 
-    monkeypatch.setattr(Path, "read_bytes", racing_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", racing_read_file)
 
     kwargs = dict(
         quantum_path=record_path, quantum_sha256=original_sha,
@@ -373,7 +374,7 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     assert _record_bytes == original_bytes
 
     # The live file has changed; the old digest must now refuse.
-    monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", real_read_file)
     assert record_path.read_bytes() == substituted_bytes
     with pytest.raises(QuantumIdentityRefused, match="digest mismatch"):
         verify_quantum_identity(**kwargs)
