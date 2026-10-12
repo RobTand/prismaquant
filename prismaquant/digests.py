@@ -557,6 +557,28 @@ def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTE
     return digest.hexdigest()
 
 
+def file_range_sha256hex(path: str | os.PathLike, offset: int, size: int) -> str:
+    """SHA-256 over exactly ``size`` bytes from ``offset``, in one open-seek stream.
+
+    The exact bound-read recipe: open once, seek to ``offset``, and read
+    ``min(remaining, FILE_BLOCK_BYTES)`` until ``size`` bytes are consumed.
+    A short file refuses with ``ValueError``; no byte outside the range
+    enters the hash. The block size changes only how the range is read,
+    never the digest.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        remaining = size
+        while remaining:
+            chunk = handle.read(min(remaining, FILE_BLOCK_BYTES))
+            if not chunk:
+                raise ValueError(f"a declared read runs past the end of {path}")
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
+
+
 def file_digest_sha256hex(handle: BinaryIO) -> str:
     """Digest an already-open, stat-fenced file handle in one stream.
 

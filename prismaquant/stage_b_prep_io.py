@@ -33,12 +33,11 @@ did, so only created files enter this action's batches.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
@@ -97,17 +96,7 @@ def head_phase_entries(parent: Mapping) -> list[dict]:
 
 
 def _hash_range(path: str, offset: int, size: int) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        handle.seek(offset)
-        remaining = size
-        while remaining:
-            chunk = handle.read(min(remaining, 8 << 20))
-            if not chunk:
-                raise ValueError(f"a declared read runs past the end of {path}")
-            digest.update(chunk)
-            remaining -= len(chunk)
-    return digest.hexdigest()
+    return file_range_sha256hex(path, offset, size)
 
 
 def file_entry(path: str | os.PathLike, sha256: str | None = None) -> dict:
