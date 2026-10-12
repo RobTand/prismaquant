@@ -768,18 +768,31 @@ and an independently digest-bound versioned source contract bind the exact
 PB snapshot input and complete selection (commit/parent/subdirectory/refs),
 reviewed package relation, known container/quantum entries,
 image and complete environments. Candidate counters cannot introduce an
-accepted source. The producer inlines the original bounded quantum wire from
-its shared owned read; the consumer authenticates those bytes and committed
-counters against the selected completion, validates record/adjoint identities,
+accepted source. The producer publishes the original quantum wire descriptor from
+its shared owned read. The consumer authenticates its explicit original-wire copy
+and committed counters against the selected completion, validates record/adjoint identities,
 and derives actual plan/regime/shape/cotangent admission before publication.
 Equivalent byte-bound inputs and output namespaces retain their existing
 admission semantics. Legacy, foreign, substituted and ambiguous evidence
-refuses; the explicit unverified override remains stamped. The 1 MiB record
-cap precedes parsing/encoding/decoding; 8 MiB documents bound result/counter
-reads, with JSON overhead additional. This is CPU consumer/source qualification;
+refuses; the explicit unverified override remains stamped. The 4 MiB record
+cap precedes parsing. Result and counter reads retain their 8 MiB document caps,
+with JSON overhead additional. This is CPU consumer/source qualification;
 worker activation and the genuine #1293 GPU pilot remain independent gates.
 No numerical, cache, pipeline-default, wire or serving change is introduced.
 See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
+
+Re-stamped 2026-10-11 for PQ #2625 and the approved PQ #2603 cap:
+The completion carries the original quantum descriptor, never base64 wire bytes.
+Supply `--pilot-quantum-record PATH SHA256` for each original consumer-visible wire copy.
+The dispatcher selects one unique reference by the existing sealed original digest.
+The producer path remains provenance; the consumer does not reopen it.
+The shared `stage_inputs.read_bound` reader applies an explicit bound to local reads, memo hits, and staged reads.
+Local reads use the existing IO engine and permit one EOF sentinel byte.
+The 4 MiB control cap bounds accepted wire bytes.
+The declared length further bounds each consumer read.
+Exact digest, length, identity, source, and invocation checks remain unconditional.
+No new identity seal, wire copy, reader, cache, or serving qualification follows.
+
 
 Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
 the existing quantum output publisher records the exact SHA-256 and byte
@@ -11368,9 +11381,15 @@ off the running engine instead of received from it.
   the sweep from THE SAME loaded engine its eager smoke just generated on,
   through vLLM's own `LLM.apply_model` (one result per rank, so this is also
   the TP>1 shape). Per module it records the resolved `quant_method` and
-  `scheme` classes, the scheme object's own attributes, the kernel the scheme
+  `scheme` classes, the scheme object's own attributes, the method object's
+  own attributes (`method_attrs`, for served modules whose method carries no
+  scheme object -- packed MoE, PQ #706), the kernel the scheme
   selected, `isinstance(quant_method, QuantizeMethodBase)`, and a forward-hook
-  dispatch count over the generate. Only the eager arm writes one: forward
+  dispatch count over the generate. Hooks sit on every module: vLLM 0.28's
+  modular MoE runner invokes its experts without passing through their
+  `__call__`, so each row also carries its parent's count and the gate
+  accepts a schemeless MoE row whose runner fired (PQ #706). Only the eager
+  arm writes one: forward
   hooks do not run under CUDA-graph replay, and a graph-arm sweep would report
   zeros that mean "not observed" while looking exactly like "never ran".
 - **The isinstance trap, recorded rather than inherited.** vLLM finalizes
@@ -11409,11 +11428,10 @@ off the running engine instead of received from it.
   principle 14 forbids.
 - **Not covered, deliberately.** The activation REPRESENTATION (#567) — a
   scheme class is a name, not the quantizer rule the kernel applied, the same
-  hole the Tessera trace has. And no packed-MoE method class is in the
-  decoder, because no small packed-MoE compressed-tensors artifact was
-  available to sweep; an MoE artifact reads NOT VERIFIED until one is
-  observed, which is the recorded gap rather than a table written from
-  reading source.
+  hole the Tessera trace has. The packed-MoE decoder held one entry since
+  2026-10-10 (PQ #706): `CompressedTensorsW8A8Fp8MoEMethod`, swept on a
+  packed-MoE FP8 artifact; any further schemeless method class still reads
+  NOT VERIFIED until it is swept.
 
 Measured: the real sweep in `tests/fixtures/compressed_route_sweep_0p6b/` was
 written by this path on sparklina (GB10, sm_121) inside
@@ -11421,7 +11439,13 @@ written by this path on sparklina (GB10, sm_121) inside
 `dq-runs/fc45-0p6b-nvfp4/exported`. 112 modules, all
 `CompressedTensorsW4A4Fp4(use_a16=False, group_size=16)` on
 `FlashInferCutlassNvFp4LinearKernel`, agreeing with all 252 priced targets.
-Gates: `tests/test_compressed_route_sweep_gate.py`,
+The second real sweep, `tests/fixtures/compressed_route_sweep_moe/`, was
+written by the same path on sparky (GB10, sm_121) inside the same pinned
+image against a packed-MoE FP8-dynamic artifact built from
+`hf-internal-testing/Mixtral-tiny` (PQ #706): 4 dense
+`CompressedTensorsW8A8Fp8` linears plus 2 `RoutedExperts` rows resolving
+`CompressedTensorsW8A8Fp8MoEMethod` with no scheme, agreeing with all 6
+priced targets. Gates: `tests/test_compressed_route_sweep_gate.py`,
 `tests/test_bite_631_route_sweep.py` (shown failing on base).
 
 Re-stamped (2026-09-17, `flash/624-a4-input-global-scale-20260917`) for **the

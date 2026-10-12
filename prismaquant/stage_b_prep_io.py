@@ -33,12 +33,11 @@ did, so only created files enter this action's batches.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
@@ -97,17 +96,7 @@ def head_phase_entries(parent: Mapping) -> list[dict]:
 
 
 def _hash_range(path: str, offset: int, size: int) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        handle.seek(offset)
-        remaining = size
-        while remaining:
-            chunk = handle.read(min(remaining, 8 << 20))
-            if not chunk:
-                raise ValueError(f"a declared read runs past the end of {path}")
-            digest.update(chunk)
-            remaining -= len(chunk)
-    return digest.hexdigest()
+    return file_range_sha256hex(path, offset, size)
 
 
 def file_entry(path: str | os.PathLike, sha256: str | None = None) -> dict:
@@ -251,12 +240,13 @@ class StagedPreparationReads:
             self.own_outputs = (*self.own_outputs, root)
 
     def _read_entry(self, path: Path, staged: dict, *, where: str,
-                    sha256: str | None) -> bytes:
+                    sha256: str | None, max_bytes: int | None = None) -> bytes:
         from .staged_tier_policy import TierPolicyRefused
         from .staged_whole_file import read_staged_entry
 
         try:
-            raw = read_staged_entry(self.resolver, path, staged, label=where)
+            raw = read_staged_entry(self.resolver, path, staged, label=where,
+                                    max_bytes=max_bytes)
         except TierPolicyRefused as exc:
             raise PreparationReadRefused(
                 f"{where} at {path} was not served from the stage: {exc}") from exc
@@ -267,17 +257,23 @@ class StagedPreparationReads:
                 f"digest the manifest and the caller require")
         return raw
 
-    def whole(self, path, *, sha256: str | None = None, where: str) -> bytes:
-        """One whole declared file off the stage, digest-checked."""
+    def whole(self, path, *, sha256: str | None = None, where: str,
+              max_bytes: int | None = None) -> bytes:
+        """One whole declared file off the stage, digest-checked and bounded."""
         path = Path(path)
         if self.owns(path):
-            return path.read_bytes()
+            if max_bytes is None:
+                return path.read_bytes()
+            from .io_engine import read_file
+
+            return read_file(path, max_bytes)[0]
         staged = self.resolver.staged_read(path, expected_sha256=sha256)
         if staged is None:
             raise PreparationReadRefused(
                 f"{where} at {path} is not staged for manifest "
                 f"{self.manifest_sha256[:12]}: refusing rather than reading the pool")
-        return self._read_entry(path, staged, where=where, sha256=sha256)
+        return self._read_entry(path, staged, where=where, sha256=sha256,
+                                max_bytes=max_bytes)
 
     def prefix(self, path, *, nbytes: int, where: str) -> bytes:
         """The staged range entry at offset 0 that covers ``nbytes`` of ``path``.
@@ -358,8 +354,8 @@ def _install_bound_reader(reads: StagedPreparationReads | None) -> None:
     # documents and pickles; the preparation reads them through it.
     from . import stage_inputs
     stage_inputs.BOUND_READER = (None if reads is None else
-                                 lambda path, sha256, label: reads.whole(
-                                     path, sha256=sha256, where=label))
+                                 lambda path, sha256, label, *, max_bytes=None: reads.whole(
+                                     path, sha256=sha256, where=label, max_bytes=max_bytes))
 
 
 def reset_staged_reads_for_tests() -> None:

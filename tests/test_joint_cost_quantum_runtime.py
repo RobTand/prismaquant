@@ -341,21 +341,22 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     substituted_bytes = json.dumps(substituted).encode("utf-8")
     assert substituted["identity_sha256"] != original["identity_sha256"]
 
-    real_read_bytes = Path.read_bytes
+    from prismaquant import io_engine
+
+    real_read_file = io_engine.read_file
     consumed: list[Path] = []
 
-    def racing_read_bytes(self):
-        if self == record_path:
-            consumed.append(self)
-            payload = real_read_bytes(self)
-            # Replace the live file before any second read can see it.
+    def racing_read_file(path, limit, **kwargs):
+        owned = real_read_file(path, limit, **kwargs)
+        if path == record_path:
+            consumed.append(path)
+            # Replace the path after the one bounded read owns its bytes.
             swap = record_path.with_suffix(".swap")
             swap.write_bytes(substituted_bytes)
             os.replace(swap, record_path)
-            return payload
-        return real_read_bytes(self)
+        return owned
 
-    monkeypatch.setattr(Path, "read_bytes", racing_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", racing_read_file)
 
     kwargs = dict(
         quantum_path=record_path, quantum_sha256=original_sha,
@@ -373,11 +374,73 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     assert _record_bytes == original_bytes
 
     # The live file has changed; the old digest must now refuse.
-    monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", real_read_file)
     assert record_path.read_bytes() == substituted_bytes
     with pytest.raises(QuantumIdentityRefused, match="digest mismatch"):
         verify_quantum_identity(**kwargs)
 
+
+
+def _padded_identity_bytes(identity_files, *, target_bytes):
+    """A valid identity record padded to exactly ``target_bytes`` of JSON."""
+    record = _valid_record(identity_files)
+    record.pop("identity_sha256")
+    pad = target_bytes - len(json.dumps(record).encode("utf-8"))
+    assert pad > 0
+    record["sealed_note"] = "n" * pad
+    record["identity_sha256"] = canonical_json_sha256(record, where="record")
+    raw = json.dumps(record).encode("utf-8")
+    drift = target_bytes - len(raw)
+    if drift:
+        record.pop("identity_sha256")
+        note = record["sealed_note"]
+        if drift < 0:
+            record["sealed_note"] = note[: len(note) + drift]
+        else:
+            record["sealed_note"] = note + "n" * drift
+        record["identity_sha256"] = canonical_json_sha256(record, where="record")
+        raw = json.dumps(record).encode("utf-8")
+    assert len(raw) == target_bytes
+    return raw
+
+
+def _identity_kwargs(identity_files, record_path, sha):
+    return dict(
+        quantum_path=record_path, quantum_sha256=sha,
+        plan_path=identity_files["plan"][0], plan_sha256=identity_files["plan"][1],
+        prepared_path=identity_files["prepared"][0],
+        prepared_sha256=identity_files["prepared"][1],
+        adjoint_path=identity_files["adjoint"][0],
+        adjoint_sha256=identity_files["adjoint"][1],
+        output_root=identity_files["output_root"])
+
+
+def test_identity_gate_admits_sealed_record_below_raised_cap(identity_files):
+    """PQ #2603: a 2.7 MB valid record passes ``verify_quantum_identity``."""
+    from prismaquant.joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+    raw = _padded_identity_bytes(identity_files, target_bytes=int(2.7 * 1024 * 1024))
+    assert 1024 * 1024 < len(raw) < QUANTUM_RECORD_MAX_BYTES
+    record_path = identity_files["output_root"].parent / "record-big.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_bytes(raw)
+    verified, _slice, record_bytes = verify_quantum_identity(
+        **_identity_kwargs(identity_files, record_path, hashlib.sha256(raw).hexdigest()))
+    assert record_bytes == raw
+    assert verified["identity_sha256"] == json.loads(raw.decode("utf-8"))["identity_sha256"]
+
+
+def test_identity_gate_refuses_record_above_raised_cap(identity_files):
+    """PQ #2603: a record one byte above 4 MiB refuses the cap."""
+    from prismaquant.joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+    raw = _padded_identity_bytes(
+        identity_files, target_bytes=QUANTUM_RECORD_MAX_BYTES + 1)
+    record_path = identity_files["output_root"].parent / "record-over.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_bytes(raw)
+    with pytest.raises(QuantumIdentityRefused, match="cap"):
+        verify_quantum_identity(
+            **_identity_kwargs(identity_files, record_path,
+                               hashlib.sha256(raw).hexdigest()))
 
 
 def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeypatch, capsys):
