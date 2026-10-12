@@ -155,6 +155,13 @@
   A real campaign error, native profiler teardown failure, and a monitor that never stopped fail in both modes.
   Missing telemetry retains each actual instrument name and its exact error detail.
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
+- The shipcard file hash calls the existing file owner (#2635, references #1301).
+  `_file_content_sha256` delegates to `digests.file_sha256hex` with the original
+  1 MiB block size; the file opens once per digest. `file_sha256` keeps its
+  error-to-None wrapper. The fd verification keeps its raw hashes: one forward
+  traversal, one stat fence, a container digest plus per-span digests.
+  Artifact roster, manifest schemas, publication policy, caches, residency and
+  seeds stay unchanged.
 
 ### Changed
 - **Bound-publication digest sites route to the digest owners** (Refs #1301, part of #2542).

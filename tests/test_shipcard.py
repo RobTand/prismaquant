@@ -26,6 +26,7 @@ from prismaquant.shipcard import (
     artifact_bytes,
     build_shipcard,
     compute_model_sha,
+    file_sha256,
     fill_slot,
     kv_shared_fisher_echo,
     lane_gate_slots,
@@ -1477,6 +1478,17 @@ def test_build_refuses_fabricated_forensic_hashes():
     card = _forensic_build(assignment_hash="definitely-16-chars!!")
     problems = verify(card, model_dir=None, required=[])
     assert any("assignment_hash" in p for p in problems), problems
+
+
+def test_file_sha256_returns_none_on_unreadable_paths(tmp_path):
+    """The error-to-None wrapper survives the digests owner move.
+
+    `_file_content_sha256` now delegates to `digests.file_sha256hex`;
+    `file_sha256` still converts every read failure to None.
+    """
+    assert file_sha256(tmp_path / "absent") is None
+    assert file_sha256(tmp_path) is None
+
 
 
 def test_build_refuses_a_malformed_format_histogram():

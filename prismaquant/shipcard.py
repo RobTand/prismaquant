@@ -516,11 +516,9 @@ def artifact_bytes(model_dir: str | os.PathLike) -> int:
 
 
 def _file_content_sha256(path: str | os.PathLike) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    from .digests import file_sha256hex
+
+    return file_sha256hex(path, block_size=1024 * 1024)
 
 
 def build_weight_content_manifest(model_dir: str | os.PathLike) -> dict[str, Any]:
