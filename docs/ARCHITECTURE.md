@@ -1728,7 +1728,7 @@ For pull requests created at or after `2026-10-09T17:00:00Z`, the head branch mu
 The suffix must match `[a-z0-9][a-z0-9-]*`.
 The branch issue must match a verified same-repository closing reference or an open parent reference.
 The check can match a later parent or an open parent beside a different closing issue.
-Head branches with `ig/` or `release` prefixes retain branch exemptions.
+Head branches with `ig/`, `pg/`, `pg-train/` or `release` prefixes retain branch exemptions.
 Earlier pull requests also retain branch exemptions.
 These exemptions do not bypass the issue-link check.
 PrismaBuild action `e0087aafc8cd` passes all 62 behavioral cases on x86.
