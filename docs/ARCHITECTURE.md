@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel ownership.
+`native_panel_kind` owns the schema-keyed dense and routed panel adapters. Receipt
+emission and runtime admission ask the same adapter for its row binding, runtime
+scope, world size and consumer. The adapter also projects final joint panels onto
+execution panels and owns the shared immutable late-binding envelope. Dense and
+routed producer consumers retain their numerical and resource refusal policies;
+the runtime gate still recomputes every row from its original receipt and panel.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): rung admission
 captures current lane and format facts together and checks that captured table's
 digest against the exact serving pin. A successful check of a later file cannot

@@ -4,7 +4,8 @@ import copy
 import pytest
 
 from prismaquant.joint_aura import identity_sha256
-from prismaquant.native_execution_binding import execution_panel_from_joint, freeze_execution_panel
+from prismaquant.native_panel_kind import execution_panel_from_joint
+from prismaquant.native_execution_binding import freeze_execution_panel
 from prismaquant.native_operator_panel import EXECUTION, freeze_native_panel
 from test_native_operator_panel import joined  # noqa: F401 -- fixture
 

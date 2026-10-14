@@ -785,10 +785,6 @@
    "tools/dispatch_stage_a_split.py",
    "tools/tp_decode_feasibility.py"
   ],
-  "bind_execution_receipt": [
-   "prismaquant/native_execution_binding.py",
-   "prismaquant/native_moe_execution_binding.py"
-  ],
   "bound_json": [
    "prismaquant/glm_source_derivative.py",
    "tools/check_t4_overlay_prepare.py",
@@ -867,10 +863,6 @@
    "tools/staged_exact_read_bench.py",
    "tools/staged_read_stream_ab.py"
   ],
-  "execution_panel_from_joint": [
-   "prismaquant/native_execution_binding.py",
-   "prismaquant/native_moe_execution_binding.py"
-  ],
   "file_sha256": [
    "prismaquant/shipcard.py",
    "tools/full_kl_teacher_payload.py"
@@ -935,10 +927,6 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py",
    "prismaquant/joint_aura_transitions.py"
-  ],
-  "resolve_execution_binding": [
-   "prismaquant/native_execution_binding.py",
-   "prismaquant/native_moe_execution_binding.py"
   ],
   "roster_sha256": [
    "prismaquant/joint_replay_frontier.py",

@@ -1786,7 +1786,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_moe_late_binding.v1":
-        from .native_moe_execution_binding import resolve_execution_binding
+        from .native_panel_kind import resolve_execution_binding
         receipt = resolve_execution_binding(receipt, expected_panel)
     if (receipt.get("schema") != "tessera.native_moe_operator_receipt.v1"
             or receipt.get("status") != "timing_admissible"):

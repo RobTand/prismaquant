@@ -620,8 +620,8 @@ def test_a_world_of_one_binds_no_separate_full_quality_preparation(joined):
 
 
 def test_late_whole_owner_binding_preserves_router_and_member_execution(joined):
-    from prismaquant.native_moe_execution_binding import (
-        execution_panel_from_joint,bind_execution_receipt,resolve_execution_binding,RAW_RECEIPT_SCHEMA)
+    from prismaquant.native_panel_kind import (
+        execution_panel_from_joint,bind_execution_receipt,resolve_execution_binding,MOE_EXECUTION_RECEIPT_SCHEMA as RAW_RECEIPT_SCHEMA)
     final=freeze_moe_panel(*joined,cost_sha256='4'*64)
     execution=execution_panel_from_joint(final)
     raw={'schema':RAW_RECEIPT_SCHEMA,'status':'timing_admissible','panel':execution,

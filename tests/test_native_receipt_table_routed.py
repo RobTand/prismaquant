@@ -1276,8 +1276,8 @@ def test_the_cli_refuses_a_forged_or_changed_rank_report(tmp_path, monkeypatch, 
 
 
 def _late_bound_receipt(receipt, panel):
-    from prismaquant.native_moe_execution_binding import (
-        RAW_RECEIPT_SCHEMA,execution_panel_from_joint,bind_execution_receipt)
+    from prismaquant.native_panel_kind import (
+        MOE_EXECUTION_RECEIPT_SCHEMA as RAW_RECEIPT_SCHEMA,execution_panel_from_joint,bind_execution_receipt)
     raw=copy.deepcopy(receipt);raw['schema']=RAW_RECEIPT_SCHEMA
     raw['panel']=execution_panel_from_joint(panel)
     raw['panel_sha256']=identity_sha256(raw['panel'])

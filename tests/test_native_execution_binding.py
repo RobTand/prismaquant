@@ -2,8 +2,8 @@
 import copy
 import pytest
 from prismaquant.joint_aura import identity_sha256
-from prismaquant.native_execution_binding import (
-    BOUND_SCHEMA, RAW_RECEIPT_SCHEMA, bind_execution_receipt,
+from prismaquant.native_panel_kind import (
+    DENSE_BINDING_SCHEMA as BOUND_SCHEMA, DENSE_EXECUTION_RECEIPT_SCHEMA as RAW_RECEIPT_SCHEMA, bind_execution_receipt,
     execution_panel_from_joint, resolve_execution_binding)
 
 

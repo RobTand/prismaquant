@@ -262,7 +262,8 @@ def test_a_present_but_empty_schedule_is_a_defect():
 
 
 def test_execution_panel_equals_final_joint_execution_projection(joined):
-    from prismaquant.native_execution_binding import freeze_execution_panel,execution_panel_from_joint
+    from prismaquant.native_execution_binding import freeze_execution_panel
+    from prismaquant.native_panel_kind import execution_panel_from_joint
     inputs,preflight,row=joined
     final=freeze_native_panel(*joined,cost_sha256='4'*64)
     raw=freeze_execution_panel(inputs,preflight,

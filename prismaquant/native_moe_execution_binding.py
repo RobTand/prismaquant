@@ -2,25 +2,13 @@
 import copy
 from .joint_aura import identity_sha256
 
-RAW_PANEL_SCHEMA='tessera.native_moe_execution_panel.v1'
-RAW_RECEIPT_SCHEMA='tessera.native_moe_execution_receipt.v1'
-BOUND_SCHEMA='prismaquant.native_moe_late_binding.v1'
+from .native_panel_kind import (
+    MOE_EXECUTION_PANEL_SCHEMA as RAW_PANEL_SCHEMA, member_execution_identity,
+)
 
 
-def member_identity(member):
-    return {'qname':member['unit'],**{key:member[key] for key in
-        ('format','source_weight','rendered_weight','activation')}}
 
 
-def execution_panel_from_joint(panel):
-    if panel.get('schema')!='tessera.native_moe_panel.v1':
-        raise ValueError('whole MoE late binding requires final joint panel')
-    value=copy.deepcopy(panel);value['schema']=RAW_PANEL_SCHEMA
-    value.pop('cost_sha256');value.pop('probe_identity_sha256')
-    value['runtime_binding'].pop('member_operator_identity_sha256')
-    value['runtime_binding']['member_execution_identity_sha256']={
-        m['unit']:identity_sha256(member_identity(m)) for m in value['members']}
-    return value
 
 
 def freeze_execution_panel(inputs,preflight,*,source_sha256):
@@ -59,7 +47,7 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
             _equal(expected[key],inputs['routing_capture']['phases'][phase][key],phase+' capture '+key)
         phases[phase]={**expected,'expected_route':route}
     binding={'member_formats':{m['unit']:m['format'] for m in members},
-        'member_execution_identity_sha256':{m['unit']:identity_sha256(member_identity(m)) for m in members},
+        'member_execution_identity_sha256':{m['unit']:identity_sha256(member_execution_identity(m)) for m in members},
         'member_shapes':{m['unit']:owner.rank_local_member_shape(inputs['shape'],m['role']) for m in members},
         'operator_route':operator_route_identity(route)}
     return copy.deepcopy({'schema':RAW_PANEL_SCHEMA, **({'source_acquisition':inputs['source_acquisition']} if 'source_acquisition' in inputs else {}),**({'reference_served_quantizer':reference} if reference is not None else {}),'unit':inputs['unit'],'format':inputs['format'],
@@ -72,22 +60,3 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
         'config_sha256':operator['config_sha256'],'serving_config_sha256':inputs['serving_config_sha256'],
         'workspace':preflight['workspace'],'workspace_sha256':preflight['workspace_sha256'],
         'numerics':inputs['numerics'],'phases':phases})
-
-
-def bind_execution_receipt(raw,final_panel):
-    if raw.get('schema')!=RAW_RECEIPT_SCHEMA or raw.get('status')!='timing_admissible':
-        raise ValueError('whole MoE late binding requires admitted raw execution')
-    panel=execution_panel_from_joint(final_panel)
-    if identity_sha256(raw['panel'])!=identity_sha256(panel) or raw['panel_sha256']!=identity_sha256(panel):
-        raise ValueError('whole MoE late binding changes measured execution')
-    return copy.deepcopy({'schema':BOUND_SCHEMA,'raw_receipt':raw,'raw_receipt_sha256':identity_sha256(raw),
-        'panel':final_panel,'panel_sha256':identity_sha256(final_panel)})
-
-
-def resolve_execution_binding(binding,final_panel):
-    raw=binding['raw_receipt']
-    if identity_sha256(raw)!=binding['raw_receipt_sha256'] or binding!=bind_execution_receipt(raw,final_panel):
-        raise ValueError('whole MoE late binding differs from immutable evidence')
-    view=copy.deepcopy(raw);view.update(schema='tessera.native_moe_operator_receipt.v1',
-        panel=copy.deepcopy(final_panel),panel_sha256=identity_sha256(final_panel))
-    return view
