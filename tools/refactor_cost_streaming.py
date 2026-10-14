@@ -123,6 +123,7 @@ def moved_reference(value, owners):
 
 def migrate(path, owners):
     source = path.read_text()
+    original_source = source
     if "cost_streaming" not in source:
         return False
     tree = ast.parse(source)
@@ -254,9 +255,10 @@ def migrate(path, owners):
             replacement = " " * node.col_offset + "pass\n"
         lines[node.lineno - 1:node.end_lineno] = [replacement]
     source = "".join(lines)
-    if changes:
+    changed = source != original_source
+    if changed:
         path.write_text(source)
-    return bool(changes)
+    return changed
 
 
 def migrate_fixtures(owners):
@@ -301,6 +303,8 @@ def main():
         for root in ("prismaquant", "tools", "tests", "experiments"):
             for path in (ROOT / root).rglob("*.py"):
                 if path.resolve() == Path(__file__).resolve():
+                    continue
+                if path.name == "test_cost_streaming_refactor.py":
                     continue
                 if migrate(path, owners):
                     changed.append(str(path.relative_to(ROOT)))
