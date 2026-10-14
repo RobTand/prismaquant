@@ -43,7 +43,6 @@
   "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry",
   "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
   "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
-  "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences",
   "hashlib:prismaquant/sample_parallel_probe.py::_open_regular_bytes_at",
   "hashlib:prismaquant/sample_parallel_probe_contract.py::activation_priority_key",
   "hashlib:prismaquant/sample_parallel_probe_merge.py::_reference_activation_priority_key",
@@ -409,7 +408,6 @@
    "tools/kl_ab.py"
   ],
   "_finite_float": [
-   "prismaquant/sensitivity_coverage.py",
    "prismaquant/shipcard.py",
    "prismaquant/tessera_allocator.py"
   ],
@@ -611,7 +609,6 @@
   ],
   "_quantile": [
    "prismaquant/kl_measurement.py",
-   "prismaquant/proposal_validation.py",
    "prismaquant/stage_a_chain_seed.py"
   ],
   "_read_json": [
@@ -651,7 +648,6 @@
    "prismaquant/prepriced_cost.py",
    "prismaquant/prismasnap_checkpoint.py",
    "prismaquant/prismasnap_validation.py",
-   "prismaquant/proposal_validation.py",
    "prismaquant/tessera_joint_aura.py",
    "prismaquant/union_production_cache.py",
    "tools/full_kl_teacher_payload.py"

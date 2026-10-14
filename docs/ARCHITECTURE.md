@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
+were retired: proposal comparison, propagated-sensitivity coverage, shard
+layout/progress, quality-ceiling selection and two Tessera coverage/repair
+ledgers. Current execution and admission paths have no callers to these modules.
+
 Re-stamped 2026-10-14: the probe inventory publishes priced dense, grouped
 and packed units and excluded Linears with reasons. Walk coverage checks the
 same module-name exclusions as the probe. Declared packed-profile failures
@@ -20040,7 +20045,7 @@ decision. Re-stamped (2026-08-21,
 (§"Output packaging"). Both CB exporters take `--shard-bytes` with the native
 lane's 1 GiB default, `run-pipeline.sh` passes `EXPORT_SHARD_BYTES` on the CB
 branch, and the partition rule is now one shared implementation
-(`prismaquant/shard_layout.py`) rather than two writers that agreed by
+(the former shared shard-layout prototype, now retired with the CB lane) rather than two writers that agreed by
 inspection. One resulting shard still publishes `model.safetensors` with no
 index, so a budget at least as large as the artifact reproduces every
 pre-2026-08-21 CB layout; more than one publishes
@@ -20053,7 +20058,7 @@ binds weight-container filenames and sizes (`shipcard.py:270-279`), so a
 different shard budget is a different artifact identity, which is correct for
 a freshly exported artifact and is not a reshard-in-place story. What the
 change adds instead is a layout-INVARIANT payload digest,
-`provenance.tensor_payload_identity` (`shard_layout.tensor_payload_identity`,
+`provenance.tensor_payload_identity` (the former shard-layout payload helper,
 stamped by **both** CB exporters), hashed in the pass that already touches the
 bytes: two exports of identical tensors at different budgets agree there and
 differ in `model_sha`, so a resharded export stays recognisable as the same
@@ -21266,14 +21271,12 @@ or stamped with the generic force flags.
 
 **Output packaging — ~1 GiB shards (2026-08-20; CB lane 2026-08-21).** Published artifacts are
 packaged in ~1 GiB safetensors shards, down from 5 GiB, on Robert's standing instruction
-("package all models using 1gb file sizes"). The value lives in
-`prismaquant/shard_layout.py` (`DEFAULT_SHARD_BYTES`), which every lane's `--shard-bytes`
-default reads (so a hand-run export gets it too), and in `run-pipeline.sh`'s
-`EXPORT_SHARD_BYTES`, passed through on **both** the compressed-tensors branch and the CB
-branch and echoed in the settings banner. The partition rule is one implementation
-(`shard_layout.plan_shards`): accumulate in emit order, close the current shard when the next
-tensor would push it past the budget, and give a single oversized tensor its own shard whole
-rather than splitting it — so a wide `lm_head`/`embed_tokens` row may still exceed the target.
+("package all models using 1gb file sizes"). The native exporter declares its default in
+`export_native_compressed`'s `--shard-bytes` argument; the pipeline passes
+`EXPORT_SHARD_BYTES`. `IncrementalSafetensorsWriter` owns native partitioning:
+accumulate in emit order, close a populated shard before the next tensor exceeds
+the budget, and emit an oversized tensor whole. The former CB lane and its
+standalone shard-layout prototype are retired.
 That is the writer's contract, not a violation of it. **There is no zero sentinel** in either
 lane: the legacy single-container layout is what a budget at least as large as the finished
 artifact already produces, and the writers publish `model.safetensors` with no index whenever
@@ -23121,7 +23124,7 @@ bootstrap intervals.
   points no slower than the balanced pick. It needs three points and
   otherwise records `status: refused` with a reason. **The high-prefill rule
   is the owner's decision**; the alternative is a served-KL ceiling
-  (`speed_quality_frontier.select_by_quality_ceiling`). The rule id is inside
+  (a served-KL ceiling; the unused quality-ceiling prototype is retired). The rule id is inside
   `identity_sha256`, so a change of rule is visible.
 - **Record.** Rule id, normalisation, roster (picks, neighbours and endpoint
   controls), regime M, table identity, materiality verdict, kernel-lane
@@ -27388,7 +27391,6 @@ parity does not establish serving, model quality or multi-host behavior.
 | PrismaSnap BF16 fold fidelity | `tools/measure_vllm_full_kl.py` → `tools/prismasnap.py attest-fold-fidelity` | no — optional pre-pipeline candidate workflow | **blocking for a marked source**: original-BF16 → snapped-BF16 all-position forward KL `≤5e-4`, with BF16/no-spec-decode launch contracts and source, teacher payload, calibration, serve-fingerprint, index, weight-map, and shard-content replay; atomically transitions `MATERIALIZED` to `VERIFIED` |
 | PrismaSnap source admission | `python -m prismaquant.prismasnap_contract --model "$MODEL_PATH"`; exporter-local replay/refusal helpers | yes, but only when the source carries the marker | binary: verified content is admitted only to native compressed-tensors; missing marker is a no-op; malformed/unverified marker and every marked GGUF/Gridbook source refuse before expensive work/output |
 | Candidate real-KL (selection) | `validate_assignments_kl.py` | yes, only under `SELECTION_MODE=validated-surrogate` (`run-pipeline.sh:1223-1278`) | ranks, does not gate |
-| Sampled whole-stack proposal comparison | `proposal_validation.validate_sampled_proposal` over independently emitted `kl_measurement.sequence_token_nll` rows | no — explicit post-selection input only | **advisory, identity-bound**: requires matched candidate/incumbent sequence IDs and scored-token counts, retains failed/timed-out rows, and returns only an approximate paired manifest-cluster-bootstrap comparison; it cannot authorize export or assert latency |
 | Artifact survey (PPL/MMLU/end-KL) | `validation_harness.py` | no | **no thresholds at all** |
 | vLLM load + greedy smoke | `validate_native_export.py` | **echoed only** (`run-pipeline.sh:1704-1705`) | binary; `--route-sweep-out` also writes the eager arm's served route sweep from that same engine |
 | Served route sweep (compressed-tensors lane) | `validate_native_export.py --route-sweep-out` → `python -m prismaquant.shipcard_cli fill-route-sweep` | no — operator-run, inside the serving container | **binary, three-valued**: exit 0 fills `route.sweep`, 1 refuses on a served/priced disagreement, 3 is NOT VERIFIED and leaves the slot unfilled |
