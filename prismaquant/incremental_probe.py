@@ -510,14 +510,7 @@ def resolve_linear_exclude(model_path: str) -> str:
     All meta stamps and hook installs must use this one resolver so
     shard-reuse keys stay consistent."""
     profile = _detect_profile_for_shards(model_path)
-    extra = ""
-    try:
-        extra = str(profile.probe_linear_exclude_extra() or "")
-    except AttributeError:
-        pass
-    if extra:
-        return f"(?:{probe_inventory.BASE_LINEAR_EXCLUDE}|{extra})"
-    return probe_inventory.BASE_LINEAR_EXCLUDE
+    return probe_inventory.linear_exclusion_for_profile(profile)
 
 
 def build_extended_shard_regexes(
@@ -2772,20 +2765,11 @@ def _run_body_streaming_shard(
     layers_prefix = ctx.layers_prefix
 
     inc = re.compile(linear_include)
-    exc = re.compile(linear_exclude)
-    # Profile-driven Linear gathering (refactor #32). Profile decides
-    # whether each Linear gets Fisher hooks. Default profile accepts
-    # any `nn.Linear`; DSv4 skips `DeepseekV4GroupedLinear` (its weight
-    # `[out_features, in_features_per_group]` doesn't match the per-token
-    # Hessian-trace effective output dim).
     from .model_profiles import profile_from_model as _pfm
     _shard_profile = _pfm(model)
-    all_linears = [
-        n for n, m in model.named_modules()
-        if _shard_profile.should_probe_linear(n, m)
-    ]
-    all_tracked = [n for n in all_linears
-                   if inc.search(n) and not exc.search(n)]
+    inventory = probe_inventory.build_probe_inventory(
+        model, _shard_profile, linear_exclude=linear_exclude)
+    all_tracked = [name for name in inventory.linear_names if inc.search(name)]
     if sample_parallel_contract is not None:
         routed = sorted(set(all_tracked) & set(precomputed.expert_info))
         if routed:

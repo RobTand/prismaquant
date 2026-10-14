@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: the probe inventory publishes priced dense, grouped
+and packed units and excluded Linears with reasons. Walk coverage checks the
+same module-name exclusions as the probe. Declared packed-profile failures
+propagate instead of producing an empty inventory.
+
 Re-stamped 2026-10-14: `probe_inventory` owns profile-declared packed-expert
 recognition and the baseline Linear exclusion. Probe execution, rendering and
 walk coverage query this owner; hook state and shard profile detection remain

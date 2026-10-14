@@ -1723,17 +1723,11 @@ def find_decided_but_unpriced(
 
     Imports prismaquant lazily so the walker core stays torch-only.
     """
-    from prismaquant.probe_inventory import BASE_LINEAR_EXCLUDE
-    from prismaquant.probe_inventory import (
-        is_packed_experts_module as _is_packed_experts_module,
-    )
+    from prismaquant.probe_inventory import build_probe_inventory
 
-    try:
-        extra = str(profile.probe_linear_exclude_extra() or "")
-    except AttributeError:
-        extra = ""
-    excludes = (BASE_LINEAR_EXCLUDE,) if not extra else (
-        BASE_LINEAR_EXCLUDE, extra)
+    inventory = build_probe_inventory(model, profile)
+    priced = {unit.module_name for unit in inventory.priced_units}
+    excluded = {unit.module_name: unit.reason_code for unit in inventory.excluded_linears}
 
     entries: list[dict] = []
     for node in result.nodes:
@@ -1750,17 +1744,9 @@ def find_decided_but_unpriced(
                 "reason_code": "owner_module_missing",
             })
             continue
-        if profile.should_probe_linear(node.owner_module, module):
-            # The hook gate accepts the module; the NAME regexes are the
-            # remaining way pricing can silently skip it.
-            if not any(re.search(rx, node.name) for rx in excludes):
-                continue
-            reason_code = "probe_linear_excluded"
-        elif _is_packed_experts_module(module, profile):
-            # Priced through install_packed_expert_hooks instead.
+        if node.owner_module in priced:
             continue
-        else:
-            reason_code = "owner_not_probe_priceable"
+        reason_code = excluded.get(node.owner_module, 'owner_not_probe_priceable')
         entries.append({
             "node": node.name,
             "owner_module": node.owner_module,
