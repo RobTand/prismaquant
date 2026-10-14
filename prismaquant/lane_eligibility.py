@@ -145,7 +145,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from . import record_fields
 
@@ -2502,6 +2502,10 @@ class EligibilityTable:
     #: admission leg; ``()`` for a v3 table, whose only launches are torch's.
     lanes: tuple[LaneClaim, ...] = ()
 
+    @property
+    def requires_serving_context(self) -> bool:
+        return self.schema in SCOPED_LANE_SCHEMAS
+
     def governs(self, family: str) -> bool:
         """Whether the pinned contract publishes a codec for this family."""
         return family in self.families
@@ -2998,6 +3002,47 @@ _CELL_RANK = {
 # ---------------------------------------------------------------------------
 # Loading the pinned contract
 # ---------------------------------------------------------------------------
+class NativeCellPopulation(Protocol):
+    """The parsed population and lane claims used by a scoped rung query."""
+
+    cells: tuple[EligibilityCell, ...]
+    regimes: tuple[str, ...]
+
+    @property
+    def lanes(self) -> tuple[LaneClaim, ...]: ...
+
+    @property
+    def requires_serving_context(self) -> bool: ...
+
+
+def native_rung_cells(
+    population: NativeCellPopulation, family: str, rate_q256: int, *,
+    serving_context: ServingContext | None = None,
+    ignore_evidence: bool = False,
+) -> tuple[EligibilityCell, ...]:
+    """Select native cells only when every required regime shares one target.
+
+    This is cell selection, not exact-pin or export admission. Diagnostic
+    callers can retain evidence- or lane-refused cells to name the refusal.
+    """
+    scoped = population.requires_serving_context
+    if scoped != (serving_context is not None):
+        return ()
+    matched = tuple(
+        cell for cell in population.cells
+        if cell.is_trellis
+        and cell.family == str(family)
+        and cell.covers_rate(int(rate_q256))
+        and cell.native
+        and (ignore_evidence or cell_evidence_admits(cell)[0])
+        and (ignore_evidence or cell_lane_admits(cell, int(rate_q256), population.lanes)[0])
+        and (not scoped or cell_matches_serving_context(cell, serving_context))
+    )
+    if scoped and {cell.regime for cell in matched} != set(population.regimes):
+        return ()
+    return matched
+
+
 def eligibility_table_from_contract(
     contract: Mapping[str, Any], *, version: str, commit: str,
     sha256: str, path: str,

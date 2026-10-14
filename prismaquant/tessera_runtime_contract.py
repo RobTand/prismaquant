@@ -100,6 +100,7 @@ from .lane_eligibility import (
     _parse_table,
     eligibility_table_from_contract,
     cell_matches_serving_context,
+    native_rung_cells,
     parse_lane_claim,
 )
 from . import record_fields
@@ -715,32 +716,8 @@ class TesseraContract:
         explicit runtime query cannot borrow that unscoped claim. V5 never uses
         the first matching cell to infer an image, execution mode or structure.
         """
-        if self.requires_serving_context and serving_context is None:
-            return ()
-        if not self.requires_serving_context and serving_context is not None:
-            return ()
-        selected = tuple(
-            cell for cell in self.cells
-            if cell.family == str(family)
-            and cell.covers_rate(int(rate_q256))
-            and cell.native
-            # The development menu reads the SAME evidence predicate the
-            # export gate reads (``lane_eligibility.cell_evidence_admits``).
-            # A rung the dev menu offers and the export refuses is the
-            # split-brain principle 8 exists to stop.
-            and cell_evidence_admits(cell)[0]
-            # And the SAME lane predicate: the lane a cell launches through
-            # must read what this producer plans at the rung
-            # (``lane_eligibility.cell_lane_admits``, deciding
-            # ``native_extensions[].lane.requires`` over
-            # ``tessera_render.planned_wire_facts``).
-            and cell_lane_admits(cell, int(rate_q256), self.lanes)[0]
-            and (not self.requires_serving_context
-                 or cell_matches_serving_context(cell, serving_context))
-        )
-        if self.requires_serving_context and {cell.regime for cell in selected} != set(self.regimes):
-            return ()
-        return selected
+        return native_rung_cells(
+            self, family, rate_q256, serving_context=serving_context)
 
     @property
     def lanes(self) -> tuple[LaneClaim, ...]:

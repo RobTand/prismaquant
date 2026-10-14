@@ -190,8 +190,7 @@ def tessera_attesting_cells(
     rather than reporting the absence the filter produced.
     """
     from .lane_eligibility import (
-        SCOPED_LANE_SCHEMAS, cell_evidence_admits, cell_lane_admits,
-        cell_matches_serving_context, resolve_payload_rung,
+        resolve_payload_rung,
     )
 
     if table is None or formats is None:
@@ -203,24 +202,11 @@ def tessera_attesting_cells(
     family, _k, rate = resolve_payload_rung(name, published_formats=formats)
     if rate is None or not table.governs(family):
         return ()
-    scoped = table.schema in SCOPED_LANE_SCHEMAS
-    if scoped and serving_context is None:
-        return ()
-    if not scoped and serving_context is not None:
-        return ()
-    matched = tuple(
-        cell for cell in table.cells
-        if cell.is_trellis
-        and cell.family == family
-        and cell.covers_rate(rate)
-        and cell.native
-        and (ignore_evidence or cell_evidence_admits(cell)[0])
-        and (ignore_evidence or cell_lane_admits(cell, rate, table.lanes)[0])
-        and (not scoped or cell_matches_serving_context(cell, serving_context))
-    )
-    if scoped and {cell.regime for cell in matched} != set(table.regimes):
-        return ()
-    return matched
+    from .lane_eligibility import native_rung_cells
+
+    return native_rung_cells(
+        table, family, rate, serving_context=serving_context,
+        ignore_evidence=ignore_evidence)
 
 
 def tessera_lane_admission(

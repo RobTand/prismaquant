@@ -53,6 +53,14 @@ containing-mount selection for staged read shape and portable source identity.
 The range reader retains its cache, transport count, chunk sizing and lease
 lifetime; source identity retains its resolved-path and client-local device policy.
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): shared
+`lane_eligibility.native_rung_cells` selects the complete native regime population
+for development and serving rung queries. The parsed population retains its lane
+requirements, qualification, evidence and explicit target scope. Diagnostic
+selection still includes evidence- or lane-refused cells to explain refusals.
+Selection does not grant the exact serving pin or independent per-unit export
+admission, which retain their own conditions and ranking.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): lane, TP and
 development-contract views also belong to their query. Cached parsed facts stay
 private; requirement, platform execution, world-size and loader-axis maps are
