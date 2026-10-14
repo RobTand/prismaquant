@@ -1231,42 +1231,6 @@ _RELEASE_RETRY_FIRST_S = 0.05
 _RELEASE_RETRY_CAP_S = 5.0
 
 
-def _mount_options(path: str, mountinfo: str = "/proc/self/mountinfo"):
-    """``(fstype, {option: value})`` of the mount holding ``path``, or ``None``.
-
-    The longest mount point that is a path prefix wins, as the kernel
-    resolves it. Super options (after the `` - `` separator) carry the NFS
-    ``timeo``/``retrans`` values; per-mount options are merged under them.
-    """
-    target = os.path.abspath(path)
-    best = None
-    try:
-        with open(mountinfo, encoding="utf-8") as stream:
-            rows = stream.read().splitlines()
-    except OSError:
-        return None
-    for row in rows:
-        head, sep, tail = row.partition(" - ")
-        fields = head.split()
-        if not sep or len(fields) < 6:
-            continue
-        point = fields[4].replace("\\040", " ")
-        if not (target == point or target.startswith(point.rstrip("/") + "/")
-                or point == "/"):
-            continue
-        tail_fields = tail.split()
-        if len(tail_fields) < 3:
-            continue
-        options = {}
-        for text in (fields[5], tail_fields[2]):
-            for item in text.split(","):
-                name, _eq, value = item.partition("=")
-                options[name] = value
-        if best is None or len(point) > len(best[0]):
-            best = (point, tail_fields[0], options)
-    if best is None:
-        return None
-    return best[1], best[2]
 
 
 def release_retry_horizon_s(path: str, mountinfo: str = "/proc/self/mountinfo") -> float:
@@ -1284,10 +1248,12 @@ def release_retry_horizon_s(path: str, mountinfo: str = "/proc/self/mountinfo") 
     pin on any other filesystem has no such horizon -- a failure there is not
     transient -- so it is not retried (``0``).
     """
-    found = _mount_options(path, mountinfo)
-    if found is None or not found[0].startswith("nfs"):
+    from .mount_facts import find_mount
+
+    found = find_mount(path, table=mountinfo)
+    if found is None or not found.filesystem.startswith("nfs"):
         return 0.0
-    options = found[1]
+    options = found.options
     try:
         timeo_s = int(options.get("timeo", "")) / 10.0
         retrans = int(options.get("retrans", ""))

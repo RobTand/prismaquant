@@ -26,3 +26,16 @@ and is included in this branch. The failed terminal remains recorded as a failur
 
 No read layout, tensor arithmetic, production defaults, admission or
 performance claim changes in the ownership move.
+
+## Pin-release correction
+
+PB `3ca3b91e8aa57c84975131b16ac0905b557afc155fd299afc7eb30101783892b`
+reproduced all three equal-path NFS/autofs failures: `/mnt/shared`,
+`/stage/prewarm` and `/ram/prewarm` returned zero instead of180 seconds.
+Pin release now uses the shared mount facts and the existing NFS timeout
+formula. The duplicate parser is deleted.
+
+PB `0ea3bb68c57738d946ee56069cd231668d37383001348937f2fb415316b26109`
+compiled both touched owners and passed all112 targeted mount, pin, lease
+lifetime and duplication cases with no skips. Exit0; result CAS
+`d2ab7f356fbac2f46c90e655f9781bb67e8ce2afed309d0b9a23d788a7fa66b0`.
