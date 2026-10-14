@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): runtime contract
+parsing and its digest use one captured byte sequence. The development reader
+retains answer-equivalent prose drift and records the bytes it parsed. Explicit
+`read_tessera_contract` callers require their declared digest on every read;
+parsed snapshots cache by bytes, path and producer identity, never by an unchecked
+path reopen. Export and serving still enforce their independent exact pin.
+
 Re-stamped 2026-10-14 PrismaQuant architecture refactor, base `138069b7993`.
 `joint_campaign_ledger` owns the v1 quantum record layout, schema, canonical
 identity, quantum ID and roster recipes, campaign comparisons, homogeneous

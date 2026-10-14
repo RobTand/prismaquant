@@ -1321,7 +1321,7 @@ def test_pre_aggregation_offers_a_fused_group_one_family_and_free_rates():
     }
     options = tessera_group_composites(
         members, candidates, n_params=1000,
-        licence=trc._load_at(
+        licence=trc.read_tessera_contract(
             str(trc.contract_path()),
             hashlib.sha256(trc.contract_path().read_bytes()).hexdigest(),
             "installed").fused_module)

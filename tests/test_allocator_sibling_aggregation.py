@@ -898,7 +898,7 @@ def _installed_fused_licence():
 
     path = trc.contract_path()
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    return trc._load_at(str(path), sha, "installed").fused_module
+    return trc.read_tessera_contract(str(path), sha, "installed").fused_module
 
 
 def _licence_with(**overrides):
@@ -1376,7 +1376,7 @@ def _aggregate_under_installed_contract(stats, costs, specs, candidates,
 
     path = trc.contract_path()
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    contract = trc._load_at(str(path), sha, "installed")
+    contract = trc.read_tessera_contract(str(path), sha, "installed")
     assert contract.fused_module.fields["q256"] == "per_member", (
         "the installed contract must license the fold, or these tests prove "
         "nothing")

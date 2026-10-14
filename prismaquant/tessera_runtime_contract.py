@@ -137,6 +137,7 @@ __all__ = [
     "describe_dev_pin",
     "dev_pin_requested",
     "load_tessera_contract",
+    "read_tessera_contract",
     "require_pin_native_extensions_match_contract",
 ]
 
@@ -2665,16 +2666,18 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
 
 
 @lru_cache(maxsize=8)
-def _load_at(path: str, sha: str, commit: str) -> TesseraContract:
-    """Parse one contract file.  Keyed on the SHA, so a changed file re-reads.
+def _parse_contract_bytes(raw: bytes, path: str, commit: str) -> TesseraContract:
+    payload = json.loads(raw)
+    return _parse(payload, commit=commit, sha=bytes_sha256hex(raw), path=path)
 
-    ``route_admission``'s docstring explains why a cache over a runtime
-    contract is a defect when its key cannot state the contract's identity.
-    This key is exactly that identity, so the cache is safe: edit the file and
-    the sha changes, which is a different key.
-    """
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    return _parse(payload, commit=commit, sha=sha, path=path)
+
+def read_tessera_contract(path: str, expected_sha256: str, commit: str) -> TesseraContract:
+    """Read a declared contract and refuse bytes outside its declared identity."""
+    raw = Path(path).read_bytes()
+    if bytes_sha256hex(raw) != expected_sha256:
+        raise TesseraContractError(
+            f"{path}: contract bytes differ from the declared digest {expected_sha256}")
+    return _parse_contract_bytes(raw, path, commit)
 
 
 def load_tessera_contract() -> "TesseraContract | None":
@@ -2699,7 +2702,7 @@ def load_tessera_contract() -> "TesseraContract | None":
                 f"cannot read the packaged Tessera contract at {path}: {exc}"
             ) from exc
         sha = bytes_sha256hex(raw)
-        contract = _load_at(str(path), sha, TESSERA_DEV_PIN_COMMIT)
+        contract = _parse_contract_bytes(raw, str(path), TESSERA_DEV_PIN_COMMIT)
         drift = _answer_drift(TESSERA_DEV_PIN_ANSWER, contract_answer(contract))
         if drift:
             raise TesseraContractError(
