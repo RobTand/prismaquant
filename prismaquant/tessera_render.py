@@ -26,7 +26,6 @@ A second copy of a rate constant is a drift bug waiting for a rate to change.
 from __future__ import annotations
 
 import dataclasses
-import functools
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -141,49 +140,28 @@ def tessera_serving_contract_path():
     return _canonical_contract_path()
 
 
-@functools.lru_cache(maxsize=1)
 def _pinned_serving_table():
-    """Tessera's packaged eligibility table and format rows, loaded once.
-
-    Until 2026-09-02 this read GRIDBOOK's materialized contract, because
-    Gridbook was the only runtime that could serve Tessera bytes.  Tessera now
-    ships its own vLLM plugin and its own ``runtime_contract.json``, and
-    Gridbook's Tessera lane is withdrawn (its contract v14, which carried the
-    two Tessera rows, was never released), so the authority for what executes
-    Tessera bytes is Tessera's table.
-    """
+    """Lane and format facts from one current captured metadata document."""
     from importlib.resources import as_file
-    import json
+    from .tessera_runtime_contract import read_runtime_snapshot
 
-    from .lane_eligibility import (
-        load_eligibility_table, load_published_formats,
-    )
     with as_file(tessera_serving_contract_path()) as path:
-        # The runtime's own version string, so the table's provenance names a
-        # release rather than an empty string.  It is a LABEL here; what
-        # admits a rung is the pin, below.
-        version = str(
-            json.loads(path.read_text(encoding="utf-8"))
-            .get("versions", {}).get("tessera", ""))
-        return (load_eligibility_table(version, contract_path=path),
-                load_published_formats(version, contract_path=path))
+        snapshot = read_runtime_snapshot(path)
+    return snapshot.eligibility, snapshot.published_formats
 
 
-def _release_pin_satisfied() -> bool:
-    """Is the INSTALLED Tessera the exact pinned one?
-
-    Since 2026-09-04 the pin is a commit plus the packaged contract's
-    SHA-256, not a release tag, so this answers True whenever the installed
-    ``runtime_contract.json`` hashes to the pinned digest and the pin file
-    agrees with the module constants -- and False for any other Tessera on
-    ``PYTHONPATH``, which is the property the tag was standing in for.  The
-    module attribute is looked up at call time so a test can substitute a
-    pinned-runtime fixture without reaching inside this function.
-    """
+def _release_pin_satisfied(contract_sha256: str | None = None) -> bool:
+    """Does the admission document have the exact tracked serving identity?"""
     from . import tessera_serving_runtime_pin as pin_module
+    from .tessera_runtime_contract import installed_runtime_snapshot
 
     try:
-        pin_module.require_pinned_tessera_runtime()
+        if contract_sha256 is None:
+            installed_runtime_snapshot().require_exact_pin()
+        else:
+            pin_module.require_exact_tessera_runtime_pin(
+                pin_module.load_tessera_serving_runtime_pin(),
+                installed_contract_sha256=contract_sha256)
     except pin_module.TesseraServingRuntimePinError:
         return False
     return True
@@ -410,7 +388,7 @@ def tessera_lane_admission(
             "artifact be admitted whose serve command need not install the "
             "runtime that reads it. This is a contract defect -- fix the "
             "packaged table, never this gate.")
-    if not _release_pin_satisfied():
+    if not _release_pin_satisfied(table.contract_sha256):
         # The table HAS the row.  Saying anything else here would point a
         # reader at re-pinning a contract that already publishes the cell,
         # when what is missing is that the INSTALLED Tessera is not the
@@ -426,7 +404,7 @@ def tessera_lane_admission(
 def _published_rungs(formats, family: str) -> list[int]:
     """The rates the packaged contract's ``formats`` row names for a family."""
     row = formats.get(family) if hasattr(formats, "get") else None
-    if not isinstance(row, dict):
+    if not isinstance(row, Mapping):
         return []
     return sorted(int(r) for r in row.get("candidate_rungs_q256", ()))
 

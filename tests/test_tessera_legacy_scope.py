@@ -54,7 +54,7 @@ def legacy(monkeypatch):
                               native_extensions=payload["native_extensions"])
     formats = {row["family"]: row for row in payload["formats"]}
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
     context = lane.ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=payload["versions"]["default_serve_image"],

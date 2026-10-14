@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): rung admission
+captures current lane and format facts together and checks that captured table's
+digest against the exact serving pin. A successful check of a later file cannot
+admit earlier unreviewed cells. Parsed byte snapshots remain reusable; render's
+process-global unverified table cache is removed. Evidence, lane, scope and plugin
+diagnostics retain their order before exact-pin refusal.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_runtime_contract.RuntimeContractSnapshot` owns captured runtime metadata
 bytes, their digest and path, and lazy lane, format and TP facts. The lane grammar

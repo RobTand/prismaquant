@@ -478,14 +478,19 @@ def test_the_rungs_a_cell_names_are_the_whole_admitted_set(tmp_path,
             row["reader_rate_range_q256"] = [768, 896]
     table, formats = _load(_write(tmp_path, contract, "narrow.json"))
     context = _dense_context()
-    assert tr.tessera_lane_attested(
+    assert tr.tessera_attesting_cells(
         "TESSERA_E2M1_K2_R896", table=table, formats=formats,
-        serving_context=context) is True
+        serving_context=context)
+    admitted, reason = tr.tessera_lane_admission(
+        "TESSERA_E2M1_K2_R896", table=table, formats=formats,
+        serving_context=context)
+    assert admitted is False
+    assert "pinned commit/contract digest" in reason
     # inside the reader range, so the rate RESOLVES -- and is still refused,
     # because no cell names it.
-    assert tr.tessera_lane_attested(
+    assert tr.tessera_attesting_cells(
         "TESSERA_E2M1_K2_R768", table=table, formats=formats,
-        serving_context=context) is False
+        serving_context=context) == ()
 
 
 def test_an_absent_table_admits_nothing(tmp_path, released_pin):

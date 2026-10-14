@@ -49,7 +49,7 @@ def released_table(monkeypatch):
     }, list(formats.values()), "fixture", "fixture", "fixture",
         native_extensions=[])
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
     return table, formats
 
 

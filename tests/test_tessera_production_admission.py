@@ -116,7 +116,7 @@ def test_conflicting_cell_statuses_refuse_with_named_cells(monkeypatch, dev_pin)
 
 def test_production_conditions_do_not_override_pin_refusal(monkeypatch):
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: False)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: False)
     table, _ = render._pinned_serving_table()
     reference = next(cell for cell in table.cells if cell.family == "TESSERA_E4M3_K1"
                      and cell.structure == "routed_moe" and cell.regime == "decode"

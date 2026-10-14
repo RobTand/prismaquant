@@ -563,7 +563,7 @@ def test_all_three_admission_legs_read_the_one_gate(payload, monkeypatch):
 
     # 1. The menu.
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
     assert render.tessera_attesting_cells(CLAIMING_NAME, serving_context=context) == ()
     admitted, reason = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
     assert not admitted
@@ -596,7 +596,7 @@ def test_the_untouched_table_admits_the_same_rung_at_every_leg(payload, monkeypa
     table, formats = _table(payload), _formats(payload)
     context = _context(payload, CLAIMING, "resident")
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
     assert render.tessera_lane_admission(CLAIMING_NAME, serving_context=context) == (True, "")
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     assert parsed.native_cells(CLAIMING_FAMILY, CLAIMING_RATE, serving_context=context)

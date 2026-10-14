@@ -334,7 +334,7 @@ def test_the_development_menu_reads_the_same_predicate(payload):
 
 def test_the_renderer_names_the_evidence_when_it_refuses(payload, table, monkeypatch):
     formats = {row["family"]: row for row in payload["formats"]}
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
     monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
     admitted, reason = render.tessera_lane_admission(
         NAME, serving_context=_moe_context(payload))

@@ -934,15 +934,18 @@ def _default_serve_image() -> str:
             "versions"]["default_serve_image"]
 
 
-def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch):
+def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch, tmp_path):
     """The refusal half: a Tessera whose contract is not the pinned bytes."""
     from prismaquant import tessera_render as tr
-    from prismaquant import tessera_serving_runtime_pin as pin_module
-    from prismaquant.lane_eligibility import ServingContext
+    from prismaquant import tessera_runtime_contract as runtime
     from prismaquant.tessera_render import synthesize_tessera_spec
 
-    monkeypatch.setattr(pin_module, "installed_tessera_contract_sha256",
-                        lambda: "c" * 64)
+    import json
+    payload = json.loads(runtime.contract_path().read_bytes())
+    payload["contract_version"] += 1
+    path = tmp_path / "unreviewed-contract.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(runtime, "contract_path", lambda: path)
     assert tr._release_pin_satisfied() is False
     context = _cell_context("TESSERA_E2M1_K2", "dense")
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024",
