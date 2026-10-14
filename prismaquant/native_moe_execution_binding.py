@@ -1,6 +1,6 @@
 """Whole packed MoE execution receipts before final distortion rows exist."""
 import copy
-from .joint_aura import identity_sha256
+from .joint_aura import identity_sha256, require_native_source_execution
 
 from .native_panel_kind import (
     MOE_EXECUTION_PANEL_SCHEMA as RAW_PANEL_SCHEMA, member_execution_identity,
@@ -37,7 +37,7 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
     owner._workspace_identity(preflight['workspace'])
     _equal(preflight['workspace_sha256'],identity_sha256(preflight['workspace']),'workspace digest')
     route=operator['declared_route'];owner.validate_compact_native_route(inputs,route)
-    execution=owner._source_execution(inputs['routing_capture']['source_execution'],unit=inputs['unit'])
+    execution=require_native_source_execution(inputs['routing_capture'].get('source_execution'),unit=inputs['unit'])
     phases={}
     for phase in owner.PHASES:
         expected=inputs['phases'][phase]

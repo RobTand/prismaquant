@@ -638,6 +638,28 @@ def test_late_whole_owner_binding_preserves_router_and_member_execution(joined):
         bind_execution_receipt(raw,changed)
 
 
+@pytest.mark.parametrize("source_execution", ["captured", "missing", "unresolved"])
+def test_raw_execution_freeze_uses_the_source_execution_contract(joined, source_execution):
+    from prismaquant.native_moe_execution_binding import freeze_execution_panel
+    from prismaquant.native_panel_kind import execution_panel_from_joint
+
+    inputs, preflight, rows = joined
+    preflight["operator"]["declared_route"]["decoder"] = "native_fixture_decoder"
+    final = freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+    if source_execution == "missing":
+        inputs["routing_capture"].pop("source_execution")
+    elif source_execution == "unresolved":
+        inputs["routing_capture"]["source_execution"]["modules"][inputs["unit"]]["attention"] = "sdpa"
+    inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
+    preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
+    if source_execution == "captured":
+        raw = freeze_execution_panel(inputs, preflight, source_sha256=final["source_sha256"])
+        assert raw == execution_panel_from_joint(final)
+    else:
+        with pytest.raises(ValueError, match="source execution"):
+            freeze_execution_panel(inputs, preflight, source_sha256=final["source_sha256"])
+
+
 def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
     from prismaquant.measure_quant_cost import _packed_experts_forward_with_weights
     class GlmLike(torch.nn.Module):
@@ -1175,7 +1197,7 @@ def test_original_source_execution_cannot_inherit_derivative_or_different_dispat
 
 
 def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy():
-    from prismaquant import joint_aura, native_moe_panel
+    from prismaquant import joint_aura
 
     class Selector(str):
         pass
@@ -1184,7 +1206,6 @@ def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy
         '': {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         Selector('u'): {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         'extra': {'attention': {2: 'café', 'z': '\ud800'}}}}
-    assert native_moe_panel.require_native_source_execution is joint_aura.require_native_source_execution
     assert joint_aura.require_native_source_execution(value, unit='u') is value
     # Mixed leaf keys retain the native reader's unsorted JSON acceptance; an
     # Original control separately refuses this selector's non-string leaf key.
