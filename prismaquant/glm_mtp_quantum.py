@@ -37,7 +37,6 @@ from typing import Callable, Mapping
 import torch
 
 from . import glm_mtp
-from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 SCOPE = "mtp"
@@ -93,26 +92,21 @@ def mtp_probe_identity(*, source_model, calibration_ids, n_probes, seed_base, ar
     """
     from .aura_cost import _aura_source_sha256
     from .kl_fisher import ROW_PROBE_LAYOUT
+    from .joint_aura import make_joint_probe_identity
 
     n, length = (int(size) for size in calibration_ids.shape)
-    probe = {
-        "schema": "prismaquant.joint_aura.probes.v2",
-        "source_model": source_model,
-        "calibration_sha256": bytes_sha256hex(calibration_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": [n, length],
-        "calibration_dtype": str(calibration_ids.dtype),
-        "n_probes": int(n_probes), "seed_base": int(seed_base),
-        "token_scope": "all", "temperature": 1.0,
-        "distribution": "rademacher", "normalization": "global_kl_fisher",
-        "producer_source_sha256": _aura_source_sha256(),
-        "source_execution": source_execution,
-        "arithmetic": arithmetic,
-        "noise_layout": {
-            "schema": ROW_PROBE_LAYOUT, "global_rows": n, "sequence_length": length,
-            "selected_tokens_per_row": length - 1, "vocab_size": int(vocab_size),
-            "token_scope": "all",
-            "global_token_count": glm_mtp.mtp_global_token_count(n, length),
-        },
+    probe = make_joint_probe_identity(
+        calibration_ids=calibration_ids, source_model=source_model,
+        n_probes=int(n_probes), seed_base=int(seed_base),
+        token_scope="all", temperature=1.0,
+        producer_source_sha256=_aura_source_sha256(),
+        source_execution=source_execution, arithmetic=arithmetic,
+    )
+    probe["noise_layout"] = {
+        "schema": ROW_PROBE_LAYOUT, "global_rows": n, "sequence_length": length,
+        "selected_tokens_per_row": length - 1, "vocab_size": int(vocab_size),
+        "token_scope": "all",
+        "global_token_count": glm_mtp.mtp_global_token_count(n, length),
     }
     return glm_mtp.with_mtp_objective(probe, glm_mtp.mtp_objective_identity(
         mtp_layer=int(mtp_layer), sequence_length=length, n_sequences=n))

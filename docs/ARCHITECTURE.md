@@ -14,6 +14,12 @@ Dispatcher record admission also verifies each record's canonical identity,
 campaign and adjoint object shapes, and exact layer-to-quantum-ID relation
 before inspecting its paths or publishing a row. Invalid and edited records
 refuse in both dev and certified modes.
+The v2 joint probe identity's common fields have one constructor in
+`joint_aura.make_joint_probe_identity`. The full streamed run, layer quantum,
+and MTP adapter use it. Each caller retains its arithmetic and objective
+extensions, including MTP's `T - 1` token normalization and source-transition
+producer identity. The calibration hash still covers the same contiguous
+token bytes once per construction.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.

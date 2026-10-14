@@ -1773,6 +1773,7 @@ def run_layer_quantum_core(
         activation_identity,
         identity_sha256,
         make_joint_aura_entry,
+        make_joint_probe_identity,
         normalize_sequence_attribution,
         source_execution_identity,
         squared_signed,
@@ -2083,20 +2084,15 @@ def run_layer_quantum_core(
 
     model_identity = validate_streamed_model_identity(
         production_cache.metadata["source_model_identity"], where="layer quantum")
-    joint_probe_identity = {
-        "schema": "prismaquant.joint_aura.probes.v2",
-        "source_model": model_identity,
-        "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": list(calib_ids.shape),
-        "calibration_dtype": str(calib_ids.dtype),
-        "n_probes": n_probes, "seed_base": seed_base,
-        "token_scope": token_scope, "temperature": temperature,
-        "distribution": "rademacher", "normalization": "global_kl_fisher",
-        "producer_source_sha256": _aura_source_sha256(),
-        "source_execution": source_execution_identity(runner.model),
-        "arithmetic": statistics_arithmetic_identity(runner.dtype, projection_backend,
-                                                     replay_regime=replay_regime),
-    }
+    joint_probe_identity = make_joint_probe_identity(
+        calibration_ids=calib_ids, source_model=model_identity,
+        n_probes=n_probes, seed_base=seed_base,
+        token_scope=token_scope, temperature=temperature,
+        producer_source_sha256=_aura_source_sha256(),
+        source_execution=source_execution_identity(runner.model),
+        arithmetic=statistics_arithmetic_identity(runner.dtype, projection_backend,
+                                                 replay_regime=replay_regime),
+    )
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")

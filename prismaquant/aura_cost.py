@@ -2310,28 +2310,25 @@ def compute_aura_cost_streamed(
         from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.joint_aura import (
             SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
-            identity_sha256, make_joint_aura_entry, prefetch_joint_cache, squared_signed,
+            identity_sha256, make_joint_aura_entry, make_joint_probe_identity,
+            prefetch_joint_cache, squared_signed,
             source_execution_identity,
             validate_joint_aura_entry,
             sequence_attribution_run_identity, sequence_attribution_sidecar,
         )
         from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
-        joint_probe_identity = {
-            "schema": "prismaquant.joint_aura.probes.v2",
-            "source_model": validate_streamed_model_identity(model_identity, where="joint AURA"),
-            "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
-            "calibration_shape": list(calib_ids.shape),
-            "calibration_dtype": str(calib_ids.dtype),
-            "n_probes": n_probes, "seed_base": seed_base,
-            "token_scope": token_scope, "temperature": temperature,
-            "distribution": "rademacher", "normalization": "global_kl_fisher",
-            "producer_source_sha256": (_aura_source_sha256() if source_transition is None
-                                       else source_transition.measurement_source_sha256),
-            "source_execution": source_execution_identity(runner.model),
-            "arithmetic": (statistics_arithmetic_identity(runner.dtype, joint_projection_backend)
-                           if operator_windows is not None else arithmetic_identity(runner.dtype, joint_projection_backend)),
-        }
+        joint_probe_identity = make_joint_probe_identity(
+            calibration_ids=calib_ids,
+            source_model=validate_streamed_model_identity(model_identity, where="joint AURA"),
+            n_probes=n_probes, seed_base=seed_base,
+            token_scope=token_scope, temperature=temperature,
+            producer_source_sha256=(_aura_source_sha256() if source_transition is None
+                                    else source_transition.measurement_source_sha256),
+            source_execution=source_execution_identity(runner.model),
+            arithmetic=(statistics_arithmetic_identity(runner.dtype, joint_projection_backend)
+                        if operator_windows is not None else arithmetic_identity(runner.dtype, joint_projection_backend)),
+        )
         if operator_windows is not None:
             joint_probe_identity['arithmetic']['operator_windows'] = operator_windows
             joint_probe_identity['arithmetic']['gradient_diagnostics'] = 'sum_output_operators_fp32_before_norm'

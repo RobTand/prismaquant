@@ -146,6 +146,26 @@ def release_joint_aura_identities(cost_data):
                 row["probe_identity"] = released[key][1]
 
 
+def make_joint_probe_identity(*, calibration_ids: torch.Tensor, source_model: Mapping,
+                             n_probes: int, seed_base: int, token_scope: str,
+                             temperature: float, producer_source_sha256: str,
+                             source_execution: Mapping, arithmetic: Mapping) -> dict:
+    return {
+        "schema": "prismaquant.joint_aura.probes.v2",
+        "source_model": source_model,
+        "calibration_sha256": bytes_sha256hex(
+            calibration_ids.detach().cpu().contiguous().numpy().tobytes()),
+        "calibration_shape": list(calibration_ids.shape),
+        "calibration_dtype": str(calibration_ids.dtype),
+        "n_probes": n_probes, "seed_base": seed_base,
+        "token_scope": token_scope, "temperature": temperature,
+        "distribution": "rademacher", "normalization": "global_kl_fisher",
+        "producer_source_sha256": producer_source_sha256,
+        "source_execution": source_execution,
+        "arithmetic": arithmetic,
+    }
+
+
 def validated_probe_identity(probe) -> Mapping:
     """``probe`` validated and hashed once, for a producer that publishes many rows.
 
