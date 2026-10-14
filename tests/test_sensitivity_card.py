@@ -79,14 +79,6 @@ def _provenance() -> CardProvenance:
 # ----------------------------------------------------------------- invariants
 
 
-def test_marginal_identity_holds():
-    """sum(row) == sum(col) == h_trace_raw. Free consistency check."""
-    u = _synthetic_unit()
-    assert np.isclose(u.fisher_row.sum(), u.h_trace_raw)
-    assert np.isclose(u.fisher_col.sum(), u.h_trace_raw)
-    u.validate()
-
-
 def test_validate_rejects_inconsistent_marginals():
     u = _synthetic_unit()
     bad = SensitivityUnit(**{**u.__dict__, "fisher_row": u.fisher_row * 2.0})

@@ -15,6 +15,13 @@ PACKED_FISHER_MARGINAL_KEYS = (
     "expert_g_sq_sum", "expert_act_sq_sum", "expert_act_absmax",
     "expert_tokens")
 
+
+def fisher_norm_tokens(row: dict, fallback: int) -> int:
+    """Use a writer's positive row stamp before the legacy probe count."""
+    stamp = int(row.get("h_trace_norm_tokens", 0) or 0)
+    return stamp if stamp > 0 else fallback
+
+
 def merge_marginals(dst: dict, src) -> None:
     """Fold per-channel marginals from `src` into `dst` in place.
 
@@ -175,9 +182,7 @@ def renormalize_probe_fisher(stats: dict, meta: dict, *,
         if not isinstance(entry, dict) or "h_trace_raw" not in entry:
             continue
         # The row's own writer-stamped denominator, else the probe-wide one.
-        row_tokens = int(entry.get("h_trace_norm_tokens", 0) or 0)
-        if row_tokens <= 0:
-            row_tokens = meta_tokens
+        row_tokens = fisher_norm_tokens(entry, meta_tokens)
         if row_tokens <= 0:
             unresolvable += 1
             continue
@@ -253,7 +258,7 @@ def h_detail_expected_norm_tokens(probe: dict | None) -> dict[str, int]:
     for name, entry in (probe.get("stats") or {}).items():
         if not isinstance(entry, dict):
             continue
-        n = int(entry.get("h_trace_norm_tokens", 0) or 0) or fallback
+        n = fisher_norm_tokens(entry, fallback)
         if n > 0:
             out[str(name)] = n
     return out

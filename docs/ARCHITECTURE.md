@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: sensitivity cards retain each Fisher row writer
+normalizer. The shared `probe_statistics.fisher_norm_tokens` rule gives a
+positive body or visual pass stamp precedence over the legacy probe count.
+
 Re-stamped 2026-10-14: staged pin release now uses the same topmost mount
 facts as staged reads and portable identity. An NFS mount above an equal-path
 autofs trigger supplies its existing major-timeout retry horizon.

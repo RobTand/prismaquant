@@ -31,3 +31,20 @@ The first run passed 144 cases but caught the stale mount-helper duplication
 inventory. Removing that retired entry restored the guard; no allowance grew.
 This ownership change alters no calibration, tensor arithmetic,
 format, price policy or GPU execution order.
+
+## Writer-normalizer correction
+
+The body and visual passes can have different calibration sizes. The card
+builder previously used the body count for every row, rescaling an8x128
+visual row by32 when merged with a32x1024 body probe. The shared row stamp
+rule now supplies the card, legacy normalization and detail expectations.
+
+PB `3ca3b91e8aa57c84975131b16ac0905b557afc155fd299afc7eb30101783892b`
+reproduced the defect: the visual card reported32768 tokens instead of1024.
+PB `6ad10cc28dd1d709900bf5f2d3e2882e87583690b257f428d979bd6feba6c9cd`
+compiled both owners and passed76 cases and11 subtests without skips.
+Exit0; result CAS
+`107359a243edb55f0513fa062e041a9e832bd2a8daa050c509d8f2ec5c33cff3`.
+The actual mixed probe/card test independently checks Fisher5.0 and price
+0.625. The removed marginal-identity test asserted only its synthetic
+fixture's sums; valid-row validation remains covered by the real card round trip.
