@@ -123,3 +123,10 @@ ended executed, exit zero, with actual completion records and CAS receipts.
 The fixture-fix compile check also ran through PB. Logs and receipt inspection
 are retained as `joint-j1-fixture-fix*` beside the J4 baseline's failed-run
 evidence under `/home/rob/tmp/pq-refactor-20261014/reports/`.
+
+The final fixture compile action
+`e1fdc007ea3c976f9ceddb223f70fb40fe7275ec793a961ed4865fff7861afe5`
+ended executed, exit zero, with CAS receipt. The first compile submission
+refused before publication because a local commit changed the checkout while
+PB was still taking its snapshot; it executed no check. The stable checkout
+was resubmitted and its actual result verified.
