@@ -463,12 +463,14 @@ def load_calibration(tokenizer, source: str, n_samples: int,
         rng_shuffle.shuffle(texts)
     random.seed(calib_seed)
     samples = []
-    for t in texts:
+    used_documents = set()
+    for document, t in enumerate(texts):
         ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
         if ids.size(1) < seqlen:
             continue
         start = random.randint(0, ids.size(1) - seqlen)
         samples.append(ids[0, start:start + seqlen])
+        used_documents.add(document)
         if len(samples) >= n_samples:
             break
 
@@ -476,7 +478,9 @@ def load_calibration(tokenizer, source: str, n_samples: int,
         eos = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
         # Pack short samples by concatenating with EOS separator
         buf: list[int] = []
-        for t in texts:
+        for document, t in enumerate(texts):
+            if document in used_documents:
+                continue
             ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids[0].tolist()
             buf.extend(ids)
             buf.append(eos)
