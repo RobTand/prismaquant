@@ -18,6 +18,13 @@ containing-mount selection for staged read shape and portable source identity.
 The range reader retains its cache, transport count, chunk sizing and lease
 lifetime; source identity retains its resolved-path and client-local device policy.
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): lane, TP and
+development-contract views also belong to their query. Cached parsed facts stay
+private; requirement, platform execution, world-size and loader-axis maps are
+copied at the owner boundary. File TP adapters verify the captured digest on
+every query. Editing returned ceilings cannot widen later TP admission. Cell
+scope and evidence retain their immutable tuple and frozen record forms.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): published format
 views belong to their query. The runtime snapshot caches its private parsed
 document and returns independent JSON-shaped row copies, including nested lists

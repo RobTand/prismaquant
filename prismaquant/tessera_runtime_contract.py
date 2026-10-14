@@ -2410,7 +2410,6 @@ def _parse_tensor_parallel_limits(payload: Mapping[str, Any], path: str) -> dict
     return _parse_tensor_parallel(payload, path)[0]
 
 
-@lru_cache(maxsize=8)
 def published_tensor_parallel_limits(path: str, sha: str) -> Mapping[str, int]:
     """Read packaged TP metadata, keyed by the attesting table identity.
 
@@ -2434,7 +2433,6 @@ def pinned_tensor_parallel_limits() -> Mapping[str, int]:
         return _parse_contract_bytes(raw, str(path), pin.producer_commit).max_world_size
 
 
-@lru_cache(maxsize=8)
 def published_tensor_parallel_axes(
     path: str, sha: str,
 ) -> Mapping[str, Mapping[str, str]]:
@@ -2451,11 +2449,11 @@ def published_tensor_parallel_axes(
 def _published_tensor_parallel(
     path: str, sha: str,
 ) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
-    raw = Path(path).read_bytes()
-    if bytes_sha256hex(raw) != sha:
+    snapshot = read_runtime_snapshot(path)
+    if snapshot.sha256 != sha:
         raise TesseraContractError(
             f"{path}: tensor-parallel metadata digest differs from attesting table")
-    return _parse_tensor_parallel(json.loads(raw), path)
+    return snapshot.tensor_parallel
 
 
 def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str,
@@ -2601,11 +2599,18 @@ class RuntimeContractSnapshot:
         return json.loads(self.raw)
 
     @cached_property
-    def eligibility(self) -> EligibilityTable:
+    def _eligibility(self) -> EligibilityTable:
         version = str(self._payload.get("versions", {}).get("tessera", ""))
         return eligibility_table_from_contract(
             self._payload, version=version, commit="", sha256=self.sha256,
             path=self.path)
+
+    @property
+    def eligibility(self) -> EligibilityTable:
+        """A query's own lane facts, including requirement and platform maps."""
+        from copy import deepcopy
+
+        return deepcopy(self._eligibility)
 
     @cached_property
     def _format_rows(self) -> dict[str, dict[str, Any]]:
@@ -2623,8 +2628,15 @@ class RuntimeContractSnapshot:
         return deepcopy(self._format_rows)
 
     @cached_property
-    def tensor_parallel(self) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
+    def _tensor_parallel(self) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
         return _parse_tensor_parallel(self._payload, self.path)
+
+    @property
+    def tensor_parallel(self) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
+        """A query's own validated world-size and loader-axis maps."""
+        from copy import deepcopy
+
+        return deepcopy(self._tensor_parallel)
 
     def require_exact_pin(self):
         """Require the tracked serving identity for THESE captured bytes."""
@@ -2661,10 +2673,16 @@ def installed_runtime_snapshot() -> RuntimeContractSnapshot:
 
 
 @lru_cache(maxsize=8)
-def _parse_contract_bytes(raw: bytes, path: str, commit: str) -> TesseraContract:
+def _cached_contract_bytes(raw: bytes, path: str, commit: str) -> TesseraContract:
     snapshot = _runtime_snapshot(raw, path)
     return _parse(snapshot._payload, commit=commit, sha=snapshot.sha256,
                   path=path, snapshot=snapshot)
+
+
+def _parse_contract_bytes(raw: bytes, path: str, commit: str) -> TesseraContract:
+    from copy import deepcopy
+
+    return deepcopy(_cached_contract_bytes(raw, path, commit))
 
 
 def read_tessera_contract(path: str, expected_sha256: str, commit: str) -> TesseraContract:
