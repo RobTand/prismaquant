@@ -81,12 +81,13 @@ import fnmatch
 import json
 import os
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .lane_eligibility import (
     CellEvidence,
+    EligibilityTable,
     _DIGEST_IMAGE,
     SCOPED_LANE_SCHEMAS,
     cell_evidence_admits,
@@ -100,6 +101,7 @@ from .lane_eligibility import (
     ROUTE_STATUS_BACKED,
     ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
     _parse_table,
+    eligibility_table_from_contract,
     cell_matches_serving_context,
     parse_lane_claim,
 )
@@ -138,6 +140,9 @@ __all__ = [
     "dev_pin_requested",
     "load_tessera_contract",
     "read_tessera_contract",
+    "RuntimeContractSnapshot",
+    "read_runtime_snapshot",
+    "installed_runtime_snapshot",
     "pinned_tensor_parallel_limits",
     "require_pin_native_extensions_match_contract",
 ]
@@ -2535,7 +2540,8 @@ def _published_tensor_parallel(
     return _parse_tensor_parallel(json.loads(raw), path)
 
 
-def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
+def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str,
+           snapshot: RuntimeContractSnapshot | None = None,
            ) -> TesseraContract:
     schema = payload.get("schema")
     if schema != TESSERA_CONTRACT_SCHEMA:
@@ -2608,8 +2614,11 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         # cell names to that extension's lane. The predicate itself is NOT
         # decided here -- loading a contract imports no encoder and no
         # serving code; admission (``native_cells``) does.
-        table = _parse_table(lane, formats, "", commit, sha,
-                             native_extensions=payload["native_extensions"])
+        if snapshot is None:
+            table = _parse_table(lane, formats, "", commit, sha,
+                                 native_extensions=payload["native_extensions"])
+        else:
+            table = snapshot.eligibility
     except LaneEligibilityError as exc:
         raise TesseraContractError(f"{path}: {exc}") from exc
     cells: list[TesseraRouteCell] = []
@@ -2681,10 +2690,86 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
     )
 
 
+@dataclass(frozen=True)
+class RuntimeContractSnapshot:
+    """Captured metadata bytes and the facts derived from those same bytes.
+
+    Parsing does not grant admission. Serving verifies this snapshot's exact
+    digest; development separately compares its admission answer. Lane facts
+    retain structural predicates that shape-free development admission refuses.
+    """
+
+    raw: bytes
+    path: str
+
+    @cached_property
+    def sha256(self) -> str:
+        return bytes_sha256hex(self.raw)
+
+    @cached_property
+    def _payload(self) -> Mapping[str, Any]:
+        return json.loads(self.raw)
+
+    @cached_property
+    def eligibility(self) -> EligibilityTable:
+        version = str(self._payload.get("versions", {}).get("tessera", ""))
+        return eligibility_table_from_contract(
+            self._payload, version=version, commit="", sha256=self.sha256,
+            path=self.path)
+
+    @cached_property
+    def published_formats(self) -> Mapping[str, Mapping[str, Any]]:
+        from types import MappingProxyType
+
+        return MappingProxyType({
+            str(entry["family"]): MappingProxyType(dict(entry))
+            for entry in self._payload.get("formats", ())
+            if isinstance(entry, Mapping) and entry.get("family")
+        })
+
+    @cached_property
+    def tensor_parallel(self) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
+        return _parse_tensor_parallel(self._payload, self.path)
+
+    def require_exact_pin(self):
+        """Require the tracked serving identity for THESE captured bytes."""
+        from .tessera_serving_runtime_pin import (
+            load_tessera_serving_runtime_pin, require_exact_tessera_runtime_pin,
+        )
+
+        pin = load_tessera_serving_runtime_pin()
+        require_exact_tessera_runtime_pin(
+            pin, installed_contract_sha256=self.sha256)
+        return pin
+
+
+@lru_cache(maxsize=8)
+def _runtime_snapshot(raw: bytes, path: str) -> RuntimeContractSnapshot:
+    snapshot = RuntimeContractSnapshot(raw, path)
+    # Keep file-reader JSON failures at the read boundary, even when a caller
+    # asks only for provenance and has not requested lane facts yet.
+    snapshot._payload
+    return snapshot
+
+
+def read_runtime_snapshot(path: str | Path) -> RuntimeContractSnapshot:
+    """Capture a metadata document once; parsed facts cache by its bytes."""
+    return _runtime_snapshot(Path(path).read_bytes(), str(path))
+
+
+def installed_runtime_snapshot() -> RuntimeContractSnapshot:
+    """Capture the installed package resource without importing serving code."""
+    from importlib.resources import as_file
+
+    with as_file(contract_path()) as path:
+        return read_runtime_snapshot(path)
+
+
 @lru_cache(maxsize=8)
 def _parse_contract_bytes(raw: bytes, path: str, commit: str) -> TesseraContract:
-    payload = json.loads(raw)
-    return _parse(payload, commit=commit, sha=bytes_sha256hex(raw), path=path)
+    snapshot = _runtime_snapshot(raw, path)
+    return _parse(snapshot._payload, commit=commit, sha=snapshot.sha256,
+                  path=path, snapshot=snapshot)
 
 
 def read_tessera_contract(path: str, expected_sha256: str, commit: str) -> TesseraContract:

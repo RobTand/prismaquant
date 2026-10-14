@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_runtime_contract.RuntimeContractSnapshot` owns captured runtime metadata
+bytes, their digest and path, and lazy lane, format and TP facts. The lane grammar
+remains in `lane_eligibility`; its file readers adapt to this owner and preserve
+absent-table semantics. Development answer parsing shares the captured document
+and retains its shape-free predicate refusal. Snapshot parsing grants no route;
+the exact serving pin and optional development answer policy remain separate.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): with the optional
 development answer pin unset, TP admission reads the closed-world ceilings from
 the exact installed serving contract. `pinned_tensor_parallel_limits` verifies

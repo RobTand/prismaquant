@@ -148,7 +148,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import record_fields
-from .digests import file_sha256hex
 
 
 #: Schema of the eligibility table PrismaQuant consumes, published by Tessera's
@@ -2991,6 +2990,28 @@ _CELL_RANK = {
 # ---------------------------------------------------------------------------
 # Loading the pinned contract
 # ---------------------------------------------------------------------------
+def eligibility_table_from_contract(
+    contract: Mapping[str, Any], *, version: str, commit: str,
+    sha256: str, path: str,
+) -> EligibilityTable:
+    """Parse lane facts from the same document that supplied their identity."""
+    block = contract.get("lane_eligibility")
+    if block is None:
+        return EligibilityTable(
+            present=False, runtime_version=version, runtime_commit=commit,
+            contract_sha256=sha256,
+            absent_reason=(
+                f"{path} packages no 'lane_eligibility' table, so no "
+                "serving-lane route can be attested for this pin. This is a "
+                "REFUSAL TO CLAIM, not a clean bill: the runtime's lane "
+                "predicates exist but are not published."
+            ),
+        )
+    return _parse_table(
+        block, contract.get("formats", ()), version, commit, sha256,
+        native_extensions=contract.get("native_extensions"))
+
+
 def load_eligibility_table(
     version: str | None = None,
     *,
@@ -3031,32 +3052,15 @@ def load_eligibility_table(
             ),
         )
 
-    sha = _sha256(path)
-
+    from .tessera_runtime_contract import read_runtime_snapshot
     try:
-        contract = json.loads(path.read_text(encoding="utf-8"))
+        snapshot = read_runtime_snapshot(path)
     except (OSError, json.JSONDecodeError) as exc:
         raise LaneEligibilityError(
             f"cannot read {path}: {exc}") from exc
-
-    block = contract.get("lane_eligibility")
-    if block is None:
-        return EligibilityTable(
-            present=False,
-            runtime_version=version or "",
-            runtime_commit=commit,
-            contract_sha256=sha,
-            absent_reason=(
-                f"{path} packages no 'lane_eligibility' table, so no "
-                "serving-lane route can be attested for this pin. This is a "
-                "REFUSAL TO CLAIM, not a clean bill: the runtime's lane "
-                "predicates exist but are not published."
-            ),
-        )
-
-    return _parse_table(
-        block, contract.get("formats", ()), version or "", commit, sha,
-        native_extensions=contract.get("native_extensions"))
+    from dataclasses import replace
+    return replace(snapshot.eligibility, runtime_version=version,
+                   runtime_commit=commit)
 
 
 def load_published_formats(
@@ -3079,12 +3083,9 @@ def load_published_formats(
     path = Path(contract_path) if contract_path is not None else None
     if path is None or not path.exists():
         return {}
-    contract = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        str(entry["family"]): dict(entry)
-        for entry in contract.get("formats", ())
-        if isinstance(entry, Mapping) and entry.get("family")
-    }
+    from .tessera_runtime_contract import read_runtime_snapshot
+    return {family: dict(row) for family, row in
+            read_runtime_snapshot(path).published_formats.items()}
 
 
 def _name_prefix(entry: Mapping[str, Any]) -> str:
@@ -3773,7 +3774,6 @@ def _require_keys(payload: Mapping[str, Any], where: str, *,
                                error=LaneEligibilityError)
 
 
-_sha256 = file_sha256hex
 
 
 __all__ = [
@@ -3863,6 +3863,7 @@ __all__ = [
     "UnitRoute",
     "resolve_unit_route",
     "load_eligibility_table",
+    "eligibility_table_from_contract",
     "load_published_formats",
     "resolve_payload_rung",
     "unit_structural_facts",
