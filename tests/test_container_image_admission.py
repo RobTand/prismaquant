@@ -33,6 +33,8 @@ import types
 
 import pytest
 
+from prismaquant.joint_campaign_ledger import seal_quantum_record
+
 from stage_a_spool_spec import stage_a_plan, with_spool
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,7 +242,7 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
                           "prepared_sha256": "2" * 64,
                           "read_manifest_sha256": "4" * 64}
     record["adjoint"] = {"receipt_sha256": None}
-    (records / record_path.name).write_text(json.dumps(record))
+    (records / record_path.name).write_text(json.dumps(seal_quantum_record(record)))
     manifest = _joint_manifest(tmp_path, {"plan_sha256": "1" * 64,
                                           "prepared_sha256": "2" * 64,
                                           "read_manifest_sha256": "4" * 64})

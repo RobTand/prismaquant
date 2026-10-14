@@ -104,3 +104,22 @@ Reports are `joint-j1-boundary-fix.json`, `joint-j1-boundary-fix.log`,
 `joint-j1-boundary-receipts.json`, and `joint-j1-boundary-compile.log`
 under the report directory above. The same qualified interpreter and bounded
 threads were used. The compile submission explicitly used `--anywhere`.
+
+## Additional dispatcher fixtures
+
+A broader J4 baseline found three fixtures that changed a record body without
+resealing it: the container-image dry-run case and the foreign-roster and
+produced-mover-contract rejection cases. The new record admission correctly
+refused the stale identity first, before the gate those fixtures intended to
+exercise. They now seal their intended valid or malformed bodies through the
+ledger. The two negative cases still verify the downstream refusal and zero
+published rows. No production gate changed.
+
+Both affected test files passed all 43 tests with no skips through portable
+PB CPU shards (one CPU and 6 GiB each, one native thread, priority -10). Actions
+`ce360110afd9efa0c43a615184484590ed7a3e156f9f07b11ffe6b4f5c9eb527` and
+`bb3a47f8bf0aae506124bc3addeb151265c7c0d8a4f1603c41aa24388e4d6c8d`
+ended executed, exit zero, with actual completion records and CAS receipts.
+The fixture-fix compile check also ran through PB. Logs and receipt inspection
+are retained as `joint-j1-fixture-fix*` beside the J4 baseline's failed-run
+evidence under `/home/rob/tmp/pq-refactor-20261014/reports/`.
