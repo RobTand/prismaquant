@@ -619,10 +619,6 @@
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py"
   ],
-  "_read_safetensors_header": [
-   "prismaquant/artifact_completeness.py",
-   "prismaquant/footprint.py"
-  ],
   "_refuse": [
    "prismaquant/joint_stage_b_head.py",
    "prismaquant/staged_lease.py"

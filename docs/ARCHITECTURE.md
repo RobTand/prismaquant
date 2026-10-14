@@ -86,6 +86,10 @@ device-qualification conditions. Development still refuses structural predicates
 and the reviewed answer, pin, evidence, scope and independent export gates remain
 unchanged.
 
+`source_read_plan` owns artifact shard/header inventory as well as the shared
+safetensors framing parser. Autoscale reads those headers directly from the IO
+owner; `artifact_completeness` retains decoder coverage classification.
+
 `NameProjection` owns the complete serving-unit roster, fusion name derivation
 and component closure. Allocation and export
 retain all overlapping fused and packed declarations and their licence kinds;
