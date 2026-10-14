@@ -906,7 +906,9 @@ def evaluate_measured_assignment(
             from .measured_runtime_prices import device_placement_bytes
             device = device_placement_bytes(
                 resident, scratch, activation,
-                fixed_device_bytes=kv + slos.peak_scratch_bytes)
+                fixed_device_bytes=kv + slos.peak_scratch_bytes,
+                non_step_transient_peak_bytes=getattr(
+                    fixed_resources, "non_step_transient_peak_bytes", None))
         else:
             if slos.device_budget_bytes is not None:
                 raise ServeConstraintError(
