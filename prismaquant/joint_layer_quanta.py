@@ -63,6 +63,7 @@ from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
 from .joint_campaign_ledger import (
+    require_quantum_digest,
     LAYER_QUANTUM_SCHEMA, new_quantum_record, quantum_id, roster_digest,
     require_quantum_campaign, replace_quantum_readset,
 )
@@ -133,7 +134,6 @@ DEFAULT_STRIDE = 8
 DEFAULT_RAM_WINDOW_GIB = 160
 DEFAULT_MAX_RESIDENT_CONSUMERS = 2
 
-_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 # Canonical JSON: the one encoding (sort_keys, compact separators,
@@ -203,10 +203,6 @@ def qname_layer(qname: object) -> int | None:
     return None if match is None else int(match.group(1))
 
 
-def _hex(value: object, label: str) -> str:
-    if type(value) is not str or _HEX64.fullmatch(value) is None:
-        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
-    return value
 
 
 def _bytes_int(value: object, label: str) -> int:
@@ -540,7 +536,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         raise ValueError("layer_quanta needs the plan and prepared mappings")
     if not isinstance(parent_manifest, dict):
         raise ValueError("layer_quanta needs the parent manifest mapping")
-    _hex(parent_manifest_sha256, "parent_manifest_sha256")
+    require_quantum_digest(parent_manifest_sha256, "parent_manifest_sha256")
     annotations = parent_manifest.get("annotations")
     if not isinstance(annotations, dict):
         raise ValueError("the parent manifest has no annotations")
@@ -581,14 +577,14 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         raise ValueError("layer_quanta needs the sealed plan path")
     if plan_sha256 is None:
         plan_sha256 = annotations.get("plan_sha256")
-    _hex(plan_sha256, "plan_sha256")
+    require_quantum_digest(plan_sha256, "plan_sha256")
     if prepared_path is None:
         prepared_path = _argv_flag(argv, "--prepared") if isinstance(argv, list) else None
     if type(prepared_path) is not str or not prepared_path:
         raise ValueError("layer_quanta needs the sealed prepared path")
     if prepared_sha256 is None:
         prepared_sha256 = _argv_flag(argv, "--prepared-sha256") if isinstance(argv, list) else None
-    _hex(prepared_sha256, "prepared_sha256")
+    require_quantum_digest(prepared_sha256, "prepared_sha256")
 
     roster = sorted(prepared.get("formats_by_qname", {}))
     if not roster:

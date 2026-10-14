@@ -6,19 +6,18 @@ in their boundary adapters. This owner preserves the v1 record wire.
 from __future__ import annotations
 
 import copy
-import re
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from .dev_mode import seal_check
 from .digests import canonical_json_bytes as canonical_bytes
-from .digests import canonical_json_sha256 as canonical_sha256, newline_utf8_sha256
+from .digests import canonical_json_sha256 as canonical_sha256, newline_utf8_sha256, is_sha256hex
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 
 
-def _hex(value: object, label: str) -> str:
-    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+def require_quantum_digest(value: object, label: str) -> str:
+    if type(value) is not str or not is_sha256hex(value):
         raise ValueError(f"{label} must be a lowercase SHA-256 digest")
     return value
 
@@ -98,12 +97,12 @@ def require_quantum_campaign(record: Mapping, campaign: Mapping) -> None:
             f"{field}: refusing")
         if field == "unit_roster_sha256":
             # The roster is what the record measured, not how it was run.
-            if bound.get(field) != _hex(expected, field):
+            if bound.get(field) != require_quantum_digest(expected, field):
                 raise refusal
             continue
         # The plan, prepared and read-manifest digests are run seals
         # (PQ #1147): dev mode prints a mismatch and admits the record.
-        seal_check(field, _hex(expected, field), bound.get(field),
+        seal_check(field, require_quantum_digest(expected, field), bound.get(field),
                    where=f"quantum {record.get('quantum_id')!r}", refusal=refusal)
     expected_scope = campaign.get("campaign_scope")
     scope_where = f"quantum {record.get('quantum_id')!r}"
@@ -136,7 +135,7 @@ def require_quantum_campaign(record: Mapping, campaign: Mapping) -> None:
             raise ValueError(
                 f"quantum {record.get('quantum_id')!r} is unbound (pre-A): re-seal "
                 f"against its stage-A slice before publishing, refusing")
-        if actual != _hex(expected_slice, "adjoint_slice_sha256"):
+        if actual != require_quantum_digest(expected_slice, "adjoint_slice_sha256"):
             raise ValueError(
                 f"quantum {record.get('quantum_id')!r} binds another stage-A "
                 f"slice: refusing")
