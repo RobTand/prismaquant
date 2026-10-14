@@ -62,7 +62,23 @@ def test_format_adapter_mutation_does_not_change_the_snapshot(tmp_path):
     family = next(iter(original.published_formats))
     formats = load_published_formats(contract_path=path)
     formats[family]["family"] = "different"
+    formats[family]["reader_rate_range_q256"][0] = 0
     assert runtime.read_runtime_snapshot(path).published_formats[family]["family"] == family
+    assert runtime.read_runtime_snapshot(path).published_formats[family][
+        "reader_rate_range_q256"] == original.published_formats[family]["reader_rate_range_q256"]
+
+
+def test_snapshot_format_views_are_owned_by_the_query(tmp_path):
+    original = runtime.installed_runtime_snapshot()
+    path = tmp_path / "runtime_contract.json"
+    path.write_bytes(original.raw)
+    captured = runtime.read_runtime_snapshot(path)
+    family = next(iter(captured.published_formats))
+    view = captured.published_formats
+    view[family]["reader_rate_range_q256"][0] = 0
+
+    assert captured.published_formats[family]["reader_rate_range_q256"] == (
+        original.published_formats[family]["reader_rate_range_q256"])
 
 
 def test_missing_file_and_missing_table_remain_distinct(tmp_path):

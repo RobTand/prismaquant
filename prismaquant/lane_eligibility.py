@@ -3092,8 +3092,7 @@ def load_published_formats(
     if path is None or not path.exists():
         return {}
     from .tessera_runtime_contract import read_runtime_snapshot
-    return {family: dict(row) for family, row in
-            read_runtime_snapshot(path).published_formats.items()}
+    return read_runtime_snapshot(path).published_formats
 
 
 def _name_prefix(entry: Mapping[str, Any]) -> str:

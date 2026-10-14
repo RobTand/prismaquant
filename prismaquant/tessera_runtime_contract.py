@@ -2608,14 +2608,19 @@ class RuntimeContractSnapshot:
             path=self.path)
 
     @cached_property
-    def published_formats(self) -> Mapping[str, Mapping[str, Any]]:
-        from types import MappingProxyType
-
-        return MappingProxyType({
-            str(entry["family"]): MappingProxyType(dict(entry))
+    def _format_rows(self) -> dict[str, dict[str, Any]]:
+        return {
+            str(entry["family"]): dict(entry)
             for entry in self._payload.get("formats", ())
             if isinstance(entry, Mapping) and entry.get("family")
-        })
+        }
+
+    @property
+    def published_formats(self) -> dict[str, dict[str, Any]]:
+        """A query's own JSON-shaped format rows, without cached list aliases."""
+        from copy import deepcopy
+
+        return deepcopy(self._format_rows)
 
     @cached_property
     def tensor_parallel(self) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
