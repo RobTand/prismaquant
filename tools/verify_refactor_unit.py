@@ -23,7 +23,7 @@ def main():
         subprocess.run([sys.executable, str(args.proof), "--base", args.base], cwd=root, check=True)
     for command in (
         [sys.executable, "-m", "compileall", "-q", *args.modules],
-        [sys.executable, "-m", "pytest", "-q", "-n", str(args.workers), *args.tests],
+        [sys.executable, "-m", "pytest", "-q", "-ra", "-n", str(args.workers), *args.tests],
     ):
         subprocess.run(command, cwd=root, check=True)
 
