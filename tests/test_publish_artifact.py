@@ -25,7 +25,7 @@ if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
 from prismaquant.shipcard import (
     GOLD_SLOTS,
     REQUIRED_SLOTS,
-    build_shipcard,
+    open_shipcard,
     compute_model_sha,
     fill_slot,
     load_shipcard,
@@ -68,7 +68,7 @@ def _artifact(tmp_path, name="exported"):
     _license_card(model_dir)
     (model_dir / "config.json").write_text('{"model_type": "qwen3"}')
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"weights")
-    card = build_shipcard(model_dir, build={"achieved_bpp": {"value": 4.75}})
+    card = open_shipcard(model_dir, build={"achieved_bpp": {"value": 4.75}})
     write_shipcard(model_dir / "shipcard.json", card)
     return model_dir
 
@@ -556,7 +556,7 @@ def test_research_stamped_card_is_refused_and_only_force_overrides(
     ``--force-unverified`` override.
     """
     model_dir = _artifact(tmp_path, name="research-exported")
-    card = build_shipcard(model_dir, build={
+    card = open_shipcard(model_dir, overwrite=True, build={
         "achieved_bpp": {"value": 4.75},
         "research_only": True,
         "certifies_placement": False,
@@ -730,6 +730,7 @@ def test_frozen_snapshot_survives_original_path_and_symlink_swaps(
         ".gitattributes",
         "config.json",
         "model-00001-of-00001.safetensors",
+        "weight_content_manifest.json",
         "shipcard.json",
         "LICENSE",
         "README.md",

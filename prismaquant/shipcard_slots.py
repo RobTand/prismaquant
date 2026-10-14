@@ -413,7 +413,7 @@ CORE_LANE_SLOTS = {"route.sweep": ShipSlot("route.sweep", _sweep_replay)}
 def ship_slot_registry():
     from .lane_spec import lane_hooks
     found = {**_BASE_SLOTS, **CORE_LANE_SLOTS}
-    owners = {name: "shipcard" for name in CORE_LANE_SLOTS}
+    owners = {name: "shipcard" for name in found}
     for lane, hook in lane_hooks("shipcard_slot_verifiers"):
         for name, replay in dict(hook()).items():
             if name in owners:

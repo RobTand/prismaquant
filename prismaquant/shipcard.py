@@ -85,6 +85,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .source_read_plan import safetensors_prefix_length
+from .digests import file_sha256hex
 
 SCHEMA = "prismaquant.shipcard/1"
 
@@ -216,6 +217,7 @@ SHIPCARD_FILENAME = "shipcard.json"
 
 SHIPCARD_RESERVED_BYTES = 256 * 1024
 WEIGHT_CONTENT_MANIFEST_SCHEMA = "prismaquant.weight_content_manifest/1"
+WEIGHT_CONTENT_MANIFEST_FILENAME = "weight_content_manifest.json"
 WEIGHT_STAT_ATTESTATION_SCHEMA = "prismaquant.weight_stat_attestation/1"
 # Orphaned 2026-09-02, kept deliberately. `SAFETENSORS_CONTENT_RECEIPT_SCHEMA`,
 # `validate_safetensors_content_receipt` and
@@ -365,11 +367,12 @@ def compute_model_sha(
     weight check sees. Demonstrated 2026-08-15 on the published Qwen3.8-27B
     native artifact: tampering with its chat template moved nothing.
 
-    Both lanes now hash auxiliary content. ``legacy_native_scope=True``
-    reproduces the pre-fix native identity so cards written under it still
-    verify -- see :func:`verify`, which tries the current scope first and
-    falls back. New cards are always written with the current scope, and the
-    legacy scope cannot produce one, so the fallback never weakens a new card.
+    Both lanes hash auxiliary content. Native exports persist an exact weight
+    content manifest before opening the card. Verification checks its stat
+    attestation, or rehashes an exact historical claim when no stat cache exists.
+    ``legacy_native_scope=True`` reproduces the old size-only scope for diagnosis;
+    publication no longer accepts that scope. Re-attestation gives such an
+    artifact a fresh content identity and leaves its old measurements stale.
     ``legacy_readme_hashed=True`` is the same tolerance for the one other
     scope change: cards stamped while ``README.md`` was still hashed.
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
@@ -409,6 +412,15 @@ def compute_model_sha(
             for p in sorted(root.glob("*.gguf"))
         }
     payload["weights"] = weights
+    manifest = read_weight_content_manifest(root)
+    embedded_manifest = ((raw_quant_cfg.get("provenance") or {}).get("weight_content_manifest")
+                         if raw_quant_cfg is not None and isinstance(raw_quant_cfg.get("provenance"), Mapping)
+                         else None)
+    if manifest is not None and embedded_manifest is None:
+        # Every identity scope binds the exact weight claim, including the
+        # historical auxiliary scopes. Size-only historical cards cannot use
+        # those fallbacks to preserve unproved measurements.
+        payload["weight_content_manifest"] = manifest
     if raw_quant_cfg is not None and canonical_quant_cfg is not None:
         manifest = (raw_quant_cfg.get("provenance") or {}).get(
             "weight_content_manifest"
@@ -421,7 +433,7 @@ def compute_model_sha(
     codebooks = {
         p.name: {
             "bytes": p.stat().st_size,
-            "sha256": _file_content_sha256(p),
+            "sha256": file_sha256hex(p),
         }
         for p in sorted(root.glob("*.pqcb"))
     }
@@ -474,7 +486,7 @@ def compute_model_sha(
         auxiliary = {
             path.relative_to(root).as_posix(): {
                 "bytes": int(path.stat().st_size),
-                "sha256": _file_content_sha256(path),
+                "sha256": file_sha256hex(path),
             }
             for path in sorted(root.rglob("*"))
             if path.is_file()
@@ -487,18 +499,13 @@ def compute_model_sha(
 
 
 def accepted_model_shas(model_dir: str | os.PathLike) -> tuple[str, ...]:
-    """Current identity first, then each superseded scope as a fallback.
+    """Current identity and historical scopes that bind at least as much.
 
-    A card describes its artifact faithfully under the rules it was computed
-    with, so a scope change must not declare every published artifact changed.
-    Each fallback is strictly narrower than the current scope (it attests MORE,
-    or the same), and no legacy scope can produce a current-scope sha, so a
-    card written today is never checked the weak way.
+    The old native size-only scope cannot demonstrate weight or auxiliary
+    integrity. README and figure scopes retain their stronger content claims.
     """
     return (
         compute_model_sha(model_dir),
-        # Pre-2026-08-15 native cards: auxiliary files were unattested.
-        compute_model_sha(model_dir, legacy_native_scope=True),
         # Cards stamped while `README.md` was still hashed.
         compute_model_sha(model_dir, legacy_readme_hashed=True),
         # Cards stamped while the card figures were still hashed.
@@ -516,31 +523,48 @@ def artifact_bytes(model_dir: str | os.PathLike) -> int:
     return int(total)
 
 
-def _file_content_sha256(path: str | os.PathLike) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def build_weight_content_manifest(model_dir: str | os.PathLike) -> dict[str, Any]:
     """Hash each finished safetensors container once at the export boundary."""
     root = Path(model_dir)
     files = sorted(root.glob("*.safetensors"))
     if not files:
         raise FileNotFoundError(f"no safetensors weights to attest under {root}")
-    return {
+    before = weight_stat_attestation(root)
+    manifest = {
         "schema": WEIGHT_CONTENT_MANIFEST_SCHEMA,
         "algorithm": "sha256",
         "files": {
             path.name: {
                 "bytes": int(path.stat().st_size),
-                "sha256": _file_content_sha256(path),
+                "sha256": file_sha256hex(path),
             }
             for path in files
         },
     }
+    if weight_stat_attestation(root) != before:
+        raise ValueError("weight files changed while building their content manifest")
+    return manifest
+
+
+def read_weight_content_manifest(model_dir: str | os.PathLike) -> Mapping[str, Any] | None:
+    """Read an exact claim from the native sidecar or existing export metadata."""
+    root = Path(model_dir)
+    embedded = None
+    quant_path = root / "quant_config.json"
+    if quant_path.is_file():
+        quant = _strict_json_object(quant_path.read_bytes(), where=str(quant_path))
+        provenance = quant.get("provenance")
+        if isinstance(provenance, Mapping):
+            embedded = provenance.get("weight_content_manifest")
+    sidecar = root / WEIGHT_CONTENT_MANIFEST_FILENAME
+    manifest = _strict_json_object(sidecar.read_bytes(), where=str(sidecar)) if sidecar.is_file() else embedded
+    if sidecar.is_file() and embedded is not None and manifest != embedded:
+        raise ValueError("native and embedded weight content manifests conflict")
+    if manifest is not None:
+        _validate_weight_content_manifest(
+            manifest, {path.name: path.stat().st_size for path in sorted(root.glob("*.safetensors"))},
+            where=root)
+    return manifest
 
 
 def _validate_weight_content_manifest(
@@ -1251,60 +1275,83 @@ def weight_stat_attestation(model_dir: str | os.PathLike) -> dict[str, Any]:
 def assert_weight_stat_attestation(
     card: Mapping[str, Any],
     model_dir: str | os.PathLike,
+    *,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> None:
     """Fail if a weight changed after the card bound its exact content claim."""
+    root = Path(model_dir)
+    manifest = read_weight_content_manifest(root)
+    if manifest is None and tuple(root.glob("*.safetensors")):
+        raise ValueError("artifact carries no exact weight content manifest; re-attest and replay measurements")
+    if observed_weight_content is not None:
+        if observed_weight_content != manifest:
+            raise ValueError("observed weight content differs from the immutable export manifest")
+        return
     expected = card.get("weight_stat_attestation")
     if expected is None:
-        return  # Backward-compatible verification of historical cards.
+        if manifest is not None and build_weight_content_manifest(root) != manifest:
+            raise ValueError("weight content differs from the immutable export manifest")
+        return
     if not isinstance(expected, Mapping) or expected.get(
         "schema"
     ) != WEIGHT_STAT_ATTESTATION_SCHEMA:
         raise ValueError("shipcard carries an invalid weight stat attestation")
     observed = weight_stat_attestation(model_dir)
     if observed != expected:
-        raise ValueError(
-            "weight file stats changed after export; refusing cached content "
-            "identity (run shipcard_cli reattest after a legitimate "
-            "cross-filesystem copy)"
-        )
+        if manifest is None or build_weight_content_manifest(root) != manifest:
+            raise ValueError("weight file stats changed and content differs from the immutable export manifest")
 
 
 def reattest_weight_stats(
     shipcard_path: str | os.PathLike,
     model_dir: str | os.PathLike | None = None,
 ) -> dict[str, Any]:
-    """Full-hash a copied CB artifact, then refresh only its cheap stat cache."""
+    """Rehash a copy, or give an unproved historical artifact a fresh identity.
+
+    An identity upgrade leaves historical slot records intact but stale. Their
+    old model_sha cannot close the fresh card until measurements are replayed.
+    """
     path = Path(shipcard_path)
     root = Path(model_dir) if model_dir is not None else path.resolve().parent
     card = load_shipcard(path)
-    quant_path = root / "quant_config.json"
-    if not quant_path.is_file():
-        raise ValueError("weight re-attestation requires a CB quant_config.json")
-    quant_config = json.loads(quant_path.read_text(encoding="utf-8"))
-    provenance = quant_config.get("provenance")
-    expected = provenance.get("weight_content_manifest") if isinstance(
-        provenance, Mapping
-    ) else None
-    if expected is None:
-        raise ValueError("CB artifact has no immutable weight content manifest")
+    before = weight_stat_attestation(root)
+    expected = read_weight_content_manifest(root)
     observed = build_weight_content_manifest(root)
-    if observed != expected:
+    if expected is not None and observed != expected:
         raise ValueError(
             "weight content differs from the immutable export manifest; "
             "refusing to refresh the stat attestation"
         )
     expected_model_sha = card.get("model_sha")
-    if expected_model_sha not in set(accepted_model_shas(root)):
+    accepted = set(accepted_model_shas(root))
+    if expected is None:
+        accepted.add(compute_model_sha(root, legacy_native_scope=True))
+    if expected_model_sha not in accepted:
         raise ValueError("copied artifact model_sha differs from the shipcard")
-    card["weight_stat_attestation"] = weight_stat_attestation(root)
+    if expected is None:
+        _write_weight_content_manifest(root, observed)
+        card["model_sha"] = compute_model_sha(root)
+        card["weight_identity_upgrade"] = {
+            "previous_model_sha": expected_model_sha,
+            "model_sha": card["model_sha"], "measurements_require_replay": True,
+        }
+    if weight_stat_attestation(root) != before:
+        raise ValueError("weight files changed during re-attestation")
+    card["weight_stat_attestation"] = before
     card["updated"] = _now()
     write_shipcard(path, card)
     return card
 
 
+def _write_weight_content_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
+    from .cost_stage_checkpoint import atomic_write_bytes
+    from .digests import indent2_json_file_bytes
+    atomic_write_bytes(root / WEIGHT_CONTENT_MANIFEST_FILENAME, indent2_json_file_bytes(manifest))
+
+
 def file_sha256(path: str | os.PathLike) -> str | None:
     try:
-        return _file_content_sha256(path)
+        return file_sha256hex(path)
     except Exception:
         return None
 
@@ -1394,6 +1441,47 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
 
 
+def artifact_lane(card: Mapping[str, Any], *, model_dir=None) -> str | None:
+    """Resolve one lane from independently retained card, build and config facts."""
+    from .lane_spec import all_lane_specs, lane_spec_for_container, load_lane_spec
+
+    facts = [("card.lane", card.get("lane"))]
+    build = card.get("build")
+    if isinstance(build, Mapping):
+        facts.extend((f"build.{key}", build.get(key)) for key in ("export_container", "quant_method"))
+    if model_dir is not None:
+        path = Path(model_dir) / "config.json"
+        if path.is_file():
+            config = _strict_json_object(path.read_bytes(), where=str(path))
+            quant = config.get("quantization_config")
+            if quant is not None:
+                if not isinstance(quant, Mapping):
+                    raise ValueError("artifact quantization_config is not an object")
+                facts.append(("config.quantization_config.quant_method", quant.get("quant_method")))
+    found: dict[str, list[str]] = {}
+    for source, raw in facts:
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError(f"{source} declares an invalid lane {raw!r}")
+        name = raw.strip().lower()
+        try:
+            spec = lane_spec_for_container(name)
+        except KeyError:
+            try:
+                spec = load_lane_spec(name)
+            except KeyError:
+                matches = [item for item in all_lane_specs()
+                           if item.quant_method and item.quant_method.strip().lower() == name]
+                if len(matches) != 1:
+                    raise ValueError(f"{source} declares an unknown or ambiguous lane {raw!r}") from None
+                spec = matches[0]
+        found.setdefault(spec.export_container, []).append(source)
+    if len(found) > 1:
+        raise ValueError(f"artifact lane facts conflict: {found}")
+    return next(iter(found), None)
+
+
 # ---------------------------------------------------------------------------
 # Build lane
 # ---------------------------------------------------------------------------
@@ -1401,10 +1489,9 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     """The shipcard slots ``lane``'s own declaration says its gates close.
 
     Read from ``lane_specs/<lane>.json``, so a lane that declares a gate opens
-    that gate's slot without an edit here.  An unknown or absent lane resolves
-    to ``()`` -- historical cards carry no ``lane`` and must keep verifying
-    against exactly the base set they were opened with.  It is not a widening
-    to answer ``()``: :func:`required_slots` UNIONS this with
+    that gate's slot without an edit here. An absent lane resolves to ``()``;
+    an unknown declaration refuses. :func:`required_slots` derives the lane
+    from the artifact, build block and card, then UNIONS its obligations with
     :data:`REQUIRED_SLOTS` and never replaces it, so no lane can subtract a
     base requirement by under-declaring (the GGUF lane declares no
     ``native_export.graph`` gate and is still required to close that slot).
@@ -1428,11 +1515,8 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     # silently answered with "no slots".
     try:
         spec = lane_spec_for_container(str(lane))
-    except Exception:
-        try:
-            spec = load_lane_spec(str(lane))
-        except Exception:
-            return ()
+    except KeyError:
+        spec = load_lane_spec(str(lane))
     declared = spec.shipcard_slots()
     # FAIL CLOSED, not filter. A lane that declares a slot with no verifier
     # is a repository defect, and the two ways of meeting it are not
@@ -1465,14 +1549,13 @@ def build_shipcard(
     *,
     build: Mapping[str, Any] | None = None,
     lane: str | None = None,
+    attested_weight_stats: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open a fresh record: build-lane facts filled, every slot empty.
 
-    ``lane`` is the ``EXPORT_CONTAINER`` this artifact was built for.  It is
-    stamped on the card and it decides which lane-scoped slots the card opens,
-    so the gates a lane DECLARES and the slots its artifact must CLOSE are one
-    object.  Omitting it reproduces the historical card exactly (base slots,
-    no ``lane`` key) -- which is what every pre-2026-09-03 native card is.
+    The artifact, build block and optional ``lane`` must agree on one container.
+    This constructor reads metadata without writing the artifact. Exporters use
+    ``open_shipcard`` to persist the content claim and canonical card together.
     """
     root = Path(model_dir)
     from prismaquant.export_output_safety import directory_publication_target
@@ -1491,8 +1574,9 @@ def build_shipcard(
                 if key in build_payload and build_payload[key] != value:
                     raise ValueError(f"prefill frontier replay build.{key} differs from recipe")
             build_payload.update(claim)
+    resolved_lane = artifact_lane({"lane": lane, "build": build_payload}, model_dir=root)
     slots = list(REQUIRED_SLOTS) + [
-        slot for slot in lane_gate_slots(lane) if slot not in REQUIRED_SLOTS
+        slot for slot in lane_gate_slots(resolved_lane) if slot not in REQUIRED_SLOTS
     ]
     # A rate-axis artifact owes the byte-matched uniform control's verdict, so
     # open the slot at export time.  `required_slots` re-derives the
@@ -1511,8 +1595,8 @@ def build_shipcard(
         "build": build_payload,
         "slots": {slot: None for slot in slots},
     }
-    if lane:
-        card["lane"] = str(lane)
+    if resolved_lane:
+        card["lane"] = resolved_lane
     quant_path = root / "quant_config.json"
     if quant_path.is_file():
         try:
@@ -1522,10 +1606,6 @@ def build_shipcard(
         provenance = quant_config.get("provenance") if isinstance(
             quant_config, Mapping
         ) else None
-        if isinstance(provenance, Mapping) and provenance.get(
-            "weight_content_manifest"
-        ) is not None:
-            card["weight_stat_attestation"] = weight_stat_attestation(root)
         # Principle 9 requires the artifact's route disposition -- a declared
         # non-native target or an explicit override -- to be stamped on the
         # card, and principle 12 requires the route census to travel with the
@@ -1535,6 +1615,32 @@ def build_shipcard(
         # ``archive/gridbook_lane_2026-09-02/`` with them.  The live stamp is
         # ``build.route_histogram`` (``route_histogram_claim``, #1377), which
         # the exporter writes into the build block beside ``achieved_bpp``.
+    if attested_weight_stats is not None:
+        if read_weight_content_manifest(root) is None:
+            raise ValueError("a stat attestation requires an exact weight content manifest")
+        if weight_stat_attestation(root) != attested_weight_stats:
+            raise ValueError("weight files changed while opening the shipcard")
+        card["weight_stat_attestation"] = dict(attested_weight_stats)
+    return card
+
+
+def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False):
+    """Seal finished weight content and write a fresh canonical shipcard."""
+    root = Path(model_dir)
+    path = Path(shipcard_path) if shipcard_path is not None else root / SHIPCARD_FILENAME
+    if (path.exists() or path.is_symlink()) and not overwrite:
+        raise ValueError("a ship record already exists; reopening would discard its measurements")
+    attestation = None
+    if tuple(root.glob("*.safetensors")):
+        attestation = weight_stat_attestation(root)
+        expected = read_weight_content_manifest(root)
+        observed = build_weight_content_manifest(root)
+        if expected is not None and observed != expected:
+            raise ValueError("weight content differs from the immutable export manifest")
+        if expected is None:
+            _write_weight_content_manifest(root, observed)
+    card = build_shipcard(root, build=build, lane=lane, attested_weight_stats=attestation)
+    write_shipcard(path, card)
     return card
 
 
@@ -1646,14 +1752,20 @@ def verify(
     *,
     model_dir: str | os.PathLike | None = None,
     required: Iterable[str] | None = None,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """Return the list of reasons this artifact is not shippable (empty = OK)."""
     problems: list[str] = []
     expected_sha = card.get("model_sha")
+    try:
+        artifact_lane(card, model_dir=model_dir)
+    except (KeyError, ValueError, OSError) as exc:
+        problems.append(f"artifact lane is not resolvable: {exc}")
 
     if model_dir is not None:
         try:
-            assert_weight_stat_attestation(card, model_dir)
+            assert_weight_stat_attestation(card, model_dir,
+                                           observed_weight_content=observed_weight_content)
             accepted = accepted_model_shas(model_dir)
             on_disk = accepted[0]
             if expected_sha and on_disk != expected_sha:
@@ -1700,7 +1812,10 @@ def verify(
     problems.extend(_verify_research_route_override(card))
 
     if required is None:
-        required = required_slots(card, model_dir=model_dir)
+        try:
+            required = required_slots(card, model_dir=model_dir)
+        except (KeyError, ValueError, OSError):
+            required = REQUIRED_SLOTS
     registry = ship_slot_registry()
     for slot in required:
         record = slots.get(slot)
@@ -2772,7 +2887,7 @@ def required_slots(
 ) -> tuple[str, ...]:
     """Return every slot default verification must replay.
 
-    Container-required slots, then whatever the card's own ``lane`` declares,
+    Container-required slots, then the artifact-derived lane's declared slots,
     then recognized optional claims that are present and non-null.
 
     Until 2026-09-02 the retired Gridbook codebook lane added three lane-scoped
@@ -2794,7 +2909,7 @@ def required_slots(
     # can subtract nothing: the GGUF lane declares no `native_export.graph`
     # gate and is still required to close that slot, so lane-derivation cannot
     # be used to shrink a bar.
-    required.extend(lane_gate_slots(card.get("lane")))
+    required.extend(lane_gate_slots(artifact_lane(card, model_dir=model_dir)))
     if _is_rate_axis_artifact(card, model_dir=model_dir):
         required.append(UNIFORM_CONTROL_SLOT)
     slots = card.get("slots")

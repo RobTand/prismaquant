@@ -64,7 +64,8 @@ def _artifact(
 
 
 def _open_card(tmp_path, model_dir):
-    card = build_shipcard(model_dir, build={"achieved_bpp": {"value": 4.75}})
+    from prismaquant.shipcard import open_shipcard
+    card = open_shipcard(model_dir, build={"achieved_bpp": {"value": 4.75}})
     path = model_dir / "shipcard.json"
     write_shipcard(path, card)
     return path
@@ -245,13 +246,15 @@ def test_model_sha_is_stable_and_content_sensitive(tmp_path):
 
 def test_native_card_remains_verifiable_after_legitimate_copy(tmp_path):
     import shutil
+    from prismaquant.shipcard import reattest_weight_stats
 
     source = _artifact(tmp_path, name="native-source")
     source_card = _open_card(tmp_path, source)
-    assert "weight_stat_attestation" not in load_shipcard(source_card)
+    assert "weight_stat_attestation" in load_shipcard(source_card)
 
     copied = tmp_path / "native-copy"
     shutil.copytree(source, copied)
+    reattest_weight_stats(copied / "shipcard.json", copied)
     problems = verify(load_shipcard(copied / "shipcard.json"), model_dir=copied)
     assert all("artifact changed" not in problem for problem in problems)
 
@@ -368,12 +371,14 @@ def test_reattest_accepts_copy_but_refuses_changed_weight_content(tmp_path):
     copied = tmp_path / "copied"
     shutil.copytree(source, copied)
     copied_card = copied / source_card.name
-    assert verify(load_shipcard(copied_card), model_dir=copied)
+    original_sha = load_shipcard(copied_card)["model_sha"]
+    original_stats = load_shipcard(copied_card)["weight_stat_attestation"]
+    assert verify(load_shipcard(copied_card), model_dir=copied, required=[]) == []
     reattest_weight_stats(copied_card, copied)
-    assert not any(
-        "artifact changed since the shipcard was opened" in problem
-        for problem in verify(load_shipcard(copied_card), model_dir=copied)
-    )
+    copied_record = load_shipcard(copied_card)
+    assert copied_record["model_sha"] == original_sha
+    assert copied_record["weight_stat_attestation"] != original_stats
+    assert verify(copied_record, model_dir=copied, required=[]) == []
 
     (copied / "model-00001-of-00001.safetensors").write_bytes(b"weights-B")
     with pytest.raises(ValueError, match="content differs"):
@@ -385,7 +390,7 @@ def test_reattest_accepts_copy_but_refuses_changed_weight_content(tmp_path):
 # ---------------------------------------------------------------------------
 def test_fresh_card_refuses_every_slot(tmp_path):
     model_dir = _artifact(tmp_path)
-    card = build_shipcard(model_dir, build={})
+    card = load_shipcard(_open_card(tmp_path, model_dir))
     assert unfilled_slots(card) == list(REQUIRED_SLOTS)
     problems = verify(card, model_dir=model_dir)
     assert len(problems) == len(REQUIRED_SLOTS)
@@ -1046,11 +1051,10 @@ def test_a_card_stamped_while_the_figures_were_hashed_still_verifies(tmp_path):
     """
     model_dir = _artifact(tmp_path)
     (model_dir / "allocation-map.png").write_bytes(b"\x89PNG\r\nv1")
-
+    path = _open_card(tmp_path, model_dir)
     legacy_sha = compute_model_sha(model_dir, legacy_figures_hashed=True)
     assert legacy_sha != compute_model_sha(model_dir)
 
-    path = _open_card(tmp_path, model_dir)
     card = load_shipcard(path)
     card["model_sha"] = legacy_sha
     write_shipcard(path, card)
@@ -1071,11 +1075,10 @@ def test_a_card_stamped_while_the_readme_was_hashed_still_verifies(tmp_path):
     """
     model_dir = _artifact(tmp_path)
     (model_dir / "README.md").write_text("# an already-published card\n")
-
+    path = _open_card(tmp_path, model_dir)
     legacy_sha = compute_model_sha(model_dir, legacy_readme_hashed=True)
     assert legacy_sha != compute_model_sha(model_dir)
 
-    path = _open_card(tmp_path, model_dir)
     card = load_shipcard(path)
     card["model_sha"] = legacy_sha
     write_shipcard(path, card)
@@ -1089,14 +1092,8 @@ def test_a_card_stamped_while_the_readme_was_hashed_still_verifies(tmp_path):
                for p in verify(load_shipcard(path), model_dir=model_dir))
 
 
-def test_a_card_written_under_the_legacy_native_scope_still_verifies(tmp_path):
-    """Published native cards must not all read as 'artifact changed'.
-
-    The legacy identity described its artifact faithfully under the rules it
-    was computed with, so `verify` accepts it as a FALLBACK. It must remain a
-    fallback: the legacy scope cannot produce a current-scope sha, so a card
-    written today is never checked the weak way.
-    """
+def test_a_size_only_native_card_requires_a_fresh_content_identity(tmp_path):
+    """A size-only historical identity cannot preserve unproved measurements."""
     model_dir = _artifact(tmp_path)
     (model_dir / "chat_template.jinja").write_text("{{ messages }}")
 
@@ -1109,14 +1106,13 @@ def test_a_card_written_under_the_legacy_native_scope_still_verifies(tmp_path):
     write_shipcard(path, card)
     _fill_all(path, legacy_sha)
 
-    assert verify(load_shipcard(path), model_dir=model_dir) == []
+    assert any("artifact changed" in problem
+               for problem in verify(load_shipcard(path), model_dir=model_dir))
 
-    # The legacy scope hashes container SIZES, so a same-size weight swap is
-    # exactly what it could never see -- and still cannot. This test pins the
-    # tolerance as bounded, not as a hole: what it accepts is the old
-    # guarantee, never less.
+    # Auxiliary edits cannot restore a historical identity lacking exact-byte
+    # integrity, and changes to weights also remain refused.
     (model_dir / "chat_template.jinja").write_text("{{ messages }}{# swap #}")
-    assert verify(load_shipcard(path), model_dir=model_dir) == []
+    assert any("artifact changed" in p for p in verify(load_shipcard(path), model_dir=model_dir))
 
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"longer!!")
     assert any(

@@ -235,7 +235,8 @@ def test_lane_gate_slots_reads_the_lane_declaration():
     assert "route.census" not in lane_gate_slots("gguf")
     # A card with no lane keeps exactly its historical requirement.
     assert lane_gate_slots(None) == ()
-    assert lane_gate_slots("no_such_lane") == ()
+    with pytest.raises(KeyError, match="no_such_lane"):
+        lane_gate_slots("no_such_lane")
 
 
 def test_a_lane_declaring_a_slot_the_shipcard_has_no_name_for_is_REFUSED(

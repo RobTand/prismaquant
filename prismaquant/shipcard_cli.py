@@ -110,7 +110,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 def _cmd_reattest(args: argparse.Namespace) -> int:
     model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
-    reattest_weight_stats(args.shipcard, model_dir)
+    card = reattest_weight_stats(args.shipcard, model_dir)
+    if card.get("weight_identity_upgrade"):
+        print("[shipcard] fresh content identity recorded; historical measurements require replay")
     print(
         f"[shipcard] exact weight content matches; refreshed stat attestation "
         f"for {model_dir}"

@@ -13,6 +13,14 @@ The gold CLI and configured gates can construct the same draft record directly.
 The producer validator and ship-record replay share the existing catastrophic
 quality thresholds and boundary schemas from this owner. Publication still checks
 artifact identity and recomputes each slot's evidence through its registered policy.
+Native exports now persist `weight_content_manifest.json` before opening the card.
+The existing SHA-256 manifest schema binds every safetensors file's finished
+bytes, and the existing stat attestation detects later changes without rereading
+unchanged shards. Publication also compares its frozen file digests to that claim.
+Historical exact-content claims remain usable; size-only native cards require a
+fresh content identity and replayed measurements. Card, build and artifact config
+lane facts must agree, and deleting a card lane or build block cannot remove the
+artifact's declared route obligations. A lane plugin cannot replace a base slot owner.
 
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): rung admission
 captures current lane and format facts together and checks that captured table's

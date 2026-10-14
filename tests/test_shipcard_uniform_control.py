@@ -26,7 +26,7 @@ from prismaquant.shipcard import (
     REQUIRED_SLOTS,
     ROUTE_HISTOGRAM_SCHEMA,
     UNIFORM_CONTROL_SLOT,
-    build_shipcard,
+    open_shipcard,
     compute_model_sha,
     fill_slot,
     load_shipcard,
@@ -210,7 +210,7 @@ def _artifact(tmp_path, *, name="exported", rate_axis=True):
         build["route_histogram"] = {
             "schema": ROUTE_HISTOGRAM_SCHEMA, "units_total": 1,
             "route_status_counts": {"unattested": 1}, "activation_contracts": {}}
-    card = build_shipcard(model_dir, build=build,
+    card = open_shipcard(model_dir, build=build,
                           lane=("tessera" if rate_axis else None))
     write_shipcard(model_dir / "shipcard.json", card)
     return model_dir

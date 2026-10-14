@@ -8619,15 +8619,11 @@ def _write_shipcard(
     # Stamp the lane the card was opened on.  This exporter writes exactly
     # one container, and until #631 it stamped none -- so `lane_gate_slots`
     # answered `()` for every native card and the lane's own declarations
-    # opened nothing.  That was harmless while the lane declared only base
-    # slots; it stops being harmless the moment it declares one of its own,
-    # because a slot no card opens is a gate that cannot bite.  Historical
-    # cards carry no lane and keep verifying against the base set they were
-    # opened with.
-    card = _shipcard.build_shipcard(
+    # opened nothing. Lane obligations now also come from the artifact config
+    # and build block, so deleting this stamp cannot remove a declared gate.
+    card = _shipcard.open_shipcard(
         out_dir, build=build, lane=_default_export_lane())
-    path = _shipcard.write_shipcard(
-        out_dir / _shipcard.SHIPCARD_FILENAME, card)
+    path = out_dir / _shipcard.SHIPCARD_FILENAME
     print(f"[export-stream] shipcard opened: {path}", flush=True)
     print(f"[export-stream]   serve-lane slots still UNFILLED: "
           f"{', '.join(_shipcard.unfilled_slots(card))}", flush=True)

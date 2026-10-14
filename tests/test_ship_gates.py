@@ -38,7 +38,7 @@ def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     (model / "tokenizer_config.json").write_text('{"tokenizer_class":"TokenizersBackend"}')
     save_file({"model.embed_tokens.weight": torch.zeros((8, 4), dtype=torch.bfloat16)},
               str(model / "model.safetensors"))
-    card = shipcard.build_shipcard(model, build={})
+    card = shipcard.open_shipcard(model, build={})
     shipcard.write_shipcard(model / "shipcard.json", card)
     teacher = root / "teacher.pt"
     torch.save({"calib_ids": torch.tensor([[1, 2, 3, 1]], dtype=torch.long),

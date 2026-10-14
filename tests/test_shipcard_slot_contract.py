@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from prismaquant.shipcard import build_shipcard, verify, write_shipcard
+from prismaquant.shipcard import open_shipcard, verify, write_shipcard
 from prismaquant.shipcard_slots import make_gold_record, ship_slot
 
 
@@ -20,7 +20,7 @@ def artifact(tmp_path):
     ("gold.ppl", {"ppl": 4.2, "n_tokens_scored": 16}),
 ])
 def test_direct_gold_fill_and_publication_replay_the_measurement(artifact, slot, metrics):
-    card = build_shipcard(artifact)
+    card = open_shipcard(artifact)
     payload = {"model": str(artifact), "spec_decode_detected": False,
                "serve_fingerprint": "f" * 64, "git_commit": "a" * 40, **metrics}
     draft = make_gold_record(payload, slot=slot, model_sha=card["model_sha"],
@@ -44,7 +44,7 @@ def test_configured_gate_fills_gold_without_the_cli(artifact, monkeypatch):
         pytest.fail("configured gold fill called argparse")
 
     monkeypatch.setattr(shipcard_cli, "main", unexpected_cli)
-    card = build_shipcard(artifact)
+    card = open_shipcard(artifact)
     write_shipcard(artifact / "shipcard.json", card)
     payload = {"model": str(artifact), "spec_decode_detected": False,
                "serve_fingerprint": "f" * 64, "git_commit": "a" * 40,

@@ -123,7 +123,9 @@ def open_lane_shipcard(
             "only when the artifact's bytes changed"
         )
     card = _build_lane_card(root, spec, build)
-    write_shipcard(path, card)
+    from .shipcard import open_shipcard
+    open_shipcard(root, build=card["build"], lane=spec.export_container,
+                  shipcard_path=path, overwrite=overwrite)
     return path
 
 
