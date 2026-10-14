@@ -94,6 +94,9 @@ __all__ = [
     "ProjectedName",
     "RECIPE",
     "ServingGroup",
+    "ServingUnit",
+    "ServingComponent",
+    "connected_serving_components",
     "VLLM",
     "strip_weight_leaf",
 ]
@@ -249,6 +252,60 @@ class ServingGroup:
 GROUP_SINGLETON = "singleton"
 GROUP_FUSED_SIBLINGS = "fused_siblings"
 GROUP_PACKED_EXPERTS = "packed_experts"
+
+
+@dataclasses.dataclass(frozen=True)
+class ServingUnit:
+    """One declared coupling; several couplings can share a member."""
+
+    kind: str
+    key: str
+    members: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class ServingComponent:
+    """Complete overlap closure and the declarations that contributed to it."""
+
+    members: tuple[str, ...]
+    units: tuple[ServingUnit, ...]
+
+
+def connected_serving_components(
+    names: Iterable[str], units: Iterable[ServingUnit],
+) -> tuple[ServingComponent, ...]:
+    """Union present members, retaining source declarations and input order."""
+    all_names = tuple(dict.fromkeys(names))
+    parent = {name: name for name in all_names}
+    present_units = tuple(
+        ServingUnit(unit.kind, unit.key,
+                    tuple(name for name in unit.members if name in parent))
+        for unit in units
+    )
+
+    def find(name):
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for unit in present_units:
+        for member in unit.members[1:]:
+            first, other = find(unit.members[0]), find(member)
+            if first != other:
+                parent[other] = first
+    members_by_root = {}
+    for name in all_names:
+        members_by_root.setdefault(find(name), []).append(name)
+    units_by_root = {}
+    for unit in present_units:
+        # A singleton contributes no coupling or licence kind.
+        if len(unit.members) >= 2:
+            units_by_root.setdefault(find(unit.members[0]), []).append(unit)
+    return tuple(
+        ServingComponent(tuple(members), tuple(units_by_root.get(key, ())))
+        for key, members in members_by_root.items()
+    )
 
 
 class NameProjectionError(KeyError):

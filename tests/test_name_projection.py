@@ -24,6 +24,26 @@ from prismaquant.model_profiles.qwen3 import Qwen3Profile
 from prismaquant.model_walk import WalkResult, walk_model
 
 
+def test_complete_serving_components_preserve_overlap_and_licence_kinds():
+    units = (
+        npx.ServingUnit("fused", "gate_up", ("gate", "up")),
+        npx.ServingUnit("packed", "experts", ("up", "down")),
+        npx.ServingUnit("fused", "absent_sibling", ("alone", "absent")),
+    )
+    components = npx.connected_serving_components(
+        ("gate", "up", "down", "alone"), units)
+    assert components[0].members == ("gate", "up", "down")
+    assert {unit.kind for unit in components[0].units} == {"fused", "packed"}
+    assert components[1].members == ("alone",)
+    assert components[1].units == ()
+
+
+def test_serving_components_keep_equal_rank_selection_order():
+    units = (npx.ServingUnit("fused", "pair", ("a", "b")),)
+    component, = npx.connected_serving_components(("b", "a"), units)
+    assert component.members == ("b", "a")
+
+
 # ---------------------------------------------------------------- fixtures
 
 

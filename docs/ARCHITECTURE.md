@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+`NameProjection` owns serving-unit component closure. Allocation and export
+retain all overlapping fused and packed declarations and their licence kinds;
+a singleton contributes no coupling. Allocation preserves member order when
+choosing among equal-rank formats.
+
 As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel and ship-record ownership.
 `native_panel_kind` owns the schema-keyed dense and routed panel adapters. Receipt
 emission and runtime admission ask the same adapter for its row binding, runtime

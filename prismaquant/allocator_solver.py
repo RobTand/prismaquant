@@ -1102,53 +1102,21 @@ def _promote_group_components(
                     "widen or narrow the family relaxation"
                 )
 
+    from .name_projection import ServingUnit, connected_serving_components
+
     out = dict(assignment)
-    parent = {name: name for name in out}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: str, b: str) -> None:
-        ra = find(a)
-        rb = find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    for group in groups:
-        members = [m for m in group if m in out]
-        if len(members) < 2:
-            continue
-        first = members[0]
-        for member in members[1:]:
-            union(first, member)
-
-    components: dict[str, list[str]] = {}
-    for name in out:
-        components.setdefault(find(name), []).append(name)
-
-    # Which kinds met in each component, recomputed AFTER every union so the
-    # roots are final.  A group that contributed no union (fewer than two
-    # members present) contributed no coupling either, so it lends no kind.
-    comp_kinds: dict[str, set[str]] = {}
-    comp_sources: dict[str, list[tuple[str, list[str]]]] = {}
-    if group_kinds is not None:
-        for index, group in enumerate(groups):
-            members = [m for m in group if m in out]
-            if len(members) < 2:
-                continue
-            root = find(members[0])
-            comp_kinds.setdefault(root, set()).add(group_kinds[index])
-            comp_sources.setdefault(root, []).append(
-                (group_kinds[index], sorted(members)))
-
+    units = (
+        ServingUnit(group_kinds[index] if group_kinds is not None else "",
+                    str(index), tuple(group))
+        for index, group in enumerate(groups)
+    )
     licence = fused_licence
-    for root, members in components.items():
+    for component in connected_serving_components(out, units):
+        members = list(component.members)
         if len(members) < 2:
             continue
-        kinds_here = comp_kinds.get(root, set())
+        kinds_here = {unit.kind for unit in component.units} - {""}
+        sources = [(unit.kind, sorted(unit.members)) for unit in component.units]
         best_fmt = max(
             (out[member] for member in members),
             key=lambda fmt: _rank_of(
@@ -1166,10 +1134,10 @@ def _promote_group_components(
                 # module and says nothing about experts; the packed unit is
                 # outside it. Refuse rather than pick a side.
                 fused_side = sorted(
-                    src for kind, src in comp_sources.get(root, [])
+                    src for kind, src in sources
                     if kind == _GROUP_KIND_FUSED)
                 packed_side = sorted(
-                    src for kind, src in comp_sources.get(root, [])
+                    src for kind, src in sources
                     if kind == _GROUP_KIND_PACKED)
                 raise AssertionError(
                     f"serving-unit component of {len(members)} members "

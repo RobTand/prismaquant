@@ -1303,24 +1303,13 @@ class _RuntimeCoercion(NamedTuple):
     delta_bytes: int | None = None
 
 
-@dataclass(frozen=True)
-class _ServingUnit:
-    """A set of Linears that must carry ONE format to be servable.
-
-    ``kind`` is ``fused_siblings`` (vLLM merges q/k/v, gate/up into one
-    packed Linear with one scheme) or ``packed_moe_experts`` (vLLM's
-    ``CompressedTensorsMoEMethod`` selects one scheme per FusedMoE
-    layer). Both are the hard serving invariants of CLAUDE.md §6.
-    """
-    kind: str
-    key: str
-    members: tuple[str, ...]
+from .name_projection import ServingUnit, connected_serving_components
 
 
 def _serving_atomic_units(
     names: Iterable[str],
     profile,
-) -> tuple[tuple[_ServingUnit, ...], dict[str, str]]:
+) -> tuple[tuple[ServingUnit, ...], dict[str, str]]:
     """Serving-atomic units among ``names``, from the profile accessors.
 
     Grouping is asked of the shared activation-contract policy through the
@@ -1361,7 +1350,7 @@ def _serving_atomic_units(
                 ("packed_moe_experts", str(packed_key)), []
             ).append(name)
     units = tuple(
-        _ServingUnit(kind, key, tuple(sorted(members)))
+        ServingUnit(kind, key, tuple(sorted(members)))
         for (kind, key), members in sorted(grouped.items())
         if len(members) >= 2
     )
@@ -1371,7 +1360,7 @@ def _serving_atomic_units(
 def _serving_atomic_components(
     names: Iterable[str],
     profile,
-) -> tuple[dict[str, list[str]], dict[str, tuple[_ServingUnit, ...]], dict[str, str]]:
+) -> tuple[dict[str, list[str]], dict[str, tuple[ServingUnit, ...]], dict[str, str]]:
     """Connected components of the serving-atomic units over ``names``.
 
     Units are unioned rather than handled one at a time because they can
@@ -1388,38 +1377,13 @@ def _serving_atomic_components(
     """
     all_names = list(names)
     units, failures = _serving_atomic_units(all_names, profile)
-    parent = {name: name for name in all_names}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for unit in units:
-        members = [m for m in unit.members if m in parent]
-        for member in members[1:]:
-            ra, rb = find(members[0]), find(member)
-            if ra != rb:
-                parent[rb] = ra
-
-    members_by_root: dict[str, list[str]] = {}
-    for name in all_names:
-        members_by_root.setdefault(find(name), []).append(name)
-    units_by_root: dict[str, list[_ServingUnit]] = {}
-    for unit in units:
-        present = [m for m in unit.members if m in parent]
-        if present:
-            units_by_root.setdefault(find(present[0]), []).append(unit)
-
-    members_by_name: dict[str, list[str]] = {}
-    units_by_name: dict[str, tuple[_ServingUnit, ...]] = {}
-    for root, members in members_by_root.items():
-        component = sorted(members)
-        component_units = tuple(units_by_root.get(root, ()))
+    members_by_name = {}
+    units_by_name = {}
+    for component in connected_serving_components(all_names, units):
+        members = sorted(component.members)
         for name in members:
-            members_by_name[name] = component
-            units_by_name[name] = component_units
+            members_by_name[name] = members
+            units_by_name[name] = component.units
     return members_by_name, units_by_name, failures
 
 
