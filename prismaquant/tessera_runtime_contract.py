@@ -138,6 +138,7 @@ __all__ = [
     "dev_pin_requested",
     "load_tessera_contract",
     "read_tessera_contract",
+    "pinned_tensor_parallel_limits",
     "require_pin_native_extensions_match_contract",
 ]
 
@@ -2493,6 +2494,21 @@ def published_tensor_parallel_limits(path: str, sha: str) -> Mapping[str, int]:
     This accessor reports ceilings only; it does not grant TP admission.
     """
     return _published_tensor_parallel(path, sha)[0]
+
+
+def pinned_tensor_parallel_limits() -> Mapping[str, int]:
+    """The closed-world TP limits of the exact installed serving pin."""
+    from importlib.resources import as_file
+    from .tessera_serving_runtime_pin import (
+        load_tessera_serving_runtime_pin, require_exact_tessera_runtime_pin,
+    )
+
+    pin = load_tessera_serving_runtime_pin()
+    with as_file(contract_path()) as path:
+        raw = path.read_bytes()
+        require_exact_tessera_runtime_pin(
+            pin, installed_contract_sha256=bytes_sha256hex(raw))
+        return _parse_contract_bytes(raw, str(path), pin.producer_commit).max_world_size
 
 
 @lru_cache(maxsize=8)

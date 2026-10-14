@@ -497,11 +497,16 @@ def tessera_tp_world_attested(
         return True, ""
     contract = tessera_runtime_contract()
     if contract is None:
-        return False, (
-            "tp_unattested: no Tessera runtime contract is pinned, so no world "
-            "size is attested for any family"
-        )
-    declared = contract.max_world_size.get(spec.name)
+        from .tessera_runtime_contract import pinned_tensor_parallel_limits
+        from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
+
+        try:
+            limits = pinned_tensor_parallel_limits()
+        except (TesseraServingRuntimePinError, ImportError, OSError) as exc:
+            return False, f"tp_unattested: no exact Tessera serving contract is pinned: {exc}"
+    else:
+        limits = contract.max_world_size
+    declared = limits.get(spec.name)
     if declared is None:
         return False, (
             f"tp_unattested: the pinned contract's closed-world tensor_parallel "

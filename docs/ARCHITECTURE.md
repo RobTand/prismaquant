@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): with the optional
+development answer pin unset, TP admission reads the closed-world ceilings from
+the exact installed serving contract. `pinned_tensor_parallel_limits` verifies
+the tracked pin and parses the captured bytes through the same runtime reader.
+Published world-size receipts still bound each ceiling. Family absence, a degree
+above the ceiling and unpinned bytes refuse. Rung cells, serving context, shard
+geometry, export and serving checks remain independent; no cell or pin changes.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): runtime contract
 parsing and its digest use one captured byte sequence. The development reader
 retains answer-equivalent prose drift and records the bytes it parsed. Explicit
