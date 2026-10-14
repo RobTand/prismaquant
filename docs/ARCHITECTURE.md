@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: `mount_facts` owns kernel mount-table decoding and
+containing-mount selection for staged read shape and portable source identity.
+The range reader retains its cache, transport count, chunk sizing and lease
+lifetime; source identity retains its resolved-path and client-local device policy.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): development and
 serving metadata now retain the same canonical `lane_eligibility.EligibilityCell`
 type. The development-only `TesseraRouteCell` copy is deleted; callers use the

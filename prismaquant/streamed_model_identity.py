@@ -240,31 +240,10 @@ _MOUNTINFO = Path("/proc/self/mountinfo")
 
 
 def _mount_filesystem_type(path: str | Path) -> str | None:
-    """The filesystem type of the mount that holds ``path``, from mountinfo.
+    from .mount_facts import find_mount
 
-    Returns the type of the longest mount point that is a prefix of the
-    resolved path, or ``None`` when mountinfo cannot be read. A bind mount
-    reports its backing filesystem's type, so a container's view of the pool
-    reads the same as the host's.
-    """
-    try:
-        lines = _MOUNTINFO.read_text().splitlines()
-    except OSError:
-        return None
-    target = str(Path(path).resolve())
-    best, best_type = "", None
-    for line in lines:
-        fields = line.split(" ")
-        try:
-            separator = fields.index("-")
-        except ValueError:
-            continue
-        # mountinfo escapes space, tab, newline and backslash as octal.
-        point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), fields[4])
-        inside = target == point or target.startswith(point.rstrip("/") + "/")
-        if inside and len(point) >= len(best) and separator + 1 < len(fields):
-            best, best_type = point, fields[separator + 1]
-    return best_type
+    mount = find_mount(Path(path).resolve(), table=_MOUNTINFO)
+    return None if mount is None else mount.filesystem
 
 
 def device_number_is_client_local(path: str | Path) -> bool:
