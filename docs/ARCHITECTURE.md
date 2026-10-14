@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): the development
+admission answer lives in `prismaquant/tessera_runtime/reviewed_answer.json`.
+`tessera_runtime_contract` loads that packaged data without generating an answer
+from the installed runtime. The reviewed values, producer commit and raw contract
+digest are unchanged. Development still checks answer equivalence; serving and
+export still require the separate exact byte pin and code/JSON agreement.
+
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
 Its bundle SHA-256 is `8a2468c67ea17cc10e9a7a15d3dcacd5afd86e465e79025aad28357b0b1611ec`.
