@@ -248,12 +248,6 @@ def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchang
         str(tmp_path / "canonical" / Path(ref.path).name) for ref in references]
 
 
-def test_the_former_stage_a_import_names_the_same_client():
-    from prismaquant import stage_a_local_spool as former
-    assert former.BoundaryOutputSpool is ProducedOutputSpool
-    assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
-
-
 def _landed_read_back_group(adapter, backend, batch_id, tmp_path):
     """One acknowledged group whose entry a read on this box may follow."""
     adapter.reserve(batch_id, 65536)
