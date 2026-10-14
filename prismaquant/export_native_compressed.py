@@ -4865,12 +4865,12 @@ def _fused_dense_group(name: str) -> tuple[str, tuple[str, ...]] | None:
 
 
 def _fused_group_key_for_name(name: str, profile=None) -> str | None:
-    """Legacy error-tolerant delegate to the shared fusion policy."""
+    """Resolve the shared fusion policy, propagating failed declarations."""
 
     return _nvfp4_activation_contract.fused_sibling_group_key(
         name,
         profile=profile,
-        tolerate_profile_errors=True,
+        tolerate_profile_errors=False,
     )
 
 
@@ -4884,7 +4884,7 @@ def _unify_input_global_scales_across_fused_siblings(
     return _nvfp4_activation_contract.unify_fused_sibling_input_global_scales(
         scales,
         profile=profile,
-        tolerate_profile_errors=True,
+        tolerate_profile_errors=False,
         diagnostic_prefix="[export-stream]",
     )
 
@@ -7727,22 +7727,19 @@ def _fused_modules_mapping_for_profile(profile) -> dict[str, tuple[str, ...]]:
                 for fused, siblings in mapping.items()
             }
 
-    try:
-        from .model_profiles.vllm_registry import (
-            packed_modules_mapping_from_class,
-            vllm_class_for_architecture,
-        )
-        vllm_cls = vllm_class_for_architecture(
-            profile.vllm_architecture_class() or ""
-        )
-        packed_mapping = packed_modules_mapping_from_class(vllm_cls)
-        if packed_mapping:
-            return {
-                str(fused): tuple(str(sibling) for sibling in siblings)
-                for fused, siblings in packed_mapping.items()
-            }
-    except Exception:
-        pass
+    from .model_profiles.vllm_registry import (
+        packed_modules_mapping_from_class,
+        vllm_class_for_architecture,
+    )
+    architecture = getattr(profile, "vllm_architecture_class", None)
+    vllm_cls = (vllm_class_for_architecture(architecture() or "")
+                if callable(architecture) else None)
+    packed_mapping = packed_modules_mapping_from_class(vllm_cls)
+    if packed_mapping:
+        return {
+            str(fused): tuple(str(sibling) for sibling in siblings)
+            for fused, siblings in packed_mapping.items()
+        }
 
     spec_getter = getattr(profile, "structure_spec", None)
     spec = spec_getter() if callable(spec_getter) else None

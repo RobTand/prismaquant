@@ -264,12 +264,13 @@ class ModelProfile(ABC):
     def _ensure_vllm_class(self):
         if self._vllm_cls_loaded:
             return
-        self._vllm_cls_loaded = True
         arch = self.vllm_architecture_class()
         if arch is None:
+            self._vllm_cls_loaded = True
             return
         from .vllm_registry import vllm_class_for_architecture
         self._vllm_cls = vllm_class_for_architecture(arch)
+        self._vllm_cls_loaded = True
 
     def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
         """Return actual parameter owners for the existing dense input hooks."""
@@ -321,18 +322,15 @@ class ModelProfile(ABC):
         Prefer vLLM metadata when available, then the declarative
         model-structure spec.
         """
-        try:
-            self._ensure_vllm_class()
-            from .vllm_registry import packed_modules_mapping_from_class
+        self._ensure_vllm_class()
+        from .vllm_registry import packed_modules_mapping_from_class
 
-            mapping = packed_modules_mapping_from_class(self._vllm_cls)
-            if mapping:
-                return {
-                    str(fused): tuple(str(member) for member in members)
-                    for fused, members in mapping.items()
-                }
-        except Exception:
-            pass
+        mapping = packed_modules_mapping_from_class(self._vllm_cls)
+        if mapping:
+            return {
+                str(fused): tuple(str(member) for member in members)
+                for fused, members in mapping.items()
+            }
 
         spec = self.structure_spec()
         if spec is None:

@@ -2094,10 +2094,7 @@ def _fused_sibling_leaf_mapping_from_profile(profile) -> dict[str, tuple[str, ..
     getter = getattr(profile, "fused_sibling_leaf_mapping", None)
     if not callable(getter):
         return {}
-    try:
-        mapping = getter()
-    except Exception:
-        return {}
+    mapping = getter()
     return {
         str(fused): tuple(str(member) for member in members)
         for fused, members in (mapping or {}).items()

@@ -12,9 +12,8 @@ This module is the adapter. `vllm_class_for_architecture(arch_name)`
 looks up the class, and the helpers below convert its class-level
 metadata into PrismaQuant's expected return shapes.
 
-If vLLM isn't importable (CPU-only dev machine, etc.), everything
-here degrades gracefully — the helpers return None and profiles fall
-back to whatever they hand-coded.
+If the vLLM package is absent, profiles use their declarative structure specs.
+An installed registry that fails to load a declared model propagates its error.
 """
 from __future__ import annotations
 
@@ -23,84 +22,68 @@ from typing import Callable
 
 
 def vllm_class_for_architecture(arch_name: str):
-    """Return the vLLM class registered for an HF `architectures[0]`
-    string (e.g. 'Qwen3_5MoeForConditionalGeneration'). Uses vLLM's
-    model registry. Returns None if vLLM is unavailable or the
-    architecture isn't registered.
+    """Resolve declared registry metadata; failed installed readers propagate.
 
-    Note: vLLM's registry lazy-imports model modules; we only
-    materialize the class, which is cheap relative to instantiating
-    any weights."""
+    A missing vLLM package or an explicitly unregistered architecture is an
+    absence. A registered model that cannot load is an environment failure.
+    """
     try:
         from vllm.model_executor.models import registry
-    except Exception:
-        return None
-    try:
-        # Variable API shape across vLLM versions. Try the several
-        # interfaces it has exposed. Modern vLLM (>= 0.19) uses
-        # `ModelRegistry.resolve_model_cls([arch]) -> (cls, name)`.
-        if hasattr(registry, "ModelRegistry"):
-            reg = registry.ModelRegistry
-            if hasattr(reg, "resolve_model_cls"):
-                try:
-                    out = reg.resolve_model_cls([arch_name])
-                    if isinstance(out, tuple):
-                        out = out[0]
-                    # Modern vLLM sometimes returns a _RegisteredModel
-                    # stub (lazy-loader record) — look for the real
-                    # class under its `.model_cls` or `.cls` attributes.
-                    for attr in ("model_cls", "cls"):
-                        real = getattr(out, attr, None)
-                        if real is not None and isinstance(real, type):
-                            return real
-                    if isinstance(out, type):
-                        return out
-                except Exception:
-                    pass
-            if hasattr(reg, "inspect_model_cls"):
-                try:
-                    info = reg.inspect_model_cls(arch_name)
-                    # Some versions return a dataclass with a .cls field.
-                    for attr in ("cls", "model_cls"):
-                        real = getattr(info, attr, None)
-                        if isinstance(real, type):
-                            return real
-                except Exception:
-                    pass
-            if hasattr(reg, "load_model_cls"):
-                try:
-                    return reg.load_model_cls(arch_name)
-                except Exception:
-                    pass
-        # Fallbacks: direct dict lookups into the registry's internal tables.
-        import importlib
-        for tbl_name in ("_TEXT_GENERATION_MODELS", "_MULTIMODAL_MODELS",
-                         "_SPECULATIVE_DECODING_MODELS", "_VLLM_MODELS",
-                         "_SUPPORTED_MODELS"):
-            tbl = getattr(registry, tbl_name, None)
-            if not isinstance(tbl, dict) or arch_name not in tbl:
-                continue
-            entry = tbl[arch_name]
-            # Entries can be tuples (mod_path, cls_name) or _LazyRegisteredModel.
-            mod_path, cls_name = None, None
-            if isinstance(entry, tuple) and len(entry) == 2:
-                mod_path, cls_name = entry
-            else:
-                for mp_attr in ("module_name", "mod_name"):
-                    mod_path = getattr(entry, mp_attr, None) or mod_path
-                for cn_attr in ("class_name", "cls_name"):
-                    cls_name = getattr(entry, cn_attr, None) or cls_name
-            if mod_path and cls_name:
-                try:
-                    mod = importlib.import_module(
-                        f"vllm.model_executor.models.{mod_path}")
-                    return getattr(mod, cls_name, None)
-                except Exception:
-                    continue
-    except Exception:
-        return None
-    return None
+    except ModuleNotFoundError as exc:
+        if exc.name == "vllm":
+            return None
+        raise
 
+    def model_class(value):
+        if isinstance(value, tuple):
+            value = value[0]
+        if isinstance(value, type):
+            return value
+        for attribute in ("model_cls", "cls"):
+            resolved = getattr(value, attribute, None)
+            if isinstance(resolved, type):
+                return resolved
+        return None
+
+    declared = None
+    reg = getattr(registry, "ModelRegistry", None)
+    if reg is not None:
+        supported = getattr(reg, "get_supported_archs", None)
+        if callable(supported):
+            declared = arch_name in supported()
+            if not declared:
+                return None
+        for method, argument in (("resolve_model_cls", [arch_name]),
+                                 ("inspect_model_cls", arch_name),
+                                 ("load_model_cls", arch_name)):
+            resolve = getattr(reg, method, None)
+            if callable(resolve):
+                resolved = model_class(resolve(argument))
+                if resolved is not None:
+                    return resolved
+
+    import importlib
+    for table_name in ("_TEXT_GENERATION_MODELS", "_MULTIMODAL_MODELS",
+                       "_SPECULATIVE_DECODING_MODELS", "_VLLM_MODELS",
+                       "_SUPPORTED_MODELS"):
+        table = getattr(registry, table_name, None)
+        if not isinstance(table, dict) or arch_name not in table:
+            continue
+        declared = True
+        entry = table[arch_name]
+        if isinstance(entry, tuple) and len(entry) == 2:
+            module_path, class_name = entry
+        else:
+            module_path = (getattr(entry, "module_name", None)
+                           or getattr(entry, "mod_name", None))
+            class_name = (getattr(entry, "class_name", None)
+                          or getattr(entry, "cls_name", None))
+        if module_path and class_name:
+            module = importlib.import_module(f"vllm.model_executor.models.{module_path}")
+            return getattr(module, class_name)
+    if declared:
+        raise RuntimeError(f"registered vLLM architecture {arch_name!r} resolved no model class")
+    return None
 
 def packed_modules_mapping_from_class(cls) -> dict[str, list[str]]:
     """Return `{fused: [siblings, ...]}` from a vLLM model class's

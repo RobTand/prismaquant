@@ -760,19 +760,7 @@ def _packed_groups_by_profile(names, profile) -> dict[str, list[str]]:
     if not callable(group_fn):
         return groups
     for name in names:
-        try:
-            key = group_fn(name)
-        except PackedExpertRoleUnknown:
-            # A profile that cannot name a packed expert's role under
-            # --packed-role-split is a declaration gap, not a "this row has no
-            # group" answer: swallowing it here would silently promote the two
-            # roles as one unit, i.e. ship a DIFFERENT allocation than the
-            # operator asked for. Aggregation raises this first today, so this
-            # is defence in depth for any future path that promotes without
-            # aggregating.
-            raise
-        except Exception:
-            key = None
+        key = group_fn(name)
         if key is None:
             continue
         groups.setdefault(key, []).append(name)

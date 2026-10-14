@@ -17,6 +17,10 @@ unchanged.
 retain all overlapping fused and packed declarations and their licence kinds;
 a singleton contributes no coupling. Allocation preserves member order when
 choosing among equal-rank formats.
+Registry absence means an unavailable vLLM package or an explicitly unregistered
+architecture. Failures loading registered model metadata propagate through
+profiles, allocation and export; a failed lookup remains failed on a repeated
+call. Activation-scale joins require the same successful fused declaration.
 
 As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel and ship-record ownership.
 `native_panel_kind` owns the schema-keyed dense and routed panel adapters. Receipt

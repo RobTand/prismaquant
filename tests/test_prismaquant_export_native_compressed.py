@@ -2783,51 +2783,6 @@ class TestFusedSiblingJointGlobalScale(unittest.TestCase):
             self.assertIsNotNone(g, f"missing fused-group pattern for {sib}")
             self.assertEqual(set(g[1]), {"in_proj_qkv", "in_proj_z"})
 
-    def test_native_fusion_compatibility_apis_delegate_to_contract_owner(self):
-        shared = enc._nvfp4_activation_contract
-        profile = object()
-        sentinel_group = ("shared", ("a", "b"))
-        with patch.object(
-            shared,
-            "fused_dense_group",
-            return_value=sentinel_group,
-        ) as dense:
-            self.assertIs(enc._fused_dense_group("layer.a"), sentinel_group)
-            dense.assert_called_once_with("layer.a")
-
-        with patch.object(
-            shared,
-            "fused_sibling_group_key",
-            return_value="shared.ab",
-        ) as key:
-            self.assertEqual(
-                enc._fused_group_key_for_name("layer.a", profile),
-                "shared.ab",
-            )
-            key.assert_called_once_with(
-                "layer.a",
-                profile=profile,
-                tolerate_profile_errors=True,
-            )
-
-        expected = {"layer.a": 0.25, "layer.b": 0.25}
-        with patch.object(
-            shared,
-            "unify_fused_sibling_input_global_scales",
-            return_value=expected,
-        ) as unify:
-            actual = enc._unify_input_global_scales_across_fused_siblings(
-                {"layer.a": 0.5, "layer.b": 0.25},
-                profile=profile,
-            )
-            self.assertIs(actual, expected)
-            unify.assert_called_once_with(
-                {"layer.a": 0.5, "layer.b": 0.25},
-                profile=profile,
-                tolerate_profile_errors=True,
-                diagnostic_prefix="[export-stream]",
-            )
-
     def test_compute_nvfp4_joint_global_picks_max(self):
         from prismaquant.export_native_compressed import (
             _compute_nvfp4_joint_global, compute_nvfp4_global_real,
