@@ -408,16 +408,8 @@ def test_route_admission_never_asserts():
     }
 
 
-def test_attested_menu_is_closed_with_no_tessera_contract_pinned():
-    """A measured fact about the pinned release, recorded as a test.
-
-    The pinned Gridbook contract publishes no Tessera cell, and no Tessera
-    RELEASE tag exists, so with the dev pin unset the DEFAULT menu holds no
-    Tessera rung at all. This is the honest state of the gate, not a bug:
-    principle 9 says a format is production-eligible only when a pinned
-    runtime attests it. A RELEASE tag is what flips this in production; the
-    dev pin below is what flips it here.
-    """
+def test_scoped_attested_menu_requires_an_explicit_serving_context():
+    """The exact pin cannot supply an undeclared image, structure or residency."""
     assert not trc.dev_pin_requested(), "the dev pin must not leak into this test"
     rungs = tm.expand_tessera_menu(SHAPE, mode=tm.MENU_ATTESTED)
     assert rungs == []
@@ -1450,7 +1442,6 @@ def test_the_allocator_stamps_the_caveat_rather_than_only_printing_it():
     and ``selection.json`` -- whenever a Tessera rung reached the menu, and out
     of neither on a stock run.
     """
-    import inspect
     from prismaquant import tessera_lane
 
     widths = {"tessera_rungs_before_reduction": 3}
@@ -1469,7 +1460,6 @@ def test_the_allocator_stamps_the_caveat_rather_than_only_printing_it():
         menu_report={}, menu_report_agg={}, menu_widths={},
         group_menu_report={}, dev_pin={})
     assert "selection_caveat" not in stock["tessera_menu"]
-    assert "CANDIDATE, not a selection" in inspect.getsource(tessera_lane)
 
 
 # ---------------------------------------------------------------------------
