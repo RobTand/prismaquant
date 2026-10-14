@@ -18,3 +18,49 @@ checks with no skips. Its exit was zero and its result CAS digest is
 The prior submission `f8d059b780094051e275920246d53dbb607520190a3db194e97dc663334becd8`
 ran no tests because the command named a nonexistent test file. It failed;
 the corrected composed command above records the actual coverage.
+
+Additional verified units, 2026-10-14 23:50 UTC:
+
+| Unit | PB action | Outcome | Result CAS SHA-256 |
+| --- | --- | --- | --- |
+| Probe inventory and declaration refusals | `9e563546b2c8d0b9dc0dfc813929aae1902572b470373aec79c6204d209c489e` | 173 passed, no skips; three modules compiled | `b013dac66f968e58601a12f5ae338a63fb2ada56708b0e71337e00cebf8dd969` |
+| Shared device-placement composition | `72a7b128d8bfb0f1767ddc48719fa047c9cb87dbe5c44e44c12b9d67733b1a37` | 126 passed, no skips; three modules compiled | `e6884cc8cf6d8c528fee745ced87d0fa0b8287be817679f635f02150c52af1ae` |
+| Off-step memory obligation | `10911b7ba97a432f155469da26d7ae3eb3737f035227e990ce2ff3d8a3dfe248` | 129 passed, no skips; three modules compiled | `153d21f80886dbc5c43b5ddeaf99593bd2d367ec6f60e4eed0fc74002c9284be` |
+| Spool alias removal and snapshot tools | `f639aeeb10ee4b315492fa7aa96d1e066455b5d6749604d671966819178ca3ee` | 22 passed, no skips; three tools compiled | `29ce3c835ab0534bec79387ec10a366281730e83734f0d547d37934b7d5fa7a6` |
+| Seven unused prototypes retired | `48153da90d271e164340323efa94b93be22e3400c37167b83fa27950d52b0f35` | 133 passed, no skips; retirement tool compiled | `c27d121eca98f3c8d2c1448f80a2851a88fe9ab8ae9bf289389d098255e6e51e` |
+| Corpus sampler ownership | `d5cd7e4126e981ce8d647e5dbe5c323636c02321b62853305fa3d2c89a51b2a1` | 44 passed, no skips; four modules compiled; sampler AST identical | `7ff633617670867258d4471d5c0d820a2b1fde0339952ac78d562a65ea24d259` |
+
+These are CPU behavior and ownership checks, with exit 0 and terminal/CAS
+records inspected. They establish no GPU speed, served quality or new lane
+admission. All used the qualified PB interpreter
+`/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python`, with OMP, MKL and
+OpenBLAS threads limited to one. Four-way checks reserved four CPUs and 16 GiB;
+the spool check reserved two CPUs and 8 GiB.
+
+The admitted command is `tools/verify_refactor_unit.py --compile ... --tests ...
+--workers N`, with the unit's source capsule supplied as `pbrun --cwd`. Corpus
+ownership also ran `--proof tools/refactor_calibration_owner.py --base f80ae9a186`.
+Exact submissions are retained at
+`/home/rob/tmp/pq-refactor-20261014/reports/*-submit.json`; logs and terminal
+records are under `/mnt/shared/prismabuild-fleet/pb-queue/{done,failed}/ACTION.json`.
+The CAS receipts are `actions/v3/XX/ACTION.json`, where XX is the first two
+characters of the action key. Source capture uses
+`tools/freeze_refactor_checkout.py --cwd WORKTREE --output NEW_CAPSULE`.
+
+Expected-failure records retain the before behavior: four inventory refusals
+failed at `fe9dc7e5dfe5a0a8966d9bf7b1cbec681e8ef6bb0add8afb396b6af5ea0fd245`;
+one off-step memory case failed at
+`0de80d9108190e6261819a912788b360c797ab564b8ada98f918f1204ba839dd`.
+A first inventory correction rejected an optional undeclared packed-profile
+method; the final correction distinguishes absent methods from declared
+methods that fail. The original inventory move proved five unchanged bodies
+and passed 163 behavior cases, with three GPU-only streaming skips, while the
+composed duplication guard still reported unrelated journal-name collisions.
+The broader composed check `8209cd0e9589e0693922c06521a4abddc5cf8463207fb46ca742861b959a91a2`
+passed 225 cases and 59 subtests but failed duplication guards. Those failures
+remain explicit until the journal corrections and final composed check land.
+
+Off-task fixes encountered during these moves: the existing pin was omitted
+from wheel data; mutable metadata views could alter later admission facts;
+source-snapshot capture could race ongoing edits. The pin packaging, owned
+metadata views and immutable verification capsules address those findings.
