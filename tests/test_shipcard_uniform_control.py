@@ -30,13 +30,13 @@ from prismaquant.shipcard import (
     compute_model_sha,
     fill_slot,
     load_shipcard,
-    make_record,
     make_uniform_control_record,
     required_slots,
     uniform_control_summary,
     verify,
     write_shipcard,
 )
+from prismaquant.shipcard_slots import make_record
 from prismaquant.shipcard_cli import main as shipcard_cli
 from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT, make_route_census_record
 from prismaquant.validate_quantized_model import (

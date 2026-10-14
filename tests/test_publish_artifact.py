@@ -29,9 +29,9 @@ from prismaquant.shipcard import (
     compute_model_sha,
     fill_slot,
     load_shipcard,
-    make_record,
     write_shipcard,
 )
+from prismaquant.shipcard_slots import make_record
 import tools.publish_artifact as publisher
 from tools.publish_artifact import main as publish_cli
 from prismaquant.validate_quantized_model import (

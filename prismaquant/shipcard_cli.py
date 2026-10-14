@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -32,13 +31,11 @@ from prismaquant.shipcard import (
     UNIFORM_CONTROL_METRIC_KEYS,
     UNIFORM_CONTROL_SLOT,
     _strict_json_object,
-    _verify_gold_record,
     assert_weight_stat_attestation,
     compute_model_sha,
     ensure_optional_slot,
     fill_slot,
     load_shipcard,
-    make_record,
     make_uniform_control_record,
     record_uniform_control_override,
     required_slots,
@@ -48,33 +45,9 @@ from prismaquant.shipcard import (
     write_shipcard,
     verify_gold_producer_record,
 )
+from prismaquant.shipcard_slots import make_record
 
-#: Metrics lifted out of a gold-lane result JSON onto the record, in the order
-#: they are searched for a "primary" number.
-PRIMARY_METRIC_KEYS = (
-    "kl_confident_mean",
-    "kl_mean",
-    "ppl",
-    "mean_nll",
-    "last_token_kl",
-)
-
-CARRIED_METRIC_KEYS = PRIMARY_METRIC_KEYS + (
-    "kl_p99", "kl_max", "n_positions", "n_confident", "n_samples", "seqlen",
-    "n_tokens_scored", "per_chunk_mean_nll", "max_chunk_mean_nll",
-    "quantization", "score_positions",
-    "serve_manifest",
-    "teacher_evidence", "mode", "prompt_top_k", "vocab_size",
-    "split", "n_tokens_requested", "calibration_contract",
-    "calibration_contract_sha256",
-)
-
-
-def _finite(value: object) -> bool:
-    try:
-        return math.isfinite(float(value))  # type: ignore[arg-type]
-    except Exception:
-        return False
+from prismaquant.shipcard_slots import make_gold_record, CARRIED_METRIC_KEYS
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
@@ -176,39 +149,11 @@ def _cmd_fill(args: argparse.Namespace) -> int:
         print("[shipcard] WARN recording a spec-decode-tainted gold number on "
               "the card; verify will refuse it", file=sys.stderr)
 
-    metrics = {k: payload[k] for k in CARRIED_METRIC_KEYS if k in payload}
-    if args.slot == "gold.kl":
-        slot_primary_keys = ("kl_confident_mean", "kl_mean")
-        count_ok = any(
-            isinstance(payload.get(key), int)
-            and not isinstance(payload.get(key), bool)
-            and payload.get(key, 0) > 0
-            for key in ("n_positions", "n_samples")
-        )
-    else:
-        slot_primary_keys = ("ppl", "mean_nll")
-        count_ok = (
-            isinstance(payload.get("n_tokens_scored"), int)
-            and not isinstance(payload.get("n_tokens_scored"), bool)
-            and payload.get("n_tokens_scored", 0) > 0
-        )
-    slot_primary = next(
-        (payload[key] for key in slot_primary_keys if key in payload and _finite(payload[key])),
-        None,
-    )
-    fingerprint = payload.get("serve_fingerprint")
-    commit = payload.get("git_commit") or (payload.get("git") or {}).get("commit")
-    structurally_valid = (
-        slot_primary is not None
-        and float(slot_primary) >= 0
-        and count_ok
-        and isinstance(fingerprint, str)
-        and len(fingerprint) == 64
-        and all(character in "0123456789abcdef" for character in fingerprint)
-        and isinstance(commit, str)
-        and len(commit) in {40, 64}
-        and all(character in "0123456789abcdef" for character in commit)
-    )
+    draft = make_gold_record(
+        payload, slot=args.slot, model_sha=model_sha, record_path=args.record,
+        model_dir=model_dir, tool=args.tool, detail=args.detail, passed=args.passed)
+    structurally_valid = draft.structurally_valid
+    slot_primary = draft.primary
     if args.passed is True and not structurally_valid:
         print(
             f"[shipcard] REFUSED: --passed cannot override missing or malformed "
@@ -216,7 +161,6 @@ def _cmd_fill(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    passed = structurally_valid if args.passed is None else args.passed
     if not structurally_valid:
         print(
             f"[shipcard] WARN {args.record} lacks complete {args.slot} "
@@ -224,37 +168,8 @@ def _cmd_fill(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    record = make_record(
-        slot=args.slot,
-        tool=args.tool or f"record:{Path(args.record).name}",
-        passed=bool(passed),
-        model_sha=model_sha,
-        metrics=metrics,
-        detail=args.detail or f"from {args.record}",
-        spec_decode_detected=spec,
-        serve_fingerprint=fingerprint,
-        git_commit=commit,
-        extra={"record_path": str(Path(args.record).resolve()),
-               "measured_model": payload.get("model")},
-    )
-    # The gold-record replay here must track `verify()`: filling with a
-    # stricter contract than publication replays would refuse evidence that
-    # ships fine, and filling with a looser one would defer a refusal to the
-    # very last gate. Until 2026-09-02 it ran only for the retired Gridbook
-    # codebook lane's cards, gated on that lane's extra blocking slots; those
-    # slots and their DSv4 release contract went into
-    # archive/gridbook_lane_2026-09-02/ with the lane, so the generic replay
-    # now runs for every structurally valid record instead of for none.
-    replay_problems = (
-        _verify_gold_record(
-            args.slot,
-            record,
-            model_dir=model_dir,
-            require_current_artifact_path=True,
-        )
-        if structurally_valid
-        else []
-    )
+    record = draft.record
+    replay_problems = draft.problems
     if replay_problems:
         if args.passed is True:
             print(

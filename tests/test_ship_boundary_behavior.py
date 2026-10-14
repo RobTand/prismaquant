@@ -354,7 +354,7 @@ def _ship_gate_record(
     boundary_response_schema="prismaquant.boundary_chat_response/1",
     drop_boundary=False,
 ):
-    from prismaquant.shipcard import make_record
+    from prismaquant.shipcard_slots import make_record
 
     ledger = {name: {"passed": True} for name in _producer_check_names()}
     ledger["perplexity"] = {
@@ -400,9 +400,12 @@ def _ship_gate_record(
 
 def _full_card(tmp_path, **record_kwargs):
     from prismaquant.shipcard import (
-        REQUIRED_SLOTS, build_shipcard, fill_slot, make_record,
+        REQUIRED_SLOTS,
+        build_shipcard,
+        fill_slot,
         write_shipcard,
     )
+    from prismaquant.shipcard_slots import make_record
 
     model_dir, sha = _artifact(tmp_path)
     path = model_dir / "shipcard.json"

@@ -19,7 +19,6 @@ if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
                 allow_module_level=True)
 
 from prismaquant.shipcard import (
-
     GOLD_SLOTS,
     REQUIRED_SLOTS,
     SHIPCARD_RESERVED_BYTES,
@@ -30,12 +29,12 @@ from prismaquant.shipcard import (
     kv_shared_fisher_echo,
     lane_gate_slots,
     load_shipcard,
-    make_record,
     required_slots,
     unfilled_slots,
     verify,
     write_shipcard,
 )
+from prismaquant.shipcard_slots import make_record
 from prismaquant.shipcard_cli import main as shipcard_cli
 from prismaquant.validate_quantized_model import (
     BOUNDARY_ENDPOINT,
@@ -353,10 +352,7 @@ def test_cb_identity_binds_auxiliary_serving_files(tmp_path):
 def test_reattest_accepts_copy_but_refuses_changed_weight_content(tmp_path):
     import shutil
 
-    from prismaquant.shipcard import (
-        build_weight_content_manifest,
-        reattest_weight_stats,
-    )
+    from prismaquant.shipcard import build_weight_content_manifest, reattest_weight_stats
 
     source = _artifact(tmp_path, name="source", weight_bytes=b"weights-A")
     quant_config = {

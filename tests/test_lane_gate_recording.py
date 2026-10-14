@@ -456,6 +456,7 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
     test edit.
     """
     import prismaquant.shipcard as shipcard_mod
+    from prismaquant import shipcard_slots
 
     base = set(REQUIRED_SLOTS) | set(shipcard_mod.OPTIONAL_SLOTS)
     derived = sorted({
@@ -492,7 +493,7 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     refusal the pinned table gives the same rows).
     """
     import prismaquant.tessera_route_receipt as receipt
-    from prismaquant.shipcard import make_record
+    from prismaquant.shipcard_slots import make_record
     from prismaquant.tessera_shipcard import make_route_census_record
 
     def _absent():
@@ -560,12 +561,10 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
     import dataclasses
 
     import prismaquant.shipcard as shipcard_mod
+    from prismaquant import shipcard_slots
     from prismaquant import lane_spec as lane_spec_mod
 
-    verifiers = getattr(shipcard_mod, "LANE_SLOT_VERIFIERS", None)
-    assert verifiers is not None, (
-        "shipcard has no verifier registry: a fourth lane's novel slot still "
-        "needs a roster edit (RobTand/prismaquant#162)")
+    verifiers = shipcard_slots.CORE_LANE_SLOTS
 
     def _verify_entropy(slot, record, *, card=None, model_dir=None):
         block = record.get("route_entropy")
@@ -577,7 +576,8 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
                     f"{block.get('match')!r}, not True"]
         return []
 
-    monkeypatch.setitem(verifiers, "route.entropy", _verify_entropy)
+    monkeypatch.setitem(verifiers, "route.entropy",
+                        shipcard_slots.ShipSlot("route.entropy", _verify_entropy))
     real = lane_spec_for_container("tessera")
     bogus = dataclasses.replace(
         real,

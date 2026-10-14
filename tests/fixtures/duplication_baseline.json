@@ -406,7 +406,6 @@
   "_finite": [
    "prismaquant/anchored_shape.py",
    "prismaquant/quality_prefill_pb_adapter.py",
-   "prismaquant/shipcard_cli.py",
    "tools/exl3_grouped_down_replay.py",
    "tools/kl_ab.py"
   ],

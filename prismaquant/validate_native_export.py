@@ -345,9 +345,8 @@ def _record_arm(args, model_dir: Path, spec: dict | None, verdict: dict) -> None
     """Close the matching `native_export.*` shipcard slot."""
     if not args.shipcard:
         return
-    from .shipcard import (
-        compute_model_sha, fill_if_requested, git_provenance, make_record,
-    )
+    from .shipcard import compute_model_sha, fill_if_requested, git_provenance
+    from .shipcard_slots import make_record
 
     arm = verdict["metrics"]["arm"]
     try:

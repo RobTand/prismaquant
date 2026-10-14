@@ -1,12 +1,18 @@
 # PrismaQuant Architecture
 
-As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel ownership.
+As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel and ship-record ownership.
 `native_panel_kind` owns the schema-keyed dense and routed panel adapters. Receipt
 emission and runtime admission ask the same adapter for its row binding, runtime
 scope, world size and consumer. The adapter also projects final joint panels onto
 execution panels and owns the shared immutable late-binding envelope. Dense and
 routed producer consumers retain their numerical and resource refusal policies;
 the runtime gate still recomputes every row from its original receipt and panel.
+`shipcard_slots` owns each slot's construction, preflight and replay policy. Its
+registry includes the required base slots and the lane plugins' evidence slots.
+The gold CLI and configured gates can construct the same draft record directly.
+The producer validator and ship-record replay share the existing catastrophic
+quality thresholds and boundary schemas from this owner. Publication still checks
+artifact identity and recomputes each slot's evidence through its registered policy.
 
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): rung admission
 captures current lane and format facts together and checks that captured table's

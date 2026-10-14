@@ -6,8 +6,8 @@ module:
 - A lane that declares an evidence slot registers the replay ``verify`` runs
   for it (``shipcard_slot_verifiers``) and the commands that fill it
   (``shipcard_cli_commands``) on its plugin.
-- ``shipcard.LANE_SLOT_VERIFIERS`` holds only the replays core itself owns,
-  and ``shipcard.lane_slot_verifiers()`` is the merged view every check reads.
+- ``shipcard_slots.CORE_LANE_SLOTS`` holds only the replays core itself owns,
+  and ``shipcard_slots.lane_slot_verifiers()`` is the merged view every check reads.
 - The rate axis, the uniform control's block schema, the checkpoint's
   ``quant_method`` and the route-histogram obligation are lane-spec data.
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant import lane_spec, shipcard, shipcard_cli
+from prismaquant import lane_spec, shipcard, shipcard_cli, shipcard_slots
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,17 +59,17 @@ def test_the_tessera_plugin_registers_its_slot_replays():
         "route.census": ts.verify_route_census_record,
         "route.trace": ts.verify_route_trace_record,
     }
-    merged = shipcard.lane_slot_verifiers()
+    merged = shipcard_slots.lane_slot_verifiers()
     assert {"route.census", "route.trace", "route.sweep"} <= set(merged)
     # Core's own registry holds only the replays core owns.
-    assert set(shipcard.LANE_SLOT_VERIFIERS) == {"route.sweep"}
+    assert set(shipcard_slots.CORE_LANE_SLOTS) == {"route.sweep"}
 
 
 def test_a_slot_with_two_owners_is_refused(monkeypatch):
     _with_fourth_lane_verifiers(
         monkeypatch, {"route.census": lambda *args, **kwargs: []})
     with pytest.raises(KeyError, match="route.census"):
-        shipcard.lane_slot_verifiers()
+        shipcard_slots.lane_slot_verifiers()
 
 
 def test_a_fourth_lanes_plugin_replay_owns_its_slot(monkeypatch):
@@ -91,7 +91,7 @@ def test_a_fourth_lanes_plugin_replay_owns_its_slot(monkeypatch):
 
     assert "route.entropy" in shipcard.lane_gate_slots("tessera")
     sha = "abc"
-    good = shipcard.make_record(
+    good = shipcard_slots.make_record(
         slot="route.entropy", tool="true", passed=True, model_sha=sha,
         extra={"route_entropy": {"match": True}})
     card = {"model_sha": sha, "slots": {"route.entropy": good}}

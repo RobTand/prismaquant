@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import compressed_route_sweep_gate as gate
-from prismaquant import shipcard
+from prismaquant import shipcard, shipcard_slots
 
 FIXTURE = Path(__file__).parent / "fixtures" / "compressed_route_sweep_0p6b"
 
@@ -247,7 +247,7 @@ def test_an_artifact_that_prices_nothing_is_refused():
 def test_the_compressed_tensors_lane_owes_route_sweep():
     assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_gate_slots(
         "compressed-tensors")
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.LANE_SLOT_VERIFIERS
+    assert shipcard.ROUTE_SWEEP_SLOT in shipcard_slots.CORE_LANE_SLOTS
     assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_scoped_slots()
 
 

@@ -90,6 +90,20 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field, asdict
+from .shipcard_slots import (
+    BOUNDARY_ENDPOINT,
+    BOUNDARY_REQUEST_SCHEMA,
+    BOUNDARY_RESPONSE_SCHEMA,
+    DEFAULT_BOUNDARY_MAX_TOKENS,
+    DEFAULT_BOUNDARY_REPS,
+    DEFAULT_BOUNDARY_TEMPERATURE,
+    DEFAULT_MAX_BOUNDARY_DEFECTS,
+    DEFAULT_MAX_MEAN_NLL,
+    DEFAULT_MAX_P99_NLL,
+    DEFAULT_MAX_PPL,
+    DEFAULT_MIN_GEN_LEN,
+    DEFAULT_MIN_MTP_ACCEPT_P0,
+)
 
 
 # -----------------------------------------------------------------
@@ -165,9 +179,6 @@ THINK_CLOSE_TAG = "</think>"
 # enters a thinking model's reasoning scaffold.  These values are also filed
 # in the shipcard metrics so offline replay can reject a clean-looking count
 # produced under the old, structurally blind request.
-BOUNDARY_ENDPOINT = "/v1/chat/completions"
-BOUNDARY_REQUEST_SCHEMA = "prismaquant.boundary_chat_request/1"
-BOUNDARY_RESPONSE_SCHEMA = "prismaquant.boundary_chat_response/1"
 BOUNDARY_CHAT_TEMPLATE_KWARGS = {
     "thinking": True,
     "enable_thinking": True,
@@ -177,11 +188,6 @@ BOUNDARY_CHAT_TEMPLATE_KWARGS = {
 # -----------------------------------------------------------------
 # Default thresholds (tune via CLI if needed)
 # -----------------------------------------------------------------
-DEFAULT_MAX_PPL = 25.0
-DEFAULT_MAX_P99_NLL = 6.0
-DEFAULT_MAX_MEAN_NLL = 3.0
-DEFAULT_MIN_GEN_LEN = 30               # chars in each generated completion
-DEFAULT_MIN_MTP_ACCEPT_P0 = 0.60       # position-0 accept fraction
 # Boundary-behavior gate (issue #87).  Temperature 1.0 is the unmodified
 # distribution and `REPS` 6 is the published battery's own replication count.
 # The zero bound and 64-token cap are retained as fail-closed historical
@@ -190,10 +196,6 @@ DEFAULT_MIN_MTP_ACCEPT_P0 = 0.60       # position-0 accept fraction
 # Qwen3-8B at 10/15 even under 600.  They are not calibrated universal claims
 # and must not be used to close #87 or promote an artifact without the pending
 # same-session control decision.
-DEFAULT_MAX_BOUNDARY_DEFECTS = 0
-DEFAULT_BOUNDARY_TEMPERATURE = 1.0
-DEFAULT_BOUNDARY_MAX_TOKENS = 64
-DEFAULT_BOUNDARY_REPS = 6
 
 
 # -----------------------------------------------------------------
@@ -869,9 +871,12 @@ def _fill_shipcard(args, rep: "ValidationReport") -> None:
     if not getattr(args, "shipcard", None):
         return
     from .shipcard import (
-        compute_model_sha, fill_if_requested, git_provenance, load_shipcard,
-        make_record,
+        compute_model_sha,
+        fill_if_requested,
+        git_provenance,
+        load_shipcard,
     )
+    from .shipcard_slots import make_record
 
     try:
         card = load_shipcard(args.shipcard)

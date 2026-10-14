@@ -12,8 +12,8 @@ Lane-scoped slots (``shipcard.lane_scoped_slots()``, read as
 :data:`LANE_SCOPED_SLOTS`) are opened by the lane's own
 ``lane_specs/<lane>.json`` ``gates[]`` and are required of cards stamped with
 that ``lane``.  The vocabulary is derived from every lane spec, and each
-derived slot names its replay in ``shipcard.lane_slot_verifiers()`` (#162):
-core's own ``LANE_SLOT_VERIFIERS`` plus the replays a lane's plugin registers
+derived slot names its adapter in ``shipcard_slots.ship_slot_registry()`` (#162):
+core's own slots plus the replays a lane's plugin registers
 (``shipcard_slot_verifiers``, PQ #1553).  This module imports no lane module.
 
 Base slots (required for every artifact):
@@ -91,12 +91,15 @@ SCHEMA = "prismaquant.shipcard/1"
 #: Every slot all serving lanes must close before an artifact is shippable.
 #: Keep this base tuple stable: no container inherits a plugin-only gate
 #: merely because one lane adds one.
-REQUIRED_SLOTS: tuple[str, ...] = (
-    "native_export.eager",
-    "native_export.graph",
-    "ship_gate",
-    "gold.kl",
-    "gold.ppl",
+from .shipcard_slots import (
+    REQUIRED_SLOTS,
+    GOLD_SLOTS,
+    OPTIONAL_SLOTS,
+    make_record,
+    ship_slot_registry,
+    lane_slot_verifiers,
+    lane_plugin_slot_verifiers,
+    _verify_gold_record,
 )
 
 #: The byte-matched uniform control's verdict (RobTand/prismaquant#121).
@@ -123,7 +126,6 @@ ROUTE_SWEEP_SLOT = "route.sweep"
 #: ``uniform_control`` is optional only in the sense that a format-menu
 #: artifact has no rate axis for it to be about; on a rate-axis artifact
 #: :func:`required_slots` makes it mandatory and its absence is UNFILLED.
-OPTIONAL_SLOTS: tuple[str, ...] = (UNIFORM_CONTROL_SLOT,)
 
 #: Slots a LANE opens beyond the base set, because its own declaration names a
 #: gate the base set has nowhere to put.  Precedent: the retired Gridbook
@@ -145,7 +147,7 @@ OPTIONAL_SLOTS: tuple[str, ...] = (UNIFORM_CONTROL_SLOT,)
 #: from :func:`lane_slot_verifiers` -- the verifier :func:`verify` replays for
 #: it, registered by the lane's plugin (``route.census``'s is the #136
 #: priced-vs-served replay, in ``tessera_shipcard``) or, for a data-only lane,
-#: in :data:`LANE_SLOT_VERIFIERS`.  A lane that declares a slot with no
+#: in ``shipcard_slots.ship_slot_registry``. A lane that declares a slot with no
 #: verifier is REFUSED at parse time -- a slot with no verifier is a slot any
 #: record closes -- so adding a fourth lane with a novel gate is one spec
 #: file plus one verifier entry, and there is no second list to forget.
@@ -208,7 +210,6 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | {"LANE_SCOPED_SLOTS", "ALL_SLOTS"})
 
 #: Slots whose number is invalid if it was produced against a spec-decode serve.
-GOLD_SLOTS: frozenset[str] = frozenset({"gold.kl", "gold.ppl"})
 
 SHIPCARD_FILENAME = "shipcard.json"
 
@@ -1576,46 +1577,6 @@ def load_shipcard(path: str | os.PathLike) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Serve lane
 # ---------------------------------------------------------------------------
-def make_record(
-    *,
-    slot: str,
-    tool: str,
-    passed: bool,
-    model_sha: str | None,
-    metrics: Mapping[str, Any] | None = None,
-    detail: str = "",
-    spec_decode_detected: bool | None = None,
-    serve_fingerprint: str | None = None,
-    git_commit: str | None = None,
-    extra: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """One serve-lane verdict block.
-
-    The vocabulary is derived (:func:`all_slots`): base slots plus every
-    lane-declared slot with a registered verifier.  The check here reads the
-    live base set plus :func:`lane_slot_verifiers` rather than a roster, so a
-    fourth lane's verified slot is fillable with no edit here.
-    """
-    known = (set(REQUIRED_SLOTS) | set(OPTIONAL_SLOTS)
-             | set(lane_slot_verifiers()))
-    if slot not in known:
-        raise KeyError(
-            f"unknown shipcard slot {slot!r}; known: {sorted(known)}")
-    record: dict[str, Any] = {
-        "slot": slot,
-        "tool": tool,
-        "filled_at": _now(),
-        "passed": bool(passed),
-        "model_sha": model_sha,
-        "spec_decode_detected": spec_decode_detected,
-        "serve_fingerprint": serve_fingerprint,
-        "git_commit": git_commit,
-        "detail": detail,
-        "metrics": dict(metrics or {}),
-    }
-    if extra:
-        record.update(dict(extra))
-    return record
 
 
 def fill_slot(
@@ -1740,7 +1701,7 @@ def verify(
 
     if required is None:
         required = required_slots(card, model_dir=model_dir)
-    plugin_verifiers = lane_plugin_slot_verifiers()
+    registry = ship_slot_registry()
     for slot in required:
         record = slots.get(slot)
         if not record:
@@ -1760,81 +1721,11 @@ def verify(
             problems.append(
                 f"{slot}: record model_sha {str(got)[:12]} != artifact "
                 f"{str(expected_sha)[:12]} (record belongs to another build)")
-        if slot == UNIFORM_CONTROL_SLOT:
-            # Routed PAST the generic `passed` check, not around it: the
-            # verdict lives in the two KLs, and this slot's verifier is the
-            # one that understands the (deliberate, stamped, bound) override.
-            # It re-derives `passed` from those KLs itself, so nothing is lost
-            # by not testing the flag here.
-            problems.extend(_verify_uniform_control_record(
-                slot, record, card=card, model_dir=model_dir))
-            continue
-        if slot in plugin_verifiers:
-            # Routed PAST the generic `passed` check for the same reason: a
-            # lane plugin's replay owns its slot's whole verdict.  The
-            # Tessera lane's `route.census` and `route.trace` carry their
-            # route records or route traces, and the replay recomputes the
-            # priced-vs-served comparison from them, so a hand-set flag buys
-            # nothing.  Dispatched through the lane-slot registry (#162) so
-            # the admission invariant and the replay read the same entry.
-            problems.extend(plugin_verifiers[slot](
-                slot, record, card=card, model_dir=model_dir))
-            continue
-        if record.get("passed") is not True:
-            problems.append(
-                f"{slot}: FAILED — {record.get('detail') or 'no detail'}")
-        if slot == "ship_gate":
-            # Every lane. This replay ran only behind the retired Gridbook
-            # codebook lane's `is_gridbook_cb` flag until 2026-09-02, which
-            # meant a NATIVE card -- the default lane, and the one shipping
-            # artifacts today -- closed its one universal slot on a bare
-            # `passed` flag while the producer filed a threshold contract, a
-            # check ledger, token evidence and an endpoint binding nobody
-            # read (#156). None of that evidence was ever CB-specific: the
-            # catastrophic bounds, the four checks and the validator's tool
-            # identity are the same program on every lane, so generalising
-            # the replay is a REMOVAL of the flag, not a new refusal.
-            problems.extend(_verify_ship_gate_record(slot, record))
-        if slot in GOLD_SLOTS:
-            # Every lane. This ran under a Gridbook-CB flag until 2026-08-15,
-            # which meant a NATIVE card -- the default lane, and the one
-            # shipping artifacts today -- had its gold slots checked for
-            # nothing but spec-decode: no finite metric, no serve fingerprint,
-            # no producer commit, no position count. The generic evidence
-            # requirements were never CB-specific and should never have been
-            # behind it.
-            problems.extend(_verify_gold_record(
-                slot,
-                record,
-                model_dir=model_dir,
-                require_current_artifact_path=False,
-            ))
-        if slot in GOLD_SLOTS:
-            spec = record.get("spec_decode_detected")
-            if spec is None:
-                problems.append(
-                    f"{slot}: spec_decode_detected is unknown — a gold number "
-                    "measured against a spec-decode serve is the draft model's "
-                    "NLL, so 'unknown' is not acceptable (§7.5)")
-            elif spec:
-                problems.append(
-                    f"{slot}: spec_decode_detected is TRUE — this is draft-model "
-                    "NLL, not the artifact's; re-measure on a no-spec serve")
-        if slot.startswith("native_export."):
-            # The slot-name check above compares `record["slot"]` to the slot
-            # key; nothing compared `metrics.arm` to the slot suffix, so a
-            # fabricated or mislabeled arm record passed. Replay it here.
-            problems.extend(_verify_native_export_record(slot, record))
-        # Lane-scoped slots whose replay core owns run through the verifier
-        # the slot names in LANE_SLOT_VERIFIERS (#162): a fourth lane's novel
-        # slot is replayed the moment its verifier is registered, and a
-        # derived slot with no verifier never reaches here because
-        # lane_gate_slots / make_record / lane_scoped_slots refuse it.  These
-        # verifiers take ``(slot, record)``, the same convention as the
-        # base-slot replays.
-        verifier = LANE_SLOT_VERIFIERS.get(slot)
-        if verifier is not None:
-            problems.extend(verifier(slot, record))
+        adapter = registry.get(slot)
+        if adapter is None:
+            problems.append(f"{slot}: no registered replay")
+        else:
+            problems.extend(adapter.replay(record, card=card, model_dir=model_dir))
     return problems
 
 
@@ -2006,78 +1897,6 @@ def _verify_gold_producer_identity(
     return problems
 
 
-def _verify_gold_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    model_dir: str | os.PathLike | None = None,
-    require_current_artifact_path: bool = True,
-) -> list[str]:
-    """Require a slot-specific finite gold metric plus measurement identity."""
-    problems: list[str] = []
-    metrics = record.get("metrics")
-    if not isinstance(metrics, Mapping):
-        return [f"{slot}: missing structured gold metrics"]
-    allowed = (
-        ("kl_confident_mean", "kl_mean")
-        if slot == "gold.kl"
-        else ("ppl", "mean_nll")
-    )
-    finite = [
-        key for key in allowed
-        if key in metrics
-        and not isinstance(metrics[key], bool)
-        and isinstance(metrics[key], (int, float))
-        and math.isfinite(float(metrics[key]))
-        and float(metrics[key]) >= 0
-    ]
-    if not finite:
-        problems.append(
-            f"{slot}: carries no finite non-negative slot-specific metric "
-            f"from {allowed}"
-        )
-    fingerprint = record.get("serve_fingerprint")
-    if not isinstance(fingerprint, str) or re.fullmatch(
-        r"[0-9a-f]{64}", fingerprint
-    ) is None:
-        problems.append(f"{slot}: missing exact serve fingerprint")
-    commit = record.get("git_commit")
-    if not isinstance(commit, str) or re.fullmatch(
-        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit
-    ) is None:
-        problems.append(f"{slot}: missing full producer git commit")
-    tool = record.get("tool")
-    if not isinstance(tool, str) or not tool:
-        problems.append(f"{slot}: missing measurement tool identity")
-    if slot == "gold.kl":
-        if not any(
-            isinstance(metrics.get(key), int)
-            and not isinstance(metrics.get(key), bool)
-            and metrics.get(key, 0) > 0
-            for key in ("n_positions", "n_samples")
-        ):
-            problems.append(f"{slot}: missing positive KL sample/position count")
-        # A positive count was never enough. `--score-positions final` scores
-        # ONE position per sequence -- the window-final context -- which is the
-        # cheap last-token "hook KL" screen that is triage-only and must never
-        # be a promotion number (§5). It reports n_samples=8 and sails through
-        # the count check above, so the card could not tell an 8-position screen
-        # from a 4088-position gold measurement. Caught 2026-08-14 on the
-        # Qwen3.8-27B lane, where the driver simply omitted the flag and the
-        # tool's default is `final`.
-        if metrics.get("score_positions") != "all":
-            problems.append(
-                f"{slot}: score_positions={metrics.get('score_positions')!r} — "
-                "the gold KL contract is every prompt position "
-                "(--score-positions all, n_positions = n_samples*(seqlen-1)). "
-                "'final' is the last-token hook screen: triage only, never a "
-                "promotion metric."
-            )
-    elif not isinstance(metrics.get("n_tokens_scored"), int) or isinstance(
-        metrics.get("n_tokens_scored"), bool
-    ) or metrics.get("n_tokens_scored", 0) <= 0:
-        problems.append(f"{slot}: missing positive scored-token count")
-    return problems
 
 
 def verify_gold_producer_record(
@@ -2101,72 +1920,6 @@ def verify_gold_producer_record(
 
 
 
-def _verify_native_export_record(
-    slot: str,
-    record: Mapping[str, Any],
-) -> list[str]:
-    """Replay the smoke arm's own stamped metrics against the slot it closes.
-
-    `validate_native_export._record_arm` stamps the arm it actually ran
-    (`metrics.arm`), the residency it ran under (`enforce_eager`), and how
-    much it generated (`generated_chars`) — but `verify` compared only the
-    slot key against `record["slot"]`, so an eager receipt closed the graph
-    slot and a pass that generated nothing verified clean. The only site
-    that knows the truth already writes it; this reads it.
-    """
-    problems: list[str] = []
-    arm = slot.split(".", 1)[1] if "." in slot else slot
-    metrics = record.get("metrics")
-    if not isinstance(metrics, Mapping):
-        return [f"{slot}: missing structured arm metrics"]
-    if metrics.get("arm") != arm:
-        problems.append(
-            f"{slot}: metrics.arm={metrics.get('arm')!r} does not match the "
-            f"slot arm {arm!r} — a mislabeled receipt, not a result"
-        )
-    # `validate_native_export._run_arm`: `arm = "eager" if enforce_eager else
-    # "graph"`. The two residencies are different numeric objects on the
-    # Tessera lane, exercised by separate gates.
-    expected_eager = {"eager": True, "graph": False}.get(arm)
-    if (
-        expected_eager is not None
-        and metrics.get("enforce_eager") is not expected_eager
-    ):
-        problems.append(
-            f"{slot}: enforce_eager={metrics.get('enforce_eager')!r} "
-            f"disagrees with the {arm} arm — this receipt ran under the "
-            "other residency"
-        )
-    produced = metrics.get("generated_chars")
-    if record.get("passed") is True:
-        if (
-            isinstance(produced, bool)
-            or not isinstance(produced, int)
-            or produced <= 0
-        ):
-            problems.append(
-                f"{slot}: passed but generated_chars={produced!r} — a smoke "
-                "pass that generated nothing is not evidence"
-            )
-    elif (
-        not isinstance(produced, bool)
-        and isinstance(produced, int)
-        and produced > 0
-    ):
-        problems.append(
-            f"{slot}: failed yet claims generated_chars={produced!r}"
-        )
-    max_new_tokens = metrics.get("max_new_tokens")
-    if max_new_tokens is not None and (
-        isinstance(max_new_tokens, bool)
-        or not isinstance(max_new_tokens, int)
-        or max_new_tokens <= 0
-    ):
-        problems.append(
-            f"{slot}: max_new_tokens={max_new_tokens!r} is not a positive "
-            "integer"
-        )
-    return problems
 
 
 # ---------------------------------------------------------------------------
@@ -2865,173 +2618,6 @@ def record_uniform_control_override(
     return card
 
 
-def _verify_ship_gate_record(
-    slot: str,
-    record: Mapping[str, Any],
-) -> list[str]:
-    """Replay the fixed catastrophic-quality thresholds, the check ledger
-    with its token evidence, and the endpoint binding.
-
-    The binding half is presence-and-shape, stated honestly: an offline
-    `verify` has no live session to compare against, so it refuses a record
-    that names no server, no served model and no artifact path -- but a
-    well-formed binding to the WRONG server still passes here. Catching that
-    needs the nonce-bound live-session check (the retired CB eager driver
-    did exactly that before teardown); see the `ship_gate` paragraph in
-    §7.2 of docs/ARCHITECTURE.md.
-    """
-    problems: list[str] = []
-    if record.get("tool") != "validate_quantized_model.py":
-        problems.append(f"{slot}: not filled by validate_quantized_model.py")
-    commit = record.get("git_commit")
-    if not isinstance(commit, str) or re.fullmatch(
-        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit
-    ) is None:
-        problems.append(f"{slot}: missing full producer git commit")
-    endpoint = record.get("base_url")
-    if (
-        not isinstance(endpoint, str)
-        or not endpoint.startswith(("http://", "https://"))
-    ):
-        problems.append(f"{slot}: missing endpoint binding (base_url)")
-    served = record.get("served_model_name")
-    if not isinstance(served, str) or not served.strip():
-        problems.append(
-            f"{slot}: missing served-model binding (served_model_name)")
-    source = record.get("model_sha_source")
-    if not isinstance(source, str) or not source.strip():
-        problems.append(
-            f"{slot}: missing artifact-path binding (model_sha_source)")
-    metrics = record.get("metrics")
-    thresholds = record.get("thresholds")
-    expected_checks = {
-        "serve_ready", "generation_sanity", "perplexity", "mtp_acceptance",
-        "boundary_behavior",
-    }
-    if not isinstance(metrics, Mapping) or set(metrics) != expected_checks:
-        return problems + [f"{slot}: validation check ledger is incomplete"]
-    for name, row in metrics.items():
-        if not isinstance(row, Mapping) or row.get("passed") is not True:
-            problems.append(f"{slot}: check {name} is not a structured pass")
-    expected_thresholds = {
-        "max_ppl": 25.0,
-        "max_mean_nll": 3.0,
-        "max_p99_nll": 6.0,
-        "min_gen_len": 30,
-        "min_mtp_accept_p0": 0.60,
-        "max_boundary_defects": 0,
-        "boundary_temperature": 1.0,
-        "boundary_max_tokens": 64,
-        "boundary_reps": 6,
-    }
-    if not isinstance(thresholds, Mapping):
-        problems.append(f"{slot}: missing threshold contract")
-    else:
-        for key, expected in expected_thresholds.items():
-            value = thresholds.get(key)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                or float(value) != float(expected)
-            ):
-                problems.append(
-                    f"{slot}: threshold {key}={value!r}, expected {expected!r}"
-                )
-    perplexity = metrics.get("perplexity")
-    if isinstance(perplexity, Mapping):
-        numeric = {
-            "perplexity": ("max_ppl", 25.0),
-            "mean_nll_per_tok": ("max_mean_nll", 3.0),
-            "max_nll_per_tok": ("max_p99_nll", 6.0),
-        }
-        for key, (_threshold_key, limit) in numeric.items():
-            value = perplexity.get(key)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                or float(value) < 0
-                or float(value) > limit
-            ):
-                problems.append(
-                    f"{slot}: perplexity metric {key} does not clear {limit}"
-                )
-        tokens = perplexity.get("n_tokens")
-        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
-            problems.append(f"{slot}: perplexity check scored no tokens")
-        if perplexity.get("spec_decode_detected") is True:
-            problems.append(f"{slot}: perplexity ran under speculative decode")
-        elif perplexity.get("spec_decode_detected") is not False:
-            problems.append(
-                f"{slot}: perplexity speculative-decode state is unknown"
-            )
-    else:
-        problems.append(f"{slot}: missing structured perplexity evidence")
-    boundary = metrics.get("boundary_behavior")
-    if isinstance(boundary, Mapping):
-        # The behavioral replay: raw `/v1/completions` never applies the chat
-        # template, so a clean-looking count from that endpoint is not
-        # boundary evidence.  Pin the producer's request and extraction
-        # schemas independently here, alongside the numerical replay below.
-        endpoint = boundary.get("endpoint")
-        if endpoint != "/v1/chat/completions":
-            problems.append(
-                f"{slot}: boundary endpoint={endpoint!r}, expected "
-                "'/v1/chat/completions'"
-            )
-        request_schema = boundary.get("request_schema")
-        if request_schema != "prismaquant.boundary_chat_request/1":
-            problems.append(
-                f"{slot}: boundary request schema={request_schema!r}, "
-                "expected 'prismaquant.boundary_chat_request/1'"
-            )
-        response_schema = boundary.get("response_schema")
-        if response_schema != "prismaquant.boundary_chat_response/1":
-            problems.append(
-                f"{slot}: boundary response schema={response_schema!r}, "
-                "expected 'prismaquant.boundary_chat_response/1'"
-            )
-
-        # A sampled check with no generations, run at temp 0, or with defects
-        # over the zero-tolerance bound is not evidence — it is the old
-        # argmax-blind gate wearing the new name.  The zero/64 values remain
-        # fail-closed historical defaults pending #87's paired-control policy;
-        # replaying them here does not claim they are calibrated universally.
-        generations = boundary.get("n_generations")
-        if (
-            isinstance(generations, bool)
-            or not isinstance(generations, int)
-            or generations <= 0
-        ):
-            problems.append(
-                f"{slot}: boundary check sampled no generations")
-        defects = boundary.get("n_defects")
-        if (
-            isinstance(defects, bool)
-            or not isinstance(defects, int)
-            or defects < 0
-            or defects > 0
-        ):
-            problems.append(
-                f"{slot}: boundary check reports {defects!r} defective "
-                "generations — the historical bound is zero; "
-                "its control-relative replacement remains pending #87"
-            )
-        temperature = boundary.get("temperature")
-        if (
-            isinstance(temperature, bool)
-            or not isinstance(temperature, (int, float))
-            or not math.isfinite(float(temperature))
-            or float(temperature) <= 0
-        ):
-            problems.append(
-                f"{slot}: boundary check temperature={temperature!r} is not "
-                "sampling — the defect is invisible at temp 0"
-            )
-    else:
-        problems.append(f"{slot}: missing structured boundary evidence")
-    return problems
 
 
 def unfilled_slots(
@@ -3172,38 +2758,11 @@ def _verify_route_sweep_record(
 #: Entries here take ``(slot, record)`` after the generic ``passed`` check.
 #: A plugin's replays take ``(slot, record, *, card, model_dir)`` and own the
 #: slot's whole verdict, so :func:`verify` routes them past that check.
-LANE_SLOT_VERIFIERS: dict[str, Callable[..., list[str]]] = {
-    ROUTE_SWEEP_SLOT: _verify_route_sweep_record,
-}
 
 
-def lane_plugin_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
-    """The slot replays lane plugins register, keyed by slot name.
-
-    Each lane plugin that provides ``shipcard_slot_verifiers`` answers with
-    ``{slot: replay}``.  A slot two owners claim -- two plugins, or a plugin
-    and :data:`LANE_SLOT_VERIFIERS` -- RAISES: choosing one replay would be a
-    guess about which lane's evidence the slot holds.
-    """
-    from prismaquant.lane_spec import lane_hooks
-
-    found: dict[str, Callable[..., list[str]]] = {}
-    owners: dict[str, str] = {slot: "shipcard" for slot in LANE_SLOT_VERIFIERS}
-    for lane, hook in lane_hooks("shipcard_slot_verifiers"):
-        for slot, replay in dict(hook()).items():
-            if slot in owners:
-                raise KeyError(
-                    f"shipcard slot {slot!r} has two replays, from "
-                    f"{owners[slot]!r} and lane {lane!r}; one slot has one "
-                    "verifier")
-            owners[slot] = lane
-            found[slot] = replay
-    return found
 
 
-def lane_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
-    """Every lane-declared slot's replay: core's own plus each plugin's."""
-    return {**LANE_SLOT_VERIFIERS, **lane_plugin_slot_verifiers()}
+
 
 
 def required_slots(
