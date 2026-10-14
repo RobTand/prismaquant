@@ -37,7 +37,7 @@ from prismaquant.sample_parallel_probe_contract import (
     activation_row_priorities,
     validate_activation_priority_domain,
 )
-from prismaquant.sensitivity_probe import load_calibration
+from prismaquant.calibration_data import load_calibration
 from .schemas import strict_json_loads
 from .digests import (
     DIRECT_ASCII_INDENT2_LAX,

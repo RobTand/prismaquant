@@ -497,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
     from prismaquant.calibration_data import _dtype_from_name
     from prismaquant.model_profiles import detect_profile_with_warning
     from prismaquant.perturbed_x_cache import load_text_model_under_work_root
-    from prismaquant.sensitivity_probe import load_calibration
+    from prismaquant.calibration_data import load_calibration
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

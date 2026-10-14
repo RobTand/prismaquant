@@ -184,7 +184,6 @@ from prismaquant.sensitivity_probe import (
     grouped_linear_stats_entry,
     install_packed_expert_hooks,
     kv_cotangent_path_enabled,
-    load_calibration,
     per_token_ce,
     read_top_k,
     run_multimodal_visual_probe_pass,
@@ -192,6 +191,7 @@ from prismaquant.sensitivity_probe import (
     stage_multimodal,
     stage_text_only,
 )
+from prismaquant.calibration_data import load_calibration
 
 from .streaming_model import (
     StreamingContext,

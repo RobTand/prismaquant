@@ -57,7 +57,7 @@ from prismaquant.production_recache import _load_assignment
 from prismaquant.production_weight_cache import (
     fill_production_weight_cache,
 )
-from prismaquant.sensitivity_probe import load_calibration
+from prismaquant.calibration_data import load_calibration
 
 
 def _load_col_weights(path, formats) -> dict | None:

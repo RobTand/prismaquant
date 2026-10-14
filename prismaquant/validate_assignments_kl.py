@@ -69,7 +69,7 @@ from prismaquant.select_validated_frontier import (
     TAIL_VETO_COLUMNS as _TAIL_REPEAT_COLUMNS,
 )
 from prismaquant.schemas import validate_cost_payload
-from prismaquant.sensitivity_probe import load_calibration
+from prismaquant.calibration_data import load_calibration
 from prismaquant.source_prefetch import (
     _available_memory_bytes,
     prefetch_safetensors_checkpoint,

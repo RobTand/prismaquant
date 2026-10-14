@@ -184,7 +184,7 @@ def compute_fisher_col_weights(
     model.eval()
 
     if dataset_path:
-        from prismaquant.sensitivity_probe import load_calibration
+        from prismaquant.calibration_data import load_calibration
         calib = load_calibration(
             tok, dataset_path, nsamples, seqlen, calib_seed=seed,
         ).to(device)

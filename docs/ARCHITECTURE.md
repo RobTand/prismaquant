@@ -5,6 +5,10 @@ were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
 ledgers. Current execution and admission paths have no callers to these modules.
 
+Re-stamped 2026-10-14: the existing corpus sampler now belongs to
+`calibration_data`, alongside exact calibration artifacts. All direct callers
+use that owner; the initial move preserves sampler bytes and seed behavior.
+
 Re-stamped 2026-10-14: the probe inventory publishes priced dense, grouped
 and packed units and excluded Linears with reasons. Walk coverage checks the
 same module-name exclusions as the probe. Declared packed-profile failures

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import random
 
 import torch
 
@@ -257,3 +258,236 @@ def _dtype_from_name(name: str) -> torch.dtype:
     if name in {"fp32", "float32"}:
         return torch.float32
     raise ValueError(f"unsupported dtype {name!r}")
+
+
+def load_calibration(tokenizer, source: str, n_samples: int,
+                     seqlen: int, *, calib_seed: int = 42) -> torch.Tensor:
+    """Load calibration from a HuggingFace dataset id, a local .jsonl, or
+    a local .txt file. Extensionless regular files are content-sniffed so a
+    bind-mounted JSONL at a canonical container path such as ``/dataset``
+    remains local. JSONL rows can have either {"text": ...} or
+    {"messages": [...]} for chat-style data.
+    """
+    import os
+
+    # A local-file source that does not exist must NOT fall through to the
+    # HuggingFace loader. It used to: the `.jsonl`/`.txt` branches were guarded
+    # by os.path.exists, so a missing file skipped to the generic `else` and
+    # HF reported `Dataset '/home/.../diverse-v1.jsonl' doesn't exist on the
+    # Hub` -- an error that names a filesystem path as a dataset id and sends
+    # the reader looking for something to download. Nothing is downloadable;
+    # the file is simply absent.
+    if (source.endswith((".jsonl", ".txt")) or os.sep in source) \
+            and not os.path.exists(source):
+        raise FileNotFoundError(
+            f"calibration file not found: {source}\n"
+            "This is a local path, not a HuggingFace dataset id, so there is "
+            "nothing to download. Either:\n"
+            "  * build the default corpus:  python tools/"
+            "build_diverse_calibration.py --output <path> --tokenizer <model>\n"
+            "  * point DATASET at your own .jsonl ({\"text\": ...} or "
+            "{\"messages\": [...]} rows) or .txt (one sample per line)\n"
+            "  * point DATASET at a HuggingFace dataset id "
+            "(e.g. ultrachat_200k)"
+        )
+
+    local_kind: str | None = None
+    if source.endswith(".jsonl") and os.path.isfile(source):
+        local_kind = "jsonl"
+    elif source.endswith(".txt") and os.path.isfile(source):
+        local_kind = "txt"
+    elif (
+        os.path.isfile(source)
+        and not os.path.splitext(os.path.basename(source))[1]
+    ):
+        # Docker commonly mounts one host file at a path-neutral canonical
+        # name.  Do not reinterpret that existing regular file as a Hub
+        # dataset merely because the container target has no suffix.  Sniff
+        # only extensionless files; known alternate local formats retain the
+        # generic datasets-loader behavior they had before this contract.
+        first_nonempty = ""
+        with open(source) as handle:
+            for line in handle:
+                if line.strip():
+                    first_nonempty = line
+                    break
+        try:
+            first_value = json.loads(first_nonempty)
+        except (json.JSONDecodeError, TypeError):
+            first_value = None
+        local_kind = (
+            "jsonl"
+            if isinstance(first_value, dict)
+            and ("text" in first_value or "messages" in first_value)
+            else "txt"
+        )
+
+    texts: list[str] = []
+    if local_kind == "jsonl":
+        with open(source) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                obj = json.loads(line)
+                if "messages" in obj:
+                    try:
+                        texts.append(tokenizer.apply_chat_template(
+                            obj["messages"], tokenize=False))
+                    except Exception:
+                        # Tokenizer has no chat template (base / pt models
+                        # like DSv4-Flash-Base). Fall back to concatenating
+                        # the message contents — good enough as calibration
+                        # text, mirrors the ultrachat fallback below.
+                        parts = []
+                        for m in obj["messages"]:
+                            if isinstance(m, dict):
+                                c = m.get("content")
+                                if isinstance(c, str) and c:
+                                    parts.append(c)
+                        if parts:
+                            texts.append("\n\n".join(parts))
+                elif "text" in obj:
+                    texts.append(obj["text"])
+    elif local_kind == "txt":
+        with open(source) as f:
+            texts = [ln.strip() for ln in f if ln.strip()]
+    elif source == "ultrachat_200k":
+        from datasets import load_dataset
+
+        ds = load_dataset("HuggingFaceH4/ultrachat_200k",
+                          split="train_sft", streaming=True)
+        for row in ds:
+            msgs = row.get("messages", [])
+            if not msgs:
+                continue
+            try:
+                texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+            except Exception:
+                # Tokenizer has no chat template (base / pt models).
+                # Join plain message contents — good enough as calibration.
+                parts = []
+                for m in msgs:
+                    if isinstance(m, dict):
+                        c = m.get("content")
+                        if isinstance(c, str) and c:
+                            parts.append(c)
+                if parts:
+                    texts.append("\n\n".join(parts))
+            if len(texts) >= n_samples * 8:
+                break
+    else:
+        try:
+            from datasets import load_dataset
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Loading HuggingFace calibration datasets requires the "
+                "'datasets' package. Local .jsonl and .txt calibration files "
+                "do not require it."
+            ) from exc
+        # Generic HF dataset loader. Handles three common schemas:
+        #   1. {"text": "..."} — raw text corpora (pile, wikitext, etc.)
+        #   2. {"messages": [...]} — chat-format SFT (ultrachat, tulu-3, etc.)
+        #   3. anything else — falls back to first string column
+        # Streaming when possible so we don't download the full dataset for
+        # just 32 samples.
+        try:
+            ds = load_dataset(source, split="train", streaming=True)
+            stream = True
+        except Exception:
+            ds = load_dataset(source, split="train")
+            stream = False
+
+        # Probe one row to detect schema
+        iterator = iter(ds) if stream else ds
+        first = next(iterator) if stream else (ds[0] if len(ds) else {})
+        schema = None
+        if "messages" in first:
+            schema = "messages"
+        elif "text" in first:
+            schema = "text"
+        else:
+            # pick first string-valued column
+            for k, v in first.items():
+                if isinstance(v, str):
+                    schema = k
+                    break
+        if schema is None:
+            raise ValueError(f"Could not find text or messages field in {source}")
+        print(f"[probe] {source} schema: {schema}", flush=True)
+
+        # Re-iterate (we consumed the first row)
+        if stream:
+            ds = load_dataset(source, split="train", streaming=True)
+            iterator = iter(ds)
+        else:
+            iterator = iter(ds)
+
+        for row in iterator:
+            if schema == "messages":
+                msgs = row.get("messages") or row.get("conversations") or []
+                if not msgs:
+                    continue
+                try:
+                    texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+                except Exception:
+                    # Tokenizer has no chat template (base / pt models)
+                    # or the template rejects this message shape.
+                    # Fall back to concatenating the message contents —
+                    # good enough as calibration text, decouples the
+                    # probe from the tokenizer's chat-template state.
+                    parts = []
+                    for m in msgs:
+                        if isinstance(m, dict):
+                            c = m.get("content")
+                            if isinstance(c, str) and c:
+                                parts.append(c)
+                    if parts:
+                        texts.append("\n\n".join(parts))
+            else:
+                v = row.get(schema)
+                if isinstance(v, str) and v.strip():
+                    texts.append(v)
+            if len(texts) >= n_samples * 8:
+                break
+
+    # Two-pass sampling:
+    #   1) first pass picks any sample already >= seqlen tokens
+    #   2) fallback packs multiple short samples together (separated by
+    #      EOS) to reach seqlen. This makes SFT/chat datasets with short
+    #      turns (tulu-3, glaive) usable without lowering seqlen.
+    # calib_seed controls (a) which subset of dataset texts is tried (shuffle)
+    # and (b) where within each text the seqlen window starts. Default 42 is
+    # the historical value and is byte-stable.
+    if calib_seed != 42:
+        rng_shuffle = random.Random(calib_seed)
+        rng_shuffle.shuffle(texts)
+    random.seed(calib_seed)
+    samples = []
+    for t in texts:
+        ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
+        if ids.size(1) < seqlen:
+            continue
+        start = random.randint(0, ids.size(1) - seqlen)
+        samples.append(ids[0, start:start + seqlen])
+        if len(samples) >= n_samples:
+            break
+
+    if len(samples) < n_samples:
+        eos = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
+        # Pack short samples by concatenating with EOS separator
+        buf: list[int] = []
+        for t in texts:
+            ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids[0].tolist()
+            buf.extend(ids)
+            buf.append(eos)
+            while len(buf) >= seqlen and len(samples) < n_samples:
+                samples.append(torch.tensor(buf[:seqlen], dtype=torch.long))
+                buf = buf[seqlen:]
+            if len(samples) >= n_samples:
+                break
+
+    if len(samples) < n_samples:
+        print(f"[probe] warning: only got {len(samples)}/{n_samples} samples "
+              f"(even with packing). Consider wider corpus.",
+              flush=True)
+    return torch.stack(samples[:n_samples], dim=0)

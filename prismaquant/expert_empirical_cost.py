@@ -1742,7 +1742,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log(f"filled {filled} packed-expert params from source shards")
 
     if args.dataset:
-        from prismaquant.sensitivity_probe import load_calibration
+        from prismaquant.calibration_data import load_calibration
         calib = load_calibration(
             tok, args.dataset, args.n_calib_samples, args.calib_seqlen,
             calib_seed=args.calib_seed)
