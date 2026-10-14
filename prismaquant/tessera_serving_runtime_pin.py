@@ -909,7 +909,9 @@ def load_tessera_serving_runtime_pin(
     immutable within a process.
     """
     if path is None:
-        return _load_tracked_pin()
+        from copy import deepcopy
+
+        return deepcopy(_load_tracked_pin())
     return _read_pin(Path(path))
 
 
