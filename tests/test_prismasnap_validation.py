@@ -9,7 +9,7 @@ import torch
 from tools.serve_fingerprint import fingerprint, performance_stack_fingerprint
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import portable_streamed_model_content_identity
+from prismaquant.streamed_model_identity import portable_streamed_model_content_identity
 from prismaquant.prismasnap import PRISMASNAP_ALGORITHM, PrismaSnapSearchConfig
 from prismaquant.prismasnap_contract import require_verified_prismasnap_if_present
 from prismaquant.prismasnap_validation import (

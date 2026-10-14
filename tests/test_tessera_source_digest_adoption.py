@@ -3,6 +3,7 @@ import functools,hashlib,json
 from pathlib import Path
 import pytest
 from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 from prismaquant.tessera_source_digest_adoption import adopt_source_digests, main
 from test_source_identity_validate_derivation import checkpoint,_build_cache,_llama_config_dict
 
@@ -11,7 +12,7 @@ from test_source_identity_validate_derivation import checkpoint,_build_cache,_ll
 def authority(checkpoint,monkeypatch):
     root,shards=checkpoint;config=_llama_config_dict();config['_name_or_path']=str(root)
     cache,identity=_build_cache(root,shards,config)
-    monkeypatch.setattr(cs,'live_streaming_runner_config',lambda _:config)
+    monkeypatch.setattr(cs_identity,'live_streaming_runner_config',lambda _:config)
     return root,shards,cache,identity,{'path':str(cache),'sha256':hashlib.sha256(cache.read_bytes()).hexdigest()}
 
 
@@ -43,7 +44,7 @@ def test_adopts_original_hashes_without_payload_reads(authority,tmp_path,monkeyp
     from tessera import serving_parts
     root,shards,path,identity,binding=authority
     def forbidden(*a,**k):raise AssertionError('adoption or warm use rehashed weight bytes')
-    monkeypatch.setattr(cs,'_file_sha256',forbidden);monkeypatch.setattr(serving_parts,'sha256_file',forbidden)
+    monkeypatch.setattr(cs_identity,'_file_sha256',forbidden);monkeypatch.setattr(serving_parts,'sha256_file',forbidden)
     out=tmp_path/'digests';out.mkdir()
     with pytest.raises(AssertionError,match='rehashed'):
         SourceDigestCache(out,source=root).sha256(next(iter(shards.values())))

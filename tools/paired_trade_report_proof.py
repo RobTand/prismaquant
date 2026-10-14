@@ -17,7 +17,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from prismaquant import format_registry as fr, joint_aura as joint
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
 from prismabuild import client as pb
 from prismaquant.layer_config import load_assignment

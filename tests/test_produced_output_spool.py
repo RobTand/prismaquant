@@ -466,7 +466,7 @@ class _RecordingExport(ControlledExport):
 def _write_only_owner(adapter, groups):
     """An owner's settle state around a real spool: only what it reads."""
     from types import SimpleNamespace
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     owner = StreamedBoundaryArtifacts.__new__(StreamedBoundaryArtifacts)
     owner._local_output_spool = adapter

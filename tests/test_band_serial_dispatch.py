@@ -30,7 +30,7 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
-from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA  # noqa: E402
+from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     exact_entry_record, write_adjoint_checkpoint)
 from prismaquant.joint_quantum_handoff import (  # noqa: E402

@@ -63,10 +63,8 @@ from prismaquant import capture_layer_chain as chain  # noqa: E402
 from prismaquant import tessera_campaign as campaign  # noqa: E402
 from prismaquant import tessera_calibration_cache as store  # noqa: E402
 from prismaquant import tessera_hessian as th  # noqa: E402
-from prismaquant.cost_streaming import (  # noqa: E402
-    build_streamed_causal_lm,
-    check_boundary_storage,
-)
+from prismaquant.cost_streaming import build_streamed_causal_lm
+from prismaquant.streamed_boundary_artifacts import check_boundary_storage
 from prismaquant.routed_experts import (  # noqa: E402
     declared_shared_capture_groups,
     ProfileRoutedExpertClassifier,

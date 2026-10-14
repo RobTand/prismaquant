@@ -1011,7 +1011,7 @@ def validate_teacher_payload(payload: object) -> dict[str, Any]:
     )
     identity = payload.get("source_model_identity")
     try:
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
         full_identity = validate_streamed_model_identity(
             identity, where="full KL teacher payload"

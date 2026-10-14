@@ -7013,7 +7013,7 @@ def _main(argv, *, source_scope, waits) -> int:
                      "capture chain prep's, and the prep names both")
         from .capture_layer_chain import (CaptureChainRefused, parse_layer_range,
                                           parse_layer_ranges, require_layer_tiling)
-        from .cost_streaming import check_boundary_storage
+        from .streamed_boundary_artifacts import check_boundary_storage
         try:
             if args.capture_layer_range is not None:
                 args.capture_layer_range = parse_layer_range(args.capture_layer_range)

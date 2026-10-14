@@ -1,43 +1,4 @@
-"""Stage A forward split: one run's forward capture as partition-range quanta (PQ #738).
-
-A fresh Stage A run captures every calibration partition's forward
-boundaries through all layers, then rolls each partition's tail cotangents
-and seals the tail checkpoint. Partitions never communicate on the way: each
-entry is written under its own ``(batch, boundary)`` coordinates, and a
-partition's forward and tail read nothing another partition wrote. So the
-capture splits by contiguous partition range, and each part is a PrismaBuild
-row that any free GPU can run:
-
-* **A prep row, run once.** It mints the run's exact boundary generation,
-  leaves the generation's status file at ``running`` for the quanta to
-  rebind, and seals the forward prep record (``split/forward/prep.json``):
-  every field of the chain state except the ones the quanta produce (the
-  boundary entries and the tail checkpoint), plus the session and the
-  ranges. It captures nothing.
-* **Quanta.** Each rebinds the prep's session as one owner of the generation
-  (``owners/forward-samples-SSSSSS-EEEEEE.json``), captures its range's
-  boundaries through every layer under their global batch indices, rolls its
-  range's tail cotangents, and seals a **partial** tail checkpoint
-  (``split/boundary-NNN/samples-SSSSSS-EEEEEE``) in the layout of the chain
-  split's partials. It writes its boundary entry records beside the prep
-  record. A range is whole read windows (``prefetch_batches``), so each
-  quantum's produced-output groups are its own.
-* **One join.** It holds the ranges to the partition plane with
-  :func:`~prismaquant.cost_streaming.verify_boundary_partition_coverage`,
-  requires every quantum's owner status to be ``complete``, publishes the
-  tail checkpoint from the partials with the chain split's own join
-  (:func:`~prismaquant.stage_a_chain_split.join_split_checkpoint`), and
-  writes the chain state a single owner writes after its tail. The chain
-  state names no producer: the join runs only over owners whose own status
-  says they finished, so no interrupted writer is left to contain.
-
-From there the run is a chain resume at the tail checkpoint, and the chain
-split (``stage_a_chain_split``) rolls it by sample range from the top.
-
-The forward relaunch compares full bind identities through the existing
-chain-resume seal/comparability owner; it never changes the session hash.
-The join checks immutable records and whole-plane coverage as before.
-"""
+"Stage A forward split: one run's forward capture as partition-range quanta (PQ #738).\n\nA fresh Stage A run captures every calibration partition's forward\nboundaries through all layers, then rolls each partition's tail cotangents\nand seals the tail checkpoint. Partitions never communicate on the way: each\nentry is written under its own ``(batch, boundary)`` coordinates, and a\npartition's forward and tail read nothing another partition wrote. So the\ncapture splits by contiguous partition range, and each part is a PrismaBuild\nrow that any free GPU can run:\n\n* **A prep row, run once.** It mints the run's exact boundary generation,\n  leaves the generation's status file at ``running`` for the quanta to\n  rebind, and seals the forward prep record (``split/forward/prep.json``):\n  every field of the chain state except the ones the quanta produce (the\n  boundary entries and the tail checkpoint), plus the session and the\n  ranges. It captures nothing.\n* **Quanta.** Each rebinds the prep's session as one owner of the generation\n  (``owners/forward-samples-SSSSSS-EEEEEE.json``), captures its range's\n  boundaries through every layer under their global batch indices, rolls its\n  range's tail cotangents, and seals a **partial** tail checkpoint\n  (``split/boundary-NNN/samples-SSSSSS-EEEEEE``) in the layout of the chain\n  split's partials. It writes its boundary entry records beside the prep\n  record. A range is whole read windows (``prefetch_batches``), so each\n  quantum's produced-output groups are its own.\n* **One join.** It holds the ranges to the partition plane with\n  :func:`~prismaquant.streamed_boundary_artifacts.verify_boundary_partition_coverage`,\n  requires every quantum's owner status to be ``complete``, publishes the\n  tail checkpoint from the partials with the chain split's own join\n  (:func:`~prismaquant.stage_a_chain_split.join_split_checkpoint`), and\n  writes the chain state a single owner writes after its tail. The chain\n  state names no producer: the join runs only over owners whose own status\n  says they finished, so no interrupted writer is left to contain.\n\nFrom there the run is a chain resume at the tail checkpoint, and the chain\nsplit (``stage_a_chain_split``) rolls it by sample range from the top.\n\nThe forward relaunch compares full bind identities through the existing\nchain-resume seal/comparability owner; it never changes the session hash.\nThe join checks immutable records and whole-plane coverage as before.\n"
 from __future__ import annotations
 
 import argparse

@@ -241,8 +241,8 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, published
 
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant import tessera_campaign
-    from prismaquant.cost_streaming import (SELECTED_SOURCE_MEMBERS, SelectedSource,
-                                            build_streamed_causal_lm)
+    from prismaquant.streamed_boundary_artifacts import SELECTED_SOURCE_MEMBERS
+    from prismaquant.cost_streaming import SelectedSource, build_streamed_causal_lm
 
     assert set(SELECTED_SOURCE_MEMBERS) == {
         "source_layers", "num_layers", "layer_index_for_qname", "selected_weight_specs",

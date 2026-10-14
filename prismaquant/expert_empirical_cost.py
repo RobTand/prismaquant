@@ -814,7 +814,7 @@ def _expert_checkpoint_identity(
     )
 
     calib = calib_ids.detach().to("cpu").contiguous()
-    from prismaquant.cost_streaming import validate_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
     exact_model_identity = validate_streamed_model_identity(
         model_identity, where="expert empirical checkpointing"
@@ -1658,7 +1658,7 @@ def _streaming_model_identity(
     identity_cache_path: str | Path | None = None,
 ) -> dict[str, object]:
     """Stable source manifest used to bind expert end-to-end KL resumes."""
-    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
 
     return build_streamed_model_identity(
         runner,

@@ -1904,7 +1904,7 @@ def _with_boundary_artifacts(function):
         config = kwargs.pop("boundary_storage", None)
         if config is None:
             return function(*args, **kwargs)
-        from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+        from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
         with StreamedBoundaryArtifacts(config) as storage:
             result = function(*args, **kwargs, boundary_storage=storage)
         result["provenance"]["streamed_boundary_storage"] = storage.receipt()
@@ -2307,7 +2307,7 @@ def compute_aura_cost_streamed(
                 policy=operator_windows, retained_budget=retained_budget,
                 source_bytes=(None if retained_budget is None
                               else retained_operator_windows['source_reserve_bytes']))
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.joint_aura import (
             SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
             identity_sha256, make_joint_aura_entry, prefetch_joint_cache, squared_signed,
@@ -2537,9 +2537,7 @@ def compute_aura_cost_streamed(
                 "streamed AURA checkpointing requires exact model_identity; "
                 "refusing model-name-gated resume"
             )
-        from prismaquant.cost_streaming import (
-            validate_streamed_model_identity,
-        )
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
         exact_model_identity = validate_streamed_model_identity(
             model_identity, where="streamed AURA checkpointing"
@@ -2895,9 +2893,9 @@ def compute_aura_cost_streamed(
 
     # Identity validation above is intentionally before the first model
     # forward: a mismatched resume is a refusal, never a recomputation.
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
     if boundary_storage is not None:
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
         def check_boundary_memory(label):
             available = _free_gib()
@@ -3336,7 +3334,7 @@ def compute_aura_cost_streamed(
                                 torch.autograd.backward([out, *roots], [incoming_grad, *root_grads])
                                 owner.harvest()
                                 if not final:
-                                    from prismaquant.cost_streaming import _state_storage_bytes
+                                    from prismaquant.streamed_boundary_artifacts import _state_storage_bytes
                                     if _state_storage_bytes(owner.resident_tensors()) > operator_windows['max_replay_cotangent_bytes']:
                                         raise RuntimeError('joint replay cotangents exceed their resident budget')
                                     if boundary_storage is not None:
@@ -4093,7 +4091,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.boundary_storage_config:
         if not args.streaming:
             p.error("--boundary-storage-config requires --streaming")
-        from prismaquant.cost_streaming import normalize_boundary_storage
+        from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
         boundary_storage_config = normalize_boundary_storage(
             json.loads(Path(args.boundary_storage_config).read_text()))
     if bool(args.calibration_input) != bool(args.calibration_input_sha256):
@@ -4218,9 +4216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             streamed_model_identity = None
             if args.checkpoint_dir or args.joint_activation or boundary_storage_config is not None:
-                from prismaquant.cost_streaming import (
-                    build_streamed_model_identity,
-                )
+                from prismaquant.streamed_model_identity import build_streamed_model_identity
 
                 streamed_model_identity = build_streamed_model_identity(
                     streamed_runner,

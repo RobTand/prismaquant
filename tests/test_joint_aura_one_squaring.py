@@ -11,7 +11,7 @@ import torch
 
 from prismaquant import format_registry as fr
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.joint_aura import (activation_identity, arithmetic_identity, identity_sha256,
                                     make_joint_aura_entry, squared_signed)
 

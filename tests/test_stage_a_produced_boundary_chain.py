@@ -430,8 +430,7 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
     # policy. Same bundle either way; this is where it is declared.
     set_lease_helper_root(str(pb_repo))
     from prismabuild import produced_output as po
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
     from prismaquant.stage_a_produced_output import (
         BoundaryProducedPublication)
 
@@ -848,8 +847,7 @@ def test_strict_read_of_an_unpublished_boundary_entry_refuses(
     """
 
     import torch
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
     from prismaquant.residency_map import ENV_VAR
     from prismaquant.staged_lease import LeaseRefused
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
@@ -1335,8 +1333,7 @@ def test_a_foreign_session_reference_is_refused(tmp_path):
     """A reference from another generation never enters a bound window."""
 
     import torch
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage, _publication, _q, _env, _pb = _bound_owner(tmp_path)
     foreign = StreamedBoundaryArtifacts({
@@ -1355,8 +1352,7 @@ def test_a_foreign_session_reference_is_refused(tmp_path):
 def test_an_entry_directory_outside_the_prefix_is_refused(tmp_path):
     """An own-generation path must sit inside the bound output prefix."""
 
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     _storage, publication, _q, _env, _pb = _bound_owner(tmp_path)
     escaped = StreamedBoundaryArtifacts({
@@ -1422,8 +1418,7 @@ def test_a_read_only_attachment_cannot_declare_an_owner_prewrite(tmp_path):
     """
 
     import torch
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage, publication, _q, _env, _pb = _bound_owner(tmp_path)
     storage.write(torch.arange(8, dtype=torch.float32),

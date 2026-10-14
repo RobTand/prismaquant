@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 transformers = pytest.importorskip("transformers")
 
 from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 
 
 def _llama_config_dict():
@@ -66,7 +67,7 @@ def _runner(shard_paths, config_dict):
 
 def _build_cache(root, shards, config_dict):
     cache = root / "identity-cache.json"
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         _runner(shards, config_dict), str(root), identity_cache_path=cache)
     assert cache.is_file()
     return cache, identity
@@ -83,7 +84,7 @@ def test_text_only_end_to_end_agrees_with_runner_derivation(checkpoint):
     config_dict = _llama_config_dict()
     config_dict["_name_or_path"] = str(root)
     cache, identity = _build_cache(root, shards, config_dict)
-    validated = cs.validate_cached_streamed_model_identity(str(root), cache)
+    validated = cs_identity.validate_cached_streamed_model_identity(str(root), cache)
     assert validated["content_sha256"] == identity["content_sha256"]
 
 
@@ -129,7 +130,7 @@ def test_multimodal_branch_uses_multimodal_staging_and_skeleton(
     config_dict = _llama_config_dict()
     config_dict["_name_or_path"] = str(root)
     cache, identity = _build_cache(root, shards, config_dict)
-    validated = cs.validate_cached_streamed_model_identity(str(root), cache)
+    validated = cs_identity.validate_cached_streamed_model_identity(str(root), cache)
     assert validated["content_sha256"] == identity["content_sha256"]
     assert "stage_multimodal" in calls
     assert ("skeleton", True) in calls
@@ -159,17 +160,17 @@ def test_live_config_comes_from_skeleton_not_raw_autoconfig(
     monkeypatch.setattr(streaming, "build_streaming_skeleton", stub_skeleton)
     runner_config = dict(normalized)
     cache, identity = _build_cache(root, shards, runner_config)
-    validated = cs.validate_cached_streamed_model_identity(str(root), cache)
+    validated = cs_identity.validate_cached_streamed_model_identity(str(root), cache)
     assert validated["content_sha256"] == identity["content_sha256"]
 
     # The same cache refuses when the runner config was the raw form: the
     # skeleton normalization is part of the bound identity, not advisory.
     cache2 = root / "identity-cache-raw.json"
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards, dict(raw, _name_or_path=str(root))),
         str(root), identity_cache_path=cache2)
     with pytest.raises(RuntimeError, match="live config differs"):
-        cs.validate_cached_streamed_model_identity(str(root), cache2)
+        cs_identity.validate_cached_streamed_model_identity(str(root), cache2)
 
 
 def test_mutated_semantic_field_still_refuses(monkeypatch, checkpoint):
@@ -190,7 +191,7 @@ def test_mutated_semantic_field_still_refuses(monkeypatch, checkpoint):
 
     monkeypatch.setattr(streaming, "build_streaming_skeleton", stub_skeleton)
     with pytest.raises(RuntimeError, match=r"changed=\['hidden_size'\]"):
-        cs.validate_cached_streamed_model_identity(str(root), cache)
+        cs_identity.validate_cached_streamed_model_identity(str(root), cache)
 
 
 def test_skeleton_failure_is_fail_closed(monkeypatch, checkpoint):
@@ -207,4 +208,4 @@ def test_skeleton_failure_is_fail_closed(monkeypatch, checkpoint):
 
     monkeypatch.setattr(streaming, "build_streaming_skeleton", refuse_skeleton)
     with pytest.raises(RuntimeError, match="cannot validate the live source config"):
-        cs.validate_cached_streamed_model_identity(str(root), cache)
+        cs_identity.validate_cached_streamed_model_identity(str(root), cache)

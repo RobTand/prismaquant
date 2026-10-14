@@ -58,7 +58,7 @@ def task_metrics(raw):
 
 
 def _task_model_artifact(backend, *, model_config=None):
-    from .cost_streaming import build_source_checkpoint_identity
+    from .streamed_model_identity import build_source_checkpoint_identity
     path = Path(backend["pretrained"])
     if path.is_dir():
         return build_source_checkpoint_identity(path)

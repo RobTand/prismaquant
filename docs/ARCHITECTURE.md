@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
+`cost_streaming` owns streamed causal-LM forwards and their model adapter.
+`streamed_boundary_artifacts` owns exact activation boundaries, produced-output
+lifetimes, partition plans and boundary-window prefetch. `streamed_model_identity`
+owns checkpoint identity, model identity and portable fingerprint reuse.
+All callers use these owners directly. The definitions and serialized contracts
+are unchanged; the existing streaming context, caches and publication adapters
+still own residency and PrismaBuild interaction.
+
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): the development
 admission answer lives in `prismaquant/tessera_runtime/reviewed_answer.json`.
 `tessera_runtime_contract` loads that packaged data without generating an answer

@@ -1023,7 +1023,7 @@ def _rebuild_batches(runner, *, partitions, shared_pass):
     shared forward pass state comes from the strided checkpoint.
     ``partitions`` is the capture's own row-sliced batch list, in order.
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
 
     batches = []
     for batch_index, rows in enumerate(partitions):
@@ -1178,7 +1178,7 @@ def quantum_retained_state(execution):
     One normalization shared by window resolution (before any GPU work) and
     the replay core, so both derive the same windows from the same bytes.
     """
-    from .cost_streaming import normalize_boundary_storage
+    from .streamed_boundary_artifacts import normalize_boundary_storage
     from .joint_retained_window_plan import (
         RetainedWindowBudget,
         normalize_retained_execution,
@@ -1781,13 +1781,9 @@ def run_layer_quantum_core(
         _write_aura_unit_checkpoint,
         _ZERO_COST_FORMATS,
     )
-    from .cost_streaming import (
-        StreamedBoundaryArtifacts,
-        _state_storage_bytes,
-        normalize_boundary_storage,
-        prefetched_boundary_batches,
-        validate_streamed_model_identity,
-    )
+    from .streamed_boundary_artifacts import StreamedBoundaryArtifacts, _state_storage_bytes, normalize_boundary_storage
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
+    from .streamed_model_identity import validate_streamed_model_identity
     from .joint_aura import (
         JointOperatorStatisticsLease,
         activation_identity,
@@ -3906,7 +3902,7 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
     and the digest proof is staged into the run directory, because the
     digest reader takes a path.
     """
-    from .cost_streaming import build_streamed_model_identity
+    from .streamed_model_identity import build_streamed_model_identity
     from .tessera_joint_aura import (
         seed_source_identity_cache,
         source_identity_proof_kwargs,

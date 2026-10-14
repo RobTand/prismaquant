@@ -8405,7 +8405,7 @@ def _export_resume_fingerprint(
     raises instead.
     """
 
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     fp_state = _render_lever_provenance()
     fp_state["assignment_hash"] = DIRECT_ASCII_SPACED_LAX.sha256(assignment)[:16]

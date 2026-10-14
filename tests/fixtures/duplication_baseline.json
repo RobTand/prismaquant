@@ -174,7 +174,7 @@
   "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256",
   "sorted-json:prismaquant/container_runtime_identity.py::main",
   "sorted-json:prismaquant/container_runtime_identity.py::write_or_verify_identity",
-  "sorted-json:prismaquant/cost_streaming.py::StreamedBoundaryArtifacts._publish_status",
+  "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status",
   "sorted-json:prismaquant/dev_mode.py::_shown",
   "sorted-json:prismaquant/glm53_stock_reprice.py::main",
   "sorted-json:prismaquant/io_spans.py::IoSpanLog.close",

@@ -106,7 +106,7 @@ def _row(entry: dict) -> dict:
 def prepare(root: Path, tier: str) -> dict:
     """Write the tiny campaign, the producer's template and both readsets."""
     import dispatch_joint_quanta as dispatch
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
     from prismaquant.joint_layer_quanta import (
         CHECKPOINT_LOAD_PHASE, executable_bound_phase_name,
         executable_source_phase_name, seal_manifest_bytes)

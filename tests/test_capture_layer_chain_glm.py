@@ -176,7 +176,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     tensor a quantum writes and of every one its successor reads.
     """
     from prismaquant import capture_layer_chain as chain
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_boundary_artifacts as cost_streaming_boundaries
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_campaign as campaign
     # Controlled legacy-mechanism fixture, not a qualified immutable provider.
@@ -229,18 +230,18 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
             return original(path, *args, **kwargs)
         return hash_file
     monkeypatch.setattr(cache, "sha256", spy(cache.sha256))
-    monkeypatch.setattr(cost_streaming, "_file_sha256", spy(cost_streaming._file_sha256))
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", spy(cost_streaming_identity._file_sha256))
 
     # Where each boundary tensor lives as a quantum writes it, and as its
     # successor's frontier hands it to the forward (which moves it to the
     # runner's device).
     written, read = [], []
-    write = cost_streaming.StreamedBoundaryArtifacts.write
+    write = cost_streaming_boundaries.StreamedBoundaryArtifacts.write
 
     def recording_write(self, tensor, **kwargs):
         written.append(tensor.device.type)
         return write(self, tensor, **kwargs)
-    monkeypatch.setattr(cost_streaming.StreamedBoundaryArtifacts, "write", recording_write)
+    monkeypatch.setattr(cost_streaming_boundaries.StreamedBoundaryArtifacts, "write", recording_write)
     hidden_batches = chain._BoundaryFrontier.hidden_batches
 
     def recording_hidden_batches(self):

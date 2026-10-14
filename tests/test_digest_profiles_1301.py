@@ -144,7 +144,7 @@ SITES = (
     ("prismaquant.native_operator_panel", "operator_route_identity", {}),
     ("prismaquant.artifact_registry", "canonical_layer_config_json", {}),
     ("prismaquant.artifact_registry", "layer_config_sha256", {}),
-    ("prismaquant.cost_streaming", "canonical_fingerprint_key", {}),
+    ('prismaquant.streamed_model_identity', "canonical_fingerprint_key", {}),
     ("prismaquant.production_recache", "assignment_digest", {}),
     ("prismaquant.tessera_sampled_stack_proposal", "selected_assignment_sha256", {}),
     ("prismaquant.runtime_provenance", "_source_tree_identity", {}),
@@ -208,7 +208,7 @@ PROFILE_BINDINGS = (
     ("prismaquant.perturbed_x_cache", "_exact_activation_json", DIRECT_ASCII_STRICT, "text"),
     ("prismaquant.artifact_registry", "canonical_layer_config_json", DIRECT_ASCII_LAX, "text"),
     ("prismaquant.artifact_registry", "layer_config_sha256", DIRECT_ASCII_LAX, "sha256"),
-    ("prismaquant.cost_streaming", "canonical_fingerprint_key", DIRECT_ASCII_LAX, "text"),
+    ('prismaquant.streamed_model_identity', "canonical_fingerprint_key", DIRECT_ASCII_LAX, "text"),
     ("prismaquant.model_walk", "_canonical", DIRECT_ASCII_LAX_DEFAULT_STR, "text"),
 )
 

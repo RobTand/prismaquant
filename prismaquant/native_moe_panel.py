@@ -879,7 +879,7 @@ def _validate_original_source_acquisition(capture, *, source_model_identity,
     launch. This metadata join cannot turn its normalized CPU controls into
     original CUDA, full-draw quality, complete capture or native qualification.
     """
-    from .cost_streaming import validate_streamed_model_identity, canonical_streamed_model_semantic_config
+    from .streamed_model_identity import validate_streamed_model_identity, canonical_streamed_model_semantic_config
     from .source_generation import (_control, _session, _full_calibration, _binding,
         ORIGINAL_AUTHORITY_KEYS, ORIGINAL_STATIC_AUTHORITY_KEYS, normalize_original_source_static_authority)
     from .stage_inputs import require_source_identity
@@ -1560,7 +1560,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(probe["source_model"]["source"], request["source_model"], "probe source model")
     _equal({Path(item["path"]).name: item["sha256"] for item in probe["source_model"]["shards"]},
            request["source_shards"], "probe source checkpoint bytes")
-    from .cost_streaming import canonical_streamed_model_semantic_config
+    from .streamed_model_identity import canonical_streamed_model_semantic_config
     source = inputs["routing_capture"]["producer_source"]
     _equal(source["files"], request["source_shards"], "capture/probe full source files")
     _equal(source["config_sha256"], request["source_config_sha256"], "captured source config bytes")

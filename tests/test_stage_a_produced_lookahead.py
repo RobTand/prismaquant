@@ -364,7 +364,7 @@ def _read_plane(storage, batches, *, then=None):
     finds is what was asked, not a race with the fleet.
     """
 
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     # ``then`` only when asked for: the parent's signature has no such
     # argument, and the red run must fail on staging, not on a keyword.
@@ -491,7 +491,7 @@ def test_write_time_publication_leaves_the_lookahead_its_room(
     assert storage.drain_produced_stager(60.0)
     with chain._fleet(q, tmp_path):
         chain._strict(monkeypatch, env, pb_repo, q)
-        from prismaquant.cost_streaming import prefetched_boundary_batches
+        from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
         with prefetched_boundary_batches(storage, batches, 0) as windows:
             for index, _batch, _tensor, _incoming in windows:
                 if index != 0:

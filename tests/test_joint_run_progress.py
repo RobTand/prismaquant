@@ -351,8 +351,7 @@ def test_a_container_launch_without_a_channel_forwards_nothing():
 def test_every_published_entry_file_moves_the_count(tmp_path):
     """The hook is at publication, which is where a unit becomes durable."""
     torch = pytest.importorskip("torch")
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
@@ -374,8 +373,7 @@ def test_every_published_entry_file_moves_the_count(tmp_path):
 
 def test_a_storage_with_no_reporter_behaves_exactly_as_before(tmp_path):
     torch = pytest.importorskip("torch")
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),

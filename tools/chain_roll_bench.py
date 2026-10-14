@@ -344,8 +344,8 @@ def cmd_child(args) -> int:
 
     import prismaquant
     from prismaquant.calibration_data import load_calibration_input
-    from prismaquant.cost_streaming import (
-        StreamedBoundaryArtifacts, build_streamed_causal_lm, normalize_boundary_storage)
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, normalize_boundary_storage
+    from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.joint_adjoint_checkpoints import reference_from_record, render_free_layer_roll
     from prismaquant.joint_cost_quantum import _install_with_settlement, _rebuild_batches
     from prismaquant.model_profiles import detect_profile

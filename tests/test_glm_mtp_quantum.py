@@ -32,7 +32,7 @@ from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant import glm_mtp, glm_mtp_quantum as quantum, glm_mtp_selection  # noqa: E402
 from prismaquant import joint_aura as joint  # noqa: E402
 from prismaquant.cost_currency import probe_identity_walls_differ  # noqa: E402
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.joint_statistics_replay import SCHEMA as WINDOWS_SCHEMA  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
@@ -366,20 +366,21 @@ def test_the_source_model_identity_is_validated_once_not_per_row(env, monkeypatc
     1734 rows. The count must not grow with the rows.
     """
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
 
-    original = cost_streaming.validate_streamed_model_identity
+    original = cost_streaming_identity.validate_streamed_model_identity
     calls = []
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get("where"))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", counted)
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", counted)
     payload = env.run()
     rows = [row for rows in payload["costs"].values() for row in rows.values()]
     assert len(rows) > 2
     assert len(calls) <= 1, calls
     for row in rows:
         assert type(row["probe_identity"]) is dict
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", original)
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", original)
     assert all(joint.validate_joint_aura_entry(row) for row in rows)

@@ -60,7 +60,7 @@ class _ValidatedProbeIdentity(Mapping):
     def __init__(self, probe):
         encoded = DIRECT_ASCII_STRICT.encoded(probe)
         snapshot = json.loads(encoded)
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
         validate_streamed_model_identity(probe["source_model"], where="joint AURA row")
         object.__setattr__(self, "_fields", tuple(
             (key, json.dumps(value, separators=(",", ":"), allow_nan=False))
@@ -1182,7 +1182,7 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
     digest = entry.get("probe_identity_sha256")
     if not isinstance(probe, Mapping) or probe.get("schema") != "prismaquant.joint_aura.probes.v2" or identity_sha256(probe) != digest or operator.get("probe_identity_sha256") != digest:
         raise ValueError("joint AURA probe identity mismatch")
-    from prismaquant.cost_streaming import validate_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_streamed_model_identity
     try:
         if type(probe) is not _ValidatedProbeIdentity:
             validate_streamed_model_identity(probe["source_model"], where="joint AURA row")

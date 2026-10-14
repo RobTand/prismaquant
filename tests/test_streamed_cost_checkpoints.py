@@ -12,7 +12,7 @@ import torch.nn as nn
 import prismaquant.aura_cost as aura
 import prismaquant.expert_empirical_cost as expert_cost
 from prismaquant.cost_streaming import StreamedCausalLM
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
 from prismaquant.model_profiles.default import DefaultProfile

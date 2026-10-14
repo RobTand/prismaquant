@@ -74,7 +74,7 @@ def final_hidden(runner, input_ids, boundary, *, layer: int):
     from the runner's own ``_prepare`` on the same ids, as the quanta rebuild
     it. Refuses any layer but the last, since only the last feeds the norm.
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
     from .layer_streaming import _get_final_norm
 
     if int(layer) != int(runner.num_layers) - 1:

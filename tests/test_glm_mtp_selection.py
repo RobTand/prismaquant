@@ -23,7 +23,7 @@ torch = pytest.importorskip("torch")
 from prismaquant import format_registry as fr  # noqa: E402
 from prismaquant import joint_aura as joint  # noqa: E402
 from prismaquant import mtp_rung_selection as canon  # noqa: E402
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
 from prismaquant.glm_mtp import mtp_objective_identity, with_mtp_objective  # noqa: E402
 from test_rung_allowability import allowability_cli_args, publication  # noqa: E402
 

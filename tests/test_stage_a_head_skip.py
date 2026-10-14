@@ -182,6 +182,7 @@ def _entry(monkeypatch, *, implementation, walk, generation):
         model_profiles,
         tessera_joint_aura,
     )
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant.joint_cost_stage_a import KernelTimeProfiler
 
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
@@ -201,7 +202,7 @@ def _entry(monkeypatch, *, implementation, walk, generation):
     monkeypatch.setattr(model_profiles, "detect_profile", lambda *a, **k: None)
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm",
                         lambda *a, **k: _dense_runner())
-    monkeypatch.setattr(cost_streaming, "build_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "build_streamed_model_identity",
                         lambda *a, **k: _model_identity("joint-source"))
     monkeypatch.setattr(glm_capture_compatibility, "require_capture_compatibility",
                         lambda *a, **k: None)

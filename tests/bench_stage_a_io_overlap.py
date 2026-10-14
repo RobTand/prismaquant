@@ -145,7 +145,7 @@ class ThreadedExport(spool_tests.ControlledExport):
 
 def _pinned_session(monkeypatch):
     """Pin the generation id the owner draws at bind, and nothing else."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     bind = StreamedBoundaryArtifacts.bind
 
@@ -202,7 +202,7 @@ def _chain(storage, written, profiler):
 
 
 def _roll_chain(storage, batches, grad_outs, final, write):
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     for layer in range(TOP - 1, -1, -1):
         for probe in range(N_PROBES):

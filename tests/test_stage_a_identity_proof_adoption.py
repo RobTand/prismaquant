@@ -29,7 +29,7 @@ def _write_proof(source, out):
     would validate the campaign's proof. The fixture's shards are hashed here,
     before the row starts counting.
     """
-    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
 
     weight_map = json.loads((source / 'model.safetensors.index.json').read_text())['weight_map']
     runner = SimpleNamespace(
@@ -84,12 +84,13 @@ def test_a_shard_restamped_after_the_proof_refuses_adoption_and_hashes_fresh(
     comes from the fingerprint check and not from something else in the row.
     """
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
 
     campaign, argv, state = selected_source_fixture(monkeypatch, tmp_path)
     proof, digest = _write_proof(state['source'], tmp_path / 'source-identity.json')
     _restamp(state['source'] / 'selected.safetensors')
     if predicate == 'admit-anything':
-        monkeypatch.setattr(cost_streaming, 'stat_fingerprint_reusable', lambda *_a: True)
+        monkeypatch.setattr(cost_streaming_identity, 'stat_fingerprint_reusable', lambda *_a: True)
     state['hashed'].clear()
     assert campaign.main(_proof_argv(argv, proof, digest)) == campaign.EXIT_EMPTY_MENU
     assert torch.equal(state['copied'][0], state['selected'])
@@ -116,6 +117,7 @@ def test_a_proof_file_that_differs_from_its_declared_digest_is_not_adopted(
 def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_path, capsys):
     """A proof whose shard rows lack ``path`` refuses; it never stops the row."""
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
 
     campaign, argv, state = selected_source_fixture(monkeypatch, tmp_path)
     proof, _ = _write_proof(state['source'], tmp_path / 'source-identity.json')
@@ -123,7 +125,7 @@ def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_
     malformed = {**record['identity'], 'shards': [
         {key: value for key, value in row.items() if key != 'path'}
         for row in record['identity']['shards']]}
-    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+    monkeypatch.setattr(cost_streaming_identity, '_read_streamed_model_identity_cache',
                         lambda *_a, **_k: (record, malformed))
     digest = hashlib.sha256(proof.read_bytes()).hexdigest()
     state['hashed'].clear()

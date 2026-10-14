@@ -26,6 +26,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 
 REFUSAL = r"would hash 196608 bytes across 2 shard.*CPU-only quantum upstream"
 
@@ -59,7 +60,7 @@ def _runner(shards):
 
 def _payload_hashes(monkeypatch, *, refuse):
     calls = []
-    real = cs._file_sha256
+    real = cs_identity._file_sha256
 
     def _hash(path):
         if str(path).endswith(".safetensors"):
@@ -67,7 +68,7 @@ def _payload_hashes(monkeypatch, *, refuse):
                 raise AssertionError(f"payload hash called for {path}")
             calls.append(str(path))
         return real(path)
-    monkeypatch.setattr(cs, "_file_sha256", _hash)
+    monkeypatch.setattr(cs_identity, "_file_sha256", _hash)
     return calls
 
 
@@ -78,11 +79,11 @@ def _identity_quantum(root, out):
 
 
 def _binding(path):
-    return {"path": str(path), "sha256": cs._file_sha256(path)}
+    return {"path": str(path), "sha256": cs_identity._file_sha256(path)}
 
 
 def _reference(root, shards):
-    return cs.build_streamed_model_identity(_runner(shards), str(root))
+    return cs_identity.build_streamed_model_identity(_runner(shards), str(root))
 
 
 # -- Stage A ----------------------------------------------------------------
@@ -201,7 +202,7 @@ def test_worker_covered_source_reproduces_the_full_hash_identity(
     identity = _build_worker_source_identity(
         _runner(shards), root, tmp_path / "id.json",
         source_digest_cache=digests,
-        source_digest_cache_sha256=cs._file_sha256(digests))
+        source_digest_cache_sha256=cs_identity._file_sha256(digests))
     assert identity == reference
 
 

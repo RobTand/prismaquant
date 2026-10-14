@@ -126,6 +126,7 @@ def _torn_second_stat(monkeypatch, method, target):
 def test_torn_during_read_fences_refuse_in_both_modes(
         monkeypatch, mode, fence, capture, checkpoint):
     from prismaquant import cost_streaming as cs
+    from prismaquant import streamed_model_identity as cs_identity
     from test_source_identity_validate_derivation import _build_cache, _llama_config_dict
 
     if mode is None:
@@ -156,10 +157,10 @@ def test_torn_during_read_fences_refuse_in_both_modes(
         config = _llama_config_dict()
         config['_name_or_path'] = str(root)
         cache, _identity = _build_cache(root, shards, config)
-        monkeypatch.setattr(cs, 'live_streaming_runner_config', lambda _source: config)
+        monkeypatch.setattr(cs_identity, 'live_streaming_runner_config', lambda _source: config)
         _torn_second_stat(monkeypatch, 'stat', root / 'config.json')
         with pytest.raises(RuntimeError, match='source config changed while validating'):
-            cs.validate_cached_streamed_model_identity(str(root), cache)
+            cs_identity.validate_cached_streamed_model_identity(str(root), cache)
 
 
 

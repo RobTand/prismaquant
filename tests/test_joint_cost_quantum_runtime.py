@@ -19,7 +19,7 @@ import torch
 
 import prismaquant.aura_cost as aura
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space,
     adjoint_receipt_path,
@@ -517,6 +517,7 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     import prismaquant.joint_cost_stage_a as stage_a
     import prismaquant.tessera_joint_aura as aura
     import prismaquant.cost_streaming as streaming
+    from prismaquant import streamed_model_identity as streaming_identity
     import prismaquant.tessera_reader as reader_mod
     import prismaquant.gpu_guard as guard
     import prismaquant.joint_projection_backend as backend
@@ -642,6 +643,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     import prismaquant.joint_cost_stage_a as stage_a
     import prismaquant.tessera_joint_aura as aura
     import prismaquant.cost_streaming as streaming
+    from prismaquant import streamed_model_identity as streaming_identity
     import prismaquant.tessera_reader as reader_mod
     import prismaquant.gpu_guard as guard
     import prismaquant.joint_projection_backend as backend
@@ -708,7 +710,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     monkeypatch.setattr(streaming, "build_streamed_causal_lm",
                         lambda model, **kwargs: (
                             captured.update(kwargs) or _Runner()))
-    monkeypatch.setattr(streaming, "build_streamed_model_identity",
+    monkeypatch.setattr(streaming_identity, "build_streamed_model_identity",
                         lambda *a, **k: {"identity": "stub"})
     monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
     monkeypatch.setattr(stage_a, "GpuPowerSampler",

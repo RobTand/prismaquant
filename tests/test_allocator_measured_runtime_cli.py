@@ -131,7 +131,7 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     from prismaquant.joint_aura import (
         activation_identity, arithmetic_identity, identity_sha256, make_joint_aura_entry,
     )
-    from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     from prismaquant.measured_runtime_prices import SCHEMA, CONTEXT_SCHEMA
 

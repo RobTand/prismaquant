@@ -1790,7 +1790,7 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
         else:
             shared_pass[int(parts[2])] = state
         if shared_state_max_bytes is not None:
-            from .cost_streaming import _state_storage_bytes
+            from .streamed_boundary_artifacts import _state_storage_bytes
             shared_tensor_bytes += _state_storage_bytes(state)
             if shared_tensor_bytes > shared_state_max_bytes:
                 raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
@@ -1823,7 +1823,7 @@ def _load_packed_shared_states(stored: dict, *, deadline,
         kind, key = shared_state_slot(name)
         (shared_adjoint if kind == "adjoint" else shared_pass)[key] = state
         if shared_state_max_bytes is not None:
-            from .cost_streaming import _state_storage_bytes
+            from .streamed_boundary_artifacts import _state_storage_bytes
             shared_tensor_bytes += _state_storage_bytes(state)
             if shared_tensor_bytes > shared_state_max_bytes:
                 raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
@@ -2248,7 +2248,7 @@ def _chain_group_batch(runner, batches, indices, cache):
     B-row forward builds for itself; a mask built for one row is never
     broadcast to B (GLM's DSA mask is a ``[B, S]`` padding mask).
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
 
     key = tuple(indices)
     group = cache.get(key)
@@ -2731,7 +2731,7 @@ def _render_free_probe_passes(
 
     At ``batch_size`` 1 this is the original loop, call for call.
     """
-    from .cost_streaming import prefetched_boundary_batches
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
 
     batch_size = int(batch_size)
     if storage is not None and int(storage.config["prefetch_batches"]) % batch_size:
@@ -2866,10 +2866,7 @@ def _render_free_fused_passes(
     ``x_in.grad`` is cleared before each so every probe's input cotangent is
     its own, never a sum.
     """
-    from .cost_streaming import (
-        fused_window_batches,
-        prefetched_fused_boundary_windows,
-    )
+    from .streamed_boundary_artifacts import fused_window_batches, prefetched_fused_boundary_windows
 
     device, dtype = runner.device, runner.dtype
     n_probes = int(n_probes)

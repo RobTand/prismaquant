@@ -47,7 +47,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = (
     "prismaquant/aura_cost.py",
     "prismaquant/cost_currency.py",
-    "prismaquant/cost_streaming.py",
+    'prismaquant/cost_streaming.py',
+    'prismaquant/streamed_boundary_artifacts.py',
+    'prismaquant/streamed_model_identity.py',
     "prismaquant/dev_mode.py",
     "prismaquant/glm_kda_capture_kernel.py",
     "prismaquant/joint_adjoint_band.py",
@@ -108,28 +110,28 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed._record_joint_operator"): (
         1, INTEGRITY, "the operator measured is the render the cache holds, within one run"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.inspect_published_session"): (
         3, WALL, "the bind digest covers calibration/data and reproduces the selected "
         "generation's session; a dev resume first checks fields and adopts the stored "
         "bind identity (wall). Pending-only exact policy equality authenticates the "
         "issued empty namespace, including byte ceilings; the requested completed "
         "metadata owner's session, policy, label and bound fields agree (structure). "
         "Ordinary resume byte-ceiling differences still go through seal_check"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
         1, STRUCTURE, "a resumed boundary entry belongs to this generation"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.attach"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.attach"): (
         1, STRUCTURE, "the attached forward recovery is the session it records"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts._entry_identity"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts._entry_identity"): (
         1, STRUCTURE, "a boundary reference names a live generation"),
-    ("prismaquant/cost_streaming.py", "_hash_one_source_shard"): (
+    ('prismaquant/streamed_model_identity.py', "_hash_one_source_shard"): (
         1, INTEGRITY, "a source shard changed while it was hashed"),
-    ("prismaquant/cost_streaming.py", "build_source_checkpoint_identity"): (
+    ('prismaquant/streamed_model_identity.py', "build_source_checkpoint_identity"): (
         1, INTEGRITY, "source metadata changed while it was hashed"),
-    ("prismaquant/cost_streaming.py", "_read_streamed_model_identity_cache"): (
+    ('prismaquant/streamed_model_identity.py', "_read_streamed_model_identity_cache"): (
         1, INTEGRITY, "an identity cache for another source is not this source's hashes"),
-    ("prismaquant/cost_streaming.py", "validate_streamed_model_identity"): (
+    ('prismaquant/streamed_model_identity.py', "validate_streamed_model_identity"): (
         2, INTEGRITY, "the identity schema, and content_sha256 against its shard digests"),
-    ("prismaquant/cost_streaming.py", "validate_cached_streamed_model_identity"): (
+    ('prismaquant/streamed_model_identity.py', "validate_cached_streamed_model_identity"): (
         1, INTEGRITY, "a cached identity whose tensor-to-shard map is not this checkpoint's"),
     ("prismaquant/joint_adjoint_checkpoints.py", "unpack_shared_states"): (
         1, INTEGRITY, "a pack member against its recorded digest"),
@@ -731,10 +733,10 @@ def test_incoming_readset_classification_allows_only_its_existing_slice_check():
 
 
 @pytest.mark.parametrize("path,scope,existing,indent,allowed", [
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session",
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.inspect_published_session",
      '        directory = Path(self.config["directory"]) / str(session["generation"])\n',
      "        ", 3),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind",
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.rebind",
      '        session, directory = self.inspect_published_session(session, identity=identity)\n',
      "        ", 0),
     ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture",

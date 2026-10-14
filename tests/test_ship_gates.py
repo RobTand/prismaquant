@@ -235,7 +235,7 @@ def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
 
 def _task_replay_job(root):
     from test_task_quality_replay import make_task_replay_fixture
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     job_path = job_config(root / "job")
     job = json.loads(job_path.read_text())
     config, result, raw = make_task_replay_fixture(root / "quality")
@@ -357,7 +357,7 @@ def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypa
 
 @pytest.mark.parametrize("dev", [False, True])
 def test_task_replay_consumer_refuses_declared_tessera_bytes(tmp_path, monkeypatch, dev):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     job, config, result, _, output = _task_replay_job(tmp_path)
     model = Path(config["backend"]["pretrained"])

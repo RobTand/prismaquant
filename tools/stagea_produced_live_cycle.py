@@ -187,8 +187,7 @@ def _chain_cycle(publication, report, report_progress, *,
 
     import torch
 
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     groups, n_probes, layers = 2, 4, 2
     n_batches = group_size * groups
@@ -534,8 +533,7 @@ def main() -> int:
         ap.error("--entry-mib is nonnegative and --group-size is positive")
 
     from prismaquant.calibration_data import _read_calibration_payload
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
     from prismaquant.prismabuild_progress import report as report_progress
     from prismaquant.residency_map import (
         bind_residency_manifest, residency_resolver)

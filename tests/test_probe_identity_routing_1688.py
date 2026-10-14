@@ -21,13 +21,14 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY / "src"))
 sys.path.insert(0, str(REPOSITORY))
 
-from prismaquant import cost_streaming as cs  # noqa: E402
+from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity  # noqa: E402
 from prismaquant import digests as owners  # noqa: E402
 from prismaquant import joint_aura as ja  # noqa: E402
 
 
 def test_probe_identity_routes_through_owner(monkeypatch):
-    monkeypatch.setattr(cs, "validate_streamed_model_identity",
+    monkeypatch.setattr(cs_identity, "validate_streamed_model_identity",
                         lambda *a, **k: {})
     seen = []
     stub = types.SimpleNamespace(

@@ -15,15 +15,16 @@ def _prepare(row):
 
 def test_shared_identity_validated_once_and_detached(monkeypatch):
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     row = _row(UNIT_A, [1, 2, 3])
     original = row["probe_identity"]
     other = dict(row)
     calls = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
     def counted(*args, **kwargs):
         calls.append(1)
         return validate(*args, **kwargs)
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", counted)
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", counted)
     joint.prepare_joint_aura_identities({"costs": {UNIT_A: {"a": row, "b": other}}})
     for entry in (row, other, row):
         assert joint.validate_joint_aura_entry(entry)

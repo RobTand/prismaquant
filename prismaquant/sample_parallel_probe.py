@@ -477,7 +477,7 @@ def _build_worker_source_identity(
     and Stage B also use. The proof is the CPU-only identity quantum's
     ``source_digest_cache``; give its sha256 to have it digest-checked.
     """
-    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
     from prismaquant.tessera_joint_aura import source_identity_proof_kwargs
 
     if source_digest_cache is not None and source_digest_cache_sha256 is not None:
@@ -511,11 +511,8 @@ def prepare_worker_source_cache(
     is reusable only when the ordinary complete-checkpoint validator accepts
     it exactly.
     """
-    from prismaquant.cost_streaming import (
-        build_streamed_causal_lm,
-        compact_streamed_model_identity,
-        validate_cached_streamed_model_identity,
-    )
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import compact_streamed_model_identity, validate_cached_streamed_model_identity
     from prismaquant.gpu_guard import require_cuda_hot_path
     from prismaquant.model_profiles import detect_profile
 

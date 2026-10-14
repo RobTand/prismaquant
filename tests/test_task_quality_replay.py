@@ -8,7 +8,7 @@ import torch
 from safetensors.torch import save_file
 from transformers import LlamaConfig
 
-from prismaquant.cost_streaming import build_source_checkpoint_identity
+from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 from prismaquant.quality_stage import artifact, evaluate_criteria, verify_result
 
 pytestmark = pytest.mark.task_suite
@@ -81,9 +81,10 @@ def test_default_dev_replay_retains_metrics_without_checkpoint_rehash(replay_cas
     replace_task_fixture(config, kind)
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE")
     import prismaquant.cost_streaming as source_owner
+    from prismaquant import streamed_model_identity as source_owner_identity
     def refuse_rehash(*args, **kwargs):
         raise AssertionError("dev replay must not rehash checkpoint data")
-    monkeypatch.setattr(source_owner, "build_source_checkpoint_identity", refuse_rehash)
+    monkeypatch.setattr(source_owner_identity, "build_source_checkpoint_identity", refuse_rehash)
     stored = copy.deepcopy(result["measurement"])
     assert verify_result(result, config, config_sha256="a" * 64)["status"] == "passed"
     assert result["measurement"] == stored

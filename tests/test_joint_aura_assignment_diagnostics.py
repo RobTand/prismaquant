@@ -13,7 +13,7 @@ import torch
 
 from prismaquant import format_registry as fr
 from prismaquant import joint_aura as joint
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 
 
 UNIT_A = "model.layers.0.mlp.down_proj"

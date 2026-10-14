@@ -386,7 +386,7 @@ class StreamedProductionAnchorRenderer:
         transient_consumer_identity: Mapping[str, object] | None = None,
     ) -> None:
         from prismaquant.cost_stage_checkpoint import canonical_json
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.routed_experts import (
             profile_declared_routed_expert_targets,
             resolve_routed_expert_profile,

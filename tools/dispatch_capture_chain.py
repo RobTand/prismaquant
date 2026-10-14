@@ -72,7 +72,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
     """Write the chain's rows once; nothing reaches PrismaBuild."""
     from prismaquant.capture_layer_chain import (parse_layer_ranges, range_label,
                                                  require_layer_tiling)
-    from prismaquant.cost_streaming import check_boundary_storage
+    from prismaquant.streamed_boundary_artifacts import check_boundary_storage
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.tessera_calibration_cache import sha256
     for value, flag in ((timeout_s, "--timeout-s"), (bookend_timeout_s, "--bookend-timeout-s")):

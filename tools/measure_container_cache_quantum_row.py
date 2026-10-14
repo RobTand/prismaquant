@@ -91,10 +91,8 @@ def _build_tiny_fixture():
     import torch.nn as nn
 
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-    from prismaquant.cost_streaming import (
-        STREAMED_MODEL_IDENTITY_SCHEMA,
-        StreamedCausalLM,
-    )
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
+    from prismaquant.cost_streaming import StreamedCausalLM
     from prismaquant.model_profiles.default import DefaultProfile
 
     class DenseLayer(nn.Module):

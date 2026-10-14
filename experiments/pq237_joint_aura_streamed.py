@@ -567,7 +567,8 @@ def main():
     from transformers import AutoModelForCausalLM
     import tessera
     from prismaquant.aura_cost import compute_aura_cost_streamed
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
     from prismaquant.joint_aura import arithmetic_identity, identity_sha256, prefetch_joint_cache
     from prismaquant.model_profiles import detect_profile
 

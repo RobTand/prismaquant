@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 
 DEV_ENV = "PRISMAQUANT_DEV_MODE"
 
@@ -49,18 +50,18 @@ def _dev_off(monkeypatch):
 ])
 def test_device_only_difference_reuses_in_dev(monkeypatch, field, value):
     _dev_on(monkeypatch)
-    from prismaquant.cost_streaming import stat_fingerprint_reusable
+    from prismaquant.streamed_model_identity import stat_fingerprint_reusable
     assert stat_fingerprint_reusable(_fingerprint(), _fingerprint(**{field: value}))
 
 
 def _filesystem(monkeypatch, fstype):
-    monkeypatch.setattr(cs, "_mount_filesystem_type", lambda _path: fstype)
+    monkeypatch.setattr(cs_identity, "_mount_filesystem_type", lambda _path: fstype)
 
 
 def test_device_only_difference_is_strict_in_certified(monkeypatch):
     _dev_off(monkeypatch)
     _filesystem(monkeypatch, "ext4")
-    from prismaquant.cost_streaming import stat_fingerprint_reusable
+    from prismaquant.streamed_model_identity import stat_fingerprint_reusable
     assert not stat_fingerprint_reusable(_fingerprint(), _fingerprint(device=75))
 
 
@@ -72,12 +73,12 @@ def test_two_nfs_mounts_of_one_object_reuse_in_certified(monkeypatch, fstype):
     admits it, and says it was a mount difference rather than dev mode."""
     _dev_off(monkeypatch)
     _filesystem(monkeypatch, fstype)
-    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
-    assert cs.stat_fingerprint_reuse(_fingerprint(), _fingerprint()) == "exact"
+    assert cs_identity.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
+    assert cs_identity.stat_fingerprint_reuse(_fingerprint(), _fingerprint()) == "exact"
     _dev_on(monkeypatch)
-    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
+    assert cs_identity.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "mount"
     _filesystem(monkeypatch, "ext4")
-    assert cs.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "dev"
+    assert cs_identity.stat_fingerprint_reuse(_fingerprint(device=66), _fingerprint()) == "dev"
 
 
 @pytest.mark.parametrize("field,value", [
@@ -87,7 +88,7 @@ def test_certified_swapped_object_refuses_on_nfs(monkeypatch, field, value):
     _filesystem(monkeypatch, 'nfs4')
     _dev_off(monkeypatch)
     for device in (64, 66):
-        assert cs.stat_fingerprint_reuse(
+        assert cs_identity.stat_fingerprint_reuse(
             _fingerprint(device=device, **{field: value}), _fingerprint()) is None
 
 
@@ -100,17 +101,17 @@ def test_mountinfo_names_the_longest_mount_holding_the_path(monkeypatch, tmp_pat
         "97 22 0:66 /pool/pq1363-models /pq1363-models rw - nfs4 dl380g10:/pool rw",
         "not a mountinfo line",
     ]) + "\n")
-    monkeypatch.setattr(cs, "_MOUNTINFO", info)
-    assert cs._mount_filesystem_type("/pq1363/shared/pq1363-models/a.safetensors") == "nfs4"
-    assert cs._mount_filesystem_type("/pq1363/shared") == "nfs4"
-    assert cs._mount_filesystem_type("/pq1363/shared/local disk/a") == "ext4"
-    assert cs._mount_filesystem_type("/pq1363/sharedx/a") == "ext4"
-    assert cs._mount_filesystem_type("/pq1363-models/GLM/a.safetensors") == "nfs4"
-    assert cs.device_number_is_client_local("/pq1363-models/GLM/a.safetensors")
-    assert not cs.device_number_is_client_local("/home/rob/a")
-    monkeypatch.setattr(cs, "_MOUNTINFO", tmp_path / "missing")
-    assert cs._mount_filesystem_type("/pq1363/shared/a") is None
-    assert not cs.device_number_is_client_local("/pq1363/shared/a")
+    monkeypatch.setattr(cs_identity, "_MOUNTINFO", info)
+    assert cs_identity._mount_filesystem_type("/pq1363/shared/pq1363-models/a.safetensors") == "nfs4"
+    assert cs_identity._mount_filesystem_type("/pq1363/shared") == "nfs4"
+    assert cs_identity._mount_filesystem_type("/pq1363/shared/local disk/a") == "ext4"
+    assert cs_identity._mount_filesystem_type("/pq1363/sharedx/a") == "ext4"
+    assert cs_identity._mount_filesystem_type("/pq1363-models/GLM/a.safetensors") == "nfs4"
+    assert cs_identity.device_number_is_client_local("/pq1363-models/GLM/a.safetensors")
+    assert not cs_identity.device_number_is_client_local("/home/rob/a")
+    monkeypatch.setattr(cs_identity, "_MOUNTINFO", tmp_path / "missing")
+    assert cs_identity._mount_filesystem_type("/pq1363/shared/a") is None
+    assert not cs_identity.device_number_is_client_local("/pq1363/shared/a")
 
 
 @pytest.mark.parametrize("field,value", [
@@ -126,15 +127,15 @@ def test_byte_reuse_never_admits_object_or_malformed_stat_drift(monkeypatch, fie
     live, cached = _fingerprint(), _fingerprint(**{field: value})
     for dev in (_dev_on, _dev_off):
         dev(monkeypatch)
-        assert not cs.stat_fingerprint_reusable(live, cached)
-        assert not cs.stat_fingerprint_reusable(live, 'not-a-dict')
+        assert not cs_identity.stat_fingerprint_reusable(live, cached)
+        assert not cs_identity.stat_fingerprint_reusable(live, 'not-a-dict')
 
 
 def test_malformed_fingerprints_never_reuse(monkeypatch):
     """Missing fields, extra fields, and empty rows never match -- a
     missing field is not a match and an extra field could carry mutation
     signal no comparison reads."""
-    from prismaquant.cost_streaming import stat_fingerprint_reusable
+    from prismaquant.streamed_model_identity import stat_fingerprint_reusable
     full = _fingerprint()
     missing = {key: value for key, value in full.items() if key != "device"}
     extra = dict(full, provenance="elsewhere")
@@ -175,7 +176,7 @@ def _build_cache(root, shards):
     """First build (certified, real tiny-figure hashes) to seed a cache."""
     cache = root / "identity-cache.json"
     runner = _runner(shards)
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         runner, str(root), identity_cache_path=cache)
     assert cache.is_file()
     return identity
@@ -190,25 +191,25 @@ def _retarget_device(cache_path, device):
 
 def _refusing_hash(monkeypatch):
     """Refuse shard payload hashes; metadata kilobytes still hash for real."""
-    real = cs._file_sha256
+    real = cs_identity._file_sha256
 
     def _refuse(path):
         if str(path).endswith(".safetensors"):
             raise AssertionError(f"payload hash called for {path}")
         return real(path)
-    monkeypatch.setattr(cs, "_file_sha256", _refuse)
+    monkeypatch.setattr(cs_identity, "_file_sha256", _refuse)
 
 
 def _counting_hash(monkeypatch):
     """Count shard payload hashes; metadata kilobytes still hash for real."""
     calls = []
-    real = cs._file_sha256
+    real = cs_identity._file_sha256
 
     def _count(path):
         if str(path).endswith(".safetensors"):
             calls.append(str(path))
         return real(path)
-    monkeypatch.setattr(cs, "_file_sha256", _count)
+    monkeypatch.setattr(cs_identity, "_file_sha256", _count)
     return calls
 
 @pytest.mark.parametrize('value', [None, '', '1', 'true', '00'])
@@ -227,7 +228,7 @@ def test_dev_stat_drift_reuses_stored_source_without_hashing(monkeypatch, checkp
         monkeypatch.setenv(DEV_ENV, value)
     _refusing_hash(monkeypatch)
     before = cache.read_bytes()
-    identity = cs.build_streamed_model_identity(_runner(shards), str(root), identity_cache_path=cache)
+    identity = cs_identity.build_streamed_model_identity(_runner(shards), str(root), identity_cache_path=cache)
     assert cache.read_bytes() == before
     assert {key: identity[key] for key in first} == first
     assert identity['dev_uncertified'] is True
@@ -246,7 +247,7 @@ def test_dev_reuses_across_device_difference_without_hashing(
     _dev_on(monkeypatch)
     _refusing_hash(monkeypatch)
     runner = _runner(shards)
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         runner, str(root), identity_cache_path=cache)
     assert identity["content_sha256"] == first["content_sha256"]
     assert [row["sha256"] for row in identity["shards"]] == [
@@ -262,7 +263,7 @@ def test_certified_rehashes_across_device_difference(
     _retarget_device(cache, live_device + 1000)
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
     assert len(calls) == len(shards)
 
@@ -275,7 +276,7 @@ def test_dev_stat_drift_keeps_old_identity_without_rehash(monkeypatch, checkpoin
     grown.write_bytes(b'a' * 65537)
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
     assert calls == []
     assert {key: identity[key] for key in first} == first
@@ -291,7 +292,7 @@ def test_certified_still_rehashes_mutated_cache(monkeypatch, checkpoint):
     (root / names[0]).write_bytes(b"a" * 65537)
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
     assert len(calls) == 1
 
@@ -301,7 +302,7 @@ def test_dev_missing_cache_warns_and_hashes(
     root, shards = checkpoint
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root),
         identity_cache_path=root / "identity-cache.json")
     assert len(calls) == len(shards)
@@ -312,7 +313,7 @@ def test_certified_missing_cache_hashes(monkeypatch, checkpoint):
     root, shards = checkpoint
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root),
         identity_cache_path=root / "identity-cache.json")
     assert len(calls) == len(shards)
@@ -326,13 +327,13 @@ def test_dev_top_up_warns_and_hashes_only_new_shards(
     shard_a.write_bytes(b"a" * 65536)
     cache = root / "identity-cache.json"
     _dev_off(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner({"a": shard_a}), str(root), identity_cache_path=cache)
     shard_b = root / "b.safetensors"
     shard_b.write_bytes(b"b" * 131072)
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner({"a": shard_a, "b": shard_b}), str(root),
         identity_cache_path=cache)
     assert [Path(call).resolve() for call in calls] == [shard_b.resolve()]
@@ -345,13 +346,13 @@ def test_certified_top_up_hashes_only_new_shards(monkeypatch, tmp_path):
     shard_a = root / "a.safetensors"
     shard_a.write_bytes(b"a" * 65536)
     cache = root / "identity-cache.json"
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner({"a": shard_a}), str(root), identity_cache_path=cache)
     shard_b = root / "b.safetensors"
     shard_b.write_bytes(b"b" * 131072)
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         _runner({"a": shard_a, "b": shard_b}), str(root),
         identity_cache_path=cache)
     assert len(calls) == 1
@@ -371,7 +372,7 @@ def test_dev_portable_reuse_is_stamped_uncertified(
     _retarget_device(cache, live_device + 1000)
     _dev_on(monkeypatch)
     _refusing_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
     assert "DEV-MODE" in capsys.readouterr().out
 
@@ -393,10 +394,10 @@ def _memo_fixture(tmp_path):
 
 def test_digest_cache_memo_reuses_across_device_in_dev(
         monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
-    live = [cs._streamed_identity_stat_fingerprint(root / name)
+    live = [cs_identity._streamed_identity_stat_fingerprint(root / name)
             for name in ("a.safetensors", "b.safetensors")]
     real = {str(root / name): hashlib.sha256(
         (root / name).read_bytes()).hexdigest()
@@ -420,10 +421,10 @@ def test_digest_cache_memo_reuses_across_device_in_dev(
 
 def test_digest_cache_memo_stays_strict_in_certified(
         monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
-    live = [cs._streamed_identity_stat_fingerprint(root / name)
+    live = [cs_identity._streamed_identity_stat_fingerprint(root / name)
             for name in ("a.safetensors", "b.safetensors")]
     entries = []
     for fingerprint in live:
@@ -441,10 +442,10 @@ def test_digest_cache_memo_stays_strict_in_certified(
 
 def test_digest_cache_memo_miss_warns_and_hashes_in_dev(
         monkeypatch, tmp_path, capsys):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
-    live = [cs._streamed_identity_stat_fingerprint(root / name)
+    live = [cs_identity._streamed_identity_stat_fingerprint(root / name)
             for name in ("a.safetensors", "b.safetensors")]
     entries = [{"fingerprint": live[0],
                 "sha256": hashlib.sha256(
@@ -467,7 +468,7 @@ def test_digest_cache_memo_none_path_warns_and_hashes_in_dev(
         monkeypatch, tmp_path, capsys):
     """Omitting the cache path hides nothing: dev mode hashes every shard,
     as certified mode does, and prints the byte count first (PQ #1147)."""
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
@@ -477,7 +478,7 @@ def test_digest_cache_memo_none_path_warns_and_hashes_in_dev(
 
 
 def test_digest_cache_memo_none_path_hashes_in_certified(monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
@@ -496,10 +497,10 @@ def test_digest_cache_memo_malformed_rows_never_reuse_in_dev(
     without the gate a device-less row would match every host's portable
     key. Every shard is hashed, with a ``[DEV-MODE]`` line; certified
     behavior is covered beside."""
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
-    live = [cs._streamed_identity_stat_fingerprint(root / name)
+    live = [cs_identity._streamed_identity_stat_fingerprint(root / name)
             for name in ("a.safetensors", "b.safetensors")]
     real = {str(root / name): hashlib.sha256(
         (root / name).read_bytes()).hexdigest()
@@ -530,10 +531,10 @@ def test_digest_cache_memo_malformed_rows_never_reuse_in_dev(
 
 def test_digest_cache_memo_malformed_rows_hash_in_certified(
         monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     root = _memo_fixture(tmp_path)
     cache_path = tmp_path / "digest-cache.json"
-    live = [cs._streamed_identity_stat_fingerprint(root / name)
+    live = [cs_identity._streamed_identity_stat_fingerprint(root / name)
             for name in ("a.safetensors", "b.safetensors")]
     entries = []
     for fingerprint in live:
@@ -554,7 +555,7 @@ def test_build_none_path_warns_and_hashes_in_dev(
     root, shards = checkpoint
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=None)
     assert len(calls) == len(shards)
     assert "[DEV-MODE] source rehash of 196608 bytes" in capsys.readouterr().out
@@ -564,7 +565,7 @@ def test_build_none_path_hashes_in_certified(monkeypatch, checkpoint):
     root, shards = checkpoint
     _dev_off(monkeypatch)
     calls = _counting_hash(monkeypatch)
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=None)
     assert len(calls) == len(shards)
 
@@ -636,13 +637,13 @@ def _validate_cache(root, shards):
             weight_ckpt={},
             weight_shard={name: str(path)
                           for name, path in shards.items()}))
-    cs.build_streamed_model_identity(
+    cs_identity.build_streamed_model_identity(
         runner, str(root), identity_cache_path=cache)
     return cache
 
 
 def test_validate_reuses_across_device_in_dev(monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
     root, shards = _validate_fixture(tmp_path)
     cache = _validate_cache(root, shards)
     payload = json.loads(cache.read_text())
@@ -657,7 +658,7 @@ def test_validate_reuses_across_device_in_dev(monkeypatch, tmp_path):
 
 
 def test_validate_stays_strict_in_certified(monkeypatch, tmp_path):
-    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
     root, shards = _validate_fixture(tmp_path)
     cache = _validate_cache(root, shards)
     payload = json.loads(cache.read_text())

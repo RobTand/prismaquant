@@ -186,6 +186,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     # This remains a certified refusal; dev mode records a backend seal.
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import model_profiles, aura_cost, joint_aura
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
     _stub_device_envelope(monkeypatch, bridge)
@@ -204,7 +205,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
         (torch.zeros((512, 512), dtype=torch.int64), calibration))
     runner = SimpleNamespace(model=torch.nn.Module(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
-    monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
+    monkeypatch.setattr(cost_streaming_identity, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
     monkeypatch.setattr(joint_aura, 'source_execution_identity', lambda _: execution)
     monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: 'c' * 64)
     monkeypatch.setattr(aura_cost, 'compute_aura_cost_streamed', lambda *_args, **_kwargs:
@@ -229,6 +230,7 @@ def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tm
     The pass now hands the identity build the plan's bound digest cache and a
     refusal naming the CPU-only quantum, so nothing is hashed under the GPU."""
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import model_profiles
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
     _stub_device_envelope(monkeypatch, bridge)
@@ -254,7 +256,7 @@ def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tm
     def identity(*_args, **kwargs):
         seen.update(kwargs)
         raise Reached
-    monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', identity)
+    monkeypatch.setattr(cost_streaming_identity, 'build_streamed_model_identity', identity)
     digests = tmp_path / 'digests.json'
     digests.write_text('{}')
     config = _plan(tmp_path)

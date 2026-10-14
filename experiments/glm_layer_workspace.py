@@ -177,7 +177,8 @@ def main():
     args.out.mkdir(parents=True, exist_ok=False)
     assert torch.cuda.is_available()
     assert 1 < args.physical_cap_gb <= 104, 'measurement must fit the declared worker capacity'
-    from prismaquant.cost_streaming import build_streamed_causal_lm, StreamedForwardBoundaries
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
     from prismaquant.model_profiles import detect_profile
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
     from prismaquant.tessera_campaign import _collect_activations

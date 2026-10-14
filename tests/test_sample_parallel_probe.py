@@ -128,6 +128,7 @@ def test_prepare_worker_source_cache_creates_then_exactly_reuses(
     monkeypatch, tmp_path,
 ):
     import prismaquant.cost_streaming as cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     import prismaquant.gpu_guard as gpu_guard
     import prismaquant.model_profiles as model_profiles
 
@@ -165,12 +166,12 @@ def test_prepare_worker_source_cache_creates_then_exactly_reuses(
     )
     monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: "profile")
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", _build_runner)
-    monkeypatch.setattr(cost_streaming, "build_streamed_model_identity", _build_identity)
+    monkeypatch.setattr(cost_streaming_identity, "build_streamed_model_identity", _build_identity)
     monkeypatch.setattr(
-        cost_streaming, "validate_cached_streamed_model_identity", _validate,
+        cost_streaming_identity, "validate_cached_streamed_model_identity", _validate,
     )
     monkeypatch.setattr(
-        cost_streaming, "compact_streamed_model_identity",
+        cost_streaming_identity, "compact_streamed_model_identity",
         lambda value, **_kwargs: {"content_sha256": value["content_sha256"]},
     )
 
@@ -200,13 +201,14 @@ def test_prepare_worker_source_cache_refuses_invalid_existing_file(
     monkeypatch, tmp_path,
 ):
     import prismaquant.cost_streaming as cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
 
     model = tmp_path / "model"
     model.mkdir()
     output = tmp_path / "source-cache.json"
     output.write_text("stale")
     monkeypatch.setattr(
-        cost_streaming, "validate_cached_streamed_model_identity",
+        cost_streaming_identity, "validate_cached_streamed_model_identity",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad")),
     )
     monkeypatch.setattr(

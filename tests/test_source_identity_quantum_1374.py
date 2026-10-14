@@ -30,6 +30,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def _runner(shards):
 
 def _payload_hashes(monkeypatch, *, refuse):
     calls = []
-    real = cs._file_sha256
+    real = cs_identity._file_sha256
 
     def _hash(path):
         if str(path).endswith(".safetensors"):
@@ -69,7 +70,7 @@ def _payload_hashes(monkeypatch, *, refuse):
                 raise AssertionError(f"payload hash called for {path}")
             calls.append(str(path))
         return real(path)
-    monkeypatch.setattr(cs, "_file_sha256", _hash)
+    monkeypatch.setattr(cs_identity, "_file_sha256", _hash)
     return calls
 
 
@@ -90,12 +91,12 @@ def test_identity_command_writes_the_digest_cache_without_a_plan_or_device(
     root, shards = checkpoint
     out = tmp_path / "digests.json"
     payload = _identity_quantum(root, out)
-    assert payload["schema"] == cs.SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA
+    assert payload["schema"] == cs_identity.SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA
     assert sorted(Path(row["fingerprint"]["path"]).name for row in payload["entries"]) \
         == sorted(shards)
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert printed["shards"] == 2 and printed["source_bytes"] == 65536 + 131072
-    assert printed["sha256"] == cs._file_sha256(out)
+    assert printed["sha256"] == cs_identity._file_sha256(out)
 
 
 def test_identity_command_refuses_a_plan(checkpoint, tmp_path):
@@ -111,13 +112,13 @@ def test_identity_command_refuses_a_plan(checkpoint, tmp_path):
 def test_the_streamed_identity_seeds_from_the_digest_quantum(
         checkpoint, tmp_path, monkeypatch):
     root, shards = checkpoint
-    reference = cs.build_streamed_model_identity(_runner(shards), str(root))
+    reference = cs_identity.build_streamed_model_identity(_runner(shards), str(root))
     out = tmp_path / "digests.json"
     _identity_quantum(root, out)
     _payload_hashes(monkeypatch, refuse=True)
     cache = tmp_path / "run" / "source-identity.json"
     cache.parent.mkdir()
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache,
         digest_cache_path=out, refuse_uncovered="bind the digest quantum")
     assert identity == reference
@@ -132,7 +133,7 @@ def test_a_changed_shard_is_not_admitted_from_the_digest_cache(
     changed = shards["model-00002-of-00002.safetensors"]
     changed.write_bytes(b"c" * 131072)
     calls = _payload_hashes(monkeypatch, refuse=False)
-    identity = cs.build_streamed_model_identity(
+    identity = cs_identity.build_streamed_model_identity(
         _runner(shards), str(root), digest_cache_path=out)
     assert [Path(call).name for call in calls] == [changed.name]
     import hashlib
@@ -148,7 +149,7 @@ def test_an_uncovered_source_refuses_before_hashing_and_names_the_quantum(
     _payload_hashes(monkeypatch, refuse=True)
     with pytest.raises(RuntimeError, match=r"would hash 196608 bytes across 2 shard.*"
                                            r"run the identity quantum"):
-        cs.build_streamed_model_identity(
+        cs_identity.build_streamed_model_identity(
             _runner(shards), str(root), refuse_uncovered="run the identity quantum")
 
 
@@ -161,7 +162,7 @@ def test_a_partly_covered_source_refuses_only_for_what_is_missing(
     grown.write_bytes(b"a" * 65537)
     _payload_hashes(monkeypatch, refuse=True)
     with pytest.raises(RuntimeError, match=r"would hash 65537 bytes across 1 shard"):
-        cs.build_streamed_model_identity(
+        cs_identity.build_streamed_model_identity(
             _runner(shards), str(root), digest_cache_path=out,
             refuse_uncovered="run the identity quantum")
 

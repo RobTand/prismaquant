@@ -854,14 +854,15 @@ def test_join_validates_each_payloads_probe_identity_once(
     it once per ROW (119 ms each, about 14 h for 45 layers); it validates it
     once per PAYLOAD, and the joined bytes still carry the plain probe."""
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     calls = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get("where"))
         return validate(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity",
                         counted)
     root = tmp_path / "campaign"
     _seal_inputs(root, campaign)

@@ -31,7 +31,7 @@ def main(argv=None):
     root.mkdir(parents=True, exist_ok=False)
     model_path = args.model.resolve(strict=True)
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     from prismaquant.production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity, render_production_weight
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=False)
     model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16, attn_implementation="eager").eval()

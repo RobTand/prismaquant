@@ -319,7 +319,7 @@ class HandoffEmitter:
 
         Refuses a kernel stamp that is not one before any thread starts.
         """
-        from .cost_streaming import normalize_boundary_storage
+        from .streamed_boundary_artifacts import normalize_boundary_storage
 
         if self.published is not None or self._streamed:
             raise RuntimeError("a quantum emits its handoff once")
@@ -567,7 +567,7 @@ class HandoffStream:
     # -- the writer thread -------------------------------------------------
 
     def _run(self):
-        from .cost_streaming import StreamedBoundaryArtifacts
+        from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
         # The writer drives this owner, so its waits are the writer's own
         # (PQ #1262), not the compute thread's.
@@ -1024,7 +1024,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     incoming rows through :class:`HandoffIncoming`, and the pass's stores
     fill the plane.
     """
-    from .cost_streaming import _state_storage_bytes
+    from .streamed_boundary_artifacts import _state_storage_bytes
     from .io_spans import ReadRateReporter
     from .joint_adjoint_checkpoints import (
         _await_checkpoint_entry,

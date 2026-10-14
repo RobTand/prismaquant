@@ -30,12 +30,9 @@ from torch import nn
 
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
-from prismaquant.cost_streaming import (
-    StreamedBoundaryArtifacts,
-    StreamedCausalLM,
-    StreamedForwardBoundaries,
-    fused_window_size,
-)
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, StreamedForwardBoundaries
+from prismaquant.cost_streaming import StreamedCausalLM
+from prismaquant.streamed_boundary_artifacts import fused_window_size
 from prismaquant.joint_adjoint_band import (
     BandRefused,
     build_band_receipt,
@@ -102,7 +99,7 @@ def _legacy_render_free_probe_passes(
     incoming_entries, incoming_tensor, roll, min_free_gib, then=None,
 ) -> int:
     from prismaquant.aura_cost import _free_gib
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     profile = runner.profile
     device, dtype = runner.device, runner.dtype

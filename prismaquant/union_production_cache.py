@@ -38,7 +38,7 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json,
     canonical_json_sha256,
 )
-from prismaquant.cost_streaming import validate_streamed_model_identity
+from prismaquant.streamed_model_identity import validate_streamed_model_identity
 from prismaquant.layer_config import load_assignment
 from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.schemas import refuse_retired_codebook_format

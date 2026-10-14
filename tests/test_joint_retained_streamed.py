@@ -9,7 +9,7 @@ import torch
 
 import prismaquant.aura_cost as aura
 from prismaquant import io_engine
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget, EXECUTION_SCHEMA
 from prismaquant.streaming_model import StreamingContext
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity

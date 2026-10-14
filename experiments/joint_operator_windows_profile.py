@@ -461,7 +461,8 @@ class ProbeObserver(StorageObserver):
 
 def run_once(fixture, ids, mode, device, out, index, *, profiled, reference=None):
     from prismaquant import aura_cost
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     from prismaquant.production_weight_cache import ProductionWeightCache
     policy = make_policy(fixture)

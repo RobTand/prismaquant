@@ -319,9 +319,7 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     in between. Without ``source_files`` the shards are checked against the
     checkpoint index alone. Returns ``({shard name: sha256}, proof sha256)``.
     """
-    from .cost_streaming import (_local_checkpoint_shards,
-                                 _read_streamed_model_identity_cache,
-                                 stat_fingerprint, stat_fingerprint_reusable)
+    from .streamed_model_identity import _local_checkpoint_shards, _read_streamed_model_identity_cache, stat_fingerprint, stat_fingerprint_reusable
 
     root = Path(os.path.abspath(root))
     path = Path(cache_path)
@@ -869,7 +867,7 @@ class CaptureSourceAuthentication:
         """Hold a recording owner's held object to the object its prep stat."""
         if self._fingerprints is None or name not in self._fingerprints:
             return
-        from .cost_streaming import stat_fingerprint, stat_fingerprint_reusable
+        from .streamed_model_identity import stat_fingerprint, stat_fingerprint_reusable
         live = stat_fingerprint(str((self.root/name).resolve()), observed)
         seal_check('capture prep source stat', self._fingerprints[name], live, where=name,
             same=stat_fingerprint_reusable(live, self._fingerprints[name]),
@@ -1617,7 +1615,7 @@ def fold_load_receipt(execution, receipt):
 
 def capture_entry_fingerprint(path):
     """The stat fingerprint of one regular, nonsymlink capture entry file."""
-    from .cost_streaming import stat_fingerprint
+    from .streamed_model_identity import stat_fingerprint
     observed = Path(path).lstat()
     if not stat.S_ISREG(observed.st_mode):
         raise RuntimeError(f'{path}: capture entry must be a regular nonsymlink file')
@@ -1667,7 +1665,7 @@ def _write_capture_entry(root, name, *, inputs, hessian, count, max_abs):
 
 def _require_verified_entry(path, name, record, verified):
     """An entry this capture wrote or verified, still the object it was then."""
-    from .cost_streaming import stat_fingerprint_reusable
+    from .streamed_model_identity import stat_fingerprint_reusable
     if (not isinstance(verified, dict) or verified.get('sha256') != record['sha256']
             or verified.get('path') != record['path']):
         raise RuntimeError(f'{name}: verified capture record differs from the journal')

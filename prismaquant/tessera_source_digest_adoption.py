@@ -20,13 +20,14 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
     ``adopt`` exactly as a fresh read would not be recorded.
     """
     from . import cost_streaming as owner
+    from prismaquant import streamed_model_identity as owner_identity
     from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
     from .cost_stage_checkpoint import publish_new_bytes
     from .digests import DIRECT_ASCII_INDENT2_LAX
     from tessera.source_digest_cache import SourceDigestCache
     source=Path(source).resolve();path=Path(binding['path'])
     before=_bound_stat_fence(path);raw=_read_bound(binding,'retained source hash proof');document=json.loads(raw)
-    identity=owner.validate_cached_streamed_model_identity(source,path,require_complete_checkpoint=True)
+    identity=owner_identity.validate_cached_streamed_model_identity(source,path,require_complete_checkpoint=True)
     if (document['identity']!=identity or _bound_stat_fence(path)!=before
             or identity['content_sha256']!=expected_content_sha256):
         raise ValueError('retained source proof or expected source identity differs')
@@ -39,7 +40,7 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
         live={'path':str(shard.resolve()),'device':fp['_dev'],'inode':fp['ino'],
               'size':fp['size'],'mtime_ns':fp['mtime_ns'],'ctime_ns':fp['ctime_ns']}
         prior=old[str(shard.resolve())]
-        reuse=owner.stat_fingerprint_reuse(live,prior)
+        reuse=owner_identity.stat_fingerprint_reuse(live,prior)
         if reuse is None:
             raise ValueError('retained source fence changed before adoption: '+str(shard))
         observed.append((shard,row['sha256'],fp,prior,reuse!='exact'))

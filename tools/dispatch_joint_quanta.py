@@ -2920,7 +2920,7 @@ def handoff_template(record: Mapping, *, plan: Mapping,
     re-dispatch of the same row files the same one again (PQ #1054). An
     explicit ``template_id`` overrides the derived one.
     """
-    from prismaquant.cost_streaming import normalize_boundary_storage
+    from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
     from prismaquant.joint_layer_quanta import quantum_id as layer_quantum_id
     from prismaquant.joint_quantum_handoff import handoff_root
     from prismaquant.stage_a_produced_output import build_boundary_template

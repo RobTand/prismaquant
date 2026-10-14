@@ -9,6 +9,7 @@ import pytest
 
 import prismaquant.artifact_collection as records
 import prismaquant.cost_streaming as streamed
+from prismaquant import streamed_boundary_artifacts as streamed_boundaries
 
 _SCHEMA = "fixture.physical.é.v1"
 
@@ -33,8 +34,8 @@ def _portable(record):
 
 
 def _owner(path, *, budget=1024):
-    owner = streamed.StreamedBoundaryArtifacts({
-        "schema": streamed.BOUNDARY_STORAGE_SCHEMA,
+    owner = streamed_boundaries.StreamedBoundaryArtifacts({
+        "schema": streamed_boundaries.BOUNDARY_STORAGE_SCHEMA,
         "directory": str(path), "max_resident_bytes": 1280,
         "max_auxiliary_bytes": 1 << 20, "max_artifact_bytes": budget,
         "prefetch_batches": 2,

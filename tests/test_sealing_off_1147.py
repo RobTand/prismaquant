@@ -495,7 +495,7 @@ def test_aura_units_without_a_manifest_are_archived_and_recomputed_by_default(
 
 def _bound_generation(tmp_path):
     """An interrupted run's boundary generation: status ``running``."""
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     config = {"schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
               "max_resident_bytes": 1 << 20, "max_auxiliary_bytes": 1 << 20,
@@ -510,7 +510,7 @@ def _bound_generation(tmp_path):
     ("max_resident_bytes", 1 << 21), ("max_auxiliary_bytes", 1 << 21),
     ("max_artifact_bytes", 1 << 21)])
 def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, field, value):
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path / "dev")
     owner = StreamedBoundaryArtifacts({**config, field: value})
@@ -531,7 +531,7 @@ def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, f
 def test_rebind_refuses_a_boundary_layout_difference(tmp_path, unset, field, value):
     """The schema, the capture order and the read window lay out the stored
     entries: a wall in dev mode too (PQ #1147)."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path)
     running = {**config, field: value}
@@ -546,7 +546,7 @@ def test_rebind_refuses_a_boundary_layout_difference(tmp_path, unset, field, val
 @pytest.mark.parametrize("status", ["complete", "attached", "retained"])
 def test_rebind_refuses_a_generation_that_did_not_stop_partway(tmp_path, unset, status):
     """Another owner or reader holds it: a wall in dev mode too (PQ #1147)."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path)
     path = Path(config["directory"]) / session["generation"] / "generation.json"

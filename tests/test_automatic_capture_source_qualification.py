@@ -63,7 +63,7 @@ def test_cli_refuses_automatic_recording_before_model_reads(tmp_path, monkeypatc
     if route == 'quantum':
         args += ['--capture-layer-range', '0:1']
     if route == 'prep':
-        from prismaquant.cost_streaming import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+        from prismaquant.streamed_boundary_artifacts import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
         boundary = {'schema': LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA,
                     'capture_order': 'layer_major', 'directory': str(tmp_path / 'boundaries'),
                     'max_resident_bytes': 1 << 20, 'max_auxiliary_bytes': 1 << 20,

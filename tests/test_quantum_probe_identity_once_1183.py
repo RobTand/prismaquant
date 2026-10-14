@@ -13,6 +13,7 @@ import pytest
 
 import prismaquant.aura_cost as aura
 from prismaquant import cost_streaming, joint_aura
+from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
 
@@ -44,7 +45,7 @@ def _counted_quantum(tmp_path, monkeypatch, single, receipt, output_root):
     """Run one quantum; count probe-identity work inside the core only."""
     counts = {"validations": 0, "plain_probe_hashes": 0}
     active = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
     digest = joint_aura.identity_sha256
     core = runtime.run_layer_quantum_core
 
@@ -65,7 +66,7 @@ def _counted_quantum(tmp_path, monkeypatch, single, receipt, output_root):
         finally:
             active.pop()
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity",
                         counted_validate)
     monkeypatch.setattr(joint_aura, "identity_sha256", counted_digest)
     monkeypatch.setattr(runtime, "run_layer_quantum_core", counted_core)

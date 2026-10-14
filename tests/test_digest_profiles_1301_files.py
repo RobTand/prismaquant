@@ -55,7 +55,7 @@ def files(tmp_path_factory):
 #: ``(site, takes_str, extra keyword arguments)``.
 FILE_SITES = [
     ("prismaquant.anchored_cost._sha256_file", False, {}),
-    ("prismaquant.cost_streaming._file_sha256", False, {}),
+    ('prismaquant.streamed_model_identity._file_sha256', False, {}),
     ("prismaquant.joint_adjoint_band._sha256_file", True, {}),
     ("prismaquant.joint_projection_backend._sha", True, {}),
     ("prismaquant.joint_quanta_join._sha_file", False, {"where": "w"}),

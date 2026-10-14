@@ -2505,7 +2505,7 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
         # is present here and is otherwise refused by the first gate in
         # ``execute`` -- seconds into the pass, before any render is written.
         require_qualified_environment()
-    from .cost_streaming import check_boundary_storage
+    from .streamed_boundary_artifacts import check_boundary_storage
     check_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
     if config.get('joint_eval') is not None:
@@ -2647,7 +2647,7 @@ def build_source_digest_cache(model, out):
     ``out`` is read first, so a rerun hashes only shards whose stat
     fingerprint changed. No runner, lease or device is touched.
     """
-    from .cost_streaming import build_source_checkpoint_identity
+    from .streamed_model_identity import build_source_checkpoint_identity
 
     before = _io_counters()
     identity = build_source_checkpoint_identity(model, digest_cache_path=out)
@@ -2857,7 +2857,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     import torch
     from .aura_cost import compute_aura_cost_streamed, _aura_source_sha256
     from .calibration_data import load_calibration_input
-    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from .cost_streaming import build_streamed_causal_lm
+    from .streamed_model_identity import build_streamed_model_identity
     from .joint_aura import source_execution_identity, validate_joint_aura_entry
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile

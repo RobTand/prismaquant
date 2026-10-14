@@ -294,6 +294,7 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
     import json
     import pickle
     from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_joint_aura as bridge
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.tessera_joint_allocation import handoff
@@ -325,13 +326,13 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
     monkeypatch.setattr(bridge, 'load_measured_anchor_input',
                         lambda inputs, *, verify_payloads, historical_encoder_reuse: data)
     calls = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get('where'))
         return validate(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, 'validate_streamed_model_identity', counted)
+    monkeypatch.setattr(cost_streaming_identity, 'validate_streamed_model_identity', counted)
     output = tmp_path / 'allocation.pkl'
     handoff(joint_binding=joint_binding, plan_binding=plan_binding, output_path=output)
     assert len([where for where in calls if where == 'joint AURA row']) == 1 < rows
