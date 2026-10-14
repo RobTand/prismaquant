@@ -742,31 +742,6 @@ def predicted_dloss(h_trace: float, weight_mse: float,
     return 0.5 * float(h_trace) * float(weight_mse) * float(gain)
 
 
-def _group_by_profile(names, profile) -> dict[str, list[str]]:
-    """Group Linear names by the profile's fused-sibling key."""
-    groups: dict[str, list[str]] = {}
-    for name in names:
-        key = profile.fused_sibling_group(name) if profile is not None else None
-        if key is None:
-            continue
-        groups.setdefault(key, []).append(name)
-    return groups
-
-
-def _packed_groups_by_profile(names, profile) -> dict[str, list[str]]:
-    """Group Linear names by the profile's packed-MoE serving unit key."""
-    groups: dict[str, list[str]] = {}
-    group_fn = getattr(profile, "packed_expert_format_group", None)
-    if not callable(group_fn):
-        return groups
-    for name in names:
-        key = group_fn(name)
-        if key is None:
-            continue
-        groups.setdefault(key, []).append(name)
-    return groups
-
-
 def legal_formats_from_candidates(
     candidates: dict[str, list[Candidate]],
 ) -> dict[str, set[str]]:
@@ -1202,18 +1177,13 @@ def promote_serving_units(
     if profile is None:
         from .model_profiles import DefaultProfile
         profile = DefaultProfile()
-    groups: list[list[str]] = []
-    group_kinds: list[str] = []
-    if include_fused:
-        for members in _group_by_profile(
-                assignment.keys(), profile).values():
-            groups.append(members)
-            group_kinds.append(_GROUP_KIND_FUSED)
-    if include_moe:
-        for members in _packed_groups_by_profile(
-                assignment.keys(), profile).values():
-            groups.append(members)
-            group_kinds.append(_GROUP_KIND_PACKED)
+    from .name_projection import GROUP_FUSED_SIBLINGS, NameProjection
+
+    units = NameProjection(profile).serving_units(
+        assignment, include_fused=include_fused, include_packed=include_moe)
+    groups = [list(unit.members) for unit in units]
+    group_kinds = [_GROUP_KIND_FUSED if unit.kind == GROUP_FUSED_SIBLINGS
+                   else _GROUP_KIND_PACKED for unit in units]
     return _promote_group_components(
         assignment, format_rank, groups, legal_formats,
         group_kinds=group_kinds, fused_licence=fused_licence)
@@ -1280,7 +1250,8 @@ def promote_fused(assignment: dict[str, str],
         legal_formats=legal_formats,
         fused_licence=fused_licence,
     )
-    groups = _group_by_profile(assignment.keys(), profile)
+    from .name_projection import NameProjection
+    groups = NameProjection(profile).serving_units(assignment, include_packed=False)
     licence = fused_licence
 
     def _group_is_licensed(members_present: list[str]) -> bool:
@@ -1314,8 +1285,8 @@ def promote_fused(assignment: dict[str, str],
     # ``max(ranks)`` would silently discard exactly those rungs (issue
     # #169). (The repass is also legality-blind, so writing here would be
     # able to undo the component pass's legal-for-all choice.)
-    for members_present in groups.values():
-        members_present = [m for m in members_present if m in out]
+    for unit in groups:
+        members_present = [m for m in unit.members if m in out]
         if len(members_present) < 2:
             continue
         if len({out[m] for m in members_present}) > 1 and _group_is_licensed(
@@ -1333,7 +1304,8 @@ def promote_fused(assignment: dict[str, str],
                         members=members_present) < best:
                 out[m] = best_fmt
 
-    for group_key, members in groups.items():
+    for unit in groups:
+        group_key, members = unit.key, unit.members
         if len(members) < 2:
             continue
         fmts = {out[m] for m in members}

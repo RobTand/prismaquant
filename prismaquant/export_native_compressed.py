@@ -1303,90 +1303,6 @@ class _RuntimeCoercion(NamedTuple):
     delta_bytes: int | None = None
 
 
-from .name_projection import ServingUnit, connected_serving_components
-
-
-def _serving_atomic_units(
-    names: Iterable[str],
-    profile,
-) -> tuple[tuple[ServingUnit, ...], dict[str, str]]:
-    """Serving-atomic units among ``names``, from the profile accessors.
-
-    Grouping is asked of the shared activation-contract policy through the
-    compatibility delegate `_fused_group_key_for_name` (the same
-    `fused_sibling_group` / `fused_sibling_leaf_mapping` chain the
-    fused-coherence gate in `build_quantization_config` derives its
-    sibling sets from) and `profile.packed_expert_format_group` (what
-    that gate's `_packed_format_group_members` uses). Nothing here
-    parses Linear names: a new architecture declares its couplings once,
-    in its profile/structure spec, and every consumer sees them.
-
-    Returns the units with >= 2 members present (a lone present member
-    cannot disagree with anything) plus, for fail-closed handling, the
-    names whose packed-expert grouping accessor RAISED — a profile that
-    cannot answer "which unit is this expert projection in" must not be
-    silently treated as "no unit".
-    """
-    grouped: dict[tuple[str, str], list[str]] = {}
-    failures: dict[str, str] = {}
-    packed_getter = (
-        getattr(profile, "packed_expert_format_group", None)
-        if profile is not None
-        else None
-    )
-    for name in names:
-        fused_key = _fused_group_key_for_name(name, profile)
-        if fused_key:
-            grouped.setdefault(("fused_siblings", str(fused_key)), []).append(name)
-        if not callable(packed_getter):
-            continue
-        try:
-            packed_key = packed_getter(name)
-        except Exception as exc:  # PackedExpertRoleUnknown and friends
-            failures[name] = f"{type(exc).__name__}: {exc}"
-            continue
-        if packed_key:
-            grouped.setdefault(
-                ("packed_moe_experts", str(packed_key)), []
-            ).append(name)
-    units = tuple(
-        ServingUnit(kind, key, tuple(sorted(members)))
-        for (kind, key), members in sorted(grouped.items())
-        if len(members) >= 2
-    )
-    return units, failures
-
-
-def _serving_atomic_components(
-    names: Iterable[str],
-    profile,
-) -> tuple[dict[str, list[str]], dict[str, tuple[ServingUnit, ...]], dict[str, str]]:
-    """Connected components of the serving-atomic units over ``names``.
-
-    Units are unioned rather than handled one at a time because they can
-    overlap: on the split per-expert representation
-    ``...experts.7.gate_proj`` is both a fused sibling of
-    ``...experts.7.up_proj`` and a member of the layer's packed-expert
-    unit. Coercing one unit at a time could then still leave the other
-    mixed. This mirrors the allocator's own union-find serving-unit
-    promotion (`allocator_solver._promote_group_components`).
-
-    Returns ``(members_by_name, units_by_name, grouping_failures)`` where
-    the first two are keyed by EVERY name in its component (so a lookup
-    needs no root bookkeeping at the call site).
-    """
-    all_names = list(names)
-    units, failures = _serving_atomic_units(all_names, profile)
-    members_by_name = {}
-    units_by_name = {}
-    for component in connected_serving_components(all_names, units):
-        members = sorted(component.members)
-        for name in members:
-            members_by_name[name] = members
-            units_by_name[name] = component.units
-    return members_by_name, units_by_name, failures
-
-
 def _bf16_coercion_delta_bytes(
     shape: Sequence[int] | None,
     from_fmt: str,
@@ -1638,37 +1554,25 @@ def _coerce_runtime_legal_assignment(
     # real byte cost, and gets the same serving-atomic treatment as a
     # shape or policy one: refused when the unit has a legal quantized
     # rung, coerced as a whole unit when it does not.
-    members_by_name, units_by_name, grouping_failures = (
-        _serving_atomic_components(out.keys(), profile)
-    )
-    if grouping_failures:
-        # Fail closed. A name whose serving-unit accessor raised is absent
-        # from every unit, so "coerce the whole unit" would silently leave
-        # it behind -- i.e. produce exactly the mixed FusedMoE this branch
-        # exists to prevent. An undeclared packed-expert role is a profile
-        # declaration gap; guessing it is how you ship an allocation nobody
-        # selected.
+    from .name_projection import NameProjection
+    if profile is None:
+        from .model_profiles import DefaultProfile
+        profile = DefaultProfile()
+    try:
+        components = NameProjection(profile).serving_components(out, fused_metadata_fallback=True)
+    except Exception as exc:
         raise ValueError(
-            f"cannot verify serving-atomic coherence: the model profile "
-            f"could not name the serving unit for "
-            f"{len(grouping_failures)} Linear(s), and "
-            f"{len(illegal) - len(handled)} Linear(s) need a runtime-legality "
-            f"coercion that must be applied to a whole unit or not at all. "
-            + "; ".join(
-                f"{name} ({err})"
-                for name, err in sorted(grouping_failures.items())[:8]
-            )
-            + ". Declare the packed-expert projection roles for this "
-            "architecture (model_profiles/specs/*.json "
-            "`packed_experts.projection_splits`) rather than letting export "
-            "guess which projections share a FusedMoE scheme."
-        )
+            f"cannot verify serving-atomic coherence: the model profile could not name the serving unit: {exc}. "
+            "Declare packed_experts.projection_splits rather than guessing coupling.") from exc
+    component_by_name = {name: component for component in components
+                         for name in component.members}
     refusals: list[str] = []
     for qname in sorted(illegal):
         if qname in handled:
             continue
         shape, from_fmt, reason, detail = illegal[qname]
-        units = units_by_name.get(qname, ())
+        component = component_by_name[qname]
+        units = component.units
         if not units:
             # Not serving-atomic: coerce this Linear alone, as before.
             handled.add(qname)
@@ -1680,7 +1584,7 @@ def _coerce_runtime_legal_assignment(
                 )
             )
             continue
-        members = members_by_name.get(qname, [qname])
+        members = list(component.members)
         co_triggers = sorted(m for m in members if m in illegal)
         handled.update(co_triggers)
         alternatives = _group_legal_quantized_formats(
@@ -4858,20 +4762,7 @@ def _split_packed_expert_tensor(
 # weight_global_scale. We compute the max over each fused group's natural
 # global_scale and force every sibling to use it.
 #
-def _fused_dense_group(name: str) -> tuple[str, tuple[str, ...]] | None:
-    """Compatibility delegate for the shared fusion catalog."""
-
-    return _nvfp4_activation_contract.fused_dense_group(name)
-
-
-def _fused_group_key_for_name(name: str, profile=None) -> str | None:
-    """Resolve the shared fusion policy, propagating failed declarations."""
-
-    return _nvfp4_activation_contract.fused_sibling_group_key(
-        name,
-        profile=profile,
-        tolerate_profile_errors=False,
-    )
+from .name_projection import fused_sibling_group_key
 
 
 def _unify_input_global_scales_across_fused_siblings(
@@ -4915,7 +4806,7 @@ def _compute_nvfp4_joint_global(
             recipe_qname = qname
         if _canonical_export_format(assignment.get(recipe_qname, "BF16")) != "NVFP4":
             continue
-        g = _fused_group_key_for_name(recipe_qname, profile)
+        g = fused_sibling_group_key(recipe_qname, profile=profile)
         if g is None:
             continue
         groups.setdefault(g, []).append((recipe_qname, mod))
@@ -5785,7 +5676,7 @@ def _compute_layer_joint_nvfp4(layer_mod: nn.Module,
             recipe_key = profile.live_to_recipe_name(full)
         except Exception:
             recipe_key = full
-        group_key = _fused_group_key_for_name(recipe_key, profile)
+        group_key = fused_sibling_group_key(recipe_key, profile=profile)
         if group_key is None:
             continue
         groups[group_key].append((full, recipe_key, mod))

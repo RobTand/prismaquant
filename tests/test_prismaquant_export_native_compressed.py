@@ -2763,23 +2763,23 @@ class TestFusedSiblingJointGlobalScale(unittest.TestCase):
     scale on disk is correct under vLLM's fused-loader rules)."""
 
     def test_fused_dense_group_self_attn(self):
-        from prismaquant.export_native_compressed import _fused_dense_group
-        g = _fused_dense_group("model.layers.5.self_attn.q_proj")
+        from prismaquant.name_projection import fused_dense_group
+        g = fused_dense_group("model.layers.5.self_attn.q_proj")
         self.assertIsNotNone(g)
         pre, members = g
         self.assertEqual(pre, "model.layers.5")
         self.assertIn("k_proj", members)
 
     def test_fused_dense_group_mlp_gate_up(self):
-        from prismaquant.export_native_compressed import _fused_dense_group
-        g = _fused_dense_group("model.layers.0.mlp.shared_expert.up_proj")
+        from prismaquant.name_projection import fused_dense_group
+        g = fused_dense_group("model.layers.0.mlp.shared_expert.up_proj")
         self.assertIsNotNone(g)
         self.assertEqual(set(g[1]), {"gate_proj", "up_proj"})
 
     def test_fused_dense_group_qwen36_linear_attn(self):
-        from prismaquant.export_native_compressed import _fused_dense_group
+        from prismaquant.name_projection import fused_dense_group
         for sib in ("in_proj_qkv", "in_proj_z"):
-            g = _fused_dense_group(f"model.layers.7.linear_attn.{sib}")
+            g = fused_dense_group(f"model.layers.7.linear_attn.{sib}")
             self.assertIsNotNone(g, f"missing fused-group pattern for {sib}")
             self.assertEqual(set(g[1]), {"in_proj_qkv", "in_proj_z"})
 

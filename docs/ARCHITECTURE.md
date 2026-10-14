@@ -39,10 +39,15 @@ device-qualification conditions. Development still refuses structural predicates
 and the reviewed answer, pin, evidence, scope and independent export gates remain
 unchanged.
 
-`NameProjection` owns serving-unit component closure. Allocation and export
+`NameProjection` owns the complete serving-unit roster, fusion name derivation
+and component closure. Allocation and export
 retain all overlapping fused and packed declarations and their licence kinds;
 a singleton contributes no coupling. Allocation preserves member order when
 choosing among equal-rank formats.
+Its `serving_units` enumeration retains both memberships when a projection is
+fused and packed; `serving_group` retains its existing packed-first shorthand.
+Activation scale joins ask the fusion naming policy and select fused siblings
+only. Existing declared metadata fallback choices are unchanged.
 Registry absence means an unavailable vLLM package or an explicitly unregistered
 architecture. Failures loading registered model metadata propagate through
 profiles, allocation and export; a failed lookup remains failed on a repeated
