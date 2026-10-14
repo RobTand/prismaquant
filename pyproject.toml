@@ -84,4 +84,5 @@ prismaquant = [
     "lane_specs/*.json",
     "tessera_runtime/shape_time_checker_config.json",
     "tessera_runtime/reviewed_answer.json",
+    "tessera_runtime/tessera_serving_runtime_pin.json",
 ]
