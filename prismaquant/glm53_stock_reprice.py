@@ -568,7 +568,7 @@ def inventory_checks(
         "PASS" if not missing_norm else "BLOCK",
         (
             "every row carrying h_trace_raw also carries "
-            "h_trace_norm_tokens, so allocator.renormalize_probe_fisher "
+            "h_trace_norm_tokens, so probe_statistics.renormalize_probe_fisher "
             "cannot SystemExit on a missing norm stamp"
             if not missing_norm
             else f"{len(missing_norm)} row(s) carry h_trace_raw with no "

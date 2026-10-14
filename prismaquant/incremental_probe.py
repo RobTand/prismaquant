@@ -2735,13 +2735,6 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
     )
 
 
-# `finalize_fisher_stats` lives in sensitivity_probe (next to
-# h_detail_blob, so both probe backends and every h-detail writer share
-# the single global-token normalization convention); it is re-exported
-# here because this module is the production backend consumers import
-# it from.
-
-
 # ---------------------------------------------------------------------------
 # Per-shard body runner — phase-3 of streaming_probe, scoped to the
 # Linears matching this shard's regex. Phase-1 + Phase-2 are now global

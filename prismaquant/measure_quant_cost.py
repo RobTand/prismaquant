@@ -408,7 +408,7 @@ class HDetailIndex:
         Both writers (`sensitivity_probe.FisherAccumulator.finalize` and
         `incremental_probe`) normalize by the GLOBAL calib token count —
         the same denominator as the scalar ``h_trace`` — and stamp
-        ``units: "per_token"`` via `sensitivity_probe.h_detail_blob`
+        ``units: "per_token"`` via `probe_statistics.h_detail_blob`
         (audits M9 + the PR #14 global-denominator fix). Legacy blobs:
 
           - v3 ``h_diag`` (or unmarked): still converted here — this

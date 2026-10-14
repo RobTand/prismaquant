@@ -56,7 +56,7 @@ def h_detail_blob(h_raw: torch.Tensor, global_tokens: int, name: str, *,
     agree with, so `predicted_dloss` fallback rows priced expert rows on
     a different scale than the rest of the knapsack.
 
-    Every h-detail writer (this module's `FisherAccumulator.finalize` and
+    Every h-detail writer (`sensitivity_probe.FisherAccumulator.finalize` and
     `incremental_probe`'s two writer sites) goes through this helper so
     the on-disk units are per-token everywhere and stamped with an
     explicit ``units: "per_token"`` marker (audit M9 — the incremental
