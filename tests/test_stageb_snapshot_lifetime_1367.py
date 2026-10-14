@@ -1,6 +1,8 @@
 """Owned cyclic snapshots retire before reusable staging credit, without GC."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal
+
 import gc
 import threading
 
@@ -16,7 +18,7 @@ WAIT = 15
 def test_cyclic_snapshot_retirement_precedes_credit(monkeypatch, tmp_path, outcome):
     owned_ids = set()
     copy = publication.deepcopy
-    encode = aura._encode_aura_unit_checkpoint
+    encode = aura_checkpoint_journal.encode_unit
     entered, release = threading.Event(), threading.Event()
     marker = f"snapshot-lifetime-{outcome}"
     source: dict[str, object] = {"marker": marker}
@@ -35,7 +37,7 @@ def test_cyclic_snapshot_retirement_precedes_credit(monkeypatch, tmp_path, outco
         return encode(**kwargs)
 
     monkeypatch.setattr(publication, "deepcopy", tracked_copy)
-    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", controlled_encode)
+    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", controlled_encode)
     names = ["first", "tail-a", "tail-b"]
     durable = set()
     ledger = publication.CheckpointPublicationLedger(

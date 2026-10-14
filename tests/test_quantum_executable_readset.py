@@ -8,6 +8,7 @@ binding through the existing owners; dispatcher selection with derived
 progress declarations; runtime read-phase reporting through the existing
 semantic reporter. Full GPU execution belongs to a later lane, not here.
 """
+from prismaquant import aura_provenance
 
 import copy
 import gzip
@@ -543,7 +544,7 @@ def _acceptance_setup(tmp_path, monkeypatch):
     import prismaquant.aura_cost as aura
     from prismaquant.joint_campaign_ledger import (roster_digest)
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     torch.manual_seed(85)
     model, context, runner, cache = lm.fixture()
@@ -680,7 +681,7 @@ def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
         source_model_identity=tsc._model_identity("joint-source"),
         unit_roster_sha256=roster_sha, plan_sha256=plan_sha,
         prepared_sha256=prepared_sha, read_manifest_sha256=parent_sha,
-        implementation_sha256=aura._aura_source_sha256(),
+        implementation_sha256=aura_provenance.source_sha256(),
         campaign_scope=campaign_scope)
 
 
@@ -1099,7 +1100,7 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
         preflight_joint_operator_admission)
     from prismaquant.production_weight_cache import ProductionWeightCache
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     model, context, runner = _expert_fixture()
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
@@ -1325,7 +1326,7 @@ def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     coverage are asserted on every leg. Source-file opens stay explicitly
     unqualified (fake context); calibration stays torch.save fixture bytes.
     """
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
     setup = _acceptance_setup_expert(tmp_path, monkeypatch)
     record0 = setup["records"]["layer-000"]
     n_windows = len(record0["windows"])

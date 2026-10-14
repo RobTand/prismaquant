@@ -137,10 +137,8 @@ def test_text_digest_site(name):
 
 @pytest.mark.parametrize("name", list(_TEXT_INPUTS))
 def test_unit_path_site(name):
-    for ref in ["prismaquant.cost_stage_checkpoint.unit_path",
-                "prismaquant.aura_cost._aura_unit_checkpoint_path"]:
-        site = _site(ref)
-        GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
+    site = _site("prismaquant.cost_stage_checkpoint.unit_path")
+    GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
 
 
 # --- the owners ---------------------------------------------------------------

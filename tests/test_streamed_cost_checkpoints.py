@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance
+
 import hashlib
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -313,7 +315,7 @@ def _anchored_streamed_aura(runner, calib, checkpoint_dir, *, resume):
 def _run_streamed_aura(
     state, calib, checkpoint_dir, *, resume, monkeypatch
 ):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _model, context, runner = _dense_runner(state)
     result = _anchored_streamed_aura(
         runner, calib, checkpoint_dir, resume=resume
@@ -335,7 +337,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
         state, calib, tmp_path / "whole", resume=False, monkeypatch=monkeypatch
     )
 
-    original_writer = aura._write_aura_unit_checkpoint
+    original_writer = aura_checkpoint_journal.write_unit
     writes = {"count": 0}
 
     def interrupt_after_first(*args, **kwargs):
@@ -345,7 +347,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
             raise RuntimeError("fixture interruption")
 
     monkeypatch.setattr(
-        aura, "_write_aura_unit_checkpoint", interrupt_after_first
+        aura_checkpoint_journal, "write_unit", interrupt_after_first
     )
     with pytest.raises(RuntimeError, match="fixture interruption"):
         _run_streamed_aura(
@@ -357,7 +359,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
         )
     assert writes["count"] == 1
 
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", original_writer)
+    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", original_writer)
     actual, _ = _run_streamed_aura(
         state, calib, tmp_path / "resumed", resume=True, monkeypatch=monkeypatch
     )
@@ -745,7 +747,7 @@ def test_streamed_anchor_allocator_release_is_cuda_only(monkeypatch):
 def _run_checkpointed_anchor_diagnostic(
     state, calib, checkpoint_dir, *, resume, monkeypatch,
 ):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _model, context, runner = _dense_runner(state)
     plan = {
         "model.layers.0.proj": ("FP8_E4M3",),
@@ -790,7 +792,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
         monkeypatch=monkeypatch,
     )
 
-    original_writer = aura._write_aura_unit_checkpoint
+    original_writer = aura_checkpoint_journal.write_unit
     writes = {"count": 0}
 
     def interrupt_after_first(*args, **kwargs):
@@ -800,7 +802,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
             raise RuntimeError("anchor diagnostic interruption")
 
     monkeypatch.setattr(
-        aura, "_write_aura_unit_checkpoint", interrupt_after_first
+        aura_checkpoint_journal, "write_unit", interrupt_after_first
     )
     with pytest.raises(RuntimeError, match="anchor diagnostic interruption"):
         _run_checkpointed_anchor_diagnostic(
@@ -811,7 +813,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
             monkeypatch=monkeypatch,
         )
     monkeypatch.setattr(
-        aura, "_write_aura_unit_checkpoint", original_writer
+        aura_checkpoint_journal, "write_unit", original_writer
     )
     actual, _, renderer = _run_checkpointed_anchor_diagnostic(
         state,
@@ -1315,7 +1317,7 @@ def test_streamed_aura_checkpointing_needs_anchor_identity(
     """Checkpointing refuses without an anchor renderer, and runs on the
     anchor's exact identity."""
     torch.manual_seed(116)
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     seed_model = _DenseTinyLM().eval()
     state = {
         name: tensor.detach().clone()

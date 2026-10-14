@@ -8,6 +8,8 @@ PB-assigned affinity, and an explicit plan value must still win.
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import inspect
 import os
 from pathlib import Path
@@ -81,7 +83,7 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
     # untouched; the intake itself is intercepted on the module the tool
     # imports it from at call time.
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "0" * 64)
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: "0" * 64)
     monkeypatch.setattr(head_module, "build_head_slices", lambda **_kwargs: {})
 
     def build(plan):

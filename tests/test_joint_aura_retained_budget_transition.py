@@ -1,6 +1,8 @@
 """CPU gates for the retained-budget run transition; no external checkpoint is touched."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
+
 import copy
 import json
 import os
@@ -109,8 +111,8 @@ def sealed(tmp_path, monkeypatch):
         return {"git_commit": state["commit"], **transition.source_proof(state["package"])}
     monkeypatch.setattr(transition, "_actual_execution", actual_execution)
     monkeypatch.setattr(transition, "_committed_package", lambda root: {"git_parent_commit": "5" * 40})
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: state["commit"])
-    monkeypatch.setattr(aura, "_aura_source_sha256",
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: state["commit"])
+    monkeypatch.setattr(aura_provenance, "source_sha256",
                         lambda: transition.source_proof(state["package"])["producer_source_sha256"])
     checkpoints = tmp_path / "checkpoints"
 
@@ -446,7 +448,7 @@ def test_a_fresh_run_carries_the_receipt_and_rewrites_the_measurement_source(sea
     assert provenance["prepared_plan_sha256"] == sealed["prepared_plan"]["sha256"]
     assert provenance["observed_git_commit"] == sealed["state"]["commit"]
     for name in result["costs"]:
-        state = aura._load_aura_unit_checkpoint(aura._aura_unit_checkpoint_path(sealed["checkpoints"], name),
+        state = aura_checkpoint_journal.load_unit(cost_stage_checkpoint.unit_path(sealed["checkpoints"], name),
                                                 qname=name, identity_sha256=manifest["identity_sha256"])
         assert state["execution_provenance"] == cap.execution_provenance
 

@@ -1,4 +1,5 @@
 """An explicit recovery authority, never reuse of an unfinished generation."""
+from prismaquant import aura_provenance
 import pytest
 import copy
 import json
@@ -454,7 +455,7 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
 
     # The freezer derives the same chained capsule from the spool and PB records.
     import prismaquant.aura_cost as aura_cost
-    monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: '3' * 64)
+    monkeypatch.setattr(aura_provenance, 'source_sha256', lambda: '3' * 64)
     request = tmp_path / 'r10-request.json'
     request.write_text(json.dumps(owner_action))
     derived = tmp_path / 'r10-to-r11-derived.json'

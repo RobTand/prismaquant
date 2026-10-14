@@ -33,6 +33,7 @@ grown to eight samples in read windows of four so a batch of four is legal:
 Every quantum here runs under the spill (a non-default regime replays only
 from it) with a 1 GiB ceiling; the fixture is a few kilobytes.
 """
+from prismaquant import aura_provenance
 from pathlib import Path
 import hashlib
 import json
@@ -120,7 +121,7 @@ def _build(tmp_path_factory, *, name, chain_batch, fusion):
     root = tmp_path_factory.mktemp(name)
     device = spill_tests._device()
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+        patch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
         patch.setenv("PRISMAQUANT_DEV_MODE", "1")
         torch.manual_seed(715)
         state = {key: tensor.detach().clone()
@@ -146,7 +147,7 @@ def _build(tmp_path_factory, *, name, chain_batch, fusion):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura._aura_source_sha256(),
+            implementation_sha256=aura_provenance.source_sha256(),
             chain_batch_size=chain_batch, chain_probe_fusion=fusion)
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}

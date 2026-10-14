@@ -9,8 +9,8 @@ was taken in.
 
 The workload is the body of ``commit_streamed_units`` in
 ``joint_cost_quantum.py``, called unit by unit on the real functions:
-``make_joint_aura_entry`` for each format, ``_aura_unit_state`` and
-``_write_aura_unit_checkpoint``. Its inputs come from one production unit
+``make_joint_aura_entry`` for each format, ``capture_unit_state`` and
+``write_unit``. Its inputs come from one production unit
 checkpoint (``--sample-checkpoint``): the probe identity (6.5 MB, almost all
 of it ``source_model``), one object shared by every unit as in the quantum,
 and the unit's rows, formats and probe count. Each unit gets its own name, so
@@ -179,7 +179,7 @@ class SimpleInputs:
 
 def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict | None):
     """``commit_streamed_units``' body for one unit, on the same functions."""
-    from prismaquant.aura_cost import _aura_unit_state, _write_aura_unit_checkpoint
+    from prismaquant.aura_checkpoint_journal import (capture_unit_state as _aura_unit_state, write_unit as _write_aura_unit_checkpoint)
     from prismaquant.joint_aura import make_joint_aura_entry
 
     started = time.perf_counter()
@@ -203,7 +203,8 @@ def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict |
                                     state=state)
         return
     # The writer's steps, timed one by one (the same calls, in its order).
-    from prismaquant.aura_cost import AURA_CHECKPOINT_UNIT_SCHEMA, _aura_unit_checkpoint_path
+    from prismaquant.aura_checkpoint_journal import (AURA_CHECKPOINT_UNIT_SCHEMA as AURA_CHECKPOINT_UNIT_SCHEMA)
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
     from prismaquant.cost_stage_checkpoint import atomic_write_bytes
     state_bytes = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
     pickled = time.perf_counter()
@@ -418,8 +419,8 @@ def _spy_main(path: Path) -> dict:
             continue
         frames = [frame.split(" (")[0] for frame in stack.split(";")[1:]]
         leaf = next((frame for frame in reversed(frames) if frame in (
-            "_write_aura_unit_checkpoint", "atomic_write_bytes", "make_joint_aura_entry",
-            "_aura_unit_state", "_read_ballast", "_load_sample", "_unit_inputs")), "other")
+            "write_unit", "atomic_write_bytes", "make_joint_aura_entry",
+            "capture_unit_state", "_read_ballast", "_load_sample", "_unit_inputs")), "other")
         counts[leaf] = counts.get(leaf, 0) + int(count)
         total += int(count)
     return {"samples": total, "by_function": counts}

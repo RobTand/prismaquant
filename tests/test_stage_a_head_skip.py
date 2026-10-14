@@ -19,6 +19,8 @@ stride 2. The claims:
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import hashlib
 import json
 import os
@@ -198,7 +200,7 @@ def _entry(monkeypatch, *, implementation, walk, generation):
     monkeypatch.setattr(joint_projection_backend, "executing_image", lambda: IMAGE)
     monkeypatch.setattr(joint_projection_backend, "prewarm_projection_backend",
                         lambda *a, **k: SimpleNamespace(identity=PROJECTION))
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: implementation)
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: implementation)
     monkeypatch.setattr(model_profiles, "detect_profile", lambda *a, **k: None)
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm",
                         lambda *a, **k: _dense_runner())

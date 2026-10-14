@@ -1753,20 +1753,19 @@ def run_layer_quantum_core(
     record, the journal identity or the payload.
     """
     from . import format_registry as fr
-    from .aura_cost import (
-        _assemble_streamed_aura_payload,
-        _aura_source_sha256,
-        _aura_unit_state,
-        _build_aura_checkpoint_identity,
-        _checkpoint_git_commit,
-        _free_gib,
-        _prepare_aura_checkpoints,
-        _restore_aura_unit_state,
-        _write_aura_unit_checkpoint,
-        _ZERO_COST_FORMATS,
+    from .aura_cost import _assemble_streamed_aura_payload, _free_gib, _ZERO_COST_FORMATS
+    from .aura_provenance import source_sha256 as _aura_source_sha256, checkpoint_git_commit as _checkpoint_git_commit
+    from .aura_checkpoint_journal import (
+        capture_unit_state as _aura_unit_state,
+        build_checkpoint_identity as _build_aura_checkpoint_identity,
+        prepare_journal as _prepare_aura_checkpoints,
+        restore_unit_state as _restore_aura_unit_state,
+        write_unit as _write_aura_unit_checkpoint,
     )
-    from .streamed_boundary_artifacts import StreamedBoundaryArtifacts, _state_storage_bytes, normalize_boundary_storage
-    from .streamed_boundary_artifacts import prefetched_boundary_batches
+    from .streamed_boundary_artifacts import (
+        StreamedBoundaryArtifacts, _state_storage_bytes,
+        normalize_boundary_storage, prefetched_boundary_batches,
+    )
     from .streamed_model_identity import validate_streamed_model_identity
     from .joint_aura import (
         JointOperatorStatisticsLease,
@@ -3923,7 +3922,7 @@ def run_layer_quantum(
     """
     import torch
 
-    from .aura_cost import _aura_source_sha256
+    from .aura_provenance import (source_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .gpu_guard import require_cuda_hot_path

@@ -1,4 +1,5 @@
 """Packed source views produce the same per-Linear joint residual as an oracle."""
+from prismaquant import aura_provenance
 import copy
 from types import SimpleNamespace
 
@@ -181,7 +182,7 @@ def test_grouped_packed_joint_matches_eager_source_oracle(monkeypatch):
 
 
 def test_packed_joint_checkpoint_resume_keeps_aligned_unit_roster(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     _, _, runner, profile, cache, _ = _fixture()
     first = _run(runner, profile, cache, checkpoint_dir=tmp_path)
     _, context, runner, profile, cache, _ = _fixture()

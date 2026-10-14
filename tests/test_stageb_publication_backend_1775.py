@@ -1,4 +1,5 @@
 """CPU-only publisher ownership/ordering gates; not performance measurements."""
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 from concurrent.futures import Future
 import os
 import stat
@@ -212,11 +213,11 @@ def test_encoded_unit_is_immutable_and_matches_existing_writer(tmp_path):
     state = {"components": [{"costs": [1.0, 2.0]}],
              "identity": {"source": ["sha256", "verified"]}}
     qname, identity = "layer.0.unit", "a" * 64
-    aura_cost._write_aura_unit_checkpoint(
+    aura_checkpoint_journal.write_unit(
         tmp_path, qname=qname, identity_sha256=identity, state=state)
-    path = aura_cost._aura_unit_checkpoint_path(tmp_path, qname)
+    path = cost_stage_checkpoint.unit_path(tmp_path, qname)
     expected = path.read_bytes()
-    encoded = aura_cost._encode_aura_unit_checkpoint(
+    encoded = aura_checkpoint_journal.encode_unit(
         qname=qname, identity_sha256=identity, state=state)
     assert type(encoded) is bytes and encoded == expected
     state["components"][0]["costs"].append(999.0)
@@ -229,10 +230,10 @@ def test_encoded_cpu_tensor_unit_is_a_snapshot(tmp_path):
 
     state = {"tensor": torch.arange(8, dtype=torch.float32)}
     qname, identity = "tensor.unit", "b" * 64
-    aura_cost._write_aura_unit_checkpoint(
+    aura_checkpoint_journal.write_unit(
         tmp_path, qname=qname, identity_sha256=identity, state=state)
-    expected = aura_cost._aura_unit_checkpoint_path(tmp_path, qname).read_bytes()
-    encoded = aura_cost._encode_aura_unit_checkpoint(
+    expected = cost_stage_checkpoint.unit_path(tmp_path, qname).read_bytes()
+    encoded = aura_checkpoint_journal.encode_unit(
         qname=qname, identity_sha256=identity, state=state)
     assert encoded == expected
     state["tensor"].fill_(999)
@@ -382,7 +383,7 @@ def test_atomic_unit_is_not_acknowledged_before_directory_fsync(
     path = tmp_path / "unit.bin"
     try:
         pub.reserve(4096)
-        encoded = aura_cost._encode_aura_unit_checkpoint(
+        encoded = aura_checkpoint_journal.encode_unit(
             qname="unit", identity_sha256="a" * 64, state={"value": 1})
         assert len(encoded) <= 4096
         pub.submit(PublicationJob("unit", 4096,

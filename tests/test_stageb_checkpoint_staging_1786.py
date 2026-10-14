@@ -1,13 +1,15 @@
 """Host staging guards and cancellation used by retained-window publication."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
+
 import pickle
 import threading
 import weakref
 
 import pytest
 
-from prismaquant.aura_cost import _encode_aura_unit_checkpoint
+from prismaquant.aura_checkpoint_journal import (encode_unit as _encode_aura_unit_checkpoint)
 from prismaquant.joint_cost_quantum import quantum_runtime_execution
 from prismaquant.tessera_publication import PublicationError, PublicationJob
 from test_stageb_publication_backend_1775 import engine, _pool_publisher, _stage, WAIT
@@ -164,8 +166,8 @@ def test_ledger_reserves_before_snapshot_and_never_borrows_nested_graph(monkeypa
     writers = []
     durable, acknowledgements, windows = set(), [], []
     source = {"nested": {"components": [1.0, 2.0]}}
-    atomic = aura.atomic_write_bytes
-    encode = aura._encode_aura_unit_checkpoint
+    atomic = aura_checkpoint_journal.atomic_write_bytes
+    encode = aura_checkpoint_journal.encode_unit
     encoders = []
 
     def checked_encode(**kwargs):
@@ -179,8 +181,8 @@ def test_ledger_reserves_before_snapshot_and_never_borrows_nested_graph(monkeypa
         assert release.wait(WAIT)
         atomic(path, body)
 
-    monkeypatch.setattr(aura, "atomic_write_bytes", held)
-    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", checked_encode)
+    monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", held)
+    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", checked_encode)
     ledger = CheckpointPublicationLedger(
         checkpoint_root=tmp_path, identity_sha256="a" * 64,
         windows=[{"names": ["unit"]}], completed=durable,
@@ -203,7 +205,7 @@ def test_ledger_reserves_before_snapshot_and_never_borrows_nested_graph(monkeypa
         ledger.flush()
         assert durable == {"unit"}
         assert acknowledgements == [{"unit"}] and windows == [0]
-        raw = aura._aura_unit_checkpoint_path(tmp_path, "unit").read_bytes()
+        raw = cost_stage_checkpoint.unit_path(tmp_path, "unit").read_bytes()
         envelope = pickle.loads(raw)
         assert pickle.loads(envelope["payload"]) == {"nested": {"components": [1.0, 2.0]}}
         assert writers and all(worker != consumer for worker in writers)
@@ -220,7 +222,7 @@ def test_encoder_owns_snapshot_before_source_mutates(monkeypatch, tmp_path):
 
     entered, release = threading.Event(), threading.Event()
     source = {"nested": {"components": [1.0, 2.0]}}
-    encode = aura._encode_aura_unit_checkpoint
+    encode = aura_checkpoint_journal.encode_unit
     expected = encode(qname="unit", identity_sha256="a" * 64, state=source)
 
     def held_encode(**kwargs):
@@ -228,7 +230,7 @@ def test_encoder_owns_snapshot_before_source_mutates(monkeypatch, tmp_path):
         assert release.wait(WAIT)
         return encode(**kwargs)
 
-    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", held_encode)
+    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", held_encode)
     durable = set()
     ledger = CheckpointPublicationLedger(
         checkpoint_root=tmp_path, identity_sha256="a" * 64,
@@ -243,7 +245,7 @@ def test_encoder_owns_snapshot_before_source_mutates(monkeypatch, tmp_path):
         assert durable == set()
         release.set()
         ledger.flush()
-        actual = aura._aura_unit_checkpoint_path(tmp_path, "unit").read_bytes()
+        actual = cost_stage_checkpoint.unit_path(tmp_path, "unit").read_bytes()
         assert actual == expected
         assert ledger.stats()["encoded_bytes"] == len(expected)
         assert ledger.stats()["charged_bytes"] == 0
@@ -261,7 +263,7 @@ def test_owned_encoder_preserves_builtin_alias_bytes(tmp_path, cycle):
     state: dict[str, object] = {"first": shared, "second": shared}
     if cycle:
         state["self"] = state
-    expected = aura._encode_aura_unit_checkpoint(
+    expected = aura_checkpoint_journal.encode_unit(
         qname="unit", identity_sha256="a" * 64, state=state)
     ledger = CheckpointPublicationLedger(
         checkpoint_root=tmp_path, identity_sha256="a" * 64,
@@ -272,7 +274,7 @@ def test_owned_encoder_preserves_builtin_alias_bytes(tmp_path, cycle):
         ledger.start_window(0, ["unit"])
         assert ledger.submit("unit", lambda limit: state)
         ledger.flush()
-        assert aura._aura_unit_checkpoint_path(tmp_path, "unit").read_bytes() == expected
+        assert cost_stage_checkpoint.unit_path(tmp_path, "unit").read_bytes() == expected
         assert ledger.stats()["charged_bytes"] == 0
     finally:
         ledger.close()
@@ -285,7 +287,7 @@ def test_encoder_failure_is_not_a_durable_ack(monkeypatch, tmp_path):
     def fail_encode(**kwargs):
         raise OSError("injected encoder-stage failure")
 
-    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", fail_encode)
+    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", fail_encode)
     durable, windows = set(), []
     ledger = CheckpointPublicationLedger(
         checkpoint_root=tmp_path, identity_sha256="a" * 64,
@@ -303,7 +305,7 @@ def test_encoder_failure_is_not_a_durable_ack(monkeypatch, tmp_path):
         error = error.__cause__
     assert "injected encoder-stage failure" in " ".join(messages)
     assert durable == set() and windows == []
-    assert not aura._aura_unit_checkpoint_path(tmp_path, "unit").exists()
+    assert not cost_stage_checkpoint.unit_path(tmp_path, "unit").exists()
     assert ledger.stats()["charged_bytes"] == 0
     # Cleanup joins ownership; drain already reported the publication failure.
     ledger.close()

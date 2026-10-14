@@ -1,6 +1,8 @@
 """Exercise the sealed read schedule inside real streamed retained COST."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
+
 import gzip
 import hashlib
 import json
@@ -177,13 +179,13 @@ def _run_case(root, monkeypatch, *, checkpoint, resume=False, completed=()):
     with monkeypatch.context() as patch:
         patch.setattr(aura, "compute_aura_cost_streamed", wrapped)
         patch.setattr(io_engine, "load_file", read)
-        save = aura._write_aura_unit_checkpoint
+        save = aura_checkpoint_journal.write_unit
         def write(*args, **kwargs):
             result = save(*args, **kwargs)
             files = list((checkpoint / "units").glob("*.pkl"))
             events.append(("checkpoint", kwargs["qname"], len(files)))
             return result
-        patch.setattr(aura, "_write_aura_unit_checkpoint", write)
+        patch.setattr(aura_checkpoint_journal, "write_unit", write)
         result, reads, context = _case(root / "same", monkeypatch, True,
                                        checkpoint=checkpoint, resume=resume)
     return result, reads, context, events, holder["schedule"]
@@ -220,7 +222,7 @@ def test_partial_and_complete_resume_keep_original_windows(tmp_path, monkeypatch
     first, all_reads, _, _, first_schedule = _run_case(
         tmp_path, monkeypatch, checkpoint=checkpoint)
     pending = sorted(first["stats"])[0]
-    aura._aura_unit_checkpoint_path(checkpoint, pending).unlink()
+    cost_stage_checkpoint.unit_path(checkpoint, pending).unlink()
     completed = set(first["stats"]) - {pending}
     resumed, reads, context, events, schedule = _run_case(
         tmp_path, monkeypatch, checkpoint=checkpoint, resume=True, completed=completed)

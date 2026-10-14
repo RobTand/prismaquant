@@ -7,6 +7,7 @@ row. These tests count those serializations inside the quantum, which must
 not grow with the number of rows, and check that the rows the quantum
 returns stay ordinary JSON data carrying the identity that was validated.
 """
+from prismaquant import aura_provenance
 import pickle
 
 import pytest
@@ -37,7 +38,7 @@ def _campaign(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=runtime._hex("a"), plan_sha256=runtime._hex("d"),
         prepared_sha256=runtime._hex("e"), read_manifest_sha256=runtime._hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.source_sha256())
     return single, receipt, output_root
 
 

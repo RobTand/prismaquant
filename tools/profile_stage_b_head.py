@@ -249,7 +249,7 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     the source-identity seed, minus the GPU-only steps."""
     import pickle
 
-    from prismaquant.aura_cost import _aura_source_sha256
+    from prismaquant.aura_provenance import (source_sha256 as _aura_source_sha256)
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.stage_inputs import bound as _bound, same as _same
@@ -317,7 +317,7 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
     The projection backend identity is the one the completion records: the
     harness has no device to prewarm one, and the head only compares it.
     """
-    from prismaquant.aura_cost import _aura_source_sha256
+    from prismaquant.aura_provenance import (source_sha256 as _aura_source_sha256)
     from prismaquant.joint_stage_b_head import (
         load_quantum_head, read_prepared_head, read_quantum_head_slice)
     from prismaquant.tessera_reader import load_declared_reader

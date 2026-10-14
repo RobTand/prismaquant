@@ -120,7 +120,7 @@ def verify_source_manifest(root, path):
 def expected_currency_bindings(runner, calibration, protocol, model_identity, cache, renders):
     """Seal dense qualification inputs before the producer returns any rows."""
     from prismaquant import format_registry as fr
-    from prismaquant.aura_cost import _aura_source_sha256
+    from prismaquant.aura_provenance import source_sha256
     from prismaquant.joint_aura import (
         activation_identity, arithmetic_identity, identity_sha256, source_execution_identity,
     )
@@ -133,7 +133,7 @@ def expected_currency_bindings(runner, calibration, protocol, model_identity, ca
         "calibration_shape": list(calibration.shape), "calibration_dtype": str(calibration.dtype),
         "n_probes": protocol["n_probes"], "seed_base": protocol["seed_base"],
         "token_scope": "causal", "temperature": 1.0, "distribution": "rademacher",
-        "normalization": "global_kl_fisher", "producer_source_sha256": _aura_source_sha256(),
+        "normalization": "global_kl_fisher", "producer_source_sha256": source_sha256(),
         "source_execution": source_execution_identity(runner.model),
         "arithmetic": arithmetic_identity(runner.dtype),
     }

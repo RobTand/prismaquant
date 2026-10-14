@@ -43,7 +43,7 @@ def _resumed_spill_run(tmp_path, monkeypatch):
     import prismaquant.joint_adjoint_checkpoints as checkpoints
     import prismaquant.joint_cost_quantum as qc
     import prismaquant.joint_replay_spill as spill_mod
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
 
     monkeypatch.setattr(phases, "_expert_fixture", one_pass._bf16_expert_fixture)
     for name in spill_mod.SPILL_ENV:

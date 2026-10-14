@@ -30,6 +30,8 @@ the direct-I/O path the campaign runs:
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import bisect
 import contextlib
 import dataclasses
@@ -135,7 +137,7 @@ def staging_campaign(tmp_path_factory):
     root = tmp_path_factory.mktemp("host-staging-1246")
     device = spill_tests._device()
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+        patch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
         patch.setenv("PRISMAQUANT_DEV_MODE", "1")
         torch.manual_seed(715)
         state = {key: tensor.detach().clone()
@@ -161,7 +163,7 @@ def staging_campaign(tmp_path_factory):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura._aura_source_sha256())
+            implementation_sha256=aura_provenance.source_sha256())
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}
     for layer in (0, 1):

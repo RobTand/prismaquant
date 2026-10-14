@@ -24,6 +24,8 @@ is the receipt path. ``--device`` selects ``cuda`` (default) or ``cpu``;
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import argparse
 import cProfile
 import io
@@ -347,7 +349,7 @@ def _run_complete_row(*, output_root: Path, device: str, reserves) -> dict:
         source_model_identity=model_identity("joint-source"),
         unit_roster_sha256="a" * 64, plan_sha256="d" * 64,
         prepared_sha256="e" * 64, read_manifest_sha256="f" * 64,
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.source_sha256())
     layer = 1
     adjoint_slice = stage_a_slice(json.loads(json.dumps(receipt)), layer)
     layer_output = stage_root / "layer-quanta" / f"layer-{layer:03d}"

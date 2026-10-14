@@ -11,6 +11,7 @@ import torch
 import test_quantum_executable_readset as fixture
 from test_quantum_executable_readset import (CALIB, N_PROBES, RENDER_PREREQ, STRIDED,
                                            _tiny_records, _tiny_receipt)
+from prismaquant import aura_checkpoint_journal
 from prismaquant import joint_layer_quanta as quanta
 
 MODE = quanta.CHECKPOINT_INCOMING_STAGED
@@ -295,7 +296,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     assert captured[-1] == baseline_resume_plane
     shutil.rmtree(record["output_space"]["root"])
     import prismaquant.aura_cost as aura
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []
     def fail_second(path, body):
         if Path(path).suffix == ".pkl":
@@ -304,7 +305,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
             published.append(str(path))
         return atomic(path, body)
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "atomic_write_bytes", fail_second)
+        patch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_second)
         with pytest.raises(OSError, match="partial staged checkpoint journal"):
             drive(MODE)
     assert len(published) == 1 and Path(published[0]).is_file()

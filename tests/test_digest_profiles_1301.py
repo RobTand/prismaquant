@@ -10,6 +10,8 @@ against them.
 """
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal
+
 import ast
 import hashlib
 import importlib
@@ -128,8 +130,8 @@ _WHERE = {"where": "digest fixture"}
 
 #: Every replaced function: (module, name, keyword arguments).
 SITES = (
-    ("prismaquant.aura_cost", "_canonical_json", _WHERE),
-    ("prismaquant.aura_cost", "_canonical_json_sha256", _WHERE),
+    ("prismaquant.aura_checkpoint_journal", "_canonical_json", _WHERE),
+    ("prismaquant.aura_checkpoint_journal", "_canonical_json_sha256", _WHERE),
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),
@@ -172,7 +174,8 @@ def _check_inputs(function, inputs, kwargs) -> set:
 
 
 @pytest.mark.parametrize(("module_name", "name", "kwargs"), SITES,
-                         ids=[f"{module}.{name}" for module, name, _ in SITES])
+                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost')}.{name}"
+                              for module, name, _ in SITES])
 def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
     new = getattr(importlib.import_module(module_name), name)
     kinds = _check_inputs(new, _inputs(module_name, name), kwargs)
@@ -219,12 +222,6 @@ def test_binding_is_the_profile_method(module_name, name, profile, method):
     bound = getattr(importlib.import_module(module_name), name)
     assert bound.__self__ is profile
     assert bound.__func__ is getattr(JsonProfile, method)
-
-
-def test_aura_round_trip_binding_is_the_owner():
-    from prismaquant import aura_cost
-
-    assert aura_cost._canonical_json is digests.canonical_json
 
 
 # ---------------------------------------------------------------------------

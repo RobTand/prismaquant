@@ -1,4 +1,5 @@
 """Integrated target replay preserves probes while bounding matrix/cache owners."""
+from prismaquant import aura_provenance
 import os
 from functools import partial
 
@@ -83,7 +84,7 @@ def test_replay_reuses_installed_source_and_preserves_input_cotangents():
 
 
 def test_window_resume_refuses_changed_budget_before_forward(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1'*40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1'*40)
     _, _, runner, cache = _fixture()
     first = _run(runner, cache, operator_windows=policy(), checkpoint_dir=tmp_path)
     _, context, runner, cache = _fixture()

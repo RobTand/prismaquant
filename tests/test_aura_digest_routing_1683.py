@@ -1,6 +1,8 @@
 """Check actual checkpoint bytes against the retained manifest recipe."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
+
 import hashlib
 import json
 
@@ -26,17 +28,17 @@ def test_manifest_publication_preserves_exact_input_bytes(
                                 ensure_ascii=False, allow_nan=False).encode("utf-8")
     expected_digest = hashlib.sha256(identity_bytes).hexdigest()
     manifest = {
-        "schema": aura.AURA_CHECKPOINT_MANIFEST_SCHEMA,
+        "schema": aura_checkpoint_journal.AURA_CHECKPOINT_MANIFEST_SCHEMA,
         "identity": identity,
         "identity_sha256": expected_digest,
-        "units": [{"qname": name, "file": str(aura._aura_unit_checkpoint_path(
+        "units": [{"qname": name, "file": str(cost_stage_checkpoint.unit_path(
             tmp_path, name).relative_to(tmp_path))} for name in names],
         "producer_source_sha256": source_digest,
         "producer_source_files_sha256": source_files,
     }
     expected = json.dumps(manifest, indent=2, sort_keys=True,
                           ensure_ascii=False, allow_nan=False).encode("utf-8")
-    assert aura._write_aura_checkpoint_manifest(tmp_path, identity, names) == expected_digest
+    assert aura_checkpoint_journal._write_aura_checkpoint_manifest(tmp_path, identity, names) == expected_digest
     published = (tmp_path / "manifest.json").read_bytes()
     assert published == expected
     assert not published.endswith(b"\n")
@@ -56,6 +58,6 @@ def test_manifest_encoding_error_preserves_published_bytes(tmp_path, monkeypatch
     # Invalid diagnostic data reaches the manifest encoder after identity hashing.
     monkeypatch.setattr(cache, "_production_cache_source_profile", lambda: ("d" * 64, {"bad": bad}))
     with pytest.raises(error):
-        aura._write_aura_checkpoint_manifest(tmp_path, {"valid": True}, [])
+        aura_checkpoint_journal._write_aura_checkpoint_manifest(tmp_path, {"valid": True}, [])
     assert manifest.read_bytes() == b"retained checkpoint"
     assert list(tmp_path.iterdir()) == [manifest]

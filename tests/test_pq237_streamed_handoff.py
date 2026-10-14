@@ -1,4 +1,5 @@
 """Actual streamed rows cross a pickle/checkpoint/candidate boundary on CPU."""
+from prismaquant import aura_provenance
 import copy
 import pickle
 
@@ -17,7 +18,7 @@ def test_streamed_checkpoint_pickle_candidates_and_identity_refusal(tmp_path, mo
     import prismaquant.aura_cost as aura
 
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, cache = _fixture()
     first = _run(runner, cache, checkpoint_dir=tmp_path / "checkpoints")
     _, context, runner, cache = _fixture()

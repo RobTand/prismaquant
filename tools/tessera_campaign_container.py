@@ -88,7 +88,7 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 
 #: The commit the sealed checkout is at, read on the host and handed to the
 #: container. The campaign image ships no git binary, and the joint pass binds
-#: every unit checkpoint to ``aura_cost._checkpoint_git_commit()``, which
+#: every unit checkpoint to ``aura_provenance.checkpoint_git_commit()``, which
 #: resolves the commit with git unless this variable names it. Inside the
 #: container the variable also skips that function's own exactness check
 #: (``git diff`` of ``aura_cost.py`` against HEAD), so the launcher performs

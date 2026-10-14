@@ -1,6 +1,8 @@
 """CPU research incoming-checkpoint behavior; no timing qualification."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal
+
 from contextlib import contextmanager
 
 import pytest
@@ -176,7 +178,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     # plane on its final pass, rather than treating already-priced units as finality.
     import prismaquant.aura_cost as aura
     from pathlib import Path
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []
 
     def fail_second(path, body):
@@ -187,7 +189,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
         return atomic(path, body)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "atomic_write_bytes", fail_second)
+        patch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_second)
         failed, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
     assert failed is None and isinstance(state.error, OSError)
     assert len(published) == 1 and Path(published[0]).is_file()

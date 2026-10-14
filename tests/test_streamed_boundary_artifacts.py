@@ -1,6 +1,8 @@
 """Exact source boundary residency and rolling cotangent regressions."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance
+
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -330,7 +332,7 @@ def test_opaque_shared_state_refuses_instead_of_hiding_tensor_ownership(tmp_path
 
 
 def test_completed_resume_skips_generation_and_policy_change_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     first, _, _ = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints")
     actual, events, context = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints", resume=True)
     assert actual["costs"] == first["costs"]
@@ -342,19 +344,19 @@ def test_completed_resume_skips_generation_and_policy_change_refuses(tmp_path, m
 
 
 def test_interrupted_cost_resume_uses_new_generation_and_original_signed_samples(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     expected, _, _ = _run(None)
-    writer = aura._write_aura_unit_checkpoint
+    writer = aura_checkpoint_journal.write_unit
     def interrupt(*args, **kwargs):
         writer(*args, **kwargs)
         raise RuntimeError("fixture interrupted cost checkpoint")
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", interrupt)
+    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", interrupt)
     with pytest.raises(RuntimeError, match="fixture interrupted"):
         _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints")
     assert not list((tmp_path / "working").rglob("*.pt*"))
     failed = json.loads(next((tmp_path / "working").rglob("generation.json")).read_text())
     assert failed["status"] == "failed" and failed["working_artifacts_reusable"] is False
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", writer)
+    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", writer)
     actual, _, _ = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints", resume=True)
     assert actual["costs"] == expected["costs"]
     completed = actual["provenance"]["streamed_boundary_storage"]

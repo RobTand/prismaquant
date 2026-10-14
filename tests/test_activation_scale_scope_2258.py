@@ -1,4 +1,5 @@
 """Real joint entry points must not leak their activation-scale policy."""
+from prismaquant import aura_provenance
 import os
 from types import SimpleNamespace
 
@@ -31,7 +32,7 @@ def _quantum_run_stub(tmp_path, monkeypatch):
     monkeypatch.setattr(joint_projection_backend, "prewarm_projection_backend",
                         lambda *a, **k: SimpleNamespace(identity=None))
     monkeypatch.setattr(tessera_reader, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: "b" * 64)
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: "b" * 64)
     monkeypatch.setattr(quantum, "GpuPowerSampler", _Sampler)
     monkeypatch.setattr(quantum, "bind_joint_served_quantizer", lambda formats: {})
     monkeypatch.setattr(joint_dispatch_pilot, "pilot_binding", lambda *a, **k: None)

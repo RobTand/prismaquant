@@ -16,6 +16,8 @@ CPU-only; no external checkpoint is touched.
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import hashlib
 import json
 from pathlib import Path
@@ -131,8 +133,8 @@ def sealed(tmp_path, monkeypatch):
     monkeypatch.setattr(transition, "_actual_execution", actual_execution)
     monkeypatch.setattr(transition, "_committed_package",
                         lambda root: {"git_parent_commit": "5" * 40})
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: state["commit"])
-    monkeypatch.setattr(aura, "_aura_source_sha256",
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: state["commit"])
+    monkeypatch.setattr(aura_provenance, "source_sha256",
                         lambda: transition.source_proof(state["package"])["producer_source_sha256"])
     receipt = transition.create_transition(
         bindings={"plan": plan, "prepared": prepared, "campaign_identity": identity},
@@ -293,8 +295,8 @@ def _aura_run(tmp_path, monkeypatch, *, source_sha, resume):
     resident path against a codebook cache identity; that lane was archived,
     #1304, and durable AURA checkpoints are streamed-only.)
     """
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "7" * 40)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: source_sha)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "7" * 40)
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: source_sha)
     torch.manual_seed(2026)
     state = {name: value.detach().clone()
              for name, value in _DenseTinyLM().state_dict().items()}

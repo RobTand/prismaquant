@@ -9,6 +9,8 @@ estimator or serving claim is made; probe-sampling scope is unchanged.
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import copy
 import math
 
@@ -419,7 +421,7 @@ def test_streamed_attribution_config_must_be_well_formed():
 # ---- checkpoint resume boundary -------------------------------------------
 
 def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _context, runner, cache = _streamed_fixture()
     aura.compute_aura_cost_streamed(
         runner, _TWO_SEQ, ["FP8_DYNAMIC", "NVFP4A16", "BF16"], n_probes=3,
@@ -446,7 +448,7 @@ def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeyp
 
 
 def test_checkpoint_resume_attribution_on_plain_rows_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _context, runner, cache = _streamed_fixture()
     aura.compute_aura_cost_streamed(
         runner, _TWO_SEQ, ["FP8_DYNAMIC", "NVFP4A16", "BF16"], n_probes=3,

@@ -1,6 +1,8 @@
 """CPU gates for explicit adoption; no mutation of external checkpoints."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
+
 import copy
 import hashlib
 import json
@@ -22,17 +24,17 @@ def _write_json(path, value):
 
 def _build_adopted(tmp_path, monkeypatch, *, layers=2):
     old_git, old_source, new_git, new_source = "1" * 40, "2" * 64, "3" * 40, "4" * 64
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: old_git)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: old_source)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: old_git)
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: old_source)
     root = tmp_path / "checkpoints"
     _, _, runner, cache = _fixture()
     expected = _run(runner, cache, checkpoint_dir=root)
     manifest = json.loads((root / "manifest.json").read_bytes())
-    pending = aura._aura_unit_checkpoint_path(root, "model.layers.0.proj")
+    pending = cost_stage_checkpoint.unit_path(root, "model.layers.0.proj")
     for i in range(layers - 1):
-        aura._aura_unit_checkpoint_path(root, f"model.layers.{i}.proj").unlink()
+        cost_stage_checkpoint.unit_path(root, f"model.layers.{i}.proj").unlink()
     kept_name = f"model.layers.{layers - 1}.proj"
-    kept = aura._aura_unit_checkpoint_path(root, kept_name)
+    kept = cost_stage_checkpoint.unit_path(root, kept_name)
     kept_bytes = kept.read_bytes()
     envelope = pickle.loads(kept_bytes)
     preserved = [{"qname": kept_name, "file": kept.relative_to(root).as_posix(),
@@ -57,8 +59,8 @@ def _build_adopted(tmp_path, monkeypatch, *, layers=2):
                  "reconstructed_source_sha256": old_source, "transition_module_sha256": "5" * 64}
     monkeypatch.setattr(transition, "_CONTRACT", contract)
     monkeypatch.setattr(transition, "_actual_execution", lambda: dict(execution))
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: execution["git_commit"])
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: new_source)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: execution["git_commit"])
+    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: new_source)
     bindings = {"plan": plan, "prepared": prepared, "inspection": inspection}
     receipt = transition.create_transition(bindings=bindings, checkpoint_dir=root, output=tmp_path / "transition.json")
     def load():
@@ -125,7 +127,7 @@ def test_real_producer_resumes_exact_rows_and_records_new_execution(adopted):
     resumed = _run(runner, cache, checkpoint_dir=adopted["root"], resume=True, source_transition=cap)
     assert resumed["costs"] == adopted["expected"]["costs"]
     assert adopted["kept"].read_bytes() == adopted["kept_bytes"]
-    state = aura._load_aura_unit_checkpoint(adopted["pending"], qname="model.layers.0.proj",
+    state = aura_checkpoint_journal.load_unit(adopted["pending"], qname="model.layers.0.proj",
                                            identity_sha256=adopted["manifest"]["identity_sha256"])
     assert state["execution_provenance"] == cap.execution_provenance
     provenance = resumed["provenance"]["source_transition"]
@@ -184,7 +186,7 @@ def test_resume_rejects_changed_non_source_identity(adopted):
 def test_preflight_rejects_unbound_new_unit(adopted):
     source = pickle.loads(adopted["kept_bytes"])
     state = pickle.loads(source["payload"])
-    aura._write_aura_unit_checkpoint(adopted["root"], qname="model.layers.0.proj",
+    aura_checkpoint_journal.write_unit(adopted["root"], qname="model.layers.0.proj",
         identity_sha256=adopted["manifest"]["identity_sha256"], state=state)
     with pytest.raises(ValueError, match="new unit lacks bound execution provenance"):
         adopted["load"]()
@@ -232,16 +234,16 @@ def test_legacy_git_override_is_not_accepted(monkeypatch):
 def test_two_interruptions_different_pb_heads_preserve_exact_costs(adopted_three, monkeypatch):
     data = adopted_three
     cap = data["load"]()
-    writer = aura._write_aura_unit_checkpoint
+    writer = aura_checkpoint_journal.write_unit
     def stop_after_middle(*args, **kwargs):
         writer(*args, **kwargs)
         if kwargs["qname"] == "model.layers.1.proj":
             raise TimeoutError("second admitted action reached deadline")
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", stop_after_middle)
+    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", stop_after_middle)
     _, _, runner, cache = _fixture()
     with pytest.raises(TimeoutError, match="deadline"):
         _run(runner, cache, checkpoint_dir=data["root"], resume=True, source_transition=cap)
-    middle = aura._aura_unit_checkpoint_path(data["root"], "model.layers.1.proj")
+    middle = cost_stage_checkpoint.unit_path(data["root"], "model.layers.1.proj")
     middle_bytes = middle.read_bytes()
     assert not data["pending"].exists()
     previous = dict(data["receipt"])
@@ -252,7 +254,7 @@ def test_two_interruptions_different_pb_heads_preserve_exact_costs(adopted_three
         output=data["root"].parent / "transition-next.json", predecessor=previous)
     data["receipt"].update(second)
     next_cap = data["load"]()
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", writer)
+    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", writer)
     _, _, runner, cache = _fixture()
     result = _run(runner, cache, checkpoint_dir=data["root"], resume=True, source_transition=next_cap)
     assert result["costs"] == data["expected"]["costs"]

@@ -1,4 +1,5 @@
 """Retained execution joins the real streamed probe and existing source owners."""
+from prismaquant import aura_provenance, cost_stage_checkpoint
 from pathlib import Path
 import hashlib
 import threading
@@ -20,7 +21,7 @@ from test_streamed_cost_checkpoints import _model_identity
 
 def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, proof_change=None,
           skeleton=None, budget=None, observed=None):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     model, context, runner, cache = fixture()
     if observed is not None:
         observed['context'] = context
@@ -143,7 +144,7 @@ def test_partial_streamed_resume_reads_only_pending_renders(tmp_path, monkeypatc
     first, all_reads, _ = _case(tmp_path / 'same', monkeypatch, True,
                                 checkpoint=tmp_path / 'checkpoint')
     pending_name = sorted(first['stats'])[0]
-    aura._aura_unit_checkpoint_path(tmp_path / 'checkpoint', pending_name).unlink()
+    cost_stage_checkpoint.unit_path(tmp_path / 'checkpoint', pending_name).unlink()
     resumed, reads, context = _case(tmp_path / 'same', monkeypatch, True,
                                    checkpoint=tmp_path / 'checkpoint', resume=True)
     assert resumed['costs'] == first['costs']

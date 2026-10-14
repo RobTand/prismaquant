@@ -201,7 +201,8 @@ def _load_inputs(bindings, checkpoint_dir):
 def _unit_roster(checkpoint_dir, manifest, preserved, execution_provenance=None, adopted=()):
     # Reuse the existing envelope/payload validator. Original envelopes are
     # additionally byte-bound; new envelopes must carry this exact execution.
-    from .aura_cost import _aura_unit_checkpoint_path, _load_aura_unit_checkpoint
+    from .cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
+    from .aura_checkpoint_journal import (load_unit as _load_aura_unit_checkpoint)
     root = Path(checkpoint_dir)
     expected = {}
     for row in manifest["units"]:

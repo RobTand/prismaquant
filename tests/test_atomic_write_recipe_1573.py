@@ -23,12 +23,8 @@ import os
 
 import pytest
 
-from prismaquant import aura_cost
 from prismaquant import cost_stage_checkpoint as csc
 
-
-def test_aura_cost_uses_the_owner_recipe() -> None:
-    assert aura_cost.atomic_write_bytes is csc.atomic_write_bytes
 
 
 def test_reseal_tool_stays_stdlib_only_for_row_rewrites() -> None:

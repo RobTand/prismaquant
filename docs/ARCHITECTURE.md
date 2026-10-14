@@ -64,6 +64,13 @@ and MTP adapter use it. Each caller retains its arithmetic and objective
 extensions, including MTP's `T - 1` token normalization and source-transition
 producer identity. The calibration hash still covers the same contiguous
 token bytes once per construction.
+`aura_checkpoint_journal` owns the unchanged v1 checkpoint schemas, identity
+construction, manifest and unit codecs, resume admission, state capture and
+restore, and atomic publication. Resident AURA, streamed AURA, layer quanta,
+transition certificates and asynchronous publication use that owner.
+`aura_provenance` owns Git and producer-package identity recipes. Numerical
+price passes supply their explicit measurement inputs and retain their own
+objectives, accumulation order and resource lifetimes.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.
