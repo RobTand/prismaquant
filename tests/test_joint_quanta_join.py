@@ -474,7 +474,7 @@ def test_roster_digest_is_the_768_construction(tmp_path, campaign, probe):
         ("\n".join(campaign["roster"]) + "\n").encode()).hexdigest()
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer, roster_digest=wrong)
-    with pytest.raises(JoinRefused, match="roster digest"):
+    with pytest.raises(JoinRefused, match="roster"):
         join_joint_quanta(receipts=None, campaign=campaign,
                           output_dir=tmp_path / "joined", input_root=root)
 

@@ -32,7 +32,7 @@ D3. A record binds its layer's Stage A *slice*, never a whole receipt
     digest) and ``adjoint.slice_path`` (the control-metadata file holding the
     slice), and no receipt digest. A band and the complete receipt give the
     same slice, so they give the same record. Binding is a new identity,
-    never an edit. ``check_quantum_for_campaign`` refuses an unbound record
+    never an edit. ``require_quantum_campaign`` refuses an unbound record
     for a bound campaign and any record that still binds a whole receipt.
 D4. Slice ``argv`` annotations carry the §5.2 inner argv without
     ``--quantum-sha256``: that digest is a submission-time binding (like
@@ -43,10 +43,10 @@ D5. The joiner is NOT colocated here. The contract (§4.1/§7) sketched
     as ``prismaquant/joint_quanta_join.py`` first, and #787 kept that module
     (its CLI, its allocation reader, its coverage proof) and deleted this
     module's parallel joiner rather than adapting it -- two joiners that
-    refuse each other's bytes is the failure #787 closed. The joiner imports
-    this module's pure constructions (``roster_digest``, ``phase_ranges``,
-    ``quantum_id``, ``qname_layer``) so the two sides of the wire share one
-    spelling of every digest and id.
+    refuse each other's bytes is the failure #787 closed. The campaign ledger
+    owns the record schema, identity, roster digest and
+    quantum ID. The producer retains manifest phase and qname-layer geometry,
+    which the joiner imports for coverage.
 """
 
 from __future__ import annotations
@@ -59,12 +59,15 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, newline_utf8_sha256
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
+from .joint_campaign_ledger import (
+    LAYER_QUANTUM_SCHEMA, new_quantum_record, quantum_id, roster_digest,
+    require_quantum_campaign, replace_quantum_readset,
+)
 
 
-LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 PLAN_BLOCK_SCHEMA = "prismaquant.joint_layer_quanta.plan.v1"
 COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 #: The stage-A capture schema, named here so the slice binder and the
@@ -184,21 +187,6 @@ def append_read_phase(phases: list[dict], entries: Sequence[Mapping],
                    "bytes": size, "cumulative_bytes": cumulative})
     return cumulative
 
-
-def quantum_id(layer: int) -> str:
-    if type(layer) is not int or layer < 0:
-        raise ValueError(f"a quantum layer must be a nonnegative integer, not {layer!r}")
-    return f"layer-{layer:03d}"
-
-
-def roster_digest(qnames: Sequence[str]) -> str:
-    """``sha256`` of the sorted qname roster, one per line (#768's construction)."""
-    ordered = sorted(qnames)
-    if any(type(name) is not str or not name for name in ordered):
-        raise ValueError("a unit roster holds nonempty qname strings")
-    if len(set(ordered)) != len(ordered):
-        raise ValueError("a unit roster holds unique qnames")
-    return newline_utf8_sha256(ordered)
 
 
 def qname_layer(qname: object) -> int | None:
@@ -705,11 +693,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
             },
         }
         blob = seal_manifest_bytes(slice_manifest)
-        record = {
-            "schema": LAYER_QUANTUM_SCHEMA,
-            "quantum_id": qid,
-            "layer": layer,
-            "campaign": {
+        record = new_quantum_record(
+            layer=layer,
+            campaign={
                 "plan_path": plan_path,
                 "plan_sha256": plan_sha256,
                 "prepared_path": prepared_path,
@@ -718,7 +704,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "campaign_scope": scope,
                 "unit_roster_sha256": digest,
             },
-            "read_set": {
+            read_set={
                 "manifest_path": manifest_path,
                 "manifest_sha256": bytes_sha256hex(blob),
                 "entry_count": len(layer_entries),
@@ -726,9 +712,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "source_phase": {"name": name, "start_bytes": row["start_bytes"],
                                  "end_bytes": row["end_bytes"]},
             },
-            "chunks": chunks,
-            "windows": windows,
-            "adjoint": {
+            chunks=chunks,
+            windows=windows,
+            adjoint={
                 "checkpoint_boundary": checkpoint,
                 "chain_layers": chain,
                 "boundary_artifacts": adjoint_dir,
@@ -736,18 +722,14 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                     None if bound_slices is None else bound_slices.get(layer),
                     slice_path=f"{control_slice_dir}/{qid}.json"),
             },
-            "output_space": {
+            output_space={
                 "root": space,
                 "cost_payload": space + "/cost.pkl",
                 "results": space + "/results.json",
                 "counters": space + "/counters.json",
                 "checkpoint_dir": space + "/checkpoints",
             },
-        }
-        if catalog_extension is not None:
-            record["catalog_extension"] = dict(catalog_extension)
-        record["identity_sha256"] = canonical_sha256(
-            record, where=f"quantum record {qid}")
+            catalog_extension=catalog_extension)
         records.append(record)
         slices[qid] = slice_manifest
 
@@ -1226,70 +1208,6 @@ def verify_quanta_coverage(records: Sequence[Mapping], parent_manifest: Mapping,
         where="quanta coverage proof")
     return proof
 
-
-def check_quantum_for_campaign(record: Mapping, campaign: Mapping) -> None:
-    """Refuse a record built for any other campaign revision (fail closed)."""
-    if not isinstance(record, dict) or record.get("schema") != LAYER_QUANTUM_SCHEMA:
-        raise ValueError("a quantum record has a foreign schema: refusing")
-    if not isinstance(campaign, dict):
-        raise ValueError("a campaign binding must be an object")
-    headless = {key: value for key, value in record.items() if key != "identity_sha256"}
-    if canonical_sha256(headless, where="quantum record") != record.get("identity_sha256"):
-        raise ValueError(
-            f"quantum {record.get('quantum_id')!r} identity does not recompute: "
-            f"edited record, refusing")
-    bound = record.get("campaign", {})
-    for field in ("plan_sha256", "prepared_sha256", "read_manifest_sha256",
-                  "unit_roster_sha256"):
-        expected = campaign.get(field)
-        if expected is None:
-            raise ValueError(f"the campaign binding names no {field}: refusing")
-        refusal = ValueError(
-            f"quantum {record.get('quantum_id')!r} was sealed for another "
-            f"{field}: refusing")
-        if field == "unit_roster_sha256":
-            # The roster is what the record measured, not how it was run.
-            if bound.get(field) != _hex(expected, field):
-                raise refusal
-            continue
-        # The plan, prepared and read-manifest digests are run seals
-        # (PQ #1147): dev mode prints a mismatch and admits the record.
-        seal_check(field, _hex(expected, field), bound.get(field),
-                   where=f"quantum {record.get('quantum_id')!r}", refusal=refusal)
-    expected_scope = campaign.get("campaign_scope")
-    scope_where = f"quantum {record.get('quantum_id')!r}"
-    if not isinstance(expected_scope, dict):
-        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
-                   where=scope_where, same=False, refusal=ValueError(
-                       "the campaign binding names no campaign_scope: refusing"))
-    else:
-        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
-                   where=scope_where,
-                   same=canonical_bytes(bound.get("campaign_scope")) == canonical_bytes(expected_scope),
-                   refusal=lambda: ValueError(
-                       f"quantum {record.get('quantum_id')!r} was sealed for another scope: "
-                       f"refusing"))
-    adjoint = record.get("adjoint", {})
-    if "receipt_sha256" in adjoint and adjoint["receipt_sha256"] is not None:
-        raise ValueError(
-            f"quantum {record.get('quantum_id')!r} binds a whole stage-A receipt; "
-            f"records bind their slice (PQ #993): re-seal, refusing")
-    if campaign.get("adjoint_receipt_sha256") is not None:
-        # A caller still naming the whole receipt would otherwise be silently
-        # ignored and admit an unbound record: fail closed.
-        raise ValueError("a campaign binding names a whole stage-A receipt; records "
-                         "bind their slice (PQ #993): pass adjoint_slice_sha256, refusing")
-    expected_slice = campaign.get("adjoint_slice_sha256")
-    if expected_slice is not None:
-        actual = adjoint.get("slice_sha256")
-        if actual is None:
-            raise ValueError(
-                f"quantum {record.get('quantum_id')!r} is unbound (pre-A): re-seal "
-                f"against its stage-A slice before publishing, refusing")
-        if actual != _hex(expected_slice, "adjoint_slice_sha256"):
-            raise ValueError(
-                f"quantum {record.get('quantum_id')!r} binds another stage-A "
-                f"slice: refusing")
 
 
 def adjoint_binding_fields(adjoint_slice: Mapping | None, *, slice_path: str) -> dict:
@@ -1820,14 +1738,14 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     Returns a deep copy of ``record`` carrying a ``boundary_readset`` block
     and a recomputed ``identity_sha256`` (the existing canonical owner, over
     every top-level field but the identity itself -- the same recomputation
-    ``check_quantum_for_campaign`` and the consumer's
+    ``require_quantum_campaign`` and the consumer's
     ``verify_quantum_identity`` enforce, so a bound record passes both);
     the input record is never mutated.
 
     Refuses unless every identity binds exactly: the record's stage-A slice
     (``receipt`` may be the slice, a completed receipt or the record's
     checkpoint band; PQ #993); the input record itself, reverified through
-    the existing ``check_quantum_for_campaign`` owner against its own sealed
+    the existing ``require_quantum_campaign`` owner against its own sealed
     campaign and bound slice BEFORE any mutation (a tampered field with a stale
     identity refuses -- binding never blesses edits by recomputing); the
     record's schema, layer, producer-constrained quantum id, campaign
@@ -1892,7 +1810,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     # The input record is reverified through the existing owner BEFORE any
     # mutation: a tampered field with a stale identity refuses here, and
     # binding never blesses edits by recomputing.
-    check_quantum_for_campaign(
+    require_quantum_campaign(
         record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("a boundary readset manifest must be an object: "
@@ -1938,11 +1856,8 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                    for phase in manifest["read_plan"]["phases"]],
         "slice_sha256": bound_slice,
     }
-    body = {key: value for key, value in fresh.items()
-            if key != "identity_sha256"}
-    fresh["identity_sha256"] = canonical_sha256(
-        body, where=f"quantum record {fresh.get('quantum_id')}")
-    return fresh
+    return replace_quantum_readset(record, kind="boundary",
+                                   block=fresh["boundary_readset"])
 
 
 #: The executable-manifest phase staging the whole checkpoint plane load.
@@ -3079,7 +2994,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     block and a recomputed ``identity_sha256`` (the existing canonical
     owner -- the same recomputation both real validators enforce); the
     input record is never mutated. The input record is reverified through
-    ``check_quantum_for_campaign`` before any mutation. The manifest must
+    ``require_quantum_campaign`` before any mutation. The manifest must
     equal what :func:`build_quantum_executable_manifest` derives from this
     record, receipt, parent and sealed inputs -- forged bytes with a
     consistent rehash refuse. The manifest path is exactly the
@@ -3144,7 +3059,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         raise ValueError(
             f"an executable readset path must be exactly {expected_path}: "
             "refusing")
-    check_quantum_for_campaign(
+    require_quantum_campaign(
         record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("an executable read manifest must be an object: "
@@ -3238,11 +3153,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         fresh["executable_readset"]["head_source"] = {
             key: copy.deepcopy(head_source_sealed[key])
             for key in ("schema", "layers_prefix", "tensors")}
-    body = {key: value for key, value in fresh.items()
-            if key != "identity_sha256"}
-    fresh["identity_sha256"] = canonical_sha256(
-        body, where=f"quantum record {fresh.get('quantum_id')}")
-    return fresh
+    return replace_quantum_readset(record, kind="executable",
+                                   block=fresh["executable_readset"])
 
 
 def emit_quantum_executable_readsets(

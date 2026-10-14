@@ -21,8 +21,9 @@ record (§3, ``prismaquant.joint_layer_quanta.v1``, built by the producer) and
 the per-quantum ``cost.pkl`` / ``status.json`` (§6.4, built by the runtime).
 This module checks the contract's schemas and digests; it does not construct
 producer or runtime records. The *constructions* it shares with the producer
--- the roster digest, the phase tiling, the quantum-id padding, the qname
-layer grammar -- are imported from ``joint_layer_quanta`` so the two sides of
+-- the roster digest and quantum-id padding -- belong to
+``joint_campaign_ledger``. The producer retains phase tiling and qname-layer
+geometry. These shared owners keep the two sides of
 the wire cannot drift again (issue #787: they did, four ways, and every
 genuine record refused).
 """
@@ -45,15 +46,12 @@ from prismaquant.cost_stage_checkpoint import (
 )
 from prismaquant.joint_aura import (
     prepare_joint_aura_identities, validate_joint_aura_entry)
-from prismaquant.joint_layer_quanta import (
-    phase_ranges,
-    qname_layer,
-    quantum_id,
-    roster_digest,
-)
+from prismaquant.joint_campaign_ledger import (quantum_id, roster_digest)
+from prismaquant.joint_layer_quanta import (phase_ranges, qname_layer)
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
-RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
+from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
+                                   require_quantum_identity, require_quantum_campaign)
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
 JOINED_RESULTS_SCHEMA = "prismaquant.joint_layer_quanta.joined_results.v1"
 
@@ -219,49 +217,29 @@ def _check_record(record: object, receipt: dict, campaign: dict, *,
     campaign binding. Returns the record."""
     quantum_id = receipt["quantum_id"]
     where = f"custody {quantum_id}"
-    if not isinstance(record, dict) or record.get("schema") != RECORD_SCHEMA:
-        raise JoinRefused(
-            f"{where}: record schema is not {RECORD_SCHEMA!r}")
+    try:
+        require_quantum_identity(record)
+    except ValueError as exc:
+        raise JoinRefused(f"{where}: {exc}") from exc
     if record.get("quantum_id") != quantum_id:
         raise JoinRefused(
-            f"{where}: record names {record.get('quantum_id')!r}, "
-            f"receipt names {quantum_id!r}")
-    identity = canonical_json_sha256(
-        {k: v for k, v in record.items() if k != "identity_sha256"},
-        where=f"{where} record identity")
-    if identity != record.get("identity_sha256"):
-        raise JoinRefused(
-            f"{where}: record identity digest does not verify "
-            "(record edited after sealing?)")
+            f"{where}: record names {record.get('quantum_id')!r}, receipt names {quantum_id!r}")
     if receipt.get("identity_sha256") is not None and (
             receipt["identity_sha256"] != record["identity_sha256"]):
         raise JoinRefused(
             f"{where}: receipt identity {receipt['identity_sha256']!r} does not "
             f"match record {record['identity_sha256']!r} (retargeted receipt)")
-    binding = record.get("campaign")
-    if not isinstance(binding, dict):
-        raise JoinRefused(f"{where}: record carries no campaign binding")
-    # Run-gate seals (PQ #1147): certified mode refuses as before; dev mode
-    # prints each mismatch and joins the record's data.
-    for key in ("plan_sha256", "prepared_sha256"):
-        seal_check(key, campaign[key], binding.get(key), where=where,
-                   refusal=lambda key=key: JoinRefused(
-                       f"{where}: record {key} {binding.get(key)!r} is not this "
-                       f"campaign ({campaign[key]!r})"))
-    seal_check("read_manifest_sha256", campaign["manifest_sha256"],
-               binding.get("read_manifest_sha256"), where=where,
-               refusal=lambda: JoinRefused(
-                   f"{where}: record read-manifest digest is not this campaign's"))
-    seal_check("campaign_scope", campaign["scope"], binding.get("campaign_scope"),
-               where=where, refusal=lambda: JoinRefused(
-                   f"{where}: record scope is not this campaign's scope"))
-    # B1 (#787): the roster digest is the producer's #768 construction
-    # (§3.1: "sha256 of the sorted qname roster, one per line") -- sorted,
-    # no trailing newline -- imported from the producer so the joiner's
-    # recomputation cannot drift from the seal.
-    if binding.get("unit_roster_sha256") != roster_digest(campaign["roster"]):
-        raise JoinRefused(f"{where}: record roster digest is not this roster")
-    # §3.2's rule, mirrored from check_quantum_for_campaign (PQ #993): every
+    try:
+        require_quantum_campaign(record, {
+            "plan_sha256": campaign["plan_sha256"],
+            "prepared_sha256": campaign["prepared_sha256"],
+            "read_manifest_sha256": campaign["manifest_sha256"],
+            "campaign_scope": campaign["scope"],
+            "unit_roster_sha256": roster_digest(campaign["roster"]),
+        })
+    except ValueError as exc:
+        raise JoinRefused(f"{where}: {exc}") from exc
+    # §3.2's rule, mirrored from require_quantum_campaign (PQ #993): every
     # record binds exactly the slice the caller's stage-A proof gives its
     # layer -- an unbound (pre-A) record, or one binding a whole receipt,
     # refuses rather than joining. Fail closed per quantum.
@@ -502,7 +480,7 @@ def _load_cost_payload(receipt: dict, record: dict,
             "the record")
     if adjoint.get("slice_sha256") is None:
         # The §6.4 adjoint digest the contract names: an unbound (pre-A)
-        # record never joins -- the same refusal check_quantum_for_campaign
+        # record never joins -- the same refusal require_quantum_campaign
         # makes for a bound campaign.
         raise JoinRefused(
             f"{where}: record is unbound (pre-A): re-seal against its "

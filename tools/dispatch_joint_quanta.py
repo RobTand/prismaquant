@@ -325,7 +325,8 @@ CHAIN_ROLL_CEILING_GB10 = {
 }
 COMPUTE_UNIT_CEILINGS = (SPILL_CAPTURE_CEILING_GB10, CHAIN_ROLL_CEILING_GB10)
 
-RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
+from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
+                                                require_quantum_record_set)
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 #: The schema of the stage-A data manifest the dispatcher binds
 #: (``prismabuild.core.DATA_MANIFEST_SCHEMA_V1``, restated: this module
@@ -493,31 +494,10 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     if not paths:
         raise DispatchRefused(f"no layer records at {records_dir}")
     loaded = [(path, _load_json(path, where="layer record")) for path in paths]
-    for path, record in loaded:
-        if record.get("schema") != RECORD_SCHEMA:
-            raise DispatchRefused(
-                f"{path}: record schema is not {RECORD_SCHEMA!r}")
-    ids = [record.get("quantum_id") for _, record in loaded]
-    if len(set(ids)) != len(ids):
-        raise DispatchRefused("layer records carry duplicated quantum ids")
-    first = loaded[0][1]["campaign"]
-    for path, record in loaded[1:]:
-        if record.get("campaign") != first:
-            raise DispatchRefused(
-                f"{path}: campaign block differs (mixed campaign)")
-    for path, record in loaded:
-        if record.get("adjoint", {}).get("receipt_sha256") is not None:
-            raise DispatchRefused(
-                f"{path}: record binds a whole stage-A receipt, not its slice "
-                "(PQ #993): regenerate")
-    bindings = {record.get("adjoint", {}).get("slice_sha256") is not None
-                for _, record in loaded}
-    if len(bindings) != 1:
-        raise DispatchRefused(
-            "layer records mix unbound and slice-bound stage-A bindings")
-    # Before stage A publishes, the sealed records are unbound (§5.2 seals
-    # records first); after, each binds its own slice. Mixed bindings are a
-    # mixed campaign.
+    try:
+        require_quantum_record_set([record for _, record in loaded])
+    except ValueError as exc:
+        raise DispatchRefused(str(exc)) from exc
     ordered = sorted(loaded,
                      key=lambda item: item[1].get("layer", -1),
                      reverse=True)
@@ -2921,7 +2901,7 @@ def handoff_template(record: Mapping, *, plan: Mapping,
     explicit ``template_id`` overrides the derived one.
     """
     from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
-    from prismaquant.joint_layer_quanta import quantum_id as layer_quantum_id
+    from prismaquant.joint_campaign_ledger import quantum_id as layer_quantum_id
     from prismaquant.joint_quantum_handoff import handoff_root
     from prismaquant.stage_a_produced_output import build_boundary_template
 
@@ -3621,8 +3601,8 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
     if counters.get("identity_sha256") != record.get("identity_sha256"):
         raise PilotRefused("pilot counters name another quantum record identity")
     try:
-        from prismaquant.joint_layer_quanta import check_quantum_for_campaign
-        check_quantum_for_campaign(record, {
+        from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+        require_quantum_campaign(record, {
             **record["campaign"],
             "adjoint_slice_sha256": invocation["--adjoint-slice-sha256"]})
     except (KeyError, ValueError, TypeError) as exc:

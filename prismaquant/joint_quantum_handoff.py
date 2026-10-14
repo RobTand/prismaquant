@@ -806,7 +806,7 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     #1214).
     """
     from .joint_adjoint_slices import chain_layers_for
-    from .joint_layer_quanta import quantum_id
+    from .joint_campaign_ledger import (quantum_id)
 
     if not is_sha256hex(sha256):
         raise QuantumHandoffRefused("the handoff digest is not a sha256")

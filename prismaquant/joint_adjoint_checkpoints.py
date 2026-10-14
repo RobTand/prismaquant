@@ -92,7 +92,6 @@ from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
 
 QUANTUM_COUNTERS_SCHEMA = "prismaquant.joint_layer_quantum.counters.v1"
 QUANTUM_STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
-QUANTUM_RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 
 #: The entry-point string the plan block and the adjoint read manifest carry
 #: (contract §5.1/§4.1). ``prismaquant.joint_cost_stage_a`` is the executing
@@ -3028,7 +3027,7 @@ def wall_clock_seconds(started: float) -> float:
 __all__ = [
     "ADJOINT_CAPTURE_ENTRY_POINT", "ADJOINT_CHECKPOINT_SCHEMA",
     "ADJOINT_RECEIPT_SCHEMA", "DEFAULT_STRIDE",
-    "KernelTimeProfiler", "QUANTUM_COUNTERS_SCHEMA", "QUANTUM_RECORD_SCHEMA",
+    "KernelTimeProfiler", "QUANTUM_COUNTERS_SCHEMA",
     "QUANTUM_STATUS_SCHEMA", "adjoint_space", "adjoint_receipt_path",
     "boundary_entry_directory", "chain_layers_for", "checkpoint_directory",
     "derive_checkpoint_boundaries", "dev_mode_enabled", "dev_mode_stamp",

@@ -55,6 +55,7 @@ MODULES = (
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_catalog_extension.py",
+    "prismaquant/joint_campaign_ledger.py",
     "prismaquant/joint_cost_quantum.py",
     "prismaquant/joint_cost_read_schedule.py",
     "prismaquant/joint_cost_stage_a.py",
@@ -156,7 +157,7 @@ ALLOWLIST = {
         1, STRUCTURE, "the independently reviewed pilot implementation names the proposed "
         "code; this is the explicitly overridable fanout qualification gate, not a resume seal"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
-        3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
+        2, AMBIGUOUS, "record bytes and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_cost_quantum.py", "require_chain_readset"): (
         1, INTEGRITY, "the staged data manifest is the readset the record names"),
@@ -181,8 +182,10 @@ ALLOWLIST = {
         1, INTEGRITY, "the stored session digest reproduces from the stored bind identity"),
     ("prismaquant/joint_forward_resume.py", "build_forward_recovery"): (
         1, INTEGRITY, "a local export manifest changed after it was written"),
-    ("prismaquant/joint_layer_quanta.py", "check_quantum_for_campaign"): (
-        3, AMBIGUOUS, "the record reproduces its own seal (integrity); the unit roster "
+    ("prismaquant/joint_campaign_ledger.py", "require_quantum_identity"): (
+        1, INTEGRITY, "the quantum record's canonical identity reproduces its own body"),
+    ("prismaquant/joint_campaign_ledger.py", "require_quantum_campaign"): (
+        2, AMBIGUOUS, "the unit roster "
         "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
@@ -213,8 +216,7 @@ ALLOWLIST = {
         3, INTEGRITY, "the compiled source, flags and loaded binary against the "
         "qualification's bytes"),
     ("prismaquant/joint_quanta_join.py", "_check_record"): (
-        3, INTEGRITY, "the record's own seal, a retargeted receipt, and the unit roster "
-        "(wall)"),
+        1, INTEGRITY, "a receipt's identity must refer to its authenticated quantum record"),
     ("prismaquant/joint_quanta_join.py", "_read_status"): (
         1, INTEGRITY, "a status receipt belongs to its quantum"),
     ("prismaquant/joint_quanta_join.py", "_load_cost_payload"): (
@@ -305,13 +307,10 @@ ALLOWLIST = {
         1, INTEGRITY, "the inspected Docker image content reproduces its declared content digest"),
     ("tools/regenerate_joint_quanta.py", "_load_json"): (
         1, INTEGRITY, "bytes against the pinned digest"),
-    ("tools/regenerate_joint_quanta.py", "_check_authorized_diff"): (
-        1, INTEGRITY, "a regenerated record reproduces its own seal"),
     ("tools/regenerate_joint_quanta.py", "_prior_slice_manifest"): (
         1, INTEGRITY, "manifest bytes against the digest the prior record stored"),
     ("tools/regenerate_joint_quanta.py", "_check_authorized_metadata_diff"): (
-        2, INTEGRITY, "the new manifest digest hashes the new slice; the record reproduces "
-        "its own seal"),
+        1, INTEGRITY, "the relocated manifest's digest must hash its newly produced slice bytes"),
     ("tools/regenerate_joint_quanta.py", "_load_production_cache"): (
         1, INTEGRITY, "production cache bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "main"): (
@@ -656,7 +655,7 @@ def test_a_new_seal_fails_the_lint(allowed):
     problems = violations(sources)
     assert len(problems) == 1
     assert "seal_check" in problems[0]
-    assert ("verify_quantum_identity: 4" if allowed else "load_run: 1") in problems[0]
+    assert ("verify_quantum_identity: 3" if allowed else "load_run: 1") in problems[0]
 
 
 NEW_SEAL_FORMS = {

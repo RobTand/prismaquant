@@ -40,6 +40,8 @@ from types import SimpleNamespace
 import torch
 
 from .digests import bytes_sha256hex
+from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as QUANTUM_RECORD_SCHEMA,
+                                   require_quantum_identity, require_quantum_campaign)
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
@@ -48,7 +50,6 @@ from .io_spans import (ExposedWaitLedger, GpuPowerSampler, IoSpanLog,
                        stage_span_log)
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
-    QUANTUM_RECORD_SCHEMA,
     QUANTUM_STATUS_SCHEMA,
     KernelTimeProfiler,
     PlaneHostStaging,
@@ -317,10 +318,8 @@ def verify_quantum_identity(
     that actually ran by rereading them through the bound reader, without
     carrying them over stdout or canonical-reencoding. Raises
     :class:`QuantumIdentityRefused` (the caller exits 3) with nothing written.
-    The producer's
-    ``check_quantum_for_campaign`` runs too when the producer module has
-    landed; until then the same checks run here from the record's own fields,
-    so a record built for another campaign revision refuses the same way.
+    The ledger owns record identity and campaign comparison. This adapter
+    retains authenticated input reads, geometry and output-path checks.
     """
     try:
         _require_hex(quantum_sha256, "--quantum-sha256")
@@ -342,16 +341,7 @@ def verify_quantum_identity(
                 f"quantum record digest mismatch at {quantum_path}")
         record_bytes = raw
         record = json.loads(record_bytes.decode("utf-8"))
-        if record.get("schema") != QUANTUM_RECORD_SCHEMA:
-            raise QuantumIdentityRefused(
-                f"quantum record schema mismatch: {record.get('schema')!r}")
-        body = {key: value for key, value in record.items()
-                if key != "identity_sha256"}
-        recomputed = canonical_json_sha256(body, where="quantum record identity")
-        if recomputed != record.get("identity_sha256"):
-            raise QuantumIdentityRefused(
-                "quantum record identity_sha256 does not bind its own bytes: "
-                f"stored={record.get('identity_sha256')!r} recomputed={recomputed}")
+        require_quantum_identity(record)
         layer = int(record["layer"])
         if record.get("quantum_id") != f"layer-{layer:03d}":
             raise QuantumIdentityRefused(
@@ -452,22 +442,16 @@ def verify_quantum_identity(
                 f"quantum output_space.root {record['output_space']['root']} "
                 f"is not {expected_root}")
         try:
-            from .joint_layer_quanta import check_quantum_for_campaign
-        except ImportError:
-            pass
-        else:  # pragma: no cover - producer-owned check once it lands
-            try:
-                check_quantum_for_campaign(record, {
-                    "plan_sha256": plan_sha256,
-                    "prepared_sha256": prepared_sha256,
-                    "read_manifest_sha256": campaign["read_manifest_sha256"],
-                    "unit_roster_sha256": campaign["unit_roster_sha256"],
-                    "campaign_scope": campaign["campaign_scope"],
-                    "adjoint_slice_sha256": adjoint_slice_sha256(adjoint_slice),
-                })
-            except ValueError as exc:
-                raise QuantumIdentityRefused(
-                    f"producer campaign check refuses: {exc}") from exc
+            require_quantum_campaign(record, {
+                "plan_sha256": plan_sha256,
+                "prepared_sha256": prepared_sha256,
+                "read_manifest_sha256": campaign["read_manifest_sha256"],
+                "unit_roster_sha256": campaign["unit_roster_sha256"],
+                "campaign_scope": campaign["campaign_scope"],
+                "adjoint_slice_sha256": adjoint_slice_sha256(adjoint_slice),
+            })
+        except ValueError as exc:
+            raise QuantumIdentityRefused(f"campaign check refuses: {exc}") from exc
     except QuantumIdentityRefused:
         raise
     except (KeyError, TypeError, ValueError, OSError) as exc:

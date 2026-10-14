@@ -15,6 +15,8 @@ binding it fails on the refusal itself, not on an import.
 """
 from __future__ import annotations
 
+from prismaquant import joint_campaign_ledger as ledger
+
 import copy
 import hashlib
 
@@ -195,4 +197,4 @@ def test_band_refusals_at_the_producer():
     record["identity_sha256"] = jl.canonical_sha256(
         {k: v for k, v in record.items() if k != "identity_sha256"})
     with pytest.raises(ValueError, match="whole stage-A receipt"):
-        jl.check_quantum_for_campaign(record, record["campaign"])
+        ledger.require_quantum_campaign(record, record["campaign"])

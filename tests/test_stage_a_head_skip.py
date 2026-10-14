@@ -423,8 +423,8 @@ def test_a_completion_with_another_calibration_refuses(tmp_path, monkeypatch):
 def _published(campaign, tmp_path):
     """The campaign a capsule publishes for this roster, and its sealed record."""
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-    from prismaquant.joint_layer_quanta import (
-        LAYER_QUANTUM_SCHEMA, canonical_sha256, roster_digest)
+    from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA, roster_digest)
+    from prismaquant.joint_layer_quanta import (canonical_sha256)
 
     names = campaign.names
     scope = {"kind": "complete_campaign", "source_unit_count": len(names),

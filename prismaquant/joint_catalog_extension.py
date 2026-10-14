@@ -818,7 +818,7 @@ def _check_capture(header, inputs, original):
     # compare unlike hashes.
     names = sorted(original["formats_by_qname"])
     if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
-        from .joint_layer_quanta import roster_digest
+        from .joint_campaign_ledger import (roster_digest)
         expected = roster_digest(names)
     else:
         expected = text_sha256hex("".join(name + "\n" for name in names))

@@ -7,6 +7,8 @@ recipes and are deliberately not part of this table.
 """
 from __future__ import annotations
 
+from prismaquant import joint_campaign_ledger as ledger
+
 import copy
 import hashlib
 import json
@@ -17,7 +19,6 @@ import pytest
 
 from prismaquant import digests
 from prismaquant import joint_head_walk_quanta as head
-from prismaquant import joint_layer_quanta as layer
 from tests.golden_table import GoldenTable, outcome
 
 GOLDEN = GoldenTable("digest_rosters_1446")
@@ -58,14 +59,14 @@ def _capture(monkeypatch, call):
 @pytest.mark.parametrize("site", ["head", "layer"])
 @pytest.mark.parametrize("case", INPUTS)
 def test_roster_site(monkeypatch, site, case):
-    function = head.roster_digest if site == "head" else layer.roster_digest
+    function = head.roster_digest if site == "head" else ledger.roster_digest
     GOLDEN.check(_capture(monkeypatch, lambda: function(copy.deepcopy(INPUTS[case]))))
 
 
 @pytest.mark.parametrize("site", ["head", "layer"])
 def test_roster_iterator(monkeypatch, site):
     # Preserve the runtime behavior even for inputs outside the annotation.
-    function: Any = head.roster_digest if site == "head" else layer.roster_digest
+    function: Any = head.roster_digest if site == "head" else ledger.roster_digest
     GOLDEN.check(_capture(monkeypatch, lambda: function(iter(["z", "é", "a"]))))
 
 
@@ -84,7 +85,7 @@ def test_head_walk_slice_bytes(monkeypatch, width):
 
 def test_newline_profiles_keep_order_and_delimiters():
     assert head.roster_digest is digests.sorted_newline_utf8_sha256
-    assert head.roster_digest(names=["z", "a"]) == layer.roster_digest(qnames=["z", "a"])
+    assert head.roster_digest(names=["z", "a"]) == ledger.roster_digest(qnames=["z", "a"])
     assert digests.newline_utf8_bytes(["z", "é"]) == b"z\n\xc3\xa9"
     assert digests.newline_utf8_bytes(["é", "z"]) == b"\xc3\xa9\nz"
     assert digests.newline_utf8_bytes([]) == b""
@@ -109,5 +110,5 @@ def test_real_stored_takeover_roster():
     assert len(names) == 36423
     expected = "4da42b8df5cbf1720406ef7f4c19ac5b7f11bdc5e0f51d0fef6378970a1ee6ea"
     assert binding["unit_roster_sha256"] == expected
-    assert layer.roster_digest(names) == expected
+    assert ledger.roster_digest(names) == expected
     assert head.roster_digest(names) == expected

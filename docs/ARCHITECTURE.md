@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 PrismaQuant architecture refactor, base `138069b7993`.
+`joint_campaign_ledger` owns the v1 quantum record layout, schema, canonical
+identity, quantum ID and roster recipes, campaign comparisons, homogeneous
+record-set checks, and immutable readset replacement. The layer producer,
+runtime, joiner, dispatcher and forward recovery use that owner. Raw-file
+SHA-256 custody remains at the readers. Stage A slice and run-header proofs,
+row publication readiness, output-root geometry, and payload coverage retain
+their independent gates. Dev run seals still stamp drift; record bytes and
+measured unit rosters still refuse corruption. This changes ownership without
+changing the format menu, serving gates, stage graph or numerical kernels.
+
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.
 `streamed_boundary_artifacts` owns exact activation boundaries, produced-output

@@ -586,7 +586,7 @@ def test_a_recovered_stage_a_binds_its_canonical_roster_spelling(tmp_path, campa
     so a recovered run's band can create it; either spelling on the other
     kind of run refuses."""
     from prismaquant.joint_catalog_extension import extension_run_header
-    from prismaquant.joint_layer_quanta import roster_digest
+    from prismaquant.joint_campaign_ledger import (roster_digest)
     inputs, receipt, _ = _pair(tmp_path, campaign, probe)
     newline = receipt['run_identity']['unit_roster_sha256']
     canonical = roster_digest(campaign['roster'])
