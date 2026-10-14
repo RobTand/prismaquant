@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RETIREMENTS = (
     'proposal_validation', 'tessera_full_domain_ledger', 'speed_quality_frontier',
     'shard_layout', 'shard_commit_progress', 'tessera_reduced_schedule_repair',
-    'sensitivity_coverage',
+    'sensitivity_coverage', 'layer_state_cache', 'weight_session',
 )
 
 

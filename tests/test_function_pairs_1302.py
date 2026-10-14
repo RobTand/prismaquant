@@ -201,7 +201,6 @@ _CALLS = [((), {}), ((1, _T), {}), ((), {"x": 1, "input": _T}),
 
 
 @pytest.mark.parametrize("ref", [
-    "prismaquant.layer_state_cache._first_tensor_location",
     "prismaquant.perturbed_x_cache._first_tensor_location",
 ])
 @pytest.mark.parametrize("index", range(len(_CALLS)))

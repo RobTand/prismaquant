@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
+prototypes are retired. Their helper-oracle checks now use the live owner,
+and live cache publication, source refusal and optional Tessera checks remain.
+
 Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
 were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
@@ -2321,14 +2325,8 @@ writes and reads wire destinations directly and is not covered by these guards.
 The packed expert append checks its new scope together with existing manifest
 keys, including the dense fill that created the cache. The dense fill itself
 constructs a new manifest rather than accepting a cache to append to.
-Disk-backed `WeightSession` checks its complete live-name and alias roster
-before creating the spill directory or capturing or adopting a source
-snapshot. Both snapshot paths reuse the shared cache leaf through one
-`__bf16src.pt` filename helper; this fixed source-snapshot suffix has its own
-injectivity check, not the rendered-format grammar. Refusals name both
-coordinates and their shared filename. Existing filenames, serialization,
-format spellings, memory-only source snapshots and serving contracts remain
-unchanged. This is not cross-process directory ownership. Gate:
+The unused weight-session snapshot prototype and its dedicated checks were
+retired on 2026-10-14. Live dense and packed cache destination checks remain. Gate:
 `tests/test_campaign_write_destinations_2231.py` and
 `tests/test_tessera_materialization.py`.
 
@@ -3825,7 +3823,7 @@ the Tessera lane's format code through lane data and a plugin, not imports
 prismaquant.tessera_lane`, the `tessera` format family (`TESSERA_`, with
 `requires_production_render` and `rate_axis`) and the `tessera_` metadata
 prefix. `format_registry`, `production_weight_cache`, `perturbed_x_cache`,
-`weight_session`, `aura_cost`, `select_validated_frontier`, `serving_profiles`
+`aura_cost`, `select_validated_frontier`, `serving_profiles`
 and `autoscale` import no lane module; `is_tessera_format_name` is gone from
 core, and `FormatSpec` gains `render_owner` and `requires_production_render`.
 The core-boundary allowlist loses 22 lines. A recorded GLM-5.3 allocation
@@ -24404,7 +24402,7 @@ the same format name, and the seam refuses rather than downgrade silently:
   lane plugin inside the family's branch only (§8.10). Pinned by a subprocess
   test that blocks the `tessera` import.
 * **All three cache-miss RTN fallbacks refuse Tessera** —
-  `weight_session._format_weight` and `perturbed_x_cache` (both gated by
+  `perturbed_x_cache` (gated by
   `PRISMAQUANT_STRICT_PRODUCTION_CACHE`, default refuse) and `aura_cost`'s
   `dW` fallback (gated by `require_production_cache`, **default off**). Each
   falls back to the registry `quantize_dequantize`, which for Tessera is the
@@ -25673,7 +25671,7 @@ those formats. Aliases:
 `FP8`/`FP8_DYNAMIC` → `FP8_E4M3`, `MXFP8` → `MXFP8_E4M3` (`:298-308`).
 `act_quant_changes_input` (`:75-106`) is the **single** predicate for "does the serving kernel
 consume quantized activations" (`act_bits` absent or ≥ 16 ⇒ no): the allocator's bit-exact
-short-circuit (§4.5), the KL validator's activation-quant assignment, `layer_state_cache` and
+short-circuit (§4.5), the KL validator's activation-quant assignment and
 `perturbed_x_cache` all key off it, so a format's activation semantics cannot drift between
 pricing and emulation. Registry-vs-callable consistency is pinned by
 `tests/test_bit_exact_cost_pricing.py`.

@@ -1412,26 +1412,6 @@ def test_the_weights_only_lever_forms_no_hessian_at_all():
         monkey.undo()
 
 
-def test_a_production_cache_miss_does_not_fall_back_to_the_registry():
-    """``STRICT_PRODUCTION_CACHE=0`` is not permission to price other bytes.
-
-    Both miss paths end at the format's registry ``quantize_dequantize``; for
-    Tessera that is the weights-only reconstruction, so the fallback would put
-    a different tensor behind the same format name with nothing raised. CB
-    already refuses there for the same reason.
-    """
-    from prismaquant.weight_session import WeightSession
-
-    lin = torch.nn.Linear(32, 8, bias=False).to(torch.bfloat16)
-    session = WeightSession(torch.nn.Sequential(lin),
-                            production_weight_cache=None,
-                            strict_production_cache=False)
-    # The qname map normally comes from a model profile; registering the
-    # alias directly keeps this test about the fallback and not about
-    # architecture discovery.
-    session._linear_by_qname["lin"] = (lin, "weight")
-    with pytest.raises(RuntimeError, match="Tessera"):
-        session._format_weight("lin", "TESSERA_E2M1_K2_R256")
 
 
 def test_the_aura_dw_fallback_refuses_tessera():
@@ -1476,7 +1456,7 @@ def test_the_perturbed_x_cache_fallback_refuses_tessera():
 def test_a_non_tessera_render_does_not_import_the_tessera_package():
     """Asking "is this mine?" must not drag in the answer's dependencies.
 
-    `render_production_weight` and the three cache-miss fallbacks are on the
+    `render_production_weight` and the live cache-miss fallbacks are on the
     hot path of every *non*-Tessera format too. Both `tessera_formats` and
     `tessera_render` require the `tessera` package at import, so routing the
     predicate through either would have made Tessera a hard dependency of the
@@ -1504,16 +1484,6 @@ r = render_production_weight(w, "FP8_DYNAMIC", qname="q",
                              activations={"q": torch.randn(128, 256)},
                              levers={})
 assert tuple(r.shape) == (64, 256)
-from prismaquant.weight_session import WeightSession
-lin = torch.nn.Linear(32, 8, bias=False).to(torch.bfloat16)
-s = WeightSession(torch.nn.Sequential(lin), production_weight_cache=None,
-                  strict_production_cache=False)
-s._linear_by_qname["lin"] = (lin, "weight")
-try:
-    s._format_weight("lin", "TESSERA_E2M1_K2_R256")
-    raise SystemExit("weight_session did not refuse")
-except RuntimeError as e:
-    assert "Tessera" in str(e), e
 from prismaquant.aura_cost import _delta_w
 try:
     _delta_w("lin", "TESSERA_E2M1_K2_R256", torch.randn(8, 32), None)

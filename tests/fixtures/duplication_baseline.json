@@ -633,10 +633,6 @@
    "prismaquant/tessera_serving_runtime_pin.py",
    "tools/prismaquant_runtime_snapshot.py"
   ],
-  "_replace_tensor_input": [
-   "prismaquant/layer_state_cache.py",
-   "prismaquant/perturbed_x_cache.py"
-  ],
   "_require": [
    "prismaquant/glm_source_derivative.py",
    "prismaquant/joint_aura_transition_base.py",

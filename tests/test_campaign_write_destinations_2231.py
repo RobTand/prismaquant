@@ -8,7 +8,6 @@ from torch import nn
 from prismaquant import production_weight_cache as pwc
 from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_render
-from prismaquant.weight_session import WeightSession
 from test_packed_expert_cross_domain_gate import TinyLM
 
 
@@ -198,28 +197,6 @@ def test_campaign_admits_cross_format_name_aliases(anchor_inputs, tmp_path):
     assert all(path.read_bytes() == b"wire" for path in wire_dir.iterdir())
 
 
-@pytest.mark.parametrize("operation", ["format_weight", "initialize"])
-def test_snapshot_open_refuses_before_capture_or_record(tmp_path, operation):
-    model = nn.Module()
-    model.layer = nn.Module()
-    model.layer.a = nn.Linear(32, 32, bias=False)
-    model.layer_a = nn.Linear(32, 32, bias=False)
-    cache = pwc.ProductionWeightCache(
-        weights={(name, "FP8_E4M3"): torch.ones(32, 32)
-                 for name in ("layer.a", "layer_a")}, levers={},
-    )
-
-    with pytest.raises(ValueError) as error:
-        session = WeightSession(model, production_weight_cache=cache,
-                                snapshot_dir=str(tmp_path))
-        if operation == "format_weight":
-            session.format_weight("layer.a", "BF16")
-            session.format_weight("layer_a", "BF16")
-        else:
-            session.initialize({"layer.a": "FP8_E4M3", "layer_a": "FP8_E4M3"}, units=[])
-
-    assert_refusal(error, "layer.a", "layer_a", "layer_a__bf16src.pt")
-    assert_no_files(tmp_path)
 
 
 def test_packed_append_checks_dense_manifest_before_sidecar(tmp_path, monkeypatch):
