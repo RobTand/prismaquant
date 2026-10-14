@@ -23,6 +23,9 @@ rel_output_mse}. When h-detail is supplied, entries may also include
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import json
 import math
 import os
@@ -290,40 +293,6 @@ def _finalize_results(bucket: dict[str, dict]) -> dict[str, dict]:
                 # gradient² from the probe's h-detail.
                 entry["fisher_output_mse"] = fisher_sum / fisher_n
             out[name][fmt] = entry
-    return out
-
-
-def h_detail_expected_norm_tokens(probe: dict | None) -> dict[str, int]:
-    """Per-row Fisher denominator each h-detail blob is required to carry.
-
-    An h-detail blob and the scalar ``h_trace`` for the SAME row must be
-    divided by the SAME token count, or `predicted_dloss` prices that row
-    on a different scale than the rest of the knapsack. The blob records
-    its denominator as ``norm_tokens`` (schema v4) and the probe stat
-    records the scalar's as ``h_trace_norm_tokens``; this builds the
-    row -> expected map so `HDetailIndex` can refuse a mismatch.
-
-    Row stamps win over the probe-wide ``meta.fisher_norm_tokens`` so a
-    MERGED probe validates per row: the multimodal visual pass is
-    finalized at its own (smaller) calibration size, and its blobs are
-    stamped to match, so comparing them against the body's count would
-    reject correct blobs. Rows with neither a stamp nor a usable meta
-    count get no expectation and are left unchecked (nothing to compare).
-    """
-    if not isinstance(probe, dict):
-        return {}
-    meta = probe.get("meta") or {}
-    fallback = int(meta.get("fisher_norm_tokens", 0) or 0)
-    if fallback <= 0:
-        fallback = (int(meta.get("nsamples", 0) or 0)
-                    * int(meta.get("seqlen", 0) or 0))
-    out: dict[str, int] = {}
-    for name, entry in (probe.get("stats") or {}).items():
-        if not isinstance(entry, dict):
-            continue
-        n = int(entry.get("h_trace_norm_tokens", 0) or 0) or fallback
-        if n > 0:
-            out[str(name)] = n
     return out
 
 
@@ -2496,7 +2465,7 @@ def run_cost_pass(model: nn.Module,
         if detail_path.exists():
             h_detail = HDetailIndex(
                 detail_path, target_names,
-                expected_norm_tokens=h_detail_expected_norm_tokens(probe))
+                expected_norm_tokens=probe_statistics.h_detail_expected_norm_tokens(probe))
             print(f"[cost] h-detail cache: {len(h_detail)} / {len(target_names)} "
                   "Linears have h-detail → using per-weight Δloss and "
                   "Fisher row-weighted output MSE when available",

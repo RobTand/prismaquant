@@ -20,18 +20,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from prismaquant.incremental_probe import (
-    _CONTENT_META_KEYS,
-    _MARGINAL_KEYS,
-    _content_meta_compatible,
-    _expected_probe_shard_meta,
-    _marginal_accumulate,
-    _marginal_chunk,
-    _marginal_flush,
-    _marginal_zeros,
-    _marginals_enabled,
-    merge_marginals,
-)
+from prismaquant.incremental_probe import _CONTENT_META_KEYS, _content_meta_compatible, _expected_probe_shard_meta, _marginal_accumulate, _marginal_chunk, _marginal_flush, _marginal_zeros, _marginals_enabled
+from prismaquant.probe_statistics import FISHER_MARGINAL_KEYS as _MARGINAL_KEYS, merge_marginals
 
 NAME = "model.layers.0.mlp.down_proj"
 

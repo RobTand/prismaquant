@@ -55,7 +55,7 @@ from .incremental_probe import (
     build_shard_schedule,
     load_num_hidden_layers,
 )
-from .measure_quant_cost import (
+from prismaquant.measure_quant_cost import (
     ActivationIndex,
     HDetailIndex,
     _accumulate_result,
@@ -64,13 +64,13 @@ from .measure_quant_cost import (
     _finalize_results,
     _measure_packed_experts,
     _normalize_fisher_output_mse_row_weights,
-    h_detail_expected_norm_tokens,
     measure_batched_gpu,
     measure_unbatched,
     prepare_cost_context,
     resolve_cost_target_name,
     start_mem_watchdog,
 )
+from prismaquant.probe_statistics import h_detail_expected_norm_tokens
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,

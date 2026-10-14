@@ -36,6 +36,9 @@ share of the objective. See `_accumulate_packed_per_token_fisher`.
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import argparse
 import dataclasses
 import gc
@@ -96,19 +99,6 @@ def _env_flag(name: str, *, default: bool) -> bool:
 # site already materializes, so they cost no extra matmul AND satisfy
 # sum(fisher_row) == sum(fisher_col) == chunk_h.sum() by construction —
 # that identity is the wiring check (tests/test_probe_marginals.py).
-# The key tuple is the dense Fisher schema's own (one owner, #1394).
-from .sensitivity_probe import _DENSE_FISHER_MARGINAL_KEYS as _MARGINAL_KEYS  # noqa: E402
-# act_absmax is a BOUND, not a total: it merges by elementwise maximum
-# across chunks/shards. Summing it would inflate it without bound.
-_MARGINAL_MAX_KEYS = frozenset({"act_absmax"})
-
-# The packed-expert (AQUA) counterparts. Separate from `_MARGINAL_KEYS`
-# because these are [E, *] per-expert arrays produced by the F.linear
-# interception, not the 1-D per-Linear vectors the dense backward hook
-# flushes through `_marginal_flush`.
-_PACKED_MARGINAL_KEYS = (
-    "expert_g_sq_sum", "expert_act_sq_sum", "expert_act_absmax",
-    "expert_tokens")
 
 
 def _marginals_enabled() -> bool:
@@ -125,32 +115,11 @@ def _marginal_accumulate(slot: dict, name: str,
     if cur is None:
         slot[name] = [v.detach().clone() for v in vecs]
         return
-    for key, c, v in zip(_MARGINAL_KEYS, cur, vecs):
-        if key in _MARGINAL_MAX_KEYS:
+    for key, c, v in zip(probe_statistics.FISHER_MARGINAL_KEYS, cur, vecs):
+        if key in probe_statistics.FISHER_MAX_KEYS:
             torch.maximum(c, v, out=c)
         else:
             c.add_(v)
-
-
-def merge_marginals(dst: dict, src) -> None:
-    """Fold per-channel marginals from `src` into `dst` in place.
-
-    Sums add elementwise; act_absmax merges by MAXIMUM. Used both for
-    the per-layer host flush and for the cross-shard partial-stats
-    merge, so the two cannot drift apart on the max-vs-sum rule.
-    """
-    for key in _MARGINAL_KEYS:
-        new = src.get(key)
-        if new is None:
-            continue
-        new = np.asarray(new, dtype=np.float32)
-        old = dst.get(key)
-        if old is None:
-            dst[key] = new.copy()
-        elif key in _MARGINAL_MAX_KEYS:
-            dst[key] = np.maximum(old, new)
-        else:
-            dst[key] = old + new
 
 
 def _marginal_flush(device_slot: dict, stats: dict) -> None:
@@ -166,7 +135,7 @@ def _marginal_flush(device_slot: dict, stats: dict) -> None:
     off = 0
     for n in names:
         payload = {}
-        for key, v in zip(_MARGINAL_KEYS, device_slot[n]):
+        for key, v in zip(probe_statistics.FISHER_MARGINAL_KEYS, device_slot[n]):
             ln = v.numel()
             # .copy() so the per-Linear arrays do not each pin the one
             # big host buffer alive.
@@ -174,7 +143,7 @@ def _marginal_flush(device_slot: dict, stats: dict) -> None:
             off += ln
         entry = stats.get(n)
         if entry is not None:
-            merge_marginals(entry, payload)
+            probe_statistics.merge_marginals(entry, payload)
     device_slot.clear()
 
 
@@ -201,18 +170,16 @@ from .layer_streaming import (
     _get_final_norm,
 )
 from .perturbed_x_cache import calibration_data_hash
-from .sensitivity_probe import (
+from prismaquant.sensitivity_probe import (
     FisherAccumulator,
     dense_marginal_chunk as _marginal_chunk,
     RouterTracker,
     SharedStateCotangents,
     discover_moe_structure,
     discover_moe_routers,
-    finalize_fisher_stats,
     grouped_linear_fisher_chunk,
     grouped_linear_groups,
     grouped_linear_stats_entry,
-    h_detail_blob,
     install_packed_expert_hooks,
     kv_cotangent_path_enabled,
     load_calibration,
@@ -223,6 +190,7 @@ from .sensitivity_probe import (
     stage_multimodal,
     stage_text_only,
 )
+
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
@@ -4049,7 +4017,7 @@ def _run_body_streaming_shard(
                     prev["h_w2_sum_raw"] += s.get("h_w2_sum_raw", 0.0)
                     prev["n_tokens_seen"] += s.get("n_tokens_seen", 0)
                     # Per-channel marginals: sums add, act_absmax maxes.
-                    merge_marginals(prev, s)
+                    probe_statistics.merge_marginals(prev, s)
                     # Per-expert Fisher is a list of floats on the packed
                     # stat entry; sum element-wise across shard splits.
                     per_prev = prev.get("h_trace_per_expert_raw")
@@ -4078,7 +4046,7 @@ def _run_body_streaming_shard(
                     # maxes. Kept beside `h_trace_per_expert_raw` rather
                     # than inside `merge_marginals` because those arrays
                     # are 1-D per-Linear and these are [E, *] per-expert.
-                    for key in _PACKED_MARGINAL_KEYS:
+                    for key in probe_statistics.PACKED_FISHER_MARGINAL_KEYS:
                         new = s.get(key)
                         if new is None:
                             continue
@@ -4113,7 +4081,7 @@ def _run_body_streaming_shard(
                     # the previous per-row count; global is used for
                     # uniformity with the per-expert-Linear writers.)
                     torch.save(
-                        h_detail_blob(tensor, global_tokens,
+                        probe_statistics.h_detail_blob(tensor, global_tokens,
                                       full_key, kind="packed"),
                         detail_dir / fname)
                 packed_full_acc.clear()
@@ -4185,7 +4153,7 @@ def _run_body_streaming_shard(
     # One shared denominator for every row — the global calib token count
     # (hoisted above; see finalize_fisher_stats for why per-row
     # n_tokens_seen is wrong for routed-expert Linears).
-    finalize_fisher_stats(merged_stats, global_tokens)
+    probe_statistics.finalize_fisher_stats(merged_stats, global_tokens)
 
     detail_dir = Path(h_detail_dir) if h_detail_dir else None
     if detail_dir is not None:
@@ -4209,7 +4177,7 @@ def _run_body_streaming_shard(
             # the detail (global/routed)× hotter than the scalar).
             # g2_per_token stays raw (it is already a per-token vector).
             torch.save(
-                h_detail_blob(h, global_tokens, fqn, kind="linear",
+                probe_statistics.h_detail_blob(h, global_tokens, fqn, kind="linear",
                               g2_per_token=g2_per_token),
                 detail_dir / fname,
             )

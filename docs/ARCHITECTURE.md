@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14: `probe_statistics` owns Fisher row field sets,
+marginal reduction, scalar/detail finalization and per-row normalization
+contracts. Device-resident hook accumulation, batching and transfer order
+remain with the existing probe execution owners.
+
 Re-stamped 2026-10-14: `mount_facts` owns kernel mount-table decoding and
 containing-mount selection for staged read shape and portable source identity.
 The range reader retains its cache, transport count, chunk sizing and lease

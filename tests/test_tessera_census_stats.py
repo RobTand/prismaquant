@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from prismaquant import tessera_expert_projection as tep
-from prismaquant.allocator import renormalize_probe_fisher
+from prismaquant.probe_statistics import renormalize_probe_fisher
 from prismaquant.allocator_candidates import (
     _has_measured_output_mse, _stats_indicates_packed_expert,
 )

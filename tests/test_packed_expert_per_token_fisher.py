@@ -36,11 +36,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from prismaquant.sensitivity_probe import (
-    FisherAccumulator,
-    h_detail_blob,
-    install_packed_expert_hooks,
-)
+from prismaquant.sensitivity_probe import FisherAccumulator, install_packed_expert_hooks
+from prismaquant.probe_statistics import h_detail_blob
 from prismaquant.measure_quant_cost import HDetailIndex
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"

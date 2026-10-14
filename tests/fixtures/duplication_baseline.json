@@ -539,10 +539,6 @@
    "prismaquant/artifact_collection.py",
    "prismaquant/runtime_provenance.py"
   ],
-  "_mount_options": [
-   "prismaquant/residency_shard_reader.py",
-   "prismaquant/staged_lease.py"
-  ],
   "_number": [
    "prismaquant/measured_runtime_prices.py",
    "prismaquant/native_operator_panel.py"

@@ -63,6 +63,9 @@ Model-agnostic:
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import json
 import atexit
 import os
@@ -548,99 +551,6 @@ def load_multimodal_calibration(
 
 
 _ALLOW_SUMSQ_PACKED_FISHER_ENV = "PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER"
-
-
-def h_detail_blob(h_raw: torch.Tensor, global_tokens: int, name: str, *,
-                  kind: str = "linear",
-                  g2_per_token: torch.Tensor | None = None) -> dict:
-    """Normalize a token-SUMMED Fisher diagonal accumulator to per-token
-    units and wrap it in the canonical h-detail blob schema.
-
-    ``global_tokens`` must be the GLOBAL calibration token count — the
-    same denominator `finalize_fisher_stats` applies to the scalar
-    ``h_trace`` — never a per-row routed-token count. v4 pins this:
-    passing an unpacked expert Linear's own ``n_tokens_seen`` here left
-    the detail blob (global/routed)× hotter than the scalar it must
-    agree with, so `predicted_dloss` fallback rows priced expert rows on
-    a different scale than the rest of the knapsack.
-
-    Every h-detail writer (this module's `FisherAccumulator.finalize` and
-    `incremental_probe`'s two writer sites) goes through this helper so
-    the on-disk units are per-token everywhere and stamped with an
-    explicit ``units: "per_token"`` marker (audit M9 — the incremental
-    writer used to save the raw token-summed ``H``, leaving the consumer
-    `HDetailIndex.h_diag_from_blob` ~n_tokens× off depending on which
-    probe produced the directory). ``g2_per_token`` is already a
-    per-token vector and is stored as-is.
-    """
-    tokens = max(int(global_tokens), 1)
-    h = h_raw.detach().to("cpu", torch.float32) / tokens
-    blob = {
-        "h_diag": h,
-        "name": name,
-        "kind": kind,
-        "shape": list(h.shape),
-        "units": "per_token",
-        # v3: unit marker; no route_prob term (M4).
-        # v4: denominator is the GLOBAL calib token count for every row
-        #     (v3 unpacked-expert blobs were per-ROUTED-token).
-        "h_detail_version": 4,
-        "norm_tokens": tokens,
-    }
-    if g2_per_token is not None:
-        blob["g2_per_token"] = g2_per_token
-    return blob
-
-
-def finalize_fisher_stats(merged_stats: dict, global_tokens: int) -> None:
-    """Normalize raw Fisher accumulators into ``h_trace`` (etc.), in place.
-
-    Fisher normalization must share ONE denominator across every row: the
-    global calibration token count (nsamples x seqlen). Dense trunk Linears
-    accumulate exactly that many tokens in ``n_tokens_seen``, so their
-    values are unchanged by dividing by the global count. Per-expert
-    Linears, however, only see their ROUTED tokens; a per-row
-    ``h_trace_raw / n_tokens_seen`` inflates a rarely-routed expert's
-    Fisher by (global/routed) — exactly inverted importance weighting (the
-    least-used experts look the most sensitive). Tokens never routed to an
-    expert contribute zero gradient, so the empirical Fisher over the
-    calibration set divides by the GLOBAL count for every row.
-
-    HISTORY — this deliberately REVERSES a documented convention. Audit M4
-    removed an explicit ÷route_prob on the grounds that dividing by the
-    routed-token count was "the one implicit ÷token-fraction the MoE
-    convention prescribes", and both backends then shipped per-routed-token
-    as the single normalization (pinned by the original
-    tests/test_packed_expert_per_token_fisher.py). M4's *agreement* goal
-    stands — one division, both backends, route_prob as metadata only —
-    but per-routed-token was the wrong denominator for the mean-Δloss
-    objective the allocator optimizes: it is the same 1/p_e inflation M4
-    removed, merely implicit. CLAUDE.md §3 records the same reversal.
-
-    ``n_tokens_seen`` stays raw (routed count, metadata). Every h-detail
-    blob is normalized by the SAME global count (`h_detail_blob` v4) so
-    scalar and per-weight detail Fisher share one denominator.
-    """
-    for s in merged_stats.values():
-        s["h_trace"] = s.get("h_trace_raw", 0.0) / global_tokens
-        s["h_w2_sum"] = s.get("h_w2_sum_raw", 0.0) / global_tokens
-        # Per-expert Fisher trace (only present on packed-3D stat entries;
-        # dense Linears have no per-expert dimension). Normalize by the
-        # same token count so it shares units with `h_trace`.
-        per = s.get("h_trace_per_expert_raw")
-        if per is not None:
-            s["h_trace_per_expert"] = [float(v) / global_tokens for v in per]
-        # Per-GROUP Fisher trace (grouped-BMM operands like DSv4's wo_a).
-        # Same rule, same denominator: the group axis is a contraction
-        # structure ON one logical tensor, and every group sees every
-        # calibration token (attention output projection — nothing is
-        # routed), so the global count is exact for it, not just
-        # consistent.
-        per_group = s.get("h_trace_per_group_raw")
-        if per_group is not None:
-            s["h_trace_per_group"] = [
-                float(v) / global_tokens for v in per_group]
-        s["h_trace_norm_tokens"] = global_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -2246,16 +2156,13 @@ class RouterTracker:
 # ---------------------------------------------------------------------------
 # Fisher accumulator with activation snapshot cache
 # ---------------------------------------------------------------------------
-_DENSE_FISHER_MARGINAL_KEYS = (
-    "fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax",
-)
 
 
 def dense_marginal_chunk(gy2_sq: torch.Tensor, x2_sq: torch.Tensor,
                          x2: torch.Tensor,
                          chunk_h: torch.Tensor) -> list[torch.Tensor]:
     """Five per-channel reductions of one (gy², x², H) chunk, in
-    ``_DENSE_FISHER_MARGINAL_KEYS`` order, device-resident fp32.
+    ``probe_statistics.FISHER_MARGINAL_KEYS`` order, device-resident fp32.
 
     Reductions force fp32 accumulation: the inputs are bf16 and a
     T-long running sum in bf16 loses real precision for free.
@@ -2641,7 +2548,7 @@ class FisherAccumulator:
             ]
             return
         for key, dst, src in zip(
-            _DENSE_FISHER_MARGINAL_KEYS, current, values, strict=True,
+            probe_statistics.FISHER_MARGINAL_KEYS, current, values, strict=True,
         ):
             if key == "act_absmax":
                 torch.maximum(dst, src, out=dst)
@@ -2686,7 +2593,7 @@ class FisherAccumulator:
             for name, values in device_entries:
                 entry = self.stats.get(name)
                 for key, value in zip(
-                    _DENSE_FISHER_MARGINAL_KEYS, values, strict=True,
+                    probe_statistics.FISHER_MARGINAL_KEYS, values, strict=True,
                 ):
                     length = int(value.numel())
                     if entry is not None:
@@ -3034,7 +2941,7 @@ class FisherAccumulator:
         # See finalize_fisher_stats for the full derivation + history.
         # `route_prob` stays in the stats as metadata only.
         global_tokens = max(int(global_tokens), 1)
-        finalize_fisher_stats(self.stats, global_tokens)
+        probe_statistics.finalize_fisher_stats(self.stats, global_tokens)
 
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3093,7 +3000,7 @@ class FisherAccumulator:
                                 else torch.empty(0, dtype=torch.float32))
                 fname = sub.sub("__", name) + ".pt"
                 torch.save(
-                    h_detail_blob(acc, global_tokens, name, kind="linear",
+                    probe_statistics.h_detail_blob(acc, global_tokens, name, kind="linear",
                                   g2_per_token=g2_per_token),
                     self.h_detail_dir / fname)
                 self.stats[name]["h_detail_path"] = fname
@@ -3107,7 +3014,7 @@ class FisherAccumulator:
                 # device-resident; h_detail_blob lands it on CPU for the
                 # saved blob.)
                 fname = sub.sub("__", full_name) + ".pt"
-                torch.save(h_detail_blob(ch, global_tokens, full_name,
+                torch.save(probe_statistics.h_detail_blob(ch, global_tokens, full_name,
                                          kind="packed"),
                            self.h_detail_dir / fname)
                 self.stats[full_name]["h_detail_path"] = fname

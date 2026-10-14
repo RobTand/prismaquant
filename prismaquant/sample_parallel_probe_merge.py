@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.incremental_probe import merge_marginals
+from prismaquant.probe_statistics import merge_marginals
 from prismaquant.sample_parallel_probe import (
     BODY_STATS_AND_ACTIVATION,
     LM_HEAD_STATS_ONLY,
@@ -56,7 +56,7 @@ from prismaquant.sample_parallel_probe_contract import (
     # use the production Torch implementation as its verifier.
     activation_row_priorities,
 )
-from prismaquant.sensitivity_probe import finalize_fisher_stats
+from prismaquant.probe_statistics import finalize_fisher_stats
 from .digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.tensor_digests import tensor_identity as _tensor_identity
 

@@ -81,6 +81,9 @@ and the curve is tiny so the dependency would not pay for itself.)
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import argparse
 import csv
 import hashlib
@@ -1052,7 +1055,6 @@ def _validate_assignment_candidate_membership(
     )
 
 
-
 # Role tokens used to bucket the bit-attribution report. Best-effort: anything
 # unrecognized buckets as "unknown" rather than failing, so new architectures
 # degrade gracefully instead of crashing a read-only diagnostic.
@@ -1569,7 +1571,6 @@ def validate_source_visual_passthrough_contract(
     )
 
 
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1675,106 +1676,6 @@ def validate_final_serving_promotion_noop(
         f"stale. Changed {len(changed)} entries, sample={sample}. Move this "
         "coupling before solve_with_promotion or recompute accounting."
     )
-
-
-def renormalize_probe_fisher(stats: dict, meta: dict, *,
-                             allow_legacy: bool = False) -> int | None:
-    """Recompute h_trace/h_w2_sum/h_trace_per_expert from the stored RAW
-    accumulators with the one correct shared denominator: the global calib
-    token count.
-
-    Older incremental probes finalized `h_trace = h_trace_raw /
-    n_tokens_seen` PER ROW, where per-expert Linears only count their
-    ROUTED tokens — inflating a rarely-routed expert's Fisher by
-    (global/routed), i.e. inverted importance weighting. The typical
-    inflation is ~n_experts/top_k (≈32x on a 256-expert top-8 model);
-    the degenerate 1-routed-token case reaches ~33,000x at a 32k-token
-    calibration. Dense rows saw exactly the global count, so their values
-    are unchanged; probes written by the fixed finalize renormalize to
-    identical values — the recompute is idempotent (see PER-ROW STAMPS).
-
-    PER-ROW STAMPS WIN. A row that already carries ``h_trace_norm_tokens``
-    was written by a fixed finalize (the field was introduced with it) and
-    is already divided by the global count of the pass that PRODUCED it —
-    which is not always this probe's meta count. `incremental_probe` merges
-    the multimodal visual pass (finalized at ``n_samples x max_text_len``,
-    e.g. 8x128) into the body probe, and `merge_probe_pickles` keeps the
-    FIRST shard's meta (the body's, e.g. 32x1024), so recomputing every row
-    from the meta count would rescale the visual rows by ~32x away from
-    what their writer computed — and would not be idempotent. Honouring the
-    row stamp keeps each row on its own writer's denominator and makes the
-    recompute a true no-op for any probe written by the fixed finalize.
-
-    Returns the probe-wide token count (the meta fallback used for
-    unstamped rows), or None when nothing could be renormalized. A row
-    with raw accumulators, no stamp, and no usable meta count is a HARD
-    ERROR (SystemExit) — silently allocating on routed-token-normalized
-    Fisher mis-spends the bit budget; `allow_legacy=True`
-    (--allow-legacy-fisher-norm) downgrades it to a warning and keeps the
-    probe's stored h_trace values.
-    """
-    meta = meta or {}
-    meta_tokens = int(meta.get("fisher_norm_tokens", 0) or 0)
-    if meta_tokens <= 0:
-        meta_tokens = (int(meta.get("nsamples", 0) or 0)
-                       * int(meta.get("seqlen", 0) or 0))
-
-    renormed = 0
-    unresolvable = 0
-    denominators: dict[int, int] = {}
-    for entry in stats.values():
-        if not isinstance(entry, dict) or "h_trace_raw" not in entry:
-            continue
-        # The row's own writer-stamped denominator, else the probe-wide one.
-        row_tokens = int(entry.get("h_trace_norm_tokens", 0) or 0)
-        if row_tokens <= 0:
-            row_tokens = meta_tokens
-        if row_tokens <= 0:
-            unresolvable += 1
-            continue
-        entry["h_trace"] = float(entry["h_trace_raw"]) / row_tokens
-        if "h_w2_sum_raw" in entry:
-            entry["h_w2_sum"] = (
-                float(entry["h_w2_sum_raw"]) / row_tokens)
-        per_raw = entry.get("h_trace_per_expert_raw")
-        if per_raw is not None:
-            entry["h_trace_per_expert"] = [
-                float(v) / row_tokens for v in per_raw]
-        # Keep the probe-side stamp truthful on legacy pickles.
-        entry["h_trace_norm_tokens"] = row_tokens
-        denominators[row_tokens] = denominators.get(row_tokens, 0) + 1
-        renormed += 1
-
-    if unresolvable:
-        msg = (
-            "probe rows carry raw Fisher accumulators but no usable token "
-            "count: neither a per-row h_trace_norm_tokens stamp nor "
-            f"meta.fisher_norm_tokens / nsamples+seqlen ({unresolvable} of "
-            f"{len(stats)} rows). h_trace cannot be renormalized by the "
-            "global calib token count; legacy per-row normalization inflates "
-            "routed-expert rows by (global/routed) — typically "
-            "~n_experts/top_k — and the allocator would mis-spend the bit "
-            "budget on rarely-routed experts. Re-run the probe with current "
-            "code (it stamps meta.fisher_norm_tokens), or pass "
-            "--allow-legacy-fisher-norm to proceed with the stored legacy "
-            "values anyway.")
-        if not allow_legacy:
-            raise SystemExit(f"[alloc] ERROR: {msg}")
-        print(f"[alloc] WARNING (--allow-legacy-fisher-norm): {msg}",
-              flush=True)
-
-    if renormed:
-        mix = ", ".join(f"{n}x{cnt} rows"
-                        for n, cnt in sorted(denominators.items()))
-        print(f"[alloc] Fisher renormalized: {renormed}/{len(stats)} rows "
-              f"→ h_trace_raw / global calib tokens [{mix}] "
-              "(per-expert routed-count normalization corrected)", flush=True)
-        if meta_tokens > 0:
-            return meta_tokens
-        # Meta-less probe carried entirely by row stamps: report the
-        # denominator the most rows share (the body pass').
-        return max(denominators.items(), key=lambda kv: (kv[1], kv[0]))[0]
-    return None
 
 
 _FISHER_CAP_ROLE_RE = re.compile(r"layers\.(\d+)\.[a-z_]+\.([a-z_]+)$")
@@ -2968,7 +2869,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # from the stored raw accumulators; hard error on probes that cannot
     # be renormalized unless --allow-legacy-fisher-norm. See
     # renormalize_probe_fisher for the full story.
-    renormalize_probe_fisher(stats, probe.get("meta", {}),
+    probe_statistics.renormalize_probe_fisher(stats, probe.get("meta", {}),
                              allow_legacy=args.allow_legacy_fisher_norm)
 
     # ---- Robust Fisher clip (opt-in research lever) ----
