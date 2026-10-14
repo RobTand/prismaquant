@@ -143,9 +143,17 @@ def require_quantum_campaign(record: Mapping, campaign: Mapping) -> None:
 
 
 def require_quantum_record_set(records: Sequence[Mapping]) -> None:
+    if not records:
+        raise ValueError("no quantum records to admit")
     for record in records:
-        if record.get("schema") != LAYER_QUANTUM_SCHEMA:
-            raise ValueError(f"record schema is not {LAYER_QUANTUM_SCHEMA!r}")
+        require_quantum_identity(record)
+        if not isinstance(record.get("campaign"), dict):
+            raise ValueError("a quantum record carries no campaign binding")
+        if not isinstance(record.get("adjoint"), dict):
+            raise ValueError("a quantum record carries no adjoint binding")
+        layer = record.get("layer")
+        if record.get("quantum_id") != quantum_id(layer):
+            raise ValueError("a quantum id does not name its layer")
     ids = [record.get("quantum_id") for record in records]
     if len(set(ids)) != len(ids):
         raise ValueError("layer records carry duplicated quantum ids")

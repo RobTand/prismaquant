@@ -79,3 +79,28 @@ run corrected those expectations and retained their safety cases.
 
 No GPU run or performance experiment was needed for this ownership-only
 change. No speed, residency, power, KL, or bpp improvement is claimed.
+
+## Follow-up boundary fix
+
+The structure refactor exposed a missing dispatcher obligation. Its record
+loader checked campaign homogeneity and schema but trusted record identity
+until the child runtime refused it. The follow-up validates every canonical
+record before using its paths or publishing rows, then checks the campaign
+and adjoint object shapes and exact layer-to-ID relation. It rejects empty
+record generations. This behavior change is a separate commit from ownership.
+
+The targeted PB run passed all 201 tests, with no skips. It exercises both
+dev and certified dispatch refusal and verifies that no gateway submission
+occurs. Malformed admission fields, genuinely resealed duplicate IDs and
+mixed campaigns, and existing launch and metadata generations also pass.
+The compile action executed with exit 0. All three endings have CAS receipts.
+
+The test actions are
+`b94d4bb222f59b6c7b40ee937c03596e04a6a52cc786066b11804d55562ab52a`
+and `3f032b0d7298a2b0df9895d019169680f8b3e23b7c02f40aed9d9fc17d489629`.
+The compile action is
+`0147940d5453fd017d62dcdec2bdb00d2ad84aa68f81389ca36b4d055d150a4d`.
+Reports are `joint-j1-boundary-fix.json`, `joint-j1-boundary-fix.log`,
+`joint-j1-boundary-receipts.json`, and `joint-j1-boundary-compile.log`
+under the report directory above. The same qualified interpreter and bounded
+threads were used. The compile submission explicitly used `--anywhere`.

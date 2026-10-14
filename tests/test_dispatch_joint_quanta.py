@@ -194,6 +194,18 @@ def _argv(records_dir, output_root, receipt=None, extra=()):
 # -- the exact pbrun argv shape (§5.2, pinned: drift breaks placement) ----------
 
 
+@pytest.mark.parametrize("mode", ["0", "1"])
+def test_dispatch_refuses_edited_record_before_publishing(tmp_path, records_dir, monkeypatch, mode):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    path = records_dir / "layer-000.json"
+    record = json.loads(path.read_text())
+    record["campaign"]["plan_path"] = "/edited-plan"
+    path.write_text(json.dumps(record))
+    gateway = FakeGateway()
+    assert main(_argv(records_dir, tmp_path / "out"), _gateway=gateway) == 3
+    assert gateway.submitted == []
+
+
 def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     """Every quantum submits exactly the contract's argv: the shared GB10
     class tag (PB requires *every* tag a row lists, so a host pair would

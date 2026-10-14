@@ -86,6 +86,7 @@ def test_record_sets_refuse_mixed_generations(record, defect):
     other = ledger.new_quantum_record(layer=1, campaign=record["campaign"], read_set={},
                                      chunks=[], windows=[], adjoint=record["adjoint"], output_space={})
     if defect == "duplicate":
+        other["layer"] = record["layer"]
         other["quantum_id"] = record["quantum_id"]
     elif defect == "campaign":
         other["campaign"]["plan_path"] = "/other-plan"
@@ -93,5 +94,28 @@ def test_record_sets_refuse_mixed_generations(record, defect):
         other["adjoint"]["slice_sha256"] = "f" * 64
     else:
         other["adjoint"]["receipt_sha256"] = "f" * 64
+    other = ledger.seal_quantum_record(other)
     with pytest.raises(ValueError):
         ledger.require_quantum_record_set([record, other])
+
+
+@pytest.mark.parametrize("mode", ["0", "1"])
+def test_record_set_refuses_an_edited_body_before_using_its_paths(record, monkeypatch, mode):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    record["campaign"]["plan_path"] = "/edited-plan"
+    with pytest.raises(ValueError, match="identity"):
+        ledger.require_quantum_record_set([record])
+
+
+@pytest.mark.parametrize("key,value", [("campaign", None), ("adjoint", []),
+                                      ("layer", True), ("quantum_id", "layer-999")])
+def test_record_set_refuses_malformed_admission_fields(record, key, value):
+    record[key] = value
+    record = ledger.seal_quantum_record(record)
+    with pytest.raises(ValueError):
+        ledger.require_quantum_record_set([record])
+
+
+def test_record_set_refuses_an_empty_generation():
+    with pytest.raises(ValueError, match="no quantum records"):
+        ledger.require_quantum_record_set([])

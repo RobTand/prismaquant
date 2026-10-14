@@ -10,6 +10,10 @@ row publication readiness, output-root geometry, and payload coverage retain
 their independent gates. Dev run seals still stamp drift; record bytes and
 measured unit rosters still refuse corruption. This changes ownership without
 changing the format menu, serving gates, stage graph or numerical kernels.
+Dispatcher record admission also verifies each record's canonical identity,
+campaign and adjoint object shapes, and exact layer-to-quantum-ID relation
+before inspecting its paths or publishing a row. Invalid and edited records
+refuse in both dev and certified modes.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.
