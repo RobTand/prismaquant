@@ -93,11 +93,11 @@ from .allocator_candidates import (
 from .fp8_dynamic import fp8_dynamic_weight_qdq
 from .mx_formats import e8m0_to_scale, mxfp8_e4m3_qdq
 from .serving_profiles import resolve_target_profile
-from .sensitivity_probe import (
-    _is_packed_experts_module,
-    _packed_expert_param_name_set,
-    _packed_expert_parent_for_projection,
-    _packed_experts_param_names,
+from prismaquant.probe_inventory import (
+    is_packed_experts_module as _is_packed_experts_module,
+    packed_expert_param_name_set as _packed_expert_param_name_set,
+    packed_expert_parent_for_projection as _packed_expert_parent_for_projection,
+    packed_experts_param_names as _packed_experts_param_names,
 )
 from .layer_config import (
     canonicalize_assignment as _canonicalize_assignment,

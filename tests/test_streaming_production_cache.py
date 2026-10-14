@@ -273,7 +273,9 @@ def _equivalence_body(workdir: Path) -> None:
     calib_ids = torch.randint(0, VOCAB, (2, 8))
     dense_qnames = _dense_qnames(model, profile)
 
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     experts_qnames = [
         n for n, m in model.named_modules()

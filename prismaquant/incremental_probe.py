@@ -36,6 +36,8 @@ share of the objective. See `_accumulate_packed_per_token_fisher`.
 """
 from __future__ import annotations
 
+from . import probe_inventory
+
 from . import probe_statistics
 
 
@@ -501,12 +503,6 @@ def _detect_profile_for_shards(model_path: str):
         return DefaultProfile()
 
 
-# Router/gate Linears carry routing logits, not quantizable weights.
-_BASE_LINEAR_EXCLUDE = (
-    r"(?:mlp\.gate$|mlp\..*gate$|\.router(?:$|\.)|block_sparse_moe\.gate$)"
-)
-
-
 def resolve_linear_exclude(model_path: str) -> str:
     """The probe's Linear exclusion: the router baseline OR'd with any
     profile-declared extra (`ModelProfile.probe_linear_exclude_extra`),
@@ -520,8 +516,8 @@ def resolve_linear_exclude(model_path: str) -> str:
     except AttributeError:
         pass
     if extra:
-        return f"(?:{_BASE_LINEAR_EXCLUDE}|{extra})"
-    return _BASE_LINEAR_EXCLUDE
+        return f"(?:{probe_inventory.BASE_LINEAR_EXCLUDE}|{extra})"
+    return probe_inventory.BASE_LINEAR_EXCLUDE
 
 
 def build_extended_shard_regexes(

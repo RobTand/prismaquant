@@ -108,7 +108,9 @@ def _load_col_weights(path, formats) -> dict | None:
 
 
 def _model_has_packed_experts(model: nn.Module, profile) -> bool:
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
     return any(
         _is_packed_experts_module(m, profile)
         for _, m in model.named_modules()

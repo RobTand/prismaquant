@@ -941,7 +941,9 @@ def _experts_qnames_by_layer(
 ) -> dict[int | None, list[str]]:
     """Group packed-experts module names by decoder-layer index (structure
     only — safe while layers are on meta)."""
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     out: dict[int | None, list[str]] = defaultdict(list)
     for name, mod in model.named_modules():

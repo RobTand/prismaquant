@@ -138,7 +138,9 @@ def _inline_export_body(workdir: str) -> None:
 
     toy = _load_toy_fixtures()
     from prismaquant.model_profiles import profile_from_model
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     model = toy.ToyModel().to(device=device, dtype=torch.bfloat16).eval()
     profile = profile_from_model(model)

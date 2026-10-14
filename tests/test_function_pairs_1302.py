@@ -153,24 +153,24 @@ _MODULES = [Qwen3MoeExperts("gate_up_proj", (2, 2, 2)), Qwen3MoeExperts("gate_up
 
 
 @pytest.mark.parametrize("module_name", [
-    "prismaquant.export_native_compressed", "prismaquant.sensitivity_probe"])
+    "prismaquant.probe_inventory"])
 @pytest.mark.parametrize("profile_index", range(len(_PROFILES)))
 def test_packed_expert_param_names_and_module_test(module_name, profile_index):
     module = importlib.import_module(module_name)
     profile = _PROFILES[profile_index]
-    GOLDEN.call(lambda: sorted(module._packed_expert_param_name_set(profile)))
+    GOLDEN.call(lambda: sorted(module.packed_expert_param_name_set(profile)))
     for candidate in _MODULES:
-        GOLDEN.call(lambda: module._is_packed_experts_module(candidate, profile))
-        GOLDEN.call(lambda: module._packed_experts_param_names(candidate, profile))
+        GOLDEN.call(lambda: module.is_packed_experts_module(candidate, profile))
+        GOLDEN.call(lambda: module.packed_experts_param_names(candidate, profile))
 
 
 @pytest.mark.parametrize("module_name", [
-    "prismaquant.export_native_compressed", "prismaquant.measure_quant_cost"])
+    "prismaquant.probe_inventory"])
 @pytest.mark.parametrize("profile_index", range(len(_PROFILES)))
 @pytest.mark.parametrize("projection", ["gate_proj", "down_proj", "unknown"])
 def test_packed_expert_parent_for_projection(module_name, profile_index, projection):
     module = importlib.import_module(module_name)
-    GOLDEN.call(lambda: module._packed_expert_parent_for_projection(
+    GOLDEN.call(lambda: module.packed_expert_parent_for_projection(
         _PROFILES[profile_index], projection))
 
 

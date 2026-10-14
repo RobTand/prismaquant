@@ -49,7 +49,10 @@ from .render_score import (
     normalize_clipped_fisher_row_weights,
     resolve_fisher_row_weight_clip,
 )
-from .sensitivity_probe import _packed_expert_parent_for_projection, grouped_linear_groups
+from prismaquant.probe_inventory import (
+    packed_expert_parent_for_projection as _packed_expert_parent_for_projection,
+)
+from prismaquant.sensitivity_probe import grouped_linear_groups
 from .tensor_digests import tensor_identity
 
 
@@ -992,7 +995,10 @@ def _enumerate_packed_experts(model: nn.Module, target_names: set[str],
     probe's stat keys. Only entries appearing in `target_names` are
     returned.
     """
-    from .sensitivity_probe import _is_packed_experts_module, _packed_experts_param_names
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
+    )
     out = []
     for qname, mod in model.named_modules():
         if not _is_packed_experts_module(mod, profile):

@@ -63,6 +63,8 @@ Model-agnostic:
 """
 from __future__ import annotations
 
+from . import probe_inventory
+
 from . import probe_statistics
 
 
@@ -1051,82 +1053,14 @@ class _PackedWeightGradFallback(torch.autograd.Function):
         return None, None, None, None, None
 
 
-def _packed_expert_param_name_set(profile=None) -> set[str]:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return set(profile.packed_expert_param_names())
-        except Exception:
-            pass
-    return set()
 
 
-def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return profile.packed_expert_parent_for_projection(projection_name)
-        except Exception:
-            pass
-    return None
 
 
-def _is_packed_experts_module(module: nn.Module, profile=None) -> bool:
-    """A module qualifies as a packed-experts container iff (a) its
-    class name contains "Experts" (case-insensitive), and (b) it owns
-    at least one profile-declared 3D packed expert parameter.
-
-    The class-name check excludes other modules that happen to own 3D
-    parameters — most importantly Conv1d in linear-attention paths,
-    whose `weight` is shape `[out, in, kernel]`. The param-name check
-    is a second safety net against unusual modules with unrelated 3D
-    state.
-    """
-    names = _packed_expert_param_name_set(profile)
-    cls_name = type(module).__name__.lower()
-    if "expert" not in cls_name:
-        return False
-    for n, p in module.named_parameters(recurse=False):
-        if (isinstance(p, nn.Parameter)
-                and p.dim() == 3
-                and n in names):
-            return True
-    return False
 
 
-def _packed_experts_param_names(module: nn.Module, profile=None) -> list[str]:
-    """Return the attribute names of all 3D packed parameters on
-    `module`, restricted to the known MoE expert names. Order is stable
-    across Python runs."""
-    names_allowed = _packed_expert_param_name_set(profile)
-    names = []
-    for n, p in module.named_parameters(recurse=False):
-        if (isinstance(p, nn.Parameter)
-                and p.dim() == 3
-                and n in names_allowed):
-            names.append(n)
-    return sorted(names)
 
 
-def _packed_expert_projection_candidate_names(profile=None) -> tuple[str, ...]:
-    names = set(_packed_expert_param_name_set(profile))
-    if profile is not None:
-        for name in list(names):
-            try:
-                names.update(profile.packed_expert_projection_names(name))
-            except Exception:
-                pass
-    return tuple(sorted(names))
 
 
 _PRISMAQUANT_PATCH_SENTINEL = "_prismaquant_packed_expert_patch"
@@ -1180,9 +1114,9 @@ def install_packed_expert_hooks(
     """
     meta: dict[str, dict] = {}
     for qname, module in model.named_modules():
-        if not _is_packed_experts_module(module, profile):
+        if not probe_inventory.is_packed_experts_module(module, profile):
             continue
-        param_names = _packed_experts_param_names(module, profile)
+        param_names = probe_inventory.packed_experts_param_names(module, profile)
         if not param_names:
             continue
 
@@ -1413,7 +1347,7 @@ def discover_moe_structure(
             raise
         except Exception:
             profile = None
-    projection_candidates = _packed_expert_projection_candidate_names(profile)
+    projection_candidates = probe_inventory.packed_expert_projection_candidate_names(profile)
 
     def _router_matches_num_experts(child: nn.Module, num_experts: int) -> bool:
         if isinstance(child, nn.Linear) and child.out_features == num_experts:
@@ -1545,7 +1479,7 @@ def discover_moe_routers(
             raise
         except Exception:
             profile = None
-    packed_names = _packed_expert_param_name_set(profile)
+    packed_names = probe_inventory.packed_expert_param_name_set(profile)
     routers: dict[str, int] = {}
 
     def _matches(child: nn.Module, num_experts: int) -> bool:
@@ -2248,7 +2182,7 @@ class FisherAccumulator:
         # identity and the declared structural spellings are read through
         # prismaquant.name_projection, never re-derived here from string
         # surgery. When the model's own profile is unavailable, fall back
-        # to DefaultProfile exactly like `_packed_expert_param_name_set`
+        # to DefaultProfile exactly like `probe_inventory.packed_expert_param_name_set`
         # above; NameProjection itself refuses a None profile by contract,
         # so the fallback is an explicit declaration, not a silent degrade.
         if self.model_profile is not None:

@@ -1723,15 +1723,17 @@ def find_decided_but_unpriced(
 
     Imports prismaquant lazily so the walker core stays torch-only.
     """
-    from prismaquant.incremental_probe import _BASE_LINEAR_EXCLUDE
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import BASE_LINEAR_EXCLUDE
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     try:
         extra = str(profile.probe_linear_exclude_extra() or "")
     except AttributeError:
         extra = ""
-    excludes = (_BASE_LINEAR_EXCLUDE,) if not extra else (
-        _BASE_LINEAR_EXCLUDE, extra)
+    excludes = (BASE_LINEAR_EXCLUDE,) if not extra else (
+        BASE_LINEAR_EXCLUDE, extra)
 
     entries: list[dict] = []
     for node in result.nodes:

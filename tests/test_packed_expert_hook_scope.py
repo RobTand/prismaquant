@@ -280,7 +280,9 @@ def test_the_hook_set_is_the_full_visible_module_set(monkeypatch):
         pwc, "_PackedExpertActivationCollector", spy)
     state, calib = frozen_state(), frozen_calib()
 
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     probe = TwoLayerMoe()
     visible = {

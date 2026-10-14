@@ -530,9 +530,9 @@ def measure_expert_unit_costs(
     allocator-payload row dicts keyed by full member names and ``unit_kls``
     maps ``experts_qname -> {fmt: unit_kl}``.
     """
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     profile = resolve_routed_expert_profile(model, profile)
@@ -742,9 +742,9 @@ EXPERT_CHECKPOINT_STAGE = "expert empirical cost"
 
 def _streamed_expert_unit_records(model, profile, *, unit_filter, max_units):
     """Return serving units in the resident measurer's exact order."""
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     packed = [
@@ -1085,7 +1085,9 @@ def _fork_quantized_unit(
     Also captures ``rows_meta[qn]`` (member names/shapes/metadata) on the
     first call, while the layer is resident.
     """
-    from prismaquant.sensitivity_probe import _packed_experts_param_names
+    from prismaquant.probe_inventory import (
+        packed_experts_param_names as _packed_experts_param_names,
+    )
 
     device = runner.device
     swaps: list[tuple] = []

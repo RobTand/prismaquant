@@ -6637,7 +6637,9 @@ class _PackedExpertActivationCollector:
         self._gen.manual_seed(1234)
         self._handles: list = []
         self._modules_by_qname: dict[str, nn.Module] = {}
-        from prismaquant.sensitivity_probe import _is_packed_experts_module
+        from prismaquant.probe_inventory import (
+            is_packed_experts_module as _is_packed_experts_module,
+        )
         for qname, mod in model.named_modules():
             if not _is_packed_experts_module(mod, self.profile):
                 continue
@@ -7318,9 +7320,9 @@ def fill_packed_expert_cache_entries(
       "rendered", "had_activations"}}``.
     """
     import time as _time
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
     from prismaquant.measure_quant_cost import (
         derive_per_expert_activations,

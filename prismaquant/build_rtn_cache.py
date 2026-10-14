@@ -42,10 +42,10 @@ from prismaquant.nvfp4_activation_contract import (
     FP4_E2M1_MAX,
     _E2M1_POSITIVE,
 )
-from prismaquant.sensitivity_probe import (
-    _mk_stage_dir,
-    _is_packed_experts_module,
-    _packed_experts_param_names,
+from prismaquant.sensitivity_probe import _mk_stage_dir
+from prismaquant.probe_inventory import (
+    is_packed_experts_module as _is_packed_experts_module,
+    packed_experts_param_names as _packed_experts_param_names,
 )
 
 
