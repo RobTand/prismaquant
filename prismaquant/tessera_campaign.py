@@ -1258,8 +1258,8 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
 #
 # A routed MoE stack is ONE decision: vLLM loads a packed ``[E, M, N]`` expert
 # tensor under a single quantization scheme, and PrismaQuant's union-find
-# serving-unit promotion already enforces that (``allocator_solver.
-# _packed_groups_by_profile`` keys ``...experts.gate_up_proj`` and
+# serving-unit promotion already enforces that (``NameProjection.serving_units``
+# keys ``...experts.gate_up_proj`` and
 # ``...experts.down_proj`` into the same ``__packed_format__`` group).  The
 # campaign measures separate expert Linears, optionally encoding compatible
 # units together. A full census still requires every expert's wire and score.
