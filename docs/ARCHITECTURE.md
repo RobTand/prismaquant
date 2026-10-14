@@ -10,6 +10,10 @@ recognition and the baseline Linear exclusion. Probe execution, rendering and
 walk coverage query this owner; hook state and shard profile detection remain
 with their existing execution owners.
 
+Re-stamped 2026-10-14: `measured_runtime_prices.device_placement_bytes` owns
+one-device resource composition for the exact frontier and assignment evaluator.
+Per-rank admission and shape-only withholding retain their separate contracts.
+
 Re-stamped 2026-10-14: sensitivity cards retain each Fisher row writer
 normalizer. The shared `probe_statistics.fisher_norm_tokens` rule gives a
 positive body or visual pass stamp precedence over the legacy probe count.

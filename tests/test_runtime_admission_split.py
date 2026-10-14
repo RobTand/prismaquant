@@ -145,17 +145,17 @@ def _totals(resident, scratch, activation):
 
 def test_an_off_step_peak_under_the_step_total_changes_no_arithmetic():
     """Where the two numbers coincide, or the off-step is smaller, nothing moves."""
-    from prismaquant.allocator_solver import _placement_bytes
+    from prismaquant.measured_runtime_prices import device_placement_bytes
     totals = _totals(1000, 200, 100)
-    assert _placement_bytes(totals, 500, None) == 1800
-    assert _placement_bytes(totals, 500, 1800) == 1800
-    assert _placement_bytes(totals, 500, 1799) == 1800
+    assert device_placement_bytes(*totals[4:7], fixed_device_bytes=500) == 1800
+    assert device_placement_bytes(*totals[4:7], fixed_device_bytes=500, non_step_transient_peak_bytes=1800) == 1800
+    assert device_placement_bytes(*totals[4:7], fixed_device_bytes=500, non_step_transient_peak_bytes=1799) == 1800
 
 
 def test_an_off_step_peak_over_the_step_total_is_what_the_box_must_hold():
     """The regression: the DP pruned against the smaller of two numbers."""
-    from prismaquant.allocator_solver import _placement_bytes
-    assert _placement_bytes(_totals(1000, 200, 100), 500, 4096) == 4096
+    from prismaquant.measured_runtime_prices import device_placement_bytes
+    assert device_placement_bytes(1000, 200, 100, fixed_device_bytes=500, non_step_transient_peak_bytes=4096) == 4096
 
 
 def test_the_off_step_peak_is_absent_rather_than_zero_when_unpriced():

@@ -903,7 +903,10 @@ def evaluate_measured_assignment(
             (row.peak_scratch_bytes for row in selected), default=0)
         kv = fixed_resources.kv_bytes + slos.kv_bytes
         if fixed_resource_scope is None:
-            device = resident + activation + scratch + kv + slos.peak_scratch_bytes
+            from .measured_runtime_prices import device_placement_bytes
+            device = device_placement_bytes(
+                resident, scratch, activation,
+                fixed_device_bytes=kv + slos.peak_scratch_bytes)
         else:
             if slos.device_budget_bytes is not None:
                 raise ServeConstraintError(

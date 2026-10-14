@@ -6,6 +6,8 @@ re-exports these symbols for backwards compatibility.
 """
 from __future__ import annotations
 
+from .measured_runtime_prices import device_placement_bytes
+
 import os
 import time
 from collections.abc import Mapping, Sequence
@@ -305,28 +307,6 @@ def _runtime_float(value, label: str, *, nonnegative: bool = True) -> float:
     return float(value)
 
 
-def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes, *,
-                     charge_activation=True):
-    """`max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the obligation.
-
-    The per-step composition prices one engine step. The off-step peak prices
-    what the engine still holds while no step is running, and a box has to hold
-    both. A `None` off-step peak is an absence of evidence and never a zero, so
-    it leaves this arithmetic exactly as it was; so does an off-step peak the
-    per-step composition already covers.
-
-    ``charge_activation`` is the boundary's ``row_terms_charged`` decision:
-    under ``transient_charge_boundary`` v1 a row's ``activation_bytes`` is the
-    logical input the fixed terms already hold, so it stays a frontier
-    coordinate and is not added here (design §3.8). With no boundary -- a table
-    that carries no fixed charge -- the three row axes compose as before.
-    """
-    step = totals[4] + totals[5] + (totals[6] if charge_activation else 0) + fixed_device_bytes
-    if fixed_non_step_peak_bytes is None:
-        return step
-    return max(step, fixed_non_step_peak_bytes)
-
-
 def solve_runtime_frontier(
     candidates: dict[str, list[Candidate]],
     resources: Mapping[tuple[str, str], RuntimeResources],
@@ -603,8 +583,9 @@ def solve_runtime_frontier(
                 if max_decode_ms is not None and totals[3] > max_decode_ms:
                     continue
                 if (max_device_bytes is not None
-                        and _placement_bytes(totals, fixed_device_bytes,
-                                             fixed_non_step_peak_bytes,
+                        and device_placement_bytes(totals[4], totals[5], totals[6],
+                                             fixed_device_bytes=fixed_device_bytes,
+                                             non_step_transient_peak_bytes=fixed_non_step_peak_bytes,
                                              charge_activation=charge_activation) > max_device_bytes):
                     continue
                 workspace = (_merge_workspace(state.workspace, b[7], name=name)
@@ -692,8 +673,9 @@ def solve_runtime_frontier(
             resident_bytes=None if ranked else a[4],
             peak_scratch_bytes=None if ranked else a[5],
             activation_bytes=None if ranked else a[6],
-            device_bytes=None if ranked else _placement_bytes(
-                a, fixed_device_bytes, fixed_non_step_peak_bytes,
+            device_bytes=None if ranked else device_placement_bytes(
+                a[4], a[5], a[6], fixed_device_bytes=fixed_device_bytes,
+                non_step_transient_peak_bytes=fixed_non_step_peak_bytes,
                 charge_activation=charge_activation),
             rank_workspace_bytes=(None if not ranked else
                                   tuple(_workspace_bytes(state.workspace, rank)
