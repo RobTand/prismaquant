@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-def git_commit() -> str | None:
+def producer_git_commit() -> str | None:
     """Best-effort commit of the prismaquant tree this cost was computed by."""
     override = str(os.environ.get(
         "PRISMAQUANT_IDENTITY_GIT_COMMIT", ""
@@ -18,10 +18,10 @@ def git_commit() -> str | None:
                 "64-character hexadecimal commit id"
             )
         return override
-    return git_head_commit()
+    return producer_git_head_commit()
 
 
-def git_head_commit() -> str | None:
+def producer_git_head_commit() -> str | None:
     """Best-effort ``git rev-parse HEAD`` of the package's checkout.
 
     The one owner of this recipe (PQ #1302): 5 s timeout, run from the package
@@ -38,7 +38,7 @@ def git_head_commit() -> str | None:
 
 
 def checkpoint_git_commit() -> str:
-    commit = git_commit()
+    commit = producer_git_commit()
     if commit is None:
         raise RuntimeError("AURA checkpoint identity cannot resolve git commit")
     if os.environ.get("PRISMAQUANT_IDENTITY_GIT_COMMIT"):
@@ -67,7 +67,7 @@ def checkpoint_git_commit() -> str:
     return commit
 
 
-def source_sha256() -> str:
+def producer_package_sha256() -> str:
     """Bind AURA to the complete producer package, including dependencies."""
     from prismaquant.production_weight_cache import (
         _production_cache_source_sha256,

@@ -131,15 +131,15 @@ def test_joint_interrupted_resume_preserves_signed_samples(tmp_path, monkeypatch
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, cache = _fixture()
     expected = _run(runner, cache)
-    writer = aura_checkpoint_journal.write_unit
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     def interrupt(*args, **kwargs):
         writer(*args, **kwargs)
         raise RuntimeError("fixture interruption")
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", interrupt)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt)
     _, _, runner, cache = _fixture()
     with pytest.raises(RuntimeError, match="fixture interruption"):
         _run(runner, cache, checkpoint_dir=tmp_path)
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", writer)
     _, _, runner, cache = _fixture()
     actual = _run(runner, cache, checkpoint_dir=tmp_path, resume=True)
     assert actual["costs"] == expected["costs"]
@@ -191,7 +191,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         return payload, backward
 
     expected, expected_backward = run()
-    writer = aura_checkpoint_journal.write_unit
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     written = []
 
     def interrupt_after_complete_layer(*args, **kwargs):
@@ -199,7 +199,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         written.append(kwargs["qname"])
         raise RuntimeError("fixture interruption after complete reverse layer")
 
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", interrupt_after_complete_layer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt_after_complete_layer)
     with pytest.raises(RuntimeError, match="fixture interruption after complete reverse layer"):
         run(checkpoint_dir=tmp_path)
     assert written == ["model.layers.1.proj"]
@@ -210,7 +210,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         written.append(kwargs["qname"])
         return writer(*args, **kwargs)
 
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", record_write)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", record_write)
     written.clear()
     leases.clear()
     actual, actual_backward = run(checkpoint_dir=tmp_path, resume=True)
@@ -280,10 +280,10 @@ def test_joint_row_refuses_second_scalar_or_activation_application(mutation):
 
 def test_joint_resume_refuses_changed_source_closure(tmp_path, monkeypatch):
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: "2" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "2" * 64)
     _, _, runner, cache = _fixture()
     _run(runner, cache, checkpoint_dir=tmp_path)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: "3" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "3" * 64)
     _, context, runner, cache = _fixture()
     with pytest.raises(RuntimeError, match="identity mismatch"):
         _run(runner, cache, checkpoint_dir=tmp_path, resume=True)

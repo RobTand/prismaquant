@@ -80,8 +80,8 @@ def _load_source(path: Path, *, name: str, identity: str, allowance: int) -> dic
         if type(payload) is not bytes:
             raise ValueError("replay source has no builtin byte payload")
         _check_builtin_pickle(payload)
-        return aura_checkpoint_journal.decode_unit(
-            envelope, path=path, qname=name, identity_sha256=identity)
+        return aura_checkpoint_journal.load_unit(
+            path, qname=name, identity_sha256=identity, envelope=envelope)
 
 
 def replay(source: Path, destination: Path, *, expected_units: int,
@@ -116,11 +116,11 @@ def replay(source: Path, destination: Path, *, expected_units: int,
     consumer = threading.get_ident()
     calls = {"synchronous": [], "shared-engine": []}
     arm = "synchronous"
-    encoder = aura_checkpoint_journal.encode_unit
+    encoder = aura_checkpoint_journal.UnitCheckpointWriter.publish
 
-    def observed_encode(**kwargs):
+    def observed_encode(writer, **kwargs):
         calls[arm].append((threading.get_ident(), threading.current_thread().name))
-        return encoder(**kwargs)
+        return encoder(writer, **kwargs)
 
     def load(name, allowance=source_allowance):
         # These are trusted existing campaign pickles, never arbitrary CLI URLs.
@@ -129,14 +129,13 @@ def replay(source: Path, destination: Path, *, expected_units: int,
 
     source_digests, expected, input_bytes = {}, {}, 0
     historical_matches = 0
-    aura_checkpoint_journal.encode_unit = observed_encode
+    aura_checkpoint_journal.UnitCheckpointWriter.publish = observed_encode
     try:
         for name in names:
             source_digests[name] = digest(paths[name])
             input_bytes += paths[name].stat().st_size
             with owned_builtin_graph(load(name)) as state:
-                aura_checkpoint_journal.write_unit(
-                    sync, qname=name, identity_sha256=identity, state=state)
+                aura_checkpoint_journal.UnitCheckpointWriter(sync, identity).publish(qname=name, state=state)
             target = cost_stage_checkpoint.unit_path(sync, name)
             expected[name] = digest(target)
             historical_matches += expected[name] == source_digests[name]
@@ -151,7 +150,7 @@ def replay(source: Path, destination: Path, *, expected_units: int,
                 checked.add(name)
 
         ledger = CheckpointPublicationLedger(
-            checkpoint_root=asynchronous, identity_sha256=identity,
+            checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(asynchronous, identity),
             windows=windows, completed=durable, acknowledge=acknowledge,
             window_done=done.append, budget_bytes=budget_bytes, max_jobs=max_jobs)
         try:
@@ -217,7 +216,7 @@ def replay(source: Path, destination: Path, *, expected_units: int,
         print(json.dumps(result, sort_keys=True))
         return result
     finally:
-        aura_checkpoint_journal.encode_unit = encoder
+        aura_checkpoint_journal.UnitCheckpointWriter.publish = encoder
 
 
 def main() -> None:

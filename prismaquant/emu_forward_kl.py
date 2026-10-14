@@ -61,7 +61,7 @@ _CONFIDENT_PROB = 0.5
 
 
 def _git_commit() -> str | None:
-    from prismaquant.aura_provenance import (git_head_commit as _git_head_commit)
+    from prismaquant.aura_provenance import (producer_git_head_commit as _git_head_commit)
 
     return _git_head_commit()
 

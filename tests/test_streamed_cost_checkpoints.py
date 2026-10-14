@@ -337,7 +337,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
         state, calib, tmp_path / "whole", resume=False, monkeypatch=monkeypatch
     )
 
-    original_writer = aura_checkpoint_journal.write_unit
+    original_writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     writes = {"count": 0}
 
     def interrupt_after_first(*args, **kwargs):
@@ -347,7 +347,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
             raise RuntimeError("fixture interruption")
 
     monkeypatch.setattr(
-        aura_checkpoint_journal, "write_unit", interrupt_after_first
+        aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt_after_first
     )
     with pytest.raises(RuntimeError, match="fixture interruption"):
         _run_streamed_aura(
@@ -359,7 +359,7 @@ def test_streamed_aura_interrupt_resume_and_identity_refusal(
         )
     assert writes["count"] == 1
 
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", original_writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", original_writer)
     actual, _ = _run_streamed_aura(
         state, calib, tmp_path / "resumed", resume=True, monkeypatch=monkeypatch
     )
@@ -792,7 +792,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
         monkeypatch=monkeypatch,
     )
 
-    original_writer = aura_checkpoint_journal.write_unit
+    original_writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     writes = {"count": 0}
 
     def interrupt_after_first(*args, **kwargs):
@@ -802,7 +802,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
             raise RuntimeError("anchor diagnostic interruption")
 
     monkeypatch.setattr(
-        aura_checkpoint_journal, "write_unit", interrupt_after_first
+        aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt_after_first
     )
     with pytest.raises(RuntimeError, match="anchor diagnostic interruption"):
         _run_checkpointed_anchor_diagnostic(
@@ -813,7 +813,7 @@ def test_production_anchor_weight_mse_diagnostic_resumes_exactly(
             monkeypatch=monkeypatch,
         )
     monkeypatch.setattr(
-        aura_checkpoint_journal, "write_unit", original_writer
+        aura_checkpoint_journal.UnitCheckpointWriter, "publish", original_writer
     )
     actual, _, renderer = _run_checkpointed_anchor_diagnostic(
         state,

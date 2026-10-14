@@ -2546,7 +2546,7 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     The caller owns this existing material owner and its final close. Actual
     original CUDA admission still fails through that owner's unchanged gate.
     """
-    from .aura_provenance import (source_sha256 as _aura_source_sha256)
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .cost_stage_checkpoint import canonical_json_sha256
     from .cost_streaming import build_streamed_causal_lm
@@ -2724,7 +2724,7 @@ def run_adjoint_capture(
     and its unchanged CUDA gate are checked before device/backend/profile
     work; the caller keeps close responsibility. No authority is constructed.
     """
-    from .aura_provenance import (source_sha256 as _aura_source_sha256)
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .cost_streaming import build_streamed_causal_lm
     from .glm_capture_compatibility import require_capture_compatibility
     from .gpu_guard import require_cuda_hot_path

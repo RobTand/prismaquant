@@ -172,7 +172,6 @@
   "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256",
   "sorted-json:prismaquant/container_runtime_identity.py::main",
   "sorted-json:prismaquant/container_runtime_identity.py::write_or_verify_identity",
-  "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status",
   "sorted-json:prismaquant/dev_mode.py::_shown",
   "sorted-json:prismaquant/glm53_stock_reprice.py::main",
   "sorted-json:prismaquant/io_spans.py::IoSpanLog.close",
@@ -349,10 +348,6 @@
    "prismaquant/dsv4_campaign_completion.py",
    "tools/build_prismasnap_27b_campaign.py"
   ],
-  "_canonical_json_sha256": [
-   "prismaquant/aura_cost.py",
-   "prismaquant/production_weight_cache.py"
-  ],
   "_canonical_sha256": [
    "prismaquant/sample_parallel_probe.py",
    "tools/measure_served_gold.py",
@@ -428,7 +423,6 @@
    "tools/wait_dsv4_aura_campaign.py"
   ],
   "_git_commit": [
-   "prismaquant/aura_cost.py",
    "prismaquant/emu_forward_kl.py",
    "prismaquant/expert_empirical_cost.py",
    "prismaquant/export_gguf.py",

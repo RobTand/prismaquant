@@ -72,7 +72,7 @@ def sealed(tmp_path, monkeypatch):
     monkeypatch.setattr(transition, "_actual_execution", actual_execution)
     monkeypatch.setattr(transition, "_committed_package", lambda root: {"git_parent_commit": "5" * 40})
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: state["commit"])
-    monkeypatch.setattr(aura_provenance, "source_sha256",
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256",
                         lambda: transition.source_proof(state["package"])["producer_source_sha256"])
     bindings = {"plan": plan, "prepared": prepared, "campaign_identity": identity}
     receipt = transition.create_transition(bindings=bindings, output=tmp_path / "transition.json")

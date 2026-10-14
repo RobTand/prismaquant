@@ -147,7 +147,7 @@ def _build(tmp_path_factory, *, name, chain_batch, fusion):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura_provenance.source_sha256(),
+            implementation_sha256=aura_provenance.producer_package_sha256(),
             chain_batch_size=chain_batch, chain_probe_fusion=fusion)
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}

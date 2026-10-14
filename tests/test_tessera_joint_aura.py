@@ -493,7 +493,7 @@ def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monke
 
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_args: None)
     _stub_device_envelope(monkeypatch, bridge)
-    monkeypatch.setattr(aura_provenance, 'source_sha256', lambda: 'i' * 64)
+    monkeypatch.setattr(aura_provenance, 'producer_package_sha256', lambda: 'i' * 64)
     monkeypatch.setattr(bridge, 'load_measured_anchor_input',
                         lambda *_a, **_k: pytest.fail('full-wire intake ran before prepared gate'))
     record = {'schema': bridge.PREPARED_SCHEMA, 'status': 'complete',

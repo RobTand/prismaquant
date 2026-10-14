@@ -22,8 +22,7 @@ def _source(tmp_path, *, cyclic=False):
             "identity": {"calibration": "unchanged"}}
         if cyclic:
             state["self"] = state
-        aura_checkpoint_journal.write_unit(
-            root, qname=name, identity_sha256="a" * 64, state=state)
+        aura_checkpoint_journal.UnitCheckpointWriter(root, "a" * 64).publish(qname=name, state=state)
         units.append({"qname": name,
                       "file": str(cost_stage_checkpoint.unit_path(root, name).relative_to(root))})
     (root / "manifest.json").write_text(json.dumps({"units": units, "identity_sha256": "a" * 64}))
@@ -56,7 +55,7 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
     gc.collect()
     decoded_ids = set()
     decode_count = 0
-    decode = aura_checkpoint_journal.decode_unit
+    decode = aura_checkpoint_journal.load_unit
 
     def observed_decode(*args, **kwargs):
         nonlocal decode_count
@@ -66,13 +65,13 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
         decoded_ids.add(id(state["self"]))
         return state
 
-    monkeypatch.setattr(aura_checkpoint_journal, "decode_unit", observed_decode)
+    monkeypatch.setattr(aura_checkpoint_journal, "load_unit", observed_decode)
 
     def refuse(*args, **kwargs):
         raise RuntimeError("injected source lease refusal")
 
     if failure == "synchronous":
-        monkeypatch.setattr(aura_checkpoint_journal, "write_unit", refuse)
+        monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", refuse)
     elif failure == "snapshot":
         from prismaquant import joint_checkpoint_publication
         monkeypatch.setattr(joint_checkpoint_publication, "snapshot_bound", refuse)

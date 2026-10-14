@@ -58,16 +58,16 @@ def test_next_real_window_replays_before_held_serialization(campaign, monkeypatc
     second_replay = threading.Event()
     seen = {"window": None, "durable": 0, "advanced": False, "worker": None}
     consumer = threading.get_ident()
-    encode = aura_checkpoint_journal.encode_unit
+    encode = aura_checkpoint_journal.UnitCheckpointWriter.publish
     observe = replay_module.observe_and_project_retained_windows
     commit = quantum.QuantumProgress.commit
 
-    def held_encode(**kwargs):
+    def held_encode(writer, **kwargs):
         if not writer_started.is_set():
             seen["worker"] = threading.get_ident()
             writer_started.set()
             assert release_writer.wait(30), "test encoder was not released"
-        return encode(**kwargs)
+        return encode(writer, **kwargs)
 
     def progress_commit(self):
         seen["durable"] = self.units()
@@ -97,7 +97,7 @@ def test_next_real_window_replays_before_held_serialization(campaign, monkeypatc
         finally:
             release_writer.set()
 
-    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", held_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", held_encode)
     monkeypatch.setattr(quantum.QuantumProgress, "commit", progress_commit)
     monkeypatch.setattr(replay_module, "observe_and_project_retained_windows", instrument)
     controller = threading.Thread(target=control, name="checkpoint-test-control")

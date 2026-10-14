@@ -179,13 +179,13 @@ def _run_case(root, monkeypatch, *, checkpoint, resume=False, completed=()):
     with monkeypatch.context() as patch:
         patch.setattr(aura, "compute_aura_cost_streamed", wrapped)
         patch.setattr(io_engine, "load_file", read)
-        save = aura_checkpoint_journal.write_unit
+        save = aura_checkpoint_journal.UnitCheckpointWriter.publish
         def write(*args, **kwargs):
             result = save(*args, **kwargs)
             files = list((checkpoint / "units").glob("*.pkl"))
             events.append(("checkpoint", kwargs["qname"], len(files)))
             return result
-        patch.setattr(aura_checkpoint_journal, "write_unit", write)
+        patch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", write)
         result, reads, context = _case(root / "same", monkeypatch, True,
                                        checkpoint=checkpoint, resume=resume)
     return result, reads, context, events, holder["schedule"]

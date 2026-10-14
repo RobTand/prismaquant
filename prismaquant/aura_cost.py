@@ -64,6 +64,8 @@ from prismaquant.routed_experts import (
 )
 from . import aura_checkpoint_journal, aura_provenance
 from .digests import bytes_sha256hex
+from .joint_price_step import (AuraUnitMeasurements, JointPriceStep, JointResumeContract,
+                               ProbeResumePolicy, RequiredAttribution)
 
 SCHEMA = "prismaquant.aura_cost.v1"
 AURA_PRODUCTION_ANCHOR_DELTA_CONSUMER_IDENTITY = {
@@ -930,7 +932,7 @@ def compute_aura_cost(
             "omitted_packed_experts": omitted_packed_experts,
             "dw_rendered_rows": n_rendered,
             "dw_rtn_fallback_rows": n_rtn,
-            "git_commit": aura_provenance.git_commit(),
+            "git_commit": aura_provenance.producer_git_commit(),
         },
     }
 
@@ -1063,7 +1065,7 @@ def _assemble_streamed_aura_payload(
             "dw_rtn_fallback_rows": int(sum(
                 value == "rtn" for value in dw_src.values()
             )),
-            "git_commit": checkpoint_git_commit or aura_provenance.git_commit(),
+            "git_commit": checkpoint_git_commit or aura_provenance.producer_git_commit(),
             "streaming": True,
             "streamed_gradient_harvest": (
                 "post_accumulate_per_parameter"
@@ -1459,11 +1461,8 @@ def compute_aura_cost_streamed(
         raise ValueError('joint operator windows require a measured candidate for every target')
     joint_probe_identity = None
     joint_run_identity = None
-    joint_rows: dict[str, dict[str, dict]] = {}
-    joint_components: dict[tuple[str, str], list[dict]] = {}
     attribution_components: dict[tuple[str, str], list[dict]] = {}
     attribution_blocks: list[dict] | None = None
-    joint_operators: dict[tuple[str, str], dict] = {}
     joint_source_tensors: dict[str, dict] = {}
     joint_cache_renders: dict[str, dict[str, dict]] = {}
     joint_prefetch_stats: list[dict] = []
@@ -1489,7 +1488,7 @@ def compute_aura_cost_streamed(
         from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.joint_aura import (
             SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
-            identity_sha256, make_joint_aura_entry, make_joint_probe_identity,
+            identity_sha256, make_joint_probe_identity,
             prefetch_joint_cache, squared_signed,
             source_execution_identity,
             validate_joint_aura_entry,
@@ -1502,7 +1501,7 @@ def compute_aura_cost_streamed(
             source_model=validate_streamed_model_identity(model_identity, where="joint AURA"),
             n_probes=n_probes, seed_base=seed_base,
             token_scope=token_scope, temperature=temperature,
-            producer_source_sha256=(aura_provenance.source_sha256() if source_transition is None
+            producer_source_sha256=(aura_provenance.producer_package_sha256() if source_transition is None
                                     else source_transition.measurement_source_sha256),
             source_execution=source_execution_identity(runner.model),
             arithmetic=(statistics_arithmetic_identity(runner.dtype, joint_projection_backend)
@@ -1685,22 +1684,43 @@ def compute_aura_cost_streamed(
     for parameter in runner.model.parameters():
         parameter.requires_grad_(False)
 
-    s2: dict[tuple[str, str], float] = {}
-    s4: dict[tuple[str, str], float] = {}
-    x2_probe: dict[tuple[str, str], list[float]] = {}
-    dw_src: dict[tuple[str, str], str] = {}
-    g_trace: dict[str, float] = {}
-    col_energy: dict[str, torch.Tensor] = {}
-    weight_mse_diagnostic: dict[tuple[str, str], float] = {}
-    source_weight_identity: dict[str, dict[str, object]] = {}
+    measurements = AuraUnitMeasurements(
+        n_probes=n_probes, render_formats=render_formats,
+        collect_col_energy=collect_col_energy,
+        diagnostic_weight_mse_pairs=diagnostic_pairs,
+        require_source_weight_identity=anchor_renderer is not None)
+    s2, s4 = measurements.s2, measurements.s4
+    x2_probe, dw_src = measurements.x2_probe, measurements.dw_src
+    g_trace, col_energy = measurements.g_trace, measurements.col_energy
+    weight_mse_diagnostic = measurements.weight_mse_diagnostic
+    source_weight_identity = measurements.source_weight_identity
     pilot_panel = (checkpoint_identity_extra or {}).get('joint_eval') if joint_activation else None
     if pilot_panel is not None and operator_windows is None:
         raise ValueError('joint diagnostic panel requires observer-backed operator windows')
     from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
     observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
+    measurements.observation_counts = observation_counts
+    price = None
+    if joint_activation:
+        required_attribution = (None if attribution_config is None else RequiredAttribution(
+            attribution_keys, lambda name, fmt: ValueError(
+                f"sequence_attribution cannot resume committed no-attribution rows for {name}@{fmt}")))
+        price = JointPriceStep(
+            measurements, probe_identity=joint_probe_identity,
+            formats_by_qname={name: tuple(fmt for fmt in unit_formats[name]
+                                         if fmt not in raw_unmeasured.get(name, ())) for name in names},
+            zero_cost_formats=_ZERO_COST_FORMATS,
+            rendered_identities=None if production_cache is None else joint_cache_renders,
+            resume_contract=JointResumeContract(
+                ProbeResumePolicy.EXACT,
+                activation_identities=(None if production_cache is None else
+                                       joint_run_identity["activation_contracts"]),
+                attribution=required_attribution))
+    joint_rows = {} if price is None else price.rows
+    joint_components = {} if price is None else price.components
+    joint_operators = {} if price is None else price.operators
     completed_checkpoint_units: set[str] = set()
-    checkpoint_root: Path | None = None
-    checkpoint_identity_sha256: str | None = None
+    checkpoint_journal = None
     checkpoint_git_commit: str | None = None
 
     ordered_layer_chunks = [
@@ -1789,68 +1809,10 @@ def compute_aura_cost_streamed(
         )
         if source_transition is not None:
             identity = source_transition.measurement_identity(identity)
-        checkpoint_root, checkpoint_identity_sha256, completed_states = (
-            aura_checkpoint_journal.prepare_journal(
-                checkpoint_dir,
-                resume=resume,
-                identity=identity,
-                names=names,
-            )
-        )
-        for name in names:
-            state = completed_states.get(name)
-            if state is None:
-                continue
-            aura_checkpoint_journal.restore_unit_state(
-                name,
-                state,
-                nonzero_formats=render_formats[name],
-                n_probes=n_probes,
-                collect_col_energy=collect_col_energy,
-                s2=s2,
-                s4=s4,
-                x2_probe=x2_probe,
-                dw_src=dw_src,
-                g_trace=g_trace,
-                col_energy=col_energy,
-                diagnostic_weight_mse_pairs=diagnostic_pairs,
-                weight_mse_diagnostic=weight_mse_diagnostic,
-                require_source_weight_identity=anchor_renderer is not None,
-                source_weight_identity=source_weight_identity,
-                observation_counts=observation_counts,
-            )
-            if joint_activation:
-                rows = state.get("joint_aura_rows")
-                expected_formats = set(unit_formats[name]) - set(raw_unmeasured.get(name, ()))
-                if not isinstance(rows, Mapping) or set(rows) != expected_formats:
-                    raise RuntimeError(f"joint AURA checkpoint row scope mismatch for {name}")
-                for fmt, row in rows.items():
-                    try:
-                        if not validate_joint_aura_entry(row):
-                            raise ValueError("not a joint row")
-                        if (attribution_config is not None
-                                and (attribution_keys is None or (name, fmt) in attribution_keys)
-                                and "sequence_attribution" not in row
-                                and fmt not in _ZERO_COST_FORMATS):
-                            # A zero-cost passthrough row's price is exact by
-                            # rule; it carries no sidecar and claims none.
-                            raise ValueError(
-                                f"sequence_attribution cannot resume committed "
-                                f"no-attribution rows for {name}@{fmt}")
-                        operator = row["joint_operator_identity"]
-                        if row["probe_identity"] != joint_probe_identity or operator["qname"] != name or operator["format"] != fmt:
-                            raise ValueError("probe/operator alignment mismatch")
-                        if production_cache is not None:
-                            if operator["activation"] != joint_run_identity["activation_contracts"][name][fmt]:
-                                raise ValueError("activation identity mismatch")
-                            if fmt in render_formats[name] and operator["rendered_weight"] != joint_cache_renders[name][fmt]:
-                                raise ValueError("actual rendered-weight identity mismatch")
-                        if fmt in render_formats[name] and row["x2_per_probe"] != x2_probe[(name, fmt)]:
-                            raise ValueError("legacy/joint sample alignment mismatch")
-                    except (ValueError, KeyError, TypeError) as exc:
-                        raise RuntimeError(f"joint AURA checkpoint identity mismatch for {name}@{fmt}: {exc}") from exc
-                joint_rows[name] = dict(rows)
-            completed_checkpoint_units.add(name)
+        checkpoint_journal = aura_checkpoint_journal.AuraCheckpointJournal.open(
+            checkpoint_dir, resume=resume, identity=identity, names=names)
+        completed_checkpoint_units = checkpoint_journal.resume_units(
+            measurements if price is None else price)
 
     if cost_read_schedule is not None:
         if retained_budget is None or prepared_render_identities is None:
@@ -1861,6 +1823,21 @@ def compute_aura_cost_streamed(
                                    for layer in range(runner.num_layers)},
             validated_completed_units=completed_checkpoint_units)
 
+    def completed_sidecar(name, fmt, components):
+        key = (name, fmt)
+        if attribution_config is None or key not in attribution_components:
+            return None
+        return sequence_attribution_sidecar(
+            blocks=attribution_blocks, components_per_probe=attribution_components[key],
+            authoritative_totals=[value["total"] for value in components],
+            gate_relative=attribution_config["gate_relative"],
+            arithmetic_scope="streamed_dense_lease_per_invocation_contractions",
+            sequence_length=int(calib_ids.shape[1]),
+            selected_tokens_per_row={"all": int(calib_ids.shape[1]), "last": 1,
+                                     "causal": int(calib_ids.shape[1]) - 1}[token_scope],
+            n_sequences=len(calib_ids),
+            calibration_sha256=joint_probe_identity["calibration_sha256"])
+
     def commit_streamed_units(targets):
         targets = [name for name in targets if name not in completed_checkpoint_units]
         if not targets:
@@ -1868,65 +1845,11 @@ def compute_aura_cost_streamed(
         if joint_activation:
             if source_execution_identity(runner.model) != joint_probe_identity["source_execution"]:
                 raise RuntimeError("joint AURA source execution backend changed during measurement")
-            for name in targets:
-                joint_rows[name] = {}
-                for fmt in unit_formats[name]:
-                    if fmt in raw_unmeasured.get(name, ()):
-                        continue
-                    key = (name, fmt)
-                    components = joint_components[key]
-                    if fmt in _ZERO_COST_FORMATS:
-                        components = [{"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0} for _ in range(n_probes)]
-                    sidecar = None
-                    if attribution_config is not None and key in attribution_components:
-                        # Descriptive per-block reconstruction of the SAME
-                        # probes, published beside the untouched authoritative
-                        # fields with its own gated residual.
-                        sidecar = sequence_attribution_sidecar(
-                            blocks=attribution_blocks,
-                            components_per_probe=attribution_components[key],
-                            authoritative_totals=[value["total"] for value in components],
-                            gate_relative=attribution_config["gate_relative"],
-                            arithmetic_scope="streamed_dense_lease_per_invocation_contractions",
-                            sequence_length=int(calib_ids.shape[1]),
-                            selected_tokens_per_row={
-                                "all": int(calib_ids.shape[1]), "last": 1,
-                                "causal": int(calib_ids.shape[1]) - 1,
-                            }[token_scope],
-                            n_sequences=len(calib_ids),
-                            calibration_sha256=joint_probe_identity["calibration_sha256"],
-                        )
-                    joint_rows[name][fmt] = make_joint_aura_entry(
-                        operator_identity=joint_operators[key],
-                        probe_identity=joint_probe_identity,
-                        signed_components=components,
-                        sequence_attribution=sidecar,
-                    )
-    
-        if checkpoint_root is not None:
-            assert checkpoint_identity_sha256 is not None
-            for name in targets:
-                aura_checkpoint_journal.write_unit(
-                    checkpoint_root,
-                    qname=name,
-                    identity_sha256=checkpoint_identity_sha256,
-                    state={**aura_checkpoint_journal.capture_unit_state(
-                        name,
-                        render_formats[name],
-                        s2=s2,
-                        s4=s4,
-                        x2_probe=x2_probe,
-                        dw_src=dw_src,
-                        g_trace=g_trace,
-                        col_energy=col_energy,
-                        weight_mse_diagnostic=weight_mse_diagnostic,
-                        source_weight_identity=source_weight_identity,
-                        observation_counts=observation_counts,
-                    ), **({"joint_aura_rows": joint_rows[name]} if joint_activation else {}),
-                    **({"execution_provenance": source_transition.execution_provenance}
-                       if source_transition is not None else {})},
-                )
-            completed_checkpoint_units.update(targets)
+            price.prepare_rows(targets, sidecar=completed_sidecar)
+        if checkpoint_journal is not None:
+            checkpoint_journal.publish_group(measurements if price is None else price, targets,
+                extra_state=({"execution_provenance": source_transition.execution_provenance}
+                             if source_transition is not None else None))
             if cost_read_schedule is not None:
                 cost_read_schedule.enter_phase(cost_read_schedule.current_phase,
                                                 len(completed_checkpoint_units))
@@ -2080,7 +2003,7 @@ def compute_aura_cost_streamed(
 
         boundary_storage.bind({
             "source_model": validate_streamed_model_identity(model_identity, where="exact boundary storage"),
-            "producer_source_sha256": aura_provenance.source_sha256(),
+            "producer_source_sha256": aura_provenance.producer_package_sha256(),
             "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
             "calibration_shape": list(calib_ids.shape), "calibration_dtype": str(calib_ids.dtype),
             "n_probes": n_probes, "seed_base": seed_base, "token_scope": token_scope,
@@ -2540,20 +2463,7 @@ def compute_aura_cost_streamed(
                                for name, module in measured.items()}
                 def consume_window_probe(probe_index, terms, diagnostics, receipt):
                     operator_window_receipts.append(dict(layer=layer, probe_index=probe_index, **receipt))
-                    for name, diagnostic in diagnostics.items():
-                        g_trace[name] += diagnostic['g_trace']
-                        if observation_counts is not None:
-                            observe_probe(observation_counts, name, probe_index, diagnostic)
-                        if collect_col_energy:
-                            previous = col_energy.get(name)
-                            col_energy[name] = (diagnostic['col_energy'] if previous is None
-                                                else previous + diagnostic['col_energy'])
-                    for key, components in terms.items():
-                        joint_components[key].append(components)
-                        value = squared_signed(components['total'])
-                        s2[key] += value
-                        s4[key] += value * value
-                        x2_probe[key].append(value)
+                    price.consume_probe(probe_index, terms, diagnostics)
                 if retained_budget is not None and measured:
                     observe_and_project_retained_windows(
                         measured, {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}

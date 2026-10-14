@@ -281,7 +281,7 @@ def run_quantum(args):
         pinned = hashlib.sha256(b'pwc-window-load-bench source').hexdigest()
         for module in [module for name, module in sys.modules.items()
                        if name.startswith('prismaquant') and module is not None]:
-            for attribute in ('_production_cache_source_sha256', '_aura_source_sha256', 'source_sha256'):
+            for attribute in ('_production_cache_source_sha256', '_aura_source_sha256', 'producer_package_sha256'):
                 if callable(getattr(module, attribute, None)):
                     patch.setattr(module, attribute, lambda *a, **k: pinned)
         single, receipt, output_root = _campaign(scratch, patch)

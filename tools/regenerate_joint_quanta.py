@@ -742,7 +742,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     producer, and nothing it reads is re-read by a quantum. Returns
     ``{layer: {"bytes", "binding"}}``; nothing is written.
     """
-    from prismaquant.aura_provenance import (source_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from prismaquant.joint_layer_quanta import qname_layer
     from prismaquant.joint_stage_b_head import (
         HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)

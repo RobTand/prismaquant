@@ -249,7 +249,7 @@ def read_original_diagnostic_session_preparation(binding, *, context, expected_s
 
 def prepare_original_diagnostic_session(base_plan_input, static_authority_input):
     """Issue an actual pending artifact session, never a source/capture receipt."""
-    from .aura_provenance import (source_sha256 as _aura_source_sha256)
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from .joint_adjoint_checkpoints import adjoint_space

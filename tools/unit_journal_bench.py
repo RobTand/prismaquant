@@ -9,8 +9,8 @@ was taken in.
 
 The workload is the body of ``commit_streamed_units`` in
 ``joint_cost_quantum.py``, called unit by unit on the real functions:
-``make_joint_aura_entry`` for each format, ``capture_unit_state`` and
-``write_unit``. Its inputs come from one production unit
+``JointPriceStep.prepare_rows``, ``captured_state`` and
+``UnitCheckpointWriter.publish``. Its inputs come from one production unit
 checkpoint (``--sample-checkpoint``): the probe identity (6.5 MB, almost all
 of it ``source_model``), one object shared by every unit as in the quantum,
 and the unit's rows, formats and probe count. Each unit gets its own name, so
@@ -179,28 +179,25 @@ class SimpleInputs:
 
 def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict | None):
     """``commit_streamed_units``' body for one unit, on the same functions."""
-    from prismaquant.aura_checkpoint_journal import (capture_unit_state as _aura_unit_state, write_unit as _write_aura_unit_checkpoint)
-    from prismaquant.joint_aura import make_joint_aura_entry
-
+    from prismaquant.aura_checkpoint_journal import UnitCheckpointWriter
+    from prismaquant.joint_price_step import (AuraUnitMeasurements, JointPriceStep,
+                                             JointResumeContract, ProbeResumePolicy)
+    measurements = AuraUnitMeasurements(n_probes=inputs.probe_identity["n_probes"],
+                                        render_formats={name: inputs.render_formats})
+    for attribute in ("s2", "s4", "x2_probe", "dw_src", "g_trace"):
+        setattr(measurements, attribute, getattr(inputs, attribute))
+    price = JointPriceStep(measurements, probe_identity=inputs.probe_identity,
+        validated_probe=inputs.joint_probe, formats_by_qname={name: inputs.formats},
+        zero_cost_formats=(), rendered_identities={},
+        resume_contract=JointResumeContract(ProbeResumePolicy.RUN_SEALS))
+    price.operators, price.components = inputs.operators, inputs.components
     started = time.perf_counter()
-    rows = {}
-    for fmt in inputs.formats:
-        row = make_joint_aura_entry(
-            operator_identity=inputs.operators[(name, fmt)],
-            probe_identity=inputs.joint_probe,
-            signed_components=inputs.components[(name, fmt)])
-        row["probe_identity"] = inputs.probe_identity
-        rows[fmt] = row
+    price.prepare_rows([name])
     entries = time.perf_counter()
-    state = {**_aura_unit_state(
-        name, inputs.render_formats, s2=inputs.s2, s4=inputs.s4,
-        x2_probe=inputs.x2_probe, dw_src=inputs.dw_src, g_trace=inputs.g_trace,
-        col_energy={}, weight_mse_diagnostic={}, source_weight_identity={},
-        observation_counts=None), "joint_aura_rows": rows}
+    state = price.captured_state(name)
     built = time.perf_counter()
     if timings is None:
-        _write_aura_unit_checkpoint(root, qname=name, identity_sha256=identity_sha256,
-                                    state=state)
+        UnitCheckpointWriter(root, identity_sha256).publish(qname=name, state=state)
         return
     # The writer's steps, timed one by one (the same calls, in its order).
     from prismaquant.aura_checkpoint_journal import (AURA_CHECKPOINT_UNIT_SCHEMA as AURA_CHECKPOINT_UNIT_SCHEMA)
@@ -419,8 +416,8 @@ def _spy_main(path: Path) -> dict:
             continue
         frames = [frame.split(" (")[0] for frame in stack.split(";")[1:]]
         leaf = next((frame for frame in reversed(frames) if frame in (
-            "write_unit", "atomic_write_bytes", "make_joint_aura_entry",
-            "capture_unit_state", "_read_ballast", "_load_sample", "_unit_inputs")), "other")
+            "publish", "atomic_write_bytes", "make_joint_aura_entry",
+            "captured_state", "_read_ballast", "_load_sample", "_unit_inputs")), "other")
         counts[leaf] = counts.get(leaf, 0) + int(count)
         total += int(count)
     return {"samples": total, "by_function": counts}

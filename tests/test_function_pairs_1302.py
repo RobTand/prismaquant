@@ -84,11 +84,11 @@ def test_aura_git_commit_keeps_its_override(monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", _fake_run("f" * 40 + "\n", calls))
     monkeypatch.delenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", raising=False)
-    GOLDEN.call(aura_provenance.git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "A" * 40)
-    GOLDEN.call(aura_provenance.git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "not-a-commit")
-    GOLDEN.call(aura_provenance.git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     GOLDEN.value(calls)
 
 

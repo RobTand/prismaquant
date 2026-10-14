@@ -163,7 +163,7 @@ def staging_campaign(tmp_path_factory):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura_provenance.source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}
     for layer in (0, 1):

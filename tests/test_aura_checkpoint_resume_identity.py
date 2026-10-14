@@ -58,7 +58,7 @@ def test_resident_aura_refuses_durable_checkpoints(tmp_path):
 def test_aura_git_override_rejects_non_object_id_lengths(monkeypatch, length):
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "a" * length)
     with pytest.raises(RuntimeError, match="40- or 64-character"):
-        aura_provenance.git_commit()
+        aura_provenance.producer_git_commit()
 
 
 @pytest.fixture
@@ -92,17 +92,23 @@ def test_dirty_producer_dev_mode_publishes_and_reuses_checkpoint(
     assert "prismaquant/aura_cost.py" in stamp
     checkpoint = tmp_path / "checkpoint"
     identity = {"git_commit": commit, "label": "dirty producer"}
-    root, digest, completed = aura_checkpoint_journal.prepare_journal(
+    journal = aura_checkpoint_journal.AuraCheckpointJournal.open(
         checkpoint, resume=False, identity=identity, names=["unit-雪"])
-    assert completed == {}
-    aura_checkpoint_journal.write_unit(root, qname="unit-雪", identity_sha256=digest,
-                                    state={"value": [1.25]})
+    root, digest = journal.root, journal.identity_sha256
+    assert journal.completed == set()
+    journal.writer.publish(qname="unit-雪", state={"value": [1.25]})
     retained = {path.relative_to(root): path.read_bytes()
                 for path in root.rglob("*") if path.is_file()}
     assert json.loads((root / "manifest.json").read_bytes())["identity"] == identity
-    assert aura_checkpoint_journal.prepare_journal(
-        root, resume=True, identity=identity, names=["unit-雪"])[1:] == (
-            digest, {"unit-雪": {"value": [1.25]}})
+    resumed = aura_checkpoint_journal.AuraCheckpointJournal.open(
+        root, resume=True, identity=identity, names=["unit-雪"])
+    restored = {}
+    class Prices:
+        def restore_unit(self, name, state):
+            restored[name] = state
+    assert resumed.identity_sha256 == digest
+    assert resumed.resume_units(Prices()) == {"unit-雪"}
+    assert restored == {"unit-雪": {"value": [1.25]}}
     assert {path.relative_to(root): path.read_bytes()
             for path in root.rglob("*") if path.is_file()} == retained
 
@@ -124,7 +130,7 @@ def test_git_diff_execution_error_refuses_in_both_modes(
     # HEAD still resolves, but Git cannot read its commit object.
     (root / ".git" / "objects" / commit[:2] / commit[2:]).unlink()
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
-    assert aura_provenance.git_commit() == commit
+    assert aura_provenance.producer_git_commit() == commit
     with pytest.raises(RuntimeError, match="AURA checkpoint git identity is not exact"):
         aura_provenance.checkpoint_git_commit()
     assert "[DEV-MODE]" not in capsys.readouterr().out

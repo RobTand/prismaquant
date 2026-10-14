@@ -38,7 +38,7 @@ def _campaign(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=runtime._hex("a"), plan_sha256=runtime._hex("d"),
         prepared_sha256=runtime._hex("e"), read_manifest_sha256=runtime._hex("f"),
-        implementation_sha256=aura_provenance.source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     return single, receipt, output_root
 
 

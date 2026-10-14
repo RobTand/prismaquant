@@ -177,12 +177,23 @@ extensions, including MTP's `T - 1` token normalization and source-transition
 producer identity. The calibration hash still covers the same contiguous
 token bytes once per construction.
 `aura_checkpoint_journal` owns the unchanged v1 checkpoint schemas, identity
-construction, manifest and unit codecs, resume admission, state capture and
-restore, and atomic publication. Resident AURA, streamed AURA, layer quanta,
+construction, manifest and unit codecs, resume admission and atomic
+publication. Resident AURA, streamed AURA, layer quanta,
 transition certificates and asynchronous publication use that owner.
 `aura_provenance` owns Git and producer-package identity recipes. Numerical
 price passes supply their explicit measurement inputs and retain their own
 objectives, accumulation order and resource lifetimes.
+`JointPriceStep` owns measured-unit probe accumulation, restored-row policy,
+row construction and unit-state capture. `AuraUnitMeasurements` owns the
+legacy measurement vectors. Full-run rows retain exact probe checks and their existing cache-dependent
+activation checks; quantum rows retain mathematical walls and D32 run seals.
+`AuraCheckpointJournal` opens an admitted lineage, restores units through
+that price owner and publishes completed state. `UnitCheckpointWriter` keeps
+the unchanged codecs private and supplies bounded atomic publication.
+Persistence and durable acknowledgement remain separate for asynchronous
+publication; full-run completion still follows every write in its target group.
+The existing retained replay engine and incoming cotangent adapters retain
+reverse arithmetic, scratch/residency admission and GPU resource lifetime.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.

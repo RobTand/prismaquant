@@ -209,16 +209,20 @@ def test_cancelled_pool_task_fails_without_hanging():
     assert pub.stats()["charged_bytes"] == 0
 
 
+def _published_checkpoint_bytes(tmp_path, qname, identity, state):
+    target = tmp_path / "snapshot-reference"
+    aura_checkpoint_journal.UnitCheckpointWriter(target, identity).publish(qname=qname, state=state)
+    return cost_stage_checkpoint.unit_path(target, qname).read_bytes()
+
+
 def test_encoded_unit_is_immutable_and_matches_existing_writer(tmp_path):
     state = {"components": [{"costs": [1.0, 2.0]}],
              "identity": {"source": ["sha256", "verified"]}}
     qname, identity = "layer.0.unit", "a" * 64
-    aura_checkpoint_journal.write_unit(
-        tmp_path, qname=qname, identity_sha256=identity, state=state)
+    aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, identity).publish(qname=qname, state=state)
     path = cost_stage_checkpoint.unit_path(tmp_path, qname)
     expected = path.read_bytes()
-    encoded = aura_checkpoint_journal.encode_unit(
-        qname=qname, identity_sha256=identity, state=state)
+    encoded = _published_checkpoint_bytes(tmp_path, qname, identity, state)
     assert type(encoded) is bytes and encoded == expected
     state["components"][0]["costs"].append(999.0)
     state["identity"]["source"].append("mutated")
@@ -230,11 +234,9 @@ def test_encoded_cpu_tensor_unit_is_a_snapshot(tmp_path):
 
     state = {"tensor": torch.arange(8, dtype=torch.float32)}
     qname, identity = "tensor.unit", "b" * 64
-    aura_checkpoint_journal.write_unit(
-        tmp_path, qname=qname, identity_sha256=identity, state=state)
+    aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, identity).publish(qname=qname, state=state)
     expected = cost_stage_checkpoint.unit_path(tmp_path, qname).read_bytes()
-    encoded = aura_checkpoint_journal.encode_unit(
-        qname=qname, identity_sha256=identity, state=state)
+    encoded = _published_checkpoint_bytes(tmp_path, qname, identity, state)
     assert encoded == expected
     state["tensor"].fill_(999)
     assert encoded == expected
@@ -378,13 +380,12 @@ def test_atomic_unit_is_not_acknowledged_before_directory_fsync(
             assert release.wait(WAIT)
         original(fd)
 
+    encoded = _published_checkpoint_bytes(tmp_path, "unit", "a" * 64, {"value": 1})
     monkeypatch.setattr(os, "fsync", fsync)
     pub = _pool_publisher(engine, budget=4096)
     path = tmp_path / "unit.bin"
     try:
         pub.reserve(4096)
-        encoded = aura_checkpoint_journal.encode_unit(
-            qname="unit", identity_sha256="a" * 64, state={"value": 1})
         assert len(encoded) <= 4096
         pub.submit(PublicationJob("unit", 4096,
                                   lambda: atomic_write_bytes(path, encoded)))

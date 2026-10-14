@@ -229,7 +229,7 @@ def capture(runner, model, modules, ids, source, output, publication):
                 plan_sha256=sha(json.dumps(execution, sort_keys=True).encode()),
                 prepared_sha256=sha(b'tiny GLM no production rendered candidates'),
                 read_manifest_sha256=os.environ['TINY_GLM_MANIFEST_SHA256'],
-                implementation_sha256=aura_provenance.source_sha256(),
+                implementation_sha256=aura_provenance.producer_package_sha256(),
                 chain_batch_size=4, chain_probe_fusion=True, produced_output=publication)
         return {'receipt': receipt, 'rolled': rolled, 'rows': observed.records}
     finally:

@@ -1,3 +1,4 @@
+from prismaquant import aura_checkpoint_journal
 """The distributed campaign's per-quantum runtime gates (#778, §11).
 
 Stage A (adjoint capture) and stage B (the layer quantum) against the
@@ -538,7 +539,7 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     monkeypatch.setattr(backend, "prewarm_projection_backend",
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     # Stage A takes its head from the completion the preflight checked
     # (PQ #1051); the stub returns it as the real preflight does.
     monkeypatch.setattr(aura, "_preflight_run_prepared",
@@ -692,7 +693,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(backend, "executing_image", lambda: None)
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     # Stage A takes its head from the completion the preflight checked
     # (PQ #1051); the stub returns it as the real preflight does.
     monkeypatch.setattr(aura, "_preflight_run_prepared",
@@ -942,7 +943,7 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     monkeypatch.setattr(backend, "prewarm_projection_backend",
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     monkeypatch.setattr(aura, "_preflight_run_prepared",
                         lambda *a, **k: {"plan_sha256": _hex("d")})
     monkeypatch.setattr(aura, "load_measured_anchor_input", fake_loader)
@@ -1167,7 +1168,7 @@ def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura_provenance.source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     # The tail checkpoint exists, boundary entries all survived, receipt not
     # yet sealed on disk by the core (the CLI seals it).
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
@@ -1221,7 +1222,7 @@ def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
             prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-            implementation_sha256=aura_provenance.source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
         assert BF16_REDUCTION_FIELD not in receipt["run_identity"]
         matmul.allow_bf16_reduced_precision_reduction = False
         with pytest.raises(QuantumIdentityRefused) as refused:
@@ -1279,7 +1280,7 @@ def _campaign_receipt(tmp_path, monkeypatch, output_root):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura_provenance.source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
 
 
 def test_the_proof_reads_only_the_shape_off_a_meta_skeleton(tmp_path, monkeypatch):
@@ -1346,7 +1347,7 @@ def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura_provenance.source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
 
     def tree(root):
         return {str(p.relative_to(root)) for p in Path(root).rglob("*")}
@@ -1403,7 +1404,7 @@ def test_band_and_receipt_slices_give_byte_identical_payloads(tmp_path, monkeypa
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
             prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-            implementation_sha256=aura_provenance.source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
     receipt = json.loads(json.dumps(receipt))
     band = build_band_receipt(
         output_root=output_root, boundary=2, plan_sha256=_hex("d"),
@@ -1588,15 +1589,15 @@ def test_shared_state_cotangents_state_dict_roundtrip():
 def _journal(tmp_path, rows, identity_extra):
     """A synthetic AURA journal: manifest + per-unit envelopes."""
     from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
-    from prismaquant.aura_checkpoint_journal import (_write_aura_checkpoint_manifest as _write_aura_checkpoint_manifest, write_unit as _write_aura_unit_checkpoint)
 
     root = tmp_path
     identity = {"schema": "prismaquant.aura.checkpoint.identity.v1",
                 "git_commit": "1" * 40, **identity_extra}
-    identity_sha256 = _write_aura_checkpoint_manifest(root, identity, sorted(rows))
+    journal = aura_checkpoint_journal.AuraCheckpointJournal.open(
+        root, identity=identity, names=sorted(rows), resume=False)
+    identity_sha256 = journal.identity_sha256
     for name, state in rows.items():
-        _write_aura_unit_checkpoint(root, qname=name,
-                                    identity_sha256=identity_sha256, state=state)
+        aura_checkpoint_journal.UnitCheckpointWriter(root, identity_sha256).publish(qname=name, state=state)
     return root
 
 
@@ -1839,7 +1840,7 @@ def test_independent_draw_quantum_records_actual_observations(tmp_path, monkeypa
         runner_a, draw(), execution=_execution(tmp_path), output_root=output_root, stride=2,
         source_model_identity=_model_identity("joint-source"), unit_roster_sha256=_hex("a"),
         plan_sha256=_hex("d"), prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura_provenance.source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     panel = {"status": "diagnostic_pilot", "draw": "independent-context-fixture"}
     payload, _record, _counters = _run_quantum(
         tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,

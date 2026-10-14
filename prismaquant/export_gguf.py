@@ -65,7 +65,7 @@ _VIRTUAL_KEYS = {
 
 
 def _git_commit() -> str:
-    from prismaquant.aura_provenance import (git_commit as _aura_git_commit)
+    from prismaquant.aura_provenance import (producer_git_commit as _aura_git_commit)
 
     return _aura_git_commit() or "unknown"
 

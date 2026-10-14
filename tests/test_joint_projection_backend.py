@@ -208,7 +208,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
     monkeypatch.setattr(cost_streaming_identity, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
     monkeypatch.setattr(joint_aura, 'source_execution_identity', lambda _: execution)
-    monkeypatch.setattr(aura_provenance, 'source_sha256', lambda: 'c' * 64)
+    monkeypatch.setattr(aura_provenance, 'producer_package_sha256', lambda: 'c' * 64)
     monkeypatch.setattr(aura_cost, 'compute_aura_cost_streamed', lambda *_args, **_kwargs:
         pytest.fail('foreign preparation reached the adjoint'))
     monkeypatch.setattr(bridge.pickle, 'loads', lambda _: pytest.fail('foreign preparation adopted PWC'))

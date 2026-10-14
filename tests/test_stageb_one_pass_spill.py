@@ -224,7 +224,7 @@ def campaign(tmp_path_factory):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura_provenance.source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}
     for layer in (0, 1):
@@ -1171,16 +1171,16 @@ def test_resume_splits_a_restored_row_probe_identity(campaign, monkeypatch, caps
     assert f"[DEV-MODE] seal joint probe identity differs at {field}" in out
 
     # Certified at this site. The fixture was captured in dev mode, so only
-    # the quantum module's seal_check runs certified here.
+    # the measured-row owner's seal_check runs certified here.
     import functools
 
-    import prismaquant.joint_cost_quantum as quantum_mod
+    import prismaquant.joint_price_step as price_mod
     from prismaquant.dev_mode import seal_check
 
     for window in campaign.preflight[layer][1:]:
         for name in window.original_full_target_names:
             _aura_unit_checkpoint_path(directory, name).unlink()
-    monkeypatch.setattr(quantum_mod, "seal_check", functools.partial(
+    monkeypatch.setattr(price_mod, "seal_check", functools.partial(
         seal_check, environ={"PRISMAQUANT_DEV_MODE": "0"}))
     payload, state = _quantum(campaign, monkeypatch, layer=layer, resume=True)
     assert payload is None

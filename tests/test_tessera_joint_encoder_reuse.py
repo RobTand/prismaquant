@@ -312,7 +312,7 @@ def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, com
         monkeypatch.setattr(bridge, "_preflight_run_prepared", lambda *_a, **_k: None)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_a, **_k:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: "i" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "i" * 64)
     monkeypatch.setattr(bridge, "_prepare_source_owner",
                         lambda *_a, **_k: SimpleNamespace(close=lambda: None))
 

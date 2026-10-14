@@ -2856,7 +2856,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     import socket
     import torch
     from .aura_cost import (compute_aura_cost_streamed)
-    from .aura_provenance import (source_sha256 as _aura_source_sha256)
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .streamed_model_identity import build_streamed_model_identity

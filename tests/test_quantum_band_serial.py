@@ -97,7 +97,7 @@ def _campaign(tmp_path, monkeypatch, *, fusion=False):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura_provenance.source_sha256(),
+        implementation_sha256=aura_provenance.producer_package_sha256(),
         chain_probe_fusion=fusion)
     receipt = json.loads(json.dumps(receipt))
     assert sorted(c["boundary"] for c in receipt["checkpoints"]) == [3, 5]

@@ -18,7 +18,7 @@ WAIT = 15
 def test_cyclic_snapshot_retirement_precedes_credit(monkeypatch, tmp_path, outcome):
     owned_ids = set()
     copy = publication.deepcopy
-    encode = aura_checkpoint_journal.encode_unit
+    encode = aura_checkpoint_journal.UnitCheckpointWriter.publish
     entered, release = threading.Event(), threading.Event()
     marker = f"snapshot-lifetime-{outcome}"
     source: dict[str, object] = {"marker": marker}
@@ -29,19 +29,19 @@ def test_cyclic_snapshot_retirement_precedes_credit(monkeypatch, tmp_path, outco
         owned_ids.add(id(owned))
         return owned
 
-    def controlled_encode(**kwargs):
+    def controlled_encode(writer, **kwargs):
         entered.set()
         assert release.wait(WAIT)
         if outcome == "failure":
             raise OSError("injected cyclic snapshot encoder failure")
-        return encode(**kwargs)
+        return encode(writer, **kwargs)
 
     monkeypatch.setattr(publication, "deepcopy", tracked_copy)
-    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", controlled_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", controlled_encode)
     names = ["first", "tail-a", "tail-b"]
     durable = set()
     ledger = publication.CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": names}], completed=durable,
         acknowledge=lambda: None, window_done=lambda index: None,
         budget_bytes=16 << 20, max_jobs=3)

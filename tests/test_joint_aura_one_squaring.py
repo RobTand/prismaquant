@@ -4,8 +4,6 @@ they differ by one ulp for some inputs, and the exact checkpoint-reload
 comparison of the two sample lists refused ("legacy/joint sample alignment
 mismatch"). Both sites now call ``squared_signed``.
 """
-import ast
-from pathlib import Path
 
 import torch
 
@@ -53,13 +51,8 @@ def test_row_squares_with_squared_signed():
     assert row["x2_per_probe"] == [t * t for t in RECORDED]
 
 
-def test_streamed_accumulator_uses_the_shared_squaring():
-    source = (Path(__file__).resolve().parents[1] / "prismaquant" / "aura_cost.py").read_text()
-    tree = ast.parse(source)
-    pow_squares = [node.lineno for node in ast.walk(tree)
-                   if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)
-                   and isinstance(node.right, ast.Constant) and node.right.value == 2
-                   and isinstance(node.left, ast.Subscript)
-                   and isinstance(node.left.slice, ast.Constant) and node.left.slice.value == "total"]
-    assert pow_squares == [], f"joint total squared with ** at lines {pow_squares}"
-    assert "squared_signed(terms[\"total\"])" in source
+def test_actual_price_step_accumulates_the_recorded_squares():
+    from test_joint_price_step import _completed, FORMAT, UNIT_A
+    step, state = _completed()
+    assert step.measurements.x2_probe[UNIT_A, FORMAT] == [value * value for value in RECORDED]
+    assert state["joint_aura_rows"][FORMAT]["x2_per_probe"] == [value * value for value in RECORDED]

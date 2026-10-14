@@ -25,7 +25,7 @@ def _write_json(path, value):
 def _build_adopted(tmp_path, monkeypatch, *, layers=2):
     old_git, old_source, new_git, new_source = "1" * 40, "2" * 64, "3" * 40, "4" * 64
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: old_git)
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: old_source)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: old_source)
     root = tmp_path / "checkpoints"
     _, _, runner, cache = _fixture()
     expected = _run(runner, cache, checkpoint_dir=root)
@@ -60,7 +60,7 @@ def _build_adopted(tmp_path, monkeypatch, *, layers=2):
     monkeypatch.setattr(transition, "_CONTRACT", contract)
     monkeypatch.setattr(transition, "_actual_execution", lambda: dict(execution))
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: execution["git_commit"])
-    monkeypatch.setattr(aura_provenance, "source_sha256", lambda: new_source)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: new_source)
     bindings = {"plan": plan, "prepared": prepared, "inspection": inspection}
     receipt = transition.create_transition(bindings=bindings, checkpoint_dir=root, output=tmp_path / "transition.json")
     def load():
@@ -186,8 +186,7 @@ def test_resume_rejects_changed_non_source_identity(adopted):
 def test_preflight_rejects_unbound_new_unit(adopted):
     source = pickle.loads(adopted["kept_bytes"])
     state = pickle.loads(source["payload"])
-    aura_checkpoint_journal.write_unit(adopted["root"], qname="model.layers.0.proj",
-        identity_sha256=adopted["manifest"]["identity_sha256"], state=state)
+    aura_checkpoint_journal.UnitCheckpointWriter(adopted["root"], adopted["manifest"]["identity_sha256"]).publish(qname="model.layers.0.proj", state=state)
     with pytest.raises(ValueError, match="new unit lacks bound execution provenance"):
         adopted["load"]()
 
@@ -234,12 +233,12 @@ def test_legacy_git_override_is_not_accepted(monkeypatch):
 def test_two_interruptions_different_pb_heads_preserve_exact_costs(adopted_three, monkeypatch):
     data = adopted_three
     cap = data["load"]()
-    writer = aura_checkpoint_journal.write_unit
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     def stop_after_middle(*args, **kwargs):
         writer(*args, **kwargs)
         if kwargs["qname"] == "model.layers.1.proj":
             raise TimeoutError("second admitted action reached deadline")
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", stop_after_middle)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", stop_after_middle)
     _, _, runner, cache = _fixture()
     with pytest.raises(TimeoutError, match="deadline"):
         _run(runner, cache, checkpoint_dir=data["root"], resume=True, source_transition=cap)
@@ -254,7 +253,7 @@ def test_two_interruptions_different_pb_heads_preserve_exact_costs(adopted_three
         output=data["root"].parent / "transition-next.json", predecessor=previous)
     data["receipt"].update(second)
     next_cap = data["load"]()
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", writer)
     _, _, runner, cache = _fixture()
     result = _run(runner, cache, checkpoint_dir=data["root"], resume=True, source_transition=next_cap)
     assert result["costs"] == data["expected"]["costs"]

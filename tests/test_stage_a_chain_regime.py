@@ -482,7 +482,7 @@ def test_the_quantum_chain_runs_the_slice_regime_bitwise(tmp_path, monkeypatch):
     # The campaign the runtime fixture's quantum record binds.
     campaign = {"plan_sha256": "d" * 64, "prepared_sha256": "e" * 64,
                 "read_manifest_sha256": "f" * 64,
-                "implementation_sha256": aura_provenance.source_sha256()}
+                "implementation_sha256": aura_provenance.producer_package_sha256()}
     receipt, planes, _ = _capture(output_root, monkeypatch, batch_size=2, stride=2,
                                   campaign=campaign)
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]

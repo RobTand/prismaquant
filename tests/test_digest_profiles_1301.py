@@ -131,7 +131,7 @@ _WHERE = {"where": "digest fixture"}
 #: Every replaced function: (module, name, keyword arguments).
 SITES = (
     ("prismaquant.aura_checkpoint_journal", "_canonical_json", _WHERE),
-    ("prismaquant.aura_checkpoint_journal", "_canonical_json_sha256", _WHERE),
+    ("prismaquant.aura_checkpoint_journal", "_checkpoint_json_sha256", _WHERE),
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),
@@ -174,7 +174,7 @@ def _check_inputs(function, inputs, kwargs) -> set:
 
 
 @pytest.mark.parametrize(("module_name", "name", "kwargs"), SITES,
-                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost')}.{name}"
+                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost')}.{name.replace('_checkpoint_json_sha256', '_canonical_json_sha256')}"
                               for module, name, _ in SITES])
 def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
     new = getattr(importlib.import_module(module_name), name)

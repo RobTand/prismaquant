@@ -6,7 +6,6 @@ serialization, hashing and atomic publication run on the existing IO engine.
 """
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -164,18 +163,15 @@ def owned_builtin_graph(root: dict) -> Iterator[dict]:
         _dispose_owned_containers(containers)
 
 
-def _publish_aura_unit_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
-    encoded = aura_checkpoint_journal.encode_unit(
-        qname=name, identity_sha256=identity_sha256, state=state,
-        max_bytes=max_bytes)
-    encoded_bytes.add(len(encoded))
-    aura_checkpoint_journal.atomic_write_bytes(path, encoded)
+def _publish_aura_unit_snapshot(writer, *, name, state, max_bytes, encoded_bytes):
+    writer.publish(qname=name, state=state, max_bytes=max_bytes,
+                   on_encoded_bytes=encoded_bytes.add)
 
 
 class CheckpointPublicationLedger:
     """Bounded measured/submitted/durable state; all methods run on consumer."""
 
-    def __init__(self, *, checkpoint_root, identity_sha256: str,
+    def __init__(self, *, checkpoint_writer,
                  windows: Sequence[Mapping], completed: set[str],
                  acknowledge: Callable[[], None], window_done: Callable[[int], None],
                  budget_bytes: int, max_jobs: int | None = None):
@@ -184,8 +180,7 @@ class CheckpointPublicationLedger:
         self._publisher = BoundedPublisher(
             budget_bytes=budget_bytes, max_jobs=self._jobs,
             submit_task=ENGINE.submit, name="stage-b-unit-checkpoint")
-        self._root = checkpoint_root
-        self._identity = identity_sha256
+        self._writer = checkpoint_writer
         self._completed = completed
         self._acknowledge = acknowledge
         self._window_done = window_done
@@ -241,8 +236,7 @@ class CheckpointPublicationLedger:
         return PublicationJob(
             name, self._slot,
             partial(_publish_aura_unit_snapshot,
-                    cost_stage_checkpoint.unit_path(self._root, name),
-                    name=name, identity_sha256=self._identity, state=owned,
+                    self._writer, name=name, state=owned,
                     max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes),
             dispose=partial(_dispose_owned_containers, containers))
 

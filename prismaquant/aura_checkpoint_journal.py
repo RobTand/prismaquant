@@ -31,7 +31,7 @@ AURA_CHECKPOINT_UNIT_SCHEMA = "prismaquant.aura_checkpoint.unit.v1"
 _canonical_json = canonical_json
 
 
-def _canonical_json_sha256(value: object, *, where: str) -> str:
+def _checkpoint_json_sha256(value: object, *, where: str) -> str:
     # Not ``digests.canonical_json_sha256``: that one wraps an encode failure
     # (a lone surrogate) in ``ValueError``; this site has always let the
     # ``UnicodeEncodeError`` through. Same bytes on every input it accepts.
@@ -78,7 +78,7 @@ def _write_aura_checkpoint_manifest(
     identity: Mapping[str, object],
     names: Sequence[str],
 ) -> str:
-    identity_sha256 = _canonical_json_sha256(
+    identity_sha256 = _checkpoint_json_sha256(
         identity,
         where="AURA checkpoint identity",
     )
@@ -262,7 +262,7 @@ def _load_aura_checkpoint_manifest(
                 where=str(checkpoint_dir),
                 refusal=refusal):
             expected_identity = stored_identity
-    expected_digest = _canonical_json_sha256(
+    expected_digest = _checkpoint_json_sha256(
         expected_identity,
         where="AURA checkpoint identity",
     )
@@ -298,7 +298,7 @@ def _checkpoint_pickle_bytes(value, *, max_bytes: int | None) -> bytes:
         return sink.getvalue()
 
 
-def encode_unit(
+def _encode_unit(
     *,
     qname: str,
     identity_sha256: str,
@@ -317,16 +317,22 @@ def encode_unit(
     return _checkpoint_pickle_bytes(envelope, max_bytes=max_bytes)
 
 
-def write_unit(
-    checkpoint_dir: Path,
-    *,
-    qname: str,
-    identity_sha256: str,
-    state: Mapping[str, object],
-) -> None:
-    encoded = encode_unit(
-        qname=qname, identity_sha256=identity_sha256, state=state)
-    atomic_write_bytes(unit_path(checkpoint_dir, qname), encoded)
+class UnitCheckpointWriter:
+    """Publish unit states under one admitted checkpoint lineage."""
+
+    def __init__(self, directory, identity_sha256):
+        self.directory = Path(directory)
+        self.identity_sha256 = identity_sha256
+
+    def publish(self, *, qname, state, max_bytes=None, on_encoded_bytes=None):
+        encoded = _encode_unit(qname=qname, identity_sha256=self.identity_sha256,
+                               state=state, max_bytes=max_bytes)
+        if on_encoded_bytes is not None:
+            on_encoded_bytes(len(encoded))
+        atomic_write_bytes(unit_path(self.directory, qname), encoded)
+
+
+_UNREAD_ENVELOPE = object()
 
 
 def load_unit(
@@ -334,20 +340,24 @@ def load_unit(
     *,
     qname: str,
     identity_sha256: str,
+    envelope: object = _UNREAD_ENVELOPE,
 ) -> dict[str, object]:
-    try:
-        with path.open("rb") as handle:
-            envelope = pickle.load(handle)
-    except Exception as exc:
-        raise RuntimeError(
-            f"AURA unit checkpoint {path} is corrupt for {qname}; refusing "
-            "reuse or recompute"
-        ) from exc
-    return decode_unit(
+    # A bounded source reader may supply its already-owned envelope, preserving
+    # one authenticated read and its existing allocation/retirement bound.
+    if envelope is _UNREAD_ENVELOPE:
+        try:
+            with path.open("rb") as handle:
+                envelope = pickle.load(handle)
+        except Exception as exc:
+            raise RuntimeError(
+                f"AURA unit checkpoint {path} is corrupt for {qname}; refusing "
+                "reuse or recompute"
+            ) from exc
+    return _decode_unit(
         envelope, path=path, qname=qname, identity_sha256=identity_sha256)
 
 
-def decode_unit(
+def _decode_unit(
     envelope: object,
     *,
     path: Path,
@@ -409,7 +419,7 @@ def decode_unit(
     return dict(state)
 
 
-def prepare_journal(
+def _open_journal_state(
     checkpoint_dir: str | Path,
     *,
     resume: bool,
@@ -515,7 +525,7 @@ def build_checkpoint_identity(
     identity = {
         "schema": AURA_CHECKPOINT_IDENTITY_SCHEMA,
         "git_commit": str(git_commit),
-        "producer_source_sha256": aura_provenance.source_sha256(),
+        "producer_source_sha256": aura_provenance.producer_package_sha256(),
         "calibration": {
             "shape": [int(dim) for dim in calib_ids.shape],
             "dtype": str(calib_ids.dtype),
@@ -558,217 +568,40 @@ def build_checkpoint_identity(
     return _canonical_json(identity, where="AURA checkpoint identity")
 
 
-def capture_unit_state(
-    name: str,
-    nonzero_formats: Sequence[str],
-    *,
-    s2: Mapping[tuple[str, str], float],
-    s4: Mapping[tuple[str, str], float],
-    x2_probe: Mapping[tuple[str, str], list[float]],
-    dw_src: Mapping[tuple[str, str], str],
-    g_trace: Mapping[str, float],
-    col_energy: Mapping[str, torch.Tensor],
-    weight_mse_diagnostic: Mapping[tuple[str, str], float] | None = None,
-    source_weight_identity: Mapping[str, Mapping[str, object]] | None = None,
-    observation_counts: Mapping[str, Mapping[str, int]] | None = None,
-) -> dict[str, object]:
-    rows: dict[str, dict[str, object]] = {}
-    for fmt in nonzero_formats:
-        key = (name, fmt)
-        if key not in s2:
-            continue
-        rows[fmt] = {
-            "s2": float(s2[key]),
-            "s4": float(s4[key]),
-            "x2_probe": list(x2_probe[key]),
-            "dw_src": str(dw_src[key]),
-        }
-        if (
-            weight_mse_diagnostic is not None
-            and key in weight_mse_diagnostic
-        ):
-            rows[fmt]["weight_mse_diagnostic"] = float(
-                weight_mse_diagnostic[key]
-            )
-    state = {
-        "g_trace": float(g_trace[name]),
-        "rows": rows,
-        "col_energy": (
-            col_energy[name].detach().to(device="cpu", dtype=torch.float32)
-            if name in col_energy
-            else None
-        ),
-    }
-    if source_weight_identity is not None and name in source_weight_identity:
-        state["source_weight_identity"] = dict(
-            source_weight_identity[name]
-        )
-    if observation_counts is not None:
-        state['joint_eval_observations'] = dict(observation_counts[name])
-    return state
+class AuraCheckpointJournal:
+    """Resume admitted measured units and publish their completed state."""
 
+    def __init__(self, root, identity_sha256, names, loaded_states):
+        self.root = root
+        self.identity_sha256 = identity_sha256
+        self.writer = UnitCheckpointWriter(root, identity_sha256)
+        self._names = tuple(names)
+        self._loaded_states = loaded_states
+        self.completed = set()
 
-def restore_unit_state(
-    name: str,
-    state: Mapping[str, object],
-    *,
-    nonzero_formats: Sequence[str],
-    n_probes: int,
-    collect_col_energy: bool,
-    s2: dict[tuple[str, str], float],
-    s4: dict[tuple[str, str], float],
-    x2_probe: dict[tuple[str, str], list[float]],
-    dw_src: dict[tuple[str, str], str],
-    g_trace: dict[str, float],
-    col_energy: dict[str, torch.Tensor],
-    diagnostic_weight_mse_pairs: set[tuple[str, str]] | None = None,
-    weight_mse_diagnostic: dict[tuple[str, str], float] | None = None,
-    require_source_weight_identity: bool = False,
-    source_weight_identity: dict[str, dict[str, object]] | None = None,
-    observation_counts: dict[str, dict[str, int]] | None = None,
-) -> None:
-    if observation_counts is not None:
-        observation = state.get('joint_eval_observations')
-        if (not isinstance(observation, Mapping)
-                or set(observation) != {'tokens', 'calls', 'per_probe', 'count_scope', 'n_probes'}
-                or observation.get('count_scope') != 'summed_over_probes'
-                or observation.get('n_probes') != n_probes
-                or not isinstance(observation.get('per_probe'), list)
-                or len(observation['per_probe']) != n_probes
-                or any(not isinstance(item, Mapping) or set(item) != {'tokens', 'calls'}
-                       or any(type(value) is not int or value < 0 for value in item.values())
-                       for item in observation['per_probe'])
-                or any(type(observation.get(key)) is not int
-                       or observation[key] != sum(item[key] for item in observation['per_probe'])
-                       for key in ('tokens', 'calls'))):
-            raise RuntimeError(f'joint pilot checkpoint observation counts missing for {name}')
-        observation_counts[name] = {**observation, 'per_probe': [dict(item) for item in observation['per_probe']]}
-    try:
-        g_trace[name] = float(state["g_trace"])
-    except Exception as exc:
-        raise RuntimeError(
-            f"AURA unit checkpoint state for {name} has invalid g_trace; "
-            "refusing reuse or recompute"
-        ) from exc
-    rows = state.get("rows")
-    if not isinstance(rows, Mapping):
-        raise RuntimeError(
-            f"AURA unit checkpoint state for {name} has invalid rows; "
-            "refusing reuse or recompute"
-        )
-    unexpected = sorted(set(str(fmt) for fmt in rows) - set(nonzero_formats))
-    if unexpected:
-        raise RuntimeError(
-            f"AURA unit checkpoint state for {name} has unexpected formats "
-            f"{unexpected}; refusing reuse or recompute"
-        )
-    for raw_fmt, raw_row in rows.items():
-        fmt = str(raw_fmt)
-        if not isinstance(raw_row, Mapping):
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name}@{fmt} is invalid; "
-                "refusing reuse or recompute"
-            )
-        samples = raw_row.get("x2_probe")
-        if (
-            not isinstance(samples, Sequence)
-            or isinstance(samples, (str, bytes))
-            or len(samples) != int(n_probes)
-        ):
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name}@{fmt} has "
-                f"x2_probe length {len(samples) if isinstance(samples, Sequence) else '<invalid>'}; "
-                f"expected {n_probes}; refusing reuse or recompute"
-            )
-        key = (name, fmt)
-        try:
-            s2[key] = float(raw_row["s2"])
-            s4[key] = float(raw_row["s4"])
-            x2_probe[key] = [float(value) for value in samples]
-            dw_src[key] = str(raw_row["dw_src"])
-        except Exception as exc:
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name}@{fmt} is malformed; "
-                "refusing reuse or recompute"
-            ) from exc
-        expected_diagnostic = (
-            diagnostic_weight_mse_pairs is not None
-            and key in diagnostic_weight_mse_pairs
-        )
-        observed_diagnostic = "weight_mse_diagnostic" in raw_row
-        if observed_diagnostic != expected_diagnostic:
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name}@{fmt} diagnostic "
-                "weight-MSE scope differs; refusing reuse or recompute"
-            )
-        if expected_diagnostic:
-            if weight_mse_diagnostic is None:
-                raise RuntimeError(
-                    "AURA diagnostic weight-MSE restore has no destination"
-                )
-            try:
-                weight_mse_diagnostic[key] = float(
-                    raw_row["weight_mse_diagnostic"]
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"AURA unit checkpoint state for {name}@{fmt} has an "
-                    "invalid diagnostic weight-MSE"
-                ) from exc
-    stored_col_energy = state.get("col_energy")
-    if collect_col_energy:
-        if stored_col_energy is not None and not isinstance(
-            stored_col_energy, torch.Tensor
-        ):
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name} has invalid "
-                "col_energy; refusing reuse or recompute"
-            )
-        if isinstance(stored_col_energy, torch.Tensor):
-            col_energy[name] = stored_col_energy.detach().to(
-                device="cpu", dtype=torch.float32
-            )
-    elif stored_col_energy is not None:
-        raise RuntimeError(
-            f"AURA unit checkpoint state for {name} unexpectedly carries "
-            "col_energy; refusing reuse or recompute"
-        )
-    raw_source = state.get("source_weight_identity")
-    if require_source_weight_identity:
-        if not isinstance(raw_source, Mapping):
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name} has no production "
-                "anchor source-weight identity; refusing reuse or recompute"
-            )
-        try:
-            shape = [int(dim) for dim in raw_source["shape"]]
-            digest = str(raw_source["sha256"]).lower()
-        except Exception as exc:
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name} has malformed "
-                "source-weight identity"
-            ) from exc
-        if (
-            len(shape) != 2
-            or any(dim <= 0 for dim in shape)
-            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-        ):
-            raise RuntimeError(
-                f"AURA unit checkpoint state for {name} has invalid "
-                "source-weight shape/hash"
-            )
-        if source_weight_identity is None:
-            raise RuntimeError(
-                "AURA source-weight identity restore has no destination"
-            )
-        source_weight_identity[name] = {
-            "shape": shape,
-            "sha256": digest,
-        }
-    elif raw_source is not None:
-        raise RuntimeError(
-            f"AURA unit checkpoint state for {name} unexpectedly carries a "
-            "production-anchor source identity"
-        )
+    @classmethod
+    def open(cls, directory, *, resume, identity, names):
+        root, digest, loaded = _open_journal_state(
+            directory, resume=resume, identity=identity, names=names)
+        return cls(root, digest, names, loaded)
 
+    def resume_units(self, prices):
+        for name in self._names:
+            state = self._loaded_states.get(name)
+            if state is not None:
+                prices.restore_unit(name, state)
+                self.completed.add(name)
+        return self.completed
+
+    def publish_group(self, prices, names, *, extra_state=None):
+        for name in names:
+            state = prices.captured_state(name)
+            if extra_state is not None:
+                state = {**state, **extra_state}
+            self.writer.publish(qname=name, state=state)
+        self.completed.update(names)
+
+    def publish_state(self, name, state):
+        self.writer.publish(qname=name, state=state)
+        self.completed.add(name)
 

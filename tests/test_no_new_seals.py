@@ -48,6 +48,7 @@ MODULES = (
     "prismaquant/aura_cost.py",
     "prismaquant/aura_checkpoint_journal.py",
     "prismaquant/aura_provenance.py",
+    "prismaquant/joint_price_step.py",
     "prismaquant/cost_currency.py",
     'prismaquant/cost_streaming.py',
     'prismaquant/streamed_boundary_artifacts.py',
@@ -103,12 +104,16 @@ RESOURCE = "resource"
 # ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
 # keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
-    ("prismaquant/aura_checkpoint_journal.py", "decode_unit"): (
+    ("prismaquant/aura_checkpoint_journal.py", "_decode_unit"): (
         1, INTEGRITY, "a unit checkpoint's envelope digest against its payload bytes"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed"): (
-        4, AMBIGUOUS, "render coverage against the roster and the render tensor proof "
-        "(integrity); a restored row's probe and activation identity (ambiguous, #1147 "
-        "report)"),
+        2, INTEGRITY, "render coverage against the roster and the render tensor proof"),
+    ("prismaquant/joint_price_step.py", "JointResumeContract.require_probe"): (
+        1, AMBIGUOUS, "full-run restored probe equality retains its existing strict policy"),
+    ("prismaquant/joint_price_step.py", "JointResumeContract.require_activation"): (
+        1, AMBIGUOUS, "full-run restored activation identity retains its existing strict policy"),
+    ("prismaquant/joint_price_step.py", "JointPriceStep.restore_unit"): (
+        1, INTEGRITY, "actual restored rendered-weight identity against its admitted tensor proof"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed.commit_streamed_units"): (
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed._record_joint_operator"): (

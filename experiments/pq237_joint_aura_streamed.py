@@ -120,7 +120,7 @@ def verify_source_manifest(root, path):
 def expected_currency_bindings(runner, calibration, protocol, model_identity, cache, renders):
     """Seal dense qualification inputs before the producer returns any rows."""
     from prismaquant import format_registry as fr
-    from prismaquant.aura_provenance import source_sha256
+    from prismaquant.aura_provenance import (producer_package_sha256 as source_sha256)
     from prismaquant.joint_aura import (
         activation_identity, arithmetic_identity, identity_sha256, source_execution_identity,
     )

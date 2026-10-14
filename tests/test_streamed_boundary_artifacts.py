@@ -346,17 +346,17 @@ def test_completed_resume_skips_generation_and_policy_change_refuses(tmp_path, m
 def test_interrupted_cost_resume_uses_new_generation_and_original_signed_samples(tmp_path, monkeypatch):
     monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     expected, _, _ = _run(None)
-    writer = aura_checkpoint_journal.write_unit
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     def interrupt(*args, **kwargs):
         writer(*args, **kwargs)
         raise RuntimeError("fixture interrupted cost checkpoint")
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", interrupt)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt)
     with pytest.raises(RuntimeError, match="fixture interrupted"):
         _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints")
     assert not list((tmp_path / "working").rglob("*.pt*"))
     failed = json.loads(next((tmp_path / "working").rglob("generation.json")).read_text())
     assert failed["status"] == "failed" and failed["working_artifacts_reusable"] is False
-    monkeypatch.setattr(aura_checkpoint_journal, "write_unit", writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", writer)
     actual, _, _ = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints", resume=True)
     assert actual["costs"] == expected["costs"]
     completed = actual["provenance"]["streamed_boundary_storage"]

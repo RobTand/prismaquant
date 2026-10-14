@@ -4,31 +4,41 @@ from __future__ import annotations
 from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 
 import pickle
+import hashlib
 import threading
 import weakref
 
 import pytest
 
-from prismaquant.aura_checkpoint_journal import (encode_unit as _encode_aura_unit_checkpoint)
 from prismaquant.joint_cost_quantum import quantum_runtime_execution
 from prismaquant.tessera_publication import PublicationError, PublicationJob
 from test_stageb_publication_backend_1775 import engine, _pool_publisher, _stage, WAIT
 
 
+def _expected_unit_bytes(state):
+    payload = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
+    return pickle.dumps({"schema": "prismaquant.aura_checkpoint.unit.v1", "qname": "unit",
+                         "identity_sha256": "a" * 64,
+                         "payload_sha256": hashlib.sha256(payload).hexdigest(), "payload": payload},
+                        protocol=pickle.HIGHEST_PROTOCOL)
+
+
 @pytest.mark.parametrize("state", [{"x": [1.0, 2.0], "nested": {"a": "b"}},
-                                   {"text": "\u03bb" * 1000, "raw": b"a" * 1000}])
-def test_capped_encoder_matches_exact_existing_bytes(state):
-    expected = _encode_aura_unit_checkpoint(qname="unit", identity_sha256="a" * 64,
-                                           state=state)
-    actual = _encode_aura_unit_checkpoint(qname="unit", identity_sha256="a" * 64,
-                                         state=state, max_bytes=len(expected))
-    assert actual == expected
+                                   {"text": "λ" * 1000, "raw": b"a" * 1000}])
+def test_capped_publication_keeps_existing_envelope_bytes(tmp_path, state):
+    expected = _expected_unit_bytes(state)
+    writer = aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64)
+    writer.publish(qname="unit", state=state, max_bytes=len(expected))
+    path = cost_stage_checkpoint.unit_path(tmp_path, "unit")
+    assert path.read_bytes() == expected
+    assert aura_checkpoint_journal.load_unit(path, qname="unit", identity_sha256="a" * 64) == state
 
 
-def test_capped_encoder_refuses_oversize():
+def test_capped_publication_refuses_oversize_before_writing(tmp_path):
+    writer = aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64)
     with pytest.raises(ValueError, match="checkpoint.*(bound|limit|bytes)"):
-        _encode_aura_unit_checkpoint(qname="unit", identity_sha256="a" * 64,
-                                     state={"blob": b"x" * 100_000}, max_bytes=4096)
+        writer.publish(qname="unit", state={"blob": b"x" * 100_000}, max_bytes=4096)
+    assert not cost_stage_checkpoint.unit_path(tmp_path, "unit").exists()
 
 
 @pytest.mark.parametrize("budget", [True, False, -1, 1.5, "1024"])
@@ -72,7 +82,7 @@ def test_single_slot_limit_serializes_without_unbounded_job_credit(engine, tmp_p
 
     durable = set()
     ledger = CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": ["one", "two"]}], completed=durable,
         acknowledge=lambda: None, window_done=lambda index: None,
         budget_bytes=16 << 20, max_jobs=1)
@@ -167,13 +177,13 @@ def test_ledger_reserves_before_snapshot_and_never_borrows_nested_graph(monkeypa
     durable, acknowledgements, windows = set(), [], []
     source = {"nested": {"components": [1.0, 2.0]}}
     atomic = aura_checkpoint_journal.atomic_write_bytes
-    encode = aura_checkpoint_journal.encode_unit
+    encode = aura_checkpoint_journal.UnitCheckpointWriter.publish
     encoders = []
 
-    def checked_encode(**kwargs):
+    def checked_encode(writer, **kwargs):
         encoders.append(threading.get_ident())
         assert threading.get_ident() != consumer, "checkpoint serialization ran on consumer"
-        return encode(**kwargs)
+        return encode(writer, **kwargs)
 
     def held(path, body):
         writers.append(threading.get_ident())
@@ -182,9 +192,9 @@ def test_ledger_reserves_before_snapshot_and_never_borrows_nested_graph(monkeypa
         atomic(path, body)
 
     monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", held)
-    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", checked_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", checked_encode)
     ledger = CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": ["unit"]}], completed=durable,
         acknowledge=lambda: acknowledgements.append(set(durable)),
         window_done=windows.append, budget_bytes=16 << 20)
@@ -222,18 +232,18 @@ def test_encoder_owns_snapshot_before_source_mutates(monkeypatch, tmp_path):
 
     entered, release = threading.Event(), threading.Event()
     source = {"nested": {"components": [1.0, 2.0]}}
-    encode = aura_checkpoint_journal.encode_unit
-    expected = encode(qname="unit", identity_sha256="a" * 64, state=source)
+    encode = aura_checkpoint_journal.UnitCheckpointWriter.publish
+    expected = _expected_unit_bytes(source)
 
-    def held_encode(**kwargs):
+    def held_encode(writer, **kwargs):
         entered.set()
         assert release.wait(WAIT)
-        return encode(**kwargs)
+        return encode(writer, **kwargs)
 
-    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", held_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", held_encode)
     durable = set()
     ledger = CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": ["unit"]}], completed=durable,
         acknowledge=lambda: None, window_done=lambda index: None,
         budget_bytes=16 << 20)
@@ -263,10 +273,9 @@ def test_owned_encoder_preserves_builtin_alias_bytes(tmp_path, cycle):
     state: dict[str, object] = {"first": shared, "second": shared}
     if cycle:
         state["self"] = state
-    expected = aura_checkpoint_journal.encode_unit(
-        qname="unit", identity_sha256="a" * 64, state=state)
+    expected = _expected_unit_bytes(state)
     ledger = CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": ["unit"]}], completed=set(),
         acknowledge=lambda: None, window_done=lambda index: None,
         budget_bytes=16 << 20)
@@ -284,13 +293,13 @@ def test_encoder_failure_is_not_a_durable_ack(monkeypatch, tmp_path):
     import prismaquant.aura_cost as aura
     from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
 
-    def fail_encode(**kwargs):
+    def fail_encode(writer, **kwargs):
         raise OSError("injected encoder-stage failure")
 
-    monkeypatch.setattr(aura_checkpoint_journal, "encode_unit", fail_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", fail_encode)
     durable, windows = set(), []
     ledger = CheckpointPublicationLedger(
-        checkpoint_root=tmp_path, identity_sha256="a" * 64,
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
         windows=[{"names": ["unit"]}], completed=durable,
         acknowledge=lambda: None, window_done=windows.append,
         budget_bytes=16 << 20)
