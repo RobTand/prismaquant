@@ -1,3 +1,4 @@
+from prismaquant.calibration_data import load_calibration_repeats
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,6 @@ from prismaquant.validate_assignments_kl import (
     _assert_calibration_disjoint,
     _assignment_cost_summary,
     _calibration_provenance,
-    _load_calibration_repeats,
     _materialize_assignment_inplace,
     _production_cache_assignment_diagnostics,
     _upstream_calibration_hashes,
@@ -183,7 +183,7 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         calib_repeat_seed_stride=1,
     )
     with pytest.raises(ValueError, match="only implemented for --dataset"):
-        _load_calibration_repeats(object(), args)
+        load_calibration_repeats(object(), args)
 
     # No skip requested -> the wikitext branch is untouched.
     args.calib_skip_first = 0
@@ -194,12 +194,13 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         return torch.zeros(n, seqlen, dtype=torch.long)
 
     import prismaquant.validate_assignments_kl as mod
-    original = mod.load_wikitext_calibration_windowed
-    mod.load_wikitext_calibration_windowed = _fake_loader
+    from prismaquant import calibration_data
+    original = calibration_data.load_wikitext_calibration_windowed
+    calibration_data.load_wikitext_calibration_windowed = _fake_loader
     try:
-        repeats = _load_calibration_repeats(object(), args)
+        repeats = load_calibration_repeats(object(), args)
     finally:
-        mod.load_wikitext_calibration_windowed = original
+        calibration_data.load_wikitext_calibration_windowed = original
     assert len(repeats) == 1 and repeats[0].shape == (4, 128)
     assert calls["seed"] == 42
 

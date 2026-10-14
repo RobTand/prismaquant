@@ -5,6 +5,9 @@ probe/cost/render stages never saw. --calib-skip-first K drops the first K
 windows of the (prefix-stable) deterministic loader, making the validation
 set [K, K+n) token-disjoint from render calib [0, K) by construction.
 """
+
+from prismaquant.calibration_data import load_calibration_repeats
+from prismaquant import calibration_data
 from types import SimpleNamespace
 
 import pytest
@@ -33,9 +36,9 @@ def _fake_loader(record):
 
 def test_skip_first_yields_disjoint_windows(monkeypatch):
     calls = []
-    monkeypatch.setattr(vak, "load_calibration", _fake_loader(calls))
-    full = vak._load_calibration_repeats(None, _args())[0]
-    held = vak._load_calibration_repeats(
+    monkeypatch.setattr(calibration_data, "load_calibration", _fake_loader(calls))
+    full = calibration_data.load_calibration_repeats(None, _args())[0]
+    held = calibration_data.load_calibration_repeats(
         None, _args(calib_skip_first=4))[0]
     assert calls[0]["n"] == 4 and calls[1]["n"] == 8
     assert held.shape[0] == 4
@@ -46,8 +49,8 @@ def test_skip_first_yields_disjoint_windows(monkeypatch):
 
 def test_skip_first_threads_seed_and_repeats(monkeypatch):
     calls = []
-    monkeypatch.setattr(vak, "load_calibration", _fake_loader(calls))
-    reps = vak._load_calibration_repeats(
+    monkeypatch.setattr(calibration_data, "load_calibration", _fake_loader(calls))
+    reps = calibration_data.load_calibration_repeats(
         None, _args(calib_repeats=3, calib_skip_first=2, calib_seed=7))
     assert len(reps) == 3
     assert calls[0]["seed"] == 7
@@ -58,7 +61,7 @@ def test_skip_first_insufficient_corpus_raises(monkeypatch):
     def short(tokenizer, source, n_samples, seqlen, *, calib_seed=42):
         n = min(n_samples, 5)
         return torch.arange(n * seqlen).reshape(n, seqlen)
-    monkeypatch.setattr(vak, "load_calibration", short)
+    monkeypatch.setattr(calibration_data, "load_calibration", short)
     with pytest.raises(RuntimeError, match="skip-first"):
-        vak._load_calibration_repeats(
+        calibration_data.load_calibration_repeats(
             None, _args(calib_skip_first=4))

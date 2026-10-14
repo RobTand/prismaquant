@@ -31,7 +31,7 @@ from pathlib import Path
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant import read_traffic
+from prismaquant import read_traffic, calibration_data
 from prismaquant.build_rtn_cache import (
     cache_reference_log_probs,
     kl_divergence,
@@ -573,83 +573,6 @@ def _activation_quant_assignment(
     return out
 
 
-def _load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
-    repeats = max(int(args.calib_repeats), 1)
-    n_samples = int(args.n_calib_samples)
-    skip = max(int(getattr(args, "calib_skip_first", 0) or 0), 0)
-    if skip and not args.dataset:
-        # R14(iii): --calib-skip-first is the held-out mechanism, and it is
-        # only implemented on the --dataset branch below. The wikitext branch
-        # used to compute `skip` and then never apply it, so a manual
-        # `--calib-skip-first 32` on wikitext silently measured selection KL on
-        # the SAME windows the cost stage consumed. In-sample "validation" has
-        # already regressed once here; refuse rather than pretend.
-        raise ValueError(
-            "--calib-skip-first is only implemented for --dataset calibration; "
-            f"got --calib-skip-first {skip} with no --dataset (wikitext "
-            f"split={args.calib_split!r}). The wikitext loader is seeded per "
-            "repeat, not window-sliced, so the skip cannot be honored and the "
-            "selection split would silently overlap the cost split. Pass a "
-            "--dataset, or use a distinct --calib-seed / --calib-split for the "
-            "held-out draw. From run-pipeline.sh: set a jsonl DATASET (the "
-            "default), or VALIDATED_FRONTIER_SKIP_CALIB=0 with a distinct "
-            "VALIDATED_FRONTIER_DATASET."
-        )
-
-    def _load_jsonl(n: int) -> torch.Tensor:
-        # --calib-skip-first K: drop the first K windows of the deterministic
-        # loader so selection KL is measured on windows DISJOINT from the
-        # probe/cost/render calibration (which consumes windows [0, K)).
-        # load_calibration is prefix-stable at a fixed seed, so [K, K+n) is
-        # token-disjoint from [0, K) by construction. House rule: held-out
-        # split is disjoint from cost generation (review criticals C3/C5).
-        all_ids = load_calibration(
-            tokenizer,
-            args.dataset,
-            n + skip,
-            args.calib_seqlen,
-            calib_seed=int(getattr(args, "calib_seed", 42) or 42),
-        )
-        if all_ids.size(0) < n + skip:
-            raise RuntimeError(
-                f"calibration source yielded {all_ids.size(0)} windows; "
-                f"need {n + skip} (n={n} + skip-first={skip}). Use a larger "
-                "corpus or reduce --calib-skip-first."
-            )
-        return all_ids[skip:]
-
-    if repeats == 1:
-        if args.dataset:
-            return [_load_jsonl(n_samples)]
-        return [load_wikitext_calibration_windowed(
-            tokenizer,
-            n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=args.calib_seed,
-        )]
-    if args.dataset:
-        all_ids = _load_jsonl(n_samples * repeats)
-        if all_ids.size(0) < n_samples * repeats:
-            raise RuntimeError(
-                f"requested {repeats} calibration repeats of {n_samples} samples, "
-                f"but only loaded {all_ids.size(0)} samples"
-            )
-        return [
-            all_ids[idx * n_samples:(idx + 1) * n_samples].contiguous()
-            for idx in range(repeats)
-        ]
-    stride = int(args.calib_repeat_seed_stride)
-    return [
-        load_wikitext_calibration_windowed(
-            tokenizer,
-            n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=int(args.calib_seed) + idx * stride,
-        )
-        for idx in range(repeats)
-    ]
 
 
 def _load_expert_render_calib(tokenizer, args) -> torch.Tensor | None:
@@ -1313,7 +1236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif device.type == "cuda":
             load_kwargs["device_map"] = device_str
         tokenizer = AutoTokenizer.from_pretrained(staged, **tokenizer_kwargs)
-        calib_repeats = _load_calibration_repeats(tokenizer, args)
+        calib_repeats = calibration_data.load_calibration_repeats(tokenizer, args)
         calib_provenance = _calibration_provenance(calib_repeats)
         calib_provenance["held_out_check"] = _assert_calibration_disjoint(
             calib_provenance["calib_repeat_hashes"],
