@@ -573,7 +573,7 @@ def _attested_cell_conditions(name: str, cells) -> tuple[str, tuple[str, ...]]:
     statuses = {cell.route_status for cell in cells}
     if len(statuses) != 1:
         named = ", ".join(
-            f"{getattr(cell, 'cell_id', getattr(cell, 'id', 'unknown'))}={cell.route_status}"
+            f"{cell.id}={cell.route_status}"
             for cell in cells)
         raise TesseraMenuError(
             f"{name}: the pinned contract's native cells disagree about "
@@ -749,7 +749,7 @@ def route_admission(
             detail = (
                 f"the pinned Tessera contract attests {len(cells)} native "
                 f"cell(s) naming this rate: "
-                f"{', '.join(cell.cell_id for cell in cells)}"
+                f"{', '.join(cell.id for cell in cells)}"
             )
             check_tessera_activation_agreement(
                 name, route,

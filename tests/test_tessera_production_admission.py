@@ -99,7 +99,7 @@ def test_conflicting_cell_statuses_refuse_with_named_cells(monkeypatch, dev_pin)
                              execution_mode=reference.execution_modes[0])
     if dev_pin:
         altered = replace(parsed, cells=tuple(
-            replace(cell, route_status="backed") if cell.cell_id == reference.id else cell
+            replace(cell, route_status="backed") if cell.id == reference.id else cell
             for cell in parsed.cells))
         monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: altered)
     else:

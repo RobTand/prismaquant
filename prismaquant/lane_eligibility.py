@@ -2241,6 +2241,14 @@ class EligibilityCell:
             runtime_kernel_build=parse_kernel_build(payload.get("runtime", {}), where),
         )
 
+    @property
+    def native(self) -> bool:
+        """Whether this cell publishes a device-qualified native route."""
+        return (
+            self.qualification == QUALIFICATION_DEVICE_QUALIFIED
+            and self.route_status in (ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG)
+        )
+
     def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
         """Whether the launch at ``executes[index]`` covers ``rate_q256``.
 
@@ -3478,18 +3486,14 @@ def parse_kernel_build(payload: Mapping[str, Any], where: str) -> str:
     return value
 
 
-def _cell_identifier(cell: Any) -> str:
-    return getattr(cell, "id", None) or cell.cell_id
-
-
 def cell_kernel_build(cell: Any) -> str:
     """Use the same effective build name for lookup and compatibility keys."""
-    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + _cell_identifier(cell)
+    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + cell.id
 
 
 def cell_key_compatibility(cells) -> dict[str, tuple]:
     """Map historical receipt names to build and module-kind keys."""
-    return {_cell_identifier(cell): (cell_kernel_build(cell), cell.structure,
+    return {cell.id: (cell_kernel_build(cell), cell.structure,
             cell.platform, cell.family, cell.regime, cell.residency_modes,
             cell.execution_modes) for cell in cells}
 

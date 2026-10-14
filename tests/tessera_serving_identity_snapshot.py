@@ -131,10 +131,10 @@ def _dev_answer() -> dict:
                         residency=residency, runtime_image=cell.runtime_image,
                         execution_mode=mode)
                     admitted.append({
-                        "cell": cell.cell_id, "rate_q256": rate,
+                        "cell": cell.id, "rate_q256": rate,
                         "residency": residency, "execution_mode": mode,
                         "native_cells": [
-                            c.cell_id for c in contract.native_cells(
+                            c.id for c in contract.native_cells(
                                 cell.family, rate, serving_context=context)],
                     })
     return {"answer": trc.contract_answer(contract), "native_cells": admitted}

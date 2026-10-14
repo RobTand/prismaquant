@@ -166,7 +166,7 @@ def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
     assert widths == {18}, sorted(widths)
     # The parsed development answer is opt-in, just as it is for menu tests.
     monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, contract.TESSERA_DEV_PIN_COMMIT)
-    parsed = {cell.cell_id: cell for cell in contract.load_tessera_contract().cells}
+    parsed = {cell.id: cell for cell in contract.load_tessera_contract().cells}
     for row in rows:
         assert isinstance(row[13], dict) and set(row[13]) == {
             "image", "execution_modes"}

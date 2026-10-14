@@ -108,10 +108,6 @@ TESSERA_PLANNED_RELEASE_OVERRIDES = 0
 _LABEL_SHAPE = (2048, 4096)
 
 
-#: Route statuses under which a cell says a native route EXECUTES.  A
-#: ``fallback`` cell attests a serve, not a native one, and admits nothing.
-_NATIVE_ROUTE_STATUSES = frozenset({"backed", "backed_with_serve_flag"})
-
 #: The vLLM plugin every Tessera route requires.  Aliased from the pin module
 #: rather than retyped: one spelling of the runtime's identity, so a rename
 #: cannot leave the gate checking a name nothing publishes.
@@ -217,8 +213,7 @@ def tessera_attesting_cells(
         if cell.is_trellis
         and cell.family == family
         and cell.covers_rate(rate)
-        and cell.qualification == "device_qualified"
-        and cell.route_status in _NATIVE_ROUTE_STATUSES
+        and cell.native
         and (ignore_evidence or cell_evidence_admits(cell)[0])
         and (ignore_evidence or cell_lane_admits(cell, rate, table.lanes)[0])
         and (not scoped or cell_matches_serving_context(cell, serving_context))

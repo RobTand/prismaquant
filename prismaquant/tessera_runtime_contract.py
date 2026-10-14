@@ -86,7 +86,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .lane_eligibility import (
-    CellEvidence,
+    EligibilityCell,
     EligibilityTable,
     _DIGEST_IMAGE,
     SCOPED_LANE_SCHEMAS,
@@ -97,9 +97,6 @@ from .lane_eligibility import (
     LaneClaim,
     LaneEligibilityError,
     ServingContext,
-    QUALIFICATION_DEVICE_QUALIFIED,
-    ROUTE_STATUS_BACKED,
-    ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
     _parse_table,
     eligibility_table_from_contract,
     cell_matches_serving_context,
@@ -123,7 +120,6 @@ __all__ = [
     "TesseraContract",
     "TesseraContractError",
     "TesseraNativeExtension",
-    "TesseraRouteCell",
     "cell_activation_projection",
     "ActivationQuantizerAttestation",
     "ActivationQuantizerGeneration",
@@ -448,10 +444,6 @@ TESSERA_DEV_PIN_ANSWER = json.loads(
     (Path(__file__).resolve().parent / "tessera_runtime" / "reviewed_answer.json")
     .read_text(encoding="utf-8")
 )
-#: Route statuses under which a cell says a native route EXECUTES.
-_NATIVE_ROUTE_STATUSES = frozenset(
-    {ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG}
-)
 
 
 #: What a published ``activation_contract`` string executes as, in the
@@ -559,80 +551,6 @@ class TesseraNativeExtension:
 
 
 @dataclass(frozen=True, slots=True)
-class TesseraRouteCell:
-    """One ``lane_eligibility.cells[]`` row, verbatim in the fields we read."""
-
-    cell_id: str
-    platform: str
-    family: str
-    structure: str
-    regime: str
-    rungs_q256: frozenset[int]
-    activation_contract: str
-    route_status: str
-    qualification: str
-    requires_plugin: str
-    requires_serve_flags: tuple[str, ...]
-    executes: tuple[tuple[str, str], ...]
-    residency_modes: tuple[str, ...]
-    runtime_image: str
-    execution_modes: tuple[str, ...]
-    #: v12's per-launch census scope, in ``executes`` order: each entry is the
-    #: launch's ``rungs_q256`` tuple, or ``None`` when the launch keeps the
-    #: scope of its cell. ``()`` means the table named no scope.
-    launch_rungs_q256: tuple[tuple[int, ...] | None, ...] = ()
-    #: v12's per-launch derived rule coverage, in ``executes`` order. Each
-    #: entry holds the allowable run-table rungs the launch's census rungs
-    #: derive, or ``None`` when the launch names no scope. Parsed once beside
-    #: the cell's own coverage, from the same rule.
-    launch_covered_rungs_q256: tuple[tuple[int, ...] | None, ...] = ()
-    #: v6's per-cell runtime versions and evidence block; empty/``None`` under
-    #: the pre-v6 grammars, which published neither.
-    runtime_vllm: str = ""
-    runtime_torch: str = ""
-    evidence: "CellEvidence | None" = None
-    #: The Tessera code the evidence was taken on (contract v41, #1561), as
-    #: ``lane_eligibility.EligibilityCell`` parses it; empty when the cell
-    #: names none. ``cell_matches_serving_context`` compares the digest with
-    #: the pinned serving code. Not part of :func:`contract_answer` yet: the
-    #: reviewed answer gains this column at the bump that activates a v3 pin.
-    runtime_tessera_commit: str = ""
-    runtime_serving_source_sha256: str = ""
-    covered_rungs_q256: frozenset[int] = frozenset()
-    run_tables: tuple[tuple[int, ...], ...] | None = None
-    runtime_kernel_build: str = ""
-
-    def covers_rate(self, rate_q256: int) -> bool:
-        return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
-
-    def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
-        """Whether the launch at ``executes[index]`` covers ``rate_q256``.
-
-        A launch without a v12 ``rungs_q256`` scope keeps the scope of its
-        cell. A scoped launch covers its census rungs plus the allowable
-        run-table rungs those rungs derive, carried from the parse beside
-        the cell's own coverage, so both halves narrow together.
-        """
-        scopes = tuple(self.launch_rungs_q256 or ())
-        scope = scopes[index] if index < len(scopes) else None
-        if scope is None:
-            return self.covers_rate(rate_q256)
-        if rate_q256 in scope:
-            return True
-        covered = tuple(self.launch_covered_rungs_q256 or ())
-        scope_covered = covered[index] if index < len(covered) else None
-        return scope_covered is not None and rate_q256 in scope_covered
-
-    @property
-    def native(self) -> bool:
-        """Does this cell attest a route the runtime executes natively?"""
-        return (
-            self.qualification == QUALIFICATION_DEVICE_QUALIFIED
-            and self.route_status in _NATIVE_ROUTE_STATUSES
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class FusedModuleLicence:
     """``fused_module``: what one vLLM-fused module's roles must SHARE.
 
@@ -728,7 +646,7 @@ class TesseraContract:
     reader_rate_range: Mapping[str, tuple[int, int]]
     #: ``family -> the rungs a ``lane_eligibility`` cell attests``.
     attested_rungs: Mapping[str, frozenset[int]]
-    cells: tuple[TesseraRouteCell, ...]
+    cells: tuple[EligibilityCell, ...]
     #: The libraries the plugin loads into a serving process, in the table's
     #: order.  Non-empty by construction: :func:`_parse` refuses a contract
     #: that publishes no table rather than reading one as "loads nothing".
@@ -790,7 +708,7 @@ class TesseraContract:
 
     def native_cells(self, family: str, rate_q256: int, *,
                      serving_context: ServingContext | None = None,
-                     ) -> tuple[TesseraRouteCell, ...]:
+                     ) -> tuple[EligibilityCell, ...]:
         """V5 admits every required regime only under one explicit context.
 
         Context-free v4 keeps its historical family/rate projection. An
@@ -1009,7 +927,7 @@ def contract_answer(contract: "TesseraContract") -> dict:
         },
         "cells": sorted(
             [
-                cell.cell_id,
+                cell.id,
                 cell.platform,
                 cell.family,
                 cell.structure,
@@ -2621,7 +2539,6 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str,
             table = snapshot.eligibility
     except LaneEligibilityError as exc:
         raise TesseraContractError(f"{path}: {exc}") from exc
-    cells: list[TesseraRouteCell] = []
     for cell in table.cells:
         if cell.predicates:
             raise TesseraContractError(
@@ -2631,33 +2548,6 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str,
                 "Pass structural facts through admission before accepting "
                 "predicated cells."
             )
-        cells.append(TesseraRouteCell(
-            cell_id=cell.id,
-            platform=cell.platform,
-            family=cell.family,
-            structure=cell.structure,
-            regime=cell.regime,
-            rungs_q256=frozenset(cell.rungs_q256),
-            activation_contract=cell.activation_contract,
-            route_status=cell.route_status,
-            qualification=cell.qualification,
-            requires_plugin=cell.requires_plugin,
-            requires_serve_flags=cell.requires_serve_flags,
-            executes=cell.executes,
-            residency_modes=cell.residency_modes,
-            launch_rungs_q256=tuple(cell.launch_rungs_q256),
-            launch_covered_rungs_q256=tuple(cell.launch_covered_rungs_q256),
-            runtime_image=cell.runtime_image,
-            execution_modes=cell.execution_modes,
-            runtime_vllm=cell.runtime_vllm,
-            runtime_torch=cell.runtime_torch,
-            evidence=cell.evidence,
-            runtime_tessera_commit=cell.runtime_tessera_commit,
-            runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
-            covered_rungs_q256=frozenset(cell.covered_rungs_q256),
-            run_tables=cell.run_tables,
-            runtime_kernel_build=cell.runtime_kernel_build,
-        ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)
 
@@ -2668,7 +2558,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str,
     return TesseraContract(
         reader_rate_range=reader_range,
         attested_rungs=attested,
-        cells=tuple(cells),
+        cells=table.cells,
         native_extensions=extensions,
         max_world_size=world,
         loader_axes=loader_axes,

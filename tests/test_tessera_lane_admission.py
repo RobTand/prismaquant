@@ -420,7 +420,7 @@ def test_legacy_kl_receipts_carry_the_rung_they_measured():
     assert entry["q256"] == 896
     parsed = trc._parse(contract, commit="t", sha="t", path="<kl-fixture>")
     cell = next(c for c in parsed.cells
-                if c.cell_id == _dense_batch_cell(contract)['id'])
+                if c.id == _dense_batch_cell(contract)['id'])
     kl = cell.evidence.kl[0]
     assert kl.q256 == 896
     assert kl.as_dict()["q256"] == 896
@@ -456,7 +456,7 @@ def test_a_kl_receipt_without_a_rung_still_parses(tmp_path, released_pin):
     del _dense_batch_cell(contract)["evidence"]["kl"][0]["q256"]
     parsed = trc._parse(contract, commit="t", sha="t", path="<no-rung>")
     cell = next(c for c in parsed.cells
-                if c.cell_id == _dense_batch_cell(contract)['id'])
+                if c.id == _dense_batch_cell(contract)['id'])
     assert cell.evidence.kl[0].q256 is None
     assert "q256" not in cell.evidence.kl[0].as_dict()
     assert cell.evidence.answer()[2] == ["topk_intersection_lower_bound@1024"]

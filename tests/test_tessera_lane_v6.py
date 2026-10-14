@@ -326,7 +326,7 @@ def test_the_dense_unit_still_resolves_backed_with_its_grade_recorded(table, pay
 def test_the_development_menu_reads_the_same_predicate(payload):
     parsed = _parse(payload)
     admitted = parsed.native_cells(FAMILY, RATE, serving_context=_moe_context(payload))
-    assert {cell.cell_id for cell in admitted} == {MOE_DECODE, MOE_BATCH}
+    assert {cell.id for cell in admitted} == {MOE_DECODE, MOE_BATCH}
     historical = _parse(_with_repetitive_smoke(payload))
     assert historical.native_cells(FAMILY, RATE,
                                    serving_context=_moe_context(payload)) == ()

@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): development and
+serving metadata now retain the same canonical `lane_eligibility.EligibilityCell`
+type. The development-only `TesseraRouteCell` copy is deleted; callers use the
+parsed cell's `id`. Its native predicate retains the existing route-status and
+device-qualification conditions. Development still refuses structural predicates,
+and the reviewed answer, pin, evidence, scope and independent export gates remain
+unchanged.
+
 `NameProjection` owns serving-unit component closure. Allocation and export
 retain all overlapping fused and packed declarations and their licence kinds;
 a singleton contributes no coupling. Allocation preserves member order when
