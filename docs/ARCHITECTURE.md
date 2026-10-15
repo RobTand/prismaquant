@@ -90,7 +90,14 @@ Re-stamped 2026-10-14: the existing corpus sampler now belongs to
 `calibration_data`, alongside exact calibration artifacts. All direct callers
 use that owner; the initial move preserves sampler bytes and seed behavior.
 
-Re-stamped 2026-10-14: the probe inventory publishes priced dense, grouped
+Re-stamped 2026-10-15: `routed_experts` owns packed discovery, parent/router
+lookup, router protocol normalization, explicit-weight replay, deterministic
+per-expert activation derivation and stable routed-pair ordering. Measurement,
+cache fill, campaign capture and native panel reference replay use its public
+functions. Historical native panel receipt operation names and versions remain
+unchanged; this ownership move changes no routing or numerical policy.
+
+Re-stamped 2026-10-15: the probe inventory publishes priced dense, grouped
 and packed units and excluded Linears with reasons. Walk coverage checks the
 same module-name exclusions as the probe. Declared packed-profile failures
 propagate instead of producing an empty inventory.

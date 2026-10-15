@@ -195,16 +195,16 @@ def compare(got: dict, ref: dict) -> list[str]:
 
 def test_the_module_reservoir_is_actually_selecting(monkeypatch):
     """Without selection pressure both arms agree for an unrelated reason."""
-    import prismaquant.measure_quant_cost as mqc
+    from prismaquant import routed_experts
 
     seen_budgets: list[int] = []
-    real_derive = mqc.derive_per_expert_activations
+    real_derive = routed_experts.derive_per_expert_activations
 
     def spy(experts_mod, X, parent_mod, **kwargs):
         seen_budgets.append(int(X.shape[0]))
         return real_derive(experts_mod, X, parent_mod, **kwargs)
 
-    monkeypatch.setattr(mqc, "derive_per_expert_activations", spy)
+    monkeypatch.setattr(routed_experts, "derive_per_expert_activations", spy)
     state, calib = frozen_state(), frozen_calib()
     run_arm(state, calib, force_format=FORMAT)
     total_tokens = int(calib.numel())

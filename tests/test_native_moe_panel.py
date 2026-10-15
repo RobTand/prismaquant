@@ -661,7 +661,7 @@ def test_raw_execution_freeze_uses_the_source_execution_contract(joined, source_
 
 
 def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
-    from prismaquant.measure_quant_cost import _packed_experts_forward_with_weights
+    from prismaquant.routed_experts import packed_experts_forward_with_weights
     class GlmLike(torch.nn.Module):
         num_experts=1
         def _apply_gate(self,value):
@@ -669,7 +669,7 @@ def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
             return torch.nn.functional.silu(gate.clamp(max=.5))*up.clamp(-1,1)
     x=torch.ones(1,4)
     gate_up=torch.cat((torch.eye(4),2*torch.eye(4))).unsqueeze(0)
-    out=_packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
+    out=packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
         torch.ones(1,1),gate_up,torch.eye(4).unsqueeze(0))
     assert torch.equal(out,torch.full((1,4),torch.nn.functional.silu(torch.tensor(.5)).item()))
 

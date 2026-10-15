@@ -7220,9 +7220,9 @@ def fill_packed_expert_cache_entries(
         is_packed_experts_module as _is_packed_experts_module,
         packed_experts_param_names as _packed_experts_param_names,
     )
-    from prismaquant.measure_quant_cost import (
+    from prismaquant.routed_experts import (
         derive_per_expert_activations,
-        _packed_experts_parent_module,
+        packed_experts_parent_module,
     )
     from prismaquant.native_render_codec import (
         compute_nvfp4_global_real,
@@ -7316,7 +7316,7 @@ def fill_packed_expert_cache_entries(
         # the visible enumeration, and the render assignment narrows only
         # the render (#145).
         eligible_experts_qnames.add(experts_qname)
-        parent = _packed_experts_parent_module(model, experts_qname)
+        parent = packed_experts_parent_module(model, experts_qname)
         for pn in _packed_experts_param_names(mod, profile):
             full = f"{experts_qname}.{pn}" if experts_qname else pn
             all_packed_fullnames.add(full)

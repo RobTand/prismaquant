@@ -3807,9 +3807,8 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
         from .routed_experts import (
             profile_declared_packed_expert_projections,
             resolve_routed_expert_profile,
-        )
-        from .measure_quant_cost import (
-            _packed_experts_parent_module, derive_per_expert_activations,
+            packed_experts_parent_module,
+            derive_per_expert_activations,
         )
         from .production_weight_cache import _PackedExpertActivationCollector
 
@@ -3830,7 +3829,7 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
                 input_kind[member.param_name] = packed_activation_input_kind(member.param_name)
             selected_by_module.setdefault(member.module_qname, []).append(member)
             routed_seen[name] = 0
-        parents = {name: _packed_experts_parent_module(model, name)
+        parents = {name: packed_experts_parent_module(model, name)
                    for name in selected_by_module}
         if shared_packed_inputs:
             for module_qname, selected in selected_by_module.items():

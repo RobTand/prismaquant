@@ -1115,10 +1115,10 @@ def packed_reference(experts_module, x, ids, weights, gate_up_weight, down_weigh
     The source module supplies its actual activation operation. Real preparation
     requires CUDA; this arithmetic helper can also exercise small CPU fixtures.
     """
-    from .measure_quant_cost import _packed_experts_forward_with_weights
+    from .routed_experts import packed_experts_forward_with_weights
     from .perturbed_x_cache import _activation_qdq
     _no_preclip()
-    return _packed_experts_forward_with_weights(
+    return packed_experts_forward_with_weights(
         experts_module, x, ids, weights, gate_up_weight, down_weight,
         input_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, input_unit),
         intermediate_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, intermediate_unit))

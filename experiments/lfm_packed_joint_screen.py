@@ -177,7 +177,7 @@ def main():
                     'boundary_metadata': raw_boundary['boundary_metadata'],
                     'source_execution_identity': result['reference_source_execution_identity'],
                     'calibration_subset': result['calibration_subset'], 'tensor_comparisons': checks}
-            from prismaquant.measure_quant_cost import derive_per_expert_activations
+            from prismaquant.routed_experts import derive_per_expert_activations
             from torch.nn import functional as F
             derived = derive_per_expert_activations(experts, hidden_states, parent)
             # The shared derivation orders rows by top-k slot then token;

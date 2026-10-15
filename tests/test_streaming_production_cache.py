@@ -120,11 +120,11 @@ class ToyMoE(nn.Module):
         self.experts = ToyExperts(HIDDEN, INTER, NUM_EXPERTS)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        from prismaquant.measure_quant_cost import _packed_router_topk
+        from prismaquant.routed_experts import packed_router_topk
 
         shp = x.shape
         xf = x.reshape(-1, x.shape[-1])
-        idx, w = _packed_router_topk(self.gate, xf)
+        idx, w = packed_router_topk(self.gate, xf)
         y = self.experts(xf, idx, w)
         return y.reshape(shp)
 

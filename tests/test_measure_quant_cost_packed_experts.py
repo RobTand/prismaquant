@@ -12,8 +12,11 @@ from prismaquant.measure_quant_cost import (
     _batched_quantize,
     _finalize_results,
     _measure_packed_experts,
-    _packed_experts_forward_with_weights,
-    _packed_router_topk,
+)
+
+from prismaquant.routed_experts import (
+    packed_experts_forward_with_weights,
+    packed_router_topk,
 )
 
 
@@ -208,9 +211,9 @@ def test_packed_experts_replay_matches_module_forward():
     model = TinyModel().eval()
     X = torch.randn(11, 16)
 
-    top_k_index, top_k_weights = _packed_router_topk(model.mlp.gate, X)
+    top_k_index, top_k_weights = packed_router_topk(model.mlp.gate, X)
     y_module = model.mlp.experts(X, top_k_index, top_k_weights)
-    y_replay = _packed_experts_forward_with_weights(
+    y_replay = packed_experts_forward_with_weights(
         model.mlp.experts,
         X,
         top_k_index,
@@ -277,7 +280,7 @@ def test_packed_experts_replay_honors_apply_gate_clamp():
     top_k_weights = torch.ones(13, 1)
 
     y_module = experts(X, top_k_index, top_k_weights)
-    y_replay = _packed_experts_forward_with_weights(
+    y_replay = packed_experts_forward_with_weights(
         experts,
         X,
         top_k_index,
@@ -296,7 +299,7 @@ def test_packed_router_topk_accepts_indices_weights_tuple_order():
             weights = torch.ones(hidden_states.size(0), 1)
             return torch.empty(hidden_states.size(0), 1), indices, weights
 
-    indices, weights = _packed_router_topk(SwappedRouter(), torch.randn(3, 16))
+    indices, weights = packed_router_topk(SwappedRouter(), torch.randn(3, 16))
 
     assert indices.dtype == torch.long
     assert torch.equal(indices, torch.zeros(3, 1, dtype=torch.long))
