@@ -96,3 +96,78 @@ Off-task prose fix: `_acquire_bulk_window` incorrectly documented an entered
 three-tuple and unresolved RAM covers. Separate commit 2c817fb691 describes the
 actual unentered four-tuple and current RAM-first cover selection. Its executable
 body is unchanged; source inspection is the verification.
+
+## Group acquisition ownership
+
+`staged_lease.enter_group_lease(entry_resolver, members, live_windows,
+counters=None)` now owns the complete existing RAM/SSD group acquisition policy.
+Its process-wide `EXACT_LEASE_COUNTERS` and `exact_lease_counters()` snapshot move
+with it. The activation single-entry increment uses that same owner record. Both
+production group callers migrate directly; one manual benchmark and three test
+files migrate the snapshot import. The old cache helper, counter and snapshot
+exports are deleted. The I/O engine has no private activation-cache dependency.
+
+RAM-first grouping, availability-only fallback to SSD, partial-cover per-entry
+refusal, entered-window cleanup and all counters keep their existing behavior.
+Group windows still belong to the callers' live-window cleanup until every read
+settles. Each member still opens through the SDK, independently verifies its
+bytes and closes its descriptor; borrowing a group never transfers its release
+obligation to a member. No parallel cache or lease manager is added.
+
+The read-only source comparison against c72f96e22e verifies the group transaction
+AST exactly after the public rename and removal of its same-owner import, and
+verifies the counter definition and snapshot exactly. The caller bodies differ
+only in import/name/documentation. SerializedEntryDigest, _read_exact_entry,
+load_verified_activation_cache_entry, calibration_data_hash and _seed_from remain
+exact executable declarations. These are review invariants, not substitute tests.
+The rerunnable source comparison is `reports/s1_group_source_invariants.py` in the
+external refactor directory.
+
+A new real-SDK behavior check first reads engine members through one borrowed
+group and observes that the pin remains live after each descriptor closes. It
+releases that group, then reads the same tensors through the activation path and
+observes two independent increments of the same owner snapshot. Real SDK counts
+must be exactly two acquisitions, two cover lookups and two releases. Existing
+PWC/activation tests continue to prove actual byte comparison, RAM/SSD grouping,
+partial-cover fallback, single-entry rereads, bad-copy refusal and parallel
+settlement. No source-parsing test replaces these checks, and no test was removed
+in S1: the touched existing tests assert actual SDK/byte/lifetime behavior.
+
+### Group verification and characterization
+
+PBd59c3ee0fc54, PBd29b55771162 and PBa37ec130b191 passed 261 tests across
+10 files. PB8774d2d87e40 passed the real produced-boundary group test; its
+37 other cases were intentionally deselected, not skipped. This unit totals
+262 passes, 0 skips. PB56fb8f5c4a75 compiled all eight touched Python files and
+ran the manual benchmark's actual counter reader in a fresh interpreter,
+obtaining the expected empty process record. Tests preserve the actual SDK
+and cache behavior; no test is replaced by an import-identity assertion.
+
+The initial group pbtest invocation refused a node ID as a discovery path,
+before any action or test ran. The corrected invocation uses file inputs and
+an explicit JSON -k selector for the bounded produced-boundary case. The failed
+discovery log remains `reports/s1-group-after.log` in the external refactor
+report directory. The admitted corrected outcomes are recorded separately.
+
+PBca7bc3bbac65 captured the before group fixture, PB48166b76a9fe captured
+after, and PB749530b36c54 compared their actual artifacts. Each arm runs eight
+iterations through both the exact activation and I/O-engine group paths over
+the same four deterministic tensors. All tensor digests, group results,
+serving/release event sequences, tier counters and SDK counts match. Each
+makes 16 acquisitions, 16 cover lookups and 16 releases, with no retained pin.
+Each arm contains eight torch CPU record spans, cProfile binary/text and
+10 actual Netdata samples, five per Spark, with no collection errors.
+
+Artifacts and SHA-256/size manifest are under
+`/mnt/shared/pq-refactor-20261014-native/s1-group-before-r2`,
+`s1-group-after` and `s1-group-pair-comparison.json`. Observed cProfile totals
+were 0.294493 s and 0.286523 s, with PB CPU masks [8] and [0]. The fixture
+characterizes CPU read/lease work on dl380g10, with simultaneous Netdata on
+both Sparks. The small sample, different masks and warm local fixture do
+not support a speed, GPU, residency throughput or energy-ranking claim.
+
+After the two S1 units, the live census has five acquire_entry_window sites
+and eight serving registrations in five modules. Distinct range, archive,
+wire-fallback and borrowed-group lifetimes remain intentional. A single
+universal eager bytes reader is not claimed. The accepted common whole-entry
+transaction and group acquisition policies each have one actual owner.

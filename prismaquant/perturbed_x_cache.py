@@ -1832,20 +1832,6 @@ class _ExactActivationPrefetch:
         return self._tensors[reference]
 
 
-#: How the strict exact-entry reader leased its windows, this process
-#: (PQ #997). ``windows_batched`` counts multi-entry lease windows and
-#: ``entries_batched`` the entries they served; ``entries_single`` counts
-#: entries leased one at a time, and ``batch_fallbacks`` the groups whose
-#: batched lease was refused and re-read one entry at a time.
-EXACT_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
-                        "entries_single": 0, "batch_fallbacks": 0}
-
-
-def exact_lease_counters() -> dict:
-    """A copy of :data:`EXACT_LEASE_COUNTERS` for a report."""
-    return dict(EXACT_LEASE_COUNTERS)
-
-
 _EXACT_READ_POOL = None
 _EXACT_READ_POOL_THREADS = 0
 _EXACT_READ_POOL_LOCK = threading.Lock()
@@ -2007,81 +1993,6 @@ def _strict_lease_groups(references, resolver, *, deadline=None):
     return list(groups.values())
 
 
-def _enter_group_lease(entry_resolver, members, live_windows, counters=None):
-    """Pin one group in at most two windows (RAM, then SSD), or ``None``.
-
-    The group-granular form of ``acquire_entry_window``'s RAM-first rule.
-    Entries offering a RAM copy share one RAM window when RAM is allowed,
-    and the rest share one SSD window. When the RAM cover lookup refuses as
-    availability for the whole set (the epoch moved, nothing is published
-    at it, the tier is not announced), each of those entries records the
-    RAM fallback and joins the SSD window, which is what the single-entry
-    leg does for each of them.
-
-    Every other refusal returns ``None`` after releasing whatever this call
-    pinned, and the caller re-reads the group one entry at a time, keeping
-    the single-entry refusal kinds exactly. This covers a partial RAM cover,
-    any refusal of the SSD lookup, and any refusal to enter. A batched
-    lookup that misses one key refuses the whole set as
-    ``source-coverage-gap`` (integrity), where that entry alone would
-    refuse ``unpublished`` (availability). A read is never served on a
-    batched proof alone: the SDK re-verifies every key under the ownership
-    lock at acquire, and every key is still opened through the SDK under
-    the pin.
-
-    ``members`` is ``[(ref, staged entry), ...]`` where ``ref.path`` is the
-    declared file. ``counters`` is the report this call adds to
-    (:data:`EXACT_LEASE_COUNTERS` unless the caller keeps its own, as the
-    PWC retained window does).
-    """
-    from .staged_lease import LeaseRefused, acquire_entries_window
-    if counters is None:
-        counters = EXACT_LEASE_COUNTERS
-    from .staged_tier_policy import tier_is_allowed
-    ram = ([member for member in members if member[1].get("ram_path") is not None]
-           if tier_is_allowed("ram") else [])
-    ssd = [member for member in members if member not in ram]
-    assignments, entered = {}, []
-
-    def items(subset):
-        return [(Path(ref.path), staged) for ref, staged in subset]
-
-    try:
-        plans = []
-        if ram:
-            try:
-                plans.append(acquire_entries_window(entry_resolver, items(ram), tier="ram")
-                             + (ram,))
-            except LeaseRefused as refusal:
-                # ``source-coverage-gap`` (a partial RAM cover) is classed
-                # integrity, so it takes the per-entry path below.
-                if refusal.kind != "availability":
-                    raise
-                for ref, _staged in ram:
-                    entry_resolver.record_ram_fallback(Path(ref.path), str(refusal))
-                ssd = list(members)
-        if ssd:
-            plans.append(acquire_entries_window(entry_resolver, items(ssd), tier="ssd")
-                         + (ssd,))
-        for lease_window, keys, subset in plans:
-            lease_window.__enter__()
-            # Owned by the caller's cleanup from the moment it is entered,
-            # so a failed release below can never strand the pin.
-            live_windows.append(lease_window)
-            entered.append(lease_window)
-            for (ref, _staged), key in zip(subset, keys):
-                assignments[ref] = (lease_window, key)
-    except LeaseRefused:
-        for lease_window in entered:
-            lease_window.__exit__(None, None, None)
-            live_windows.remove(lease_window)
-        counters["batch_fallbacks"] += 1
-        return None
-    counters["windows_batched"] += len(entered)
-    counters["entries_batched"] += len(members)
-    return assignments
-
-
 def _exact_entry_prechecks(ref, *, expected_session, session_for_reference, path=None):
     """The declared-file fences every read runs first: ``(path, stat, signature)``.
 
@@ -2214,6 +2125,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     it has returned. A refusal is the one the serial read raises: the
     first failing entry in window order, with its kind unchanged.
     """
+    from .staged_lease import EXACT_LEASE_COUNTERS, enter_group_lease
+
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
         raise TypeError("exact activation prefetch requires immutable references")
@@ -2322,7 +2235,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         """
         checked = _run_in_order(pool, [partial(_exact_entry_prechecks, ref, **prechecks)
                                        for ref, _ in members])
-        assignments = (_enter_group_lease(entry_resolver, members, live_windows)
+        assignments = (enter_group_lease(entry_resolver, members, live_windows)
                        if len(members) > 1 else None)
         if assignments is None:
             for ref, _staged in members:

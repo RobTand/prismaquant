@@ -886,7 +886,7 @@ def test_own_boundary_group_publishes_stages_and_reads_back(
     assert storage.telemetry["produced_groups_published"] == 0, (
         "publishing at write time would spend the stage credit the first "
         "read needs")
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     with _fleet(q, tmp_path):
         _strict(monkeypatch, env, pb_repo, q)
         leases_before = exact_lease_counters()

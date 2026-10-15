@@ -603,8 +603,8 @@ def pin_group(members, live_leases, *, counters=None):
     retiring mover, the per-entry cover lookup, and the release), paid once
     per 16 MiB file. PrismaBuild's ``acquire`` pins a whole key set under one
     ownership-lock hold (PQ #997), so a group's entries are pinned together
-    here, by the same ``_enter_group_lease`` the exact activation cache uses:
-    RAM copies in one window and the rest in one SSD window.
+    here, by the same ``staged_lease.enter_group_lease`` the exact activation
+    cache uses: RAM copies in one window and the rest in one SSD window.
 
     ``members`` is ``[(declared path, expected sha256), ...]``. Returns
     ``{declared path: (lease window, map key, staged entry)}`` for the reads
@@ -635,8 +635,8 @@ def pin_group(members, live_leases, *, counters=None):
         pinned.append((_LeaseRef(path), staged))
     if len(pinned) < 2:
         return None
-    from .perturbed_x_cache import _enter_group_lease
-    assignments = _enter_group_lease(resolver, pinned, live_leases, counters=counters)
+    from .staged_lease import enter_group_lease
+    assignments = enter_group_lease(resolver, pinned, live_leases, counters=counters)
     if assignments is None:
         return None
     staged_by_path = {ref.path: staged for ref, staged in pinned}
@@ -1418,7 +1418,7 @@ class IOEngine:
         and may wait for them, and a set ``cancel`` asks it to stop (raising
         ``CancelledError``). The stream starts reading at once; use it as a
         context manager so it is closed. ``lease_counters`` is the report a
-        group pin adds to (``perturbed_x_cache._enter_group_lease``).
+        group pin adds to (``staged_lease.enter_group_lease``).
         """
         stream = ReadStream(self, entries, budget, ready, lease_counters)
         with stream._cond:

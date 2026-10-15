@@ -2750,7 +2750,7 @@ def _read_exact(refs):
 
 
 def _lease_deltas(before):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     return {name: count - before[name] for name, count in exact_lease_counters().items()}
 
 
@@ -2787,7 +2787,7 @@ def _ram_fixture(tmp_path, monkeypatch, refs, *, ram_offered, ram_published):
 
 
 def test_an_exact_window_takes_one_lease_for_all_its_entries(tmp_path, monkeypatch):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 4)
     root = _stage_root(tmp_path)
     resolver, consumer, _mover = _leased_fixture(
@@ -2826,7 +2826,7 @@ def test_an_exact_window_takes_one_lease_for_all_its_entries(tmp_path, monkeypat
 
 def test_ram_entries_share_a_ram_window_and_the_rest_an_ssd_window(
         tmp_path, monkeypatch):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 3)
     resolver, consumer, rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0, 1])
@@ -2850,7 +2850,7 @@ def test_an_unpublished_ram_tier_folds_the_window_into_one_ssd_lease(
     """No RAM mover published anything at the announced epoch: every entry
     records the RAM fallback, exactly as the single-entry leg does, and the
     whole window leases once on SSD."""
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 3)
     resolver, consumer, rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1, 2], ram_published=[])
@@ -2875,7 +2875,7 @@ def test_a_partial_ram_cover_rereads_the_window_one_entry_at_a_time(
     the pair as a coverage gap (integrity) where each entry alone answers
     precisely, so the window falls back: the published entry serves from
     RAM and the other falls to SSD, as they did before #997."""
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 2)
     resolver, consumer, _rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0])
@@ -2959,7 +2959,7 @@ def _sizes(refs):
 
 
 def exact_lease_counters_snapshot():
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     return exact_lease_counters()
 
 
@@ -3114,7 +3114,7 @@ def test_a_checkpoint_plane_streams_in_windows_with_one_lease_each(tmp_path, mon
     from the pool, the charges never exceed the budget and all come back,
     and no pin outlives the load.
     """
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     record, tensors = _write_plane_checkpoint(tmp_path)
     resolver, consumer, _paths = _stage_checkpoint_entries(tmp_path, monkeypatch, record)
     calls = _count_sdk_calls(monkeypatch, _pb()[0])

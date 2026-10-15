@@ -13,6 +13,13 @@ precedence. Measured and PACT contexts still reuse one loaded run and retain
 their scientific evidence, exact re-solve and no-overwrite replay contracts.
 Whole-artifact and runtime pricing remain with their existing owners.
 
+Re-stamped 2026-10-15: `staged_lease` owns the existing RAM/SSD group
+acquisition transaction and its one process-wide exact lease counter record.
+The I/O engine and exact activation reader use that owner directly. Group
+pins still outlive parallel member reads, descriptors close before exact-ref
+release, and partial-cover fallback retains per-entry refusal kinds.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
+
 Re-stamped 2026-10-15: `staged_whole_file` owns the checkpoint whole-entry
 read transaction as well as existing metadata/sealed material reads. The checkpoint
 keeps manifest admission and independent digest verification; the reader returns
@@ -5150,7 +5157,7 @@ retained_window` now does each of these once per window:
 
 - **One reader lease.** Under the strict tier policy, `_enter_window_leases`
   pins every staged render that has a bound digest through
-  `perturbed_x_cache._enter_group_lease`, the batched lease the exact
+  `staged_lease.enter_group_lease`, the batched lease the exact
   activation cache uses (PQ #997): RAM copies share one lease window and the
   rest share one SSD window. Each load still opens its file through the SDK
   under that pin, reads the entry the pin was built from, and hashes the
