@@ -845,7 +845,7 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     stays on the per-group dynamic RTN (see the registration below) until
     a static-scale-aware emulation exists.
     """
-    from . import export_native_compressed as enc
+    from . import native_render_codec as _native_render_codec
 
     orig_shape = x.shape
     in_features = int(orig_shape[-1])
@@ -853,7 +853,7 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     pad = (-in_features) % 16
     if pad:
         flat = torch.nn.functional.pad(flat, (0, pad))
-    out = enc._rtn_dequant_nvfp4(flat, group_size=16)
+    out = _native_render_codec._rtn_dequant_nvfp4(flat, group_size=16)
     if pad:
         out = out[:, :in_features]
     return out.reshape(orig_shape).to(x.dtype)

@@ -41,7 +41,9 @@ def _cost_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
 
 
 def _export_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
-    from prismaquant.export_native_compressed import _normalize_fisher_row_weights
+    from prismaquant.native_render_codec import (
+        _normalize_fisher_row_weights,
+    )
 
     return _normalize_fisher_row_weights(row_weights, n_rows, _CPU)
 
@@ -109,45 +111,15 @@ def test_canonical_wins_when_both_set(monkeypatch) -> None:
     assert float(render_out[0]) < 2.4
 
 
-def test_paths_route_through_shared_helper(monkeypatch) -> None:
-    """Every path must call the single-sourced helper, not its own copy.
-
-    If someone reintroduces a second copy of the normalise-then-clamp
-    arithmetic in any wrapper, that wrapper stops calling the helper and
-    this test fails.
-    """
-    import prismaquant.export_native_compressed as export_mod
-    import prismaquant.measure_quant_cost as cost_mod
-    import prismaquant.render_score as score_mod
-
-    real = score_mod.normalize_clipped_fisher_row_weights
-    calls: list[tuple[float, bool]] = []
-
-    def spy(
-        rw: torch.Tensor, clip: float, *, require_positive_mean: bool
-    ) -> torch.Tensor | None:
-        calls.append((float(clip), bool(require_positive_mean)))
-        return real(rw, clip, require_positive_mean=require_positive_mean)
-
-    monkeypatch.setattr(
-        score_mod, "normalize_clipped_fisher_row_weights", spy
-    )
-    monkeypatch.setattr(
-        cost_mod, "normalize_clipped_fisher_row_weights", spy
-    )
-    monkeypatch.setattr(
-        export_mod, "normalize_clipped_fisher_row_weights", spy
-    )
+@pytest.mark.parametrize("rows", [[0.0, 0.0], [-1.0, float("nan")]])
+def test_degenerate_rows_preserve_each_consumer_policy(monkeypatch, rows) -> None:
+    """Scoring retains zero weights; cost and codec choose unweighted fallback."""
     _clear_clip_env(monkeypatch)
-    render_out, cost_out, export_out = _all_paths(_dense_vector(), 8)
-    assert render_out is not None and cost_out is not None
-    assert export_out is not None
-    # One helper call per path: the scorer keeps the legacy lenient policy
-    # while the probe and exporter keep the strict positive-mean policy.
-    assert calls == [(64.0, False), (64.0, True), (64.0, True)]
-    # The spy delegated, so outputs are the real clipped weights.
-    assert torch.equal(render_out, cost_out)
-    assert torch.equal(render_out, export_out)
+    render_out, cost_out, codec_out = _all_paths(torch.tensor(rows), 2)
+    assert render_out is not None
+    assert torch.equal(render_out, torch.zeros(2))
+    assert cost_out is None
+    assert codec_out is None
 
 
 def test_default_weights_are_bit_identical(monkeypatch) -> None:

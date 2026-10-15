@@ -6,6 +6,8 @@ E2M1 codes in the same low-nibble/high-nibble layout used by the exporter.
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import torch
 import triton
 import triton.language as tl
@@ -81,13 +83,13 @@ def nvfp4_pack_weight(
 
     w_float = weight.detach().float()
     grouped = w_float.reshape(rows, cols // _NVFP4_GROUP_SIZE, _NVFP4_GROUP_SIZE)
-    scale_real, global_real = enc._select_nvfp4_pack_scales_and_global(grouped)
-    codec = enc._nvfp4_quantize_grouped_codec(
+    scale_real, global_real = _native_render_codec._select_nvfp4_pack_scales_and_global(grouped)
+    codec = _native_render_codec._nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=scale_real,
     )
-    eff_scale = enc._nvfp4_effective_scale_from_fp8(
+    eff_scale = _native_render_codec._nvfp4_effective_scale_from_fp8(
         codec.scale, global_real,
     )
     fp4_indices = codec.indices.reshape(rows, cols)

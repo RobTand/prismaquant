@@ -258,7 +258,7 @@ def _render_dense_layer(
         # the exporter (the igs convention is a ±14-37% served-KL knob).
         export_scale = None
         if max_abs is not None and max_abs > 0:
-            from prismaquant.export_native_compressed import (
+            from prismaquant.native_render_codec import (
                 _nvfp4_input_global_scale_from_max_abs,
             )
             export_scale = _nvfp4_input_global_scale_from_max_abs(

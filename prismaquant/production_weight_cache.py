@@ -65,6 +65,8 @@ Usage:
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -372,7 +374,7 @@ class ProductionWeightCache:
     PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE=0).  We store ``max_abs``
     directly here because that's the value the act-clip path needs;
     consumers convert via
-    ``export_native_compressed._nvfp4_input_global_scale_from_max_abs``.
+    ``native_render_codec._nvfp4_input_global_scale_from_max_abs``.
     """
     weights: dict[tuple[str, str], object]  # tensor OR str(path)
     levers: dict[str, bool]
@@ -1956,32 +1958,30 @@ def _temporarily_install_act_aware(
 ):
     """Install module-level state expected by ``_quantize_2d``.
 
-    The export module reads ``_CACHED_ACTIVATIONS`` and ``_ACT_AWARE_FLAGS``
-    from its own globals to decide what passes to run.  We mutate these
-    inside a try/finally so concurrent export work isn't disturbed.
+    The codec reads ``_CACHED_ACTIVATIONS`` and ``_ACT_AWARE_FLAGS`` from
+    its globals. Restore the prior state after this render.
     """
-    from prismaquant import export_native_compressed as enc
 
-    prev_cache = enc._CACHED_ACTIVATIONS
-    prev_flags = dict(enc._ACT_AWARE_FLAGS)
-    prev_scale_rule = enc._NVFP4_SCALE_RULE
-    enc._CACHED_ACTIVATIONS = _DictActivations(activations)
-    enc._ACT_AWARE_FLAGS = {
+    prev_cache = _native_render_codec._CACHED_ACTIVATIONS
+    prev_flags = dict(_native_render_codec._ACT_AWARE_FLAGS)
+    prev_scale_rule = _native_render_codec._NVFP4_SCALE_RULE
+    _native_render_codec._CACHED_ACTIVATIONS = _DictActivations(activations)
+    _native_render_codec._ACT_AWARE_FLAGS = {
         "gptq": bool(levers.get("gptq", True)),
         "scale_sweep": bool(levers.get("scale_sweep", False)),
         "static_act_order": bool(levers.get("static_act_order", False)),
         "joint_scale_opt": bool(levers.get("joint_scale_opt", False)),
     }
-    enc._NVFP4_SCALE_RULE = enc.resolve_nvfp4_scale_rule(
+    _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule(
         str(levers.get("nvfp4_scale_rule", "static_6"))
     )
     try:
         yield
     finally:
-        enc._CACHED_ACTIVATIONS = prev_cache
-        enc._ACT_AWARE_FLAGS.clear()
-        enc._ACT_AWARE_FLAGS.update(prev_flags)
-        enc._NVFP4_SCALE_RULE = prev_scale_rule
+        _native_render_codec._CACHED_ACTIVATIONS = prev_cache
+        _native_render_codec._ACT_AWARE_FLAGS.clear()
+        _native_render_codec._ACT_AWARE_FLAGS.update(prev_flags)
+        _native_render_codec._NVFP4_SCALE_RULE = prev_scale_rule
 
 
 class _DictActivations:
@@ -2102,9 +2102,9 @@ def _fused_sibling_leaf_mapping_from_profile(profile) -> dict[str, tuple[str, ..
 
 
 def _damp_sweep_enabled() -> bool:
-    # lazy import: production_weight_cache <-> export_native_compressed
-    # are mutually lazy to avoid import cycles
-    from prismaquant.export_native_compressed import gptq_damp_sweep_enabled
+    from prismaquant.native_render_codec import (
+        gptq_damp_sweep_enabled,
+    )
     return gptq_damp_sweep_enabled()
 
 
@@ -2133,14 +2133,13 @@ def _env_float(name: str, default: float, *, lo: float, hi: float) -> float:
 
 @contextmanager
 def _temporary_nvfp4_scale_rule(rule: str):
-    from prismaquant import export_native_compressed as enc
 
-    previous = enc._NVFP4_SCALE_RULE
-    enc._NVFP4_SCALE_RULE = enc.resolve_nvfp4_scale_rule(rule)
+    previous = _native_render_codec._NVFP4_SCALE_RULE
+    _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule(rule)
     try:
         yield
     finally:
-        enc._NVFP4_SCALE_RULE = previous
+        _native_render_codec._NVFP4_SCALE_RULE = previous
 
 def _store_rendered_weight_entry(
     *,
@@ -2283,9 +2282,8 @@ def _gate_activation_matrix(
     """
     if acts_for_render is None:
         return None
-    from prismaquant import export_native_compressed as enc
 
-    return enc._activation_matrix_for_gptq(
+    return _native_render_codec._activation_matrix_for_gptq(
         acts_for_render,
         int(cols),
         device=device,
@@ -3239,10 +3237,9 @@ def _render_nvfp4_progressive_candidate(
     include_gptq: bool,
     include_scale_sweep: bool,
 ) -> torch.Tensor:
-    from prismaquant import export_native_compressed as enc
 
     with _temporary_nvfp4_scale_rule(scale_rule):
-        current = enc._rtn_dequant_nvfp4(
+        current = _native_render_codec._rtn_dequant_nvfp4(
             weight_scaled,
             group_size=16,
             global_real_override=joint_global_real,
@@ -3251,7 +3248,7 @@ def _render_nvfp4_progressive_candidate(
             return current
         if include_gptq:
             if _damp_sweep_enabled():
-                current = enc._gptq_obs_rounding_nvfp4_swept(
+                current = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
                     weight_scaled,
                     activations_scaled,
                     group_size=16,
@@ -3267,11 +3264,11 @@ def _render_nvfp4_progressive_candidate(
                     ),
                 )
             else:
-                current = enc._gptq_obs_rounding_nvfp4(
+                current = _native_render_codec._gptq_obs_rounding_nvfp4(
                     weight_scaled,
                     activations_scaled,
                     group_size=16,
-                    damp=enc._resolve_gptq_damp_for_role(qname),
+                    damp=_native_render_codec._resolve_gptq_damp_for_role(qname),
                     global_real_override=joint_global_real,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
@@ -3284,7 +3281,7 @@ def _render_nvfp4_progressive_candidate(
                     ),
                 )
         if include_scale_sweep:
-            current = enc._scale_sweep_nvfp4(
+            current = _native_render_codec._scale_sweep_nvfp4(
                 current,
                 activations_scaled,
                 group_size=16,
@@ -3309,12 +3306,11 @@ def _render_nvfp4_progressively(
     fisher_row_weights: torch.Tensor | None,
     gate_trace: list[dict[str, object]] | None,
 ) -> torch.Tensor:
-    from prismaquant import export_native_compressed as enc
 
-    requested_rule = enc.resolve_nvfp4_scale_rule(
+    requested_rule = _native_render_codec.resolve_nvfp4_scale_rule(
         str(levers.get("nvfp4_scale_rule", "static_6"))
     )
-    f6_enabled = requested_rule == enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+    f6_enabled = requested_rule == _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
     gptq_enabled = bool(levers.get("gptq", True))
     scale_sweep_enabled = bool(levers.get("scale_sweep", False))
     static_act_order_enabled = bool(
@@ -3331,7 +3327,7 @@ def _render_nvfp4_progressively(
         if enabled
     )
     gptq_scale_rule = (
-        enc.NVFP4_SCALE_RULE_JOINT_MSE
+        _native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE
         if joint_scale_opt_enabled
         else None
     )
@@ -3400,7 +3396,7 @@ def _render_nvfp4_progressively(
             has_gptq=bool(include_gptq),
         )
 
-    static_rule = enc.NVFP4_SCALE_RULE_STATIC_6
+    static_rule = _native_render_codec.NVFP4_SCALE_RULE_STATIC_6
     current = candidate(
         label="rtn_static_6",
         scale_rule=static_rule,
@@ -3473,7 +3469,7 @@ def _render_nvfp4_progressively(
             candidates=[
                 candidate(
                     label="four_over_six",
-                    scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                    scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                     package=("four_over_six",),
                     include_gptq=False,
                     include_scale_sweep=False,
@@ -3500,11 +3496,11 @@ def _render_nvfp4_progressively(
         if (
             f6_enabled
             and not joint_scale_opt_enabled
-            and current.scale_rule != enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+            and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
             packages.append(candidate(
                 label=f"four_over_six+{gptq_name}",
-                scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                 package=(
                     (*gptq_modifiers, "four_over_six", gptq_name, "gptq")
                     if gptq_name != "gptq" else
@@ -3544,7 +3540,7 @@ def _render_nvfp4_progressively(
         if (
             f6_enabled
             and not joint_scale_opt_enabled
-            and current.scale_rule != enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+            and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
             gptq_name = "fisher_gptq" if fisher_row_weights is not None else "gptq"
             include_gptq = bool(gptq_enabled)
@@ -3557,7 +3553,7 @@ def _render_nvfp4_progressively(
             pkg.append("scale_sweep")
             scale_candidates.append(candidate(
                 label="+".join(pkg),
-                scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                 package=tuple(pkg),
                 include_gptq=include_gptq,
                 include_scale_sweep=True,
@@ -3865,7 +3861,6 @@ def render_production_weight(
             and bool(levers.get("gptq", True))
             and acts_for_render is not None
         ):
-            from prismaquant import export_native_compressed as enc
 
             joint_scale_opt = bool(
                 levers.get("joint_scale_opt", False)
@@ -3895,7 +3890,7 @@ def render_production_weight(
                 )))
                 if fmt == "MXFP4":
                     if use_damp_sweep:
-                        _q, _s, candidate = enc._gptq_obs_rounding_mxfp4_swept(
+                        _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4_swept(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3905,7 +3900,7 @@ def render_production_weight(
                             static_act_order=use_static_act_order,
                         )
                     else:
-                        _q, _s, candidate = enc._gptq_obs_rounding_mxfp4(
+                        _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3915,7 +3910,7 @@ def render_production_weight(
                             static_act_order=use_static_act_order,
                         )
                 elif use_damp_sweep:
-                    _q, _s, candidate = enc._gptq_obs_rounding_fp8_like_swept(
+                    _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like_swept(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3927,7 +3922,7 @@ def render_production_weight(
                         static_act_order=use_static_act_order,
                     )
                 else:
-                    _q, _s, candidate = enc._gptq_obs_rounding_fp8_like(
+                    _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3959,7 +3954,7 @@ def render_production_weight(
             and acts_for_render is not None
         ):
             if fmt == "MXFP8_E4M3":
-                from prismaquant.export_native_compressed import (
+                from prismaquant.native_render_codec import (
                     _mxfp8_scale_sweep_quantize,
                 )
 
@@ -3972,7 +3967,7 @@ def render_production_weight(
                     fisher_row_weights=fisher_row_weights,
                 )
             else:
-                from prismaquant.export_native_compressed import (
+                from prismaquant.native_render_codec import (
                     _fp8_dynamic_scale_sweep_quantize,
                 )
 
@@ -3998,7 +3993,9 @@ def render_production_weight(
             return candidate.weight.contiguous()
         return current.weight.contiguous()
 
-    from prismaquant.export_native_compressed import _quantize_2d
+    from prismaquant.native_render_codec import (
+        _quantize_2d,
+    )
 
     with _temporarily_install_act_aware(activations, levers):
         result = _quantize_2d(
@@ -4046,7 +4043,7 @@ def _resolve_production_render_levers(
         # Provenance: which fixed damp the no-sweep renders used
         # (PRISMAQUANT_GPTQ_DAMP, default 0.01) — without this, two
         # fixed-damp caches are metadata-indistinguishable.
-        from prismaquant.export_native_compressed import (
+        from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
         )
         levers.setdefault("gptq_fixed_damp", _resolve_gptq_fixed_damp())
@@ -4066,7 +4063,7 @@ def _resolve_production_render_levers(
         "fisher_gptq",
         _env_flag("PRISMAQUANT_FISHER_WEIGHTED_GPTQ", False),
     )
-    from prismaquant.export_native_compressed import (
+    from prismaquant.native_render_codec import (
         NVFP4_SCALE_RULE_ENV,
         NVFP4_SCALE_RULE_JOINT_MSE,
         resolve_nvfp4_scale_rule,
@@ -6308,7 +6305,7 @@ def fill_production_weight_cache(
         # correct convention so the metadata is honest in case future
         # code consumes it.  Routed through the export helper so it
         # tracks PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE (audit C1).
-        from prismaquant.export_native_compressed import (
+        from prismaquant.native_render_codec import (
             _nvfp4_input_global_scale_from_max_abs,
         )
         export_scale = (
@@ -7328,9 +7325,11 @@ def fill_packed_expert_cache_entries(
         derive_per_expert_activations,
         _packed_experts_parent_module,
     )
+    from prismaquant.native_render_codec import (
+        compute_nvfp4_global_real,
+    )
     from prismaquant.export_native_compressed import (
         _split_packed_expert_tensor,
-        compute_nvfp4_global_real,
     )
     from prismaquant import format_registry as fr
 
@@ -7930,7 +7929,9 @@ def fill_packed_expert_cache_entries(
             from prismaquant.export_batched_gptq import (
                 gptq_obs_rounding_nvfp4_batched,
             )
-            from prismaquant.export_native_compressed import _rtn_dequant_nvfp4
+            from prismaquant.native_render_codec import (
+                _rtn_dequant_nvfp4,
+            )
             src = packed_param.to(device=device, dtype=torch.float32)
             hidden_in = packed_param.shape[2]
             # Split each expert's routed rows into a RENDER set (fit GPTQ) and a

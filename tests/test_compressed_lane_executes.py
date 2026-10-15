@@ -29,6 +29,8 @@ old A-side price.
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 from copy import deepcopy
 
 import pytest
@@ -51,7 +53,7 @@ def test_scheme_table_derivation_equals_the_lane_spec():
     )
 
     expected = {
-        enc._canonical_export_format(fmt)
+        _native_render_codec._canonical_export_format(fmt)
         for fmt, scheme in enc.FORMAT_SCHEME.items()
         if "input_activations" in scheme
     }

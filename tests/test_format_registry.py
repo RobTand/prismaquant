@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant.export_native_compressed import (
+from prismaquant.native_render_codec import (
     _mxfp8_dequantize_2d,
     _rtn_dequant_nvfp4,
     quantize_dequantize_fp8_dynamic,
@@ -189,8 +191,8 @@ def test_mx_e8m0_rtn_matches_export_scale_rounding():
 def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
     import prismaquant.export_native_compressed as enc
 
-    previous = enc._NVFP4_SCALE_RULE
-    monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", enc.NVFP4_SCALE_RULE_STATIC_6)
+    previous = _native_render_codec._NVFP4_SCALE_RULE
+    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", _native_render_codec.NVFP4_SCALE_RULE_STATIC_6)
     try:
         cases = [
             torch.linspace(-3.7, 3.7, steps=64, dtype=torch.float32).reshape(4, 16)
@@ -205,15 +207,15 @@ def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
 
             assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:
-        monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", previous)
+        monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", previous)
 
 
 def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
     # WEIGHTS follow the export codec (one rendering everywhere).
     import prismaquant.export_native_compressed as enc
 
-    previous = enc._NVFP4_SCALE_RULE
-    monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", enc.NVFP4_SCALE_RULE_STATIC_6)
+    previous = _native_render_codec._NVFP4_SCALE_RULE
+    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", _native_render_codec.NVFP4_SCALE_RULE_STATIC_6)
     try:
         torch.manual_seed(23)
         x = torch.randn(2, 5, 32, dtype=torch.float32) * 2.0
@@ -225,7 +227,7 @@ def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
 
         assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:
-        monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", previous)
+        monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", previous)
 
 
 def test_nvfp4_activation_emulation_is_batch_independent():

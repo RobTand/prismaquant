@@ -17,6 +17,8 @@ GPTQ/scale-sweep/AR treatment at export. Covers:
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import argparse
 import contextlib
 import io
@@ -508,16 +510,16 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
         # Cache a fake activation tensor keyed by recipe name.
         fake_acts = torch.randn(64, 32, dtype=torch.float32)
 
-        prev_cache = exp._CACHED_ACTIVATIONS
+        prev_cache = _native_render_codec._CACHED_ACTIVATIONS
         try:
-            exp._CACHED_ACTIVATIONS = {visual_name: fake_acts}
-            out = exp._quantize_2d(
+            _native_render_codec._CACHED_ACTIVATIONS = {visual_name: fake_acts}
+            out = _native_render_codec._quantize_2d(
                 W, "NVFP4",
                 linear_name=visual_name,
                 gptq_enabled=True,
             )
         finally:
-            exp._CACHED_ACTIVATIONS = prev_cache
+            _native_render_codec._CACHED_ACTIVATIONS = prev_cache
         # NVFP4 path emits the full triple; we just confirm the call returned
         # a valid compressed tensor structure when activations come from the
         # module-level cache.
@@ -533,18 +535,18 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
 
         visual_name = "model.visual.merger.mlp.0"
         W = torch.randn(32, 32, dtype=torch.bfloat16)
-        prev_cache = exp._CACHED_ACTIVATIONS
+        prev_cache = _native_render_codec._CACHED_ACTIVATIONS
         try:
             # Set cache but without this key.
-            exp._CACHED_ACTIVATIONS = {"some.other.linear":
+            _native_render_codec._CACHED_ACTIVATIONS = {"some.other.linear":
                                        torch.randn(4, 32)}
-            out = exp._quantize_2d(
+            out = _native_render_codec._quantize_2d(
                 W, "NVFP4",
                 linear_name=visual_name,
                 gptq_enabled=True,
             )
         finally:
-            exp._CACHED_ACTIVATIONS = prev_cache
+            _native_render_codec._CACHED_ACTIVATIONS = prev_cache
         self.assertIn("weight_packed", out)
 
     def test_quantize_2d_multimodal_activation_reuse_body_path(self):
@@ -557,22 +559,22 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
         W = torch.randn(32, 32, dtype=torch.bfloat16)
         acts = torch.randn(64, 32, dtype=torch.float32)
 
-        prev = exp._CACHED_ACTIVATIONS
+        prev = _native_render_codec._CACHED_ACTIVATIONS
         try:
-            exp._CACHED_ACTIVATIONS = {
+            _native_render_codec._CACHED_ACTIVATIONS = {
                 "model.visual.blocks.0.mlp.fc1": acts,
                 "model.layers.0.mlp.gate_proj": acts,
             }
-            visual = exp._quantize_2d(
+            visual = _native_render_codec._quantize_2d(
                 W, "NVFP4", linear_name="model.visual.blocks.0.mlp.fc1",
                 gptq_enabled=True,
             )
-            body = exp._quantize_2d(
+            body = _native_render_codec._quantize_2d(
                 W, "NVFP4", linear_name="model.layers.0.mlp.gate_proj",
                 gptq_enabled=True,
             )
         finally:
-            exp._CACHED_ACTIVATIONS = prev
+            _native_render_codec._CACHED_ACTIVATIONS = prev
         self.assertEqual(visual["weight_packed"].shape,
                          body["weight_packed"].shape)
 

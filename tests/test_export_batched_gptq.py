@@ -8,13 +8,15 @@ different reduction tree than the per-Linear sequential path).
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import pytest
 from unittest import mock
 
 torch = pytest.importorskip("torch")
 
 import prismaquant.export_native_compressed as enc
-from prismaquant.export_native_compressed import (
+from prismaquant.native_render_codec import (
     _gptq_obs_rounding_nvfp4,
     _rtn_dequant_nvfp4,
     _scale_sweep_nvfp4,
@@ -202,9 +204,9 @@ def test_batched_paths_match_per_linear_with_four_over_six(seeded):
     weights, activations_list = _make_inputs(E, out_features, in_features, T=96)
     reference_weights = weights.clone()
 
-    prev = enc._NVFP4_SCALE_RULE
+    prev = _native_render_codec._NVFP4_SCALE_RULE
     try:
-        enc._NVFP4_SCALE_RULE = "four_over_six_mse"
+        _native_render_codec._NVFP4_SCALE_RULE = "four_over_six_mse"
         per_gptq = torch.stack([
             _gptq_obs_rounding_nvfp4(
                 weights[e], activations_list[e], group_size=16,
@@ -230,7 +232,7 @@ def test_batched_paths_match_per_linear_with_four_over_six(seeded):
             expert_chunk=2,
         )
     finally:
-        enc._NVFP4_SCALE_RULE = prev
+        _native_render_codec._NVFP4_SCALE_RULE = prev
 
     assert torch.allclose(per_gptq, batch_gptq, atol=1e-4, rtol=1e-3)
     assert torch.allclose(per_sweep, batch_sweep, atol=1e-4, rtol=1e-3)
@@ -294,9 +296,9 @@ def test_gptq_batched_matches_per_linear_with_lift_options(seeded):
     E, out_features, in_features = 3, 24, 48
     weights, activations_list = _make_inputs(E, out_features, in_features, T=96)
 
-    prev = enc._NVFP4_SCALE_RULE
+    prev = _native_render_codec._NVFP4_SCALE_RULE
     try:
-        enc._NVFP4_SCALE_RULE = enc.NVFP4_SCALE_RULE_JOINT_MSE
+        _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE
         per_gptq = torch.stack([
             _gptq_obs_rounding_nvfp4(
                 weights[e],
@@ -316,7 +318,7 @@ def test_gptq_batched_matches_per_linear_with_lift_options(seeded):
             joint_scale_opt=True,
         )
     finally:
-        enc._NVFP4_SCALE_RULE = prev
+        _native_render_codec._NVFP4_SCALE_RULE = prev
 
     assert torch.allclose(per_gptq, batch_gptq, atol=1e-5, rtol=1e-5)
 
@@ -366,7 +368,7 @@ def test_quantize_2d_nvfp4_group_batched_integration(seeded):
     equivalence tests above; this test just exercises the integration
     plumbing."""
     import torch.nn as nn
-    from prismaquant.export_native_compressed import (
+    from prismaquant.native_render_codec import (
         _quantize_2d_nvfp4_group_batched,
         _ACT_AWARE_FLAGS,
         _CACHED_ACTIVATIONS,
@@ -387,15 +389,15 @@ def test_quantize_2d_nvfp4_group_batched_integration(seeded):
 
     # Stub the module-level activation cache for the duration of the
     # call. Restored after.
-    saved_cache = enc._CACHED_ACTIVATIONS
-    saved_flags = dict(enc._ACT_AWARE_FLAGS)
-    saved_input_scales = enc._INPUT_GLOBAL_SCALES
+    saved_cache = _native_render_codec._CACHED_ACTIVATIONS
+    saved_flags = dict(_native_render_codec._ACT_AWARE_FLAGS)
+    saved_input_scales = _native_render_codec._INPUT_GLOBAL_SCALES
     try:
-        enc._CACHED_ACTIVATIONS = type("Idx", (), {
+        _native_render_codec._CACHED_ACTIVATIONS = type("Idx", (), {
             "get": lambda self, name: cached.get(name)})()
-        enc._ACT_AWARE_FLAGS["gptq"] = True
-        enc._ACT_AWARE_FLAGS["scale_sweep"] = False
-        enc._INPUT_GLOBAL_SCALES = {
+        _native_render_codec._ACT_AWARE_FLAGS["gptq"] = True
+        _native_render_codec._ACT_AWARE_FLAGS["scale_sweep"] = False
+        _native_render_codec._INPUT_GLOBAL_SCALES = {
             k: 1.0 for k, _, _, _ in items
         }
 
@@ -404,10 +406,10 @@ def test_quantize_2d_nvfp4_group_batched_integration(seeded):
             expert_chunk=2,
         )
     finally:
-        enc._CACHED_ACTIVATIONS = saved_cache
-        enc._ACT_AWARE_FLAGS.clear()
-        enc._ACT_AWARE_FLAGS.update(saved_flags)
-        enc._INPUT_GLOBAL_SCALES = saved_input_scales
+        _native_render_codec._CACHED_ACTIVATIONS = saved_cache
+        _native_render_codec._ACT_AWARE_FLAGS.clear()
+        _native_render_codec._ACT_AWARE_FLAGS.update(saved_flags)
+        _native_render_codec._INPUT_GLOBAL_SCALES = saved_input_scales
 
     assert len(compressed_per_linear) == E
     expected_keys = {

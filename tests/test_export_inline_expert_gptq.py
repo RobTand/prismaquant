@@ -31,6 +31,8 @@ Runs in a FRESH subprocess with the cuBLAS workspace pinned from process start.
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import os
 import re
 import subprocess
@@ -112,18 +114,18 @@ def _set_export_act_globals(enc, act_dir):
     from prismaquant.measure_quant_cost import ActivationIndex
 
     idx = ActivationIndex(act_dir, [])
-    enc._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
+    _native_render_codec._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
     scales: dict[str, float] = {}
     for name in idx.names():
         try:
-            scales[name] = enc.compute_nvfp4_input_global_scale(idx.load(name))
+            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(idx.load(name))
         except Exception:
             pass
-    enc._INPUT_GLOBAL_SCALES = scales
-    enc._ACT_AWARE_FLAGS["gptq"] = True
-    enc._ACT_AWARE_FLAGS["scale_sweep"] = False
-    enc._ACT_AWARE_FLAGS["static_act_order"] = True
-    enc._ACT_AWARE_FLAGS["joint_scale_opt"] = True
+    _native_render_codec._INPUT_GLOBAL_SCALES = scales
+    _native_render_codec._ACT_AWARE_FLAGS["gptq"] = True
+    _native_render_codec._ACT_AWARE_FLAGS["scale_sweep"] = False
+    _native_render_codec._ACT_AWARE_FLAGS["static_act_order"] = True
+    _native_render_codec._ACT_AWARE_FLAGS["joint_scale_opt"] = True
 
 
 def _packed_tensor_bytes(tensors):
@@ -189,8 +191,8 @@ def _inline_export_body(workdir: str) -> None:
     )
 
     saved = (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-             enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES,
-             dict(enc._ACT_AWARE_FLAGS))
+             _native_render_codec._CACHED_ACTIVATIONS, _native_render_codec._INPUT_GLOBAL_SCALES,
+             dict(_native_render_codec._ACT_AWARE_FLAGS))
     try:
         enc._PRODUCTION_WEIGHT_CACHE = cache
         enc._INLINE_EXPERT_GPTQ = False
@@ -206,8 +208,8 @@ def _inline_export_body(workdir: str) -> None:
             model, assignment, bf16_passthrough=set(), profile=profile)
     finally:
         (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-         enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES) = saved[:4]
-        enc._ACT_AWARE_FLAGS.update(saved[4])
+         _native_render_codec._CACHED_ACTIVATIONS, _native_render_codec._INPUT_GLOBAL_SCALES) = saved[:4]
+        _native_render_codec._ACT_AWARE_FLAGS.update(saved[4])
 
     packed_a = _packed_tensor_bytes(tensors_a)
     packed_b = _packed_tensor_bytes(tensors_b)

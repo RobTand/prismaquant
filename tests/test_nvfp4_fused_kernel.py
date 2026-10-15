@@ -25,7 +25,7 @@ def _export_convention_act_qdq(x: torch.Tensor) -> torch.Tensor:
     (audit §3.8), so it cannot serve as the oracle at tie positions —
     ~0.036% of bf16 elements land on exact midpoints at large shapes.
     """
-    from prismaquant.export_native_compressed import (
+    from prismaquant.native_render_codec import (
         _round_to_codebook,
     )
 

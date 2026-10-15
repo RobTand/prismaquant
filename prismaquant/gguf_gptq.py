@@ -69,7 +69,7 @@ def _hessian_inverse(
 ) -> torch.Tensor:
     """Upper-triangular Cholesky of H^-1, with the NVFP4 lane's activation
     clipping, dead-channel, and damp conventions."""
-    from prismaquant.export_native_compressed import (
+    from prismaquant.native_render_codec import (
         _activation_matrix_for_gptq,
         _resolve_gptq_fixed_damp,
     )

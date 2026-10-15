@@ -19,7 +19,7 @@ the per-Linear path was. The compute itself is identical to the
 per-Linear path — we are amortizing kernel launches, not skipping work.
 
 The math is bitwise-equivalent to the per-Linear functions in
-`export_native_compressed`. Equivalence tests live in
+`native_render_codec`. Equivalence tests live in
 `tests/test_export_batched_gptq.py`.
 """
 from __future__ import annotations
@@ -30,9 +30,9 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-# Re-import codebook helpers from the main export module to avoid
+# Import codebook helpers from the native codec owner to avoid
 # duplicating the FP4 grid definition.
-from .export_native_compressed import (
+from .native_render_codec import (
     _activation_matrix_for_gptq,
     _gptq_column_block_size,
     _gptq_obs_rounding_nvfp4,
@@ -75,7 +75,7 @@ def _build_H_stack(
     (routed-token-count differs per expert).
     """
     if damp is None:
-        from prismaquant.export_native_compressed import (
+        from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
         )
         damp = _resolve_gptq_fixed_damp()
@@ -180,7 +180,7 @@ def gptq_obs_rounding_nvfp4_batched(
       weights, ready for the standard NVFP4 packer.
     """
     if damp is None:
-        from prismaquant.export_native_compressed import (
+        from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
         )
         damp = _resolve_gptq_fixed_damp()

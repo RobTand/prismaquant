@@ -190,9 +190,11 @@ def test_cross_domain_gate_reverts_to_rtn_when_gate_prefers_it(monkeypatch):
     import prismaquant.production_weight_cache as pwc
     monkeypatch.setattr(pwc, "score_render_error", rigged_score)
 
-    from prismaquant.export_native_compressed import (
+    from prismaquant.native_render_codec import (
         _rtn_dequant_nvfp4,
         compute_nvfp4_global_real,
+    )
+    from prismaquant.export_native_compressed import (
         _split_packed_expert_tensor,
     )
 

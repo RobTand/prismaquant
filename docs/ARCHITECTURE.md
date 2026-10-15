@@ -94,6 +94,9 @@ parsed cell's `id`. Its native predicate retains the existing route-status and
 device-qualification conditions. Development still refuses structural predicates,
 and the reviewed answer, pin, evidence, scope and independent export gates remain
 unchanged.
+`native_render_codec` owns the existing native weight arithmetic and wire
+codecs shared by ProductionWeightCache and compressed-tensors export. The
+exporter retains names, serving policy, artifact IO and CLI orchestration.
 
 vLLM metadata discovery loads the registered class entry directly when available.
 It does not construct a serving `ModelConfig`; errors from the installed class

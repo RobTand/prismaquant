@@ -309,7 +309,7 @@ class TestApplyVisualRecipeQuant(unittest.TestCase):
         name = "model.visual.blocks.0.attn.qkv"
         src_extra = {f"{name}.weight": torch.randn(48, 32, dtype=torch.bfloat16)}
         with patch(
-            "prismaquant.export_native_compressed._quantize_2d",
+            'prismaquant.native_render_codec._quantize_2d',
             side_effect=ValueError("shape mismatch"),
         ):
             with self.assertRaisesRegex(RuntimeError, "visual quant failed"):

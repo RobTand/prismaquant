@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 import dataclasses
 
 import pytest
@@ -541,13 +543,13 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
             # a passthrough is NEVER quantized by the weight codec.
             if fmt not in emittable:
                 with pytest.raises(ValueError):
-                    enc._quantize_2d(w, fmt)
+                    _native_render_codec._quantize_2d(w, fmt)
             continue
         if fmt in emittable:
-            assert enc._quantize_2d(w, fmt), fmt
+            assert _native_render_codec._quantize_2d(w, fmt), fmt
         else:
             with pytest.raises(ValueError):
-                enc._quantize_2d(w, fmt)
+                _native_render_codec._quantize_2d(w, fmt)
 
 
 def test_gguf_lane_declaration_matches_the_exporters_own_gate():
@@ -595,7 +597,7 @@ def test_export_lane_with_a_stale_declaration_fails_loudly():
     not_iterable = ExportLaneSpec(
         id="unit_scalar_lane",
         codec_formats_from=(
-            "prismaquant.export_native_compressed:FP8_E4M3_MAX",
+            "prismaquant.native_render_codec:FP8_E4M3_MAX",
         ),
     )
     with pytest.raises(RuntimeError, match="not iterable"):

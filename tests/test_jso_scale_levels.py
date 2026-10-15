@@ -10,7 +10,7 @@ import os
 
 import torch
 
-import prismaquant.export_native_compressed as enc
+import prismaquant.native_render_codec as enc
 
 
 def _reload(monkeypatch, value):
@@ -49,7 +49,7 @@ def test_joint_mse_rule_uses_the_configured_levels(monkeypatch):
     m = _reload(monkeypatch, None)
     # group of 16 whose magnitudes favor clipping to 4 over 6 is hard to force;
     # instead assert the JOINT default matches FourOverSix exactly.
-    g = torch.randn(4, 8, 16)
+    g = torch.randn(4, 8, 16, generator=torch.Generator().manual_seed(7))
     joint = m._select_nvfp4_group_scales(g, scale_rule="joint_mse")
     f46 = m._select_nvfp4_group_scales(g, scale_rule="four_over_six_mse")
     assert torch.allclose(joint, f46), "JOINT_MSE default must equal FourOverSix"

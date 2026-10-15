@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,7 +9,7 @@ import torch
 import torch.nn as nn
 import pytest
 
-from prismaquant.export_native_compressed import (
+from prismaquant.native_render_codec import (
     _resolve_gptq_fixed_damp,
     gptq_damp_sweep_enabled,
 )
@@ -820,7 +822,7 @@ def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
             weight.detach().to(torch.float32) + 2.0,
         )
 
-    monkeypatch.setattr(enc, "_mxfp8_scale_sweep_quantize", fake_mxfp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "_mxfp8_scale_sweep_quantize", fake_mxfp8_scale_sweep)
 
     cache = fill_production_weight_cache(
         model,
@@ -860,7 +862,7 @@ def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
             weight.detach().to(torch.float32) + 2.0,
         )
 
-    monkeypatch.setattr(enc, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
 
     cache = fill_production_weight_cache(
         model,
@@ -904,7 +906,7 @@ def test_production_cache_fp8_e4m3_uses_gptq(monkeypatch):
         )
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
 
     fill_production_weight_cache(
         model,
@@ -969,8 +971,8 @@ def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch)
         return 1.0, "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
-    monkeypatch.setattr(enc, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     fill_production_weight_cache(
@@ -1012,7 +1014,7 @@ def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
         )
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
 
     fill_production_weight_cache(
         model,
@@ -1063,7 +1065,7 @@ def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
         return float((rendered_weight.to(torch.float32) - target).pow(2).sum()), "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     cache = fill_production_weight_cache(
@@ -1114,7 +1116,7 @@ def test_production_cache_mxfp4_static_act_order_do_no_harm(monkeypatch):
         return float((rendered_weight.to(torch.float32) - target).pow(2).sum()), "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_mxfp4", fake_mxfp4_gptq)
+    monkeypatch.setattr(_native_render_codec, "_gptq_obs_rounding_mxfp4", fake_mxfp4_gptq)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     cache = fill_production_weight_cache(
@@ -1582,14 +1584,14 @@ def test_render_gate_scores_on_gptq_clipped_activations():
         gate_trace=trace,
     )
 
-    X = enc._activation_matrix_for_gptq(
+    X = _native_render_codec._activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
     )
 
     # Baseline candidate = static_6 RTN; its recorded gate score must be the
     # shared scorer evaluated on the CLIPPED matrix, not on raw acts.
-    with pwc._temporary_nvfp4_scale_rule(enc.NVFP4_SCALE_RULE_STATIC_6):
-        baseline = enc._rtn_dequant_nvfp4(weight.float(), group_size=16)
+    with pwc._temporary_nvfp4_scale_rule(_native_render_codec.NVFP4_SCALE_RULE_STATIC_6):
+        baseline = _native_render_codec._rtn_dequant_nvfp4(weight.float(), group_size=16)
     expected_clipped = score_render_error(weight.float(), baseline, X)
     raw_score = score_render_error(weight.float(), baseline, acts.float())
     assert trace[0]["mechanism"] == "baseline"
@@ -1634,7 +1636,7 @@ def test_non_nv_render_gate_scores_on_gptq_clipped_activations():
         gate_trace=trace,
     )
 
-    X = enc._activation_matrix_for_gptq(
+    X = _native_render_codec._activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
     )
     baseline = fr.get_format("FP8_E4M3").quantize_dequantize(
