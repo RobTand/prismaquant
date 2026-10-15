@@ -8,10 +8,11 @@ from __future__ import annotations
 import argparse
 import ast
 import copy
-import hashlib
 import json
 from pathlib import Path
 import re
+
+from prismaquant.digests import bytes_sha256hex
 
 
 RENAMES = {
@@ -53,7 +54,7 @@ class PublicNames(ast.NodeTransformer):
 
 def body_identity(node):
     normalized = PublicNames().visit(copy.deepcopy(node))
-    return hashlib.sha256(ast.dump(normalized, include_attributes=False).encode()).hexdigest()
+    return bytes_sha256hex(ast.dump(normalized, include_attributes=False).encode())
 
 
 def main():
