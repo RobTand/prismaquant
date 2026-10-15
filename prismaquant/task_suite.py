@@ -174,10 +174,10 @@ def _versions():
 
 def preflight_tasks(config):
     validate_config(config)
-    from transformers import AutoTokenizer
-    from lm_eval.tasks import TaskManager, get_task_dict
     backend = config["backend"]
     model_config = require_hf_reader(backend)
+    from transformers import AutoTokenizer
+    from lm_eval.tasks import TaskManager, get_task_dict
     tokenizer = AutoTokenizer.from_pretrained(backend["tokenizer"], revision=backend.get("tokenizer_revision"),
                                              trust_remote_code=backend["trust_remote_code"])
     tasks = get_task_dict(config["tasks"], task_manager=TaskManager())
