@@ -12,7 +12,6 @@ stacking 19 GiB of gate_up. The risk in reordering a reduction is that it stops
 being the same reduction, so the load-bearing test here is the agreement one:
 streamed must equal `_activation_dloss_packed` on the stacked equivalent.
 """
-from prismaquant import joint_aura_rows
 import numpy as np
 import pytest
 import torch
@@ -332,8 +331,8 @@ def test_the_shard_handle_cache_releases_an_evicted_shard(tmp_path, monkeypatch)
     assert cache._open == {}
 
 
-def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
-    """The trace root asked for: joint rows are exempt, not double-counted.
+def test_a_joint_row_is_never_stamped_with_the_aqua_a_side():
+    """The A-side merge preserves a real joint-priced row.
 
     A joint row's one signed residual already carries the weight, activation and
     mixed terms under a single downstream Fisher, and
@@ -346,10 +345,8 @@ def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
     from prismaquant import aqua_activation_cost as aqc
     from prismaquant.priced_cell import ACT_DLOSS_KEY
 
-    joint: dict = {}                      # sentinel: the predicate is the subject
+    joint = _joint_row("a", "NVFP4")
     costs = {"a": {"NVFP4": joint}}
-    monkeypatch.setattr(joint_aura_rows, 'cost_entry_is_joint_aura', lambda e: e is joint,
-                        raising=False)
     report = aqc.merge_act_dloss(costs, {"a": {"NVFP4": 0.1}})
 
     assert ACT_DLOSS_KEY not in joint, (
