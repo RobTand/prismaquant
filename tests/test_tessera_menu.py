@@ -21,6 +21,7 @@ from fractions import Fraction
 import pytest
 
 from prismaquant import format_registry as fr
+from prismaquant import allocator_solver as solver
 from prismaquant import tessera_menu as tm
 from prismaquant import tessera_runtime_contract as trc
 from prismaquant.tessera_formats import (
@@ -1058,13 +1059,13 @@ def test_prune_dominated_keeps_a_point_inside_the_hull():
     is the optimum -- dropping it would change the DP's answer.
     """
     rows = [(100, 10.0, "a"), (200, 6.0, "b"), (300, 1.0, "c")]
-    kept = [r[2] for r in tm.prune_dominated(rows)]
+    kept = [r[2] for r in solver.prune_dominated(rows)]
     assert kept == ["a", "b", "c"]
 
 
 def test_prune_dominated_drops_only_both_axes_worse():
     rows = [(100, 10.0, "a"), (150, 12.0, "worse-both"), (300, 1.0, "c")]
-    kept = [r[2] for r in tm.prune_dominated(rows)]
+    kept = [r[2] for r in solver.prune_dominated(rows)]
     assert kept == ["a", "c"]
 
 
@@ -1076,7 +1077,7 @@ def test_collapse_to_dp_bins_agrees_with_the_solver():
         (int(bpp * n_params / 8), 1.0 / bpp, f"r{i}")
         for i, bpp in enumerate([3.0, 3.001, 3.5, 4.0])
     ]
-    kept = tm.collapse_to_dp_bins(
+    kept = solver.collapse_to_dp_bins(
         rows, baseline_bits_per_param=3.0, n_params=n_params,
         total_params=total, bit_precision=1e-4)
     bins = {

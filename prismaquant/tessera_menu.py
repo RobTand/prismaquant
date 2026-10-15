@@ -97,7 +97,6 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
 
-from .allocator_solver import collapse_to_dp_bins, prune_dominated
 from .lane_eligibility import (
     SCOPED_LANE_SCHEMAS,
     NATIVE_ROUTE_STATUSES,
@@ -136,7 +135,6 @@ __all__ = [
     "RouteAdmission",
     "TesseraMenuError",
     "check_tessera_activation_agreement",
-    "collapse_to_dp_bins",
     "expand_tessera_menu",
     "MENU_CACHE_SHAPES_ENV",
     "DEFAULT_MENU_CACHE_SHAPES",
@@ -147,7 +145,6 @@ __all__ = [
     "GEOMETRY_CACHE_SHAPES",
     "menu_families",
     "menu_mode",
-    "prune_dominated",
     "fused_module_licence",
     "route_admission",
     "shard_shape",
@@ -1517,13 +1514,8 @@ def expand_tessera_menu(
 
 
 # ---------------------------------------------------------------------------
-# Making a 3000-rung menu tractable, exactly
+# Expanding the continuous menu token
 # ---------------------------------------------------------------------------
-
-# ``prune_dominated`` and ``collapse_to_dp_bins`` are the DP's own exact
-# reductions and live in ``allocator_solver`` beside ``_charged_bins``, the bin
-# arithmetic the collapse must agree with (decoupling step 6, PQ #1552). They
-# are imported at the top of this module for this module's callers.
 
 
 def expand_menu_tokens(names, priced_formats=()) -> list[str]:
