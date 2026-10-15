@@ -473,3 +473,44 @@ receipt is `cd20a0c6aa89fd4fcc512e58a899f64aee0a07d3e2c6a4ba648c6f1803a33b0c`.
 Both successful manual/sampler results were independently checked against their
 actual terminal records, logs and CAS bytes. Each uses CPU1, RAM4 GiB, native
 threads1 and portable eligibility with the qualified Git interpreter.
+
+
+The sampler follow-up `7d2f623b4a` preserves explicit Linux kB-to-byte
+conversion coverage with literal input and expected values. PB
+`30c7cf210b05611ce18516d21fa31a7d454e2a5d5598da55de9210dbf74e2bd4`
+passes the whole thirteen-case module without skips and compiles the test.
+Result is `438d459033c4ce96062374c0d477adb205014a62adf9d42226a00a98116c79d1`;
+receipt is `8d3ca14b6e687fa90256408bf8055883c5d59188a13de39ea057b769afa30b4c`.
+The earlier twelve-case proof remains historical; no production sampler change
+or timing improvement is claimed.
+
+The scope resolver is integrated in `217271a66e`. Its nineteen-field request
+returns twenty-three cohesive facts using the existing roster and population
+structures. Whole-population and selected pricing views, source admission,
+sampling and refusal order are preserved. The initial PB `0e5a292a` failed
+after 308 passes and two CUDA skips because a formerly local import was missing.
+It remains failed. The missing bindings were repaired before integration.
+
+The corrected partition proof `d48a18ef` passes sixteen cases without skips.
+The corrected scope/family/guard proof `c88966fa` passes eighty cases without
+skips and compiles four sources. Its result is
+`3395d2128231854c56ac56c47fafac4e2da21c6bd762be791a22717cb4597544`;
+receipt is `f38cc48a732bcc6d57e67f66e74335d5ff80690ccca0d51c11d0a5b39a050a2e`.
+The actual scope operation's sixty-two global reads have no missing bindings
+in PB `ba6da1a3`. The durable global-binding tool also inspects nested code and
+actual function globals/builtins; its negative cases and related guards pass
+fifty cases without skips in PB `7e39db2f`. Result is
+`d40c5596cea93a8a3b43b47fa411ebac26624ef6435f00354bb1eac807243b39`;
+receipt is `dade9d08de49217574353a37098c03d6e0ce11615b6d8c253b019884ea07ddb6`.
+These overlapping selections are not added into a unique test count.
+
+Independent review caught one annotation mismatch: seed_checkpoint is one
+optional string path, rather than a sequence. Commit `7a2ade0283` corrects it.
+PB `73f4eac0` compiles the request, verifies actual parser-to-request preservation
+of one spaced path and resolved annotation, and reruns actual global binding.
+Result is `7db9a78a23ed0b115a6018accadd1dbfe464080043dc1c6283b28fa7d15b94c7`;
+receipt is `0a09e91bf4f01452185f3e0b20cd8387f82fe2b1cc8267e386da4948045702c4`.
+Terminal records, result payload sizes/hashes and embedded receipts for these
+successful actions were independently checked. Resource reservations are
+CPU1, RAM4 GiB and native threads1, with portable eligibility. Final composed
+verification remains pending the menu and pricing operations.

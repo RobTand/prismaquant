@@ -163,3 +163,12 @@ asked to resume the producer in mailbox message `1792039473540-8df61371`; the
 canonical brief remains in the shared mailbox context directory. The eleven
 serving-runtime imports and API-dependent cell extraction are still explicitly
 unfinished. The 36-PR disposition plan and remote PR state remain unchanged.
+
+
+The shared scope resolver is now integrated in `217271a66e`, followed by the
+single-path type correction in `7a2ade0283`. Independent review found no
+changed scope, admission, sampling or census behavior. The menu/projection
+operation, raw acquisition wire ownership and final typed loaded-campaign
+execution remain in progress. Cache constructors and their census effects
+must retain their current order and lifetime. Final composed verification and
+the additional Tessera producer API handoff remain outstanding.
