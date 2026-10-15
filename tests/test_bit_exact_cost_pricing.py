@@ -34,8 +34,8 @@ from pathlib import Path
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
-    build_candidates,
+from prismaquant.allocator_candidates import build_candidates
+from prismaquant.priced_cell import (
     cost_entry_is_bit_exact,
     cost_entry_predicted_dloss,
     cost_entry_source,

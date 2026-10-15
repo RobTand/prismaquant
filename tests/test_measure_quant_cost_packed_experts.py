@@ -28,7 +28,7 @@ class _StubHDetail:
 
     def load(self, name: str) -> torch.Tensor:
         return self._m[name]
-from prismaquant.allocator_candidates import cost_entry_uses_measured_output_mse
+from prismaquant.priced_cell import cost_entry_uses_measured_output_mse
 
 
 class TinyRouter(nn.Module):

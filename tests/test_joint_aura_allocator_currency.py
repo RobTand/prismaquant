@@ -1,4 +1,5 @@
 """Exercise allocator admission using actual streamed joint measurement rows."""
+from prismaquant import priced_cell
 import copy
 
 import pytest
@@ -28,24 +29,24 @@ def test_actual_joint_table_admits_in_one_aura_currency(measured_payload):
 
 def test_joint_cost_consumed_without_scalar_sensitivity_or_activation_transfer(measured_payload, monkeypatch):
     _, row = _first(measured_payload)
-    monkeypatch.setattr(ac, "_activation_penalty", lambda *args: 1000.0)
+    monkeypatch.setattr(priced_cell, "_activation_penalty", lambda *args: 1000.0)
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
-    assert ac.cost_entry_predicted_dloss(
+    assert priced_cell.cost_entry_predicted_dloss(
         {"h_trace": 1e8}, row, format_name="FP8_E4M3") == row["predicted_dloss"]
-    assert ac.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3") == "joint_aura"
+    assert priced_cell.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3") == "joint_aura"
 
 
 @pytest.mark.parametrize("gain", [0.5, 2.0, float("nan")])
 def test_joint_cost_refuses_second_gain(measured_payload, gain):
     _, row = _first(measured_payload)
     with pytest.raises(ValueError, match="gain"):
-        ac.cost_entry_predicted_dloss({}, row, gain=gain, format_name="FP8_E4M3")
+        priced_cell.cost_entry_predicted_dloss({}, row, gain=gain, format_name="FP8_E4M3")
 
 
 def test_joint_row_cannot_price_another_format(measured_payload):
     _, row = _first(measured_payload)
     with pytest.raises(ValueError, match="different format"):
-        ac.cost_entry_predicted_dloss({}, row, format_name="NVFP4A16")
+        priced_cell.cost_entry_predicted_dloss({}, row, format_name="NVFP4A16")
 
 
 @pytest.mark.parametrize("field,value", [("fisher_application_count", True),
@@ -56,7 +57,7 @@ def test_malformed_joint_claim_never_falls_into_generic_pricing(measured_payload
     row = copy.deepcopy(source)
     row[field] = value
     with pytest.raises(ValueError, match="joint AURA"):
-        ac.cost_entry_predicted_dloss({"h_trace": 1.0}, row, format_name="FP8_E4M3")
+        priced_cell.cost_entry_predicted_dloss({"h_trace": 1.0}, row, format_name="FP8_E4M3")
 
 
 def test_joint_table_refuses_weight_only_control(measured_payload):

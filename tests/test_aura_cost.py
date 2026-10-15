@@ -252,7 +252,7 @@ def test_additivity_gate_reports_uncovered_and_passthrough():
 
 
 def test_cost_ucb_z_charges_stderr(monkeypatch):
-    from prismaquant.allocator_candidates import cost_entry_predicted_dloss
+    from prismaquant.priced_cell import cost_entry_predicted_dloss
 
     stats = {"h_trace": 1.0}
     row = {"predicted_dloss": 0.010, "predicted_dloss_stderr": 0.002,

@@ -12,13 +12,15 @@ import pytest
 
 from prismaquant import format_registry as fr
 from prismaquant.activation_fair_pricing import BRANCH_SOURCE_PASSTHROUGH
-from prismaquant.allocator_candidates import (
+from prismaquant.source_format_contracts import (
     SOURCE_BPP_EXCEEDED_REASON,
     SOURCE_BPP_UNKNOWN_REASON,
-    build_candidates,
-    check_format_applicability,
     source_footprint_owner_for_kind,
     source_format_for_kind,
+)
+from prismaquant.allocator_candidates import (
+    build_candidates,
+    check_format_applicability,
     summarize_applicability_masks,
 )
 

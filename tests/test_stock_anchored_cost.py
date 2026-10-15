@@ -22,15 +22,15 @@ import pickle
 import pytest
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
     cost_entry_is_anchored_aura_supersurrogate,
     cost_entry_is_bit_exact,
     cost_entry_is_source_passthrough,
     cost_entry_predicted_dloss,
-    serialized_candidate_payload,
 )
+from prismaquant.allocator_candidates import serialized_candidate_payload
 from prismaquant import anchored_cost as core
 from prismaquant import stock_anchored_cost as stock
 

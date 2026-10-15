@@ -1,4 +1,5 @@
 """Opt-in routed allocation policy, exercised before any stack aggregation."""
+from prismaquant import source_format_contracts
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -142,7 +143,7 @@ def test_family_allowance_does_not_bypass_source_ceiling():
     decision = ac.check_format_applicability((2048, 4096), E4M3[-1], qname=ROUTED,
         source_kind='fp8', target_profile=PROFILE)
     assert not decision.legal
-    assert decision.reason == ac.SOURCE_BPP_EXCEEDED_REASON
+    assert decision.reason == source_format_contracts.SOURCE_BPP_EXCEEDED_REASON
 
 
 def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):

@@ -86,8 +86,8 @@ from safetensors.torch import save_file
 
 from . import io_spans
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
-from .allocator_candidates import (
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
+from prismaquant.allocator_candidates import (
     _scan_source_dtype_manifest,
     check_format_applicability,
 )

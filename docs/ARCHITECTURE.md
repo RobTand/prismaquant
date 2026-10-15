@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: native source storage and footprint declarations belong
+to `source_format_contracts`; cost-row numerical and evidence interpretation
+belongs to `priced_cell`. Candidate assembly consumes these owners. The first
+move preserves predicates, branch precedence, constants and initialization guards.
+
 Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.

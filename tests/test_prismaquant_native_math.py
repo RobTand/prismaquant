@@ -7,11 +7,9 @@ import torch
 import torch.nn as nn
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
-    SOURCE_BPP_EXCEEDED_REASON,
-    _scan_source_dtype_manifest,
-    cost_entry_source,
-)
+from prismaquant.source_format_contracts import SOURCE_BPP_EXCEEDED_REASON
+from prismaquant.allocator_candidates import _scan_source_dtype_manifest
+from prismaquant.priced_cell import cost_entry_source
 from prismaquant.allocator import (
     Candidate,
     build_candidates,

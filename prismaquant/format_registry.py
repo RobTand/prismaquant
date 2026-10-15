@@ -163,7 +163,7 @@ class FormatSpec:
         This is the single predicate for that question. Consumers must use
         it rather than re-deriving it from ``act_bits``: the allocator's
         bit-exact cost short-circuit
-        (``allocator_candidates.cost_entry_is_bit_exact``), the KL
+        (``priced_cell.cost_entry_is_bit_exact``), the KL
         validator's activation-quant assignment, ``layer_state_cache`` and
         ``perturbed_x_cache`` all key off this one property, so a format's
         activation semantics cannot drift between pricing and emulation.

@@ -67,6 +67,7 @@ stamps it into the fixture beside the digest::
         PYTHONPATH=. python tests/test_super_item_menu_byte_identity.py --regen
 """
 from __future__ import annotations
+from prismaquant import priced_cell
 
 import hashlib
 import json
@@ -662,13 +663,13 @@ def test_the_golden_is_load_bearing():
             "-- the golden does not pin what it claims to pin"
         )
 
-    original_dloss = alloc_cand.cost_entry_predicted_dloss
+    original_dloss = priced_cell.cost_entry_predicted_dloss
 
     def perturbed(*args, **kwargs):
         return original_dloss(*args, **kwargs) * (1.0 + 1e-12)
 
     with mock.patch.object(
-        alloc_cand, "cost_entry_predicted_dloss", perturbed
+        priced_cell, "cost_entry_predicted_dloss", perturbed
     ):
         problems = compare_to_golden(_build_payload(), golden)
     assert problems, (

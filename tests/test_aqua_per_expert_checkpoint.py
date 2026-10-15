@@ -343,7 +343,7 @@ def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
     row and stop the allocation.
     """
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.allocator_candidates import ACT_DLOSS_KEY
+    from prismaquant.priced_cell import ACT_DLOSS_KEY
 
     joint: dict = {}                      # sentinel: the predicate is the subject
     costs = {"a": {"NVFP4": joint}}
@@ -542,7 +542,7 @@ def test_a_mixed_artifact_prices_exactly_its_legacy_cells(tmp_path,
     import sys
 
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.allocator_candidates import ACT_DLOSS_KEY
+    from prismaquant.priced_cell import ACT_DLOSS_KEY
 
     name = "model.layers.0.mlp.down_proj"
     joint = _joint_row(name, "NVFP4")

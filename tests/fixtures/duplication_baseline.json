@@ -643,10 +643,6 @@
    "prismaquant/model_profiles/registry.py",
    "prismaquant/native_receipt_table.py"
   ],
-  "_resolve_cost_entry": [
-   "prismaquant/allocator_candidates.py",
-   "prismaquant/per_row_pricing.py"
-  ],
   "_resolve_serve_image": [
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"

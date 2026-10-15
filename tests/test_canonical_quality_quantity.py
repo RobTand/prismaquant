@@ -1,5 +1,6 @@
 """Synthetic regressions for complete scientific coordinates and one quantity."""
 from __future__ import annotations
+from prismaquant import priced_cell
 
 import copy
 import math
@@ -142,7 +143,7 @@ def test_fused_quantity_is_not_scaled_after_member_prices(monkeypatch):
     option = next(c for options in grouped.values() for c in options if c.fmt == fmt)
     assert option.predicted_dloss == 1.5
     group = next(name for name in grouped if name not in units)
-    assert candidates.cost_entry_predicted_dloss(grouped_stats[group], grouped_costs[group][fmt],
+    assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], grouped_costs[group][fmt],
         gain=9.0, format_name=fmt, activation_pricing=nontrivial_calibration(fmt)) == 1.5
 
 
@@ -241,7 +242,7 @@ def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch
     mixed = next(option for option in options if option.member_formats == dict(zip(units, formats)))
     assert mixed.predicted_dloss == expected
     complete = grouped_costs[group][mixed.fmt]
-    assert candidates.cost_entry_predicted_dloss(grouped_stats[group], complete,
+    assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], complete,
         gain=9.0, format_name=mixed.fmt, activation_pricing=nontrivial_calibration(formats[0])) == expected
     assert {member["unit"]: member["format"] for member in complete["canonical_members"]} == dict(zip(units, formats))
 

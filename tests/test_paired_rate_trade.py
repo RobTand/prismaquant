@@ -1,4 +1,5 @@
 """Deterministic common-probe rate trades; no serving or quality claim."""
+from prismaquant import priced_cell
 import copy
 import math
 
@@ -272,7 +273,7 @@ def test_fused_uniform_and_mixed_prices_share_one_paired_cost_table(monkeypatch)
     group = next(iter(grouped))
     for candidate in grouped[group]:
         row = grouped_costs[group][candidate.fmt]
-        assert ac.cost_entry_predicted_dloss(grouped_stats[group], row) == candidate.predicted_dloss
+        assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], row) == candidate.predicted_dloss
         assert row["paired_rate_trade"]["candidate_point_cost"] == row["predicted_dloss"]
 
 

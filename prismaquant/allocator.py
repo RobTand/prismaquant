@@ -109,8 +109,8 @@ from .allocator_solver import (
     promote_serving_units,
     solve_with_promotion,
 )
-from .allocator_candidates import (
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
+from prismaquant.allocator_candidates import (
     _FUSED_SIBLING_MARKER,
     _PACKED_GROUP_MARKER,
     _format_kernel_supports_shape,
@@ -134,10 +134,10 @@ from .allocator_candidates import (
     summarize_paired_rate_trade,
     summarize_paired_routed_layer,
     reduce_continuous_menu,
-    _cost_ucb_z,
     price_paired_rate_trade,
     reprice_paired_candidates,
 )
+from prismaquant.priced_cell import _cost_ucb_z
 from .digests import (
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,

@@ -55,8 +55,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
     _scan_source_dtype_manifest,
     check_format_applicability,
 )

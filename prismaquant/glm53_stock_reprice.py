@@ -59,13 +59,13 @@ import re
 import sys
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
     cost_entry_is_anchored_aura_supersurrogate,
     cost_entry_is_bit_exact,
-    serialized_candidate_payload,
 )
+from prismaquant.allocator_candidates import serialized_candidate_payload
 from prismaquant.anchored_cost import (
     anchors_from_results,
     plan_anchor_requests,

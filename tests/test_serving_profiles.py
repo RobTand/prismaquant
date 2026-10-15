@@ -493,9 +493,7 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
     can never silently diverge from what the exporter really does."""
     import torch
 
-    from prismaquant.allocator_candidates import (
-        PASSTHROUGH_SOURCE_REQUIREMENTS,
-    )
+    from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
     import prismaquant.export_native_compressed as enc
 
     emittable = lane_emittable_formats(VLLM_PROFILE)

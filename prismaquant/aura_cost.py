@@ -25,7 +25,7 @@ Why this is the right cost (rung-0 validated, 2026-06-04):
 
 Reuses kl_fisher (probe), ProductionWeightCache (dW), format_registry (RTN
 fallback), schemas (cost.pkl contract). Sets output_mse_measured=False so
-allocator_candidates.cost_entry_predicted_dloss consumes predicted_dloss
+priced_cell.cost_entry_predicted_dloss consumes predicted_dloss
 directly. Measurement defaults to fp32 (the precision the additivity result
 requires); memory-safe (one autograd graph at a time, watchdog-gated).
 """
@@ -79,7 +79,7 @@ AURA_PRODUCTION_ANCHOR_DELTA_CONSUMER_IDENTITY = {
 
 
 # Passthrough formats -> zero predicted_dloss. This is the *passthrough rule*
-# (see allocator_candidates.PASSTHROUGH_SOURCE_REQUIREMENTS): zero cost is
+# (see source_format_contracts.PASSTHROUGH_SOURCE_REQUIREMENTS): zero cost is
 # correct only when the source weight already has the target precision --
 #   BF16        is lossless iff the source weight dtype is bf16 (or lower);
 #   FP8_SOURCE  is lossless iff the source weight is native fp8 (verbatim copy).

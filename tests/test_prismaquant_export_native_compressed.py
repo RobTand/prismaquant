@@ -1199,7 +1199,7 @@ class TestRoundTrip(unittest.TestCase):
                         )
                         continue
 
-                    from prismaquant.allocator_candidates import (
+                    from prismaquant.source_format_contracts import (
                         PASSTHROUGH_SOURCE_REQUIREMENTS,
                         SOURCE_PASSTHROUGH_CONTRACTS,
                     )

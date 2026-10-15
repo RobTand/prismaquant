@@ -24,6 +24,7 @@ These tests pin three things:
   invent a topology it was not given).
 """
 from __future__ import annotations
+from prismaquant import priced_cell
 
 import argparse
 import json
@@ -258,8 +259,8 @@ def test_the_allocator_takes_the_output_mse_branch_for_a_stack_row():
     payload = _payload(campaign, anchors, {sample.packed_qname: sample})
     row = payload["costs"][f"{STEM}.gate_up_proj"]["TESSERA_E2M1_K1_R256"]
 
-    assert ac._prices_from_output_mse(probe, row) is True
-    assert ac.cost_entry_predicted_dloss(probe, row) == pytest.approx(
+    assert priced_cell._prices_from_output_mse(probe, row) is True
+    assert priced_cell.cost_entry_predicted_dloss(probe, row) == pytest.approx(
         predicted_dloss(probe["h_trace"], row["output_mse"]), rel=1e-12)
 
 

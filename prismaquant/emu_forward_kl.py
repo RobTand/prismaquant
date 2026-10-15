@@ -38,7 +38,7 @@ from typing import Mapping
 import torch
 
 from . import format_registry as fr
-from .allocator_candidates import PASSTHROUGH_SOURCE_REQUIREMENTS
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from .measure_quant_cost import canonical_linear_name
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from .kl_fisher import forward_kl_per_token

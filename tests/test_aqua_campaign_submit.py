@@ -41,6 +41,7 @@ The fixture is torch-free on the producer side on purpose: the manifest is
 built by the CPU path, exactly as it is at submission time. The stage itself is
 never executed here -- these tests run no GPU work.
 """
+from prismaquant import priced_cell
 
 import hashlib
 import json
@@ -116,7 +117,7 @@ def joint_row_is_joint(monkeypatch):
     """The stub: anything carrying a joint operator identity is a joint row."""
     from prismaquant import allocator_candidates
 
-    monkeypatch.setattr(allocator_candidates, "cost_entry_is_joint_aura",
+    monkeypatch.setattr(priced_cell, "cost_entry_is_joint_aura",
                         lambda entry: "joint_operator_identity" in entry)
     return allocator_candidates
 

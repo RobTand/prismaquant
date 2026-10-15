@@ -54,13 +54,15 @@ from prismaquant.allocator_candidates import (
     build_candidates,
     calibrate_activation_fair_pricing,
     collect_activation_calibration_rows,
+    drop_interpolated_candidates_dominated_by_measured,
+)
+from prismaquant.priced_cell import (
     cost_entry_activation_pricing_branch,
     TESSERA_INTERPOLATED_COST_SOURCE,
     cost_entry_is_band_interpolated,
     cost_entry_predicted_dloss,
     cost_entry_source,
     cost_entry_uses_measured_output_mse,
-    drop_interpolated_candidates_dominated_by_measured,
 )
 from prismaquant.allocator_solver import Candidate
 

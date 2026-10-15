@@ -166,7 +166,7 @@ def test_a_drawn_rung_keeps_the_sampled_cost_source():
 @pytest.mark.parametrize("rung", TARGETS)
 def test_a_predicted_rung_declares_the_law_it_was_predicted_by(payload, rung):
     """The whole law travels on the row: slopes, intercepts, ids, n, spread."""
-    from prismaquant.allocator_candidates import TESSERA_INTERPOLATED_COST_SOURCE
+    from prismaquant.priced_cell import TESSERA_INTERPOLATED_COST_SOURCE
     from prismaquant.tessera_rate_surface import PROVENANCE_INTERPOLATED
 
     row = _rows(payload, MODULE_A)[f"TESSERA_E2M1_K1_R{rung}"]

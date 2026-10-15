@@ -58,6 +58,8 @@ from prismaquant.allocator_candidates import (
     build_candidates,
     calibrate_activation_fair_pricing,
     collect_activation_calibration_rows,
+)
+from prismaquant.priced_cell import (
     cost_entry_activation_pricing_branch,
     cost_entry_predicted_dloss,
 )

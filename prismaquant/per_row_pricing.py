@@ -1,7 +1,7 @@
 """Per-row repricing for recorded allocator selections.
 
 The allocator prices a raw ``(Linear, format)`` cost row through
-``allocator_candidates.cost_entry_predicted_dloss``.  That precedence is
+``priced_cell.cost_entry_predicted_dloss``.  That precedence is
 load-bearing: measured ``output_mse`` already includes the activation path,
 whereas a weight-only row receives P5a's per-family multiplicative correction.
 Aggregated serving-unit rows carry ``activation_pricing_applied=True`` because
@@ -31,8 +31,8 @@ from .activation_fair_pricing import (
     BRANCH_UNCALIBRATED,
     REASON_KILL_SWITCH,
 )
-from .allocator_candidates import (
-    SOURCE_PASSTHROUGH_FORMATS,
+from prismaquant.source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
+from prismaquant.priced_cell import (
     cost_entry_predicted_dloss,
     synthesized_source_passthrough_cost_entry,
 )

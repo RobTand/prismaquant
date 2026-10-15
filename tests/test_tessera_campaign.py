@@ -83,9 +83,7 @@ def _menu(qname, family, rungs):
 
 
 def test_measured_and_interpolated_rows_are_told_apart():
-    from prismaquant.allocator_candidates import (
-        cost_entry_is_band_interpolated, cost_entry_source,
-    )
+    from prismaquant.priced_cell import cost_entry_is_band_interpolated, cost_entry_source
     from prismaquant.tessera_campaign import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
@@ -111,8 +109,9 @@ def test_an_interpolated_row_is_priced_in_output_space():
     the DP would rank Tessera's rungs against each other on a scale nothing
     else on the menu uses.
     """
-    from prismaquant.allocator_candidates import (
-        cost_entry_activation_pricing_branch, cost_entry_predicted_dloss,
+    from prismaquant.priced_cell import (
+        cost_entry_activation_pricing_branch,
+        cost_entry_predicted_dloss,
     )
     from prismaquant.tessera_campaign import campaign_cost_payload
 
