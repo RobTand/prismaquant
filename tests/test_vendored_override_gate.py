@@ -69,7 +69,8 @@ def _qwen3_model():
 
 @pytest.fixture(autouse=True)
 def _clean_override_errors():
-    """OVERRIDE_ERRORS is process-global; never leak a synthetic entry."""
+    """Register the real override before injecting its recorded failure."""
+    vendored.register_qwen3()
     saved = dict(vendored.OVERRIDE_ERRORS)
     vendored.OVERRIDE_ERRORS.clear()
     vendored.OVERRIDE_ERRORS.update(saved)
