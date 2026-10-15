@@ -32,18 +32,34 @@ from test_quantum_probe_identity_once_1183 import _campaign
 
 
 def _validations(monkeypatch):
-    """Record when each joint row is validated, from inside the quantum."""
-    import time
+    """Observe validation inside the real span log without clock comparisons."""
+    from prismaquant.io_spans import IoSpanLog
 
-    stamps = []
+    events, logs = [], []
     validate = joint_aura_rows.validate_joint_aura_entry
+    open_span, close_span = IoSpanLog.open, IoSpanLog.close
+
+    def opened(log, name, **attrs):
+        span = open_span(log, name, **attrs)
+        if log not in logs:
+            logs.append(log)
+        events.append(("open", log, name))
+        return span
+
+    def closed(log, span, **kwargs):
+        record = close_span(log, span, **kwargs)
+        if record is not None:
+            events.append(("close", log, span.name))
+        return record
 
     def stamped(entry):
-        stamps.append(time.time())
+        events.extend(("validate", log, tuple(log.open_names)) for log in logs)
         return validate(entry)
 
+    monkeypatch.setattr(IoSpanLog, "open", opened)
+    monkeypatch.setattr(IoSpanLog, "close", closed)
     monkeypatch.setattr(joint_aura_rows, 'validate_joint_aura_entry', stamped)
-    return stamps
+    return events
 
 
 def _quantum(tmp_path, monkeypatch, *, handoff_emitter=None):
@@ -56,7 +72,7 @@ def _quantum(tmp_path, monkeypatch, *, handoff_emitter=None):
 
 def test_the_row_validation_after_the_last_window_runs_under_its_span(
         tmp_path, monkeypatch):
-    stamps = _validations(monkeypatch)
+    events = _validations(monkeypatch)
     payload, _record, block = _quantum(tmp_path, monkeypatch)
     spans = block["io_spans"]
     rows = sum(len(per_unit) for per_unit in payload["costs"].values())
@@ -66,12 +82,22 @@ def test_the_row_validation_after_the_last_window_runs_under_its_span(
     (tail,) = tails
     assert tail["parent"] is None and tail["outcome"] == "ok"
     assert tail["rows"] == rows and tail["units"] == len(payload["costs"])
-    last_window = max(span["end_unix"] for span in spans if span["span"] == "window")
-    assert tail["start_unix"] >= last_window
+    payload_opens = [(index, log) for index, (kind, log, name) in enumerate(events)
+                     if kind == "open" and name == "payload"]
+    assert len(payload_opens) == 1
+    payload_open, payload_log = payload_opens[0]
+    payload_closes = [index for index, (kind, log, name) in enumerate(events)
+                      if kind == "close" and log is payload_log and name == "payload"]
+    assert len(payload_closes) == 1
+    last_window_close = max(index for index, (kind, log, name) in enumerate(events)
+                            if kind == "close" and log is payload_log and name == "window")
+    assert last_window_close < payload_open
     # Every row the payload carries is checked once more inside the span:
     # that loop is the stretch v7 spent 796 s in.
-    inside = [t for t in stamps if tail["start_unix"] <= t <= tail["end_unix"]]
+    inside = [index for index, (kind, log, names) in enumerate(events)
+              if kind == "validate" and log is payload_log and "payload" in names]
     assert len(inside) == rows
+    assert all(payload_open < index < payload_closes[0] for index in inside)
 
 
 def test_a_band_serial_handoff_is_written_under_its_own_span(tmp_path, monkeypatch):
