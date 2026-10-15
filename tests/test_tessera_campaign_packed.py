@@ -82,14 +82,14 @@ def _routed_tokens():
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_capture_packed_projections_uses_every_actual_routed_row(dtype):
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     model = _RoutedModel().to(dtype=dtype)
     targets = [f"{EXPERT_PREFIX}.{expert}.{projection}"
                for expert in range(2) for projection in ("w1", "w3", "w2")]
     dense = "model.layers.0.attention"
     tokens = [batch.to(dtype=dtype) for batch in _routed_tokens()]
-    rows, hessians, counts, max_abs = _collect_activations(
+    rows, hessians, counts, max_abs = capture_activation_statistics(
         model, [dense, *targets], tokens, 1, "cpu", want_hessian=True)
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
 
@@ -124,14 +124,14 @@ def test_capture_packed_projections_uses_every_actual_routed_row(dtype):
 
 
 def test_packed_capture_subset_keeps_the_same_routed_rows_and_hessian():
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     all_targets = [f"{EXPERT_PREFIX}.{expert}.{projection}"
                    for expert in range(2) for projection in ("w1", "w3", "w2")]
     selected = f"{EXPERT_PREFIX}.1.w2"
-    whole = _collect_activations(
+    whole = capture_activation_statistics(
         _RoutedModel(), all_targets, _routed_tokens(), 2, "cpu", want_hessian=True)
-    subset = _collect_activations(
+    subset = capture_activation_statistics(
         _RoutedModel(), [selected], _routed_tokens(), 2, "cpu", want_hessian=True)
     for index in (0, 1):
         torch.testing.assert_close(subset[index][selected], whole[index][selected])
@@ -141,12 +141,12 @@ def test_packed_capture_subset_keeps_the_same_routed_rows_and_hessian():
 
 @pytest.mark.parametrize("want_hessian", [False, True])
 def test_packed_capture_refuses_an_unobserved_expert(want_hessian):
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     model = _RoutedModel()
     missing = f"{EXPERT_PREFIX}.1.w1"
     with pytest.raises(RuntimeError, match="no routed calibration rows") as error:
-        _collect_activations(model, [missing], [torch.ones(1, 3, 4)], 1,
+        capture_activation_statistics(model, [missing], [torch.ones(1, 3, 4)], 1,
                              "cpu", want_hessian=want_hessian)
     assert missing in str(error.value)
     assert not model.model.layers[2].feed_forward.experts._forward_pre_hooks

@@ -13,6 +13,8 @@ failure stops the action instead of being absorbed by it.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import hashlib
 import pickle
 import time
@@ -55,7 +57,7 @@ def _fixture(monkeypatch, tmp_path):
     })
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
                         lambda *_args: ([torch.ones(1, 256, dtype=torch.long)], "one draw"))
-    monkeypatch.setattr(tessera_campaign, "_collect_activations", lambda *_args, **kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **kwargs: (
         {name: rows for name in UNITS}, {}, {name: 0 for name in UNITS},
         {name: 3.0 for name in UNITS}))
     monkeypatch.setattr(tessera_campaign, "expand_menus_for_targets",

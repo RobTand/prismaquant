@@ -1,4 +1,6 @@
 """A reusable calibration keeps full-H/prefix-X bytes and refuses stale inputs."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
@@ -528,7 +530,7 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
              '--calibration-census',str(census_path)]
     root = tmp_path/'full-capture'
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
-    monkeypatch.setattr(tc,'_collect_activations',lambda *a,**k: pytest.fail('repeated forward'))
+    monkeypatch.setattr(calibration_forward,'capture_activation_statistics',lambda *a,**k: pytest.fail('repeated forward'))
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
     if streamed_selection:
         from prismaquant import cost_streaming, autoscale
@@ -660,7 +662,7 @@ def test_campaign_boundary_coordinates_follow_batched_calibration_ids():
     model = TokenModel()
     tokens = [torch.tensor([[0,1],[1,0]]),torch.tensor([[0,1]])]
     captures = []
-    values = tc._collect_activations(model,[EXPERT_PREFIX+'.0.w1',EXPERT_PREFIX+'.1.w1'],
+    values = calibration_forward.capture_activation_statistics(model,[EXPERT_PREFIX+'.0.w1',EXPERT_PREFIX+'.1.w1'],
         tokens,2,'cpu',want_hessian=True,
         boundary_consumer=lambda name,module,args,kwargs,coords:captures.append((args[0].clone(),coords.clone())))
     assert len(captures) == 2
@@ -838,7 +840,7 @@ def test_cli_cache_reader_requires_coverage_not_equal_output_scope(
              "--layer-stride", "1", "--calibration-census", str(census_path),
              "--units", str(selection), "--calibration-cache", record["path"],
              "--calibration-cache-sha256", record["sha256"]]
-    monkeypatch.setattr(tc, "_collect_activations",
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics",
                         lambda *_args, **_kwargs: pytest.fail("cache reader repeated the forward"))
     actual_prefetch = cc.prefetch_capture
     observed = []

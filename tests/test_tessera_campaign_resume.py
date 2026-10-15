@@ -1,4 +1,6 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 import hashlib
 import json
@@ -55,7 +57,7 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
     })
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
                         lambda *_args: (inputs["tokens"], inputs["text"]))
-    monkeypatch.setattr(tessera_campaign, "_collect_activations", lambda *_args, **kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **kwargs: (
         {unit: inputs["rows"]},
         {unit: inputs["hessian"]} if kwargs["want_hessian"] else {},
         {unit: len(inputs["rows"]) if kwargs["want_hessian"] else 0},

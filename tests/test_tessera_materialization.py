@@ -1,4 +1,6 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import hashlib
@@ -312,7 +314,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         assert not reuse, 'materialization repeated the calibration forward'
         captures.append((list(targets), max_rows))
         return ({n:torch.ones(4,N) for n in targets}, {}, {n:8 for n in targets}, {n:1.0 for n in targets})
-    monkeypatch.setattr(tc, '_collect_activations', collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', collect)
     monkeypatch.setattr(tc, '_static_input_scales', lambda *args, **kwargs:(
         s.cost['provenance']['activation_static_scales']['units'],
         s.cost['provenance']['activation_static_scales']['policy']))
@@ -622,7 +624,7 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
                         lambda *_args: (torch.ones(2, 4), "fixture"))
     calibration = provenance["hessian"]["calibration_identity"]
     monkeypatch.setattr(th, "calibration_identity", lambda *_args, **_kwargs: calibration)
-    monkeypatch.setattr(tc, "_collect_activations", lambda *_args, **_kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **_kwargs: (
         {name: torch.ones(4, N) for name in names}, {}, census["counts"], census["max_abs"]))
     monkeypatch.setattr(tc, "_static_input_scales", lambda *_args, **_kwargs: (
         provenance["activation_static_scales"]["units"],

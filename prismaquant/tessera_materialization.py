@@ -7,6 +7,8 @@ packed allocation, after the ordinary receipt and priced-input gates pass.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import argparse
 import copy
 import json
@@ -266,7 +268,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             cache_record['path'],expected_sha256=cache_record['sha256'],
             expected_identity=cache_identity,census=census,names=names,device=device)
     else:
-        acts, hessians, counts, maxima = tc._collect_activations(
+        acts, hessians, counts, maxima = calibration_forward.capture_activation_statistics(
             model, names, tokens, provenance['max_act_rows'], device,
             want_hessian=want_h, profile=profile)
     hi, lo = tc.census_token_counts(census, counts)

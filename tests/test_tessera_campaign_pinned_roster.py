@@ -5,6 +5,8 @@ every GLM re-run from main. ``--allow-pinned`` lifts named pins for one campaign
 allocator's grammar), ``--pinned-roster-only`` keeps only what it lifts, and the census
 records the lift so a run under another lift refuses it. Unset, nothing changes.
 """
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 import argparse
 import json
 
@@ -210,7 +212,7 @@ def test_real_router_uses_the_existing_dense_capture_without_a_model_change():
     x = torch.arange(8).reshape(2, 4).bfloat16()
     original_weight = router.weight.detach().clone()
     before = router(x)
-    rows, hessian, counts, maxima = tc._collect_activations(
+    rows, hessian, counts, maxima = calibration_forward.capture_activation_statistics(
         model, [name], [x], 2, "cpu", want_hessian=True, forward_batch=router)
     assert torch.equal(rows[name], x.float())
     assert torch.equal(hessian[name], x.float().t() @ x.float())

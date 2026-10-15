@@ -7,7 +7,7 @@ from experiments.glm_shared_input_replay import (
 )
 from prismaquant import routed_experts, production_weight_cache
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from test_tessera_campaign_packed import _RoutedModel, _routed_tokens
 
 
@@ -19,7 +19,7 @@ def capture_fixture(*, max_bytes=1024*1024):
     fixture = RoutedInputFixture(members, max_batches=len(tokens), max_bytes=max_bytes,
                                  resource_check=lambda _: None)
     with fixture.capture():
-        observed = _collect_activations(model, targets, tokens, 0, 'cpu', want_hessian=False)
+        observed = capture_activation_statistics(model, targets, tokens, 0, 'cpu', want_hessian=False)
     return model, targets, tokens, fixture, observed
 
 
@@ -113,7 +113,7 @@ def test_partial_fixture_guard_failure_releases_clones_with_retained_traceback(m
                                  resource_check=guard)
     with pytest.raises(RuntimeError, match='partial fixture guard') as error:
         with fixture.capture():
-            _collect_activations(model, targets, _routed_tokens(), 0, 'cpu', want_hessian=False)
+            capture_activation_statistics(model, targets, _routed_tokens(), 0, 'cpu', want_hessian=False)
     fixture.clear()
     assert error.value.__traceback__ is not None
     assert refs and all(ref() is None for ref in refs)

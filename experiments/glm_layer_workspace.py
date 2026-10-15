@@ -181,7 +181,7 @@ def main():
     from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
     from prismaquant.model_profiles import detect_profile
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     from prismaquant.autoscale import streamed_calibration_resources
 
     profile = detect_profile(str(args.model))
@@ -520,7 +520,7 @@ def main():
                             activities=[torch.profiler.ProfilerActivity.CPU,torch.profiler.ProfilerActivity.CUDA],
                             schedule=profiler_schedule, record_shapes=True,profile_memory=True,
                             on_trace_ready=trace_ready) as prof:
-                        acts,hessians,counts,maxima = _collect_activations(runner.model,targets,tokens,
+                        acts,hessians,counts,maxima = capture_activation_statistics(runner.model,targets,tokens,
                             args.max_act_rows,runner.device,want_hessian=True,profile=profile,
                             forward_batch=forward_batch, resource_check=check_guard,
                             shared_packed_inputs=args.shared_packed_inputs,
@@ -529,7 +529,7 @@ def main():
                         audit_collector_rows(counts, targets, result, check_guard)
                 except BaseException as exc:
                     result['partial_target_row_observations'] = failed_collector_row_counts(
-                        exc, _collect_activations, targets)
+                        exc, capture_activation_statistics, targets)
                     raise
                 finally:
                     sampling_enabled.clear()

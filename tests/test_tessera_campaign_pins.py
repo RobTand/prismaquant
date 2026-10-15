@@ -1,4 +1,6 @@
 """The campaign's priced population must obey the profile's immutable floor."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from types import ModuleType, SimpleNamespace
 import sys
 
@@ -49,7 +51,7 @@ def test_main_excludes_exactly_the_existing_profile_pins(monkeypatch, tmp_path, 
         assert set(targets) == expected, "campaign attempted to price profile-pinned Linears"
         raise _CaptureBoundaryReached
 
-    monkeypatch.setattr(tessera_campaign, "_collect_activations", capture)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", capture)
     with pytest.raises(_CaptureBoundaryReached):
         tessera_campaign.main([
             "--model", "synthetic-profile", "--out", str(tmp_path / "cost.pkl"),

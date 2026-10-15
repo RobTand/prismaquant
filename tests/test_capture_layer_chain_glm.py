@@ -3,6 +3,8 @@
 Needs transformers' ``glm5_next`` (the ``-tf516`` venv) and, for the campaign
 CLI, the pinned Tessera producer.
 """
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 import json
 import os
 import re
@@ -43,12 +45,12 @@ class _Frontier:
 
 def _visit(runner, tokens, targets, *, start=None, stop_layer=None):
     """Captured X/H/rows/max per unit, the hidden after the last layer, and the visited layers."""
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     captured, final, visited = [{}, {}, {}, {}], [], []
 
     def visit(layer, forward_batch):
         names = [name for name in targets if runner.layer_index_for_qname(name) == layer]
-        values = _collect_activations(runner.model, names, tokens, 7, "cpu",
+        values = capture_activation_statistics(runner.model, names, tokens, 7, "cpu",
             want_hessian=True, profile=runner.profile, forward_batch=forward_batch)
         for actual, local in zip(captured, values):
             actual.update(local)
@@ -473,17 +475,17 @@ def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
     capture_units = [*capture, '--units', str(units_path)]
 
     forwards = []
-    real_collect = campaign._collect_activations
+    real_collect = calibration_forward.capture_activation_statistics
 
     def counting_collect(*args, **kwargs):
         forwards.append(1)
         return real_collect(*args, **kwargs)
-    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', counting_collect)
     monolith = tmp_path / 'monolith'
     assert campaign.main([*capture_units, '--cache-dir', str(tmp_path / 'monolith-cache'),
                           '--capture-calibration-out', str(monolith)]) == 0
     assert forwards, "the monolith capture never collected activations"
-    monkeypatch.setattr(campaign, '_collect_activations',
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics',
                         lambda *_: (_ for _ in ()).throw(
                             AssertionError("a completed-capture reuse repeated the forward")))
     manifest = _manifest(monolith)
@@ -521,7 +523,7 @@ def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
                        '--cache-dir', str(tmp_path / 'monolith-fullreuse-cache'),
                        '--capture-calibration-out', str(monolith)])
     # The chain rows forward for real again.
-    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', counting_collect)
 
     storage = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
                "directory": str(tmp_path / "boundaries"), "max_resident_bytes": 64 << 20,

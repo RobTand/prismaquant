@@ -1,6 +1,6 @@
 """GLM MTP layer 45: the capture's model, weight loader and inputs (PQ #1290).
 
-The capture reuses the body campaign's collector (`_collect_activations`)
+The capture reuses the body campaign's collector (`capture_activation_statistics`)
 unchanged, so what needs checking is everything that feeds it:
 
 * the wrapper that puts the MTP layer under its checkpoint name, so the
@@ -49,7 +49,7 @@ from prismaquant import tessera_hessian as th  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 from prismaquant.routed_experts import profile_declared_packed_expert_projections  # noqa: E402
-from prismaquant.tessera_campaign import _collect_activations  # noqa: E402
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from tests.test_glm5_next_streamed_forward_parity import (  # noqa: E402
     _build_tiny_model, _streamed_runner, _torch_only_causal_conv1d,  # noqa: F401
 )
@@ -238,7 +238,7 @@ def test_capture_collects_the_rows_the_router_routes(layer):
         lambda _m, _a, out: moe_inputs.append(out.detach().clone()))
     try:
         targets = sorted(_routed_names() | _shared_names())
-        rows, hessians, counts, maxima = _collect_activations(
+        rows, hessians, counts, maxima = capture_activation_statistics(
             feed.model, targets, feed.batches(), 5, "cpu", want_hessian=True,
             profile=PROFILE, forward_batch=feed)
     finally:

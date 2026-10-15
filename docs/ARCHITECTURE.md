@@ -92,6 +92,20 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_calibration_forward.capture_activation_statistics` owns dense and packed
+activation capture over caller-owned models and tokens. `CalibrationStatistics`
+names scoring rows, Hessians, full token counts and full maxima while retaining
+tuple unpacking. The operation keeps hook removal, source-view release callbacks,
+resource guards and exception cleanup. Calibration loading and model/source
+lifetime stay with their existing owners; cell recipes remain separate.
+Every active caller and profiler uses this public owner; the campaign private
+capture function is removed. Importing its types does not load numerical runtimes.
+Receipt operation names and schemas retain their historical spelling. The current
+package source closure includes the new owner; historical source seals still
+require the existing explicit migration proof rather than automatic relabeling.
+
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): reseal
 publication uses the shared checkpoint atomic writer with process-specific
 staging. Two processes can no longer consume the same fixed `.tmp` inode.

@@ -1,7 +1,7 @@
 """Same-pass disjoint FIT/HELDOUT calibration row moments (Stage-1 research).
 
 ``DisjointRowMoments`` is the external ``row_consumer`` for the default-off
-seam in :func:`prismaquant.tessera_campaign._collect_activations`.  The seam
+seam in :func:`prismaquant.tessera_calibration_forward.capture_activation_statistics`.  The seam
 calls :meth:`consume` ONCE per canonical shared input group -- dense pre-hook
 or routed derivation, both feed the single ``accumulate`` path -- with the
 uncapped flat rows, before any scoring-prefix cap and independent of

@@ -8,6 +8,8 @@ This measures preparation ownership, not a calibration probe, KL, serving,
 full-GLM fit or production throughput.
 """
 from __future__ import annotations
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 
 import argparse
@@ -151,7 +153,7 @@ def build_fixture(root):
         stack.enter_context(patch.object(campaign, 'expand_menus_for_targets', exact_menu))
         def no_capture(*_args, **_kwargs):
             raise RuntimeError('selected anchor reuse attempted a new calibration forward')
-        stack.enter_context(patch.object(campaign, '_collect_activations', no_capture))
+        stack.enter_context(patch.object(calibration_forward, 'capture_activation_statistics', no_capture))
         output = root / 'selected-cost.pkl'
         if campaign.main([*common, '--out', str(output), '--cache-dir', str(root / 'selected-cache'),
                 '--units', str(selection), '--calibration-census', str(census_path),

@@ -7,6 +7,8 @@ on CPU over a real verified capture, a real shard reader and real Tessera
 encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 
 import gc
@@ -84,7 +86,7 @@ def stream_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
         "accepted": True, "reason": "CPU test fixture", "kwargs": [], "recipe": {}})
     monkeypatch.setattr(campaign, "_calibration_tokens", lambda *_args: (tokens, text))
-    monkeypatch.setattr(campaign, "_collect_activations",
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics",
                         lambda *_a, **_k: pytest.fail("repeated calibration forward"))
     monkeypatch.setattr(campaign, "expand_menus_for_targets",
                         lambda _weights, targets, **_kwargs: {name: menu for name in targets})

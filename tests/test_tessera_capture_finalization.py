@@ -1,7 +1,8 @@
 """The collector must release obsolete capture buffers during finalization."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 import weakref
 import torch
-from prismaquant import tessera_campaign as tc
 
 
 def test_scoring_chunks_are_released_between_units(monkeypatch):
@@ -15,7 +16,7 @@ def test_scoring_chunks_are_released_between_units(monkeypatch):
         previous[:] = [weakref.ref(value) for value in chunks]
         return original_cat(chunks, *args, **kwargs)
     monkeypatch.setattr(torch, 'cat', concatenate)
-    rows, hessians, counts, maxima = tc._collect_activations(
+    rows, hessians, counts, maxima = calibration_forward.capture_activation_statistics(
         model,['0','1'],tokens,2,'cpu',want_hessian=True)
     x = tokens[0].float()
     y = model[0](tokens[0]).float()

@@ -14,6 +14,8 @@ selected-source row of ``prismaquant.tessera_campaign.main`` on the tiny GLM
 checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 import json
 import os
@@ -189,7 +191,7 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         pytest.fail('selected anchor reuse repeated calibration')
 
     monkeypatch.setattr(campaign, 'expand_menus_for_targets', two_rungs)
-    monkeypatch.setattr(campaign, '_collect_activations', no_forward)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', no_forward)
 
     # The release path, recorded and called through. The wrapper checks the
     # caller's ``expected_stat`` against the file itself, so a call that names

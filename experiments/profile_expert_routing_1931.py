@@ -7,6 +7,8 @@ rows. This is one resident layer control, not whole-campaign qualification.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import argparse
 from contextlib import ExitStack, contextmanager
 import datetime as dt
@@ -266,7 +268,7 @@ def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds
     routed_experts.derive_per_expert_activations = selected
     try:
         try:
-            campaign._collect_activations(model, targets, batches(), 512, 'cuda',
+            calibration_forward.capture_activation_statistics(model, targets, batches(), 512, 'cuda',
                 want_hessian=True,profile=profile,shared_packed_inputs=True,
                 forward_batch=lambda _:None,on_forwards_complete=lambda:None)
         except _HookControlComplete:

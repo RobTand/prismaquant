@@ -9,7 +9,7 @@ One runnable experiment entry with four modes over ONE capture root:
   admission call is made or patched.
 * ``quantum``  -- builds the existing streamed runner through
   :func:`prismaquant.capture_layer_chain.authenticate_quantum_source` and
-  drives ``_collect_activations`` with ``want_hessian=False, max_rows=0,
+  drives ``capture_activation_statistics`` with ``want_hessian=False, max_rows=0,
   shared_packed_inputs=True, row_consumer=moments.consume`` so both split
   roles accumulate in the SAME forward pass. Every source layer in the
   range forwards, even a layer with no selected unit. Both roles are
@@ -41,6 +41,8 @@ Both the ``prismaquant`` package and split-moment helper are loaded from this
 checkout, so PrismaBuild carries the complete runnable research source.
 """
 from __future__ import annotations
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 
 import argparse
@@ -763,7 +765,7 @@ def _run_prepared_quantum(args, guard, *, recompute=False) -> dict:
             records = None
             try:
                 checked = indexer.wrapper(layer, forward_batch)
-                _acts, _hessians, rows, _amax = campaign._collect_activations(
+                _acts, _hessians, rows, _amax = calibration_forward.capture_activation_statistics(
                     runner.model, names, tokens, 0, runner.device,
                     want_hessian=False, profile=runner.profile, forward_batch=checked,
                     shared_packed_inputs=True, expected_shared_input_groups=expected,

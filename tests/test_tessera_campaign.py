@@ -849,7 +849,7 @@ def test_the_hessian_sees_every_row_not_just_the_scored_ones():
     the test that says so: with ``max_rows`` far below the rows the module
     sees, H must still equal the full Gram.
     """
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     torch.manual_seed(0)
     cols, batches, rows_per_batch = 32, 3, 40
@@ -864,7 +864,7 @@ def test_the_hessian_sees_every_row_not_just_the_scored_ones():
 
     net = _Net().eval()
     tokens = [torch.randn(rows_per_batch, cols) for _ in range(batches)]
-    rows, hess, seen, amax = _collect_activations(
+    rows, hess, seen, amax = capture_activation_statistics(
         net, ["lin"], tokens, max_rows=5, device="cpu", want_hessian=True)
 
     every = torch.cat(tokens, dim=0).to(torch.float32)

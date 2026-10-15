@@ -1,4 +1,6 @@
 """Campaign source qualification uses the real GLM skeleton and shard loader."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 import os
 import subprocess
@@ -110,7 +112,7 @@ def test_real_glm_streamed_source_matches_checkpoint(glm_checkpoint, tmp_path):
 
 
 def test_layer_visit_preserves_campaign_prefix_and_full_hessian(glm_checkpoint, tmp_path):
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
     reference, source = glm_checkpoint
     profile = Glm5NextProfile()
@@ -121,7 +123,7 @@ def test_layer_visit_preserves_campaign_prefix_and_full_hessian(glm_checkpoint, 
     assert targets and any(".experts." in name for name in targets)
     torch.manual_seed(441)
     tokens = [torch.randint(2, 128, (1, 257)), torch.randint(2, 128, (1, 257))]
-    baseline = _collect_activations(reference, targets, tokens, 7, "cpu", want_hessian=True, profile=profile)
+    baseline = capture_activation_statistics(reference, targets, tokens, 7, "cpu", want_hessian=True, profile=profile)
     runner = build_streamed_causal_lm(str(source), device=torch.device("cpu"),
         dtype=torch.float32, offload_folder=str(tmp_path / "offload"), profile=profile,
         max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0,
@@ -131,7 +133,7 @@ def test_layer_visit_preserves_campaign_prefix_and_full_hessian(glm_checkpoint, 
     visited = []
     def visit(layer, forward_batch):
         names = [n for n in targets if runner.layer_index_for_qname(n) == layer]
-        values = _collect_activations(runner.model, names, tokens, 7, "cpu",
+        values = capture_activation_statistics(runner.model, names, tokens, 7, "cpu",
             want_hessian=True, profile=profile, forward_batch=forward_batch)
         for actual, local in zip(captured, values):
             actual.update(local)
@@ -338,7 +340,7 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(
             groups=[dict(key=dense_group, members=names)])))
         def no_forward(*args, **kwargs):
             pytest.fail('selected anchor reuse repeated calibration')
-        monkeypatch.setattr(campaign, '_collect_activations', no_forward)
+        monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', no_forward)
         original_menus = campaign.expand_menus_for_targets
         def two_rungs(weights, targets, **kwargs):
             # TWO rungs, so the row runs two encode steps. One step cannot

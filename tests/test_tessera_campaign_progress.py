@@ -1,4 +1,6 @@
 """Adaptive scheduler progress and durable resume, with controlled producer calls."""
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 from collections import Counter
 import copy
@@ -21,7 +23,7 @@ def fixture(monkeypatch, tmp_path):
     inputs['menu'] = [SimpleNamespace(format_name=f'{FAMILY}_R{r}', family=FAMILY,
         body_rate_q256=r, bpp=r/256, admission=SimpleNamespace(activation_contract='fp8_e4m3'))
         for r in (1024, 1280, 1536)]
-    monkeypatch.setattr(campaign, '_collect_activations', lambda *_a, **_k: (
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', lambda *_a, **_k: (
         {n: inputs['rows'] for n in (UNIT, OTHER)}, {}, {n: 0 for n in (UNIT, OTHER)},
         {n: inputs['max_abs'] for n in (UNIT, OTHER)}))
     monkeypatch.setattr(campaign, 'resolve_anchor_groups',

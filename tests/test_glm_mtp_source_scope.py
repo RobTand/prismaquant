@@ -11,6 +11,8 @@ Each test runs on the tiny checkpoint of ``test_glm_mtp_capture``: a two-layer
 body plus its MTP layer, captured through the real CLI phases.
 """
 from __future__ import annotations
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 
 import hashlib
@@ -309,7 +311,7 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
     def no_forward(*_args, **_kwargs):
         pytest.fail("a selected MTP row must not run a calibration forward")
 
-    monkeypatch.setattr(campaign, "_collect_activations", no_forward)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", no_forward)
     original_menus = campaign.expand_menus_for_targets
 
     def one_rung(weights, targets, **kwargs):
