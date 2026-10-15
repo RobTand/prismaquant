@@ -4,6 +4,15 @@ Re-stamped 2026-10-15: G3 staged ranges re-cover and re-acquire the same declare
 bytes on stage after a RAM acquisition availability refusal. Integrity and unknown
 refusals still fail closed. An unsuccessful acquisition publishes no reader window.
 
+Re-stamped 2026-10-15: `assignment_space.AssignmentSpace` owns the admitted
+run's per-name stats lookup, complete scope view, packed/fused expansion, fixed
+format join, serving promotion and exact tensor payload accounting. Expansion
+retains both pre-promotion and final assignments for the writer's checked no-op
+policy. Per-name lookup skips non-dict entries; scope maps retain overwrite
+precedence. Measured and PACT contexts still reuse one loaded run and retain
+their scientific evidence, exact re-solve and no-overwrite replay contracts.
+Whole-artifact and runtime pricing remain with their existing owners.
+
 Re-stamped 2026-10-15: candidate prices, activation branch labels and unknown-zero
 refusals share one classified price basis. Fixed qualified/exact, joint, output
 and weight-space bases retain existing precedence, gains, transfers and clamps.

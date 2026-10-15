@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from prismaquant import allocator
+from prismaquant import allocator, assignment_space
 from prismaquant.serve_constraints import (
     ServeConstraintError, ServeSLOs, evaluate_measured_assignment,
 )
@@ -265,7 +265,7 @@ def test_real_cli_refuses_promotion_of_priced_proposal(tmp_path, monkeypatch):
     name, argv = _main_fixture(tmp_path)
     def change_format(assignment, *args, **kwargs):
         return {**assignment, name: "FP8_E4M3"}
-    monkeypatch.setattr(allocator, "promote_serving_units", change_format)
+    monkeypatch.setattr(assignment_space, "promote_serving_units", change_format)
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(SystemExit, match="promotion changed a measured runtime proposal"):
         allocator.main()

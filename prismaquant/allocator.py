@@ -98,6 +98,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import format_registry as fr
+from .assignment_space import AggregationPolicy, AssignmentSpace
 from .allocator_solver import (
     Candidate,
     _shape_from_stats,
@@ -106,7 +107,6 @@ from .allocator_solver import (
     legal_formats_from_candidates,
     promote_fused,
     promote_moe_pair,
-    promote_serving_units,
     solve_with_promotion,
 )
 from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
@@ -122,8 +122,6 @@ from prismaquant.allocator_candidates import (
     aggregate_packed_serving_groups,
     build_candidates,
     calibrate_activation_fair_pricing,
-    expand_fused_sibling_assignment,
-    expand_packed_group_assignment,
     fused_sibling_group_members,
     packed_role_split_profile,
     packed_serving_group_members,
@@ -3764,44 +3762,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     )
     print(f"[alloc] format applicability → {applicability_report_path}")
 
-    def _stats_entry_for_assignment_name(name: str) -> dict | None:
-        entry = stats.get(name)
-        if isinstance(entry, dict):
-            return entry
-        fixed_entry = fixed_stats.get(name)
-        if isinstance(fixed_entry, dict):
-            return fixed_entry
-        original_entry = accounting_stats.get(name)
-        if isinstance(original_entry, dict):
-            return original_entry
-        return None
+    assignment_space = AssignmentSpace(
+        stats=stats, fixed_stats=fixed_stats, accounting_stats=accounting_stats,
+        fixed_formats=fixed_format_assignment,
+        aggregation=AggregationPolicy(packed=not args.no_packed_aggregation,
+                                      fused=not args.no_fused_aggregation),
+        profile=model_profile, format_rank=format_rank,
+        legal_formats=per_linear_legal_formats,
+    )
 
-    def _expand_assignment_for_seed_json(
-        assignment: dict[str, str],
-        *,
-        include_auxiliary: bool = True,
-    ) -> dict[str, str]:
-        """Expand DP super-items into the per-Linear seed-assignment shape.
-
-        The allocator can solve over packed-serving-group and fused-sibling
-        super-items. The KL probe's seed path wants ordinary module qnames;
-        it already handles legality, pinning, and fused coherence, but giving
-        it expanded names preserves the intended frontier point instead of
-        making the super-item markers look like unknown entries.
-        """
-        expanded = dict(assignment)
-        if not args.no_packed_aggregation:
-            expanded = expand_packed_group_assignment(expanded, stats)
-        if not args.no_fused_aggregation:
-            expanded = expand_fused_sibling_assignment(expanded, stats)
-        if include_auxiliary:
-            expanded.update(fixed_format_assignment)
-        return promote_serving_units(
-            expanded,
-            format_rank,
-            profile=model_profile,
-            legal_formats=per_linear_legal_formats,
-        )
 
     measured_runtime_resources = {}
     measured_option_assignments = {}
@@ -3822,8 +3791,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     if option.serialized_sidecar_identity is not None:
                         raise ValueError("measured runtime search requires additive serialized "
                                          "candidate bytes; shared candidate sidecars are unsupported")
-                    members = expand_fused_sibling_assignment(
-                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    members = assignment_space.unit_members(unit, option.fmt)
                     measured_option_assignments[(unit, option.fmt)] = members
                     identities = {}
                     shapes = {}
@@ -3839,7 +3807,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                             raise ValueError(f"{name}:{fmt}: measured runtime source/calibration "
                                              "differs from the joint AURA evidence")
                         identities[name] = digest
-                        entry = _stats_entry_for_assignment_name(name)
+                        entry = assignment_space.stats_for(name)
                         if entry is None:
                             raise ValueError(f"{name}: measured runtime has no independent shape")
                         shapes[name] = _shape_from_stats(entry)
@@ -3912,13 +3880,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             member_shapes, member_structure = {}, {}
             for unit, options in sorted(candidates.items()):
                 for option in options:
-                    members = expand_fused_sibling_assignment(
-                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    members = assignment_space.unit_members(unit, option.fmt)
                     pact_option_members[(unit, option.fmt)] = members
                     for name in members:
                         if name in member_shapes:
                             continue
-                        entry = _stats_entry_for_assignment_name(name)
+                        entry = assignment_space.stats_for(name)
                         if entry is None:
                             raise ValueError(f"{name}: PACT has no independent shape")
                         member_shapes[name] = _shape_from_stats(entry)
@@ -3989,79 +3956,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
         return evaluate_serve_constraints(
             expanded_assignment,
-            {**accounting_stats, **fixed_stats, **stats},
+            assignment_space.scope_stats(),
             serve_context,
             lane_for=_serve_lane_for,
             resident_bytes=resident_bytes,
         )
 
-    def _assignment_payload_totals(
-        assignment: Mapping[str, str],
-        *,
-        require_all_stats: bool,
-    ) -> dict[str, float | int | list[str]]:
-        """Exact assignment-scope tensor payload.
 
-        Candidate memory remains the additive DP proposal cost.  This function
-        is the exact filter/reporting path: NVFP4 global scale tensors are
-        included.
-        """
-        total = 0.0
-        params = 0
-        missing: list[str] = []
-        for name, fmt in assignment.items():
-            entry = _stats_entry_for_assignment_name(name)
-            if not isinstance(entry, dict):
-                missing.append(name)
-                continue
-            params += int(entry.get("n_params", 0) or 0)
-            # Super-items (packed groups, fused siblings) carry exact
-            # per-format byte sums; their stats entries have no single
-            # (out, in) shape, so the shape fallback is only for plain rows.
-            memory_map = entry.get("_memory_bytes_by_format")
-            if isinstance(memory_map, dict) and fmt in memory_map:
-                total += 8.0 * memory_map[fmt]
-                if fmt == "NVFP4":
-                    total += 8.0 * nvfp4_global_sidecar_bytes(
-                        name,
-                        _shape_from_stats(entry),
-                        weight_only=bool(
-                            entry.get(NVFP4_WEIGHT_ONLY_STATS_KEY, False)
-                        ),
-                    )
-                continue
-            shape = _shape_from_stats(entry)
-            payload_bytes, _identity, _sidecar_identity = serialized_candidate_payload(
-                fr.get_format(fmt),
-                shape,
-                qname=name,
-            )
-            total += 8.0 * payload_bytes
-            if fmt == "NVFP4":
-                total += 8.0 * nvfp4_global_sidecar_bytes(
-                    name,
-                    shape,
-                    weight_only=bool(
-                        entry.get(NVFP4_WEIGHT_ONLY_STATS_KEY, False)
-                    ),
-                )
-        if missing and require_all_stats:
-            raise AssertionError(
-                "exact assignment payload has no shape/stats for "
-                f"{len(missing)} tensor(s): {sorted(missing)[:12]}"
-            )
-        return {
-            "bits_total": float(total),
-            "quantizable_params": int(params),
-            "bits_per_param": float(total) / max(params, 1),
-            "missing_stats_names": sorted(missing),
-        }
-
-    def _assignment_bits_total(assignment: dict[str, str]) -> float:
-        return float(_assignment_payload_totals(
-            assignment,
-            require_all_stats=True,
-        )["bits_total"])
 
     _solve_cache: dict[float, tuple] = {}
     # Solver diagnostics per target, kept beside the memo so a cache hit never
@@ -4170,12 +4071,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 for unit, fmt in proposal.assignment.items():
                     raw_expanded.update(measured_option_assignments[(unit, fmt)])
                 raw_expanded.update(fixed_format_assignment)
-                expanded = _expand_assignment_for_seed_json(proposal.assignment)
+                expanded = assignment_space.expand(proposal.assignment).assignment
                 if expanded != raw_expanded:
                     raise SystemExit("[alloc] ERROR: serving promotion changed a measured "
                                      "runtime proposal; aggregate coupled units and measure "
                                      "their exact whole-operator options before selection")
-                exact = _assignment_payload_totals(
+                exact = assignment_space.payload(
                     {name: fmt for name, fmt in expanded.items()
                      if name not in fixed_format_assignment}, require_all_stats=True)
                 achieved = float(exact["bits_per_param"])
@@ -4238,11 +4139,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             })
             if assign is None:
                 return None, float("nan"), float("inf"), float("inf")
-            expanded = _expand_assignment_for_seed_json(
+            expanded = assignment_space.expand(
                 assign,
                 include_auxiliary=False,
-            )
-            exact = _assignment_payload_totals(
+            ).assignment
+            exact = assignment_space.payload(
                 expanded,
                 require_all_stats=True,
             )
@@ -4295,39 +4196,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             flush=True,
         )
 
-        assignment_expanded = dict(assignment)
-
-        # Expand packed-serving-group super-items back to per-tensor entries.
-        if not args.no_packed_aggregation:
-            assignment_expanded = expand_packed_group_assignment(
-                assignment_expanded, stats)
-
-        # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
-        if not args.no_fused_aggregation:
-            assignment_expanded = expand_fused_sibling_assignment(
-                assignment_expanded, stats)
-
-        assignment_expanded.update(fixed_format_assignment)
-        assignment_before_serving_promotion = dict(assignment_expanded)
-
-        # vLLM's FusedMoE requires all projections of the same expert to share
-        # one scheme. Packed groups are first-class DP units, so this promotion
-        # is a validated no-op (validate_final_serving_promotion_noop below);
-        # it stays as the serve-time coherence backstop for the un-aggregated
-        # paths (--no-packed-aggregation / --no-fused-aggregation). It is handed
-        # per-Linear legality so the shared format it lands on is runnable for
-        # every member, and it is still a no-op here by construction: an
-        # aggregated unit's format came from the intersection of its members'
-        # candidate sets, and the un-aggregated paths were already promoted
-        # against the same sets inside solve_with_promotion.
-        assignment_expanded = promote_serving_units(
-            assignment_expanded,
-            format_rank,
-            profile=model_profile,
-            legal_formats=per_linear_legal_formats,
-        )
+        expansion = assignment_space.expand(assignment)
+        assignment_before_serving_promotion = dict(expansion.before_promotion)
+        assignment_expanded = expansion.assignment
         from .allocator_candidates import require_assignment_rung_allowability
-        final_scope_stats = {**accounting_stats, **fixed_stats, **stats}
+        final_scope_stats = assignment_space.scope_stats()
         final_scopes = _final_allowability_scopes(
             assignment_expanded, tessera_context_by_unit, final_scope_stats, rung_allowability,
             m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel or 1)
@@ -4370,7 +4243,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 artifact_size_for=_artifact_size_for,
                 canonical_format=_canonical_candidate_format,
             )
-            achieved = float(_assignment_payload_totals(
+            achieved = float(assignment_space.payload(
                 body_assignment_for_accounting(assignment_expanded),
                 require_all_stats=True)["bits_per_param"])
             try:
@@ -4516,7 +4389,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         for layer, row in paired_trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
                              + DIRECT_ASCII_SPACED_LAX.text(refusals))
-        final_body_payload = _assignment_payload_totals(
+        final_body_payload = assignment_space.payload(
             final_body_assignment,
             require_all_stats=True,
         )
@@ -4532,7 +4405,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 f"exact-filtered solve: final={final_body_achieved}, "
                 f"solve={achieved}"
             )
-        final_assignment_payload = _assignment_payload_totals(
+        final_assignment_payload = assignment_space.payload(
             assignment_expanded,
             require_all_stats=False,
         )
@@ -4767,7 +4640,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             achieved_bits=final_body_achieved,
             assignment_expanded=assignment_expanded,
             candidates=candidates,
-            stats_entry_for=_stats_entry_for_assignment_name,
+            stats_entry_for=assignment_space.stats_for,
             format_specs=format_specs,
             visual_decision_names=visual_decision_names,
             profile=model_profile,
@@ -4856,13 +4729,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             priced_total, _part = _partition_source_total(
                 _fp, src_total, src_manifest,
                 where="pareto candidate footprint",
-                assigned_names={**accounting_stats, **fixed_stats, **stats})
+                assigned_names=assignment_space.scope_stats())
             _footprint_ctx.update({
                 "fp": _fp,
                 "source_total_bytes": priced_total,
                 "regime": _fp.source_regime(src_by_dtype),
                 "source_manifest": src_manifest,
-                "stats": {**accounting_stats, **fixed_stats, **stats},
+                "stats": assignment_space.scope_stats(),
             })
         except Exception as exc:  # pricing is additive; never break allocation
             print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
@@ -4976,7 +4849,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # the non-unit payload plus the units' member names (#1716).  The
             # card reports the two apart so `non_unit_payload_bytes` stays
             # honest, but the unit budget must subtract both.
-            priced = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
+            priced = {name: _pact_payload_bytes(assignment_space.expand(dict(a)).assignment)
                       for name, a in ends.items()}
             outside = {name: priced[name][0] - _pact_unit_bytes(a) for name, a in ends.items()}
             names_outside = {name: priced[name][1] for name in ends}
@@ -5011,10 +4884,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             for unit, fmt in assignment.items():
                 raw_expanded.update(pact_option_members[(unit, fmt)])
             raw_expanded.update(fixed_format_assignment)
-            expanded = _expand_assignment_for_seed_json(dict(assignment))
+            expanded = assignment_space.expand(dict(assignment)).assignment
             if expanded != raw_expanded:
                 return {"feasible": False, "reason": "serving_promotion_changed_the_vertex"}
-            exact = _assignment_payload_totals(
+            exact = assignment_space.payload(
                 {name: fmt for name, fmt in expanded.items()
                  if name not in fixed_format_assignment}, require_all_stats=True)
             achieved = float(exact["bits_per_param"])
@@ -5064,7 +4937,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     raise ValueError(f"PACT baseline {unit}: requires one uniquely priced serving choice, "
                                      f"found {len(matching)}")
                 assignment[unit] = matching[0]
-            if _expand_assignment_for_seed_json(assignment) != expanded:
+            if assignment_space.expand(assignment).assignment != expanded:
                 raise ValueError("PACT baseline serving expansion changes its assignment")
             # Match the existing runtime solver's sorted binary64 fold exactly.
             time_ms = 0.0
@@ -5250,8 +5123,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                       "diagnostics": diag}
             if assign is None:
                 return record
-            expanded = _expand_assignment_for_seed_json(assign)
-            exact = _assignment_payload_totals(
+            expanded = assignment_space.expand(assign).assignment
+            exact = assignment_space.payload(
                 {name: fmt for name, fmt in expanded.items()
                  if name not in fixed_format_assignment}, require_all_stats=True)
             verdict = _serve_feasibility(expanded)
@@ -5310,7 +5183,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         format_params = defaultdict(int)
         for name, fmt in assign.items():
             format_counts[fmt] += 1
-            entry = _stats_entry_for_assignment_name(name)
+            entry = assignment_space.stats_for(name)
             if isinstance(entry, dict):
                 format_params[fmt] += int(entry.get("n_params", 0) or 0)
         total_with_aux = total + fixed_total_dloss
@@ -5329,11 +5202,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             **{f"params_{k}": v for k, v in format_params.items()},
         })
         if args.pareto_output_dir:
-            expanded = _expand_assignment_for_seed_json(assign)
-            budget_expanded = _expand_assignment_for_seed_json(
+            expanded = assignment_space.expand(assign).assignment
+            budget_expanded = assignment_space.expand(
                 assign,
                 include_auxiliary=False,
-            )
+            ).assignment
             expanded_counts = defaultdict(int)
             for fmt in expanded.values():
                 expanded_counts[fmt] += 1
@@ -5347,8 +5220,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "total_predicted_dloss_with_aux": float(total_with_aux),
                 "assignment": expanded,
                 "format_counts": dict(sorted(expanded_counts.items())),
-                "bits_total": _assignment_bits_total(budget_expanded),
-                "bits_total_with_aux": _assignment_bits_total(expanded),
+                "bits_total": assignment_space.bits_total(budget_expanded),
+                "bits_total_with_aux": assignment_space.bits_total(expanded),
             })
 
     # Coarse Kneedle, then golden-section refinement inside the knee bracket so
@@ -5376,9 +5249,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             if args.pareto_output_dir:
                 r_assign, r_ach, r_tot, r_mut = _solve_for_target(refined["target_bits"])
                 if r_assign is not None:
-                    r_exp = _expand_assignment_for_seed_json(r_assign)
-                    r_bud = _expand_assignment_for_seed_json(
-                        r_assign, include_auxiliary=False)
+                    r_exp = assignment_space.expand(r_assign).assignment
+                    r_bud = assignment_space.expand(
+                        r_assign, include_auxiliary=False).assignment
                     r_counts = defaultdict(int)
                     for fmt in r_exp.values():
                         r_counts[fmt] += 1
@@ -5392,8 +5265,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         "total_predicted_dloss_with_aux": float(r_tot + fixed_total_dloss),
                         "assignment": r_exp,
                         "format_counts": dict(sorted(r_counts.items())),
-                        "bits_total": _assignment_bits_total(r_bud),
-                        "bits_total_with_aux": _assignment_bits_total(r_exp),
+                        "bits_total": assignment_space.bits_total(r_bud),
+                        "bits_total_with_aux": assignment_space.bits_total(r_exp),
                         "knee_refined": True,
                     })
 
@@ -5673,20 +5546,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         src_total_full = int(src_total)
         src_total, source_partition = _partition_source_total(
             _fp, src_total, src_manifest, where="byte-budget selection",
-            assigned_names={**accounting_stats, **fixed_stats, **stats})
+            assigned_names=assignment_space.scope_stats())
 
         # Stats view for the footprint accounting: the same three-map
-        # precedence `_stats_entry_for_assignment_name` uses (aggregated DP
+        # precedence `assignment_space.stats_for` uses (aggregated DP
         # stats > fixed MTP/visual > pre-aggregation accounting stats), so
         # every name in an EXPANDED assignment resolves and the shared
         # function prices exactly the tensors the inlined copy did.
-        _footprint_stats = {**accounting_stats, **fixed_stats, **stats}
+        _footprint_stats = assignment_space.scope_stats()
 
         def _artifact_for_target(t: float):
             assign_t, ach_t, tot_t, _mut = _solve_for_target(t)
             if assign_t is None:
                 return None
-            expanded_t = _expand_assignment_for_seed_json(assign_t)
+            expanded_t = assignment_space.expand(assign_t).assignment
             ctx = f"byte-budget selector (target_bits={t:.3f})"
             # ONE accounting path: footprint.assignment_artifact_bytes owns
             # the manifest -> resolve -> check-non-negative -> floor sequence
@@ -5784,9 +5657,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 cheapest_fmt[cand_name] = min(
                     cand_list, key=lambda c: (c.memory_bytes, c.fmt)).fmt
             try:
-                expanded_floor = _expand_assignment_for_seed_json(
-                    cheapest_fmt, include_auxiliary=False)
-                totals = _assignment_payload_totals(
+                expanded_floor = assignment_space.expand(
+                    cheapest_fmt, include_auxiliary=False).assignment
+                totals = assignment_space.payload(
                     expanded_floor, require_all_stats=True)
             except Exception:
                 return None

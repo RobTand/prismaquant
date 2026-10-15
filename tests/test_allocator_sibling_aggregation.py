@@ -28,6 +28,7 @@ import pytest
 
 from prismaquant import format_registry as fr
 from prismaquant.allocator_solver import promote_serving_units
+from prismaquant.allocator_candidates import expand_fused_sibling_assignment
 from prismaquant.allocator import (
     Candidate,
     _FUSED_SIBLING_MARKER,
@@ -35,7 +36,6 @@ from prismaquant.allocator import (
     aggregate_fused_siblings,
     build_candidates,
     compute_achieved,
-    expand_fused_sibling_assignment,
     promote_moe_pair,
     solve_with_promotion,
     validate_default_profile_format_menu,
