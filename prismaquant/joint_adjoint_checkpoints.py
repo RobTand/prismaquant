@@ -1611,7 +1611,7 @@ def _shared_state_by_name(shared_adjoint, shared_pass, name: str):
         f"exact boundary checkpoint has no shared state {name!r}")
 
 
-def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
+def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     """One small checkpoint file, staged-pinned under policy.
 
     Serves the shared-state pickles and ``checkpoint.json``; refusal
