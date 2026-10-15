@@ -86,6 +86,10 @@ device-qualification conditions. Development still refuses structural predicates
 and the reviewed answer, pin, evidence, scope and independent export gates remain
 unchanged.
 
+vLLM metadata discovery loads the registered class entry directly when available.
+It does not construct a serving `ModelConfig`; errors from the installed class
+loader propagate through serving-unit discovery.
+
 `source_read_plan` owns artifact shard/header inventory as well as the shared
 safetensors framing parser. Autoscale reads those headers directly from the IO
 owner; `artifact_completeness` retains decoder coverage classification. The

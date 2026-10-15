@@ -53,6 +53,17 @@ def vllm_class_for_architecture(arch_name: str):
             declared = arch_name in supported()
             if not declared:
                 return None
+        # Registered entries expose metadata loading without the runtime's
+        # ModelConfig-dependent architecture selection in newer vLLM.
+        entries = getattr(reg, "models", None)
+        if isinstance(entries, dict) and arch_name in entries:
+            load = getattr(entries[arch_name], "load_model_cls", None)
+            if callable(load):
+                resolved = model_class(load())
+                if resolved is None:
+                    raise RuntimeError(
+                        f"registered vLLM architecture {arch_name!r} loaded no model class")
+                return resolved
         for method, argument in (("resolve_model_cls", [arch_name]),
                                  ("inspect_model_cls", arch_name),
                                  ("load_model_cls", arch_name)):

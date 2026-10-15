@@ -67,3 +67,32 @@ def test_unregistered_architecture_remains_an_explicit_absence(monkeypatch):
         resolve_model_cls=lambda names: pytest.fail("unknown architecture was loaded")))
     monkeypatch.setitem(sys.modules, "vllm.model_executor.models", module)
     assert vllm_registry.vllm_class_for_architecture("Unregistered") is None
+
+
+def test_registry_metadata_loader_does_not_require_runtime_model_config(monkeypatch):
+    class QwenMetadata:
+        packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
+    entry = SimpleNamespace(load_model_cls=lambda: QwenMetadata)
+    def runtime_resolution(architectures, model_config):
+        pytest.fail("metadata discovery initialized a runtime model config")
+    module = ModuleType("vllm.model_executor.models")
+    module.registry = SimpleNamespace(ModelRegistry=SimpleNamespace(
+        get_supported_archs=lambda: ["Qwen3ForCausalLM"],
+        models={"Qwen3ForCausalLM": entry},
+        resolve_model_cls=runtime_resolution))
+    monkeypatch.setitem(sys.modules, "vllm.model_executor.models", module)
+    resolved = vllm_registry.vllm_class_for_architecture("Qwen3ForCausalLM")
+    assert vllm_registry.packed_modules_mapping_from_class(resolved) == {
+        "qkv_proj": ["q_proj", "k_proj", "v_proj"]}
+
+
+def test_registered_metadata_loader_failure_propagates(monkeypatch):
+    def fail():
+        raise DeclarationFailed("registered metadata cannot load")
+    module = ModuleType("vllm.model_executor.models")
+    module.registry = SimpleNamespace(ModelRegistry=SimpleNamespace(
+        get_supported_archs=lambda: ["Qwen3ForCausalLM"],
+        models={"Qwen3ForCausalLM": SimpleNamespace(load_model_cls=fail)}))
+    monkeypatch.setitem(sys.modules, "vllm.model_executor.models", module)
+    with pytest.raises(DeclarationFailed, match="metadata cannot load"):
+        vllm_registry.vllm_class_for_architecture("Qwen3ForCausalLM")
