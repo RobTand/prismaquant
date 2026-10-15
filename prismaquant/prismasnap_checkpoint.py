@@ -852,6 +852,8 @@ def _validate_config_semantics(
     identity: Mapping[str, object],
 ) -> None:
     """Bind the live HF config semantics carried by the source identity."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     config_path = model_root / "config.json"
     before = (config_path.stat().st_size, _sha256_file(config_path))
     try:

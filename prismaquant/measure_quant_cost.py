@@ -819,6 +819,8 @@ def _stage_text_only(model_path: str) -> str:
 
 def _load_live_model(model_path: str, device: str, dtype: torch.dtype,
                      device_map: str | None = None) -> nn.Module:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM
 
     staged = _stage_text_only(model_path)

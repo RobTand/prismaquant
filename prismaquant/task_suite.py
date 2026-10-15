@@ -63,6 +63,8 @@ def _task_model_artifact(backend, *, model_config=None):
     if path.is_dir():
         return build_source_checkpoint_identity(path)
     if model_config is None:
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         from transformers import AutoConfig
         model_config = AutoConfig.from_pretrained(backend["pretrained"], revision=backend.get("revision"),
                                                   trust_remote_code=backend["trust_remote_code"])
@@ -151,6 +153,8 @@ def verify_task_result(result, config):
 
 def require_hf_reader(backend):
     """Refuse declared bytes that the authoritative HF reader would skip."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
     from transformers.quantizers.auto import AutoHfQuantizer
     model_config = AutoConfig.from_pretrained(backend["pretrained"], revision=backend.get("revision"),

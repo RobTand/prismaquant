@@ -1843,6 +1843,8 @@ def main(argv: list[str] | None = None) -> int:
 
     Exit codes follow the repo's guard convention: 0 passed, 2 refused.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import argparse
     import json
     import os

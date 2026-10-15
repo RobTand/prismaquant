@@ -6703,6 +6703,8 @@ def main(argv: "Sequence[str] | None" = None) -> int:
 
 
 def _main(argv, *, source_scope, waits) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
 
     from . import format_registry as fr

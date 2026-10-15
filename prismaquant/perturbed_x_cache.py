@@ -3679,6 +3679,8 @@ def load_text_model_under_work_root(
     work_root: str | Path,
     device_map: str | None = None,
 ) -> nn.Module:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM
 
     staged = stage_text_only_under_work_root(model_path, work_root)

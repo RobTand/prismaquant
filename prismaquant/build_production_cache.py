@@ -418,6 +418,8 @@ def _run_streaming(args, formats, levers, dtype) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     p = argparse.ArgumentParser(description="Build production δw cache")
     p.add_argument("--model", required=True)
     p.add_argument("--output", required=True)

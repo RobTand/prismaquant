@@ -192,6 +192,8 @@ def _compute_metrics(
     calib_seed: int,
     progress: bool,
 ) -> dict:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     try:
         import torch
         from datasets import load_dataset

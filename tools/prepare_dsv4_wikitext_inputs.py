@@ -63,6 +63,8 @@ def _load_corpus(*, split: str, cache_dir: str, dataset_repo: str = WIKITEXT_DAT
 
 
 def _build_payload(*, model: Path, cache_dir: str, input_schema: str = "dsv4-v1") -> dict:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     if input_schema not in {"dsv4-v1", "model-v2"}:
         raise ValueError("unsupported WikiText materialization schema")
     observed_datasets = version(DATASETS_DISTRIBUTION)

@@ -150,6 +150,8 @@ def scale_record(max_abs, counts, scales, policy, population, *, calibration):
 
 
 def producer(args):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     authority = read(args.out / 'host-input.json')
     require(authority['schema'] == 'prismaquant.lfm-mixed-host-input.v1' and
             re.fullmatch('[0-9a-f]{40}', authority['pq_snapshot']) and

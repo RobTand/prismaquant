@@ -975,7 +975,7 @@ def _validate_prefix_capture(capture, source_model_identity=None, *, expected_or
     Layers 3..43 need a proper prefix. Layer 44 uses the existing completed
     text-forward witness, never a weakened proper-prefix or HF-load contract.
     """
-    from .streaming_model import (validate_streaming_initialization_contract,
+    from .streaming_initialization import (validate_streaming_initialization_contract,
                                   validate_streaming_prefix_initialization_contract)
     unit = capture.get('unit')
     if not isinstance(unit, str) or _GLM_UNIT.fullmatch(unit) is None:

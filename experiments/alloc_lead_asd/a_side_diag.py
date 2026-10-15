@@ -491,6 +491,8 @@ def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_g
 
 # ----------------------------------------------------------------------------- driver
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--inputs", required=True)

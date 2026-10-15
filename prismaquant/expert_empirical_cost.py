@@ -1670,6 +1670,8 @@ def _streaming_model_identity(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     args = _build_parser().parse_args(argv)
     if args.resume and not args.checkpoint_dir:
         raise SystemExit("--resume requires --checkpoint-dir")

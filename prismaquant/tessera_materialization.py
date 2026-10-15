@@ -212,6 +212,8 @@ def _expert_input_identity(api, weight, unit, fmt, activation):
 
 def run(plan_path, group_index, *, anchor_batch_size=1):
     """Execute inside one admitted action; never submit recursively."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import functools
     from dataclasses import asdict
     import torch

@@ -507,6 +507,8 @@ def load_weights_chunked(path_prefix: str) -> Dict[str, torch.Tensor]:
 # ---------------------------------------------------------------------------
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--cache-dir", required=True)

@@ -929,6 +929,8 @@ def _measure_inplace_assignment_kl(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser(description="Validate assignment JSONs with real KL")
     parser.add_argument("--model", required=True)
     parser.add_argument("--probe", required=True)

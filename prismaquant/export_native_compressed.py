@@ -2444,6 +2444,8 @@ def materialize_tensors_streaming(
     When `tensor_sink` is supplied, each emitted head/layer batch is
     passed to the sink and cleared immediately; the returned tensor dict
     is then intentionally empty."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig, AutoModelForCausalLM
 
     from .layer_streaming import (
@@ -5958,6 +5960,8 @@ def _materialize_mtp_tensors(src_model: str,
     `mtp.layers.0.<rest>`). vLLM's `qwen3_5_mtp.load_weights` remaps
     `mtp.→model.` at load time.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     # Build an MTP wrapper with source weights.

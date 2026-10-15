@@ -22,6 +22,8 @@ def _smoke_json(path, value):
 
 
 def main(argv=None):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)

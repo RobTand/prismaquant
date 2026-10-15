@@ -13,6 +13,8 @@ from experiments.lfm_packed_joint_screen import file_sha
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     import transformers
     from safetensors.torch import load_file

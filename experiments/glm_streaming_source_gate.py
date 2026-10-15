@@ -12,6 +12,8 @@ import torch
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()

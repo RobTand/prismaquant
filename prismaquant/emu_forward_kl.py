@@ -364,6 +364,8 @@ def measure_emulated_kl(
     cut): an empty lane has no mean, and emitting 0.0 over nothing would
     report a win on an empty set.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch.manual_seed(0)
@@ -461,6 +463,8 @@ def _expand_uniform(model, fmt: str, col_weights: dict) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     ap = argparse.ArgumentParser(
         description="Whole-model emulated forward KL-vs-BF16.")
     ap.add_argument("--model", required=True)

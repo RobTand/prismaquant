@@ -1038,6 +1038,8 @@ def _validated_source_identity_binding(
     source_root: Path, identity_path: Path
 ) -> tuple[dict[str, object], dict[str, object], str]:
     """Validate the original source bytes without trusting a path-only stamp."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     identity_bytes = _read_regular_bytes(
         identity_path, where="PrismaSnap original-source identity"
     )

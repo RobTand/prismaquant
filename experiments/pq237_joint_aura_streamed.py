@@ -607,6 +607,8 @@ def main():
     dump(out / "identity.json", identity)
 
     def resident_model():
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16,
                     local_files_only=True, attn_implementation="eager").cuda().eval()
         model.config.use_cache = False

@@ -150,6 +150,8 @@ def freeze(args):
 
 def probe(args):
     """Run the shared CLI on exact inputs after one resident/streamed check."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import gc
     import torch
     from transformers import AutoModelForCausalLM

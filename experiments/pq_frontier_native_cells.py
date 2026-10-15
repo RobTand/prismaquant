@@ -152,6 +152,8 @@ def bind_priced_arithmetic():
 
 
 def prepare(args):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     from safetensors import safe_open
     from safetensors.torch import save_file

@@ -3020,6 +3020,8 @@ def _stage_aura_model(model_path: str) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     p = argparse.ArgumentParser(description="Aura KL-adjoint allocator cost")
     p.add_argument("--model", required=True)
     p.add_argument("--output", required=True)

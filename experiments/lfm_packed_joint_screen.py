@@ -21,6 +21,8 @@ def file_sha(path):
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     import transformers
     from safetensors.torch import load_file, save_file

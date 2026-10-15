@@ -156,6 +156,8 @@ def compute_fisher_col_weights(
     determines the (unused-here) dW rendering the shared harvest also does; the
     column energy is independent of it.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from prismaquant.aura_cost import compute_aura_cost

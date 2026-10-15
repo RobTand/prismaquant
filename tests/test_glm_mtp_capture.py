@@ -339,7 +339,7 @@ def test_load_contract_binds_every_tensor_and_the_input(layer, tmp_path):
     tensor, a tampered digest or an unbound input is a different contract or
     none, and the shared validator routes it without admitting it elsewhere."""
     from prismaquant import validate_source_initialization_contract
-    from prismaquant.streaming_model import validate_mtp_layer_initialization_contract
+    from prismaquant.streaming_initialization import validate_mtp_layer_initialization_contract
 
     _write_checkpoint(tmp_path, _per_expert_checkpoint(layer))
     loaded, receipt = glm_mtp.load_mtp_layer(

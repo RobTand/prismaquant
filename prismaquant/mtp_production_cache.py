@@ -127,6 +127,8 @@ def _load_exact_mtp_wrapper(
     device: torch.device,
     dtype: torch.dtype,
 ) -> tuple[nn.Module, dict[str, nn.Linear], int]:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     local_only = Path(model_path).exists()

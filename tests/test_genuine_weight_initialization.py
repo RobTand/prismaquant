@@ -1,23 +1,4 @@
-"""`prismaquant` no-ops weight init process-wide; this is the documented undo.
-
-`prismaquant/__init__.py::_polyfill_transformers` replaces
-`PreTrainedModel._initialize_weights` with a no-op at import time. That is
-sound for PrismaQuant's own loaders, which build a `from_config` skeleton and
-then overwrite every parameter from the checkpoint. It is unsound for any
-caller that *uses* a from-config model: every tensor a modeling file allocates
-as a bare `nn.Parameter(torch.empty(...))` then keeps whatever the allocator
-last left in that page -- not reproducible, and not guaranteed finite.
-
-That is not hypothetical. It reached CI as a NaN in
-`test_glm5_next_streamed_forward_parity.py::test_long_sequence_parity_per_layer_type[dsa_only]`
-(run 33284249771: py3.11 failed, py3.12 passed, same commit and same torch and
-transformers), where the uninitialized tensors were the routed-expert
-`mlp.experts.gate_up_proj` / `down_proj`.
-
-So the polyfill must keep the real method reachable, and the undo must be
-exception-safe -- leaking the real `_initialize_weights` back into the process
-would silently re-cost every subsequent PrismaQuant model load.
-"""
+"""Explicit model runtime preserves checkpoint and from-config initialization."""
 from __future__ import annotations
 
 import pytest
@@ -27,7 +8,7 @@ pytest.importorskip("transformers")
 
 from transformers.modeling_utils import PreTrainedModel  # noqa: E402
 
-from prismaquant import genuine_weight_initialization  # noqa: E402
+from prismaquant import genuine_weight_initialization, initialize_model_runtime  # noqa: E402
 
 
 def _polyfilled() -> bool:
@@ -35,6 +16,7 @@ def _polyfilled() -> bool:
 
 
 def test_the_polyfill_keeps_the_real_initializer_reachable():
+    initialize_model_runtime()
     if not _polyfilled():
         pytest.skip("the transformers polyfill did not apply in this build")
     assert getattr(
@@ -47,6 +29,7 @@ def test_the_polyfill_keeps_the_real_initializer_reachable():
 
 
 def test_the_context_manager_swaps_the_method_and_puts_it_back():
+    initialize_model_runtime()
     if not _polyfilled():
         pytest.skip("the transformers polyfill did not apply in this build")
     real = PreTrainedModel._prismaquant_real_initialize_weights
@@ -59,6 +42,7 @@ def test_the_context_manager_swaps_the_method_and_puts_it_back():
 
 
 def test_the_context_manager_restores_on_an_exception():
+    initialize_model_runtime()
     if not _polyfilled():
         pytest.skip("the transformers polyfill did not apply in this build")
     noop = PreTrainedModel._initialize_weights
@@ -88,6 +72,7 @@ def test_weight_init_actually_runs_inside_the_context_manager():
         def _init_weights(self, module):
             self.initialized.append(type(module).__name__)
 
+    initialize_model_runtime()
     outside = _Model(_Config())
     with genuine_weight_initialization():
         inside = _Model(_Config())

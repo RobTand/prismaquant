@@ -2981,6 +2981,8 @@ def load_probe_model_and_tokenizer(model_path: str,
                                    device_map: str | None = None,
                                    gradient_checkpointing: bool = True,
                                    offload_folder: str | None = None):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     staged = stage_text_only(model_path)
@@ -3209,6 +3211,8 @@ def run_multimodal_visual_probe_pass(
     False on graceful fallback. Raises only on unexpected errors
     (not OOM / resource shortage).
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoProcessor
 
     staged = stage_multimodal(model_path)

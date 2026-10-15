@@ -722,6 +722,8 @@ class Glm5NextProfile(ModelProfile):
         names of ``glm_mtp.MtpCheckpointModel``, its skeleton. Its captures
         carry the MTP layer's load contract.
         """
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         if name != "mtp":
             return super().source_scope(name, model_path)
         import copy
