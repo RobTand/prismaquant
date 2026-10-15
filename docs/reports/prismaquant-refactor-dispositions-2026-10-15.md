@@ -65,3 +65,34 @@ See `prismaquant-refactor-verification-2026-10-14.md` for admitted execution
 records, failures, skips and CAS results. The local PR inventory and latest
 source adoption audit are under `/home/rob/tmp/pq-refactor-20261014/reports/`.
 No push, issue creation, PR publication, merge or closure has occurred.
+
+## Fifteen defect claims
+
+These implementation references identify the fixing units. Individual PB
+coverage and unqualified device cases remain in the verification report.
+
+| Claim | Resolution on the integration branch |
+| --- | --- |
+| Native cards bind names/sizes without weight content | `60060a69c0` binds exact native content. |
+| Export passes parameter names to module exclusions | `dae261bad6` uses the probe inventory's module-name policy. |
+| Validation ranks using a raw zero prediction | `cec64471d6` uses a labeled unadjusted row estimate with sensitivity; incomplete or unknown-zero estimates are unavailable. |
+| Native recipes omit JSO/grid/span/damping controls | `c6eb3bcfd9` records the complete immutable recipe; `1b8c6fe5f8` validates completed records. |
+| Packed text reuses already sampled probe documents | `3ad314f6ba` excludes selected documents from packing. |
+| Cards without lane hints owe no slots | `60060a69c0` derives obligations from the artifact, independently of a hint. |
+| TP admission is false without a development override | `43c665f199` uses the exact serving pin for the independent TP path. |
+| Autofs hides the NFS release retry horizon | `9181f3a99d` selects the topmost equal-path mount. |
+| Frozen MoE panel calls a deleted source helper | `94155f2536` repairs the actual panel source check. |
+| Profile/export hides registry declaration errors | `313ac19365` propagates declared failures. |
+| Packed inventory hides profile failures | `dae261bad6` distinguishes an absent optional method from a failing declared method. |
+| Search and verdict use different device-byte formulas | `295be9fd18` shares the formula; `f80ae9a186` includes the off-step transient peak. |
+| All-False render controls mean unset | `3b4f875b60` preserves explicit false values; an actual wire regression failed before the fix. |
+| Visual Fisher uses body tokens as denominator | `e7b0dad30a` retains each writer's normalizer. |
+| Completeness reads nonexistent quant_config | `dd53f9bd76` reads emitted config.json quantization_config, retaining the legacy reader. The CLI is a real manual entry point. |
+
+Encountered defects fixed separately include seed-zero normalization, caller RNG
+leakage, mutable pin metadata views, process-global genuine-init permission,
+incomplete native-verdict construction, malformed native recipes, the `.weight`
+activation lookup regression, block-release failure during prefetch, sample shard
+reuse in ordinary execution, a missing runtime initializer in the comparison
+tool, and the new environment helper's duplicate digest implementation. These
+are named to distinguish them from the fifteen original proposal findings.
