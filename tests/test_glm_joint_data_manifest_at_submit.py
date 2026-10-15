@@ -26,9 +26,8 @@ and the exclusions that make the order true:
   the chain's demand, because a ``pbrun`` option after the separator is an
   argument of the action instead.
 
-The tests are torch-free on purpose: they run on the fleet's CPU boxes, which
-have no torch, and the producer they exercise imports nothing from the
-``prismaquant`` package for the same reason.
+The tests exercise metadata-only paths without Torch. The producer imports
+cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
 """
 
 from prismaquant.render_cache_paths import cache_weight_filename
