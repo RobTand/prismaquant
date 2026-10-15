@@ -103,6 +103,13 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_campaign_cli` owns the unchanged external argument schema. The campaign
+binds distinct capture prep and join requests after its ordered source/draw gates.
+The prep owns census, full-group selection, source-recording and boundary-plan
+binding; join publishes its existing census-bound manifest. Neither loads a model.
+CLI settings retain their existing checkpoint wire representation.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): menu modes
 and their existing refusal policy import without the numerical allocator.
 The two unused DP reduction reexports are removed; exact dominance and bin

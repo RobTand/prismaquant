@@ -12,6 +12,7 @@ import pytest
 from prismaquant import tessera_calibration_cache as cache
 from prismaquant import tessera_campaign as campaign
 from prismaquant import capture_layer_chain as chain
+from prismaquant.tessera_campaign_requests import CaptureJoinRequest, CapturePrepRequest
 
 
 def test_no_source_claim_can_qualify_automatic_recording():
@@ -29,10 +30,21 @@ def test_direct_bookends_refuse_before_census_tokenizer_recording_or_join(tmp_pa
     monkeypatch.setattr(campaign, '_calibration_tokens', forbidden)
     monkeypatch.setattr(cache, 'record_capture_source', forbidden)
     monkeypatch.setattr(chain, 'join', forbidden)
-    args = SimpleNamespace(streaming=True, capture_calibration_out=str(tmp_path / 'capture'),
-                           capture_chain=route)
+    output = str(tmp_path / 'capture')
+    census = str(tmp_path / 'missing-census.json')
+    if route == 'join':
+        request = CaptureJoinRequest(calibration_census=census, capture_calibration_out=output)
+        run = lambda: campaign.run_capture_chain_join(request)
+    else:
+        request = CapturePrepRequest(model='missing-source', nsamples=1, seqlen=4,
+            seed=0, layer_stride=1, calibration_input_receipt=None,
+            calibration_census=census, units=None, research_exact_member=None,
+            allow_pinned=None, pinned_roster_only=False, max_act_rows=1,
+            attention_implementation='eager', capture_chain_ranges=[(0, 1)],
+            capture_chain_boundary_storage={}, capture_calibration_out=output)
+        run = lambda: campaign.run_capture_chain_prep(request, None)
     with pytest.raises(RuntimeError, match='automatic capture.*immutable source'):
-        campaign._run_capture_chain_bookends(args, None)
+        run()
     assert attempted == []
     assert not (tmp_path / 'capture').exists()
 
