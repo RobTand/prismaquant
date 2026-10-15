@@ -1,6 +1,7 @@
 """Cost-row evidence, objective and activation-price interpretation."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 import operator
 import os
@@ -11,6 +12,42 @@ from .schemas import refuse_retired_ladder_cost_source
 from .activation_fair_pricing import (APPLIED_MARKER_KEY, ActivationFairPricing,
     BRANCH_ACTIVATION_IDENTITY, BRANCH_BIT_EXACT, BRANCH_CALIBRATED,
     BRANCH_INTERPOLATED_OUTPUT, BRANCH_MEASURED, BRANCH_SOURCE_PASSTHROUGH, BRANCH_UNCALIBRATED)
+
+
+@dataclass(frozen=True)
+class CostPricingPolicy:
+    ucb_z: float
+    fisher_output_mse: bool
+
+    @classmethod
+    def from_environment(cls):
+        return cls(_cost_ucb_z(), _fisher_output_mse_allocator_enabled())
+
+
+@dataclass(frozen=True)
+class PricedCell:
+    predicted_dloss: float
+    source: str
+    activation_branch: str
+    unmeasured_activation_at_zero: bool
+
+    @property
+    def candidate_dloss(self) -> float:
+        return max(self.predicted_dloss, 0.0)
+
+
+def price_cell(stats_entry: dict, cost_entry: dict, *, format_name: str,
+               policy: CostPricingPolicy, gain: float = 1.0,
+               activation_pricing: ActivationFairPricing | None = None) -> PricedCell:
+    value = cost_entry_predicted_dloss(
+        stats_entry, cost_entry, gain=gain, format_name=format_name,
+        activation_pricing=activation_pricing, policy=policy)
+    return PricedCell(value,
+        cost_entry_source(stats_entry, cost_entry, format_name, policy=policy),
+        cost_entry_activation_pricing_branch(
+            stats_entry, cost_entry, format_name, activation_pricing),
+        cost_entry_prices_unmeasured_activation_at_zero(
+            stats_entry, cost_entry, max(value, 0.0), format_name))
 
 
 SOURCE_PASSTHROUGH_COST_SOURCE = "source_passthrough"
@@ -290,8 +327,10 @@ def cost_entry_source(
     stats_entry: dict,
     cost_entry: dict,
     format_name: str | None = None,
+    *, policy: CostPricingPolicy | None = None,
 ) -> str:
     """Return the named cost source the allocator will use for one row."""
+    policy = CostPricingPolicy.from_environment() if policy is None else policy
     explicit = cost_entry.get("cost_source")
     if isinstance(explicit, str) and explicit:
         return explicit
@@ -299,7 +338,7 @@ def cost_entry_source(
         return "bit_exact"
     if _has_measured_output_mse(stats_entry, cost_entry):
         if (
-            _fisher_output_mse_allocator_enabled()
+            policy.fisher_output_mse
             and "fisher_output_mse" in cost_entry
         ):
             return "fisher_output_mse"
@@ -319,6 +358,7 @@ def cost_entry_measured_activation_dloss(
     cost_entry: dict,
     *,
     gain: float = 1.0,
+    policy: CostPricingPolicy | None = None,
 ) -> float:
     """The ACTIVATION-INCLUSIVE price of one row, or 0.0 when unmeasured.
 
@@ -337,8 +377,9 @@ def cost_entry_measured_activation_dloss(
     is ``_prices_from_output_mse``'s decision, not this function's; the
     calibration still admits only measured ones.
     """
+    policy = CostPricingPolicy.from_environment() if policy is None else policy
     if (
-        _fisher_output_mse_allocator_enabled()
+        policy.fisher_output_mse
         and "fisher_output_mse" in cost_entry
     ):
         return predicted_dloss(
@@ -357,12 +398,14 @@ def cost_entry_weight_only_dloss(
     cost_entry: dict,
     *,
     gain: float = 1.0,
+    policy: CostPricingPolicy | None = None,
 ) -> float:
     """The WEIGHT-ONLY price of one row (``predicted_dloss``/``weight_mse``).
 
     Uncorrected by any activation calibration — this is the number the
     calibration divides into, and the number the correction multiplies.
     """
+    policy = CostPricingPolicy.from_environment() if policy is None else policy
     if "predicted_dloss" in cost_entry:
         base = float(cost_entry["predicted_dloss"])
         # Uncertainty-aware allocation (opt-in): charge z·stderr on top of the
@@ -373,7 +416,7 @@ def cost_entry_weight_only_dloss(
         # bias whose penalty is derived from the measurement's own sampling
         # noise, not a tuned constant. z=0 (default) is bit-identical to
         # prior behavior.
-        z = _cost_ucb_z()
+        z = policy.ucb_z
         if z > 0.0:
             base += z * float(cost_entry.get("predicted_dloss_stderr", 0.0))
         return base * float(gain)
@@ -536,6 +579,7 @@ def cost_entry_predicted_dloss(
     gain: float = 1.0,
     format_name: str | None = None,
     activation_pricing: ActivationFairPricing | None = None,
+    policy: CostPricingPolicy | None = None,
 ) -> float:
     """Return the allocator's authoritative Δloss for one cost entry.
 
@@ -552,6 +596,7 @@ def cost_entry_predicted_dloss(
     price off zero — ``cost_entry_prices_unmeasured_activation_at_zero``
     keeps its full strength.
     """
+    policy = CostPricingPolicy.from_environment() if policy is None else policy
     from .rung_allowability import complete_scientific_price
     entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
     complete = complete_scientific_price(entry, format_name=format_name)
@@ -566,7 +611,7 @@ def cost_entry_predicted_dloss(
         # Its signed full residual already contains weight, activation and
         # mixed terms under one downstream KL Fisher. Only probe uncertainty
         # may change the proposal price; no scalar sensitivity is applied.
-        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0)
+        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy)
     if cost_entry_is_exact_by_construction(cost_entry, format_name):
         # Zero cost by construction, in one of two ways: a lossless re-encode
         # END TO END (weights verbatim AND identity activation path,
@@ -584,8 +629,8 @@ def cost_entry_predicted_dloss(
         # on it. Applying it would double-count, and applying it to only some
         # rungs of a family is the mispricing this branch was split out to fix.
         return cost_entry_measured_activation_dloss(
-            stats_entry, cost_entry, gain=gain)
-    base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain)
+            stats_entry, cost_entry, gain=gain, policy=policy)
+    base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
     if cost_entry.get(APPLIED_MARKER_KEY) is True:
         # Aggregated super item: its members were penalized individually and
         # the result summed. Re-applying here would square the correction. The

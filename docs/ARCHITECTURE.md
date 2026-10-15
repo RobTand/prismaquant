@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: allocation captures the UCB and Fisher-output pricing
+policy once at its CLI boundary and shares it with activation calibration, body,
+head, MTP and grouped prices. Candidate assembly consumes a `PricedCell` carrying
+the numeric price, provenance, activation branch and unknown-zero refusal.
+Measurement-only calibration membership remains a separate evidence question.
+
 Re-stamped 2026-10-15: native source storage and footprint declarations belong
 to `source_format_contracts`; cost-row numerical and evidence interpretation
 belongs to `priced_cell`. Candidate assembly consumes these owners. The first

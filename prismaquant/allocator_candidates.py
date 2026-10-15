@@ -843,6 +843,7 @@ def collect_activation_calibration_rows(
     stats: dict,
     costs: dict,
     formats: list[fr.FormatSpec],
+    *, pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[list[CalibrationRow], dict[str, int], dict[str, int]]:
     """Extract the P5a calibration sample from the run's own cost tables.
 
@@ -882,6 +883,8 @@ def collect_activation_calibration_rows(
     the iteration order is the sorted cost table, so the sample — and its
     digest — is deterministic.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     rows: list[CalibrationRow] = []
     measured_by_family: dict[str, int] = {}
     weight_only_by_family: dict[str, int] = {}
@@ -917,8 +920,8 @@ def collect_activation_calibration_rows(
                 if not ("predicted_dloss" in entry or "weight_mse" in entry):
                     continue
                 measured = priced_cell.cost_entry_measured_activation_dloss(
-                    stats_entry, entry)
-                weight_only = priced_cell.cost_entry_weight_only_dloss(stats_entry, entry)
+                    stats_entry, entry, policy=pricing_policy)
+                weight_only = priced_cell.cost_entry_weight_only_dloss(stats_entry, entry, policy=pricing_policy)
                 if measured > 0.0 and weight_only > 0.0:
                     rows.append(CalibrationRow(
                         qname=str(name),
@@ -938,6 +941,7 @@ def calibrate_activation_fair_pricing(
     formats: list[fr.FormatSpec],
     *,
     enabled: bool | None = None,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> ActivationFairPricing:
     """Calibrate the per-family activation penalty ONCE for a run.
 
@@ -946,8 +950,10 @@ def calibrate_activation_fair_pricing(
     menus share one fit (the audit's "calibrated once per model") instead of
     three menu-dependent ones.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     rows, measured, weight_only = collect_activation_calibration_rows(
-        stats, costs, formats)
+        stats, costs, formats, pricing_policy=pricing_policy)
     return _calibrate_activation_pricing(
         rows,
         measured_rows_by_family=measured,
@@ -1472,6 +1478,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      rung_allowability: Mapping | None = None,
                      allowability_m: int | None = None,
                      allowability_tensor_parallel: int = 1,
+                     pricing_policy: priced_cell.CostPricingPolicy | None = None,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -1499,6 +1506,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     scope cannot admit that query merely because it does not require one.
     The existing research menu may still price an unattested writable rung.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     refuse_retired_trellis_surface()
     production_allocation = not load_serving_profile(target_profile).emulation_only
     gains = calibrated_gains or {}
@@ -1661,12 +1670,11 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             # Packed experts can carry an unmeasured output_mse placeholder;
             # cost_entry_predicted_dloss falls back to predicted_dloss or
             # weight_mse for those entries.
-            predicted = priced_cell.cost_entry_predicted_dloss(
+            cell = priced_cell.price_cell(
                 s, entry, gain=gain, format_name=spec.name,
-                activation_pricing=activation_pricing)
-            priced = max(predicted, 0.0)
-            if priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
-                    s, entry, priced, spec.name):
+                activation_pricing=activation_pricing, policy=pricing_policy)
+            priced = cell.candidate_dloss
+            if cell.unmeasured_activation_at_zero:
                 # The A-side cost of this W-and-A format was never measured for
                 # this row, and the W side is lossless, so the only price the
                 # cost table can offer is 0.0 — the DP's global optimum. An
@@ -1685,7 +1693,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     f"price is dloss 0.0 with h_trace={h_trace:.6g} > 0: an "
                     "unmeasured activation cost at the DP's global minimum "
                     f"(cost_source="
-                    f"{priced_cell.cost_entry_source(s, entry, spec.name)})"
+                    f"{cell.source})"
                 )
                 if mask_records is not None:
                     mask_records.append({
@@ -1704,9 +1712,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 ).append(name)
                 unpriceable.setdefault(name, []).append(spec.name)
                 continue
-            source_counts[priced_cell.cost_entry_source(s, entry, spec.name)] += 1
-            activation_branch = priced_cell.cost_entry_activation_pricing_branch(
-                s, entry, spec.name, activation_pricing)
+            source_counts[cell.source] += 1
+            activation_branch = cell.activation_branch
             activation_branch_counts[activation_branch] += 1
             (
                 memory_bytes,
@@ -2584,6 +2591,7 @@ def aggregate_fused_siblings(
     activation_pricing: ActivationFairPricing | None = None,
     preserve_runtime_frontier: bool = False,
     baseline_assignment: Mapping[str, str] | None = None,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate fused siblings into single DP items.
 
@@ -2621,11 +2629,13 @@ def aggregate_fused_siblings(
     whole group from the DP with no error at all. The same argument is written
     out at length in ``aggregate_packed_serving_groups``.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     if profile is None:
         return stats, costs, candidates
 
     gains = calibrated_gains or {}
-    ucb_z = priced_cell._cost_ucb_z()
+    ucb_z = pricing_policy.ucb_z
     # Principle 14: what one fused module's roles may disagree about is a fact
     # about the serving runtime, so it is read from the table that runtime
     # publishes -- once per aggregation, not once per group, and through the
@@ -2716,7 +2726,7 @@ def aggregate_fused_siblings(
                 # un-gained.
                 member_pred = priced_cell.cost_entry_predicted_dloss(
                     stats[m], c, format_name=spec.name,
-                    activation_pricing=activation_pricing)
+                    activation_pricing=activation_pricing, policy=pricing_policy)
                 sum_pred += member_pred
                 member_terms.append((stats[m], c, member_pred, act_penalty))
             # Recover the unhedged sum for weight_mse, and store the shared
@@ -3246,6 +3256,7 @@ def aggregate_packed_serving_groups(
     calibrated_gains: dict[str, float] | None = None,
     activation_pricing: ActivationFairPricing | None = None,
     preserve_runtime_frontier: bool = False,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate packed-MoE serving groups into single DP decision units.
 
@@ -3285,13 +3296,15 @@ def aggregate_packed_serving_groups(
     ``expand_packed_group_assignment`` to broadcast a group decision back
     to per-tensor entries for emission.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     group_fn = getattr(profile, "packed_expert_format_group", None) \
         if profile is not None else None
     if not callable(group_fn):
         return stats, costs, candidates
 
     gains = calibrated_gains or {}
-    ucb_z = priced_cell._cost_ucb_z()
+    ucb_z = pricing_policy.ucb_z
     grouped, ungrouped = _packed_serving_groups(candidates, group_fn)
 
     if not grouped:

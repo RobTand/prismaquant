@@ -137,7 +137,7 @@ from prismaquant.allocator_candidates import (
     price_paired_rate_trade,
     reprice_paired_candidates,
 )
-from prismaquant.priced_cell import _cost_ucb_z
+from prismaquant.priced_cell import CostPricingPolicy
 from .digests import (
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
@@ -2364,6 +2364,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "candidate-minus-baseline probe UCB and the routed expert-dominance guard. "
                          "Required for mixed-rate COST_UCB_Z; no menu baseline is inferred.")
     args = ap.parse_args(argv)
+    pricing_policy = CostPricingPolicy.from_environment()
     cost_baseline_assignment = None
     if args.cost_baseline_assignment is not None:
         from .layer_config import load_assignment
@@ -3171,7 +3172,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         activation_pricing_stats,
         activation_pricing_costs,
         specs_sorted,
-    )
+    pricing_policy=pricing_policy,
+                         )
     if activation_pricing.enabled:
         print(
             "[alloc] activation-fair pricing: "
@@ -3219,7 +3221,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     )
     candidates = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
-        census_loo=census_loo,
+        pricing_policy=pricing_policy, census_loo=census_loo,
         census_loo_groups=census_loo_groups,
         source_manifest=source_manifest,
         target_profile=target_profile,
@@ -3280,7 +3282,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             head_costs,
             [fr.get_format(lm_head_format_canonical)],
             calibrated_gains,
-            census_loo=census_loo,
+            pricing_policy=pricing_policy, census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3376,7 +3378,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             mtp_costs,
             [fr.get_format(mtp_format_canonical)],
             calibrated_gains,
-            census_loo=census_loo,
+            pricing_policy=pricing_policy, census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3584,7 +3586,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # is a validated no-op.
     if not args.no_packed_aggregation:
         stats, costs, candidates = aggregate_packed_serving_groups(
-            stats, costs, specs_sorted, candidates, profile=model_profile,
+            stats, costs, specs_sorted, candidates, pricing_policy=pricing_policy, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
             **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
@@ -3617,7 +3619,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     tessera_group_menu_report: dict = {}
     if not args.no_fused_aggregation:
         stats, costs, candidates = aggregate_fused_siblings(
-            stats, costs, specs_sorted, candidates, profile=model_profile,
+            stats, costs, specs_sorted, candidates, pricing_policy=pricing_policy, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
             baseline_assignment=cost_baseline_assignment,
@@ -3657,7 +3659,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         try:
             candidates = reprice_paired_candidates(
                 stats, cost_data["costs"], candidates, cost_baseline_assignment,
-                profile=model_profile, ucb_z=_cost_ucb_z(), report=paired_candidate_report)
+                profile=model_profile, ucb_z=pricing_policy.ucb_z, report=paired_candidate_report)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
     candidates = filter_candidates_for_profile(candidates, target_profile)
@@ -4088,7 +4090,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return price_paired_rate_trade(
                 cost_data["costs"], assignment,
                 {n: cost_baseline_assignment[n] for n in assignment},
-                profile=model_profile, ucb_z=_cost_ucb_z())
+                profile=model_profile, ucb_z=pricing_policy.ucb_z)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
 
