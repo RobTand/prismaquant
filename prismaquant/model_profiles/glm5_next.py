@@ -732,7 +732,7 @@ class Glm5NextProfile(ModelProfile):
 
         from ..glm_mtp import (MtpCheckpointModel, mtp_checkpoint_prefix, mtp_layer_index,
                                mtp_layer_skeleton)
-        from ..streaming_model import _MTP_LAYER_INITIALIZATION_SCHEMA
+        from ..streaming_initialization import _MTP_LAYER_INITIALIZATION_SCHEMA
         from .base import SourceScope
 
         text_config = AutoConfig.from_pretrained(str(model_path)).text_config
