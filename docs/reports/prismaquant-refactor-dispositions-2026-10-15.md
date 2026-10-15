@@ -14,7 +14,7 @@ record, not a claim that every pending unit is finished.
 | A1 reviewed pin | Implemented captured contract snapshot, packaged reviewed answer, private maps and exact TP fallback. |
 | A2 admission | Implemented typed rung verdicts and canonical cells; preserve separate menu, serving and export policies. |
 | T1 campaign metadata | Table/payload/merge, census union, reseal and source readset owners implemented. Complete repository-boundary migration waits on additional public Tessera APIs. |
-| T2 requests | Actual parser, typed prep/join/census/capture requests, phase runners, scope resolver and raw checkpoint mapping are implemented. Shared menu/projection is integrated; raw acquisition wire ownership and final loaded-campaign execution remain in progress. |
+| T2 requests | Actual parser, typed prep/join/census/capture requests, phase runners, scope resolver and raw checkpoint mapping are implemented. Shared menu/projection is integrated; raw acquisition wire ownership is integrated, and final loaded-campaign execution remains in progress. |
 | T3 measurement | Calibration-forward and wire-custody owners implemented. Selected-wire recipe and cell-measurement migration waits on additional public Tessera APIs. |
 | T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
 | S1 staged reads | Implemented shared mount facts, topmost-NFS retry and checkpoint whole-entry transaction. Implemented grouped acquisition and shared counters in staged_lease. Borrowed descriptor and sealed-buffer lifetimes stay distinct. |

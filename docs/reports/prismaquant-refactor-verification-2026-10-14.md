@@ -540,3 +540,47 @@ These overlapping selections are not a combined unique count. Both actions use
 CPU1, RAM4 GiB and native threads1 with portable eligibility. Terminal records,
 result payloads and embedded receipts were independently checked. Final
 composed verification remains pending the raw-wire and loaded-campaign runner.
+
+
+Raw acquisition settings are integrated in `4ec6bfc93a`. The CLI mapping is
+copied before the three derived settings, updated at their existing policy
+points and handed to checkpoint identity read-only. Typed requests never
+serialize themselves into this historical wire. Production and new test bytes
+equal the qualified root-composed capsule. The actual main fixture verifies
+literal three-unit work, schedule and origin fields, per-unit source proofs,
+input-map immutability and physical source replacement refusal before pricing.
+The source-owner's existing held-descriptor and pathname checks enforce that
+negative case; no new refusal or internal fact revalidation was introduced.
+
+PB `876aeb6a2e0881f66570062a0ea0af76de9e42253b45c11880074749ee34070a`
+passes 125 cases without skips and compiles three sources. Full guards,
+operation global bindings and the three-store/provenance order proof pass.
+Result is `3bc4154f44a70e5060fc3c119e69a5d249cd440db5dd30e3d593a8cc03f1df08`,
+1316 bytes; receipt is
+`e924f5fa1bbf21ba2ab5e9a45adada0cabe2d05ab836c8262e03398df1e1e4df`.
+The earlier `1f0bc440` action failed before tests because its proof baseline
+came from an older worker source. It remains failed. The composition tool now
+retrieves baselines from its recorded root commit, records their hashes and
+checks that manifest before body comparison. No unrelated ownership difference
+is normalized away. CPU1, RAM4 GiB and native threads1 are reserved portably.
+Terminal records and CAS payload/receipt bytes were independently verified.
+
+A bounded audit of other changed tests found a span-accounting sleep that
+could use the existing public clock injection. Commit `a1b69ab7ea` replaces the
+20 ms sleep and minimum duration with a literal 0.125-second interval through
+real IoSpanLog and QuantumCounters objects. Count, total, outside-phase wait
+and recorded span duration are checked independently of wall-clock progress.
+PB `a27d4f0dffc46dba4563e91f1c610eac651ebb404d7887dfc3f260ce17b3b5af`
+passes the full twenty-three-case module without skips and compiles the test.
+Result is `ec95fc81c815ba6a8398b12bd99ae484d0b7aedcfa606eae145d0551b0230dfd`,
+750 bytes; receipt is
+`208aba840eb6b270434df35073fd8d241ab571b18b07450f39e711032d69fe7f`.
+Resource bounds are CPU1, RAM4 GiB and native threads1, with portable eligibility.
+The actual diff, terminal and CAS result/receipt were independently checked.
+No production telemetry code changes.
+
+The package-runtime AST guard remains a structural explicit-initializer policy.
+It can catch a missing local declaration, but lexical order does not prove
+runtime order. Separate cold metadata-import and real streaming-skeleton tests
+exercise their actual boundaries. The audit does not claim complete dynamic
+coverage of every manual loader.
