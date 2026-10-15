@@ -294,7 +294,7 @@ def _run_fused(ucb_z: str, *, gains, pricing):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": ucb_z}):
         cands = build_candidates(
             stats, costs, specs, calibrated_gains=gains,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
         return alloc_cand.aggregate_fused_siblings(
             stats, costs, specs, cands, _DenseProfile(),
             calibrated_gains=gains, activation_pricing=pricing)
@@ -309,7 +309,7 @@ def _run_packed(ucb_z: str, *, gains, pricing, role_split: bool):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": ucb_z}):
         cands = build_candidates(
             stats, costs, specs, calibrated_gains=gains,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
         return alloc_cand.aggregate_packed_serving_groups(
             stats, costs, specs, cands, profile,
             calibrated_gains=gains, activation_pricing=pricing)
@@ -523,7 +523,7 @@ def test_group_prices_preserve_scaled_member_hedges(kind, z):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": z}):
         members = build_candidates(
             stats, costs, _specs(), calibrated_gains=GAINS,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
     if kind == "fused":
         grouped_stats, _, grouped = _run_fused(z, gains=GAINS, pricing=pricing)
         member_key = "_fused_siblings"

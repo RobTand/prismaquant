@@ -142,7 +142,7 @@ def _format_specs():
 def test_aggregation_groups_qkv_and_gate_up_only():
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     profile = _FakeProfile()
 
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
@@ -181,7 +181,7 @@ def test_super_linear_predicted_dloss_is_sum_of_members():
     """
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     profile = _FakeProfile()
 
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
@@ -211,16 +211,17 @@ def test_super_linear_uses_format_alias_cost_entries_and_gains():
             "BF16": {"weight_mse": 0.0, "predicted_dloss": 0.0},
         }
     specs = [fr.get_format("FP8_E4M3"), fr.REGISTRY["BF16"]]
-    cands = build_candidates(
+    build = build_candidates(
         stats,
         costs,
         specs,
         calibrated_gains={"FP8_DYNAMIC": 2.0},
     )
+    cands = build.candidates
 
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
         stats,
-        costs,
+        build.cost_rows,
         specs,
         cands,
         _FakeProfile(),
@@ -269,7 +270,7 @@ def test_asymmetric_sensitivity_sums_contributions():
             "BF16":  {"weight_mse": 0.0, "predicted_dloss": 0.0},
         }
     specs = [fr.REGISTRY["NVFP4"], fr.REGISTRY["BF16"]]
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     _, _, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, _FakeProfile())
     super_name = next(n for n in cands_ext if _FUSED_SIBLING_MARKER in n)
@@ -283,7 +284,7 @@ def test_asymmetric_sensitivity_sums_contributions():
 def test_expand_broadcasts_super_format_to_members():
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     profile = _FakeProfile()
 
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
@@ -325,7 +326,7 @@ def test_singleton_groups_pass_through_unchanged():
 
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, _SingletonProfile())
     # No `__siblings__` markers should appear — the one q_proj group had
@@ -371,7 +372,7 @@ def test_fused_group_with_disjoint_member_menus_hard_errors():
     cands = build_candidates(
         stats, costs, specs,
         source_manifest={q: "f16", k: "bf16"},
-    )
+    ).candidates
     assert [c.fmt for c in cands[q]] == ["NVFP4"]
     assert [c.fmt for c in cands[k]] == ["BF16"]
 
@@ -389,7 +390,7 @@ def test_fused_group_with_disjoint_member_menus_hard_errors():
 def test_aggregation_is_no_op_without_profile():
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, profile=None)
     assert cands_ext is cands or cands_ext == cands
@@ -526,7 +527,7 @@ def test_pre_aggregation_respects_budget_without_overshoot():
     and solve_with_promotion returns on iteration 1 with achieved ≤ target."""
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     profile = _FakeProfile()
 
     # Aggregate first.
@@ -562,7 +563,7 @@ def test_solve_with_promotion_returns_feasible_iterate_on_plateau():
     # Use the un-aggregated path so promote_fused has siblings to coerce.
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     profile = _FakeProfile()
 
     format_specs = {s.name: s for s in specs}
@@ -813,7 +814,7 @@ def test_fused_group_ucb_stderr_preserves_conservative_bound(monkeypatch):
     members, stats, costs = _mk_qkv_ucb_fixture(base, stderr)
     specs = _format_specs()
 
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     _s, costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, _FakeProfile())
     super_name = next(n for n in cands_ext if _FUSED_SIBLING_MARKER in n)
@@ -849,7 +850,7 @@ def test_fused_group_hedge_is_identity_at_z_zero(monkeypatch):
     members, stats, costs = _mk_qkv_ucb_fixture(base, stderr)
     specs = _format_specs()
 
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     _s, costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, _FakeProfile())
     super_name = next(n for n in cands_ext if _FUSED_SIBLING_MARKER in n)
@@ -1059,7 +1060,7 @@ def test_a_stock_menu_gains_no_group_options_at_all():
     built before the group knapsack existed."""
     names, stats, costs = _mk_stats_and_costs()
     specs = _format_specs()
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     stats_ext, _costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, _FakeProfile())
     for name, per_name in cands_ext.items():

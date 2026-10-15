@@ -3219,7 +3219,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         packed=not args.no_packed_aggregation,
         fused=not args.no_fused_aggregation,
     )
-    candidates = build_candidates(
+    body_build = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
         pricing_policy=pricing_policy, census_loo=census_loo,
         census_loo_groups=census_loo_groups,
@@ -3239,6 +3239,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         **({"preserve_runtime_frontier": True}
            if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
     )
+    candidates = body_build.candidates
+    costs = body_build.cost_rows
+    materialized_cost_rows = dict(costs)
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
              f"{len(fused_members_deferred)} fused-sibling members keep whole "
@@ -3277,7 +3280,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             )
         head_stats = {name: stats[name] for name in head_probe_names}
         head_costs = {name: costs[name] for name in head_probe_names}
-        head_candidates = build_candidates(
+        head_build = build_candidates(
             head_stats,
             head_costs,
             [fr.get_format(lm_head_format_canonical)],
@@ -3298,6 +3301,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             allowability_m=args.pact_regime,
             allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
+        head_candidates = head_build.candidates
+        costs.update(head_build.cost_rows)
+        materialized_cost_rows.update(head_build.cost_rows)
         missing_head_candidates = [
             name for name in head_probe_names
             if _find_candidate_for_format(
@@ -3373,7 +3379,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     if mtp_names:
         mtp_stats = {name: stats[name] for name in mtp_names}
         mtp_costs = {name: costs[name] for name in mtp_names}
-        mtp_candidates = build_candidates(
+        mtp_build = build_candidates(
             mtp_stats,
             mtp_costs,
             [fr.get_format(mtp_format_canonical)],
@@ -3388,6 +3394,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             allowability_m=args.pact_regime,
             allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
+        mtp_candidates = mtp_build.candidates
+        costs.update(mtp_build.cost_rows)
+        materialized_cost_rows.update(mtp_build.cost_rows)
         missing_mtp_candidates = [
             name for name in mtp_names
             if _find_candidate_for_format(
@@ -4329,9 +4338,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             tessera_menu_widths["rung_allowability_scopes"] = {
                 name: scope for name, scope in final_scopes.items() if scope is not None}
             tessera_menu_widths["canonical_quality"] = {
-                name: final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})[fmt]
+                name: row["canonical_quality"]
                 for name, fmt in assignment_expanded.items()
-                if fmt in final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})}
+                if (row := materialized_cost_rows.get(name, {}).get(fmt)) is not None
+                and row.get("canonical_quality") is not None}
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,

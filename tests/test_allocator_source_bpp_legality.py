@@ -67,7 +67,7 @@ def test_mxfp4_packed_expert_boundary_and_audit_are_byte_exact():
         [fr.get_format("MXFP4"), fr.get_format("NVFP4")],
         source_manifest={qname: "mxfp4"},
         mask_records=records,
-    )
+    ).candidates
 
     assert source_format_for_kind("mxfp4").name == "MXFP4_SOURCE"
     assert [candidate.fmt for candidate in candidates[qname]] == ["MXFP4"]
@@ -139,7 +139,7 @@ def test_dense_fp8_source_allows_a_lower_rung_and_its_measured_equal_source_form
         [fr.get_format("NVFP4"), fr.get_format(source_format)],
         source_manifest={qname: source_kind},
         mask_records=records,
-    )
+    ).candidates
 
     resolved_source = source_format_for_kind(source_kind)
     assert resolved_source is not None
@@ -168,7 +168,7 @@ def test_dense_ue8m0_w8a16_source_is_an_exact_identity_terminal():
         [fr.get_format("NVFP4"), fr.get_format(source_format)],
         source_manifest={qname: "fp8_ue8m0"},
         mask_records=records,
-    )
+    ).candidates
 
     resolved_source = source_format_for_kind("fp8_ue8m0")
     assert resolved_source is not None
@@ -203,7 +203,7 @@ def test_unknown_source_kind_fails_closed_before_candidate_construction():
             {qname: {"NVFP4": _measured_cost()}},
             [fr.get_format("NVFP4")],
             source_manifest={qname: "future_fp6"},
-            )
+            ).candidates
 
 
 @pytest.mark.parametrize(("source_kind", "source_bpp"), [
@@ -256,4 +256,4 @@ def test_source_census_without_exact_linear_shape_fails_closed():
             {qname: {"NVFP4": _measured_cost()}},
             [fr.get_format("NVFP4")],
             source_manifest={qname: "bf16"},
-        )
+        ).candidates

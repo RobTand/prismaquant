@@ -589,7 +589,7 @@ def test_payload_becomes_allocator_candidates_on_the_intended_branches():
         [fr.get_format(name) for name in ("NVFP4", "FP8_SOURCE")],
         source_manifest={DENSE_QNAME: "fp8"},
         target_profile=SERVING_PROFILE,
-    )
+    ).candidates
     by_format = {c.fmt: c for c in candidates[DENSE_QNAME]}
     assert set(by_format) == {"NVFP4", "FP8_SOURCE"}
     assert by_format["NVFP4"].predicted_dloss == pytest.approx(4.0e-6, rel=0)

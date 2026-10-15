@@ -1461,6 +1461,12 @@ def refuse_retired_trellis_surface(env: Mapping[str, str] | None = None) -> None
     )
 
 
+@dataclass(frozen=True)
+class CandidateBuild:
+    candidates: dict[str, list[Candidate]]
+    cost_rows: dict[str, dict[str, dict]]
+
+
 def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      calibrated_gains: dict[str, float] | None = None,
                      source_manifest: dict[str, str] | None = None,
@@ -1479,7 +1485,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      allowability_m: int | None = None,
                      allowability_tensor_parallel: int = 1,
                      pricing_policy: priced_cell.CostPricingPolicy | None = None,
-                     ) -> dict[str, list[Candidate]]:
+                     ) -> CandidateBuild:
     """Build runtime-legal format candidates for every measured Linear.
 
     This is the optimizer's first legality gate. Export keeps a final
@@ -1511,6 +1517,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     refuse_retired_trellis_surface()
     production_allocation = not load_serving_profile(target_profile).emulation_only
     gains = calibrated_gains or {}
+    cost_rows = {name: {fmt: dict(row) for fmt, row in rows.items()}
+                 for name, rows in costs.items()}
     out: dict[str, list[Candidate]] = {}
     masked: dict[tuple[str, str], list[str]] = {}
     source_counts: Counter[str] = Counter()
@@ -1523,8 +1531,6 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     for name, s in stats.items():
         if name not in costs:
             continue
-        s.pop("_canonical_price_by_format", None)
-        s.pop("_canonical_quality_by_format", None)
         serving_context = (
             context_by_unit.get(name) if context_by_unit is not None else None
         )
@@ -1656,15 +1662,13 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     masked.setdefault((spec.name, reason), []).append(name)
                     unserved.setdefault(name, []).append(spec.name)
                     continue
-            if entry.get("canonical_quality") is not None:
-                s.setdefault("_canonical_quality_by_format", {})[spec.name] = entry["canonical_quality"]
             if (entry.get("cost_source") == "canonical_qualified_chord"
                     or entry.get("quality_scope", {}).get("currency") == "served_kl"):
                 from .rung_allowability import complete_scientific_price
                 complete_scientific_price(entry, format_name=spec.name)
                 if entry["quality_scope"]["unit"] != name or tuple(entry["quality_scope"]["shape"]) != shape:
                     raise ValueError("canonical scientific price differs from the actual unit or source shape")
-                s.setdefault("_canonical_price_by_format", {})[spec.name] = entry
+            cost_rows[name][entry_fmt] = dict(entry)
             gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
             # Always use measured joint output perturbation when available.
             # Packed experts can carry an unmeasured output_mse placeholder;
@@ -1841,7 +1845,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         preserve_runtime_frontier=preserve_runtime_frontier,
         defer_reduction=defer_menu_reduction,
     )
-    return out
+    return CandidateBuild(out, cost_rows)
 
 
 def selection_serving_lane_provenance(
@@ -2692,7 +2696,7 @@ def aggregate_fused_siblings(
             missing = []
             for m in members:
                 entry, entry_fmt = priced_cell.resolve_cost_row(
-                    costs.get(m, {}), spec.name, stats_entry=stats[m])
+                    costs.get(m, {}), spec.name)
                 if entry is None or "error" in entry:
                     missing.append(m)
                 else:
@@ -2955,7 +2959,7 @@ def aggregate_fused_siblings(
                 complete_members = []
                 for member, member_format in member_formats.items():
                     entry, _entry_format = priced_cell.resolve_cost_row(
-                        costs.get(member, {}), member_format, stats_entry=stats[member])
+                        costs.get(member, {}), member_format)
                     complete_members.append({"unit": member, "format": member_format, "row": entry})
                 complete_sum = make_scientific_price_sum(complete_members, format_name=composite.fmt)
                 if complete_sum is not None:
@@ -3355,7 +3359,7 @@ def aggregate_packed_serving_groups(
             act_penalty = priced_cell._activation_penalty(spec.name, activation_pricing)
             for m in members:
                 entry, entry_fmt = priced_cell.resolve_cost_row(
-                    costs.get(m, {}), spec.name, stats_entry=stats[m])
+                    costs.get(m, {}), spec.name)
                 member_terms.append((
                     stats[m],
                     entry,

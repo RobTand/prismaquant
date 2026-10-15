@@ -59,7 +59,7 @@ def test_body_chord_keeps_its_quantity_without_another_transfer(monkeypatch, cur
                    "h_trace": 9.0, "unit_structure": "dense"}}
     built = candidates.build_candidates(stats, {"u": anchor_rows(currency=currency)},
         [registry.get_format(fmt)], target_profile="research", rung_allowability={FAMILY: owner},
-        allowability_m=8, calibrated_gains={fmt: 9.0}, activation_pricing=nontrivial_calibration(fmt))
+        allowability_m=8, calibrated_gains={fmt: 9.0}, activation_pricing=nontrivial_calibration(fmt)).candidates
     assert built["u"][0].predicted_dloss == expected
     assert built["u"][0].activation_pricing == "canonical_qualified_chord"
 
@@ -230,8 +230,10 @@ def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch
                 scope["currency"] = scope["objective"]["currency"] = currency
                 row = {"predicted_dloss": 1.0 if rate == 768 else 0.5, "quality_scope": scope}
             costs[unit][name] = row
-    supplied = candidates.build_candidates(stats, costs, specs, target_profile="research",
+    build = candidates.build_candidates(stats, costs, specs, target_profile="research",
         rung_allowability={FAMILY: owner}, allowability_m=8)
+    supplied = build.candidates
+    costs = build.cost_rows
     supplied = {unit: [option for option in supplied[unit] if option.fmt == fmt]
                 for unit, fmt in zip(units, formats)}
     profile = SimpleNamespace(fused_sibling_group=lambda name: "pair",

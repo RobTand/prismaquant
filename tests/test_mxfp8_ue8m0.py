@@ -461,7 +461,7 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research", mask_records=masks)
+        target_profile="research", mask_records=masks).candidates
     assert FMT not in {c.fmt for c in cands[name]}
     assert any(m["format"] == FMT
                and m["reason"] == ACTIVATION_COST_UNMEASURED_REASON
@@ -478,7 +478,7 @@ def test_a_measured_activation_side_passes_menu_admission():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research")
+        target_profile="research").candidates
     chosen = {c.fmt: c for c in cands[name]}
     assert FMT in chosen
     assert chosen[FMT].predicted_dloss > 0.0

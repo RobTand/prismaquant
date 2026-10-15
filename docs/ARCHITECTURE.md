@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: `CandidateBuild` returns candidates and explicit owned
+cost rows. Admitted canonical chord rows and synthesized source prices flow to
+aggregation and selected quality metadata through these rows, replacing hidden
+canonical price/quality maps on probe stats. Callers migrate directly.
+
 Re-stamped 2026-10-15: allocation captures the UCB and Fisher-output pricing
 policy once at its CLI boundary and shares it with activation calibration, body,
 head, MTP and grouped prices. Candidate assembly consumes a `PricedCell` carrying

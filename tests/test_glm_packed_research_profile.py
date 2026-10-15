@@ -94,7 +94,7 @@ def test_actual_candidate_filter_masks_before_routed_grouping(fmt, qname, packed
     stats, costs = candidate_table([qname], specs, packed=packed)
     masks = []
     result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={qname: 'bf16'}, mask_records=masks)
+        source_manifest={qname: 'bf16'}, mask_records=masks).candidates
     expected = {'BF16', fmt} if fmt in RESEARCH_FAMILIES else {'BF16'}
     assert {candidate.fmt for candidate in result[qname]} == expected
     if fmt not in RESEARCH_FAMILIES:
@@ -108,7 +108,7 @@ def test_dense_readable_candidates_remain_available(qname, fmt):
     specs = [fr.get_format(fmt), fr.get_format('BF16')]
     stats, costs = candidate_table([qname], specs)
     result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={qname: 'bf16'})
+        source_manifest={qname: 'bf16'}).candidates
     assert {candidate.fmt for candidate in result[qname]} == {fmt, 'BF16'}
 
 
@@ -123,7 +123,7 @@ def test_family_allowance_does_not_bypass_shape_refusal():
     stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
     masks = []
     result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={ROUTED: 'bf16'}, mask_records=masks)
+        source_manifest={ROUTED: 'bf16'}, mask_records=masks).candidates
     assert {candidate.fmt for candidate in result[ROUTED]} == {'BF16'}
     assert [(m['format'], m['reason']) for m in masks] == [
         (E4M3[1], 'tensor_parallel_shard')]
@@ -135,7 +135,7 @@ def test_a_realisable_rung_on_a_partial_superblock_is_offered():
     specs = [fr.get_format(E4M3[-1]), fr.get_format('BF16')]
     stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
     result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-        source_manifest={ROUTED: 'bf16'})
+        source_manifest={ROUTED: 'bf16'}).candidates
     assert {candidate.fmt for candidate in result[ROUTED]} == {E4M3[-1], 'BF16'}
 
 
@@ -167,7 +167,7 @@ def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):
     masks = []
     result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
         source_manifest=dict.fromkeys(names, 'bf16'),
-        context_by_unit={ROUTED: accepted, STACK: refused}, mask_records=masks)
+        context_by_unit={ROUTED: accepted, STACK: refused}, mask_records=masks).candidates
     assert {c.fmt for c in result[ROUTED]} == {fmt, 'BF16'}
     assert {c.fmt for c in result[STACK]} == {'BF16'}
     assert calls == [accepted, refused]

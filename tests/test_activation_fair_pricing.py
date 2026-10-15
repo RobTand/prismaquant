@@ -261,7 +261,7 @@ def test_calibration_corrects_weight_only_rows_and_leaves_measured_rows_alone():
 
     cands = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing).candidates
 
     priced = {c.fmt: c for c in cands[expert]}
     # The weight-only expert row is charged its family's factor...
@@ -357,7 +357,7 @@ def test_no_measured_activation_rows_passes_through_but_is_recorded():
     # Uncorrected rows say so on the candidate.
     cands = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing).candidates
     branches = {
         c.activation_pricing
         for c in cands["model.layers.0.mlp.down_proj"]
@@ -390,7 +390,7 @@ def test_the_unmeasured_activation_removal_gate_is_not_weakened():
     masks: list[dict] = []
     cands = build_candidates(
         stats, costs, _specs(["NVFP4", "BF16"]),
-        mask_records=masks, activation_pricing=pricing)
+        mask_records=masks, activation_pricing=pricing).candidates
     assert {c.fmt for c in cands["model.layers.0.mlp.down_proj"]} == {"BF16"}
     assert [m["reason"] for m in masks] == [ACTIVATION_COST_UNMEASURED_REASON]
 
@@ -408,11 +408,11 @@ def test_kill_switch_restores_pre_p5a_prices_exactly(monkeypatch):
 
     switched = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing).candidates
     monkeypatch.delenv(ENV_FLAG, raising=False)
     legacy = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=None)
+        activation_pricing=None).candidates
     for name in switched:
         got = {c.fmt: c.predicted_dloss for c in switched[name]}
         want = {c.fmt: c.predicted_dloss for c in legacy[name]}
@@ -472,7 +472,7 @@ def test_a_fused_super_item_folds_the_family_penalty_in_exactly_once():
 
     cands = build_candidates(
         stats, costs, specs, target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing).candidates
     stats_ext, costs_ext, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, profile=_FusedProfile(),
         activation_pricing=pricing)
@@ -514,7 +514,7 @@ def test_a_super_item_with_mixed_member_branches_says_so():
     pricing = calibrate_activation_fair_pricing(stats, costs, specs)
     cands = build_candidates(
         stats, costs, specs, target_profile="research",
-        activation_pricing=pricing)
+        activation_pricing=pricing).candidates
     _s, _c, cands_ext = aggregate_fused_siblings(
         stats, costs, specs, cands, profile=_FusedProfile(),
         activation_pricing=pricing)
@@ -576,7 +576,7 @@ def test_the_dp_flips_to_fp8_once_the_w4_activation_cost_is_priced():
     def _solve(pricing):
         cands = build_candidates(
             stats, costs, specs, target_profile="research",
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
         # Budget the expert row alone at a rate both quantized rungs can
         # reach and BF16 cannot.
         solved = solve_allocation(

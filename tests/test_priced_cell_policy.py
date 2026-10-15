@@ -36,5 +36,5 @@ def test_candidate_build_uses_one_policy_even_if_an_adapter_changes_the_environm
         'in_features': 1024, 'out_features': 512} for name in ('a', 'b')}
     costs = {name: {'BF16': {'predicted_dloss': 3.0,
         'predicted_dloss_stderr': 0.5}} for name in stats}
-    candidates = assembly.build_candidates(stats, costs, [formats.get_format('BF16')])
+    candidates = assembly.build_candidates(stats, costs, [formats.get_format('BF16')]).candidates
     assert [candidates[name][0].predicted_dloss for name in stats] == [4.0, 4.0]

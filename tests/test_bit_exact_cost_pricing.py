@@ -268,7 +268,7 @@ def test_build_candidates_splits_passthrough_and_actquant_bit_exact():
                      "Q4_K": _lossy_entry()}}
     specs = [fr.get_format(_PASSTHROUGH_FMT), fr.get_format(_ACTQUANT_FMT),
              fr.get_format("Q4_K")]
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     by_fmt = {c.fmt: c for c in cands["row"]}
     assert by_fmt[_PASSTHROUGH_FMT].predicted_dloss == 0.0
     expected_a_side = 0.5 * _STATS["h_trace"] * _bit_exact_entry()["output_mse"]
@@ -366,7 +366,7 @@ def test_unmeasured_activation_cost_is_excluded_not_priced_at_zero():
     specs = [fr.get_format(f) for f in
              (_ACTQUANT_FMT, "Q4_K", _PASSTHROUGH_FMT, "BF16")]
     records: list[dict] = []
-    cands = build_candidates(stats, costs, specs, mask_records=records)
+    cands = build_candidates(stats, costs, specs, mask_records=records).candidates
 
     by_fmt = {c.fmt: c for c in cands["e"]}
     assert _ACTQUANT_FMT not in by_fmt, (
@@ -397,7 +397,7 @@ def test_measured_output_mse_keeps_the_actquant_candidate():
     entry = {"weight_mse": 0.0, "output_mse": 6.3e-3, "rel_output_mse": 8.7e-3,
              "output_mse_measured": True}
     costs = {"e": {_ACTQUANT_FMT: entry}}
-    cands = build_candidates(stats, costs, [fr.get_format(_ACTQUANT_FMT)])
+    cands = build_candidates(stats, costs, [fr.get_format(_ACTQUANT_FMT)]).candidates
     got = {c.fmt: c.predicted_dloss for c in cands["e"]}
     expected = 0.5 * stats["e"]["h_trace"] * entry["output_mse"]
     assert abs(got[_ACTQUANT_FMT] - expected) < 1e-12
@@ -416,7 +416,7 @@ def test_zero_sensitivity_rows_keep_every_format():
                    "BF16": {"weight_mse": 0.0}}}
     specs = [fr.get_format(f) for f in (_ACTQUANT_FMT, "Q4_K", "BF16")]
     records: list[dict] = []
-    cands = build_candidates(stats, costs, specs, mask_records=records)
+    cands = build_candidates(stats, costs, specs, mask_records=records).candidates
     assert {c.fmt for c in cands["e"]} == {_ACTQUANT_FMT, "Q4_K", "BF16"}
     assert records == []
 
@@ -435,14 +435,14 @@ def test_starving_a_linear_of_all_candidates_is_a_hard_error():
                    "Q4_K": _unmeasured_output_entry(0.0)}}
     specs = [fr.get_format(_ACTQUANT_FMT), fr.get_format("Q4_K")]
     with pytest.raises(AssertionError) as exc:
-        build_candidates(stats, costs, specs)
+        build_candidates(stats, costs, specs).candidates
     msg = str(exc.value)
     assert "e" in msg and _ACTQUANT_FMT in msg
     assert "PRISMAQUANT_EXPERT_COST_SAMPLE" in msg
     # Adding one identity-activation rung is a legal resolution.
     costs["e"][_PASSTHROUGH_FMT] = _unmeasured_output_entry(0.0)
     cands = build_candidates(
-        stats, costs, specs + [fr.get_format(_PASSTHROUGH_FMT)])
+        stats, costs, specs + [fr.get_format(_PASSTHROUGH_FMT)]).candidates
     assert {c.fmt for c in cands["e"]} == {_PASSTHROUGH_FMT}
 
 
@@ -463,7 +463,7 @@ def test_unmeasured_zero_no_longer_wins_the_dp_at_every_budget():
             "MXFP8A16": _unmeasured_output_entry(0.0),   # passthrough acts
         }
     specs = [fr.get_format(f) for f in menu]
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     assert all("MXFP4" not in {c.fmt for c in v} for v in cands.values())
 
     spec_map = {f: fr.get_format(f) for f in menu}
@@ -498,7 +498,7 @@ def test_packed_group_pricing_splits_passthrough_and_actquant():
                        "in_features": 256, "out_features": 256}
         costs[name] = {_PASSTHROUGH_FMT: _bit_exact_entry(),
                        _ACTQUANT_FMT: _bit_exact_entry()}
-    cands = build_candidates(stats, costs, specs)
+    cands = build_candidates(stats, costs, specs).candidates
     _stats2, _costs2, cands2 = aggregate_packed_serving_groups(
         stats, costs, specs, cands, _P())
     super_name = next(n for n in cands2 if _PACKED_GROUP_MARKER in n)

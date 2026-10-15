@@ -512,7 +512,7 @@ def cost_entry_activation_pricing_branch(
     version that produced it.
     """
     from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    entry = cost_entry
     if complete_scientific_price(entry, format_name=format_name) is not None:
         return "canonical_qualified_chord" if entry.get("canonical_quality") is not None else "qualified_served_kl"
     if cost_entry_is_joint_aura(cost_entry):
@@ -598,7 +598,7 @@ def cost_entry_predicted_dloss(
     """
     policy = CostPricingPolicy.from_environment() if policy is None else policy
     from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    entry = cost_entry
     complete = complete_scientific_price(entry, format_name=format_name)
     if complete is not None:
         return complete
@@ -752,7 +752,7 @@ def cost_entry_prices_unmeasured_activation_at_zero(
         BF16.
     """
     from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
+    entry = cost_entry
     if complete_scientific_price(entry, format_name=format_name) is not None:
         return False
     if cost_entry_is_joint_aura(cost_entry):
@@ -802,17 +802,13 @@ def _cost_ucb_z() -> float:
     except Exception:
         return 0.0
 
-def resolve_cost_row(cost_rows: dict, fmt_name: str, *, stats_entry=None) -> tuple[dict | None, str]:
+def resolve_cost_row(cost_rows: dict, fmt_name: str) -> tuple[dict | None, str]:
     """Resolve one Linear's cost row for ``fmt_name``, alias-aware.
 
     Returns ``(entry, entry_fmt)`` where ``entry_fmt`` is the alias actually
     present in the cost table (what ``calibrated_gains`` may be keyed by), or
     ``(None, fmt_name)`` when the format was never measured.
     """
-    if stats_entry is not None:
-        cached = stats_entry.get("_canonical_price_by_format", {}).get(fmt_name)
-        if cached is not None:
-            return cached, fmt_name
     for candidate_name in fr.aliases_for(fmt_name):
         if candidate_name in cost_rows:
             return cost_rows[candidate_name], candidate_name
