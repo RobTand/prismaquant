@@ -149,7 +149,7 @@ class CampaignScopeRequest:
     research_exact_member: str | None
     rate_band: str | None
     max_rounds: int
-    seed_checkpoint: Sequence[str] | None
+    seed_checkpoint: str | None
     seed_wire_dir: str | None
     capture_calibration_out: str | None
     calibration_cache: str | None
