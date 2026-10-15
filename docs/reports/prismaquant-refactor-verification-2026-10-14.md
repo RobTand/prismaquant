@@ -422,3 +422,54 @@ absolute or relative imports in the package, tools, experiments and live tests.
 It does not inspect dynamic exports or certify runtime behavior. Pricing and
 additional public producer APIs remain pending; final composed verification
 has not yet run.
+
+
+The raw checkpoint-settings API is integrated in `e90583f2be`. The public
+`campaign_checkpoint_identity` copies a mapping and retains all existing wire
+filters and per-unit acquisition proof. All fourteen caller test modules migrate;
+the private API is deleted. PB
+`1bb969c75aa65e368892aed4232ed3a4e57e329e23337fa2ca2c787d4f3b9bcb`
+passes 363 cases without skips and compiles seventeen sources. Result is
+`913b3a5f621a884010a5aa4d27ba291dcdba6fadfdc2209e78ebe1d8c5c6d8c3`,
+1234 bytes; receipt is
+`26be667c2439a27ea58d260853137fba854148fad8370d70698fba7142ca5170`.
+Actual terminal, logs, payload bytes and receipt were independently verified.
+
+Its two-record historical fixture came from the old producer in PB `235dd63f`.
+The candidate checks its actual current package-source seal, then normalizes
+only that field to compare all remaining historical record content. It does
+not claim that different source trees have identical whole identities. Raw
+settings bytes independently preserve unknown keys, zero, false, null, Unicode
+and acquisition unit proofs. The main-function snapshot follows all direct
+acquisition stores; read-only AST inspection finds no later direct args stores
+or setattr calls. Source-seal gates remain active.
+
+The encoder-startup source-order test now observes actual main/model/seal/
+producer events through its real captured-row fixture. Existing failure and
+drain cases remain. One packed-module docstring-only assertion is deleted.
+Independent census/capture review found no missing nested fields or changed
+valid phase, refusal, source/guard or serialization behavior.
+
+Encountered dynamic manual callers are repaired separately in `6d2adb9df3`.
+The rebind timing harness instruments the public API while retaining historical
+phase names. The profile reader counts old, new and recursive frames once under
+the historical output key. PB
+`29f6155f4feda38c288070fd17c9c5a97a4582fe3e4b736c236b300315a81ee2`
+passes two cases without skips and compiles three sources. Result is
+`d6ed4c4ffd8fcb85c8c478fc14af8a3c056716dfb6204c00074b9251622900e5`;
+receipt is `40258850f8dce15ddbd695775e3dd8029990bec821b4ec8995631ab36b5cc20e`.
+This CPU instrumentation case mocks the CUDA availability boundary and stops
+before model execution; it does not qualify a CUDA rebind timing run.
+
+The encountered sampler wall-clock test is repaired in `aa648ece2a`.
+A real sampler thread and close/read barrier replace sleeping for 300 ms and
+expecting at least four samples. Four literal readings independently specify
+peak/minimum and final-read ordering, while one unmocked /proc read preserves
+source parsing coverage. No production sampler behavior changes. PB
+`b857b29d43eb780e98b8a26a10b4e3943079223f28f465edc15a24e0daff864a`
+passes the full twelve-case module without skips and compiles the touched test.
+Result is `fe152fbf0fa75fbabd16e334b2b49b2228edeb73de5d31a51eb35edf3f0539ad`;
+receipt is `cd20a0c6aa89fd4fcc512e58a899f64aee0a07d3e2c6a4ba648c6f1803a33b0c`.
+Both successful manual/sampler results were independently checked against their
+actual terminal records, logs and CAS bytes. Each uses CPU1, RAM4 GiB, native
+threads1 and portable eligibility with the qualified Git interpreter.

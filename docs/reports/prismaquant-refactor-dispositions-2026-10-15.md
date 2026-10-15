@@ -139,3 +139,27 @@ plan remains unchanged: one locally incorporated change, 22 independent changes,
 seven unrelated changes, two blocked changes and four conditional retirements.
 PR #2669 remains open and is linked to this thread; no remote disposition was
 executed.
+
+
+## Integration update, 2026-10-15 04:58 UTC
+
+T2's actual-parser correction is integrated in `ebca1132ab`, with eleven real
+parser cases agreeing. Census/capture requests and runners are integrated in
+`41d7417de3`; the public raw checkpoint-settings mapping API is integrated in
+`e90583f2be`. Historical settings retain their wire representation while actual
+package-source seals continue to change with source. Source-evaluating resume
+and encoder-startup tests now exercise real CLI behavior. The encountered
+manual instrumentation caller and sampler timing assertion are repaired in
+separate commits `6d2adb9df3` and `aa648ece2a`.
+
+Shared scope and menu/projection resolution are prerequisites to the remaining
+typed pricing runner. They are under implementation, with the existing source,
+cache, seal, publication and checkpoint lifetimes preserved. No generic session
+bag or copied census/pricing policy is being introduced. Final composed branch
+verification remains pending.
+
+The additional producer APIs remain unacknowledged. Parent coordinators were
+asked to resume the producer in mailbox message `1792039473540-8df61371`; the
+canonical brief remains in the shared mailbox context directory. The eleven
+serving-runtime imports and API-dependent cell extraction are still explicitly
+unfinished. The 36-PR disposition plan and remote PR state remain unchanged.
