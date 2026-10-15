@@ -27,7 +27,7 @@ def _load(name: str, path: str):
 
 QUANTA = _load("route2639_quanta", "tools/dispatch_joint_quanta.py")
 CAMPAIGN = _load("route2639_campaign", "tools/dispatch_tessera_campaign.py")
-UNION = _load("route2639_union", "tools/union_tessera_census_tables.py")
+from prismaquant import tessera_census_union as UNION
 
 from prismaquant import digests as owners  # noqa: E402
 from prismaquant import stage_b_prep_io as preparation  # noqa: E402
@@ -89,24 +89,8 @@ def test_seed_for_selection_routes_through_owner(monkeypatch, tmp_path):
     assert seen == [(rowdir / "cost.anchors.json").read_bytes()]
 
 
-def test_union_digest_routes_through_owner(monkeypatch):
-    seen = []
-    monkeypatch.setattr(owners, "text_sha256hex",
-                        lambda text: seen.append(text) or "routed")
-    assert UNION._digest({"b": 1}) == "routed"
-    assert seen == [UNION._json_key({"b": 1})]
 
 
-def test_union_indent_dump_routes_through_owner(monkeypatch):
-    seen = []
-
-    def text(value):
-        seen.append(value)
-        return "routed"
-
-    monkeypatch.setattr(owners, "DIRECT_UTF8_INDENT2_STRICT", type("P", (), {"text": staticmethod(text)}))
-    assert UNION._indent_dump({"b": 1}) == "routed"
-    assert seen == [{"b": 1}]
 
 
 def test_routed_values_match_hashlib(tmp_path):

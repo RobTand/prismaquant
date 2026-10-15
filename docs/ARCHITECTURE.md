@@ -54,6 +54,14 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_census_union` owns union planning, source/cell/Hessian/receipt checks and
+publication of sealed campaign tables. Shared layout and stage names belong to
+`tessera_campaign_table`. The executable parses arguments and prints results;
+package consumers do not load tool source or initialize a numerical campaign.
+Planning preserves the existing all-checks-before-write policy, wire hardlinks,
+identity migration proofs and verification of resumed outputs.
+
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_table` owns anchor/stack metadata, campaign payload construction,
 cost/census/plan/scope schemas and merged checkpoint/payload policy. The numerical
 campaign supplies measurements; dispatcher and package callers consume the same

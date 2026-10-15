@@ -26,7 +26,7 @@ def _load(name: str, path: str):
     return module
 
 
-UNION = _load("route_union_1672", "tools/union_tessera_census_tables.py")
+from prismaquant import tessera_census_union as UNION
 TEACHER = _load("route_teacher_1672", "tools/full_kl_teacher_payload.py")
 
 from prismaquant.quality_prefill_pb_adapter import (  # noqa: E402
