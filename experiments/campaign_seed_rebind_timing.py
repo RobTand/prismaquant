@@ -105,8 +105,12 @@ def run(path, expected):
     command += arm_flags(p['overlap_bytes'], p['identity_bytes'])
     recorder = PhaseRecorder(limit=200000)
     from prismaquant import tessera_campaign_wire as campaign_wire
-    wire_operations = {'_checkpoint_wire_record': 'checkpoint_wire_record', '_link_seed_wire': 'link_seed_wire'}
-    targets = [(campaign_wire, wire_operations[name]) if name in wire_operations else (campaign, name)
+    moved_operations = {
+        '_checkpoint_wire_record': (campaign_wire, 'checkpoint_wire_record'),
+        '_link_seed_wire': (campaign_wire, 'link_seed_wire'),
+        '_campaign_checkpoint_identity': (campaign, 'campaign_checkpoint_identity'),
+    }
+    targets = [moved_operations.get(name, (campaign, name))
         for name in (
         '_prefetch_selected_capture', '_campaign_bound_identities', '_adopt_seed_checkpoint',
         '_checkpoint_anchor_identity', '_checkpoint_wire_record', '_link_seed_wire',
@@ -119,9 +123,11 @@ def run(path, expected):
     returncode = None
     try:
         for owner, name, original in originals:
-            setattr(owner, name, recorder.wrap(original, (campaign.__name__+'.'+next(
-                old for old, current in wire_operations.items() if current == name))
-                if owner is campaign_wire else owner.__name__+'.'+name))
+            logical_name = next((old for old, target in moved_operations.items()
+                                 if target == (owner, name)), None)
+            phase = (campaign.__name__+'.'+logical_name if logical_name is not None
+                     else owner.__name__+'.'+name)
+            setattr(owner, name, recorder.wrap(original, phase))
         returncode = campaign.main(command)
     finally:
         for owner, name, original in originals:

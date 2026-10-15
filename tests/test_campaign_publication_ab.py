@@ -98,3 +98,49 @@ def test_with_headroom_replaces_the_floor_and_refuses_a_recipe_without_one():
         with_headroom(['--anchor-batch-size', '8'], 12)
     with pytest.raises(ValueError):
         with_headroom(recipe, 0)
+
+
+def test_rebind_instruments_public_identity_with_historical_phase_and_cleanup(monkeypatch, tmp_path):
+    import torch
+    from prismaquant import tessera_campaign as campaign
+    from experiments import campaign_seed_rebind_timing as rebind
+
+    class ObservedBinding(RuntimeError):
+        pass
+
+    def identity():
+        return 'bound'
+
+    def stop_after_binding(argv):
+        assert campaign.campaign_checkpoint_identity() == 'bound'
+        raise ObservedBinding('instrumentation bound before model execution')
+
+    monkeypatch.setattr(campaign, 'campaign_checkpoint_identity', identity)
+    monkeypatch.setattr(campaign, 'main', stop_after_binding)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'max_memory_reserved', lambda: 0)
+    out = tmp_path / 'result'
+    plan = tmp_path / 'plan.json'
+    plan.write_text(json.dumps(dict(
+        schema=rebind.SCHEMA, input_sha256={}, environment={}, out=str(out),
+        command=['--out', 'old', '--cache-dir', 'old', '--checkpoint', 'old'],
+        seed_checkpoint='unused', seed_wire_dir='unused', overlap_bytes=0,
+        identity_bytes=0, row_id='binding', seed_wire_bytes=0, seed_unit_shards=0)))
+    with pytest.raises(ObservedBinding):
+        rebind.run(plan, rebind.digest(plan))
+    assert campaign.campaign_checkpoint_identity is identity
+    result = json.loads((out / 'rebind-timing.json').read_text())
+    assert result['phases']['prismaquant.tessera_campaign._campaign_checkpoint_identity']['calls'] == 1
+
+
+def test_profile_reader_keeps_historical_key_for_old_new_and_recursive_frames(tmp_path):
+    from experiments.stream_row_head_640.profile_summary import profile
+
+    (tmp_path / 'pyspy.raw.txt').write_text(
+        'main;_campaign_checkpoint_identity (old.py:1) 3\n'
+        'main;campaign_checkpoint_identity (new.py:1) 5\n'
+        'main;campaign_checkpoint_identity (new.py:1);campaign_checkpoint_identity (new.py:2) 7\n')
+    result = profile(tmp_path)
+    assert result['samples'] == 15
+    assert result['inclusive']['_campaign_checkpoint_identity'] == 15
+    assert 'campaign_checkpoint_identity' not in result['inclusive']

@@ -35,6 +35,7 @@ NAMED = ("_campaign_checkpoint_identity", "canonical_hessian_reference_descripto
          "tensor_identity", "_stream_unit_identity", "finalize_row_stream", "RowStream",
          "_read ", "admit ", "_measure_anchor_batch", "_encode_and_render",
          "write_export_inputs", "snapshot_selected_weights", "_project_expert_population")
+NAMED_NEEDLES = {"_campaign_checkpoint_identity": "campaign_checkpoint_identity"}
 MILESTONES = (("row_head", "[campaign] row head:"),
               ("prefetched", "[campaign] calibration prefetched"),
               ("activations_ready", "[campaign] activations ready"),
@@ -114,7 +115,7 @@ def profile(arm: Path):
         seen = set()
         for frame in frames:
             for name in NAMED:
-                if name.strip() in frame and name not in seen:
+                if NAMED_NEEDLES.get(name, name).strip() in frame and name not in seen:
                     inclusive[name.strip()] += count
                     seen.add(name)
         self_frames[frames[-1]] += count
