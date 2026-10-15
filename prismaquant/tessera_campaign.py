@@ -4759,6 +4759,134 @@ def resolve_campaign_scope(request: CampaignScopeRequest, model, profile, *,
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PartitionCampaignMenu:
+    full_menus: dict
+    encode_structure: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCampaignMenu:
+    """Resolved menus and the exact projection/structure they describe."""
+    menus: dict
+    context_by_unit: dict | None
+    structure_by_unit: dict | None
+    encode_structure: dict | None
+    no_admitted_rung: list[str]
+    expert_projection: dict | None
+    projected_units: dict
+    partition: PartitionCampaignMenu | None
+
+
+def resolve_campaign_menu(weights, scope: ResolvedCampaignScope, profile, *,
+                          mode, tp_degree, family_restriction, model_path, cache_dir,
+                          selected_source, streaming_head, source_authentication,
+                          selected_guard) -> ResolvedCampaignMenu:
+    """Resolve full-group grids, local menus and producer-bound structure."""
+    import torch
+    from .tessera_menu import PARALLEL_NONE
+
+    partition_menu_targets = scope.partition_menu_targets
+    census = scope.census
+    context_by_unit = scope.context_by_unit
+    structure_by_unit = scope.structure_by_unit
+    encode_structure = scope.encode_structure
+    population = scope.population
+    expert_targets = scope.expert_targets
+    targets = [*scope.dense_targets, *expert_targets]
+    if partition_menu_targets is not None:
+        # Geometry-only menu inputs: no unpriced W/X/H is loaded or cached.
+        menu_weights = {name: torch.empty(census["unit_shapes"][name], device="meta")
+                        for name in partition_menu_targets}
+        full_partition_menus = expand_menus_for_targets(
+            menu_weights, partition_menu_targets, mode=mode, tp_degree=tp_degree,
+            parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
+            family_restriction=family_restriction, structure_by_unit=structure_by_unit,
+            profile=profile)
+        menus = {name: full_partition_menus[name] for name in targets}
+        partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
+        # Consumers and identity receipts describe only this row's priced units.
+        context_by_unit = (None if context_by_unit is None else
+                           {name: context_by_unit[name] for name in targets})
+        structure_by_unit = (None if structure_by_unit is None else
+                             {name: structure_by_unit[name] for name in targets})
+        encode_structure = {name: "routed_moe" for name in targets}
+    else:
+        menus = expand_menus_for_targets(
+            weights, targets, mode=mode, tp_degree=tp_degree,
+            parallel_kind=PARALLEL_NONE,
+            context_by_unit=context_by_unit,
+            family_restriction=family_restriction,
+            structure_by_unit=structure_by_unit,
+            profile=profile,
+        )
+    # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
+    # ``attested`` without a dev pin, ``readable`` against a contract that
+    # publishes no reader for these shapes -- used to resolve to nothing and
+    # let the run finish successfully with ``costs: {}``. A zero-row cost
+    # table is not a cheap answer, it is a missing one, and downstream it is
+    # indistinguishable from a scope that legitimately holds no unit. So the
+    # run refuses, and says which mode and which contract produced the
+    # emptiness. This is principle 1's line: the platform reports the gap
+    # instead of shipping a table nobody can tell is empty on purpose.
+    no_admitted_rung = report_empty_menus(menus, mode=mode)
+
+    # The producer's projection of every in-scope stack, asked for ONCE (it
+    # hashes the whole checkpoint), bound exactly to the profile-declared
+    # units, and its source bytes checked against the live views this run
+    # prices.  What the producer will read at export is what is priced here.
+    expert_projection = None
+    projected_units: dict[str, dict] = {}
+    # The projection is a SCOPE-wide answer, always: the block a shard carries
+    # covers every declared stack, because the allocation rebinds the
+    # producer's answer against every stack the block names
+    # (``carried_units``), and a block trimmed to one shard's stacks would be
+    # refused there. What narrows is only the byte-check and the priced units.
+    # A shard therefore reads the census's projection rather than asking the
+    # producer again -- the request hashes the whole checkpoint, so asking per
+    # row would put the campaign's most expensive serial step on every row and
+    # let two rows answer it differently.
+    if population.declared:
+        expert_projection, projected_units = _project_expert_population(
+            population, weights=weights, menus=menus,
+            model_path=model_path, cache_dir=cache_dir,
+            measured=set(expert_targets),
+            projection=(None if census is None else census.get("expert_projection")),
+            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                    release_source_pages=True, source_authentication=source_authentication)
+               if selected_source else {}),
+            # The stream head reads each unit's source tensor on its reader
+            # threads and prices it directly, so there is no snapshot view to
+            # check against it (PQ #1654).
+            check_units=not streaming_head)
+        print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
+              f"{len(projected_units)} expert units priced here"
+              + ("; their source tensors are read on the row stream's readers"
+                 if streaming_head and projected_units else ""), flush=True)
+    # A projected unit is a routed stack member whatever the run declares:
+    # Tessera's export intake reads a projection as ``routed_moe`` and expects
+    # the routed served wire in its receipt (tessera#662), so pricing one on
+    # the unstructured spelling would write a receipt the exporter refuses.
+    if projected_units:
+        declared_dense = sorted(name for name in projected_units
+                                if (encode_structure or {}).get(name, "routed_moe") != "routed_moe")
+        if declared_dense:
+            raise ValueError(f"projected expert units declared non-routed: {declared_dense[:4]}")
+        encode_structure = {**(encode_structure or {}),
+                            **{name: "routed_moe" for name in projected_units}}
+
+    return ResolvedCampaignMenu(
+        menus=menus,
+        context_by_unit=context_by_unit,
+        structure_by_unit=structure_by_unit,
+        encode_structure=encode_structure,
+        no_admitted_rung=no_admitted_rung,
+        expert_projection=expert_projection,
+        projected_units=projected_units,
+        partition=(PartitionCampaignMenu(full_partition_menus, partition_encode_structure)
+                   if partition_menu_targets is not None else None))
+
+
 def _main(argv, *, source_scope, waits) -> int:
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
@@ -4766,7 +4894,7 @@ def _main(argv, *, source_scope, waits) -> int:
 
     from . import format_registry as fr
     from .production_weight_cache import ProductionWeightCache
-    from .tessera_menu import PARALLEL_NONE, menu_mode
+    from .tessera_menu import menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
     from .tessera_publication import PublicationError
     from .tessera_render import (
@@ -5466,86 +5594,21 @@ def _main(argv, *, source_scope, waits) -> int:
         metadata={"schema": SCHEMA, "menu_mode": mode,
                   **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
-    if partition_menu_targets is not None:
-        # Geometry-only menu inputs: no unpriced W/X/H is loaded or cached.
-        menu_weights = {name: torch.empty(census["unit_shapes"][name], device="meta")
-                        for name in partition_menu_targets}
-        full_partition_menus = expand_menus_for_targets(
-            menu_weights, partition_menu_targets, mode=mode, tp_degree=args.tp_degree,
-            parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit,
-            profile=profile)
-        menus = {name: full_partition_menus[name] for name in targets}
-        partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
-        # Consumers and identity receipts describe only this row's priced units.
-        context_by_unit = (None if context_by_unit is None else
-                           {name: context_by_unit[name] for name in targets})
-        structure_by_unit = (None if structure_by_unit is None else
-                             {name: structure_by_unit[name] for name in targets})
-        encode_structure = {name: "routed_moe" for name in targets}
-    else:
-        menus = expand_menus_for_targets(
-            weights, targets, mode=mode, tp_degree=args.tp_degree,
-            parallel_kind=PARALLEL_NONE,
-            context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction,
-            structure_by_unit=structure_by_unit,
-            profile=profile,
-        )
-    # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
-    # ``attested`` without a dev pin, ``readable`` against a contract that
-    # publishes no reader for these shapes -- used to resolve to nothing and
-    # let the run finish successfully with ``costs: {}``. A zero-row cost
-    # table is not a cheap answer, it is a missing one, and downstream it is
-    # indistinguishable from a scope that legitimately holds no unit. So the
-    # run refuses, and says which mode and which contract produced the
-    # emptiness. This is principle 1's line: the platform reports the gap
-    # instead of shipping a table nobody can tell is empty on purpose.
-    no_admitted_rung = report_empty_menus(menus, mode=mode)
-
-    # The producer's projection of every in-scope stack, asked for ONCE (it
-    # hashes the whole checkpoint), bound exactly to the profile-declared
-    # units, and its source bytes checked against the live views this run
-    # prices.  What the producer will read at export is what is priced here.
-    expert_projection = None
-    projected_units: dict[str, dict] = {}
-    # The projection is a SCOPE-wide answer, always: the block a shard carries
-    # covers every declared stack, because the allocation rebinds the
-    # producer's answer against every stack the block names
-    # (``carried_units``), and a block trimmed to one shard's stacks would be
-    # refused there. What narrows is only the byte-check and the priced units.
-    # A shard therefore reads the census's projection rather than asking the
-    # producer again -- the request hashes the whole checkpoint, so asking per
-    # row would put the campaign's most expensive serial step on every row and
-    # let two rows answer it differently.
-    if population.declared:
-        expert_projection, projected_units = _project_expert_population(
-            population, weights=weights, menus=menus,
-            model_path=args.model, cache_dir=cache_dir,
-            measured=set(expert_targets),
-            projection=(None if census is None else census.get("expert_projection")),
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_source_pages=True, source_authentication=source_authentication)
-               if selected_source else {}),
-            # The stream head reads each unit's source tensor on its reader
-            # threads and prices it directly, so there is no snapshot view to
-            # check against it (PQ #1654).
-            check_units=not streaming_head)
-        print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
-              f"{len(projected_units)} expert units priced here"
-              + ("; their source tensors are read on the row stream's readers"
-                 if streaming_head and projected_units else ""), flush=True)
-    # A projected unit is a routed stack member whatever the run declares:
-    # Tessera's export intake reads a projection as ``routed_moe`` and expects
-    # the routed served wire in its receipt (tessera#662), so pricing one on
-    # the unstructured spelling would write a receipt the exporter refuses.
-    if projected_units:
-        declared_dense = sorted(name for name in projected_units
-                                if (encode_structure or {}).get(name, "routed_moe") != "routed_moe")
-        if declared_dense:
-            raise ValueError(f"projected expert units declared non-routed: {declared_dense[:4]}")
-        encode_structure = {**(encode_structure or {}),
-                            **{name: "routed_moe" for name in projected_units}}
+    menu = resolve_campaign_menu(weights, scope, profile, mode=mode,
+        tp_degree=args.tp_degree, family_restriction=args.family_restriction,
+        model_path=args.model, cache_dir=cache_dir,
+        selected_source=selected_source, streaming_head=streaming_head,
+        source_authentication=source_authentication, selected_guard=selected_guard)
+    menus = menu.menus
+    context_by_unit = menu.context_by_unit
+    structure_by_unit = menu.structure_by_unit
+    encode_structure = menu.encode_structure
+    no_admitted_rung = menu.no_admitted_rung
+    expert_projection = menu.expert_projection
+    projected_units = menu.projected_units
+    if menu.partition is not None:
+        full_partition_menus = menu.partition.full_menus
+        partition_encode_structure = menu.partition.encode_structure
 
     def close_source_authentication():
         """Record the source owner's receipt, then release its descriptors.

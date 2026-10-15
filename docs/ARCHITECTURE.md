@@ -103,6 +103,12 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): one campaign
+menu/projection operation resolves full-group partition grids, local menus and
+producer-bound encoding structure. Census and pricing share that policy;
+existing cache, memo, seal and source-owner construction stays at its prior
+lifecycle points. Partition tests execute this operation directly.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): one loaded-model
 campaign scope resolver owns roster, whole scope, selection/sample and expert
 partition admission, followed by topology. Census and pricing consume the same

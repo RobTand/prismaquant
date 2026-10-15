@@ -7,7 +7,7 @@ from pathlib import Path
 from types import CodeType, FunctionType
 
 
-OWNED_OPERATIONS = ('resolve_campaign_scope',)
+OWNED_OPERATIONS = ('resolve_campaign_scope', 'resolve_campaign_menu')
 
 
 def unbound_global_reads(operation: FunctionType) -> tuple[tuple[str, str], ...]:
