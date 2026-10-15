@@ -5192,5 +5192,3 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
 SELECTED_SOURCE_MEMBERS = ("source_layers", "num_layers", "layer_index_for_qname",
                            "selected_weight_specs", "snapshot_selected_weights",
                            "shutdown", "context")
-
-

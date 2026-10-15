@@ -416,5 +416,3 @@ def _restore_unit_state(
             f"AURA unit checkpoint state for {name} unexpectedly carries a "
             "production-anchor source identity"
         )
-
-

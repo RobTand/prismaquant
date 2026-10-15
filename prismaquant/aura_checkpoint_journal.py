@@ -604,4 +604,3 @@ class AuraCheckpointJournal:
     def publish_state(self, name, state):
         self.writer.publish(qname=name, state=state)
         self.completed.add(name)
-

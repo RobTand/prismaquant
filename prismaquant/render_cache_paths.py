@@ -55,4 +55,3 @@ def require_injective_cache_filenames(
                 f"mangled leaf is not injective and the rendered shards "
                 f"would silently overwrite each other"
             )
-

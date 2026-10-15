@@ -3651,4 +3651,3 @@ def _quantize_2d_nvfp4_group_batched(
                 [float(input_scale)], dtype=torch.float32),
         })
     return out
-
