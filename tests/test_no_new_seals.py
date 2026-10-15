@@ -82,6 +82,7 @@ MODULES = (
     "prismaquant/stage_a_chain_split.py",
     "prismaquant/stage_inputs.py",
     "prismaquant/tessera_acquisition_inputs.py",
+    "prismaquant/tessera_campaign_table.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
@@ -275,13 +276,15 @@ ALLOWLIST = {
         1, AMBIGUOUS, "a record's Stage A slice against the proof for its layer"),
     ("tools/dispatch_joint_quanta.py", "_read_bound_slice"): (
         1, INTEGRITY, "slice bytes against the digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_json"): (
+    ("prismaquant/tessera_campaign_table.py", "selection_stack_samples"): (
+        1, INTEGRITY, "the declared sampling-size vector digest matches the replayed draw"),
+    ("prismaquant/tessera_campaign_table.py", "_bound_json"): (
         1, INTEGRITY, "a plan input's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_digest"): (
+    ("prismaquant/tessera_campaign_table.py", "_bound_digest"): (
         1, INTEGRITY, "a file's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_pickle"): (
+    ("prismaquant/tessera_campaign_table.py", "_bound_pickle"): (
         1, INTEGRITY, "a pickle's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "verify_joint_campaign_scope"): (
+    ("prismaquant/tessera_campaign_table.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
     ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
         1, WALL, "row-work predictions bind the census roster and shapes they price; "
@@ -290,11 +293,11 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the capture binds this census (calibration data)"),
     ("tools/dispatch_tessera_campaign.py", "_merge_export_hessian_references.accepted_rows"): (
         1, INTEGRITY, "reference commitments bind the priced row they merge"),
-    ("tools/dispatch_tessera_campaign.py", "merge_checkpoint"): (
+    ("prismaquant/tessera_campaign_table.py", "merge_checkpoint"): (
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
-    ("tools/dispatch_tessera_campaign.py", "_merge_acquisition_settings"): (
+    ("prismaquant/tessera_campaign_table.py", "_merge_acquisition_settings"): (
         1, WALL, "each acquisition wire record names the checkpoint unit weight that produced it"),
-    ("tools/dispatch_tessera_campaign.py", "_check_acquisition_identity"): (
+    ("prismaquant/tessera_campaign_table.py", "_check_acquisition_identity"): (
         1, WALL, "authenticated locator-independent controls, cost/run/probe and current regime "
         "agree across real rows and plan; only raw request provenance uses seal_check"),
     # Opt-in #1986 namespace ownership only; no general source/calibration gate.
