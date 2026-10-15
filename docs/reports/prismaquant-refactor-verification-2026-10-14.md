@@ -70,7 +70,7 @@ Additional verified units, 2026-10-15:
 | Unit | PB action | Outcome | Result CAS SHA-256 |
 | --- | --- | --- | --- |
 | Relocated publication allowance and dead streaming imports | `db2ebbe46bbf49c9a454d4d25ab7c02888eb5ab94a62e11d31a1009e65257e0f` | 27 passed, no skips | `ae7592a5707ee80b41b54c934c91d3a72b25c6552432594a7f7514c2acac6f73` |
-| Typed calibration request and draw | `6af3ecf1c2c0f02ffa7f0bb002a5c81673250a98a00f312e416efe2d30406795` | 16 passed, no skips; two modules compiled | recorded terminal receipt |
+| Typed calibration request and draw | `6af3ecf1c2c0f02ffa7f0bb002a5c81673250a98a00f312e416efe2d30406795` | 16 passed, no skips; two modules compiled | `5ac5dd215742e4c9c05b66a7dfe8c4c327bc2dd58fa731447cde1a185a64d961` |
 | Checked calibration prefix and captured lazy fit samples | `615fd7e68ce4864fd9f9a5af882c3df1207c614e124a2172ca75becddc316346` | 32 passed, no skips; two modules compiled | `b330d60c465775ff8e62111ab72a4dab75105fa33c3885062af2b5f80cc23c63` |
 | Explicit seed zero and isolated sampling RNG | `6de56ed06f534062958565eb9e99761422390d8b391fa0cb6f7a122ab7ca4ea2` | 34 passed, no skips; two modules compiled | `0a04143b030b9aca3b62d44baca47f3e71636e3c18393df14d46c78a5ad67699` |
 | Composed quantum phase, codec and calibration changes | `3c9a75ea793d501fa2abae373ce232d869cc2222f87ce51cae94d5f7557ddebc` | 447 passed, 59 subtests passed, three skips; package and tools compiled | `8aaf348723610508de898c6786fd919d0df5ec9004cf88dc2e296b1bf1fa18a0` |
