@@ -111,7 +111,7 @@ def _submit(tmp_path: Path, monkeypatch, contract: dict, *, gate: bool = True,
     for name in ("assignment.json", "cost.json"):
         (run / name).write_text("{}")
     producer = _StubProducer()
-    monkeypatch.setattr(campaign, "_manifest_producer", lambda: producer)
+    monkeypatch.setattr(campaign, 'campaign_data_manifests', producer)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     monkeypatch.chdir(workspace)
     if not gate:

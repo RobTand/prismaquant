@@ -31,7 +31,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # noqa: E402
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 from test_tessera_campaign_fanout import (  # noqa: E402
     _partition_workspace, _plan_args)
 

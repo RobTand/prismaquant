@@ -746,7 +746,7 @@ def shared_mount(tmp_path, monkeypatch):
     ``plan`` derives each published row's read set, and the fleet warms only
     the shared mount, so a planned row reading outside it is refused.
     """
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
     return tmp_path
 

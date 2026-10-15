@@ -15,7 +15,7 @@ from test_tessera_campaign_expert_partitions import GROUP, roster, selection  # 
 
 @pytest.fixture
 def planned(tmp_path, monkeypatch):
-    from experiments import glm_data_manifests as manifests
+    from prismaquant import campaign_data_manifests as manifests
     from prismaquant import tessera_expert_projection as projection
     monkeypatch.setattr(manifests, "SHARED_MOUNT", str(tmp_path))
     spec_path, workspace = _partition_workspace(tmp_path, wide=False)
@@ -62,7 +62,7 @@ def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned
     spec, workspace, _seen = planned
     assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
     plan = json.loads((workspace / "plan.json").read_text())
-    producer = dispatch._manifest_producer()
+    producer = dispatch.campaign_data_manifests
     # One-byte records make this tiny fixture's distinct tensor ranges visible;
     # production still rounds to the existing ZFS record size.
     monkeypatch.setattr(sys.modules[producer.Campaign.__module__], "RECORD_SIZE", 1)
@@ -85,7 +85,7 @@ def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned
             continue
         expected = set(row["members"])
         assert set(campaign.members(row["row_id"])) == expected
-        manifest = producer.build_manifest(campaign, row["row_id"], {}, argv_by_row[row["row_id"]])
+        manifest = producer.build_campaign_row_manifest(campaign, row["row_id"], {}, argv_by_row[row["row_id"]])
         capture_paths = {entry["path"] for entry in manifest["entries"] if entry["path"].endswith(".pt")}
         assert capture_paths == {str(root / entries[name]["path"]) for name in expected}
         assert manifest["annotations"]["bytes"]["weight_extents"] == len(expected) * 8 * 8 * 2

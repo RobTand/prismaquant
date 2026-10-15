@@ -93,6 +93,16 @@ prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`campaign_data_manifests` owns campaign input membership, source tensor extents,
+read order, schema validation and readset publication. The dispatcher imports
+that package owner directly. Historical experiment commands retain argv and
+printing; hardware prewarm/queue behavior stays in its existing command.
+Readset provenance names the actual package source and seals that source's
+bytes. No runtime placement, resource reservation or numerical gate changes.
+The shared phase owners are ordinary cold imports; source-loaded copies are gone.
+
+
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_calibration_forward.capture_activation_statistics` owns dense and packed
 activation capture over caller-owned models and tokens. `CalibrationStatistics`
 names scoring rows, Hessians, full token counts and full maxima while retaining

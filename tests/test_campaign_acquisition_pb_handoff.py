@@ -16,7 +16,7 @@ import pytest
 torch = pytest.importorskip("torch")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch
-from experiments import glm_data_manifests as manifests
+from prismaquant import campaign_data_manifests as manifests
 from prismaquant import tessera_campaign as campaign, tessera_hessian as th
 from prismaquant.cost_stage_checkpoint import prepare_journal, write_unit
 from prismaquant.cost_streaming import StreamedCausalLM
@@ -193,7 +193,7 @@ def test_readset_uses_whole_original_inputs_before_actual_capture_reads(handoff)
     inputs = joint_campaign_acquisition_control_inputs(handoff.binding)
     for row, action in zip(planned["rows"], actions):
         argv = dispatch._inner_campaign_argv(action)
-        readset = manifests.build_manifest(reader, row["row_id"], {}, argv)
+        readset = manifests.build_campaign_row_manifest(reader, row["row_id"], {}, argv)
         assert set(readset) == set(manifests.MANIFEST_KEYS)
         assert readset["entries"][:2] == [{**item, "offset": 0} for item in inputs]
         assert readset["annotations"]["phases"][0] == {
@@ -247,10 +247,10 @@ def test_readset_refuses_missing_and_drifted_original_inputs(handoff, target):
     path = getattr(handoff, target)
     path.write_bytes(path.read_bytes() + b"drift")
     with pytest.raises(ValueError, match="identity mismatch"):
-        manifests.build_manifest(reader, row["row_id"], {}, argv)
+        manifests.build_campaign_row_manifest(reader, row["row_id"], {}, argv)
     path.unlink()
     with pytest.raises((OSError, ValueError)):
-        manifests.build_manifest(reader, row["row_id"], {}, argv)
+        manifests.build_campaign_row_manifest(reader, row["row_id"], {}, argv)
 
 
 def test_readset_refuses_controls_outside_shared_mount(handoff, monkeypatch):

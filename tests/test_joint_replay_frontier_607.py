@@ -41,7 +41,7 @@ if str(ROOT / "tools") not in sys.path:
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 import test_glm_joint_data_manifest_at_submit as campaign_fixture  # noqa: E402
 
 

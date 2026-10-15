@@ -1,4 +1,6 @@
 """COST's V2 manifest describes forward/reverse reads and stable resume windows."""
+
+from prismaquant.render_cache_paths import cache_weight_filename
 import copy
 from dataclasses import replace
 import hashlib
@@ -7,7 +9,7 @@ import json
 import pytest
 import torch
 
-from experiments import glm_data_manifests as producer
+from prismaquant import campaign_data_manifests as producer
 from prismaquant import format_registry as fr
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
@@ -158,7 +160,7 @@ def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
         assert windows[(name,)]["active_pending_names"] == [name]
     declared = {entry["path"] for entry in resumed["entries"]}
     for name in completed_names:
-        assert not any(producer._cache_weight_filename(name, fmt) in path
+        assert not any(cache_weight_filename(name, fmt) in path
                        for path in declared for fmt in existing.MEASURED)
     assert resumed["read_plan"]["read_bytes"] < full["read_plan"]["read_bytes"]
     for layer in range(3):
@@ -197,7 +199,7 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     fixture, prepared, budget = cost_fixture
     name = fixture["names"][0]
     render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
-              / producer._cache_weight_filename(name, existing.MEASURED[0]))
+              / cache_weight_filename(name, existing.MEASURED[0]))
     render.unlink()
     with pytest.raises(SystemExit, match="prepared COST render is missing"):
         _build(fixture, prepared, budget)
@@ -342,5 +344,5 @@ def test_cost_v2_prices_only_the_eval_target_roster(cost_fixture):
     assert len(render_refs) == len(selected) * len(existing.MEASURED)
     declared = {entry["path"] for entry in manifest["entries"]}
     for name in set(fixture["names"]) - set(selected):
-        assert not any(producer._cache_weight_filename(name, fmt) in path
+        assert not any(cache_weight_filename(name, fmt) in path
                        for path in declared for fmt in existing.MEASURED)

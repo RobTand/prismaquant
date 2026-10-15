@@ -13,8 +13,9 @@ second dispatcher predicting the same claim order is exactly the duplication
 the fleet's own rules forbid.
 
 What stays useful here is everything the loop does not do: the pool-ceiling
-and NFS read rigs that measured the tiers, the manifest builder, and the
-dry-run queue rig.  ``--daemon`` is kept so the measurements remain
+and NFS read rigs that measured the tiers and the dry-run queue rig. Campaign
+readset construction belongs to ``prismaquant.campaign_data_manifests``.
+``--daemon`` is kept so the measurements remain
 reproducible and so the running dry-run unit on dl380g10 can be read back; it
 is not the thing to deploy.  Retirement of that unit is step 1 of the W3
 switchover runbook (``SWITCHOVER.md``, kept with the W3 evidence outside this
@@ -59,7 +60,6 @@ Run it on dl380g10 as rob::
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import queue
@@ -69,39 +69,22 @@ import sys
 import threading
 import time
 
-CAMPAIGN_BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
-POOL_BASE = "/storage_pool/shared/tessera-measurements/glm-canonical-census-20260908"
 QUEUE = "/mnt/shared/prismabuild-fleet/pb-queue"
 CAS_REQUESTS = "/mnt/shared/prismabuild-fleet/cas/requests"
 
-UNITS_RE = re.compile(r"units/(row-\d{4}(?:-p\d{4})?)\.json")
-# This owner is deliberately torch-free: manifest construction runs outside
-# the GPU image and must not import the package's runtime/registry bootstrap.
-_selection_spec = importlib.util.spec_from_file_location(
-    "tessera_campaign_selection_contract",
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
-                 "tessera_campaign_selection.py"))
-_selection_owner = importlib.util.module_from_spec(_selection_spec)
-_selection_spec.loader.exec_module(_selection_owner)
-_acquisition_spec = importlib.util.spec_from_file_location(
-    "tessera_acquisition_inputs_contract",
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
-                 "tessera_acquisition_inputs.py"))
-_acquisition_owner = importlib.util.module_from_spec(_acquisition_spec)
-_acquisition_spec.loader.exec_module(_acquisition_owner)
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant.campaign_data_manifests import (
+    CAMPAIGN_BASE, POOL_BASE, UNITS_RE, RECORD_SIZE, Campaign,
+    argv_value, to_pool, read_optional_campaign_json as _json,
+)
+
 ARC_PATH = "/proc/spl/kstat/zfs/arcstats"
-RECORD_SIZE = 1 << 20
 
 
 # ---------------------------------------------------------------- utilities
 
 
-def _json(path):
-    try:
-        with open(path) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
 
 
 def arcstats() -> dict:
@@ -136,362 +119,22 @@ def arc_headroom_bytes(reserve_fraction: float) -> tuple[int, int, int, int]:
     return max(0, int((c_max - size) * reserve_fraction)), size, c, c_max
 
 
-_POOL_LOCAL = os.path.isdir("/storage_pool/shared")
 
 
-def to_pool(path: str) -> str:
-    """Map a /mnt/shared path onto the identical local ZFS mount.
-
-    On dl380g10 both are mounts of ``storage_pool/shared``; using the pool path
-    keeps the reader off the NFS loopback so the warm is a pool read. Off that
-    box there is no pool mount, so the path is returned unchanged and only the
-    read-free modes (``--dry-run``) are meaningful.
-    """
-    if not _POOL_LOCAL:
-        return path
-    if path.startswith(CAMPAIGN_BASE):
-        return POOL_BASE + path[len(CAMPAIGN_BASE):]
-    if path.startswith("/mnt/shared/"):
-        return "/storage_pool/shared/" + path[len("/mnt/shared/"):]
-    return path
 
 
 #: The two campaign flags that name bytes a seeded row reads before it prices
 #: anything.  They are read off the row's argv because that is the only record
 #: that always carries them; see ``Campaign.seed_reads``.
-SEED_CHECKPOINT_FLAG = "--seed-checkpoint"
-SEED_WIRE_DIR_FLAG = "--seed-wire-dir"
 
 
-def argv_value(argv, flag: str) -> "str | None":
-    """The value a row's argv gives ``flag``, in either spelling, or None.
-
-    The last spelling wins, matching ``argparse``: a campaign that appends a
-    global ``--seed-checkpoint`` after a per-row one runs with the last.
-    """
-    items = [str(a) for a in argv]
-    found = None
-    for index, item in enumerate(items):
-        if item == flag and index + 1 < len(items):
-            found = items[index + 1]
-        elif item.startswith(flag + "="):
-            found = item[len(flag) + 1:]
-    return found
 
 
-def _files_under(path: str) -> list[tuple[str, int]]:
-    """Every regular file at ``path``, named exactly, largest scope one tree.
-
-    ``path`` is a single directory (or file) the row's argv names.  It is
-    enumerated with ``os.scandir`` of that named directory and the directories
-    below it, and nothing above it: a search rooted at a parent would be a
-    recursive scan of the shared mount, which is the RPC storm that stalls the
-    fleet's GPU clients.  ``scandir`` also carries the attributes the NFS
-    READDIRPLUS reply already returned, so a 5,920-file seed wire costs one
-    round of directory reads rather than one ``stat`` per file.
-
-    The named root is followed if it is a symlink -- a campaign may point
-    ``--seed-wire-dir`` at a link -- but leaves are not: the prewarm reader
-    opens every entry ``O_NOFOLLOW``, so a symlinked leaf would only ever
-    record an error, and it is dropped rather than declared.
-
-    Paths come back in the shared namespace the manifest declares, even when
-    the sizes were taken through the local pool mount.
-    """
-    local = to_pool(path)
-    try:
-        info = os.stat(local)
-    except OSError:
-        return []
-    if statmod.S_ISREG(info.st_mode):
-        return [(path, info.st_size)] if info.st_size > 0 else []
-    if not statmod.S_ISDIR(info.st_mode):
-        return []
-    out: list[tuple[str, int]] = []
-    pending = [local]
-    while pending:
-        directory = pending.pop()
-        try:
-            with os.scandir(directory) as scan:
-                items = list(scan)
-        except OSError:
-            continue
-        for item in items:
-            try:
-                if item.is_dir(follow_symlinks=False):
-                    pending.append(item.path)
-                    continue
-                if not item.is_file(follow_symlinks=False):
-                    continue
-                size = item.stat(follow_symlinks=False).st_size
-            except OSError:
-                continue
-            if size <= 0:
-                continue
-            relative = os.path.relpath(item.path, local)
-            out.append((os.path.normpath(os.path.join(path, relative)), size))
-    return sorted(out)
 
 
 # ------------------------------------------------------------ campaign model
 
 
-class Campaign:
-    """Read-only view of the campaign's plan, units and capture manifest."""
-
-    def __init__(self, workspace: str, manifest_sha_check: bool = False, *,
-                 plan: "dict | None" = None,
-                 selections: "dict[str, dict] | None" = None) -> None:
-        """Read the campaign off disk, or from the plan about to be published.
-
-        ``dispatch_tessera_campaign.py plan`` derives every row's read set
-        before it writes a byte, so that a row whose manifest cannot be built
-        refuses the plan without rewriting a selection an existing manifest
-        still names.  It passes the plan it is about to write as ``plan`` and
-        each row's units selection, keyed by the ``units`` path the plan
-        records, as ``selections``.  Given ``selections``, a row's members are
-        read from it and never from disk, where the file may still hold the
-        previous plan's bytes.
-        """
-        self.workspace = workspace
-        if plan is None:
-            plan = _json(os.path.join(workspace, "plan.json"))
-        if plan is None:
-            raise SystemExit(f"unreadable plan: {workspace}/plan.json")
-        self._selections = None if selections is None else dict(selections)
-        self.plan = plan
-        self.rows = {r["row_id"]: r for r in plan["rows"]}
-        self.model_dir = plan["model"]
-        cache = plan.get("calibration_cache") or {}
-        cap = cache.get("path")
-        self.capture_manifest_path = cap
-        if cap is None:
-            # A campaign planned without a hash-bound calibration cache reads
-            # no capture files at all.  That is a read set with one part
-            # missing, not an unreadable campaign, and saying so here is what
-            # lets the submit-time gate refuse a row whose manifest is
-            # genuinely unbuildable rather than every row of a shape that
-            # never had captures.
-            self.capture_root = workspace
-            self.entries = {}
-        else:
-            manifest = _json(cap)
-            if manifest is None:
-                raise SystemExit(f"unreadable capture manifest: {cap}")
-            self.capture_root = os.path.dirname(cap)
-            self.entries = manifest["entries"]
-        self._units_cache: dict[str, list[str]] = {}
-        self._header_cache: dict[str, dict] = {}
-        self._weight_map = None
-
-
-    # -- rows ------------------------------------------------------------
-
-    def members(self, row_id: str) -> list[str]:
-        if row_id not in self._units_cache:
-            row = self.rows[row_id]
-            if self._selections is not None:
-                units = self._selections.get(row["units"])
-            else:
-                units = _json(row["units"])
-            if units is None:
-                raise SystemExit(f"unreadable units: {row['units']}")
-            if units.get("schema") == _selection_owner.UNITS_SCHEMA_V3:
-                _selection_owner.validate_unit_selection(units, path=row["units"])
-                names = list(_selection_owner.selection_priced_units(units)[0])
-            else:
-                # Preserve the legacy prewarm policy outside this opt-in lane.
-                names = [m for g in units["groups"] for m in g["members"]]
-            # prefetch_capture sorts before it reads; warm in the same order.
-            self._units_cache[row_id] = sorted(names)
-        return self._units_cache[row_id]
-
-    def capture_files_for(self, names) -> list[tuple[str, int]]:
-        """The capture files these units name, in the order given.
-
-        Name-keyed rather than row-keyed because the joint pass consumes the
-        same captures a unit at a time, grouped by transformer layer rather
-        than by campaign row. ``capture_files`` is this function over a row's
-        members, so both read sets come from one expansion.
-        """
-        out = []
-        for name in names:
-            rec = self.entries.get(name)
-            if rec is None:
-                continue
-            path = os.path.join(self.capture_root, rec["path"])
-            try:
-                size = os.stat(to_pool(path)).st_size
-            except OSError:
-                size = 0
-            out.append((path, size))
-        return out
-
-    def capture_files(self, row_id: str) -> list[tuple[str, int]]:
-        return self.capture_files_for(self.members(row_id))
-
-    # -- weights ---------------------------------------------------------
-
-    @property
-    def weight_map(self) -> dict:
-        if self._weight_map is None:
-            idx = _json(os.path.join(self.model_dir, "model.safetensors.index.json"))
-            self._weight_map = idx["weight_map"] if idx else {}
-        return self._weight_map
-
-    def _header(self, shard: str) -> dict:
-        if shard not in self._header_cache:
-            path = to_pool(os.path.join(self.model_dir, shard))
-            try:
-                with open(path, "rb") as fh:
-                    n = int.from_bytes(fh.read(8), "little")
-                    head = json.loads(fh.read(n))
-                head["__data_start__"] = 8 + n
-            except (OSError, ValueError):
-                head = {"__data_start__": 0}
-            self._header_cache[shard] = head
-        return self._header_cache[shard]
-
-    def weight_extents(self, row_id: str) -> list[tuple[str, int, int]]:
-        """(shard path, offset, length) covering this row's selected tensors.
-
-        ``--source-snapshot-policy selected-tensors-v1`` reads only the named
-        tensors' byte ranges via ``safe_open``
-        (``layer_streaming.py`` ``_read_chunk``), so whole-shard warming would
-        pull several times the bytes the row actually touches. Ranges are
-        coalesced and rounded out to record boundaries because ZFS reads a
-        whole 1 MiB record either way -- but never past the end of the shard.
-        The last tensor in a shard almost never ends on a 1 MiB boundary, so
-        rounding its end out unconditionally declared bytes that do not exist:
-        every one of the 16 resume rows over-declared about 2.5 MB, and every
-        warm through the PrismaBuild prewarm loop therefore finished ``partial``
-        (2026-09-11, rows 0085 and 0086). A length is a claim about the file,
-        so it is clamped to the file.
-        """
-        return self.weight_extents_for(self.members(row_id))
-
-    def weight_extents_for(self, names) -> list[tuple[str, int, int]]:
-        """``weight_extents`` over an arbitrary unit set.
-
-        The joint pass streams a *layer's* units, not a row's, so the extent
-        expansion is keyed by unit name and ``weight_extents`` calls it with a
-        row's members. The coalescing, record rounding and end-of-file clamp
-        described above are this function's, and there is one copy of them.
-        """
-        wm = self.weight_map
-        by_shard: dict[str, list[tuple[int, int]]] = {}
-        for name in names:
-            key = name + ".weight"
-            shard = wm.get(key)
-            if shard is None:
-                continue
-            head = self._header(shard)
-            meta = head.get(key)
-            if not isinstance(meta, dict) or "data_offsets" not in meta:
-                continue
-            a, b = meta["data_offsets"]
-            base = head["__data_start__"]
-            by_shard.setdefault(shard, []).append((base + a, base + b))
-        out = []
-        for shard in sorted(by_shard):
-            path = os.path.join(self.model_dir, shard)
-            try:
-                end_of_file = os.stat(to_pool(path)).st_size
-            except OSError:
-                end_of_file = 0
-            spans = sorted(by_shard[shard])
-            merged: list[list[int]] = []
-            for a, b in spans:
-                a -= a % RECORD_SIZE
-                b += (-b) % RECORD_SIZE
-                if end_of_file:
-                    b = min(b, end_of_file)
-                if b <= a:
-                    continue
-                if merged and a <= merged[-1][1]:
-                    merged[-1][1] = max(merged[-1][1], b)
-                else:
-                    merged.append([a, b])
-            for a, b in merged:
-                out.append((path, a, b - a))
-        return out
-
-    def seed_reads(self, row_id: str, argv: "list | None" = None
-                   ) -> list[tuple[str, int]]:
-        """The seed bytes the row will read, taken from the argv that runs it.
-
-        Two reads, and the argv is the only place that names both.  A seeded
-        row is handed ``--seed-checkpoint`` (the anchors it adopts, small) and
-        ``--seed-wire-dir`` (the cached wire it re-verifies, 9.4-19 GB of
-        ``.tessera`` blobs).  The plan's own ``rows[i].seed`` carries them only
-        for a row seeded from a ``--seed-workspace``; a campaign seeded from
-        the global ``--seed-checkpoint`` / ``--seed-wire-dir`` flags records
-        neither per row, and the directory those flags name belongs to a
-        *different* workspace than this campaign's.
-
-        Reading the plan instead of the argv is what made every manifest of
-        ``extension-r1024-02`` say ``seeds: 0`` while the row spent minutes
-        hashing its wire directory at 41 MB/s off cold spindles (row-0065,
-        2026-09-12).  With no argv the plan is still consulted, so the daemon
-        modes that never had one keep working.
-        """
-        ckpt, wire_dir = None, None
-        if argv is not None:
-            ckpt = argv_value(argv, SEED_CHECKPOINT_FLAG)
-            wire_dir = argv_value(argv, SEED_WIRE_DIR_FLAG)
-        if ckpt is None and wire_dir is None:
-            seed = self.rows[row_id].get("seed") or {}
-            ckpt, wire_dir = seed.get("checkpoint"), seed.get("wire_dir")
-        out: list[tuple[str, int]] = []
-        for path in ((ckpt, ckpt + ".parts") if ckpt else ()):
-            out += _files_under(path)
-        if wire_dir:
-            out += _files_under(wire_dir)
-        # A path declared twice is refused by the manifest contract, and the
-        # checkpoint's ``.parts`` directory can sit inside the wire directory.
-        seen, unique = set(), []
-        for path, size in out:
-            if path not in seen:
-                seen.add(path)
-                unique.append((path, size))
-        return unique
-
-    def acquisition_reads(self, argv):
-        """Use the public bound-input owner; this read set is not an intake parser."""
-        path = None if argv is None else argv_value(argv, "--acquisition-request")
-        digest = None if argv is None else argv_value(argv, "--acquisition-request-sha256")
-        if path is None and digest is None:
-            return []
-        if not path or not digest:
-            raise SystemExit("acquisition read set requires paired request path/SHA256")
-        return _acquisition_owner.joint_campaign_acquisition_control_inputs(
-            {"path": path, "sha256": digest})
-
-    def row_plan(self, row_id: str, argv: "list | None" = None) -> dict:
-        acquisition = self.acquisition_reads(argv)
-        caps = self.capture_files(row_id)
-        ext = self.weight_extents(row_id)
-        seeds = self.seed_reads(row_id, argv)
-        result = {
-            "row_id": row_id,
-            "group": self.rows[row_id]["groups"][0],
-            "capture_files": len(caps),
-            "capture_bytes": sum(s for _, s in caps),
-            "weight_extents": len(ext),
-            "weight_bytes": sum(n for _, _, n in ext),
-            "seed_files": len(seeds),
-            "seed_bytes": sum(s for _, s in seeds),
-            "total_bytes": sum(s for _, s in caps) + sum(n for _, _, n in ext)
-                           + sum(s for _, s in seeds),
-            "_captures": caps,
-            "_extents": ext,
-            "_seeds": seeds,
-        }
-        if acquisition:
-            result.update(acquisition_files=len(acquisition),
-                acquisition_bytes=sum(record["bytes"] for record in acquisition), _acquisition=acquisition)
-            result["total_bytes"] += result["acquisition_bytes"]
-        return result
 
 
 # ----------------------------------------------------------- queue reading

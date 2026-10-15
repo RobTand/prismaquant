@@ -115,6 +115,7 @@ from tools.tessera_campaign_namespace import (
     prepare_namespace_requests,
     validate_namespace_request,
 )
+from prismaquant import campaign_data_manifests
 from prismaquant.tessera_campaign_table import (
     CAMPAIGN_IDENTITY_SCHEMA,
     CAMPAIGN_SCOPE_KINDS,
@@ -569,7 +570,7 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     * the checkpoint, which is loaded whole in ``bfloat16`` and is the same for
       every row;
     * the selection's Hessians, ``in x in`` in fp32 per member, which is the
-      accumulator ``_collect_activations`` keeps;
+      full calibration accumulator;
     * the selection's retained scoring rows, ``max_act_rows x in`` in fp32.
 
     plus the spec's declared headroom for the forward pass and the encoder.
@@ -2072,21 +2073,6 @@ class DataManifestRefused(RuntimeError):
     """A row would reach PrismaBuild without the read set it is warmed from."""
 
 
-def _manifest_producer():
-    """The campaign's data-manifest producer, imported from ``experiments/``.
-
-    It is imported here rather than at module load because it reads the
-    campaign's plan and capture manifest, which only ``plan``, ``check`` and
-    ``submit`` need.
-    """
-    root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from experiments import glm_data_manifests
-
-    return glm_data_manifests
-
-
 def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
                             out_dir: Path) -> list[tuple[str, Path, bytes]]:
     """Each row's id, manifest path and manifest bytes, or a refusal.
@@ -2094,7 +2080,7 @@ def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
     Writes nothing, so a caller can refuse the whole set before any byte of it
     is published.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     provenance = producer.deterministic_provenance(
         str(workspace), campaign, "stat")
     derived = []
@@ -2108,7 +2094,7 @@ def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
         if row_id not in campaign.rows:
             raise RuntimeError(
                 f"{row_id} is not a row of {workspace}/plan.json")
-        manifest = producer.build_manifest(
+        manifest = producer.build_campaign_row_manifest(
             campaign, row_id, provenance, row.get("argv"))
         blob = producer.check_manifest_bytes(
             json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
@@ -2128,7 +2114,7 @@ def planned_data_manifests(workspace: Path, plan: dict,
     are the row's action identity and are returned byte-identical; the only
     change to a row is ``data_manifest``, appended last.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     campaign = producer.Campaign(str(workspace), plan=plan,
                                  selections=selections)
     derived = _derived_data_manifests(workspace, rows, campaign,
@@ -2150,7 +2136,7 @@ def require_data_manifests(rows: list[dict], *, where) -> None:
     and holds it to the rules PrismaBuild applies, and to belonging to the row
     that names it; it does not re-derive the read set, which ``submit`` does.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     refusals = []
     for index, row in enumerate(rows):
         label = _row_label(_inner_campaign_argv(row), index)
@@ -2203,7 +2189,7 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     the same row submitted under different bytes would run twice.  A row
     planned before ``plan`` attached manifests names none, and gets one here.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     campaign = producer.Campaign(str(workspace))
     out_dir = out_dir or workspace / DATA_MANIFEST_DIR
     derived = _derived_data_manifests(workspace, rows, campaign, out_dir=out_dir)
@@ -2577,10 +2563,10 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         # Checked after the summary is printed, so a read set the fleet would
         # refuse still reports the size and the phase boundaries that make the
         # refusal readable.
-        _manifest_producer().check_manifest_bytes(
+        campaign_data_manifests.check_manifest_bytes(
             blob, where=f"{entry_point}:{command}")
         return 0
-    _manifest_producer().check_manifest_bytes(blob, where=f"{entry_point}:{command}")
+    campaign_data_manifests.check_manifest_bytes(blob, where=f"{entry_point}:{command}")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = manifest_path.with_name(manifest_path.name + ".tmp")
     temporary.write_bytes(blob)
@@ -2595,7 +2581,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
 
 
 def cmd_submit_joint(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -2680,7 +2666,7 @@ def cmd_submit_aqua(args) -> int:
     artifact, not a nearly-empty run: nothing is submitted and the caller is
     told which payload already carries the A-side.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -2787,7 +2773,7 @@ def cmd_submit_aqua(args) -> int:
 
 
 def cmd_submit_allocation(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -2949,7 +2935,7 @@ def _module_checkout(mounts: list, *, cwd: str):
 
 
 def cmd_submit_export(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")

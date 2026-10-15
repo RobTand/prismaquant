@@ -31,8 +31,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # noqa: E402
 
-from experiments import glm_data_manifests  # noqa: E402
-from experiments.glm_arc_prewarm import RECORD_SIZE  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
+from prismaquant.campaign_data_manifests import RECORD_SIZE
 
 MEMBER = "model.layers.0.mlp.experts.0.down_proj"
 TENSOR_BYTES = 4 * RECORD_SIZE
@@ -125,7 +125,7 @@ def test_seed_entries_come_from_the_rows_seed_wire_dir_argv(
     campaign = glm_data_manifests.Campaign(str(workspace))
     row = _row(units, seed_dir)
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, row["argv"])
 
     declared = {entry["path"]: entry["bytes"] for entry in manifest["entries"]}
@@ -139,7 +139,7 @@ def test_seed_entries_come_from_the_rows_seed_wire_dir_argv(
 
     # And this is the defect: the plan names no seed for this row, so a
     # manifest built without the argv declares none of those bytes.
-    blind = glm_data_manifests.build_manifest(
+    blind = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"})
     assert blind["annotations"]["counts"]["seeds"] == 0
     assert blind["total_bytes"] < manifest["total_bytes"]
@@ -158,7 +158,7 @@ def test_the_seed_wire_is_declared_last_so_a_short_warm_keeps_the_captures(
     workspace, units, seed_dir = _workspace(tmp_path)
     campaign = glm_data_manifests.Campaign(str(workspace))
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, seed_dir)["argv"])
 
     seeds = {str(seed_dir / name) for name in SEED_WIRE}
@@ -301,7 +301,7 @@ def test_a_seed_wire_directory_reached_through_a_symlink_is_still_declared(
     link.symlink_to(seed_dir)
     campaign = glm_data_manifests.Campaign(str(workspace))
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, link)["argv"])
 
     assert manifest["annotations"]["counts"]["seeds"] == len(SEED_WIRE)
@@ -359,7 +359,7 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
 
     workspace, units, seed_dir = _workspace(tmp_path)
     campaign = glm_data_manifests.Campaign(str(workspace))
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, seed_dir)["argv"])
 
     # The real ceilings are far above any GLM row, so the refusal is exercised

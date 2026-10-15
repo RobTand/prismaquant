@@ -30,6 +30,8 @@ The tests are torch-free on purpose: they run on the fleet's CPU boxes, which
 have no torch, and the producer they exercise imports nothing from the
 ``prismaquant`` package for the same reason.
 """
+
+from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import tessera_campaign_table as campaign_table
 
 import gzip
@@ -54,7 +56,7 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 from container_inspection_fixture import inspection
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 
 #: The sealed replay frontier's own definitions, loaded the way the producer
 #: loads them: no ``prismaquant`` package, no GPU image.
@@ -191,7 +193,7 @@ def _workspace(scratch: Path) -> dict:
         cache = workspace / "rows" / f"row-{layer:04d}" / "cache"
         for index, name in enumerate(UNITS[layer]):
             for offset, fmt in enumerate(MEASURED):
-                filename = glm_data_manifests._cache_weight_filename(name, fmt)
+                filename = cache_weight_filename(name, fmt)
                 (cache / filename).write_bytes(b"r" * (2048 + 10 * index + offset))
 
     merged = workspace / "merged"
@@ -831,7 +833,7 @@ def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
     fixture = _workspace(scratch)
     name, fmt = fixture["names"][0], MEASURED[0]
     render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
-              / glm_data_manifests._cache_weight_filename(name, fmt))
+              / cache_weight_filename(name, fmt))
     assert render.is_file()
     # A rung this campaign adopted rather than encoded: wire, no shard.
     render.unlink()
@@ -875,6 +877,15 @@ def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
 
     names = [phase["name"] for phase in manifest["annotations"]["phases"]]
     assert names == ["head", "layer-0", "layer-1"]
+    from prismaquant.joint_run_progress import JointRunProgress
+    committed = []
+    progress = JointRunProgress(layers=2, partitions=1, phases=tuple(names),
+        clock=lambda: 0.0, log=lambda message: None,
+        commit=lambda phase, units: committed.append((phase, units)) or True)
+    for layer in range(2):
+        progress.entry(layer=layer, partition=0)
+        progress.flush(force=True)
+    assert committed == [("layer-0", 1), ("layer-1", 2)]
     assert str(prepared) in _paths(manifest, "head")
     assert str(cache) in _paths(manifest, "head")
 
@@ -883,7 +894,7 @@ def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
         for name in sorted(UNITS[layer]):
             for fmt in sorted(MEASURED):
                 expected.append(str(fixture["workspace"] / "rows" / f"row-{layer:04d}"
-                                    / "cache" / glm_data_manifests._cache_weight_filename(name, fmt)))
+                                    / "cache" / cache_weight_filename(name, fmt)))
         assert _paths(manifest, f"layer-{layer}") == expected
     assert not any(entry['path'].endswith('.tessera') for entry in manifest['entries'])
     assert manifest['annotations']['counts'].get('wires', 0) == 0
@@ -1015,7 +1026,6 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
     manifest_dir = scratch / "manifests"
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     code = dispatch.main([
         "submit-joint", "prepare",
@@ -1079,7 +1089,6 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
     digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     built = {}
     real = glm_data_manifests.build_joint_pass_manifest
 
@@ -1147,7 +1156,6 @@ def test_joint_submit_environment_reaches_launcher_argv(
     spec = scratch / "spec.joint.json"
     original = json.dumps({"container": {"image": "x"}, "env": environment})
     spec.write_text(original)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main([
         "submit-joint", "prepare", "--plan", str(fixture["plan"]),
         *_scope_args(fixture), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1185,7 +1193,6 @@ def test_joint_submit_refuses_environment_conflicts_before_manifest(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}, "env": {name: value}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest",
                         lambda *args, **kwargs: pytest.fail("manifest built before environment refusal"))
     with pytest.raises(RuntimeError, match=name):
@@ -1213,7 +1220,6 @@ def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
                           *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1261,7 +1267,6 @@ def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
                           *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1319,7 +1324,6 @@ def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", cached)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     with pytest.raises(RuntimeError, match="proof is local"):
         dispatch.main([
             "submit-joint", "prepare", "--plan", str(fixture["plan"]),
@@ -1353,7 +1357,6 @@ def test_a_diagnostic_subset_is_not_submittable_as_the_campaign(
     }
     pilot = scratch / "plan.pilot.json"
     pilot.write_text(json.dumps(plan))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     def submit(launch_plan, require_scope):
         return dispatch.main([
@@ -1382,7 +1385,6 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
     spec.write_text(json.dumps({"container": {"image": "x"}}))
     directory = scratch / "manifests"
     submitted = []
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     real_run = subprocess.run
 
     def fake_run(argv, **kwargs):
@@ -1430,7 +1432,6 @@ def test_a_joint_reservation_under_the_plans_own_bound_is_refused(
         "cwd": "/workspace", "python": "python3", "env": {},
         "container": {"image": "x"},
         "cpu_memory_gb": 34, "box_memory_gb": 114}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     def submit(demand):
         return dispatch.main([
@@ -1470,7 +1471,6 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     dispatch.main([
         "submit-joint", "prepare", "--plan", str(fixture["plan"]),
@@ -1535,7 +1535,6 @@ def test_a_read_set_over_the_prismabuild_ceiling_is_refused_at_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     monkeypatch.setattr(glm_data_manifests, "MAX_MANIFEST_BYTES", 128)
 
     with pytest.raises(SystemExit) as refusal:
@@ -1581,7 +1580,6 @@ def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     assert dispatch.main([
         "submit-joint", "prepare",

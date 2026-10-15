@@ -59,7 +59,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 
 CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
 TENSOR_BYTES = 4096
@@ -245,8 +245,6 @@ def shared_mount(scratch, monkeypatch):
 def campaign(scratch, shared_mount, monkeypatch):
     import dispatch_tessera_campaign as dispatch
 
-    monkeypatch.setattr(dispatch, "_manifest_producer",
-                        lambda: glm_data_manifests)
     return _workspace(scratch)
 
 

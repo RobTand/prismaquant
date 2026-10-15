@@ -560,7 +560,7 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
 
 def test_driver_capture_and_plan_bind_one_complete_capture(capture, monkeypatch):
     from tools import dispatch_tessera_campaign as dispatch
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     root,path,census,identity,acts,hessians,record = capture
     # ``plan`` builds each row's data manifest (#638), which refuses any read-set
     # entry outside the shared mount. This capture lives under pytest's tmp_path,

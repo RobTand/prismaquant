@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]
-from experiments import glm_data_manifests
+from prismaquant import campaign_data_manifests as glm_data_manifests
 from test_tessera_campaign_fanout import _plan_args, _write_model
 
 

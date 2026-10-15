@@ -68,7 +68,7 @@ def scratch(request):
 @pytest.fixture()
 def shared_mount(scratch, monkeypatch):
     """The fixture's files are not on /mnt/shared, so the prefix moves to it."""
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
 
 
@@ -354,8 +354,7 @@ def test_submit_joint_wrong_digest_still_refuses_without_dev_mode(
         scratch, shared_mount, monkeypatch):
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     with pytest.raises(RuntimeError, match="hashes to"):
         dispatch.main(argv)
 
@@ -365,8 +364,7 @@ def test_submit_joint_digest_arguments_are_records_under_dev_mode(
     import shlex
     dispatch, fixture, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     monkeypatch.setenv(DEV_ENV, "1")
     assert dispatch.main(argv) == 0
     out = capsys.readouterr().out
@@ -383,8 +381,7 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
     import shlex
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume"])  # no --source-transition: no receipt wiring
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     # Certified mode refuses this shape at the pass gates (gates 1-3 above);
     # the submission itself is admitted only under dev mode's contract.
     monkeypatch.setenv(DEV_ENV, "1")
@@ -422,8 +419,7 @@ def _submitted_launcher_argv(capsys):
 def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
         scratch, shared_mount, monkeypatch, capsys):
     dispatch, _fixture_, spec, argv = _joint_submission(scratch)
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     # Certified is "0" since PQ #1147 (unset is dev mode), and the certified
     # submitter seals "0" so the container, which does not inherit this
     # environment, stays certified.
