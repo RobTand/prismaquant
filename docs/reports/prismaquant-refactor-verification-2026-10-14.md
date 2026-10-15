@@ -129,3 +129,58 @@ The public Tessera metadata consumer uses the exact API-only backport `d2e98b3cb
 Environment provisioning action `6eb3e535adf797672c0b0c42cf98abf262b79d7520ddea6deed3cba8fc426e12` exits zero with CAS result `2ffb67329d0630a7d59319a00b8ec4deb6906513761b2ee9982153c5bf121e71`, receipt `14a8afb9d12236085b422bd26d40a0638b31c2b3482ab34c9c9969b721112313`. It verifies installed package bytes/origins and unchanged contract in `/home/rob/venvs/pq-pin-d2e98b3c-pb20261015`, borrowing the old qualified numerical dependencies without mutating that environment. Torch is 2.11 CPU; this is no device qualification. Two earlier bootstrap attempts were rejected before submission for a not-yet-existing output dependency and a concurrently changed checkout. The final immutable bootstrap checkout resolves both.
 
 Composed runtime/admission/pricing action `91c2c7eb06422785425f0c50ad67bd079478a64dda1260484100fa67c22ff72d` records 484 passes and 13 task-suite skips, exit one. Its sole failure identifies a missing explicit model-runtime initialization in the native-render comparison tool. The export worker is fixing this actual loader boundary separately; the action is not counted as a composed pass.
+
+Additional integration evidence, 2026-10-15:
+
+| Unit | PB action | Outcome | Result CAS SHA-256 |
+| --- | --- | --- | --- |
+| Captured pricing policy | `6c229d4abe84186e5307391729ae4bd04ff3a6954c287c35b1e51fd3d3b92f1a` | 194 passed, 56 warnings in 68.54s (0:01:08) | `5534ca5efb02edbd503d157d6a5e66b58d21bfd862232b11a59966ff042aaa8b` |
+| Explicit candidate/cost rows | `58046fcce445c161424aaab2e692bc135ac7d0b74042588576f5fbae25c53360` | 529 passed, 56 warnings in 64.32s (0:01:04) | `3377603d8ee81c74a4544711ba84a312b42eafa9f6c3e5e0aee30d45cdec2727` |
+| Shared price basis | `afd0a6e8c95a435c10b8686492c81088e614cc0489b59db158b667aab3b4e735` | 604 passed, 2 skipped, 56 warnings in 92.39s (0:01:32) | `097d0e5590084d89a6eb7bc0391a0d86f161460c86712d45416f5d6fb7ee523f` |
+| Unadjusted validation estimate | `7e1c1f318103f6b72079eddbb289f5bb6efd841cc2f0f8ae2392275cbe52b26b` | 74 passed, 2 skipped, 56 warnings in 58.08s | `022197c51a29900a981807e6eae91c11e64eca0dde66dde0f7ff7359587c7e11` |
+| Campaign table owner | `82c627deb1c222ba1a9a6ffa934a61fa12ad4deb9d5efed2e9833571ea927ed0` | 615 passed, 5 skipped, 14 warnings in 357.17s (0:05:57) | `6ad89463742a78c0e10543ced08f4ab31ad630c4f7a303f939e12726eccff2aa` |
+| Concrete layer-output oracles | `0380215628bfcbc1674db0294e19dd1a77a9c97c8ed265b16ade879c3351a06c` | 2 passed, 14 warnings in 6.58s | `368327471a3ad95accdc6474d34aba610e1ac621d07131a579429fd950c721bd` |
+| Output corruption sensitivity | `0c2d11c1bdbab9e79d86e796292ec7579db1c8caf2704016d60fe2b4b0f0ac26` | exit 0; result bytes verified | `bb9892a0a7e4cb5e2a708b2eba3553ca57f39bbb39ca5f5131b5e0bd4c9864e9` |
+| Helper digest owner | `6d55d04daf7c379bbbf5a5c1485c4094bb2e0a4a0672c7a2698b37d7e9a2ac3b` | 10 passed in 52.63s | `6ce17f924555a6cc12d663229287ce4ce98931ee0fd5d5bc00b8e5d7fc889733` |
+| Actual environment revalidation | `9b476d50d6d3c6e1ca462b05b890f2124fcb3289caaddfc72f7b341ab22c68ea` | exit 0; result bytes verified | `b3117db2ccfe00a37f6d1bf58368af114c019734e90a2310a4f002571ca09ecd` |
+| Sample reuse metadata | `6ad183dbfbf3e6f4510d0beba26b36b02c557d3a40745e94ef2e2f8d9907ffe9` | 48 passed, 14 warnings in 46.38s | `f8ec2a497f95af14ad5d03ec4ce4d41b4f7cad179bf5f3bda3f3a6dc9f926680` |
+| Pooled reuse metadata | `42dc97aa7d33d2aacc1d64a9e61392b2621ab41304e8334c2b20bc6559e85a90` | 42 passed, 14 warnings in 18.77s | `c6ef370b386c552457414375f585a6cdf35fab8d3d343de0a37a1293ba66f120` |
+| G3 acquisition availability retry | `c8ca865f733870a8dbe5b887560e4c6ac56f29276b0a7599eb5123d3a0e018b5` | 16 passed in 3.07s | `0d6780b3fcd6e5ce8193aaa7bf3579e01dd0e50f0e25483b63c8860ceeb9cfab` |
+
+The pricing and validation checks skip two historical DSv4 artifact directories
+that are not mounted. The campaign-table check skips five CUDA encode cases;
+its cold-import case refuses numerical runtimes and serving imports. These
+counts describe their individual source capsules, not a whole-branch pass.
+
+The original wheel-only environment had correct reviewed package bytes but
+exposed duplicate Tessera distribution metadata and lacked real Git PEP610
+provenance. Strict PB qualification rejected it before testing at `196bb124`.
+The separate `pq-pin-d2e98b3c-pb20261015-git` prefix installs the exact real
+producer Git commit and checks its package against the reviewed wheel. Strict
+checks `0792327a` and `5621dfee` passed. The helper's retained receipt records its
+initial phase, so its pending strict-gate field is historical rather than an
+assertion that subsequent strict checks failed.
+
+Combined check `bd1306e6` passed 584 cases and 59 subtests, skipped the two
+historical artifact cases, and failed its new helper digest site. The helper
+now calls the existing digest owner in both parent and child; actual published
+prefix revalidation above also passed. This failure remains recorded. The
+subsequent pbtest invocation rejected `-q` before testing; the corrected command
+uses supported options. Combined table, Fisher and price checks are pending.
+
+The old output-hash tests already failed on the pre-policy base. Their repair
+keeps companion/Pareto/seed hashes and checks actual assignments, independent
+byte counts, price sums and exact pin authority. Four deliberate output
+corruptions each fail a concrete assertion. It does not establish an unexplained
+historical metadata difference as harmless merely by replacing a hash.
+
+Ordinary resume previously accepted sample-stamped shard metadata when the
+request omitted those keys. PB `5d19aada` reproduced ten failing cases. Individual
+and pooled reuse now compare the same owned sample metadata field set, including
+requested absence. Writers and numerical statistics are unchanged.
+
+PR #2669's acquisition fallback is incorporated locally with the current refusal
+classifier. PB `f97f2c4d` reproduces one refusal, with 15 passing cases; the green
+check above passes 16. The earlier 12-case action `624220ca` ran only existing
+coverage after the initial patch failed to apply, and is not a regression proof.
+No PR or issue was closed, merged, commented on or pushed.
