@@ -2919,13 +2919,10 @@ def _quantize_2d(
     if acts is not None and acts.device != weight.device:
         acts = acts.to(weight.device, non_blocking=True)
 
-    # Preserve the legacy flag-bundle policy in this structural unit.
-    if not (gptq_enabled or scale_sweep_enabled
-            or static_act_order_enabled or joint_scale_opt_enabled):
-        gptq_enabled = levers.gptq
-        scale_sweep_enabled = levers.scale_sweep
-        static_act_order_enabled = levers.static_act_order
-        joint_scale_opt_enabled = levers.joint_scale_opt
+    gptq_enabled = levers.gptq if gptq_enabled is None else bool(gptq_enabled)
+    scale_sweep_enabled = levers.scale_sweep if scale_sweep_enabled is None else bool(scale_sweep_enabled)
+    static_act_order_enabled = levers.static_act_order if static_act_order_enabled is None else bool(static_act_order_enabled)
+    joint_scale_opt_enabled = levers.joint_scale_opt if joint_scale_opt_enabled is None else bool(joint_scale_opt_enabled)
     static_act_order_enabled = bool(gptq_enabled and static_act_order_enabled)
     joint_scale_opt_enabled = bool(gptq_enabled and joint_scale_opt_enabled)
 

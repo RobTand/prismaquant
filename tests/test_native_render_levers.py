@@ -10,6 +10,21 @@ import prismaquant.production_weight_cache as pwc
 from prismaquant.native_render_levers import NativeRenderLevers
 
 
+def test_explicit_all_false_preserves_rtn_when_render_options_enable_gptq(monkeypatch):
+    generator = torch.Generator().manual_seed(17)
+    weight = torch.randn(16, 16, generator=generator)
+    acts = torch.randn(64, 16, generator=generator)
+    monkeypatch.setenv("PRISMAQUANT_DO_NO_HARM", "0")
+    options = NativeRenderLevers.resolve({"gptq": True})
+    wp, ws, wg = codec.quantize_dequantize_nvfp4(weight)
+    expected = {"weight_packed": wp, "weight_scale": ws, "weight_global_scale": wg}
+    actual = codec._quantize_2d(
+        weight, "NVFP4", cached_activations=acts, levers=options,
+        gptq_enabled=False, scale_sweep_enabled=False,
+        static_act_order_enabled=False, joint_scale_opt_enabled=False,
+        compute_only=False)
+    for key, tensor in expected.items():
+        assert torch.equal(actual[key], tensor)
 
 
 def test_resolved_options_freeze_levels_and_damp_roles(monkeypatch):
