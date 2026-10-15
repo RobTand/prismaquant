@@ -184,3 +184,25 @@ classifier. PB `f97f2c4d` reproduces one refusal, with 15 passing cases; the gre
 check above passes 16. The earlier 12-case action `624220ca` ran only existing
 coverage after the initial patch failed to apply, and is not a regression proof.
 No PR or issue was closed, merged, commented on or pushed.
+
+
+The nineteen-file composed PB run completed 567 passing cases, ten skips and two
+failures, with no collection/reconciliation gaps. Both failures are duplication
+guards for the moved table helpers and routed source-proof tool. Follow-up table
+owner `e5158e3458` and tool owner `14ebc1ca31` remove those sites without a waiver.
+The subsequent integrated owner/guard check `ffb16121` passed 105 cases with no
+skips and compiled the active package and tools. This later check precedes the
+separate reseal staging correction, whose own 74-case check passed.
+
+A source capsule was captured during an unresolved architecture merge. It was
+never executed or submitted. PB `ca7f2384` reproduces the missing refusal;
+`23ebf653` passes after the capture helper rejects an unmerged index before
+creating or registering a target worktree. The invalid capsule and explanation
+are retained separately from the explicitly named valid broad-test capsule.
+
+Broad changed-test verification is now admitted from that valid source capsule.
+The first attempt was refused before execution because the GLM census test is
+marked fleet_data. Its exact two artifacts exist and total 1,454,802,228 bytes;
+a separate manifest declares their known digests for that one offline validation.
+The remaining 367 test files use a separate PB fanout. These submissions are
+pending and are not recorded as passing coverage.
