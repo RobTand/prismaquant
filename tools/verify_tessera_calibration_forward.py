@@ -7,13 +7,53 @@ This records numerical parity and instrument coverage, not a performance claim.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
-import threading
 import time
+
+
+@contextmanager
+def _record_netdata(output, samples, errors):
+    from prismaquant.digests import indent2_json_file_bytes
+    from prismaquant.io_spans import PeriodicSampler
+    from experiments.workspace_netdata import NetdataWriter, sample_netdata
+
+    handle = writer = None
+
+    def sample():
+        nonlocal handle, writer
+        try:
+            if writer is None:
+                handle = (output / 'netdata-both-boxes.jsonl').open('w')
+                writer = NetdataWriter(handle)
+            for host in ('sparky', 'sparklina'):
+                try:
+                    record = sample_netdata(host)
+                    writer.write(record)
+                    samples.append((host, record['time']))
+                except Exception as exc:
+                    errors.append(f'{host}: {type(exc).__name__}: {exc}')
+        finally:
+            # A timed-out tick retains its file until its own last write ends.
+            if sampler.stopping and handle is not None:
+                handle.close()
+
+    sampler = PeriodicSampler(sample, interval_s=1, name='capture-netdata', tick_first=True)
+    try:
+        sampler.start()
+        yield
+    finally:
+        sampler.stop(timeout=20)
+        if sampler.is_alive():
+            errors.append('Netdata sampler did not finish')
+        elif handle is not None:
+            handle.close()
+        (output / 'instrument-status.json').write_bytes(indent2_json_file_bytes(
+            dict(samples=samples, errors=errors)))
 
 
 def main():
@@ -33,7 +73,6 @@ def main():
     from transformers import AutoModelForCausalLM
     from prismaquant.tessera_calibration_forward import capture_activation_statistics
     from prismaquant.tensor_digests import tensor_identity
-    from experiments.workspace_netdata import NetdataWriter, sample_netdata
 
     if not torch.cuda.is_available():
         raise RuntimeError('capture comparison requires an admitted CUDA device')
@@ -59,29 +98,12 @@ def main():
     collectors = [('before', baseline._collect_activations),
                   ('after', capture_activation_statistics)]
     args.output.mkdir()
-    stop = threading.Event()
     errors, samples = [], []
-
-    def sample():
-        with (args.output / 'netdata-both-boxes.jsonl').open('w') as handle:
-            writer = NetdataWriter(handle)
-            while not stop.is_set():
-                for host in ('sparky', 'sparklina'):
-                    try:
-                        record = sample_netdata(host)
-                        writer.write(record)
-                        samples.append((host, record['time']))
-                    except Exception as exc:
-                        errors.append(f'{host}: {type(exc).__name__}: {exc}')
-                stop.wait(1)
-
-    sampler = threading.Thread(target=sample, name='capture-netdata')
-    sampler.start()
     evidence = []
     expected = None
     original_hooks = {name: len(model.get_submodule(name)._forward_pre_hooks)
                       for name in targets}
-    try:
+    with _record_netdata(args.output, samples, errors):
         for label, collect in collectors:
             started = time.time()
             with torch.profiler.profile(
@@ -112,13 +134,6 @@ def main():
                 hessians={name: tensor_identity(hessians[name]) for name in targets},
                 counts=counts, maxima=maxima,
                 profile_sha256=file_sha256hex(args.output / f'{label}-torch.json')))
-    finally:
-        stop.set()
-        sampler.join(20)
-        if sampler.is_alive():
-            errors.append('Netdata sampler did not finish')
-        (args.output / 'instrument-status.json').write_bytes(indent2_json_file_bytes(
-            dict(samples=samples, errors=errors)))
     if errors:
         raise RuntimeError(f'capture evidence is incomplete: {errors}')
     if any(sum(host == wanted for host, _ in samples) < 2
