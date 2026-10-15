@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: DSv4 sparse blocks select the per-expert probe
+constructor through `experts_type`. Registration preserves the packed expert
+class's identity, so genuine HF initialization dispatches packed parameters
+and per-expert Linear leaves correctly. Real toy fixtures explicitly enter
+`genuine_weight_initialization`; ordinary skeleton and checkpoint missing-state
+initialization permissions retain their existing contracts.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
+
 Re-stamped 2026-10-15: G3 staged ranges re-cover and re-acquire the same declared
 bytes on stage after a RAM acquisition availability refusal. Integrity and unknown
 refusals still fail closed. An unsuccessful acquisition publishes no reader window.
