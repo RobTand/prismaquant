@@ -3,6 +3,13 @@
 Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): genuine
+from-config initialization permission is local to the calling context. It no
+longer swaps the Transformers initializer process-wide, so an ordinary skeleton
+on another thread retains the no-init policy. Nested scopes and exceptions reset
+permission; checkpoint missing-state initialization keeps its independent local
+permission and completed-load descriptor.
+
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): package imports
 read metadata without Torch, Transformers or Triton initialization. Numerical

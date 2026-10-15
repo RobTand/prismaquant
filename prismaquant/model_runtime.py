@@ -7,6 +7,7 @@ from threading import Lock
 from .streaming_initialization import _INITIALIZATION_CONTRACT_ATTRIBUTE
 
 _checkpoint_initializing = _ContextVar("prismaquant_checkpoint_initializing", default=False)
+_genuine_initializing = _ContextVar("prismaquant_genuine_initializing", default=False)
 _runtime_lock = Lock()
 _runtime_initialized = False
 
@@ -103,10 +104,9 @@ def _polyfill_transformers() -> None:
             model_class = _mu.PreTrainedModel
             real_initialize = model_class._initialize_weights
             real_missing = model_class._initialize_missing_keys
-            model_class._prismaquant_real_initialize_weights = real_initialize
 
             def _initialize_for_checkpoint(self, *args, **kwargs):
-                if _checkpoint_initializing.get():
+                if _checkpoint_initializing.get() or _genuine_initializing.get():
                     return real_initialize(self, *args, **kwargs)
                 return None
 
@@ -219,19 +219,11 @@ def genuine_weight_initialization():
     import that raised), so callers need not test for it.
     """
     initialize_model_runtime()
-    import transformers.modeling_utils as _mu
-
-    real = getattr(
-        _mu.PreTrainedModel, "_prismaquant_real_initialize_weights", None)
-    if real is None:
-        yield
-        return
-    patched = _mu.PreTrainedModel._initialize_weights
-    _mu.PreTrainedModel._initialize_weights = real
+    token = _genuine_initializing.set(True)
     try:
         yield
     finally:
-        _mu.PreTrainedModel._initialize_weights = patched
+        _genuine_initializing.reset(token)
 
 
 def initialize_model_runtime() -> None:

@@ -145,10 +145,6 @@ def merge_selected_initialization_witnesses(witnesses):
 
 
 
-
-
-
-
 class _StreamingInitializationAudit:
     """Observe the shared loader's actual installed state before consumption.
 

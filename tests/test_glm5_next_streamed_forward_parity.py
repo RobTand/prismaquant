@@ -114,7 +114,7 @@ def _build_model(config):
     `genuine_weight_initialization` is load-bearing, not decoration.
     Importing anything from `prismaquant` no-ops
     `PreTrainedModel._initialize_weights` process-wide
-    (`prismaquant/__init__.py::_polyfill_transformers`), which is sound for
+    (`prismaquant/model_runtime.py::_polyfill_transformers`), which is sound for
     PrismaQuant's own loaders -- they overwrite every parameter from a
     checkpoint straight afterwards -- and unsound here, where the
     from-config model IS the subject.  Without the restore, every tensor

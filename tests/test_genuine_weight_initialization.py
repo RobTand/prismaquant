@@ -1,88 +1,67 @@
-"""Explicit model runtime preserves checkpoint and from-config initialization."""
-from __future__ import annotations
+"""Genuine initialization is explicit and cannot escape its calling context."""
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+import torch
+from transformers import PretrainedConfig, PreTrainedModel
 
-torch = pytest.importorskip("torch")
-pytest.importorskip("transformers")
-
-from transformers.modeling_utils import PreTrainedModel  # noqa: E402
-
-from prismaquant import genuine_weight_initialization, initialize_model_runtime  # noqa: E402
+from prismaquant import genuine_weight_initialization, initialize_model_runtime
 
 
-def _polyfilled() -> bool:
-    return bool(getattr(PreTrainedModel, "_prismaquant_init_noop", False))
-
-
-def test_the_polyfill_keeps_the_real_initializer_reachable():
+@pytest.fixture
+def probe():
     initialize_model_runtime()
-    if not _polyfilled():
-        pytest.skip("the transformers polyfill did not apply in this build")
-    assert getattr(
-        PreTrainedModel, "_prismaquant_real_initialize_weights", None
-    ) is not None, (
-        "the polyfill overwrote _initialize_weights without keeping the real "
-        "method, so nothing in the process can build an initialized "
-        "from-config model any more"
-    )
 
+    class Config(PretrainedConfig):
+        model_type = 'pq_initialization_probe'
 
-def test_the_context_manager_swaps_the_method_and_puts_it_back():
-    initialize_model_runtime()
-    if not _polyfilled():
-        pytest.skip("the transformers polyfill did not apply in this build")
-    real = PreTrainedModel._prismaquant_real_initialize_weights
-    noop = PreTrainedModel._initialize_weights
-    assert noop is not real
-
-    with genuine_weight_initialization():
-        assert PreTrainedModel._initialize_weights is real
-    assert PreTrainedModel._initialize_weights is noop
-
-
-def test_the_context_manager_restores_on_an_exception():
-    initialize_model_runtime()
-    if not _polyfilled():
-        pytest.skip("the transformers polyfill did not apply in this build")
-    noop = PreTrainedModel._initialize_weights
-    with pytest.raises(RuntimeError, match="construction failed"):
-        with genuine_weight_initialization():
-            raise RuntimeError("construction failed")
-    assert PreTrainedModel._initialize_weights is noop
-
-
-def test_weight_init_actually_runs_inside_the_context_manager():
-    """The contract is behavioural: `_init_weights` must be reached."""
-    from transformers import PretrainedConfig
-
-    class _Config(PretrainedConfig):
-        model_type = "prismaquant_init_probe"
-
-    class _Model(PreTrainedModel):
-        config_class = _Config
-        base_model_prefix = "probe"
+    class Model(PreTrainedModel):
+        config_class = Config
+        base_model_prefix = 'probe'
 
         def __init__(self, config):
             super().__init__(config)
-            self.linear = torch.nn.Linear(2, 2)
+            self.weight = torch.nn.Parameter(torch.empty(2))
             self.initialized = []
             self.post_init()
 
         def _init_weights(self, module):
             self.initialized.append(type(module).__name__)
+            if module is self:
+                module.weight.fill_(7.)
 
-    initialize_model_runtime()
-    outside = _Model(_Config())
+    return lambda: Model(Config())
+
+
+def test_genuine_context_initializes_bare_parameters_and_restores_skeleton_policy(probe):
+    assert probe().initialized == []
     with genuine_weight_initialization():
-        inside = _Model(_Config())
+        inside = probe()
+    assert inside.initialized
+    assert torch.equal(inside.weight, torch.full((2,), 7.))
+    assert probe().initialized == []
 
-    assert inside.initialized, (
-        "`_init_weights` never ran inside genuine_weight_initialization(); "
-        "the from-config model would carry uninitialized parameters"
-    )
-    if _polyfilled():
-        assert not outside.initialized, (
-            "`_init_weights` ran outside the context manager -- the polyfill "
-            "under test is not actually in effect, so this test proves nothing"
-        )
+
+def test_initializer_permission_resets_after_a_construction_exception(probe):
+    with pytest.raises(RuntimeError, match='construction failed'):
+        with genuine_weight_initialization():
+            assert probe().initialized
+            raise RuntimeError('construction failed')
+    assert probe().initialized == []
+
+
+def test_nested_genuine_context_keeps_the_outer_initialization_permission(probe):
+    with genuine_weight_initialization():
+        with genuine_weight_initialization():
+            assert probe().initialized
+        assert probe().initialized
+    assert probe().initialized == []
+
+
+def test_genuine_permission_does_not_initialize_another_threads_skeleton(probe):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with genuine_weight_initialization():
+            other = pool.submit(probe).result(timeout=10)
+            assert other.initialized == []
+            assert probe().initialized
+        assert pool.submit(probe).result(timeout=10).initialized == []
