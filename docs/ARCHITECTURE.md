@@ -4,6 +4,15 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): package imports
+read metadata without Torch, Transformers or Triton initialization. Numerical
+model/config loaders explicitly call `model_runtime.initialize_model_runtime`
+before resolving or constructing a model. The runtime owner retains Triton cache
+preparation and existing Transformers compatibility. Pure source/checkpoint/MTP
+initialization descriptors live in `streaming_initialization`; their validation
+can run without model loading. Genuine from-config construction initializes the
+runtime before entering its existing initialization context.
+
 Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
 were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
@@ -77,6 +86,8 @@ captured snapshot after cell, evidence, lane, context and plugin checks.
 Development answer, reader range, per-unit predicates and export ranking retain
 their independent policies. One menu expansion captures its runtime once;
 returned verdict cells and metadata views cannot mutate cached facts.
+A native verdict requires matched cells and a positive integer rate; refusals
+retain their diagnostic cells without granting admission.
 
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): shared
 `lane_eligibility.native_rung_cells` selects the complete native regime population

@@ -91,3 +91,19 @@ def test_returned_predicate_values_cannot_mutate_later_queries(reference, monkey
         facts, snapshot.eligibility, platform=context.platform, residency=context.residency,
         runtime_image=context.runtime_image, execution_mode=context.execution_mode)
     assert route.route_status == "backed_with_serve_flag"
+
+
+@pytest.mark.parametrize("rate", [None, True, 0, -1])
+def test_native_record_refuses_missing_or_invalid_rate(reference, rate):
+    from prismaquant.lane_eligibility import NativeRungVerdict
+    _, _, context = reference
+    cells = render.tessera_lane_admission(
+        "TESSERA_E2M1_K2_R896", serving_context=context).cells
+    with pytest.raises(ValueError, match="matched cells and a positive integer rate"):
+        NativeRungVerdict("native", cells=cells, rate_q256=rate)
+
+
+def test_native_record_refuses_absent_matched_cells():
+    from prismaquant.lane_eligibility import NativeRungVerdict
+    with pytest.raises(ValueError, match="matched cells and a positive integer rate"):
+        NativeRungVerdict("native", rate_q256=896)

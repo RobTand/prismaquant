@@ -3055,6 +3055,12 @@ class NativeRungVerdict:
     cells: tuple[EligibilityCell, ...] = ()
     rate_q256: int | None = None
 
+    def __post_init__(self):
+        if self.kind == "native" and (
+            not self.cells or type(self.rate_q256) is not int or self.rate_q256 <= 0
+        ):
+            raise ValueError("native verdict requires matched cells and a positive integer rate")
+
     @property
     def admitted(self) -> bool:
         return self.kind == "native"
