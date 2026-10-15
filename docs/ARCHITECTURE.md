@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: candidate prices, activation branch labels and unknown-zero
+refusals share one classified price basis. Fixed qualified/exact, joint, output
+and weight-space bases retain existing precedence, gains, transfers and clamps.
+Measurement-only sample membership and raw field provenance remain separate
+questions and do not require numeric pricing to answer.
+
 Re-stamped 2026-10-15: validation's surrogate diagnostic uses the shared
 row estimator with supplied probe sensitivity, unit gains, no family transfer,
 no uncertainty hedge and ordinary output MSE. It labels this unadjusted estimate

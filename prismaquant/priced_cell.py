@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import math
 import operator
 import os
+from typing import Literal
 from . import format_registry as fr
 from .source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
 from .allocator_solver import predicted_dloss
@@ -36,18 +37,115 @@ class PricedCell:
         return max(self.predicted_dloss, 0.0)
 
 
-def price_cell(stats_entry: dict, cost_entry: dict, *, format_name: str,
+@dataclass(frozen=True)
+class _FixedPrice:
+    value: float
+    activation_branch: str
+
+
+@dataclass(frozen=True)
+class _JointPrice:
+    activation_branch: str = "joint_aura"
+
+
+@dataclass(frozen=True)
+class _OutputPrice:
+    activation_branch: str
+
+
+@dataclass(frozen=True)
+class _WeightPrice:
+    kind: Literal["aggregate", "anchored", "transferred"]
+    activation_branch: str
+    penalty: float = 1.0
+
+
+_PriceBasis = _FixedPrice | _JointPrice | _OutputPrice | _WeightPrice
+
+
+def _price_basis(stats_entry: dict, cost_entry: dict, format_name: str | None,
+                 activation_pricing: ActivationFairPricing | None) -> _PriceBasis:
+    from .rung_allowability import complete_scientific_price
+    complete = complete_scientific_price(cost_entry, format_name=format_name)
+    if complete is not None:
+        branch = ("canonical_qualified_chord" if cost_entry.get("canonical_quality") is not None
+                  else "qualified_served_kl")
+        return _FixedPrice(complete, branch)
+    if cost_entry_is_joint_aura(cost_entry):
+        return _JointPrice()
+    if cost_entry_is_source_passthrough(cost_entry, format_name):
+        return _FixedPrice(0.0, BRANCH_SOURCE_PASSTHROUGH)
+    if cost_entry_is_bit_exact(cost_entry, format_name):
+        return _FixedPrice(0.0, BRANCH_BIT_EXACT)
+    if _has_measured_output_mse(stats_entry, cost_entry):
+        return _OutputPrice(BRANCH_MEASURED)
+    if _has_interpolated_output_mse(cost_entry):
+        return _OutputPrice(BRANCH_INTERPOLATED_OUTPUT)
+    if cost_entry.get(APPLIED_MARKER_KEY) is True:
+        return _WeightPrice("aggregate", BRANCH_CALIBRATED)
+    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
+        return _WeightPrice("anchored", ANCHORED_AURA_BRANCH)
+    act_changes = _format_act_quant_changes_input(format_name)
+    if activation_pricing is None:
+        branch = BRANCH_ACTIVATION_IDENTITY if not act_changes else BRANCH_UNCALIBRATED
+        return _WeightPrice("transferred", branch)
+    penalty, branch = activation_pricing.penalty_for(format_name, act_changes)
+    return _WeightPrice("transferred", branch, penalty)
+
+
+def _basis_dloss(basis: _PriceBasis, stats_entry: dict, cost_entry: dict, *,
+                 gain: float, format_name: str | None, policy: CostPricingPolicy) -> float:
+    if isinstance(basis, _FixedPrice):
+        return basis.value
+    if isinstance(basis, _JointPrice):
+        if float(gain) != 1.0 or cost_entry.get(APPLIED_MARKER_KEY) is True:
+            raise ValueError("joint AURA refuses calibrated gain or a second activation transfer")
+        if (format_name is not None and
+                cost_entry["joint_operator_identity"]["format"] != format_name):
+            raise ValueError("joint AURA row cannot price a different format")
+        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy)
+    if isinstance(basis, _OutputPrice):
+        return cost_entry_measured_activation_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
+    base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
+    if basis.kind == "aggregate":
+        return base
+    if basis.kind == "anchored":
+        return base + cost_entry_act_dloss(cost_entry)
+    return (base + cost_entry_act_dloss(cost_entry)) * basis.penalty
+
+
+def _unknown_activation_zero(basis: _PriceBasis, stats_entry: dict, cost_entry: dict,
+                             priced_dloss: float, format_name: str | None) -> bool:
+    if isinstance(basis, (_FixedPrice, _JointPrice)):
+        return False
+    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
+        return False
+    if isinstance(basis, _OutputPrice) and basis.activation_branch == BRANCH_MEASURED:
+        return False
+    if not _format_act_quant_changes_input(format_name):
+        return False
+    try:
+        if float(priced_dloss) != 0.0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    try:
+        h_trace = float(stats_entry.get("h_trace", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return h_trace > 0.0
+
+
+def price_cell(stats_entry: dict, cost_entry: dict, *, format_name: str | None,
                policy: CostPricingPolicy, gain: float = 1.0,
                activation_pricing: ActivationFairPricing | None = None) -> PricedCell:
-    value = cost_entry_predicted_dloss(
-        stats_entry, cost_entry, gain=gain, format_name=format_name,
-        activation_pricing=activation_pricing, policy=policy)
+    basis = _price_basis(stats_entry, cost_entry, format_name, activation_pricing)
+    value = _basis_dloss(basis, stats_entry, cost_entry,
+        gain=gain, format_name=format_name, policy=policy)
     return PricedCell(value,
         cost_entry_source(stats_entry, cost_entry, format_name, policy=policy),
-        cost_entry_activation_pricing_branch(
-            stats_entry, cost_entry, format_name, activation_pricing),
-        cost_entry_prices_unmeasured_activation_at_zero(
-            stats_entry, cost_entry, max(value, 0.0), format_name))
+        basis.activation_branch,
+        _unknown_activation_zero(basis, stats_entry, cost_entry, max(value, 0.0), format_name))
 
 
 SOURCE_PASSTHROUGH_COST_SOURCE = "source_passthrough"
@@ -511,49 +609,7 @@ def cost_entry_activation_pricing_branch(
     question is answerable from the artifact rather than from the code
     version that produced it.
     """
-    from .rung_allowability import complete_scientific_price
-    entry = cost_entry
-    if complete_scientific_price(entry, format_name=format_name) is not None:
-        return "canonical_qualified_chord" if entry.get("canonical_quality") is not None else "qualified_served_kl"
-    if cost_entry_is_joint_aura(cost_entry):
-        return "joint_aura"
-    if cost_entry_is_source_passthrough(cost_entry, format_name):
-        # Neither measured nor weight-only: the row was never priced from an
-        # error estimate at all. It gets its own label so the artifact can
-        # tell "shipped the source bytes" apart from "measured a lossless
-        # re-encode" — both are free, but only one of them ran an encoder.
-        return BRANCH_SOURCE_PASSTHROUGH
-    if cost_entry_is_bit_exact(cost_entry, format_name):
-        return BRANCH_BIT_EXACT
-    if _has_measured_output_mse(stats_entry, cost_entry):
-        return BRANCH_MEASURED
-    if _has_interpolated_output_mse(cost_entry):
-        # Same output-space branch as BRANCH_MEASURED, different label: the
-        # price is real information in the right units, but it is a PREDICTION,
-        # and "which of the selected prices were predicted" has to survive into
-        # the artifact. Ordered after the measured test, and after the two
-        # exact-by-construction tests above it, so this label is only ever
-        # claimed by a row that nothing stronger already explained — the same
-        # precedence ``cost_entry_predicted_dloss`` applies.
-        return BRANCH_INTERPOLATED_OUTPUT
-    if cost_entry.get(APPLIED_MARKER_KEY) is True:
-        # An aggregated super-item entry: the members' penalties are already
-        # folded into its predicted_dloss (aggregate_* below).
-        return BRANCH_CALIBRATED
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # Its own label rather than BRANCH_UNCALIBRATED: both are priced at a
-        # 1.0 multiplier, but "no calibration sample was found for this family"
-        # and "this row is an anchored KL-adjoint projection that the P5a
-        # transfer does not apply to" are different audit answers, and the
-        # artifact has to be able to tell them apart.
-        return ANCHORED_AURA_BRANCH
-    act_changes = _format_act_quant_changes_input(format_name)
-    if activation_pricing is None:
-        return (
-            BRANCH_ACTIVATION_IDENTITY if not act_changes
-            else BRANCH_UNCALIBRATED
-        )
-    return activation_pricing.penalty_for(format_name, act_changes)[1]
+    return _price_basis(stats_entry, cost_entry, format_name, activation_pricing).activation_branch
 
 def _format_act_quant_changes_input(format_name: str | None) -> bool:
     if format_name is None:
@@ -597,70 +653,9 @@ def cost_entry_predicted_dloss(
     keeps its full strength.
     """
     policy = CostPricingPolicy.from_environment() if policy is None else policy
-    from .rung_allowability import complete_scientific_price
-    entry = cost_entry
-    complete = complete_scientific_price(entry, format_name=format_name)
-    if complete is not None:
-        return complete
-    if cost_entry_is_joint_aura(cost_entry):
-        if float(gain) != 1.0 or cost_entry.get(APPLIED_MARKER_KEY) is True:
-            raise ValueError("joint AURA refuses calibrated gain or a second activation transfer")
-        if (format_name is not None and
-                cost_entry["joint_operator_identity"]["format"] != format_name):
-            raise ValueError("joint AURA row cannot price a different format")
-        # Its signed full residual already contains weight, activation and
-        # mixed terms under one downstream KL Fisher. Only probe uncertainty
-        # may change the proposal price; no scalar sensitivity is applied.
-        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy)
-    if cost_entry_is_exact_by_construction(cost_entry, format_name):
-        # Zero cost by construction, in one of two ways: a lossless re-encode
-        # END TO END (weights verbatim AND identity activation path,
-        # ``cost_entry_is_bit_exact``), or a byte-verbatim source passthrough
-        # whose exporter never re-encodes at all
-        # (``cost_entry_is_source_passthrough``). Either way the answer does
-        # not depend on a measurement, so it outranks any noisy output_mse.
-        return 0.0
-    if _prices_from_output_mse(stats_entry, cost_entry):
-        # The row's own OUTPUT-space number, whether measured or the tensor's
-        # band-interpolated fit (``_prices_from_output_mse`` explains why those
-        # two provenances share one branch while only the first may calibrate).
-        # The per-family penalty is NOT applied here: it exists to move a
-        # WEIGHT-space number onto the output scale, and this number is already
-        # on it. Applying it would double-count, and applying it to only some
-        # rungs of a family is the mispricing this branch was split out to fix.
-        return cost_entry_measured_activation_dloss(
-            stats_entry, cost_entry, gain=gain, policy=policy)
-    base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
-    if cost_entry.get(APPLIED_MARKER_KEY) is True:
-        # Aggregated super item: its members were penalized individually and
-        # the result summed. Re-applying here would square the correction. The
-        # same reasoning covers the AQUA A-side: a super item prices a format as
-        # the SUM of its members' cost_entry_predicted_dloss, so every member's
-        # act_dloss is already inside ``base``.
-        return base
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # Read the anchored projection directly. The P5a penalty transfers a
-        # weight-SPACE number onto the measured output scale using a constant
-        # fitted from that family's own measured/weight-only row pairs; an
-        # anchored table has no measured rows, so there is no such constant to
-        # apply (``penalty_for`` already returns 1.0 via BRANCH_UNCALIBRATED).
-        # Naming the branch instead of falling through keeps the artifact
-        # honest about WHY the multiplier was 1.0. Numerically identical today
-        # — and it stays correct if a future run mixes an anchored table with a
-        # measured one, where falling through would silently apply another
-        # family's transfer constant to a projection that is not in its units.
-        return base + cost_entry_act_dloss(cost_entry)
-    # The A-side rides the SAME per-family transfer as the W-side. Adding it
-    # OUTSIDE the multiply puts the two halves of one unit's price on two
-    # scales, and P5a's fitted constants are large: measured on Qwen3.8-27B the
-    # NVFP4 family fit was x8103, which diluted an A-side worth 6x the W-side
-    # down to 0.07% of the total and produced an allocation byte-identical to
-    # the weight-only one. Multiplying the sum preserves the A:W ratio, which is
-    # the quantity the DP actually ranks on, and is exactly ``base + act`` when
-    # P5a is inert (penalty 1.0) -- so it cannot change a run that has no
-    # measured rows to calibrate from.
-    return ((base + cost_entry_act_dloss(cost_entry))
-            * _activation_penalty(format_name, activation_pricing))
+    basis = _price_basis(stats_entry, cost_entry, format_name, activation_pricing)
+    return _basis_dloss(basis, stats_entry, cost_entry,
+        gain=gain, format_name=format_name, policy=policy)
 
 ACT_DLOSS_KEY = "act_dloss"
 
@@ -751,49 +746,8 @@ def cost_entry_prices_unmeasured_activation_at_zero(
         stay free to take the cheapest format instead of being forced onto
         BF16.
     """
-    from .rung_allowability import complete_scientific_price
-    entry = cost_entry
-    if complete_scientific_price(entry, format_name=format_name) is not None:
-        return False
-    if cost_entry_is_joint_aura(cost_entry):
-        return False
-    if format_name is None:
-        return False
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # An anchored-AURA zero is a MEASUREMENT, not the absence of one, and
-        # this guard exists for the absence. The zeros it was built to catch
-        # are placeholders — a band-interpolated row that never produced an
-        # output number, a dense-ladder fit that could not be made — and an
-        # anchored table cannot contain those: ``assert_aura_only_cost_table``
-        # refuses any row carrying output_mse/weight_mse/h_trace at all, and
-        # per-unit checkpoint completeness refuses a missing anchor rather than
-        # defaulting it to zero.
-        #
-        # It is also very nearly vacuous, which is the point: 0.5*mean_k<gW,dW>^2
-        # is exactly 0.0 only if dW is exactly zero (a byte-identical render —
-        # the exact-by-construction branch above already owns that) or gW is
-        # exactly zero (h_trace == 0 — the positive-sensitivity condition below
-        # already exempts that). The bypass is scoped to rows this predicate
-        # matches, so every other cost table keeps the guard at full strength.
-        return False
-    try:
-        spec = fr.get_format(str(format_name))
-    except KeyError:
-        return False
-    if not spec.act_quant_changes_input:
-        return False
-    if _has_measured_output_mse(stats_entry, cost_entry):
-        return False
-    try:
-        if float(priced_dloss) != 0.0:
-            return False
-    except (TypeError, ValueError):
-        return False
-    try:
-        h_trace = float(stats_entry.get("h_trace", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return False
-    return h_trace > 0.0
+    basis = _price_basis(stats_entry, cost_entry, format_name, None)
+    return _unknown_activation_zero(basis, stats_entry, cost_entry, priced_dloss, format_name)
 
 def _cost_ucb_z() -> float:
     """PRISMAQUANT_COST_UCB_Z: stderr multiples added to predicted_dloss."""
