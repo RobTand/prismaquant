@@ -22,6 +22,7 @@ from prismaquant.model_walk import walk_model
 from prismaquant.production_weight_cache import fill_production_weight_cache
 from prismaquant.digests import indent2_json_file_bytes, file_sha256hex
 from prismaquant.tensor_digests import tensor_identity
+from prismaquant.io_engine import ENGINE
 import prismaquant.export_native_compressed as exporter
 
 
@@ -180,8 +181,7 @@ def main():
                     except Exception as exc:
                         errors.append(f"{host}: {type(exc).__name__}: {exc}")
                 stop.wait(2)
-    sampler = threading.Thread(target=collect)
-    sampler.start()
+    sampler = ENGINE.submit(collect)
     started = time.time()
     try:
         with torch.profiler.profile(
@@ -231,7 +231,7 @@ def main():
                           "rendered": len(tensors), "calibration": result["calibration"]}), flush=True)
     finally:
         stop.set()
-        sampler.join()
+        sampler.result()
     if errors:
         raise ValueError(f"missing Netdata series: {errors}")
     for host in ("sparky", "sparklina"):
