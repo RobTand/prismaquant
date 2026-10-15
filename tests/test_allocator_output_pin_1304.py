@@ -1,123 +1,22 @@
-"""The allocator's non-codebook output is unchanged by the lane excision (#1304).
+"""Real allocator decisions and stable companion bytes after codebook retirement.
 
-Step 2 of #1304 removed the retired codebook lane's branches from the
-allocator, the cost readers and the footprint. None of those branches could
-run on a menu without a codebook rung, so a stock menu and a Tessera menu must
-allocate to the same bytes as before. The digests below were computed on the
-parent commit 1b29d4a6aff (PR #1332), before any branch was removed. They cover
-``layer_config.json``, the Pareto CSV and, for the stock menu, every Pareto seed
-file. Absolute temporary paths are replaced by ``<TMP>`` and the solver's
-wall time is blanked before hashing.
+Layer files contain live pin provenance and solver diagnostics. Assert their
+assignments, format metadata, independently derived prices/bytes and actual
+code/JSON pin authorities directly. Historical Pareto, applicability, knee and
+seed goldens remain unchanged. No timing or live pin is blessed by a hash.
 
-One key changed on purpose. ``format_applicability.json`` carried
-``cb_ladder_cross_family_verdict``, which was always ``null`` without a
-codebook rung, and step 2 dropped it. Its two digests were computed on
-1b29d4a6aff with that null key removed before hashing; every other file's
-digest is the unmodified 1b29d4a6aff digest.
-
-The Tessera ``layer.json`` digest was re-taken on 2026-09-26 for the Tessera
-pin move to af7a86d43 (contract v38, PQ #1274). Diffing the normalised file
-before and after, the allocation is unchanged and exactly three provenance
-fields move: ``contract_version`` (34 to 38), ``reviewed_contract_sha256``, and
-the routed unit's attesting cells. The last is the fixture's doing: since v38
-``_v5_contract`` keeps only the default image's roster before flattening
-images, so the routed unit is attested by the dense E2M1 pair's routed
-projection (``resident|streamed``) instead of the routed E2M1 pair on its own
-image (``resident``).
-
-It was re-taken again on 2026-09-26 for PQ #1377 (#1390), which retired six
-counters from ``serving_lane_provenance`` in favour of ``route_status_counts``.
-Diffing the normalised file at 07105b50b05 (before) and 634bc923e48 (after),
-the allocation is unchanged and exactly six keys leave
-``__prismaquant__.serving_lane_provenance``: ``units_on_backed_fused_mid_m_lane``,
-``units_on_fallback_route`` (3 on this all-Tessera fixture, beside
-``route_status_attested: true``), ``units_without_declared_lane``,
-``route_status_attested``, ``selected_rungs_fused_mid_m_backed`` and
-``selected_rungs_on_fallback_route`` (PQ #1404).
-
-Re-taken 2026-09-27 for PQ #1456's v39 pin. PB receipts e6167bc0d679
-(before, 8fd6d931/09d6559d) and 9d2e1de243eb (after) capture the normalised
-outputs. Exactly eight metadata fields changed: contract_version and the
-reviewed digest, plus route detail/cell ids and requires_serve_flags for the
-three units. The v5 fixture now selects the A4/GLM image, not the default
-image that lost A4. Allocations, applicability and Pareto outputs are
-byte-identical; no allocator arithmetic changed.
-
-Re-taken 2026-09-28 for PQ #1542's v40 pin (Tessera #675, merged as
-db5b6e23). PB receipts a10255cf089e (before: c36c02e1e76 under the
-20bf5346 interpreter) and 21c7668c7738 (after: the db5b6e23 interpreter)
-capture the normalised layer.json. Exactly two fields change:
-``contract_version`` (39 to 40) and ``reviewed_contract_sha256``
-(f2f90948 to d6768313). The allocation, the applicability file and the
-Pareto outputs are byte-identical.
-
-Re-taken 2026-09-28 for PQ #1274's v42 pin (Tessera 38e96012). PB receipts
-f1be79e7d9f9 (before: origin/main 9ffe2e66 under the db5b6e23 interpreter)
-and ee97538e5b00 (after: the 38e96012 interpreter) capture the normalised
-layer.json. Three things change, all inside
-``__prismaquant__.tessera_dev_pin``: ``contract_version`` (40 to 42),
-``reviewed_contract_sha256`` (d6768313 to 4aeba5dc), and
-``native_extensions`` gains the two fused routed rows v42 publishes. The
-allocation, the applicability file and the Pareto outputs are
-byte-identical.
-
-Re-taken 2026-09-28 for PQ #1616's v44 pin (Tessera a5f3b232cb). PB receipts
-c9dc357bb01d (before: origin/main e6eb87f3 under the 38e96012 interpreter)
-and a01e39b687a2 (after: the a5f3b232 interpreter) capture the normalised
-layer.json. Exactly two fields change, both inside
-``__prismaquant__.tessera_dev_pin``: ``contract_version`` (42 to 44) and
-``reviewed_contract_sha256`` (4aeba5dc to 47b01355). The allocation, the
-applicability file and the Pareto outputs are byte-identical.
-
-Re-taken 2026-09-28 for PQ #1387 and #1289. The allocator now writes
-``serving_lane_provenance`` into every layer_config meta (the stock menu had
-none) and each ``by_format`` row gains a ``routes`` histogram. Only the two
-layer files change: the stock ``layer_config.json`` gains the
-``serving_lane_provenance`` meta block, and the Tessera ``layer.json`` gains
-``routes`` inside ``by_format``. The allocations, the applicability files, the
-Pareto CSVs, the knees and every Pareto seed are byte-identical.
-
-Re-taken 2026-09-29 for PQ #1609 / #1690 (Tessera side-byte pricing; first red
-commit c2cb79d7, the #1690 merge; the seven commits before it, 165b8a2a
-through 5d662207, are green). The change is footprint pricing only
-(``footprint.py``, ``tessera_footprint.py``, ``tessera_legal_domain.py``);
-no allocator source moved. Only the Tessera ``layer.json`` and ``pareto.csv``
-change, and only the payload accounting inside them: in ``layer.json``
-``achieved_bits`` (4.0625 to 4.1492919921875),
-``body_assignment_payload_bits_total`` and ``assignment_payload_bits_total``
-(both 798720.0 to 815784.0, i.e. +17064 bits of side bytes); in ``pareto.csv``
-the ``achieved_bits`` column of the single row (4.0625 to 4.1492919921875).
-The assignment (3 layers, all TESSERA_E2M1_K2_R896), every predicted_dloss
-column, the applicability file and the knees are byte-identical.
-
-Re-taken 2026-09-29 for PQ #1702's v45 pin (Tessera a21d74d89b). PB receipts
-9639ecdfd1b1 (before: origin/main fcf9bafb6a under the a5f3b232 interpreter)
-and 0a3befd7dd5f (after: the a21d74d8 interpreter) capture the normalised
-outputs. Exactly two fields change, both inside
-``__prismaquant__.tessera_dev_pin``: ``contract_version`` (44 to 45) and
-``reviewed_contract_sha256`` (47b01355 to 0869f326). The allocation, the
-applicability file and the Pareto outputs are byte-identical.
-
-Re-taken for PQ #2264's v56 pin (Tessera 2dbac191). Batch38 observed the new
-normalised ``layer.json`` digest while its three companion digests remained
-unchanged. Source comparison infers three provenance changes inside
-``__prismaquant__.tessera_dev_pin``: ``contract_version`` (45 to 56),
-``reviewed_contract_sha256`` (0869f326 to 47f180ef), and ``native_extensions``
-gaining the E4M3 MMA row. This is not a captured raw before/after metadata
-diff. The digest check and explicit assignment below retain the unchanged
-three-unit E2M1 allocation independently of that provenance inference.
-
-PB f05313eeee06 compares the captured origin/main source with this branch.
-The former uses the unchanged D13 overlay; the latter uses the fca4c6ce0 overlay.
-Only contract_version and reviewed_contract_sha256 differ in the retained fixture outputs.
-The canonical layer digest excludes only those two fields and retains every other field.
-Both retained outputs produce the same digest after that normalization.
-The independent applicability and Pareto digests stay unchanged.
+The old layer hashes already fail before this refactor's priced-cell policy:
+PB327e2388. Captured policy outputs PB2af84be9/c240c704 differ only in solver
+seconds. Historical PBf05313ee proves a prior normalized Tessera hash, but its
+raw temporary layer files are no longer retained; no new field-level historical
+comparison is claimed here.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import csv
+import math
 import pickle
 import sys
 
@@ -126,9 +25,6 @@ import pytest
 STOCK_DIGESTS = {
     "format_applicability.json": (
         "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
-    ),
-    "layer_config.json": (
-        "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469"
     ),
     "pareto.csv": (
         "0805fbc4dbffb240025dc5bfb8a4e97ddb241eda8e3c80818f07cdec425cfb32"
@@ -156,9 +52,6 @@ TESSERA_DIGESTS = {
     "format_applicability.json": (
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
-    "layer.json": (
-        "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9"
-    ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
     ),
@@ -170,7 +63,6 @@ TESSERA_DIGESTS = {
 
 def _without_wall_time(value):
     # The solver timer is not deterministic. Keep each other value.
-    # The Tessera layer uses the separate canonical identity normalization below.
     if isinstance(value, dict):
         return {
             key: None if key == "solver_seconds" else _without_wall_time(item)
@@ -181,28 +73,42 @@ def _without_wall_time(value):
     return value
 
 
-def _canonical_tessera_layer(text):
-    payload = _without_wall_time(json.loads(text))
-    identity = payload["__prismaquant__"]["tessera_dev_pin"]
-    for field in ("contract_version", "reviewed_contract_sha256"):
-        del identity[field]
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False).encode()
-
-
 def _digests(root):
     out = {}
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         rel = path.relative_to(root).as_posix()
-        if rel.endswith((".pkl",)) or rel.startswith("model/"):
+        if rel.endswith((".pkl",)) or rel.startswith("model/") or rel in {"layer_config.json", "layer.json"}:
             continue
         text = path.read_bytes().replace(str(root).encode(), b"<TMP>")
-        if rel == "layer.json":
-            text = _canonical_tessera_layer(text)
-        elif rel.endswith(".json"):
+        if rel.endswith(".json"):
             text = json.dumps(_without_wall_time(json.loads(text))).encode()
         out[rel] = hashlib.sha256(text).hexdigest()
     return out
+
+
+def _assert_accounting(metadata, *, params, bits, target):
+    assert metadata["schema"] == "prismaquant.layer_config_meta.v1"
+    assert metadata["body_assignment_quantizable_params"] == params
+    assert metadata["body_assignment_payload_bits_total"] == metadata["assignment_payload_bits_total"] == bits
+    assert metadata["achieved_bits"] == bits / params
+    assert metadata["target_bits"] == target
+    assert metadata["body_shared_cb_sidecar_bits"] == 0
+    assert metadata["assignment_payload_missing_stats_names"] == []
+    assert metadata["lm_head_format"] == "BF16" and metadata["lm_head_mode"] == "profile_pinned_bf16"
+    assert metadata["solver_contract"] == "additive_candidate_proposal_then_exact_assignment_filter"
+    assert metadata["global_optimality_claimed"] is False
+    for diagnostic in metadata["solve_diagnostics"].values():
+        assert diagnostic["solver_calls"] == 1
+        assert math.isfinite(diagnostic["solver_seconds"]) and diagnostic["solver_seconds"] >= 0
+
+
+def _assert_pareto_point(root, *, target, bits_per_param, loss):
+    with (root / "pareto.csv").open() as source:
+        row, = [row for row in csv.DictReader(source) if float(row["target_bits"]) == target]
+    assert row["feasible"] == "True"
+    assert float(row["achieved_bits"]) == bits_per_param
+    assert math.isclose(float(row["predicted_dloss"]), loss, rel_tol=1e-12)
+    assert math.isclose(float(row["total_predicted_dloss_with_aux"]), loss, rel_tol=1e-12)
 
 
 def _stock_inputs(tmp_path):
@@ -252,11 +158,42 @@ def _stock_inputs(tmp_path):
     ]
 
 
-def test_stock_menu_allocation_is_byte_identical(tmp_path, monkeypatch):
+def test_stock_menu_preserves_decisions_accounting_and_companion_bytes(tmp_path, monkeypatch):
     from prismaquant import allocator
 
+    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
     monkeypatch.setattr(sys, "argv", ["allocator", *_stock_inputs(tmp_path)])
     allocator.main()
+    from prismaquant.layer_config import load_assignment
+    payload = json.loads((tmp_path / "layer_config.json").read_text())
+    fp8 = {"model.layers.0.mlp.down_proj", *(
+        "model.layers.1." + leaf for leaf in ("self_attn.o_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"))}
+    names = [f"model.layers.{layer}.{leaf}" for layer in range(2) for leaf in
+        ("self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",
+         "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj")]
+    expected = {name: "FP8_E4M3" if name in fp8 else "NVFP4" for name in names}
+    assert load_assignment(tmp_path / "layer_config.json") == expected
+    assert set(payload) == {*names, "__prismaquant__"}
+    for name in names:
+        if name in fp8:
+            assert payload[name] == dict(bits=8, group_size=0, sym=True, data_type="fp8_e4m3",
+                act_bits=8, act_group_size=0, act_sym=True, act_data_type="fp8_e4m3", act_dynamic=True)
+        else:
+            assert payload[name] == dict(bits=4, group_size=16, sym=True, data_type="nv_fp",
+                act_bits=4, act_group_size=16, act_sym=True, act_data_type="nv_fp4_with_static_gs", act_dynamic=True)
+    # UE4M3 per-16 scales and two global FP32 scales; FP8 row scales are FP32.
+    n = 128 * 256
+    bits = 9 * (n * 4 + (n // 16) * 8 + 64) + 5 * (n * 8 + 128 * 32)
+    metadata = payload["__prismaquant__"]
+    _assert_accounting(metadata, params=14 * n, bits=bits, target=6.0)
+    assert "tessera_dev_pin" not in metadata
+    provenance = metadata["serving_lane_provenance"]
+    assert provenance["units_total"] == 14
+    assert provenance["route_status_counts"] == {"no_declared_lane": 14}
+    assert {name: row["units"] for name, row in provenance["by_format"].items()} == {"FP8_E4M3": 5, "NVFP4": 9}
+    loss = sum((0.05 + 0.011 * index) if name in fp8 else (1.0 + 0.37 * index)
+               for index, name in enumerate(names))
+    _assert_pareto_point(tmp_path, target=6.0, bits_per_param=bits / (14 * n), loss=loss)
     got = _digests(tmp_path)
     assert got == STOCK_DIGESTS, json.dumps(got, indent=1, sort_keys=True)
 
@@ -270,6 +207,8 @@ def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeyp
     from prismaquant import allocator
     from prismaquant.layer_config import load_assignment
 
+    from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_COMMIT
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_DEV_PIN", TESSERA_DEV_PIN_COMMIT)
     _v5_contract(monkeypatch)
     argv = _allocator_inputs(tmp_path, "TESSERA_E2M1_K2_R896")
     monkeypatch.setattr(sys, "argv", [
@@ -283,8 +222,40 @@ def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeyp
     from prismaquant import tessera_serving_runtime_pin as pin
     payload = json.loads((tmp_path / "layer.json").read_text())
     identity = payload["__prismaquant__"]["tessera_dev_pin"]
-    installed = json.loads(runtime.contract_path().read_bytes())
+    raw = runtime.contract_path().read_bytes()
+    installed = json.loads(raw)
+    serving_pin = pin.load_tessera_serving_runtime_pin()
+    assert serving_pin.commit == pin.TESSERA_SERVING_RUNTIME_PINNED_COMMIT == runtime.TESSERA_DEV_PIN_COMMIT
+    assert serving_pin.contract_sha256 == hashlib.sha256(raw).hexdigest() == runtime.TESSERA_DEV_PIN_CONTRACT_SHA256
+    assert identity["requested"] == runtime.TESSERA_DEV_PIN_COMMIT
+    assert identity["commit"] == identity["contract_sha256"] == identity["contract_path"] == "fixture"
+    assert identity["bytes_are_the_reviewed_bytes"] is False
     assert identity["contract_version"] == installed["contract_version"]
-    assert identity["reviewed_contract_sha256"] == pin.TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
+    assert identity["reviewed_contract_sha256"] == serving_pin.contract_sha256
+    assert identity["plugin_version"] == serving_pin.version == "0.1.0"
+    assert identity["quant_method"] == installed["quant_method"]["canonical"] == "tessera"
+    assert identity["default_serve_image"] == installed["versions"]["default_serve_image"]
+    for observed, published in zip(identity["native_extensions"], installed["native_extensions"], strict=True):
+        for field in ("module_name_prefix", "filename_glob", "match", "source", "loaded_by", "routes", "when_unavailable"):
+            assert observed[field] == published[field]
+    metadata = payload["__prismaquant__"]
+    # The unchanged historical side-byte oracle is also locked by the Pareto CSV.
+    _assert_accounting(metadata, params=3 * 256 * 256, bits=815784, target=16.0)
+    _assert_pareto_point(tmp_path, target=16.0, bits_per_param=815784 / (3 * 256 * 256), loss=3 * 0.5 * 1.0 * 4e-4)
+    expected_scope = {DENSE: "dense", EXPERT: "routed_moe", SHARED: "dense"}
+    provenance = metadata["serving_lane_provenance"]
+    assert provenance["units_total"] == 3
+    assert provenance["activation_pricing_branches"] == {"measured_output_mse": 3}
+    assert provenance["route_status_counts"] == {"backed_with_serve_flag": 3}
+    for name, structure in expected_scope.items():
+        assert payload[name] == dict(data_type="tessera", bits=5, tessera_format="TESSERA_E2M1_K2_R896",
+            tessera_family="TESSERA_E2M1_K2", tessera_body_rate_q256=896, tessera_body="TCQ",
+            tessera_scale_plane="lut16", sym=True, group_size=16, act_bits=4,
+            act_data_type="fp4_e2m1", act_group_size=16, act_dynamic=True, act_sym=True)
+        row = provenance["by_unit"][name]
+        assert row["format"] == "TESSERA_E2M1_K2_R896"
+        assert row["serving_context"]["structure"] == structure
+        assert row["route"]["route_status"] == "backed_with_serve_flag"
+        assert row["route"]["requires_serve_flags"] == ["TESSERA_SERVE_MODE=resident"]
     got = _digests(tmp_path)
     assert got == TESSERA_DIGESTS, json.dumps(got, indent=1, sort_keys=True)
