@@ -164,8 +164,8 @@ class FormatSpec:
         it rather than re-deriving it from ``act_bits``: the allocator's
         bit-exact cost short-circuit
         (``priced_cell.cost_entry_is_bit_exact``), the KL
-        validator's activation-quant assignment, ``layer_state_cache`` and
-        ``perturbed_x_cache`` all key off this one property, so a format's
+        validator's activation-quant assignment and ``perturbed_x_cache``
+        all key off this one property, so a format's
         activation semantics cannot drift between pricing and emulation.
         Registry consistency between this declaration and the actual
         activation callable is pinned by
@@ -1358,10 +1358,10 @@ def require_producer_formats(
 def format_family_of(name: object):
     """The lane format family that owns ``name``, **without importing it**.
 
-    Four consumers ask only "whose format is this?" before deciding whether to
-    take a lane's path: ``render_production_weight`` and the three
-    production-cache miss fallbacks (``weight_session``, ``perturbed_x_cache``,
-    ``aura_cost``). All four are on the hot path of every stock format too,
+    Consumers ask only "whose format is this?" before deciding whether to
+    take a lane's path: ``render_production_weight`` and the
+    production-cache miss fallbacks in ``perturbed_x_cache`` and
+    ``aura_cost``. These are on the hot path of every stock format too,
     so the question must not drag in the answer's dependencies -- a lane's
     code can require a package an NVFP4-only pipeline does not have.
 
