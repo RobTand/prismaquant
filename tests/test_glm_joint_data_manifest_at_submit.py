@@ -30,6 +30,7 @@ The tests are torch-free on purpose: they run on the fleet's CPU boxes, which
 have no torch, and the producer they exercise imports nothing from the
 ``prismaquant`` package for the same reason.
 """
+from prismaquant import tessera_campaign_table as campaign_table
 
 import gzip
 import hashlib
@@ -252,9 +253,9 @@ def _workspace(scratch: Path) -> dict:
     # the campaign it belongs to, and the plan's own bound census cannot show
     # that by itself.
     import dispatch_tessera_campaign as dispatch
-    scope = dispatch.joint_campaign_scope(json.loads(plan.read_text()))
+    scope = campaign_table.joint_campaign_scope(json.loads(plan.read_text()))
     campaign_identity = scratch / "campaign-identity.json"
-    campaign_identity.write_text(json.dumps(dispatch.campaign_identity(scope),
+    campaign_identity.write_text(json.dumps(campaign_table.campaign_identity(scope),
                                             sort_keys=True))
     return {"plan": plan, "workspace": workspace, "wire_dir": wire_dir,
             "checkpoint": checkpoint, "parts": parts, "names": names,
@@ -335,10 +336,10 @@ def workspace_with_sealed_checkpoint(scratch):
     plan["inputs"]["merged_checkpoint"]["sha256"] = hashlib.sha256(
         checkpoint.read_bytes()).hexdigest()
     plan_path.write_text(json.dumps(plan))
-    fixture["scope"] = dispatch.joint_campaign_scope(
+    fixture["scope"] = campaign_table.joint_campaign_scope(
         json.loads(plan_path.read_text()))
     Path(fixture["campaign_identity"]).write_text(json.dumps(
-        dispatch.campaign_identity(fixture["scope"]), sort_keys=True))
+        campaign_table.campaign_identity(fixture["scope"]), sort_keys=True))
     return fixture, document["identity_sha256"]
 
 
@@ -1364,7 +1365,7 @@ def test_a_diagnostic_subset_is_not_submittable_as_the_campaign(
         ])
 
     # The full campaign's score cannot be produced by 16 of its 512 windows.
-    with pytest.raises(dispatch.ScopeRefused,
+    with pytest.raises(campaign_table.ScopeRefused,
                        match="requires a complete_campaign scope"):
         submit(pilot, "complete_campaign")
     # Submitted for what it is, it resolves.

@@ -1,4 +1,5 @@
 """Selected capture reuse authenticates consumed source objects, once per row."""
+from prismaquant import tessera_campaign_selection as campaign_selection
 import hashlib
 import importlib.metadata
 import json
@@ -111,7 +112,7 @@ def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
         phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
     monkeypatch.setattr(campaign, '_collect_activations', lambda *a, **k: pytest.fail('repeated forward'))
     selection = tmp_path/'selection.json'
-    selection.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA,
+    selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA,
         groups=[dict(key='u:'+UNIT, members=[UNIT])])) )
     argv[argv.index('--model')+1] = str(source)
     argv[argv.index('--hessian')+1] = 'require'

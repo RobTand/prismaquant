@@ -1,4 +1,5 @@
 """A campaign must account for the live packed expert population."""
+from prismaquant import tessera_campaign_table as campaign_table
 from types import ModuleType, SimpleNamespace
 import json
 import os
@@ -367,8 +368,6 @@ def _write_source_checkpoint(model, root, *, perturb=None):
     }, indent=1))
 
 
-
-
 def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     """main() with a real capture, projection, encode and receipt; no route scoring.
 
@@ -432,7 +431,7 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(blob)
         encoded.append((qname, format_name, tuple(weight.shape)))
-        return tessera_campaign.CampaignAnchor(
+        return campaign_table.CampaignAnchor(
             qname=qname, family="TESSERA_E4M3_K1", format_name=format_name,
             body_rate_q256=1024,
             dloss=float(((render.float() - weight.float()) ** 2).mean()), dloss_stderr=0.0,
@@ -582,7 +581,7 @@ def test_wire_backed_units_keep_only_measured_rows():
     expert unit's row is exported from its priced blob (``--cached-expert-units``),
     so an interpolated rung would be a price with no bytes behind it.
     """
-    from prismaquant.tessera_campaign import CampaignAnchor, campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (CampaignAnchor, campaign_cost_payload)
 
     fam = "TESSERA_E2M1_K2"
 

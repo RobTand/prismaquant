@@ -41,6 +41,7 @@ Both the ``prismaquant`` package and split-moment helper are loaded from this
 checkout, so PrismaBuild carries the complete runnable research source.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 import argparse
 import hashlib
@@ -243,7 +244,7 @@ def load_draw(args, census):
 
 def selected_units(args, census, namespace) -> list:
     """The parent's selected capture targets, through the existing authority."""
-    selection = campaign.load_unit_selection(args.units)
+    selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
         selection, args=namespace, resolved=census["anchor_groups"])
     missing = sorted(set(names) - set(census["counts"]))
@@ -1003,7 +1004,7 @@ def _real_metadata_preflight(args, guard) -> dict:
     census = json.loads(path.read_text())
     namespace = campaign_args(args, census)
     checked = campaign.load_calibration_census(path, args=namespace)
-    selection = campaign.load_unit_selection(args.units)
+    selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
         selection, args=namespace, resolved=checked["anchor_groups"])
     missing = sorted(set(names) - set(checked["counts"]))

@@ -13,6 +13,8 @@ Three properties make the split honest, and these tests pin them:
   not describe one campaign: a mixed Hessian identity, a gap in the coverage,
   or a unit priced twice.
 """
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 import pathlib
@@ -72,7 +74,7 @@ def _selection(*groups):
 
 
 def test_selection_is_checked_against_the_run_s_own_grouping():
-    from prismaquant.tessera_campaign import select_anchor_groups
+    from prismaquant.tessera_campaign_table import (select_anchor_groups)
 
     resolved = {"g:attn": ["q", "k", "v"], "u:down": ["down"]}
     assert select_anchor_groups(
@@ -213,7 +215,6 @@ def test_streaming_residency_knobs_are_scheduling_not_identity(monkeypatch):
                     streaming_prefetch_workers=4, anchor_batch_size=32) == base
     assert identity(streaming_capture_policy="strict") != base
     assert identity(streaming=False) != base
-
 
 
 def test_source_identity_cache_flags_are_not_checkpoint_identity(monkeypatch):
@@ -400,7 +401,7 @@ def _payloads():
 def test_merge_reproduces_a_whole_scope_table():
     import dispatch_tessera_campaign as dispatch
 
-    merged = dispatch.merge_payloads(
+    merged = campaign_table.merge_payloads(
         _payloads(), census={"counts": {"a": 16384, "b": 16384}},
         capture_sha256="merged-digest")
 
@@ -433,8 +434,8 @@ def test_merge_refuses_a_mixed_hessian_identity():
     payloads = _payloads()
     row = payloads["row-0001"]["costs"]["b"]["E4M3_R512"]
     row["hessian_identity"] = {**row["hessian_identity"], "fit_ids_sha256": "other"}
-    with pytest.raises(dispatch.MergeRefused, match="fit_ids_sha256"):
-        dispatch.merge_payloads(payloads, census={"counts": {}},
+    with pytest.raises(campaign_table.MergeRefused, match="fit_ids_sha256"):
+        campaign_table.merge_payloads(payloads, census={"counts": {}},
                                 capture_sha256="merged-digest")
 
 
@@ -443,15 +444,15 @@ def test_merge_refuses_a_gap_and_a_double_price():
 
     payloads = _payloads()
     del payloads["row-0001"]
-    with pytest.raises(dispatch.MergeRefused, match="do not cover"):
-        dispatch.merge_payloads(payloads, census={"counts": {}},
+    with pytest.raises(campaign_table.MergeRefused, match="do not cover"):
+        campaign_table.merge_payloads(payloads, census={"counts": {}},
                                 capture_sha256="merged-digest")
 
     payloads = _payloads()
     payloads["row-0001"]["provenance"]["unit_selection"]["groups"] = [
         {"key": "u:a", "members": ["a"]}]
-    with pytest.raises(dispatch.MergeRefused, match="priced by both"):
-        dispatch.merge_payloads(payloads, census={"counts": {}},
+    with pytest.raises(campaign_table.MergeRefused, match="priced by both"):
+        campaign_table.merge_payloads(payloads, census={"counts": {}},
                                 capture_sha256="merged-digest")
 
 
@@ -460,8 +461,8 @@ def test_merge_refuses_rows_from_two_calibrations():
 
     payloads = _payloads()
     payloads["row-0001"]["provenance"]["nsamples"] = 64
-    with pytest.raises(dispatch.MergeRefused, match="provenance.nsamples"):
-        dispatch.merge_payloads(payloads, census={"counts": {}},
+    with pytest.raises(campaign_table.MergeRefused, match="provenance.nsamples"):
+        campaign_table.merge_payloads(payloads, census={"counts": {}},
                                 capture_sha256="merged-digest")
 
 
@@ -493,8 +494,8 @@ def test_merge_refuses_a_journal_that_names_a_shard_it_does_not_have(tmp_path):
         "identity": {"units": {"a": {}}},
         "units": [{"qname": "a", "file": "a.pkl"}],
     }))
-    with pytest.raises(dispatch.MergeRefused, match="is not there"):
-        dispatch.merge_checkpoint({"row-0000": str(row)},
+    with pytest.raises(campaign_table.MergeRefused, match="is not there"):
+        campaign_table.merge_checkpoint({"row-0000": str(row)},
                                   tmp_path / "cost.anchors.json")
 
 
@@ -534,15 +535,15 @@ def test_receipts_accept_a_memoized_row_and_refuse_a_failed_campaign(tmp_path):
         "rows": [{"key": "a", "status": "cache_hit", "host": "-", "rc": "-"},
                  {"key": "b", "status": "executed", "host": "sparky", "rc": "0"}],
     }))
-    dispatch._require_receipts(tmp_path, 2)
+    campaign_table.require_campaign_receipts(tmp_path, 2)
 
     (tmp_path / "receipts.json").write_text(json.dumps({
         "returncode": 75,
         "rows": [{"key": "a", "status": "waiting", "host": "-", "rc": "-"},
                  {"key": "b", "status": "executed", "host": "sparky", "rc": "0"}],
     }))
-    with pytest.raises(dispatch.MergeRefused, match="not every row is done"):
-        dispatch._require_receipts(tmp_path, 2)
+    with pytest.raises(campaign_table.MergeRefused, match="not every row is done"):
+        campaign_table.require_campaign_receipts(tmp_path, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -567,7 +568,7 @@ def test_merge_unions_the_unservable_evidence_rather_than_copying_one_row_s():
     payloads["row-0001"]["provenance"]["unservable"] = {
         "b": {"TESSERA_E2M1_K2_R128": other}}
 
-    merged = dispatch.merge_payloads(
+    merged = campaign_table.merge_payloads(
         payloads, census={"counts": {"a": 16384, "b": 16384}},
         capture_sha256="merged-digest")
 
@@ -594,8 +595,8 @@ def test_merge_refuses_two_rows_that_disagree_about_one_unservable_row():
     payloads["row-0001"]["provenance"]["unservable"] = {
         "a": {"TESSERA_E2M1_K1_R512": theirs}}
 
-    with pytest.raises(dispatch.MergeRefused, match="unservable evidence"):
-        dispatch.merge_payloads(
+    with pytest.raises(campaign_table.MergeRefused, match="unservable evidence"):
+        campaign_table.merge_payloads(
             payloads, census={"counts": {"a": 16384, "b": 16384}},
             capture_sha256="merged-digest")
 
@@ -919,7 +920,7 @@ def _sizes(*values):
 
 
 def test_the_draw_is_fixed_size_and_deterministic_from_its_seed():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     sizes = _sizes(*[1.0 + index for index in range(32)])
     first = draw_stack_sample(sizes, 8, seed=0, stack="s:x|w1")
@@ -936,7 +937,7 @@ def test_the_draw_is_fixed_size_and_deterministic_from_its_seed():
 
 
 def test_inclusion_probabilities_sum_to_the_sample_size():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     # No unit dominates, so nothing lands in the certainty stratum and every
     # pi is strictly interior.  sum(pi) == n is the identity that makes the
@@ -952,7 +953,7 @@ def test_inclusion_probabilities_sum_to_the_sample_size():
 
 
 def test_a_dominant_unit_is_taken_with_certainty_not_clipped():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     # One expert holding most of the stack's h_trace would want pi > 1 under a
     # plain proportional rule.  Clipping it to 1 and leaving the others alone
@@ -968,7 +969,7 @@ def test_a_dominant_unit_is_taken_with_certainty_not_clipped():
 
 
 def test_asking_for_the_whole_frame_is_a_census_not_a_sample():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     sizes = _sizes(1.0, 2.0, 3.0)
     draw = draw_stack_sample(sizes, 8, seed=0, stack="s:z|w1")
@@ -978,7 +979,7 @@ def test_asking_for_the_whole_frame_is_a_census_not_a_sample():
 
 
 def test_a_zero_importance_expert_gets_probability_zero_and_is_never_drawn():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     # Zero h_trace is exact, not small: under the campaign's Fisher convention
     # a token never routed to an expert contributes zero gradient, so that
@@ -994,7 +995,7 @@ def test_a_zero_importance_expert_gets_probability_zero_and_is_never_drawn():
 
 
 def test_a_single_random_draw_is_refused_because_it_has_no_error_bar():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     # One random draw admits no variance estimate. Stamping 0.0 for it would
     # read downstream as "measured exactly", so the refusal happens here --
@@ -1005,7 +1006,7 @@ def test_a_single_random_draw_is_refused_because_it_has_no_error_bar():
 
 
 def test_the_draw_stamps_what_a_variance_estimate_will_need():
-    from prismaquant.tessera_campaign import draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
 
     # The permutation and the systematic start re-derive the sample
     # arithmetically, so a reader checks the draw rather than trusting a PRNG
@@ -1024,7 +1025,8 @@ def test_the_draw_stamps_what_a_variance_estimate_will_need():
 
 
 def test_the_audit_subsample_is_a_subset_that_cannot_move_the_estimate():
-    from prismaquant.tessera_campaign import audit_subsample, draw_stack_sample
+    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import audit_subsample
 
     sizes = _sizes(*[1.0 + index for index in range(32)])
     draw = draw_stack_sample(sizes, 20, seed=0, stack="s:a|w1")
@@ -1043,7 +1045,7 @@ def test_the_audit_subsample_is_a_subset_that_cannot_move_the_estimate():
 
 
 def test_a_v1_selection_that_samples_is_refused_by_its_own_schema(tmp_path):
-    from prismaquant.tessera_campaign import load_unit_selection
+    from prismaquant.tessera_campaign_selection import load_unit_selection
 
     path = tmp_path / "units.json"
     path.write_text(json.dumps({
@@ -1056,7 +1058,7 @@ def test_a_v1_selection_that_samples_is_refused_by_its_own_schema(tmp_path):
 
 
 def test_a_sample_without_inclusion_probabilities_is_refused(tmp_path):
-    from prismaquant.tessera_campaign import load_unit_selection
+    from prismaquant.tessera_campaign_selection import load_unit_selection
 
     path = tmp_path / "units.json"
     path.write_text(json.dumps({
@@ -1069,9 +1071,8 @@ def test_a_sample_without_inclusion_probabilities_is_refused(tmp_path):
 
 
 def test_the_sample_narrows_what_is_priced_but_not_what_the_group_is(tmp_path):
-    from prismaquant.tessera_campaign import (load_unit_selection,
-                                              selection_priced_units,
-                                              select_anchor_groups)
+    from prismaquant.tessera_campaign_table import (select_anchor_groups)
+    from prismaquant.tessera_campaign_selection import load_unit_selection, selection_priced_units
 
     path = tmp_path / "units.json"
     path.write_text(json.dumps({
@@ -1156,7 +1157,7 @@ def test_the_audit_anchor_lands_inside_the_bracket_or_nowhere():
 
 
 def test_a_malformed_band_is_refused():
-    from prismaquant.tessera_campaign import parse_rate_band
+    from prismaquant.tessera_campaign_table import parse_rate_band
 
     assert parse_rate_band(None) is None and parse_rate_band("") is None
     assert parse_rate_band("256,896") == (256, 896)
@@ -1191,5 +1192,5 @@ def test_the_planner_and_the_campaign_agree_on_the_selection_schemas():
     import dispatch_tessera_campaign as dispatch
     from prismaquant import tessera_campaign
 
-    assert dispatch.UNITS_SCHEMA == tessera_campaign.UNITS_SCHEMA
-    assert dispatch.UNITS_SCHEMA_V2 == tessera_campaign.UNITS_SCHEMA_V2
+    assert dispatch.UNITS_SCHEMA == campaign_selection.UNITS_SCHEMA
+    assert dispatch.UNITS_SCHEMA_V2 == campaign_selection.UNITS_SCHEMA_V2

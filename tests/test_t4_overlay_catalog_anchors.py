@@ -25,7 +25,7 @@ import assemble_t4_overlay as assemble  # noqa: E402
 import build_t4_overlay_catalog as builder  # noqa: E402
 import rebind_t4_qualified_results as rebind  # noqa: E402
 from prismaquant.cost_stage_checkpoint import unit_path, write_unit  # noqa: E402
-from prismaquant.tessera_campaign import CampaignAnchor  # noqa: E402
+from prismaquant.tessera_campaign_table import (CampaignAnchor)
 from prismaquant.tessera_joint_aura import STAGE  # noqa: E402
 
 FMT = builder.FMT

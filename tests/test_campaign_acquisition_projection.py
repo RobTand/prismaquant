@@ -1,5 +1,6 @@
 """Whole authenticated requests project onto explicit row units, not new rates."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import copy
 import pickle
@@ -68,7 +69,7 @@ def test_two_actual_cohorts_keep_global_origin_and_exact_sources(
         assert set(scoped["requests"]) == set(members)
         assert set(scoped["source_weights"]) == set(members)
         assert scoped["identity"] == complete["identity"]
-        campaign._campaign_acquisition_scope(scoped, groups, selected=set(members))
+        campaign_table.campaign_acquisition_scope(scoped, groups, selected=set(members))
         for name in members:
             assert scoped["requests"][name] == complete["requests"][name]
             assert scoped["requests"][name][DEFERRED] == []
@@ -187,8 +188,8 @@ def test_atomic_partial_selection_is_runtime_refusal_not_library_group_inference
     scoped = project_joint_campaign_acquisition(complete, units=[domain.names[0]])
     assert set(scoped["requests"]) == {domain.names[0]}
     with pytest.raises(ValueError, match="member|scope"):
-        campaign._campaign_acquisition_scope(scoped, domain.groups, selected={domain.names[0]})
+        campaign_table.campaign_acquisition_scope(scoped, domain.groups, selected={domain.names[0]})
     valid = project_joint_campaign_acquisition(complete, units=domain.names[:3])
-    _, members = campaign._campaign_acquisition_scope(valid, domain.groups, selected=set(domain.names[:3]))
+    _, members = campaign_table.campaign_acquisition_scope(valid, domain.groups, selected=set(domain.names[:3]))
     assert members == set(domain.names[:3])
     assert valid["requests"][domain.names[2]][FAMILY] == []

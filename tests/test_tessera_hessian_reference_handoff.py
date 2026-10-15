@@ -1,4 +1,5 @@
 """Canonical H handoffs union commitments and authenticate only consumed H."""
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import sys
 import json
@@ -87,7 +88,7 @@ def test_dispatch_refuses_unbound_reference_rows(handoff,defect):
     elif defect=='canonical':p['provenance']['calibration_cache']={**f['record'],'sha256':'0'*64}
     elif defect=='roster':p['provenance']['unit_selection']['groups'][0]['members']=['b']
     else:p['provenance']['hessian'].pop('reference_binding')
-    with pytest.raises(dispatch.MergeRefused):
+    with pytest.raises(campaign_table.MergeRefused):
         dispatch.merge_export_inputs(dirs,payloads,out_cache=f['tmp']/'merged',
             identity=f['calibration'],policy='fixture',static_scales={},census=f['census'])
     assert not (f['tmp']/'merged/hessian_capture.references.json').exists()

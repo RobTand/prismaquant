@@ -11,6 +11,7 @@ returned value, or the same exception type, text and chained cause.
 """
 
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 from collections.abc import Mapping
 import re
@@ -77,7 +78,7 @@ TEXT_LOADERS = {
     "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
     "sample_parallel_probe": lambda text: sample_parallel_probe._strict_json_loads(text, where="probe"),
-    "tessera_campaign": tessera_campaign.parse_family_restriction,
+    "tessera_campaign": campaign_table.parse_family_restriction,
 }
 
 BYTE_LOADERS = {

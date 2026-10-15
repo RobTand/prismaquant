@@ -1,4 +1,6 @@
 """A reusable calibration keeps full-H/prefix-X bytes and refuses stale inputs."""
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import importlib.metadata
 import prismaquant
@@ -162,7 +164,6 @@ def test_torn_during_read_fences_refuse_in_both_modes(
             cs_identity.validate_cached_streamed_model_identity(str(root), cache)
 
 
-
 def test_dev_prefetch_identity_metadata_adopts_stored_draw(capture, monkeypatch, capsys):
     _root, _path, census, capture_id, acts, _hessians, record = capture
     monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
@@ -198,11 +199,6 @@ def test_dev_selected_source_uses_stored_digest_without_proof_or_hash(capture, m
         assert receipt['payload_bytes_hashed'] == 0
         assert receipt['verified_files'][0]['sha256'] == capture_id['source_files']['config.json']
     assert '[DEV-MODE]' in capsys.readouterr().out
-
-
-
-
-
 
 
 @pytest.mark.parametrize('mode', [None, '1', '0'])
@@ -551,7 +547,7 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             encoder_memo_capacity=1,
             phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
         selection = tmp_path/'units.json'
-        selection.write_text(json.dumps(dict(schema=tc.UNITS_SCHEMA,
+        selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA,
             groups=[dict(key='u:'+UNIT, members=[UNIT])])))
         argv += ['--streaming', '--units', str(selection),
                  '--calibration-cache-sha256', cc.sha256(root/'capture_manifest.json')]
@@ -598,8 +594,8 @@ def test_merge_refuses_disagreeing_capture_bindings():
     payloads = _payloads()
     for index,payload in enumerate(payloads.values()):
         payload['provenance']['calibration_cache'] = dict(path='/capture.json',sha256=str(index))
-    with pytest.raises(dispatch.MergeRefused,match='calibration_cache'):
-        dispatch.merge_payloads(payloads,census={'counts':{'a':16384,'b':16384}},capture_sha256='merged')
+    with pytest.raises(campaign_table.MergeRefused,match='calibration_cache'):
+        campaign_table.merge_payloads(payloads,census={'counts':{'a':16384,'b':16384}},capture_sha256='merged')
 
 
 @pytest.mark.parametrize('field',['model_load_contract','attention_implementation','capture_runtime'])
@@ -835,7 +831,7 @@ def test_cli_cache_reader_requires_coverage_not_equal_output_scope(
         counts={name: 4 for name in names}, maxima={name: maxima[name] for name in names})
     requested_name = "model.layers.0." + requested
     selection = tmp_path / "units.json"
-    selection.write_text(json.dumps({"schema": tc.UNITS_SCHEMA, "model": str(source),
+    selection.write_text(json.dumps({"schema": campaign_selection.UNITS_SCHEMA, "model": str(source),
         "layer_stride": 1, "groups": [{"key": "u:" + requested_name,
                                        "members": [requested_name]}]}))
     argv += ["--attention-implementation", "eager", "--nsamples", "32", "--seqlen", "512",

@@ -8,6 +8,7 @@ This measures preparation ownership, not a calibration probe, KL, serving,
 full-GLM fit or production throughput.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 import argparse
 from collections import Counter
@@ -135,7 +136,7 @@ def build_fixture(root):
         groups = select_groups(census)
         selected = sorted(name for group in groups for name in group['members'])
         selection = root / 'selected-units.json'
-        write_json(selection, dict(schema=campaign.UNITS_SCHEMA, model=str(source),
+        write_json(selection, dict(schema=campaign_selection.UNITS_SCHEMA, model=str(source),
                                    layer_stride=1, groups=groups))
         original_menus = campaign.expand_menus_for_targets
         def exact_menu(weights, targets, **kwargs):

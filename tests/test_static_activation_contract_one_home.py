@@ -229,9 +229,8 @@ def test_the_campaign_refuses_a_second_contract_without_its_scale(
 
 def test_the_resume_guard_follows_the_contract(fp8_gains_a_static_contract):
     """A resumed row of a second-contract rung is a pre-contract price too."""
-    from prismaquant.tessera_campaign import (
-        ActivationScaleContractError, CampaignAnchor, _require_resumable_anchor,
-    )
+    from prismaquant.tessera_campaign_table import (CampaignAnchor)
+    from prismaquant.tessera_campaign import ActivationScaleContractError, _require_resumable_anchor
 
     anchor = CampaignAnchor(
         qname="m.up", family="TESSERA_E4M3_K1", format_name=W8A8,

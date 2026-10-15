@@ -1,4 +1,5 @@
 """Workspace migration preserves the row ownership and ordinary seed gates."""
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ def fixture(tmp_path):
         rows.append({'row_id': name, 'groups': [name], 'dir': str(row), 'units': str(row/'units.json')})
     # A partial checkpoint has a manifest and may have only some unit shards.
     (root/'a/cost.anchors.json').write_text(json.dumps({'identity_sha256': 'a'*64}))
-    plan = {'schema': d.PLAN_SCHEMA, 'model': '/model', 'census': str(root/'census.json'),
+    plan = {'schema': campaign_table.PLAN_SCHEMA, 'model': '/model', 'census': str(root/'census.json'),
             'calibration_cache': None, 'rows': rows}
     (root/'plan.json').write_text(json.dumps(plan))
     return d, root, census, plan

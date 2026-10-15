@@ -1,4 +1,5 @@
 """Campaign source qualification uses the real GLM skeleton and shard loader."""
+from prismaquant import tessera_campaign_selection as campaign_selection
 import os
 import subprocess
 import sys
@@ -332,7 +333,7 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(
                            if key.startswith('u:') and '.experts.' not in key)
         names = result['anchor_groups'][dense_group]
         selection_path = tmp_path/'selected-units.json'
-        selection_path.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA,
+        selection_path.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA,
             model=str(source), layer_stride=1,
             groups=[dict(key=dense_group, members=names)])))
         def no_forward(*args, **kwargs):

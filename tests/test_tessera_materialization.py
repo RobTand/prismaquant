@@ -1,4 +1,5 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import hashlib
 import json
@@ -52,7 +53,7 @@ def selection(case, tmp_path):
     output = tmp_path / 'final-layer-config.json'
     tm.write_selection_request(request_path, layer_config=config, assignment=assignment,
                                cost_path=cost_path, cost_payload=cost, output_path=output)
-    census = dict(schema=tc.CENSUS_SCHEMA, model=str(case.model), nsamples=2, seqlen=4, seed=0,
+    census = dict(schema=campaign_table.CENSUS_SCHEMA, model=str(case.model), nsamples=2, seqlen=4, seed=0,
         layer_stride=1, text_sha256='a'*64, fit_ids_sha256='b'*64,
         counts={n:8 for n in _units()}, max_abs={n:1.0 for n in _units()},
         anchor_groups={'s:'+STACK: _units()}, unit_shapes={n:[N,N] for n in _units()},
@@ -322,7 +323,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         measured.append((name, kwargs['format_name']))
         record = s.case.receipts[name]
         (kwargs['wire_dir']/record['file']).write_bytes((s.case.wire_dir/record['file']).read_bytes())
-        return tc.CampaignAnchor(qname=name, family='TESSERA_E4M3_K1', format_name=FMT,
+        return campaign_table.CampaignAnchor(qname=name, family='TESSERA_E4M3_K1', format_name=FMT,
             body_rate_q256=1024, dloss=0.1, dloss_stderr=0.0, memory_bytes=128,
             bits_per_param=4, activation_contract='fixture', activation_quantized=True,
             wire_bytes=record['blob_bytes'], seconds=0.0)
@@ -413,14 +414,14 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
         stats = _packed_probe_row(shape[0], [1.0]*shape[0],
             packed_param=packed.rsplit('.',1)[-1], out_features=shape[1], in_features=shape[2])
         stats['_packed_experts_module'] = REAL_STACK
-        samples[packed] = campaign.stack_sample_from_probe(packed, stats, profile,
+        samples[packed] = campaign_table.stack_sample_from_probe(packed, stats, profile,
             sampled_experts=[0,1], inclusion_prob={0:2/3, 1:2/3, 2:2/3}, seed=0)
     retained = {n for sample in samples.values() for members in sample.members.values() for n in members}
     dense = 'model.layers.0.attention'
     measured = {n:rows for n,rows in measured_anchors.items() if n == dense or n in retained}
-    prices = campaign.campaign_cost_payload(measured, {}, loo={},
+    prices = campaign_table.campaign_cost_payload(measured, {}, loo={},
         provenance={'provenance':cost['provenance']}, stack_samples=samples)
-    prices['provenance'][tep.POPULATION_KEY] = campaign.campaign_population_block(
+    prices['provenance'][tep.POPULATION_KEY] = campaign_table.campaign_population_block(
         dense_targets=[dense], expert_targets=population.qnames, dense_all=[dense], pinned=[],
         population=population, layer_stride=1, costs=prices['costs'],
         menus={n:[RUNG] for n in prices['costs']}, stack_samples=samples, profile=profile)

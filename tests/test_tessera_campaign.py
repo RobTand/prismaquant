@@ -57,7 +57,7 @@ def test_next_anchor_splits_the_worst_predicted_interval():
 # ---------------------------------------------------------------------------
 
 def _anchor(qname, family, rung, dloss, *, bytes_=1000):
-    from prismaquant.tessera_campaign import CampaignAnchor
+    from prismaquant.tessera_campaign_table import (CampaignAnchor)
     from prismaquant.format_registry import get_format
 
     return CampaignAnchor(
@@ -84,7 +84,7 @@ def _menu(qname, family, rungs):
 
 def test_measured_and_interpolated_rows_are_told_apart():
     from prismaquant.priced_cell import cost_entry_is_band_interpolated, cost_entry_source
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -113,7 +113,7 @@ def test_an_interpolated_row_is_priced_in_output_space():
         cost_entry_activation_pricing_branch,
         cost_entry_predicted_dloss,
     )
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -132,7 +132,7 @@ def test_an_interpolated_row_is_priced_in_output_space():
 
 
 def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -147,7 +147,7 @@ def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
 
 
 def test_non_monotone_anchors_are_recorded_not_laundered():
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -404,7 +404,7 @@ def test_the_priced_scale_travels_into_the_cost_rows(monkeypatch, tmp_path):
     """
     import dataclasses
 
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     scale = 448.0 * 6.0 / 37.5
@@ -1045,7 +1045,7 @@ def test_every_cost_row_carries_the_captures_digest():
     """``campaign_cost_payload`` copies the capture digest the campaign wrote
     into each row's ``hessian_identity`` (measured and interpolated), which
     is how it reaches the allocator's stamp and then the export gate."""
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d)
@@ -1271,9 +1271,7 @@ def test_every_payload_row_carries_the_hessian_identity():
     the measured branch stamped it, a table could be 3 stamped rows and 766
     unstamped ones and still pass a uniformity check.
     """
-    from prismaquant.tessera_campaign import (
-        CampaignAnchor, campaign_cost_payload,
-    )
+    from prismaquant.tessera_campaign_table import (CampaignAnchor, campaign_cost_payload)
     from prismaquant.tessera_menu import (
         assert_uniform_hessian_identity, expand_tessera_menu,
     )

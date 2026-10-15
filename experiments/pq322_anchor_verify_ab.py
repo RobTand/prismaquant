@@ -1,5 +1,6 @@
 """PB-only equal-work A/B of original versus bound, namespaced anchor verification."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
 import copy
@@ -107,7 +108,7 @@ def main():
         'workload': 'two original dense units, fourteen original wires/renders; same verify_anchor_render and PWC transfer in each arm',
         'scope': 'resident-prefetched verification only; excludes whole-model streaming, capture intake, and file-hash intake',
         'first_pair_policy': 'retained separately; first parse, not claimed disk-cold'}
-    anchors = {name: [tc.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
+    anchors = {name: [campaign_table.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
                for name in names}
     kwargs = dict(calibration_source=calibration_source, projected_unit=None, static_scales=scales)
 

@@ -1,4 +1,6 @@
 """Partition handoffs use real reference/journal owners, without GPU claims."""
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
 
 import pytest
@@ -22,9 +24,9 @@ def test_partition_reference_union_uses_priced_subset_not_full_group(handoff, mo
     # separately exercised against real carried producer records.
     for index, name in enumerate(names):
         payloads[name]["provenance"]["unit_selection"] = {
-            "schema": campaign.UNITS_SCHEMA_V3,
+            "schema": campaign_selection.UNITS_SCHEMA_V3,
             "groups": [{"key": "s:fixture", "members": names,
-                "partition": {"schema": campaign.EXPERT_PARTITION_SCHEMA,
+                "partition": {"schema": campaign_selection.EXPERT_PARTITION_SCHEMA,
                     "experts_per_row": 1, "index": index, "count": len(names),
                     "rate_q256": 768, "members": [name]}}]}
     monkeypatch.setattr(torch, "load", lambda *a, **k: pytest.fail("eager reference H read"))
@@ -81,7 +83,7 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
                                identity_sha256=digest, state=states[name])
         row_dirs[f"row{index}"] = str(row)
     destination = tmp_path / "merged" / "cost.anchors.json"
-    merged = dispatch.merge_checkpoint(row_dirs, destination)
+    merged = campaign_table.merge_checkpoint(row_dirs, destination)
     assert merged["identity"] == journal.canonical_json(whole, where="whole identity")
     assert merged["identity_sha256"] == journal.canonical_json_sha256(whole, where="whole identity")
     _, _, resumed = journal.prepare_journal(

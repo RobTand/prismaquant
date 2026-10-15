@@ -1,4 +1,6 @@
 """Fixed-rate partitions keep a full group contract, not a new sample."""
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 import json
 from typing import cast
 
@@ -28,23 +30,21 @@ def selection(index=0):
 
 
 def validate(record, **overrides):
-    owner = getattr(campaign, "expert_partition_members", None)
-    assert callable(owner), "no explicit fixed-rate partition owner"
     records, stacks = roster()
     kwargs = dict(unit_records=records, stack_of=stacks, rate_band="768,768",
                   max_rounds=1, seeded=False)
     kwargs.update(overrides)
-    return cast(dict[str, list[str]], owner(record, **kwargs))
+    return campaign_table.expert_partition_members(record, **kwargs)
 
 
 def test_versioned_partition_loads_and_prices_only_complete_expert_chunk(tmp_path):
     record = selection()
     path = tmp_path / "units.json"
     path.write_text(json.dumps(record))
-    loaded = campaign.load_unit_selection(path)
-    campaign.select_anchor_groups(loaded, {GROUP: sorted(roster()[0])}, where="test")
+    loaded = campaign_selection.load_unit_selection(path)
+    campaign_table.select_anchor_groups(loaded, {GROUP: sorted(roster()[0])}, where="test")
     assert validate(loaded) == {GROUP: record["groups"][0]["partition"]["members"]}
-    priced, audit, pi = campaign.selection_priced_units(loaded)
+    priced, audit, pi = campaign_selection.selection_priced_units(loaded)
     assert priced == set(record["groups"][0]["partition"]["members"])
     assert not audit and not pi
 
@@ -76,11 +76,11 @@ def test_partition_must_be_the_declared_expert_complete_chunk(mutation):
 
 def test_legacy_schema_cannot_hide_partition_metadata(tmp_path):
     record = selection()
-    record["schema"] = campaign.UNITS_SCHEMA
+    record["schema"] = campaign_selection.UNITS_SCHEMA
     path = tmp_path / "units.json"
     path.write_text(json.dumps(record))
     with pytest.raises(RuntimeError, match="partition"):
-        campaign.load_unit_selection(path)
+        campaign_selection.load_unit_selection(path)
 
 
 def test_partition_subsets_are_disjoint_and_exactly_cover_full_roster():
@@ -122,7 +122,7 @@ def test_partition_is_bound_to_real_carried_producer_records():
     record = {"schema": V3, "groups": [{"key": key, "members": names,
         "partition": {"schema": PARTITION, "experts_per_row": 2, "index": 0,
                       "count": 2, "rate_q256": 768, "members": priced}}]}
-    assert campaign.expert_partition_members(record, unit_records=records,
+    assert campaign_table.expert_partition_members(record, unit_records=records,
         stack_of=stacks, rate_band="768,768", max_rounds=1) == {key: priced}
     edited = json.loads(json.dumps(carried))
     edited["stacks"][STACK][names[0]]["rows"] *= 2
@@ -134,7 +134,7 @@ def test_partition_refuses_heterogeneous_producer_geometry():
     records, stacks = roster()
     records["expert3.gate"]["rows"] = 16
     with pytest.raises(RuntimeError, match="geometry"):
-        campaign.expert_partition_members(selection(), unit_records=records,
+        campaign_table.expert_partition_members(selection(), unit_records=records,
             stack_of=stacks, rate_band="768,768", max_rounds=1)
 
 

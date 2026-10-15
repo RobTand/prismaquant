@@ -988,7 +988,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
 def consumer_merge(rows, out_dir):
     """Run the dispatcher's real merge_checkpoint on the rows (needs PrismaQuant importable)."""
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from tools.dispatch_tessera_campaign import merge_checkpoint  # noqa: E402
+    from prismaquant.tessera_campaign_table import (merge_checkpoint)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     manifest = merge_checkpoint({Path(r).name: Path(r) for r in rows}, out/'cost.anchors.json')

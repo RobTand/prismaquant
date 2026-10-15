@@ -1,5 +1,6 @@
 """PB-only original dense-anchor verification; never a full-model cost run."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
 import copy
@@ -100,7 +101,7 @@ def main():
     def baseline():
         refs = {}
         for (name, fmt), cell in sorted(cells.items()):
-            anchor = tc.CampaignAnchor(**cell['anchor'])
+            anchor = campaign_table.CampaignAnchor(**cell['anchor'])
             encoding = tc._checkpoint_anchor_identity(anchor, weights=weights,
                 menus={name: [SimpleNamespace(format_name=fmt)]}, calibration_source=calibration_source,
                 static_scales=scales)

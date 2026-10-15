@@ -1,5 +1,6 @@
 """PB-only complete-path A/B of anchor file scans versus verified PWC single reads."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
 import copy
@@ -167,7 +168,7 @@ def main():
         'workload': 'two original dense units, fourteen wires/renders; complete metadata intake, payload checks, fresh PWC prefetch and verification in each arm',
         'scope': 'complete relevant file/intake/PWC/verification path; source and original capture held CUDA resident; excludes whole-model streaming',
         'first_pair_policy': 'retained separately; first parse, not claimed disk-cold'}
-    anchors = {name: [tc.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
+    anchors = {name: [campaign_table.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
                for name in names}
     kwargs = dict(calibration_source=calibration_source, projected_unit=None, static_scales=scales)
 

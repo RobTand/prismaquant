@@ -1,4 +1,5 @@
 """Real planner and merge coverage for opt-in unsampled expert partitions."""
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from pathlib import Path
@@ -158,7 +159,7 @@ def partition_payloads(monkeypatch):
 
 def test_partition_merge_matches_whole_group_cost_union(partition_payloads):
     payloads, census, coverage = partition_payloads
-    merged = dispatch.merge_payloads(payloads, census=census,
+    merged = campaign_table.merge_payloads(payloads, census=census,
                                      capture_sha256="merged", plan_coverage=coverage)
     whole = copy.deepcopy(payloads["row0"])
     for field in ("costs", "leave_one_anchor_out", "menu_sizes", "anchor_counts"):
@@ -170,7 +171,7 @@ def test_partition_merge_matches_whole_group_cost_union(partition_payloads):
     whole["provenance"]["unit_selection"] = {
         "schema": "prismaquant.tessera_campaign_units.v1", "selected": True,
         "groups": [{"key": GROUP, "members": sorted(roster()[0])}]}
-    reference = dispatch.merge_payloads({"whole": whole}, census=census,
+    reference = campaign_table.merge_payloads({"whole": whole}, census=census,
                                         capture_sha256="merged")
     for field in ("costs", "leave_one_anchor_out", "menu_sizes", "anchor_counts", "formats"):
         assert merged[field] == reference[field]
@@ -197,8 +198,8 @@ def test_partition_merge_refuses_coverage_or_identity_gap(partition_payloads, da
         groups[GROUP] = groups[GROUP][:-1]
     elif damage == "seed":
         payloads["row1"]["provenance"]["seed_checkpoint"] = {"path": "foreign"}
-    with pytest.raises(dispatch.MergeRefused, match="partition"):
-        dispatch.merge_payloads(payloads, census=census, capture_sha256="merged", plan_coverage=coverage)
+    with pytest.raises(campaign_table.MergeRefused, match="partition"):
+        campaign_table.merge_payloads(payloads, census=census, capture_sha256="merged", plan_coverage=coverage)
 
 
 @pytest.mark.parametrize("damage", ["anchor_key", "wrong_rate", "empty_prices"])
@@ -213,6 +214,6 @@ def test_partition_merge_checks_actual_group_and_priced_rung(partition_payloads,
         row["formats"] = ["TESSERA_E4M3_K1_R1024"]
     else:
         row["costs"] = dict.fromkeys(row["costs"], {})
-    with pytest.raises(dispatch.MergeRefused, match="partition"):
-        dispatch.merge_payloads(payloads, census=census, capture_sha256="merged",
+    with pytest.raises(campaign_table.MergeRefused, match="partition"):
+        campaign_table.merge_payloads(payloads, census=census, capture_sha256="merged",
                                 plan_coverage=coverage)

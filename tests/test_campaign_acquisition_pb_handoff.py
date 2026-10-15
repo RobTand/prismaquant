@@ -1,5 +1,7 @@
 """Original authenticated joint request -> actual PB rows -> scalar wires -> strict merge."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 
 import copy
 import hashlib
@@ -156,9 +158,9 @@ def test_actual_plan_projects_two_atomic_rows_and_records_deferred_cohort(handof
     for row, action in zip(planned["rows"], actions):
         argv = dispatch._inner_campaign_argv(action)
         assert dispatch._campaign_acquisition_argv(argv) == handoff.binding
-        selection = campaign.load_unit_selection(row["units"])
-        members = campaign.selection_priced_units(selection)[0]
-        projected, keys, actual = campaign._campaign_acquisition_row_scope(handoff.acquisition,
+        selection = campaign_selection.load_unit_selection(row["units"])
+        members = campaign_selection.selection_priced_units(selection)[0]
+        projected, keys, actual = campaign_table.campaign_acquisition_row_scope(handoff.acquisition,
             handoff.census["anchor_groups"], selected=members)
         assert actual == members
         assert keys == row["groups"]
@@ -262,16 +264,16 @@ def records(handoff, *, menu_families=None):
     result = {}
     from prismaquant.tessera_menu import expand_tessera_menu
     for index, name in enumerate(handoff.run.active_names):
-        projected, keys, _ = campaign._campaign_acquisition_row_scope(handoff.acquisition,
+        projected, keys, _ = campaign_table.campaign_acquisition_row_scope(handoff.acquisition,
             handoff.census["anchor_groups"], selected=[name])
         menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research",
                                          families=menu_families)}
-        schedule = campaign._requested_acquisition_schedule({key: handoff.census["anchor_groups"][key]
+        schedule = campaign_table.requested_acquisition_schedule({key: handoff.census["anchor_groups"][key]
             for key in keys}, projected["requests"])
         unit = {"weight": campaign._checkpoint_identity_api().tensor_identity(handoff.run.weights[name]),
                 "acquisition_source_weight": projected["source_weights"][name],
                 "menu": sorted(rung.format_name for rung in menus[name])}
-        result[f"row-{index:04d}"] = dict(origin=campaign._campaign_acquisition_origin(projected, schedule, menus),
+        result[f"row-{index:04d}"] = dict(origin=campaign_table.campaign_acquisition_origin(projected, schedule, menus),
             schedule=schedule, sources=projected["source_weights"], units={name: unit},
             cells={name: [f"{family}_R{q}" for family, qs in schedule[name].items() for q in qs]})
     return result
@@ -312,14 +314,14 @@ def test_semantic_merge_refuses_wrong_global_identity_source_and_row_work(handof
         rows[first]["units"][name].pop("menu")
     else:
         rows[first]["origin"]["deferred_domain"][name].remove(DEFERRED)
-    with pytest.raises(dispatch.MergeRefused):
-        dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    with pytest.raises(campaign_table.MergeRefused):
+        campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
             scope_groups=handoff.census["anchor_groups"])
 
 
 def test_exact_deferred_domain_keeps_real_unrequested_menu_families(handoff):
     rows = records(handoff)
-    merged = dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    merged = campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
         scope_groups=handoff.census["anchor_groups"])
     for record in rows.values():
         for name, deferred in record["origin"]["deferred_domain"].items():
@@ -335,15 +337,15 @@ def test_known_unrequested_family_outside_actual_restricted_menu_refuses(handoff
     rows = records(handoff, menu_families=[get_tessera_family(FAMILY)])
     first = next(iter(rows))
     name = next(iter(rows[first]["schedule"]))
-    actual = dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    actual = campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
         scope_groups=handoff.census["anchor_groups"])
     assert actual["origin"]["deferred_domain"][name] == [DEFERRED]
     excluded = next(family for family in full[first]["origin"]["deferred_domain"][name]
                     if family not in rows[first]["schedule"][name])
     rows[first]["origin"]["deferred_domain"][name].append(excluded)
     rows[first]["origin"]["deferred_domain"][name].sort()
-    with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
-        dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    with pytest.raises(campaign_table.MergeRefused, match="exact deferred families"):
+        campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
             scope_groups=handoff.census["anchor_groups"])
 
 
@@ -352,12 +354,12 @@ def test_runtime_refuses_unknown_partial_actual_groups_and_changed_source(handof
     grouped = {"g:actual-complete-cohort": list(handoff.run.active_names),
                "u:" + handoff.run.idle_name: [handoff.run.idle_name]}
     with pytest.raises(ValueError, match="complete.*atomic"):
-        campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped,
+        campaign_table.campaign_acquisition_row_scope(handoff.acquisition, grouped,
             selected=[handoff.run.active_names[0]])
     with pytest.raises(ValueError, match="complete.*atomic"):
-        campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped, selected=["unknown"])
+        campaign_table.campaign_acquisition_row_scope(handoff.acquisition, grouped, selected=["unknown"])
     with pytest.raises(ValueError, match="no requested measurement work|zero"):
-        campaign._campaign_acquisition_row_scope(handoff.acquisition, handoff.census["anchor_groups"],
+        campaign_table.campaign_acquisition_row_scope(handoff.acquisition, handoff.census["anchor_groups"],
             selected=[handoff.run.idle_name])
     name = names[0]
     with pytest.raises(ValueError, match="source weight identity"):
@@ -383,7 +385,7 @@ def test_manifest_refuses_request_fork_and_overlapping_rows(handoff):
 
 def test_no_acquisition_keeps_legacy_settings_and_manifest_shape():
     assert dispatch._campaign_acquisition_argv(["--max-rounds", "legacy-unparsed-value"]) is None
-    assert dispatch._merge_acquisition_settings({"row": {"settings": {"legacy": True}, "units": {}}},
+    assert campaign_table._merge_acquisition_settings({"row": {"settings": {"legacy": True}, "units": {}}},
         {"row": {}}, acquisition=None, scope_groups=None) is None
 
 
@@ -417,10 +419,10 @@ def render_handoff(handoff, *, aliased=False):
     payloads, directories, schedules = {}, {}, {}
     row_identities, row_states = {}, {}
     for row, action in zip(planned["rows"], actions):
-        members = campaign.selection_priced_units(campaign.load_unit_selection(row["units"]))[0]
+        members = campaign_selection.selection_priced_units(campaign_selection.load_unit_selection(row["units"]))[0]
         binding = dispatch._campaign_acquisition_argv(dispatch._inner_campaign_argv(action))
         loaded = load_joint_campaign_acquisition(binding, units=sorted(members))
-        projected, keys, _ = campaign._campaign_acquisition_row_scope(loaded,
+        projected, keys, _ = campaign_table.campaign_acquisition_row_scope(loaded,
             handoff.census["anchor_groups"], selected=members)
         menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research") for name in members}
         weights = {name: handoff.run.weights[name] for name in members}
@@ -436,7 +438,7 @@ def render_handoff(handoff, *, aliased=False):
             audit_units=set(), snap=None, requests=projected["requests"], rates_by_unit=rates)
         schedules.update(scheduled)
         args.acquisition_schedule = scheduled
-        args.acquisition_origin = campaign._campaign_acquisition_origin(projected, scheduled, menus)
+        args.acquisition_origin = campaign_table.campaign_acquisition_origin(projected, scheduled, menus)
         args.acquisition_source_weights = projected["source_weights"]
         row_dir = Path(row["dir"])
         wire_dir = row_dir / "cache" / "wire"
@@ -463,7 +465,7 @@ def render_handoff(handoff, *, aliased=False):
                         activation_kwargs_for=memo, hessian_required=True,
                         static_input_scale=static_scales.get(name))
                     keyword_names.update(prepared["activation_kwargs"] or {})
-                    campaign._require_campaign_acquisition_anchor(anchor, scheduled)
+                    campaign_table.require_campaign_acquisition_anchor(anchor, scheduled)
                     identity = campaign._checkpoint_anchor_identity(anchor, weights=weights,
                         menus=menus, calibration_source=source, static_scales=static_scales, projected_units={})
                     wire_records.setdefault(name, {})[anchor.format_name] = campaign._checkpoint_wire_record(anchor, wire_dir, identity)
@@ -494,14 +496,14 @@ def render_handoff(handoff, *, aliased=False):
             surfaces={name: {family: {"anchors": len(anchors)} for family, anchors in fs.items()}
                       for name, fs in measured.items()}, acquisition=args.acquisition_origin,
             acquisition_schedule=scheduled, acquisition_source_weights=projected["source_weights"],
-            anchor_groups=groups, unit_selection={**campaign.load_unit_selection(row["units"]), "selected": True},
+            anchor_groups=groups, unit_selection={**campaign_selection.load_unit_selection(row["units"]), "selected": True},
             activation_static_scales={"policy": static_policy, "path": str(scale_path), "units": static_scales},
             hessian={**calibration, "calibration_identity": calibration, "supplied": True,
                 "capture_path": str(capture_path), "capture_sha256": capture_digest,
                 "kwargs": sorted(keyword_names)})
         requested_menu = {name: [r for r in menus[name] if r.body_rate_q256 in scheduled[name].get(r.family, [])]
                           for name in members}
-        payloads[row["row_id"]] = campaign.campaign_cost_payload(measured, requested_menu,
+        payloads[row["row_id"]] = campaign_table.campaign_cost_payload(measured, requested_menu,
             loo={}, provenance={"provenance": prov})
         # The row runner publishes these after campaign_cost_payload; the merge
         # reads them from every row payload.
@@ -525,10 +527,10 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
     directories, payloads, schedules = actual.directories, actual.payloads, actual.schedules
     row_identities, row_states = actual.row_identities, actual.row_states
     coverage, merged_capture_digest = actual.coverage, actual.capture_digest
-    checkpoint = dispatch.merge_checkpoint(directories, handoff.root / "merged.anchors.json",
+    checkpoint = campaign_table.merge_checkpoint(directories, handoff.root / "merged.anchors.json",
         acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
     unit_identities = checkpoint["identity"]["units"]
-    merged = dispatch.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
+    merged = campaign_table.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
         plan_coverage=coverage, acquisition=handoff.acquisition,
         acquisition_unit_identities=unit_identities)
     assert merged["provenance"]["acquisition_schedule"] == schedules
@@ -547,8 +549,8 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
             restored = pickle.loads(handoff.cost.read_bytes())["costs"][name][fmt]
             assert restored == original
             assert original["signed_components_per_probe"]
-    with pytest.raises(dispatch.MergeRefused, match="bound checkpoint unit identities"):
-        dispatch.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
+    with pytest.raises(campaign_table.MergeRefused, match="bound checkpoint unit identities"):
+        campaign_table.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
             plan_coverage=coverage, acquisition=handoff.acquisition)
     first = next(iter(payloads))
     name = next(iter(payloads[first]["provenance"]["acquisition_schedule"]))
@@ -565,14 +567,14 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
 
         changed_payloads = copy.deepcopy(payloads)
         alter_domain(changed_payloads[first]["provenance"]["acquisition"])
-        with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
-            dispatch.merge_payloads(changed_payloads, census=handoff.census,
+        with pytest.raises(campaign_table.MergeRefused, match="exact deferred families"):
+            campaign_table.merge_payloads(changed_payloads, census=handoff.census,
                 capture_sha256=merged_capture_digest, plan_coverage=coverage,
                 acquisition=handoff.acquisition, acquisition_unit_identities=unit_identities)
         changed_identities = copy.deepcopy(row_identities)
         alter_domain(changed_identities[first]["settings"]["acquisition_origin"])
-        with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
-            dispatch._merge_acquisition_settings(changed_identities, row_states,
+        with pytest.raises(campaign_table.MergeRefused, match="exact deferred families"):
+            campaign_table._merge_acquisition_settings(changed_identities, row_states,
                 acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
 
 
@@ -583,15 +585,15 @@ def test_aliased_controls_reach_real_rows_and_both_merges(handoff, monkeypatch, 
                 for identity in actual.row_identities.values()}) == 2
     failures = []
     try:
-        checkpoint = dispatch.merge_checkpoint(actual.directories, handoff.root / "alias-merged.anchors.json",
+        checkpoint = campaign_table.merge_checkpoint(actual.directories, handoff.root / "alias-merged.anchors.json",
             acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
-    except dispatch.MergeRefused as exc:
+    except campaign_table.MergeRefused as exc:
         failures.append(f"checkpoint merge: {exc}")
     try:
-        merged = dispatch.merge_payloads(actual.payloads, census=handoff.census,
+        merged = campaign_table.merge_payloads(actual.payloads, census=handoff.census,
             capture_sha256=actual.capture_digest, plan_coverage=actual.coverage,
             acquisition=handoff.acquisition, acquisition_unit_identities=actual.unit_identities)
-    except dispatch.MergeRefused as exc:
+    except campaign_table.MergeRefused as exc:
         failures.append(f"scalar payload merge: {exc}")
     assert not failures, "real admitted alias artifacts refused: " + "; ".join(failures)
     assert checkpoint["identity"]["settings"]["acquisition_schedule"] == actual.schedules
@@ -634,10 +636,10 @@ def test_aliased_controls_reach_real_rows_and_both_merges(handoff, monkeypatch, 
                     identity_sha256=identity_sha, state=state)
             directories[row_id] = str(directory)
             units.update(identity["units"])
-        with pytest.raises(dispatch.MergeRefused):
-            dispatch.merge_checkpoint(directories, handoff.root / (change + ".anchors.json"),
+        with pytest.raises(campaign_table.MergeRefused):
+            campaign_table.merge_checkpoint(directories, handoff.root / (change + ".anchors.json"),
                 acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
-        with pytest.raises(dispatch.MergeRefused):
-            dispatch.merge_payloads(payloads, census=handoff.census,
+        with pytest.raises(campaign_table.MergeRefused):
+            campaign_table.merge_payloads(payloads, census=handoff.census,
                 capture_sha256=actual.capture_digest, plan_coverage=actual.coverage,
                 acquisition=handoff.acquisition, acquisition_unit_identities=units)

@@ -14,6 +14,7 @@ selected-source row of ``prismaquant.tessera_campaign.main`` on the tiny GLM
 checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
+from prismaquant import tessera_campaign_selection as campaign_selection
 import json
 import os
 import pickle
@@ -85,7 +86,7 @@ def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
             rows.append((path, selection))
     assert len(rows) == 1, 'the fixture must plan exactly one stack row'
     path, selection = rows[0]
-    assert selection['schema'] == campaign.UNITS_SCHEMA_V2
+    assert selection['schema'] == campaign_selection.UNITS_SCHEMA_V2
     entry, = selection['groups']
     assert entry['sampled'] and set(entry['sampled']) < set(entry['members'])
     return path, selection

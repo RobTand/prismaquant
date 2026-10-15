@@ -1,4 +1,7 @@
 """Packed probe -> persisted draw -> packed campaign prices -> scoped allocator."""
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
+from prismaquant import tessera_campaign as campaign
 import copy
 import json
 import pickle
@@ -9,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, _campaign, _sample, _payload, STEM
+from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, _sample, _payload, STEM
 
 
 def _plan(tmp_path, monkeypatch):
@@ -41,7 +44,7 @@ def _plan(tmp_path, monkeypatch):
 def test_real_packed_probe_plans_and_rehydrates_shared_projection_draw(tmp_path, monkeypatch):
     from prismaquant import tessera_campaign as campaign
     selection, stats = _plan(tmp_path, monkeypatch)
-    samples = campaign.selection_stack_samples(selection, _profile())
+    samples = campaign_table.selection_stack_samples(selection, _profile())
     assert set(samples) == set(stats)
     for name, sample in samples.items():
         assert sample.stack_h_trace == stats[name]['h_trace']
@@ -56,9 +59,9 @@ def test_real_packed_probe_plans_and_rehydrates_shared_projection_draw(tmp_path,
     for sample in samples.values():
         for members in sample.members.values():
             for member in members:
-                anchors[member] = {'TESSERA_E2M1_K2': [_anchor(campaign, member,
+                anchors[member] = {'TESSERA_E2M1_K2': [_anchor(member,
                     'TESSERA_E2M1_K2', 'TESSERA_E2M1_K2_R896', 896, 0.02)]}
-    payload = campaign.campaign_cost_payload(anchors, {}, loo={}, provenance={}, stack_samples=samples)
+    payload = campaign_table.campaign_cost_payload(anchors, {}, loo={}, provenance={}, stack_samples=samples)
     assert set(payload['costs']) == set(stats)
 
 
@@ -66,8 +69,8 @@ def test_selection_rejects_independent_gate_and_up_draws(tmp_path, monkeypatch):
     from prismaquant import tessera_campaign as campaign
     selection, _ = _plan(tmp_path, monkeypatch)
     selection['groups'][0]['sampled'].pop()
-    with pytest.raises(campaign.StackSampleError, match='sampled members'):
-        campaign.selection_stack_samples(selection, _profile())
+    with pytest.raises(campaign_table.StackSampleError, match='sampled members'):
+        campaign_table.selection_stack_samples(selection, _profile())
 
 
 def test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypatch):
@@ -85,7 +88,6 @@ def test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypa
 
     from prismaquant import allocator
 
-    campaign = _campaign()
     _v5_contract(monkeypatch)
 
     model_dir = tmp_path / "model"
@@ -108,14 +110,14 @@ def test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypa
 
     anchors = {
         f"{STEM}.{e}.{role}": {family: [
-            _anchor(campaign, f"{STEM}.{e}.{role}", family, fmt, q256, 0.02)]}
+            _anchor(f"{STEM}.{e}.{role}", family, fmt, q256, 0.02)]}
         for e in range(4) for role in ("w1", "w3")}
-    sample = _sample(campaign, stats[gate_up])
-    payload = _payload(campaign, anchors, {sample.packed_qname: sample})
+    sample = _sample(stats[gate_up])
+    payload = _payload(anchors, {sample.packed_qname: sample})
     # The dense unit is priced by the same table so the run has one currency.
     payload["costs"]["model.layers.18.self_attn.out_proj"] = {
         fmt: {"output_mse": 4e-4, "output_mse_measured": True,
-              "currency": campaign.CURRENCY}}
+              "currency": campaign_table.CURRENCY}}
     payload["formats"] = sorted(set(payload["formats"]) | {fmt})
     costs = tmp_path / "cost.pkl"
     costs.write_bytes(pickle.dumps(payload))
@@ -153,8 +155,8 @@ def test_draw_receipt_must_replay_from_the_carried_probe(tmp_path, monkeypatch):
     selection, _ = _plan(tmp_path, monkeypatch)
     record = next(iter(selection['groups'][0]['stack_samples'].values()))
     record['seed'] += 1
-    with pytest.raises(campaign.StackSampleError, match='does not replay'):
-        campaign.selection_stack_samples(selection, _profile())
+    with pytest.raises(campaign_table.StackSampleError, match='does not replay'):
+        campaign_table.selection_stack_samples(selection, _profile())
 
 
 def test_checkpoint_binds_fisher_and_probability_values_with_same_measured_units(monkeypatch):
@@ -193,7 +195,7 @@ def test_campaign_main_consumes_persisted_draw_and_emits_packed_population(tmp_p
         probe_rows[name]['_packed_experts_module'] = STACK
     sampled = dispatch.sample_stack_groups(groups, probe_rows, profile=profile,
         stack_sample=2, seed=5, audit_rate=10)
-    selection = {'schema': campaign.UNITS_SCHEMA_V2, 'model': argv[1], 'layer_stride': 1,
+    selection = {'schema': campaign_selection.UNITS_SCHEMA_V2, 'model': argv[1], 'layer_stride': 1,
         'groups': [{'key': key, 'members': members, **sampled.get(key, {})}
                    for key, members in sorted(groups.items())]}
     path = tmp_path / 'units.json'

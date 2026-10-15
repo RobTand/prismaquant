@@ -19,10 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from tools.dispatch_tessera_campaign import (
-    CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE,
-    DIAGNOSTIC_SCOPE, PANEL_SCHEMA, PANEL_STATUS, ScopeRefused,
-    campaign_identity, joint_campaign_scope, verify_joint_campaign_scope)
+from prismaquant.tessera_campaign_table import (CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE, DIAGNOSTIC_SCOPE, PANEL_SCHEMA, PANEL_STATUS, ScopeRefused, campaign_identity, joint_campaign_scope, verify_joint_campaign_scope)
 
 
 def _sha(path: Path) -> str:

@@ -1,5 +1,6 @@
 """Actual producer identities remain exact across a bounded immutable unit."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 from dataclasses import replace
 from types import SimpleNamespace
@@ -23,7 +24,7 @@ def fixture(*, projected=False):
     for fmt in formats:
         family, rung = parse_tessera_format_name(fmt)
         spec = get_format(fmt)
-        anchors.append(tc.CampaignAnchor(qname=name, format_name=fmt, family=family.name,
+        anchors.append(campaign_table.CampaignAnchor(qname=name, format_name=fmt, family=family.name,
             body_rate_q256=rung, dloss=0.1, dloss_stderr=0.0, memory_bytes=8192,
             bits_per_param=4.0, activation_contract=str(spec.act_dtype_name or "a16"),
             activation_quantized=spec.act_quant_changes_input,

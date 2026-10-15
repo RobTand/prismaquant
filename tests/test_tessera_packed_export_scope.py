@@ -1,4 +1,5 @@
 """Packed decisions use the same source receipts and scope gates as a census."""
+from prismaquant import tessera_campaign_table as campaign_table
 
 import pytest
 
@@ -20,12 +21,12 @@ def _pack(case):
     for name in parameters:
         stats = dict(h_trace=2.0, h_trace_per_expert=[1.0, 1.0], num_experts=2,
                      _packed_param=name.rsplit('.', 1)[1], _packed_experts_module=STACK)
-        samples[name] = campaign.stack_sample_from_probe(name, stats, profile,
+        samples[name] = campaign_table.stack_sample_from_probe(name, stats, profile,
             sampled_experts=[0, 1], inclusion_prob={0: 1.0, 1: 1.0}, seed=0)
     costs = {name: {FMT: {'output_mse': 1e-4}} for name in [DENSE, *parameters]}
-    population = campaign.campaign_population_block(
+    population = campaign_table.campaign_population_block(
         dense_targets=[DENSE], expert_targets=_units(), dense_all=[DENSE], pinned=[],
-        population=campaign.ExpertPopulation(members=(),
+        population=campaign_table.ExpertPopulation(members=(),
             declared={STACK: {name: (N, N) for name in _units()}},
             packed_in_scope=parameters, omitted_outside_layer_stride={}),
         layer_stride=1, costs=costs, menus={n: [FMT] for n in costs},

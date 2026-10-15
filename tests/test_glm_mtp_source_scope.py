@@ -11,6 +11,7 @@ Each test runs on the tiny checkpoint of ``test_glm_mtp_capture``: a two-layer
 body plus its MTP layer, captured through the real CLI phases.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 import hashlib
 import json
@@ -300,7 +301,7 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
     groups = [f"u:{SHARED_DOWN}", f"s:{STACK}"]
     selection = tmp_path / "units.json"
     selection.write_text(json.dumps(dict(
-        schema=campaign.UNITS_SCHEMA, model=str(env.source), layer_stride=1,
+        schema=campaign_selection.UNITS_SCHEMA, model=str(env.source), layer_stride=1,
         groups=[dict(key=key, members=census["anchor_groups"][key]) for key in groups])))
     monkeypatch.setattr(campaign, "_calibration_tokens",
                         lambda *_args, **_kwargs: (_calibration_rows(env.ids), CALIBRATION_TEXT))

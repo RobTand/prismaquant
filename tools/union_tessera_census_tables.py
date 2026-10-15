@@ -815,7 +815,7 @@ def _restamp(row: Any, capture_sha256: str) -> Any:
 def _union_provenance(tables: list[Table], *, costs, menu_sizes, capture_path: Path,
                       capture_sha256: str, wire_dir: Path, cache_dir: Path,
                       scales_path: Path) -> dict:
-    from prismaquant.tessera_campaign import ExpertPopulation, campaign_population_block
+    from prismaquant.tessera_campaign_table import (ExpertPopulation, campaign_population_block)
 
     provs = {t.name: t.cost["provenance"] for t in tables}
     for name, prov in provs.items():
@@ -970,7 +970,7 @@ def _union_provenance(tables: list[Table], *, costs, menu_sizes, capture_path: P
 
 def _union_cost(tables: list[Table], union_units: Mapping[str, dict], *, capture_sha256: str,
                 paths: Mapping[str, Path]) -> tuple[dict, dict]:
-    from prismaquant.tessera_campaign import SCHEMA, canonical_refusals
+    from prismaquant.tessera_campaign_table import (SCHEMA, canonical_refusals)
 
     for table in tables:
         cost = table.cost

@@ -1,4 +1,5 @@
 """Adaptive scheduler progress and durable resume, with controlled producer calls."""
+from prismaquant import tessera_campaign_table as campaign_table
 from collections import Counter
 import copy
 import json
@@ -41,7 +42,7 @@ def fixture(monkeypatch, tmp_path):
             if controls['hard'] is not None:
                 raise controls['hard']
             raise RuntimeError('controlled permanent adaptive encode rejection')
-        return campaign.CampaignAnchor(qname=qname, family=FAMILY,
+        return campaign_table.CampaignAnchor(qname=qname, family=FAMILY,
             format_name=format_name, body_rate_q256=rate, dloss=1/rate,
             dloss_stderr=0., memory_bytes=32, bits_per_param=rate/256,
             activation_contract='fp8_e4m3', activation_quantized=True, wire_bytes=32,

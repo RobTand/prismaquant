@@ -1,4 +1,6 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -77,13 +79,13 @@ def test_nonuniform_requests_union_only_inside_actual_atomic_group(domain):
     assert actual[domain.names[3]][FAMILY] == [domain.qs[2]]
     reordered = {name: dict(reversed(list(domain.requests[name].items()))) for name in reversed(domain.names)}
     assert schedule(domain, requests=reordered) == actual
-    keys, scope = campaign._campaign_acquisition_scope(packet(domain), domain.groups)
+    keys, scope = campaign_table.campaign_acquisition_scope(packet(domain), domain.groups)
     assert keys == sorted(domain.groups)
     assert scope == set(domain.names)
-    origin = campaign._campaign_acquisition_origin(packet(domain), actual, domain.menus)
+    origin = campaign_table.campaign_acquisition_origin(packet(domain), actual, domain.menus)
     assert origin["expanded_actual_work_count"] == 7
     assert all(DEFERRED in families for families in origin["deferred_domain"].values())
-    assert origin["currency"] == campaign.CURRENCY
+    assert origin["currency"] == campaign_table.CURRENCY
     assert "path" not in origin
 
 
@@ -94,7 +96,7 @@ def test_projected_experts_expand_by_actual_stack_group():
     assert groups == {"s:model.layers.0.mlp.experts": sorted(names)}
     acquisition = dict(requests={name: {FAMILY: [896] if i == 0 else []}
                                 for i, name in enumerate(names)}, source_weights=dict.fromkeys(names, {}))
-    keys, scope = campaign._campaign_acquisition_scope(acquisition, groups)
+    keys, scope = campaign_table.campaign_acquisition_scope(acquisition, groups)
     assert scope == set(names)
     expanded = campaign._campaign_round_one_schedule(groups, {keys[0]: {FAMILY: [896, 1024]}},
         args=arguments(), audit_units=set(), snap=None, requests=acquisition["requests"],
@@ -117,7 +119,7 @@ def test_scope_refuses_unknown_missing_atomic_member_and_extra_work(domain, chan
     else:
         selected.remove(domain.names[1])
     with pytest.raises(ValueError, match="scope|member"):
-        campaign._campaign_acquisition_scope(acquisition, domain.groups, selected=selected)
+        campaign_table.campaign_acquisition_scope(acquisition, domain.groups, selected=selected)
 
 
 def remove_deferred_grid(domain, absent):
@@ -136,7 +138,7 @@ def test_absent_empty_family_is_retained_deferred_without_extra_prime_work(domai
     removed = remove_deferred_grid(domain, absent)
     actual = schedule(domain)
     assert actual == before
-    origin = campaign._campaign_acquisition_origin(packet(domain), actual, domain.menus)
+    origin = campaign_table.campaign_acquisition_origin(packet(domain), actual, domain.menus)
     assert origin["expanded_actual_work_count"] == 7
     assert all(DEFERRED in origin["deferred_domain"][name] for name in removed)
     assert all(actual[name][DEFERRED] == [] for name in domain.names)
@@ -262,10 +264,10 @@ def test_partial_and_audit_selections_refuse_before_model(tmp_path, monkeypatch,
     import json
     from prismaquant import tessera_full_domain_acquisition as intake, model_profiles
     entry = {"key": "s:experts", "members": ["q", "k"]}
-    schema = campaign.UNITS_SCHEMA_V2
+    schema = campaign_selection.UNITS_SCHEMA_V2
     if kind == "partition":
-        schema = campaign.UNITS_SCHEMA_V3
-        entry["partition"] = dict(schema=campaign.EXPERT_PARTITION_SCHEMA,
+        schema = campaign_selection.UNITS_SCHEMA_V3
+        entry["partition"] = dict(schema=campaign_selection.EXPERT_PARTITION_SCHEMA,
             experts_per_row=1, index=0, count=2, rate_q256=896, members=["q"])
     else:
         entry.update(sampled=["q"], inclusion_probability={"q": 0.5})
@@ -350,12 +352,12 @@ def test_producer_header_digest_is_not_misrepresented_as_raw_digest(monkeypatch)
 def test_checkpoint_seed_extra_rungs_are_refused(domain):
     actual = schedule(domain)
     allowed = SimpleNamespace(qname=domain.names[0], family=FAMILY, body_rate_q256=domain.qs[1])
-    campaign._require_campaign_acquisition_anchor(allowed, actual)
+    campaign_table.require_campaign_acquisition_anchor(allowed, actual)
     for bad in [SimpleNamespace(qname="extra", family=FAMILY, body_rate_q256=domain.qs[0]),
                 SimpleNamespace(qname=domain.names[0], family=DEFERRED, body_rate_q256=domain.qs[0]),
                 SimpleNamespace(qname=domain.names[0], family=FAMILY, body_rate_q256=-1)]:
         with pytest.raises(ValueError, match="extra"):
-            campaign._require_campaign_acquisition_anchor(bad, actual)
+            campaign_table.require_campaign_acquisition_anchor(bad, actual)
 
 
 def test_unset_flags_leave_checkpoint_identity_settings_byte_identical(monkeypatch):
@@ -399,7 +401,7 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
     anchor = campaign._measure_anchor(qname=name, weight=weight, activations=rows,
         format_name=fmt, cache=cache, wire_dir=tmp_path, hessian_required=True,
         activation_kwargs_for=campaign._activation_kwargs_memo(source, {name: weight}, "cpu"))
-    campaign._require_campaign_acquisition_anchor(anchor, actual)
+    campaign_table.require_campaign_acquisition_anchor(anchor, actual)
     wire = campaign._wire_path(tmp_path, name, fmt)
     assert wire.is_file() and anchor.wire_bytes == wire.stat().st_size
     decoded = read_unit_artifact(wire.read_bytes(), device="cpu")

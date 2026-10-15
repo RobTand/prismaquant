@@ -20,6 +20,7 @@ Two things are pinned:
   draw it carries.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign
 
 import json
 import sys
@@ -37,10 +38,6 @@ ROLES = ("w1", "w3")
 
 def _dispatch():
     return pytest.importorskip("dispatch_tessera_campaign")
-
-
-def _campaign():
-    return pytest.importorskip("prismaquant.tessera_campaign")
 
 
 def _profile():
@@ -125,7 +122,7 @@ def _sample(dispatch, **over):
 
 def test_the_default_draw_is_byte_for_byte_what_it_was():
     """No ``sizes`` argument: the same record, serialised identically."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch)[f"s:{MODULE}"]
     record = entry["stack_samples"][PACKED]
     expected = _expected_probe_record(campaign, n=3, seed=5, audit_rate=10)
@@ -142,7 +139,7 @@ def test_the_default_draw_is_byte_for_byte_what_it_was():
 
 def test_a_counts_draw_follows_the_counts_and_declares_them():
     """The vector that drove the draw is named, carried and digested."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     record = entry["stack_samples"][PACKED]
     assert record["design"] == (record["draw"]["method"]
@@ -164,7 +161,7 @@ def test_a_counts_draw_follows_the_counts_and_declares_them():
 
 def test_a_counts_draw_survives_the_campaign_rehydration():
     """``selection_stack_samples`` replays it on the declared sizes."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     selection = {"groups": [{"key": f"s:{MODULE}", "members": _members(), **entry}]}
     samples = campaign.selection_stack_samples(selection, _profile())
@@ -176,7 +173,7 @@ def test_a_counts_draw_survives_the_campaign_rehydration():
 
 def test_a_record_whose_declared_digest_is_not_the_draws_is_refused():
     """The digest is what binds the named vector to the one actually used."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     record = dict(entry["stack_samples"][PACKED])
     record["sizes"] = {**record["sizes"], "sha256": "0" * 64}

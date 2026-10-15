@@ -1,4 +1,5 @@
 """An explicit pricing restriction cannot become routed support or seed leakage."""
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from types import SimpleNamespace
@@ -53,16 +54,16 @@ def test_restricted_seed_refuses_incompatible_routed_family():
 ])
 def test_policy_refuses_malformed_or_noncanonical_declarations(change):
     with pytest.raises(ValueError, match="family restriction"):
-        campaign.parse_family_restriction({**POLICY, **change})
+        campaign_table.parse_family_restriction({**POLICY, **change})
 
 
 def test_policy_is_canonical_and_rejects_repeated_json_fields():
     policy = copy.deepcopy(POLICY)
     policy["dense"].reverse()
-    assert campaign.parse_family_restriction(json.dumps(policy)) == POLICY
-    assert campaign.parse_family_restriction(None) is None
+    assert campaign_table.parse_family_restriction(json.dumps(policy)) == POLICY
+    assert campaign_table.parse_family_restriction(None) is None
     with pytest.raises(ValueError, match="repeats field"):
-        campaign.parse_family_restriction('{"dense":[],"dense":[]}')
+        campaign_table.parse_family_restriction('{"dense":[],"dense":[]}')
 
 
 @pytest.mark.parametrize("structures", [None, {}, {"a": "dense"},
@@ -194,7 +195,7 @@ def _restricted_payloads():
 
 
 def test_fanout_merge_preserves_the_complete_structure_restriction():
-    from tools.dispatch_tessera_campaign import merge_payloads
+    from prismaquant.tessera_campaign_table import (merge_payloads)
     merged = merge_payloads(_restricted_payloads(), census={"counts": {"a": 16384, "b": 16384}},
                             capture_sha256="merged-digest")
     assert merged["provenance"]["family_restriction"] == {
@@ -210,7 +211,7 @@ def test_fanout_merge_unions_a_dense_row_and_a_routed_row():
     whole-restriction equality check would make any census that mixes dense
     and routed rows unmergeable (RobTand/prismaquant#487).
     """
-    from tools.dispatch_tessera_campaign import merge_payloads
+    from prismaquant.tessera_campaign_table import (merge_payloads)
     payloads = _restricted_payloads()
     payloads["row-0001"]["provenance"]["family_restriction"]["structure_by_unit"] = {
         "b": "routed_moe"}
@@ -222,7 +223,7 @@ def test_fanout_merge_unions_a_dense_row_and_a_routed_row():
 
 def test_fanout_merge_refuses_one_unit_claimed_by_two_rows():
     """The union is not a silent overwrite: a repeated unit is a refusal."""
-    from tools.dispatch_tessera_campaign import merge_payloads, MergeRefused
+    from prismaquant.tessera_campaign_table import (merge_payloads, MergeRefused)
     payloads = _restricted_payloads()
     payloads["row-0001"]["provenance"]["family_restriction"]["structure_by_unit"] = {
         "a": "dense", "b": "routed_moe"}
@@ -233,7 +234,7 @@ def test_fanout_merge_refuses_one_unit_claimed_by_two_rows():
 
 @pytest.mark.parametrize("mutation", ["missing_policy", "different_policy", "missing_structure", "unknown_structure"])
 def test_fanout_merge_refuses_incompatible_or_incomplete_restrictions(mutation):
-    from tools.dispatch_tessera_campaign import merge_payloads, MergeRefused
+    from prismaquant.tessera_campaign_table import (merge_payloads, MergeRefused)
     payloads = _restricted_payloads()
     prov = payloads["row-0001"]["provenance"]
     if mutation == "missing_policy":

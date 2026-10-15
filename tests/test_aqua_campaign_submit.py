@@ -42,6 +42,7 @@ built by the CPU path, exactly as it is at submission time. The stage itself is
 never executed here -- these tests run no GPU work.
 """
 from prismaquant import priced_cell
+from prismaquant import tessera_campaign_table as campaign_table
 
 import hashlib
 import json
@@ -190,9 +191,9 @@ def _workspace(scratch: Path) -> dict:
 
     import dispatch_tessera_campaign as dispatch
 
-    scope = dispatch.joint_campaign_scope(json.loads(plan.read_text()))
+    scope = campaign_table.joint_campaign_scope(json.loads(plan.read_text()))
     identity = scratch / "campaign-identity.json"
-    identity.write_text(json.dumps(dispatch.campaign_identity(scope),
+    identity.write_text(json.dumps(campaign_table.campaign_identity(scope),
                                    sort_keys=True))
     return {"plan": plan, "identity": identity, "cost_in": cost_in, "card": card,
             "spec": spec, "checkpoint": checkpoint, "names": names,
@@ -400,7 +401,7 @@ def test_the_plan_may_price_a_narrower_surface_than_the_census(campaign):
     campaign["plan"].write_text(json.dumps(plan))
     campaign["cost_in"].write_bytes(pickle.dumps(payload))
     assert submit_aqua(campaign, "--dry-run") == 0
-    record, cells = dispatch.aqua_requested_cells(
+    record, cells = campaign_table.aqua_requested_cells(
         json.loads(campaign["plan"].read_text()), payload, list(MEASURED))
     assert record["requested_cells"] == len(MEASURED) + 1
     assert cells == frozenset({(names[0], MEASURED[0]),
@@ -487,7 +488,7 @@ def test_a_joint_cell_the_plan_never_priced_refuses_or_is_recorded_unverified(
     message = str(refused.value)
     assert "never priced" in message and "FP8_UNPLANNED" in message
 
-    record, cells = dispatch.aqua_requested_cells(
+    record, cells = campaign_table.aqua_requested_cells(
         json.loads(campaign["plan"].read_text()), payload, list(MEASURED),
         accept_joint_cells_outside_plan=True)
     assert record["joint_cells_outside_plan"] == 1

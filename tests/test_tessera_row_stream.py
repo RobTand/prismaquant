@@ -7,6 +7,7 @@ on CPU over a real verified capture, a real shard reader and real Tessera
 encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 import gc
 import importlib.metadata
@@ -154,7 +155,7 @@ def stream_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build)
     monkeypatch.setattr(autoscale, "selected_anchor_resources", plan)
     selection = tmp_path / "selection.json"
-    selection.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA, groups=[
+    selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA, groups=[
         dict(key=key, members=list(members)) for key, members in sorted(groups.items())])))
     argv = ["--model", str(source), "--out", str(tmp_path / "cost.pkl"),
             "--cache-dir", str(tmp_path / "cache"),

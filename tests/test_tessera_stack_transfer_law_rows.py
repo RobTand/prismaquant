@@ -22,6 +22,7 @@ Three claims are pinned here, and the third is the one that has teeth:
   onto it; the block is now built from an allowlist.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign
 
 import math
 from types import SimpleNamespace
@@ -36,10 +37,6 @@ TARGETS = (832, 1088)
 #: The transfer-law draw: the experts that were also encoded at 832 and 1088.
 LAW_EXPERTS = (0, 2, 5, 7)
 EXPERTS = 12
-
-
-def _campaign():
-    return pytest.importorskip("prismaquant.tessera_campaign")
 
 
 def _profile():
@@ -60,7 +57,7 @@ def _probe_row(module, per_expert):
     }
 
 
-def _anchor(campaign, qname, q256, dloss):
+def _anchor(qname, q256, dloss):
     return campaign.CampaignAnchor(
         qname=qname, family="TESSERA_E2M1_K1",
         format_name=f"TESSERA_E2M1_K1_R{q256}", body_rate_q256=q256,
@@ -78,7 +75,7 @@ PLANTED = {832: {"w1": (1.05, 1.30), "w3": (0.95, 1.45)},
            1088: {"w1": (0.96, -1.20), "w3": (1.04, -1.35)}}
 
 
-def _stack(campaign, module, *, offset, anchors):
+def _stack(module, *, offset, anchors):
     """One two-tier stack: a 960 census, plus 832/1088 on the law draw only."""
     h = [1.0 + 0.3 * expert for expert in range(EXPERTS)]
     reference = {}
@@ -88,14 +85,14 @@ def _stack(campaign, module, *, offset, anchors):
             value = 2.0 ** (-8.0 + offset + 0.21 * expert + 0.37 * index)
             reference[(expert, role)] = value
             anchors[qname] = {"TESSERA_E2M1_K1": [
-                _anchor(campaign, qname, REFERENCE, value)]}
+                _anchor(qname, REFERENCE, value)]}
     for expert in LAW_EXPERTS:
         for role in ("w1", "w3"):
             qname = f"{module}.{expert}.{role}"
             for rung in TARGETS:
                 slope, intercept = PLANTED[rung][role]
                 anchors[qname]["TESSERA_E2M1_K1"].append(_anchor(
-                    campaign, qname, rung,
+                    qname, rung,
                     2.0 ** (intercept
                             + slope * math.log2(reference[(expert, role)]))))
     sample = campaign.stack_sample_from_probe(
@@ -109,11 +106,10 @@ def _stack(campaign, module, *, offset, anchors):
 @pytest.fixture
 def payload():
     """Two two-tier stacks, so each can be predicted by a law that held it out."""
-    campaign = _campaign()
     anchors: dict = {}
     samples = {}
     for index, module in enumerate((MODULE_A, MODULE_B)):
-        sample, _ = _stack(campaign, module, offset=1.4 * index, anchors=anchors)
+        sample, _ = _stack(module, offset=1.4 * index, anchors=anchors)
         samples[sample.packed_qname] = sample
     built = campaign.campaign_cost_payload(
         anchors, {}, loo={},
@@ -142,14 +138,13 @@ def test_the_censused_rung_is_a_measurement(payload):
 
 def test_a_drawn_rung_keeps_the_sampled_cost_source():
     """A one-tier draw is an estimate and must not borrow the census spelling."""
-    campaign = _campaign()
     h = [1.0 + expert for expert in range(4)]
     anchors = {}
     for expert in range(4):
         for role in ("w1", "w3"):
             qname = f"{MODULE_A}.{expert}.{role}"
             anchors[qname] = {"TESSERA_E2M1_K1": [
-                _anchor(campaign, qname, REFERENCE, 0.01 * (expert + 1))]}
+                _anchor(qname, REFERENCE, 0.01 * (expert + 1))]}
     sample = campaign.stack_sample_from_probe(
         f"{MODULE_A}.gate_up_proj", _probe_row(MODULE_A, h), _profile(),
         sampled_experts=[0, 1, 2, 3],
@@ -225,15 +220,14 @@ def test_the_interpolated_surface_row_also_carries_no_estimator():
     interpolated rows used to inherit ``estimator`` by subtraction.  Same rule:
     a value no estimator produced may not name one.
     """
-    campaign = _campaign()
     h = [1.0 + expert for expert in range(4)]
     anchors = {}
     for expert in range(4):
         for role in ("w1", "w3"):
             qname = f"{MODULE_A}.{expert}.{role}"
             anchors[qname] = {"TESSERA_E2M1_K1": [
-                _anchor(campaign, qname, 832, 0.02 * (expert + 1)),
-                _anchor(campaign, qname, 1088, 0.01 * (expert + 1))]}
+                _anchor(qname, 832, 0.02 * (expert + 1)),
+                _anchor(qname, 1088, 0.01 * (expert + 1))]}
     sample = campaign.stack_sample_from_probe(
         f"{MODULE_A}.gate_up_proj", _probe_row(MODULE_A, h), _profile(),
         sampled_experts=[0, 1, 2, 3],

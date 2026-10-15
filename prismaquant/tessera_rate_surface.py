@@ -69,11 +69,6 @@ from typing import Any, Mapping, Sequence, TYPE_CHECKING
 from tessera.errors import GrammarError
 from tessera.manifest import BodyKind
 
-from .tessera_allocator import (
-    TesseraAllocatorCandidate,
-    build_tessera_allocator_candidate,
-    tessera_solver_candidate_menu,
-)
 from .tessera_formats import (
     SUPERBLOCK_WEIGHTS,
     TesseraFamily,
@@ -85,6 +80,7 @@ from .tessera_formats import (
 
 if TYPE_CHECKING:
     from tessera.export import WireRecipe
+    from .tessera_allocator import TesseraAllocatorCandidate
 
 __all__ = [
     "STACK_TRANSFER_REFERENCE_Q256",
@@ -376,6 +372,8 @@ def densify_rate_surface(
         if any(tuple(scope["shape"]) != dims for scope in self_scopes.values()):
             raise TesseraFormatError("quality surface differs from the actual source shape")
     columns = dims[1]
+    from .tessera_allocator import build_tessera_allocator_candidate
+
     built: list[TesseraAllocatorCandidate] = []
     for rate in sorted(set(int(value) for value in q256_values)):
         structure = (allowability_scope or {}).get("kernel_kind")
@@ -457,6 +455,8 @@ def rate_surface_solver_menu(
         raise TesseraFormatError(
             f"units {sorted(missing)} have no declared currency"
         )
+    from .tessera_allocator import tessera_solver_candidate_menu
+
     flat: list[TesseraAllocatorCandidate] = []
     for unit_name in sorted(densified):
         flat.extend(densified[unit_name])

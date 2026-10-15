@@ -854,8 +854,7 @@ def derive_original_campaign_scope(original_plan, campaign_identity):
     digest. This is the whole cost, paid at creation; consumers recheck the
     embedded block against the plan's stated digests and the identity file.
     """
-    from tools.dispatch_tessera_campaign import (
-        COMPLETE_CAMPAIGN_SCOPE, ScopeRefused, verify_joint_campaign_scope)
+    from prismaquant.tessera_campaign_table import (COMPLETE_CAMPAIGN_SCOPE, ScopeRefused, verify_joint_campaign_scope)
     _require(isinstance(campaign_identity, dict) and set(campaign_identity) == {"path", "sha256"},
              "the frozen campaign identity needs a bound path and SHA256")
     plan = _json(original_plan, "original plan")
@@ -888,9 +887,7 @@ def _check_derived_scope(block, inputs, plan):
     sealed in every record, is what the effective scope is then compared
     with, byte for byte, at every site.
     """
-    from tools.dispatch_tessera_campaign import (
-        CAMPAIGN_IDENTITY_FIELDS, CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA,
-        COMPLETE_CAMPAIGN_SCOPE)
+    from prismaquant.tessera_campaign_table import (CAMPAIGN_IDENTITY_FIELDS, CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE)
     _require(isinstance(block, dict), "derived campaign scope block is not a mapping")
     _same(block.get("schema"), DERIVED_SCOPE_SCHEMA, "derived scope schema")
     _same(block.get("rule"), DERIVED_SCOPE_RULE, "derived scope rule")

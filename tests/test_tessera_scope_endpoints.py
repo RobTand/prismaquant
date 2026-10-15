@@ -159,7 +159,7 @@ def test_campaign_main_passes_live_model_topology_to_real_menu_boundary(tmp_path
 
 def _allocator_inputs(tmp_path, fmt="BF16"):
     from prismaquant.cost_currency import RENDER_SCORE_COST_MODE
-    from prismaquant.tessera_campaign import CURRENCY
+    from prismaquant.tessera_campaign_table import (CURRENCY)
     from prismaquant.tessera_formats import SUPERBLOCK_WEIGHTS
     model_dir = tmp_path / "model"
     model_dir.mkdir()

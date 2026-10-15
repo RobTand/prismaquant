@@ -31,6 +31,19 @@ move preserves predicates, branch precedence, constants and initialization guard
 Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_campaign_table` owns anchor/stack metadata, campaign payload construction,
+cost/census/plan/scope schemas and merged checkpoint/payload policy. The numerical
+campaign supplies measurements; dispatcher and package callers consume the same
+table owner. Scope and acquisition bindings, Hessian identities, family coverage,
+stack estimation and cached wire claims retain their existing rules. Receipt
+validation returns display facts; the CLI prints them. Existing selection metadata
+remains in `tessera_campaign_selection`, including file intake. Acquisition scope,
+partition/rate-band and sample audit metadata use the table owner. Rate-surface
+allocator bridges load only when building solver candidates, so constructing
+measured/interpolated payloads needs no numerical model or Torch runtime.
+
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): Tessera
 metadata compatibility uses public stdlib-only `tessera.metadata` API v1. Its
 producer owns the smoke grammar, derivations and lane requirements; PrismaQuant

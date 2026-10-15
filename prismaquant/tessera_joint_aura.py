@@ -6,6 +6,7 @@ Tessera's existing source/H/settings receipt and decoder qualify them before
 ordinary streamed joint AURA consumes the exact per-Linear candidate roster.
 """
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
 from collections import defaultdict
@@ -808,7 +809,7 @@ def _read_campaign_metadata(inputs, reuse_policy):
     runs. The result is the state the walk reads from; a caller that walks
     several scopes in one process keeps it through ``metadata_memo`` (#1492).
     """
-    from tools.dispatch_tessera_campaign import _require_receipts
+    from prismaquant.tessera_campaign_table import (require_campaign_receipts)
 
     paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
     census = json.loads(paths["census"].read_text())
@@ -819,7 +820,7 @@ def _read_campaign_metadata(inputs, reuse_policy):
           (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
     rows = plan["rows"]
     _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
-    _require_receipts(paths["campaign_plan"].parent, len(rows))
+    require_campaign_receipts(paths["campaign_plan"].parent, len(rows))
     owners, groups = {}, {}
     for row in rows:
         for name in row["members"]:
@@ -1596,7 +1597,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
     from . import tessera_campaign as tc
     from .production_weight_cache import _cb_cache_tensor_identity
 
-    anchor = tc.CampaignAnchor(**cell["anchor"])
+    anchor = campaign_table.CampaignAnchor(**cell["anchor"])
     name, fmt = anchor.qname, anchor.format_name
     render_origin = cell.get("render_origin")
     _require(render_origin in RENDER_ORIGINS,
@@ -2211,7 +2212,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                             max_resident_bytes=max_render_bytes, max_workers=file_load_workers))
                     for name in unit_names:
                         source_weight = targets[name].weight.detach()
-                        anchors = [tc.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
+                        anchors = [campaign_table.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
                         keys = tuple((name, fmt) for fmt in renders[name])
                         # ONE WINDOW, THE BYTES THE GUARD ALREADY RESERVED.
                         # The reservation above prices this unit's residency at

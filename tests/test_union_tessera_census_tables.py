@@ -16,7 +16,7 @@ from prismaquant.cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path, write_unit,
 )
 from prismaquant.layer_config import LAYER_CONFIG_META_KEY
-from prismaquant.tessera_campaign import SCHEMA, ExpertPopulation, campaign_population_block
+from prismaquant.tessera_campaign_table import (SCHEMA, ExpertPopulation, campaign_population_block)
 from prismaquant.tessera_census_cache import (
     census_layer_config, census_selected_cached_units_manifest, load_selected_wire_records,
     seal_roster,

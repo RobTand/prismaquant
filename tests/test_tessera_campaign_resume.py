@@ -1,4 +1,5 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
+from prismaquant import tessera_campaign_table as campaign_table
 import hashlib
 import json
 import pickle
@@ -85,14 +86,14 @@ def test_main_refuses_unbound_checkpoint_before_accepting_anchors(
     monkeypatch, tmp_path, checkpoint_unit,
 ):
     campaign, checkpoint, argv, _model, _inputs = _main_fixture(monkeypatch, tmp_path)
-    anchor = campaign.CampaignAnchor(
+    anchor = campaign_table.CampaignAnchor(
         qname=checkpoint_unit, family="TESSERA_E4M3_K1",
         format_name="TESSERA_E4M3_K1_R1024", body_rate_q256=1024,
         dloss=0.25, dloss_stderr=0.0, memory_bytes=8, bits_per_param=4.0,
         activation_contract="a8", activation_quantized=True, wire_bytes=8,
         seconds=1.0, hessian_applied=False,
     )
-    checkpoint.write_text(json.dumps({"schema": campaign.SCHEMA, "anchors": [vars(anchor)]}))
+    checkpoint.write_text(json.dumps({"schema": campaign_table.SCHEMA, "anchors": [vars(anchor)]}))
     with pytest.raises(RuntimeError, match="checkpoint.*identity|resume.*identity"):
         campaign.main(argv)
 
@@ -432,7 +433,6 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
     assert checkpoint.read_bytes() == original_manifest
 
 
-
 @pytest.mark.parametrize("changed", ["producer", "encoder", "mixed", "certified",
                                      "tampered_wire", "other_wire_identity"])
 def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
@@ -501,8 +501,6 @@ def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_camp
             assert "[DEV-MODE]" not in capsys.readouterr().out
     assert checkpoint.read_bytes() == original_manifest
     assert unit_path(root, UNIT).read_bytes() == original_shard
-
-
 
 
 @pytest.mark.parametrize("suffix,contract", [("indexer.weights_proj", "a32"), ("kv_b_proj", "a16")])
