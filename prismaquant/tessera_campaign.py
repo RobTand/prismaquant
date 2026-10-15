@@ -133,7 +133,6 @@ __all__ = [
     'require_census_draw',
     'resolve_anchor_groups',
     'round_one_rates',
-    'select_anchor_groups',
     'write_export_inputs',
 ]
 
