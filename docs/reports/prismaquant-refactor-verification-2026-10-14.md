@@ -584,3 +584,19 @@ It can catch a missing local declaration, but lexical order does not prove
 runtime order. Separate cold metadata-import and real streaming-skeleton tests
 exercise their actual boundaries. The audit does not claim complete dynamic
 coverage of every manual loader.
+
+
+The bounded test audit's Stage B tail case is repaired in `87a75a1570`.
+Actual IoSpanLog open/close events and public open_names replace inclusive
+wall-clock timestamp comparisons. The final validation count must occur under
+the payload span, after every window closes and before payload closes. Existing
+row, unit, parent and outcome checks remain. Production code and shared runtime
+fixtures are unchanged.
+PB `f9c9deaaa43c449afec2df191a5d4b1dbfb17e74a929cdfb7a0f1e8c1e795ea6`
+passes all seven module cases without skips, with fourteen warnings, and compiles
+the test. Result is
+`1a7f31b5b128f4bf41be507674de3820963ba544452d8ffdfb4c293e17b8b691`,
+821 bytes; receipt is
+`86409332e7dc04c55585c925b09db0e82fed2d65d7edef6001632c8715a2b33b`.
+The actual diff, successful terminal and CAS payload/receipt were independently
+checked. CPU1, RAM4 GiB and native threads1 are reserved with portable eligibility.
