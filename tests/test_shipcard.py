@@ -638,9 +638,18 @@ def test_kv_shared_fisher_echo_flags_an_unvalidated_allocation():
     assert severed["unvalidated_kv_fisher_correction"] is True
 
 
-def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path):
-    """The exporter's `_write_shipcard`, without importing torch's world."""
-    from prismaquant.export_native_compressed import _write_shipcard
+def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path, monkeypatch):
+    """Export records captured render options and the missing serving gates."""
+    from prismaquant import export_native_compressed as exporter
+    from prismaquant.native_render_levers import NativeRenderLevers
+
+    monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP", "0.125")
+    monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_ROLES", "q_proj=0.25")
+    monkeypatch.setenv("PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS", "6,4,3")
+    captured = NativeRenderLevers.resolve({"gptq": False})
+    monkeypatch.setattr(exporter, "_RENDER_LEVERS", captured)
+    monkeypatch.setattr(exporter, "_PRODUCTION_WEIGHT_CACHE", None)
+    monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP", "0.875")
 
     model_dir = _artifact(tmp_path)
     recipe = tmp_path / "layer_config.json"
@@ -650,7 +659,7 @@ def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path):
         "log_error": {"achieved_bits": 4.7513, "target_bits": 4.75},
     }))
 
-    _write_shipcard(
+    exporter._write_shipcard(
         model_dir,
         source_model="/models/Qwen3-4B",
         layer_config_path=str(recipe),
@@ -675,7 +684,12 @@ def test_export_writes_a_card_with_build_facts_and_empty_slots(tmp_path):
     assert build["layer_config_sha"] and build["assignment_hash"]
 
     assert build["format_histogram"] == {"NVFP4/packed": 1}
-    assert "PRISMAQUANT_GPTQ_DAMP" in build["render_levers"]
+    recorded = build["render_levers"]["native_render_levers"]
+    assert NativeRenderLevers.from_record(recorded) == captured
+    assert recorded["gptq"] is False
+    assert recorded["gptq_fixed_damp"] == 0.125
+    assert recorded["gptq_damp_roles"] == {"q_proj": 0.25}
+    assert recorded["nvfp4_joint_scale_levels"] == [6.0, 4.0, 3.0]
     assert "unvalidated_kv_fisher_correction" in build["kv_shared_fisher"]
     assert card["artifact_bytes"] == len(b"weights")
 
