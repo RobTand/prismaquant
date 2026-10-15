@@ -514,3 +514,29 @@ Terminal records, result payload sizes/hashes and embedded receipts for these
 successful actions were independently checked. Resource reservations are
 CPU1, RAM4 GiB and native threads1, with portable eligibility. Final composed
 verification remains pending the menu and pricing operations.
+
+
+The menu/projection operation is integrated in `71972608cb`. The actual
+production, partition-test and global-binding-tool bytes equal the qualified
+root-composed source capsule. The call remains after the existing activation
+memo/cache setup and before acquisition scheduling and source closure. It
+retains whole-partition meta geometry and narrows only priced consumer maps.
+The partition test now calls the operation rather than extracting and executing
+its source. A producer-controlled projected-dense case retains the real refusal.
+Independent read-only review found no changed policy or ownership behavior.
+
+PB `1acee643710085defd2a306248ae693b41cbe117694b075dd2a31cc70be4aa50`
+passes 179 cases without skips and compiles three sources. Actual operation
+body equivalence and scope/menu global-binding checks pass. Result is
+`99d717148d1f5051749f4c25f41848fe5f1a9a9407ae7e6fb778965e599526d7`,
+1186 bytes; receipt is
+`3e6c6c4f6bcda06c2c7e4a6e29d1e5a1c64c1b00112627f028015d37295f929d`.
+The preceding focused proof `2a632b8476dd2d1328a5b89baf931f0f4b30248b41ae24c53ac6d9f2f223643d`
+passes 27 cases without skips and compiles five sources, including the next
+acquisition-wire unit's real entry-point proof before its production change.
+Its result is `40b7b56b55859f559d67c6706c32312188e851bb8194973c886eba73bb5f2dd4`;
+receipt is `d0db53a52c3df13029a11f884d32699226d13e377f5ce8dcab0f915c791253c6`.
+These overlapping selections are not a combined unique count. Both actions use
+CPU1, RAM4 GiB and native threads1 with portable eligibility. Terminal records,
+result payloads and embedded receipts were independently checked. Final
+composed verification remains pending the raw-wire and loaded-campaign runner.
