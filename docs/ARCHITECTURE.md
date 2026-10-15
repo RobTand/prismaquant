@@ -13,6 +13,14 @@ precedence. Measured and PACT contexts still reuse one loaded run and retain
 their scientific evidence, exact re-solve and no-overwrite replay contracts.
 Whole-artifact and runtime pricing remain with their existing owners.
 
+Re-stamped 2026-10-15: `staged_whole_file` owns the checkpoint whole-entry
+read transaction as well as existing metadata/sealed material reads. The checkpoint
+keeps manifest admission and independent digest verification; the reader returns
+its existing owned bytearray only after descriptor closure, exact lease release
+and successful byte accounting. Range/tensor, activation archive and borrowed
+group lifetimes retain their existing owners and independent fences.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
+
 Re-stamped 2026-10-15: candidate prices, activation branch labels and unknown-zero
 refusals share one classified price basis. Fixed qualified/exact, joint, output
 and weight-space bases retain existing precedence, gains, transfers and clamps.
