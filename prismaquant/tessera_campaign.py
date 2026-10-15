@@ -102,6 +102,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 from .digests import (
     DIRECT_ASCII_INDENT2_LAX,
@@ -5622,6 +5623,7 @@ def _main(argv, *, source_scope, waits) -> int:
             source_authentication.close()
 
     route_cache: dict[tuple, str | None] = {}
+    checkpoint_settings = vars(args).copy()
     acquisition_schedule = None
     if acquisition is not None:
         acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
@@ -5636,9 +5638,10 @@ def _main(argv, *, source_scope, waits) -> int:
         acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
             args=args, audit_units=audit_units, snap=None, requests=acquisition["requests"],
             rates_by_unit=acquisition_rates)
-        args.acquisition_schedule = acquisition_schedule
-        args.acquisition_origin = campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
-        args.acquisition_source_weights = acquisition["source_weights"]
+        checkpoint_settings["acquisition_schedule"] = acquisition_schedule
+        acquisition_origin = campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
+        checkpoint_settings["acquisition_origin"] = acquisition_origin
+        checkpoint_settings["acquisition_source_weights"] = acquisition["source_weights"]
 
     if not streaming_head:
         close_source_authentication()
@@ -5658,7 +5661,7 @@ def _main(argv, *, source_scope, waits) -> int:
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
             pinned_roster=pinned_roster, expected_units=census_targets)
 
-    checkpoint_settings = vars(args).copy()
+    checkpoint_settings = MappingProxyType(checkpoint_settings)
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
     from .prismabuild_progress import report as report_progress
@@ -6821,7 +6824,7 @@ def _main(argv, *, source_scope, waits) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
-            **({"acquisition": args.acquisition_origin,
+            **({"acquisition": acquisition_origin,
                 "acquisition_schedule": acquisition_schedule,
                 "acquisition_source_weights": acquisition["source_weights"]} if acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means

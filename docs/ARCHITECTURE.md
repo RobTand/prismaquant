@@ -103,6 +103,11 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): acquisition
+keeps its three derived checkpoint settings in the original raw CLI mapping,
+with ordered updates before a read-only identity handoff. Typed execution
+requests do not serialize themselves into the historical checkpoint wire.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): one campaign
 menu/projection operation resolves full-group partition grids, local menus and
 producer-bound encoding structure. Census and pricing share that policy;
