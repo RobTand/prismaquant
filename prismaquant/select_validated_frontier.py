@@ -493,10 +493,9 @@ def measured_rows(
             "assignment_hash": row.get("assignment_hash"),
             "assignment_sha256": row.get("assignment_sha256"),
             "mse": dict(row.get("mse", {}) or {}),
-            # The surrogate the allocator optimized. validate_assignments_kl emits
-            # it nested as mse.predicted_dloss_sum; a top-level surrogate_loss (e.g.
-            # test fixtures or legacy rows) takes precedence when present. Without
-            # this fallback the surrogate-vs-KL Spearman below silently never fires.
+            # Validation's local row estimate is not a recorded DP objective.
+            # Historical rows may carry an explicit top-level surrogate_loss,
+            # which takes precedence over the nested validation diagnostic.
             "surrogate_loss": (
                 row.get("surrogate_loss")
                 if row.get("surrogate_loss") is not None
