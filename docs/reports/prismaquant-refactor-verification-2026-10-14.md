@@ -342,3 +342,36 @@ A further GitHub read-only refresh found the same 36 open PRs and unchanged
 heads. No remote PR disposition was executed. The additional API handoff was
 resent as mailbox message `1792036048215-f730d08d` with its shared context path;
 no producer acknowledgement had arrived at this checkpoint.
+
+
+The cold menu prerequisite is integrated in `ea5b9f4dc7`. Its real isolated
+menu test blocks serving, Torch, Transformers, Triton and vLLM while checking
+menu defaults, modes and refusals. Two unused solver reexports and their pointer
+identity test are deleted; three actual DP behavior tests still call the solver.
+PB `8f9db04d7906c503ffdc8fc94c688711228b09801a24d1d0a56ff166af469299`
+passes 118 cases without skips and compiles four touched sources. Result is
+`0bfeaba30c6da5e29c4eb8a11f586d9b14383ea2b537d4ccf520eff210409ae0`;
+receipt is `53191c653d4632b7badb4e59c5ce75ffc031bdd2cfa7429467fe4f46cd747997`.
+
+The T2 structural preparation/join unit is integrated in `d83314d6a4`.
+PB `70e7c64ef5b513597b5efafcd32338890e149edce4c5fbd1d195d33f62477717`
+passes 107 cases with two explicit CUDA skips and compiles six sources. Result
+is `498ab5a7e92dcd784139baee2d90d2e2662234d950be82f59ad023fd32e3c048`;
+receipt is `2ec0af4b82ebd8a2637a2ea4e2841e9082ae501709fe58a6fd5d5eab2021c96f`.
+The coordinator independently checked both terminal outcomes, logs and actual
+CAS bytes against their recorded sizes and SHA-256 identities. Both units used
+CPU1, RAM4 GiB, native threads1 and portable admission with the exact qualified
+Git interpreter. Their immutable source compositions are recorded locally in
+`reports/tessera-menu-cold-composition.json` and
+`reports/tessera-cli-bookends-composition.json`.
+
+An independent read-only review of the integrated prep/join unit found no
+missing request fields or changed refusal ordering. It traced nested census,
+calibration, pinned-roster, selection and streamed-identity consumers. Preparation
+keeps the saved calibration and source context through the synchronous identity
+callback. Join retains its automatic-source refusal before I/O. The checkpoint
+settings codec still consumes the original CLI Namespace on its existing path;
+it does not serialize a request dataclass. Direct request copies retain seed0
+and explicit false controls. This review grants no additional execution coverage.
+Census/capture/pricing request units, the separately reproduced argv defect,
+and the additional public producer APIs remain pending.
