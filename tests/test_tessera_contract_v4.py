@@ -27,6 +27,13 @@ def _parse(payload):
     return contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
 
 
+def test_development_population_requires_rate_addressed_tessera_formats():
+    payload = _packaged()
+    payload["formats"][0]["kind"] = "cb_product"
+    with pytest.raises(contract.TesseraContractError, match="knows only 'tessera_wire'"):
+        _parse(payload)
+
+
 def test_current_v4_contract_keeps_every_launch_and_residency(legacy_v4_contract):
     payload = legacy_v4_contract
     assert payload["lane_eligibility"]["schema"] == "tessera.lane-eligibility.v4"
