@@ -206,3 +206,11 @@ marked fleet_data. Its exact two artifacts exist and total 1,454,802,228 bytes;
 a separate manifest declares their known digests for that one offline validation.
 The remaining 367 test files use a separate PB fanout. These submissions are
 pending and are not recorded as passing coverage.
+
+
+The separately declared GLM census test passed at
+`0386b8141ee4636f12e69dedbc646456a8d019c60291290d9c1937d075aa8ab1`,
+with one collected and one completed case, no skips. Result CAS SHA-256 is
+`756cb881249eff7ac834e2a17a8ad7b96a687fca910d69d763675aca51cabe0b`.
+It validates the actual digest-bound historical probe/census roster and raw
+statistics. It grants no new served quality or speed qualification.

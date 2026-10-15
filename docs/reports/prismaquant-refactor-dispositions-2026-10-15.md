@@ -17,7 +17,7 @@ record, not a claim that every pending unit is finished.
 | T2 requests | Pending source-grounded request/kind runner migration. |
 | T3 measurement | Pending cell-measurement/calibration-forward ownership migration. |
 | T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
-| S1 staged reads | Shared mount facts and topmost-NFS retry fixed. Remaining read-transaction ownership under review, including borrowed descriptors, sealed buffers and exact-release receipts. |
+| S1 staged reads | Implemented shared mount facts, topmost-NFS retry and checkpoint whole-entry transaction. Group lease ownership migration is in progress; borrowed descriptor and sealed-buffer lifetimes stay distinct. |
 | S2 block walk | Implemented ordinary forward/capture/expert lifetime owner and prefetch-failure cleanup. Fisher work retains distinct tape and source policies. |
 | S3 cost streaming | Implemented separate forward, artifact and identity owners with direct caller migration. |
 | S4 store append | Reject another append wrapper. Existing publication owner already handles five callers, unique temporary files, fsync, rename and indexing. Wire synthesis with no cache owner is a different operation. |

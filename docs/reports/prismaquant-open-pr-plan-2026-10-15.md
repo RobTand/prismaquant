@@ -38,3 +38,9 @@ replaces the final composed gate.
 Detailed source citations, cached patches, exact heads, checks and dependency
 records remain at `/home/rob/tmp/pq-refactor-20261014/reports/`. This report is a
 disposition decision, not an assertion that all retained PRs are merge-ready.
+
+
+The S1 review does not yet justify retiring #2641. Existing live tests cover much
+of its intent, but a fixed sampling-seed vector and census mutation during the
+read still need equivalent behavior coverage. Retain it until those obligations
+are met; the staged-reader extraction is not a substitute for either.
