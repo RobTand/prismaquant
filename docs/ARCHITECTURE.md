@@ -16,6 +16,15 @@ Re-stamped 2026-10-15: `CandidateBuild` returns candidates and explicit owned
 cost rows. Admitted canonical chord rows and synthesized source prices flow to
 aggregation and selected quality metadata through these rows, replacing hidden
 canonical price/quality maps on probe stats. Callers migrate directly.
+
+Re-stamped 2026-10-15: individual and pooled probe-shard reuse require recorded
+sample-partition, importance, activation-scope, execution and census metadata to
+equal the requested metadata, including requested absence. The field set belongs
+to `sample_parallel_artifacts`. An ordinary request cannot reuse a shard stamped
+for the retired sample execution lane. Probe writers and scientific rows retain
+their existing schemas and bytes.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
+
 Re-stamped 2026-10-15: sample-parallel producer and reducer execution, their
 five offline manual commands, and the uncalled resident whole-model probe are
 archived at `archive/sample_parallel_probe_2026-10-15/`. The incremental CLI

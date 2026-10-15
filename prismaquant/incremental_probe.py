@@ -38,6 +38,7 @@ from __future__ import annotations
 from . import probe_inventory
 
 from . import probe_statistics
+from .sample_parallel_artifacts import SAMPLE_PARALLEL_META_FIELDS
 
 
 import argparse
@@ -1073,6 +1074,9 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     meta = data.get("meta") or {}
     probe_meta = dict(meta)
     probe_meta.update(meta.get("incremental_shard", {}))
+    if any(probe_meta.get(key) != expected_meta.get(key)
+           for key in SAMPLE_PARALLEL_META_FIELDS):
+        return False
     for key, expected in expected_meta.items():
         if probe_meta.get(key) != expected:
             return False
@@ -1174,11 +1178,7 @@ _CONTENT_META_KEYS: tuple[str, ...] = (
     # A different sample partition has the same qname scope but different
     # sufficient statistics. It may only meet its siblings in the dedicated
     # raw-stat sample merger, never in LPS-invariant first-seen reuse.
-    "sample_parallel",
-    "sample_parallel_importance",
-    "sample_parallel_activation_scope",
-    "sample_parallel_execution_identity",
-    "sample_parallel_qname_census",
+    *SAMPLE_PARALLEL_META_FIELDS,
 )
 
 

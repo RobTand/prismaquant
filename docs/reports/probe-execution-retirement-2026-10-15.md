@@ -166,3 +166,24 @@ helper or compatibility export was restored. PB
 passes all 45 file/byte digest cases with no skips. Its terminal and CAS payload
 were independently checked. Combined latest coverage is now 729 passes and seven
 skips across 20 files; the failed pre-edit baseline remains recorded above.
+
+### Separate ordinary-shard resume repair
+
+The P1 metadata-admission finding is fixed separately from the refactor. A real
+ordinary shard is first proved reusable, then each of the five recorded sample
+fields is stamped at top level or under `incremental_shard`. All ten cases failed
+before the fix because the public reader accepted the stamp when expected metadata
+omitted it. Pooled-row reuse already refused that disagreement.
+
+`sample_parallel_artifacts.SAMPLE_PARALLEL_META_FIELDS` now supplies the existing
+field set to both readers. Individual-shard reuse requires each recorded value to
+equal the request, including absence. Probe writers and artifact bytes do not
+change. This check runs while the CLI examines existing pickles before creating
+its streaming context; it adds no probe, kernel, cache-fill or per-layer work.
+
+The admitted RED check returned ten failures and 15 passes. GREEN PB
+`6ad183dbfbf3e6f4510d0beba26b36b02c557d3a40745e94ef2e2f8d9907ffe9`
+and `42dc97aa7d33d2aacc1d64a9e61392b2621ab41304e8334c2b20bc6559e85a90`
+returned 90 passes and no skips across seven affected files. Three files compile
+under PB `e3f3b9aa25c1`. All terminal exits, settled cleanup and CAS payloads were
+checked. Combined latest coverage is 739 passes and seven skips across 20 files.

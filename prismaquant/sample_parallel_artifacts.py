@@ -14,6 +14,14 @@ import torch
 from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex
 from .probe_statistics import merge_marginals, finalize_fisher_stats
 
+SAMPLE_PARALLEL_META_FIELDS = (
+    "sample_parallel",
+    "sample_parallel_importance",
+    "sample_parallel_activation_scope",
+    "sample_parallel_execution_identity",
+    "sample_parallel_qname_census",
+)
+
 import hashlib
 
 import re
