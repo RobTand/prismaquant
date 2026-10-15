@@ -116,6 +116,8 @@ def main():
         compare_records(args.compare_before, args.compare_after, args.comparison_output,
                         args.baseline_options_record)
         return
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     root = Path(args.root)
     torch.set_num_threads(1)
     torch.manual_seed(42)
