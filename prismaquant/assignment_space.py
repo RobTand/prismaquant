@@ -101,7 +101,7 @@ class AssignmentSpace:
         if include_auxiliary:
             expanded.update(self._fixed_formats)
         return AssignmentExpansion(
-            before_promotion=expanded,
+            before_promotion=dict(expanded),
             assignment=promote_serving_units(
                 expanded,
                 self._format_rank,

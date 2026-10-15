@@ -46,6 +46,20 @@ def test_expansion_keeps_both_sides_of_real_serving_promotion():
     assert assignment[q] == 'NVFP4'
 
 
+def test_in_place_promotion_cannot_blind_the_emitted_assignment_guard(monkeypatch):
+    from prismaquant import assignment_space
+    from prismaquant.allocator import validate_final_serving_promotion_noop
+
+    def mutate_promotion(assignment, *args, **kwargs):
+        assignment['q'] = 'BF16'
+        return assignment
+
+    monkeypatch.setattr(assignment_space, 'promote_serving_units', mutate_promotion)
+    result = space().expand({'q': 'NVFP4'})
+    with pytest.raises(SystemExit, match='final serving-unit promotion changed'):
+        validate_final_serving_promotion_noop(result.before_promotion, result.assignment)
+
+
 def test_unit_members_and_fixed_join_are_distinct_operations():
     names = ['model.layers.0.self_attn.' + leaf + '_proj' for leaf in ('q', 'k', 'v')]
     unit = 'model.layers.0.self_attn' + _FUSED_SIBLING_MARKER + 'qkv'
