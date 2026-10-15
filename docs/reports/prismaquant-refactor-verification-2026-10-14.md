@@ -375,3 +375,50 @@ it does not serialize a request dataclass. Direct request copies retain seed0
 and explicit false controls. This review grants no additional execution coverage.
 Census/capture/pricing request units, the separately reproduced argv defect,
 and the additional public producer APIs remain pending.
+
+
+The real CLI resume-head test replaces source extraction/evaluation in
+`225b62f925`. PB
+`45f1d7a12b3d8fb5df858565c4d014ef4f022eb588b6da618d66a1d4178dc744`
+passes all nine retained geometry/admission cases without skips and compiles the
+test. It observes actual persisted head telemetry before source authentication
+for absent, manifest and partial-directory checkpoints. Two deliberate source
+mutations are caught: the obsolete checkpoint keyword causes six failures,
+and forcing load-all on checkpoint presence causes four. The worker restores
+the source after each fault. Result is
+`3fd37ba1e57ffc8d0850377a59b0e93271d9a9dc48884fbc2c0f80701b5b3852`;
+receipt is `bae278c7271d6106a019c535809b0e234fd7ac84bf8cab833aabccbea2b6e3d4`.
+
+Census/capture requests and runners are integrated in `41d7417de3`.
+`CensusRequest` carries the ten actual census fields. `CaptureRequest` carries
+eighteen fields with an explicit monolith/quantum phase. The CLI retains source,
+calibration and model lifetimes. Existing collection/callback operations compare
+exactly after request-field/phase normalization. Five moved raw serializer calls
+use existing named profiles, with separate byte oracles for Unicode, NaN,
+Infinity, indentation and spacing. The obsolete private digest-site baseline
+entry is removed; the remaining main-function entry is retained.
+
+PB `8fcc4bacf2552cdd5d48bcfc5d82b579a2b9c44c7aff2f829d96b9a9426cfc18`
+passes 220 cases with two CUDA skips, but fails the obsolete baseline entry
+check. Its runtime/test/proof bytes equal the final source capsule across nine
+recorded files; the coordinator independently checked all nine identities.
+Final PB `ea183223eea5b3dd84e572cf65fc793c9bc0c13e16c6578111b5bc1fc827cd07`
+passes 43 guard/oracle cases without skips, compiles seven sources, and verifies
+the live primitive-site set against the scoped baseline removal. Result is
+`3f0d12b1be8a115d3f88a38f2beb225c2f9dacc4566afa7b9f515a262b16eaf1`,
+1130 bytes; receipt is
+`b0488aa4db3192c0d964e32a4b95ba7191b1a5332cca996ae0bf0f0e2a777a82`.
+Terminal outcomes, logs and successful payload/receipt identities were checked.
+
+Earlier phase proof failures remain failed: `6c32be51` selected a nonexistent
+test filename and ran no tests; `f2955250` exposed inherited raw serialization
+sites; `db53ba20` required equality of a generated inventory's entire presentation
+rather than its primitive-site set. No generated whole-file rewrite or new
+allowance was adopted. These actions have no passing receipts. Final execution
+uses CPU1, RAM4 GiB and native threads1 with portable eligibility.
+
+A read-only explicit internal-import scan after `41d7417de3` finds no missing
+absolute or relative imports in the package, tools, experiments and live tests.
+It does not inspect dynamic exports or certify runtime behavior. Pricing and
+additional public producer APIs remain pending; final composed verification
+has not yet run.
