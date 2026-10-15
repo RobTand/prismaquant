@@ -1236,7 +1236,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif device.type == "cuda":
             load_kwargs["device_map"] = device_str
         tokenizer = AutoTokenizer.from_pretrained(staged, **tokenizer_kwargs)
-        calib_repeats = calibration_data.load_calibration_repeats(tokenizer, args)
+        calibration_draw = calibration_data.load_validation_calibration(
+            tokenizer, calibration_data.CalibrationRequest.from_namespace(args))
+        calib_repeats = calibration_draw.selection_repeats
         calib_provenance = _calibration_provenance(calib_repeats)
         calib_provenance["held_out_check"] = _assert_calibration_disjoint(
             calib_provenance["calib_repeat_hashes"],

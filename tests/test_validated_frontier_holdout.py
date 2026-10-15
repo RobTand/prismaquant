@@ -6,7 +6,7 @@ windows of the (prefix-stable) deterministic loader, making the validation
 set [K, K+n) token-disjoint from render calib [0, K) by construction.
 """
 
-from prismaquant.calibration_data import load_calibration_repeats
+from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 from prismaquant import calibration_data
 from types import SimpleNamespace
 
@@ -37,9 +37,9 @@ def _fake_loader(record):
 def test_skip_first_yields_disjoint_windows(monkeypatch):
     calls = []
     monkeypatch.setattr(calibration_data, "load_calibration", _fake_loader(calls))
-    full = calibration_data.load_calibration_repeats(None, _args())[0]
-    held = calibration_data.load_calibration_repeats(
-        None, _args(calib_skip_first=4))[0]
+    full = load_validation_calibration(None, CalibrationRequest.from_namespace(_args())).selection_repeats[0]
+    held = load_validation_calibration(
+        None, CalibrationRequest.from_namespace(_args(calib_skip_first=4))).selection_repeats[0]
     assert calls[0]["n"] == 4 and calls[1]["n"] == 8
     assert held.shape[0] == 4
     render_tokens = set(full.flatten().tolist())
@@ -50,8 +50,8 @@ def test_skip_first_yields_disjoint_windows(monkeypatch):
 def test_skip_first_threads_seed_and_repeats(monkeypatch):
     calls = []
     monkeypatch.setattr(calibration_data, "load_calibration", _fake_loader(calls))
-    reps = calibration_data.load_calibration_repeats(
-        None, _args(calib_repeats=3, calib_skip_first=2, calib_seed=7))
+    reps = load_validation_calibration(
+        None, CalibrationRequest.from_namespace(_args(calib_repeats=3, calib_skip_first=2, calib_seed=7))).selection_repeats
     assert len(reps) == 3
     assert calls[0]["seed"] == 7
     assert calls[0]["n"] == 3 * 4 + 2  # repeats*n + skip
@@ -63,5 +63,5 @@ def test_skip_first_insufficient_corpus_raises(monkeypatch):
         return torch.arange(n * seqlen).reshape(n, seqlen)
     monkeypatch.setattr(calibration_data, "load_calibration", short)
     with pytest.raises(RuntimeError, match="skip-first"):
-        calibration_data.load_calibration_repeats(
-            None, _args(calib_skip_first=4))
+        load_validation_calibration(
+            None, CalibrationRequest.from_namespace(_args(calib_skip_first=4))).selection_repeats

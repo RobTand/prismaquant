@@ -8,6 +8,9 @@ Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
 were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
 ledgers. Current execution and admission paths have no callers to these modules.
+Re-stamped 2026-10-15: validation sampling takes a `CalibrationRequest` and
+returns a `CalibrationDraw` from `calibration_data`. CLI normalization lives
+at the boundary; selection callers consume the owned repeat tuple.
 
 Re-stamped 2026-10-14: validation repeat sampling now belongs to
 `calibration_data`; the validator calls the owner and retains its serving and

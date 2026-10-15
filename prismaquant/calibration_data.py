@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -497,11 +498,39 @@ def load_calibration(tokenizer, source: str, n_samples: int,
     return torch.stack(samples[:n_samples], dim=0)
 
 
-def load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
-    repeats = max(int(args.calib_repeats), 1)
-    n_samples = int(args.n_calib_samples)
-    skip = max(int(getattr(args, "calib_skip_first", 0) or 0), 0)
-    if skip and not args.dataset:
+@dataclass(frozen=True)
+class CalibrationRequest:
+    source: str | None
+    n_samples: int
+    seqlen: int
+    repeats: int
+    seed: int
+    skip_first: int
+    split: str
+    repeat_seed_stride: int
+
+    @classmethod
+    def from_namespace(cls, args) -> CalibrationRequest:
+        return cls(
+            source=args.dataset, n_samples=int(args.n_calib_samples),
+            seqlen=int(args.calib_seqlen), repeats=max(int(args.calib_repeats), 1),
+            seed=(int(getattr(args, "calib_seed", 42) or 42) if args.dataset
+                  else int(args.calib_seed)),
+            skip_first=max(int(getattr(args, "calib_skip_first", 0) or 0), 0),
+            split=args.calib_split, repeat_seed_stride=int(args.calib_repeat_seed_stride),
+        )
+
+
+@dataclass(frozen=True)
+class CalibrationDraw:
+    selection_repeats: tuple[torch.Tensor, ...]
+
+
+def load_validation_calibration(tokenizer, request: CalibrationRequest) -> CalibrationDraw:
+    repeats = request.repeats
+    n_samples = request.n_samples
+    skip = request.skip_first
+    if skip and not request.source:
         # R14(iii): --calib-skip-first is the held-out mechanism, and it is
         # only implemented on the --dataset branch below. The wikitext branch
         # used to compute `skip` and then never apply it, so a manual
@@ -511,7 +540,7 @@ def load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
         raise ValueError(
             "--calib-skip-first is only implemented for --dataset calibration; "
             f"got --calib-skip-first {skip} with no --dataset (wikitext "
-            f"split={args.calib_split!r}). The wikitext loader is seeded per "
+            f"split={request.split!r}). The wikitext loader is seeded per "
             "repeat, not window-sliced, so the skip cannot be honored and the "
             "selection split would silently overlap the cost split. Pass a "
             "--dataset, or use a distinct --calib-seed / --calib-split for the "
@@ -521,18 +550,12 @@ def load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
         )
 
     def _load_jsonl(n: int) -> torch.Tensor:
-        # --calib-skip-first K: drop the first K windows of the deterministic
-        # loader so selection KL is measured on windows DISJOINT from the
-        # probe/cost/render calibration (which consumes windows [0, K)).
-        # load_calibration is prefix-stable at a fixed seed, so [K, K+n) is
-        # token-disjoint from [0, K) by construction. House rule: held-out
-        # split is disjoint from cost generation (review criticals C3/C5).
         all_ids = load_calibration(
             tokenizer,
-            args.dataset,
+            request.source,
             n + skip,
-            args.calib_seqlen,
-            calib_seed=int(getattr(args, "calib_seed", 42) or 42),
+            request.seqlen,
+            calib_seed=request.seed,
         )
         if all_ids.size(0) < n + skip:
             raise RuntimeError(
@@ -543,34 +566,34 @@ def load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
         return all_ids[skip:]
 
     if repeats == 1:
-        if args.dataset:
-            return [_load_jsonl(n_samples)]
-        return [load_wikitext_calibration_windowed(
+        if request.source:
+            return CalibrationDraw((_load_jsonl(n_samples),))
+        return CalibrationDraw((load_wikitext_calibration_windowed(
             tokenizer,
             n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=args.calib_seed,
-        )]
-    if args.dataset:
+            request.seqlen,
+            split=request.split,
+            seed=request.seed,
+        ),))
+    if request.source:
         all_ids = _load_jsonl(n_samples * repeats)
         if all_ids.size(0) < n_samples * repeats:
             raise RuntimeError(
                 f"requested {repeats} calibration repeats of {n_samples} samples, "
                 f"but only loaded {all_ids.size(0)} samples"
             )
-        return [
+        return CalibrationDraw(tuple(
             all_ids[idx * n_samples:(idx + 1) * n_samples].contiguous()
             for idx in range(repeats)
-        ]
-    stride = int(args.calib_repeat_seed_stride)
-    return [
+        ))
+    stride = request.repeat_seed_stride
+    return CalibrationDraw(tuple(
         load_wikitext_calibration_windowed(
             tokenizer,
             n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=int(args.calib_seed) + idx * stride,
+            request.seqlen,
+            split=request.split,
+            seed=request.seed + idx * stride,
         )
         for idx in range(repeats)
-    ]
+    ))

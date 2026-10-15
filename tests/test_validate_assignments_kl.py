@@ -1,4 +1,4 @@
-from prismaquant.calibration_data import load_calibration_repeats
+from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 from types import SimpleNamespace
 
 import pytest
@@ -183,7 +183,7 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         calib_repeat_seed_stride=1,
     )
     with pytest.raises(ValueError, match="only implemented for --dataset"):
-        load_calibration_repeats(object(), args)
+        load_validation_calibration(object(), CalibrationRequest.from_namespace(args)).selection_repeats
 
     # No skip requested -> the wikitext branch is untouched.
     args.calib_skip_first = 0
@@ -198,7 +198,7 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
     original = calibration_data.load_wikitext_calibration_windowed
     calibration_data.load_wikitext_calibration_windowed = _fake_loader
     try:
-        repeats = load_calibration_repeats(object(), args)
+        repeats = load_validation_calibration(object(), CalibrationRequest.from_namespace(args)).selection_repeats
     finally:
         calibration_data.load_wikitext_calibration_windowed = original
     assert len(repeats) == 1 and repeats[0].shape == (4, 128)
