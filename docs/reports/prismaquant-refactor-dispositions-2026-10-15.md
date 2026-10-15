@@ -16,7 +16,7 @@ record, not a claim that every pending unit is finished.
 | T1 campaign metadata | Table/payload/merge owner implemented. Union, reseal and readset owners are being migrated independently. |
 | T2 requests | Pending source-grounded request/kind runner migration. |
 | T3 measurement | Pending cell-measurement/calibration-forward ownership migration. |
-| T4 fleet port | Pending source-grounded fleet CLI seam. PrismaBuild remains the sole scheduler/admission owner. |
+| T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
 | S1 staged reads | Shared mount facts and topmost-NFS retry fixed. Remaining read-transaction ownership under review, including borrowed descriptors, sealed buffers and exact-release receipts. |
 | S2 block walk | Implemented ordinary forward/capture/expert lifetime owner and prefetch-failure cleanup. Fisher work retains distinct tape and source policies. |
 | S3 cost streaming | Implemented separate forward, artifact and identity owners with direct caller migration. |
@@ -96,3 +96,12 @@ activation lookup regression, block-release failure during prefetch, sample shar
 reuse in ordinary execution, a missing runtime initializer in the comparison
 tool, and the new environment helper's duplicate digest implementation. These
 are named to distinguish them from the fifteen original proposal findings.
+
+The fleet-port review compared a new typed submit/wait client with retaining the
+published protocol and existing domain gateways. A typed client would duplicate
+PB's versioned options or just forward argv. It cannot replace capture-chain
+output checks, Stage A's checked row selection, the Joint gateway's exact-key
+verdict or fleet complete-set barriers. Joint already provides Gateway and
+FakeGateway; pbwait_table already owns row parsing and done statuses. The
+application-side policy moves simplify callers without adding another client.
+Detailed source grounding is in the local `reports/fleet-port-design.md`.
