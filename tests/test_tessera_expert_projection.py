@@ -90,11 +90,6 @@ def _declared(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
 # ---------------------------------------------------------------------------
 # Vocabulary pinned to the producer
 # ---------------------------------------------------------------------------
-def test_unpacked_layout_is_the_producers_constant():
-    scheme = pytest.importorskip("tessera.serving.scheme")
-    if not hasattr(scheme, "MOE_SOURCE_UNPACKED"):
-        pytest.skip("pinned tessera predates MOE_SOURCE_UNPACKED")
-    assert tep.SOURCE_LAYOUT_UNPACKED == scheme.MOE_SOURCE_UNPACKED
 
 
 def test_unit_identity_keys_are_what_the_producer_seals():

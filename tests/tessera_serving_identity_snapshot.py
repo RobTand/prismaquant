@@ -24,6 +24,8 @@ At PQ #2262 the snapshot is re-taken on public 2dbac191/v56: v11 rule
 coverage, four extensions and 22 eager cells move the expected answer.
 At PQ #2426, PB da8fbb6d706a generates the snapshot from fca4c6ce0/v60.
 Only the pin commit and contract digest change. The admission answer remains unchanged.
+At the 2026-10-15 public metadata API backport, only the pin commit moves to
+exact d2e98b3c; packaged v60 bytes and every parsed admission answer stay equal.
 This is an admission snapshot, never compiled/model/performance qualification.
 
 Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.

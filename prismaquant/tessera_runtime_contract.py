@@ -426,9 +426,9 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: v56 uses lane schema v11, rule-derived window coverage, four extensions
 #: and 22 eager cells. The literal is the complete existing-reader projection
 #: from PB bb291153; no compiled or full-artifact qualification is inferred.
-#: Re-pinned 2026-10-07 to fca4c6ce0 with contract v60 (PQ #2426).
+#: Re-pinned 2026-10-15 to API-only d2e98b3c; the v60 table bytes are unchanged.
 #: The installed contract supplies the generated admission answer.
-TESSERA_DEV_PIN_COMMIT = "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+TESSERA_DEV_PIN_COMMIT = "d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
@@ -1054,33 +1054,14 @@ def dev_pin_requested() -> str:
 
 
 def contract_path():
-    """Where the packaged contract lives: the actually-importable package's table.
+    """Locate installed producer metadata without importing its serving package.
 
-    ``importlib.resources.files("tessera.serving")`` rather than path
-    arithmetic on ``tessera.__file__``, so a wheel install, an editable
-    install and an in-repo checkout all resolve identically -- and so this
-    reads the table of the ``tessera.serving`` package that is actually
-    importable, never a copy.  This is the one resolver both producer readers
-    share: ``tessera_render.tessera_serving_contract_path`` delegates here
-    rather than carrying a second policy for the same file.
-
-    That call does import the ``tessera.serving`` package, but the import is
-    cheap by the runtime's own design: its ``__init__`` defines ``register()``
-    (which imports vLLM and registers the config) and calls nothing at module
-    scope, importing neither torch nor vLLM, so locating the contract
-    registers nothing and needs no GPU.
-    ``tests/test_tessera_serving_contract_path.py`` pins that property in a
-    subprocess rather than in prose, so drift in the runtime's import
-    behaviour fails a test instead of silently aging this docstring.  What a
-    producer must not need is the serving-side *code*:
-    ``tessera.serving.contract``'s validator imports the plugin's dispatch
-    tables, which is a serving-side import a producer must not need on a
-    machine with no GPU -- so the JSON is read directly rather than through
-    that module.
+    Resource traversal from the importable Tessera package supports source and
+    wheel layouts while retaining the exact packaged contract bytes.
     """
     from importlib import resources
 
-    return resources.files("tessera.serving").joinpath("runtime_contract.json")
+    return resources.files("tessera").joinpath("serving", "runtime_contract.json")
 
 
 def _require(block: Mapping[str, Any], key: str, where: str) -> Any:

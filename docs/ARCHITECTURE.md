@@ -8,6 +8,18 @@ move preserves predicates, branch precedence, constants and initialization guard
 Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): Tessera
+metadata compatibility uses public stdlib-only `tessera.metadata` API v1. Its
+producer owns the smoke grammar, derivations and lane requirements; PrismaQuant
+metadata readers import no serving modules or algorithms. Package-root resource traversal reads
+the exact packaged JSON. The API-only backport is pinned to exact producer/serving
+commit `d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff` under existing schema v2. Version
+0.1.0, v60 contract SHA `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`,
+22 cells, qualifications, evidence, scope, native extensions, TP ceilings and the
+packaged reviewed answer remain unchanged. The API marker grants no admission;
+exact serving/export and optional development-answer policies stay independent.
+
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): genuine
 from-config initialization permission is local to the calling context. It no
 longer swaps the Transformers initializer process-wide, so an ordinary skeleton

@@ -94,7 +94,7 @@ would ship bytes whose serve substitutes or refuses.  This reader parses the
 predicate closed at Tessera's own vocabulary (:func:`parse_lane_claim`) and
 :func:`cell_lane_admits` decides it for a cell -- by handing THIS producer's
 planned wire (``tessera_render.planned_wire_facts``) to Tessera's own
-decision core (``tessera.serving.scheme.decide_lane_requirements``).  The
+decision core (``tessera.metadata.decide_lane_requirements``).  The
 rule has one home and it is not in this repository; what lives here is the
 facts and the refusal.  A lane launch is made only at a rung the lane admits:
 since contract v42 a cell can name a lane launch beside a lane-free one (the
@@ -1030,38 +1030,28 @@ def derive_smoke_attribution(control: SmokeControl | None) -> str:
     return EVIDENCE_ATTRIBUTION_NOT_SHARED
 
 
-def _tessera_contract_module():
-    """Tessera's own contract module -- the home of the v9 smoke vocabulary.
+def _producer_metadata(where: str):
+    """Require the pinned producer's public metadata capabilities by name."""
+    from importlib import import_module
 
-    A v9 lane table is, by construction, the packaged contract of an installed
-    Tessera, so this import cannot be the thing that fails on a box that has a
-    v9 table to read. It is a hard import for the same reason
-    ``decide_lane_requirements`` is: a fallback that answers when Tessera
-    cannot is a second home for Tessera's rule.
-    """
-    from tessera.serving import contract as _contract
-
-    return _contract
-
-
-def _tessera_published(name: str, where: str) -> Any:
-    """One of Tessera's v9 names, or a refusal that says which one is missing.
-
-    A v9 table beside a runtime too old to publish the rule it is written
-    against is a mis-pin, and it has to say so by name rather than surface as
-    an ``AttributeError`` from inside a parser.
-    """
-    module = _tessera_contract_module()
     try:
-        return getattr(module, name)
-    except AttributeError as exc:
+        module = import_module("tessera.metadata")
+    except ImportError as exc:
         raise LaneEligibilityError(
-            f"{where} needs Tessera's {name} to decide, and the installed "
-            "tessera.serving.contract does not publish it: this table calls "
-            f"itself {LANE_ELIGIBILITY_SCHEMA_TESSERA_V9} but the runtime "
-            "beside it is older. Re-pin, never restate the rule here -- a "
-            "second copy is how the two halves of one contract drift."
-        ) from exc
+            f"{where} needs Tessera's public metadata API; the installed "
+            "producer does not publish tessera.metadata") from exc
+    if getattr(module, "METADATA_API_VERSION", None) != "tessera.producer-metadata.v1":
+        raise LaneEligibilityError(
+            f"{where}: incompatible Tessera metadata API version "
+            f"{getattr(module, 'METADATA_API_VERSION', None)!r}; "
+            "this reader requires tessera.producer-metadata.v1")
+    required = ("parse_smoke_record", "smoke_status_is_derived", "derive_smoke_status",
+                "derive_smoke_attribution", "decide_lane_requirements")
+    missing = [name for name in required if not callable(getattr(module, name, None))]
+    if missing:
+        raise LaneEligibilityError(
+            f"{where}: Tessera metadata API does not publish callable(s) {missing}")
+    return module
 
 
 def _parse_smoke_record(payload: Any, where: str, *,
@@ -1070,13 +1060,13 @@ def _parse_smoke_record(payload: Any, where: str, *,
 
     Validating only vocabularies before deriving a status is insufficient:
     observation identity, portable paths and nullable reference arms are also
-    producer grammar. The immutable pin binds this private metadata helper's
-    API; a runtime lacking it refuses by name through ``_tessera_published``.
+    producer grammar. The immutable pin binds this public metadata API; a runtime lacking its
+    capabilities refuses by name.
     No serving execution or kernel module is imported here.
     """
-    validate = _tessera_published("_evidence_smoke_record", where)
+    validate = _producer_metadata(where).parse_smoke_record
     try:
-        parsed = validate(payload, where, control, where.removesuffix(".record"))
+        parsed = validate(payload, control=control, where=where)
     except ValueError as exc:
         raise LaneEligibilityError(str(exc)) from exc
     if parsed is None:
@@ -1326,11 +1316,9 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
         # NAMES, so it is asked rather than inferred from the key: a reader
         # that spelled it `record is not None` would be restating the rule
         # one level up from the one it already refuses to restate.
-        status_is_derived = bool(_tessera_published(
-            "smoke_status_is_derived", f"{where}.smoke")(dict(smoke)))
+        status_is_derived = bool(_producer_metadata(f"{where}.smoke").smoke_status_is_derived(dict(smoke)))
         if status_is_derived:
-            derived_status = _tessera_published(
-                "derive_smoke_status", f"{where}.smoke")(dict(smoke))
+            derived_status = _producer_metadata(f"{where}.smoke").derive_smoke_status(dict(smoke))
             if status != derived_status:
                 raise LaneEligibilityError(
                     f"{where}.smoke.status is {status!r} but Tessera's own "
@@ -1368,8 +1356,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
         if recorded_smoke:
             # v9 derives the attribution from the RECORD, which is a
             # projection of rows this repository does not restate.
-            derived_attribution = _tessera_published(
-                "derive_smoke_attribution", f"{where}.smoke")(dict(smoke))
+            derived_attribution = _producer_metadata(f"{where}.smoke").derive_smoke_attribution(dict(smoke))
             if attribution != derived_attribution:
                 raise LaneEligibilityError(
                     f"{where}.smoke.attribution is {attribution!r} but "
@@ -1764,16 +1751,15 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
 
     The rule is not here. Tessera publishes the predicate
     (``native_extensions[].lane.requires``) and owns the decision
-    (``tessera.serving.scheme.decide_lane_requirements``, the one home its
+    (``tessera.metadata.decide_lane_requirements``, the one home its
     loader, its byte-side report and its plan-time gate all call); this
     function supplies the FACTS -- ``tessera_render.planned_wire_facts``, the
     wire this producer will encode for the cell's family at this rung, read
     off the same recipe and decoration the render encodes with -- and turns
     the refusals into a reason that names the cell, the lane and the launch.
-    Both imports are lazy: ``planned_wire_facts`` needs the encoder, and
-    ``scheme`` pulls in ``tessera.serving.contract`` for its wire spellings
-    (the module, not its validator's dispatch tables; neither imports torch or
-    vLLM). A contract is LOADED without either -- this runs at admission.
+    Numerical wire facts are computed lazily at admission. The producer's
+    public metadata module owns the requirement vocabulary and decisions,
+    without loading the serving runtime.
 
     The unit's STRUCTURE (``dense`` | ``routed_moe``) is one of those facts,
     read off the cell (a serving-profile / decision-unit fact, never inferred
@@ -1834,7 +1820,7 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
             f"{head(claims[0])} cannot be decided against: this producer "
             f"cannot plan family {family!r} at rung {rate_q256} ({exc}), and a "
             "plan that does not exist is not a plan the lane reads"), ()
-    from tessera.serving.scheme import decide_lane_requirements
+    decide_lane_requirements = _producer_metadata("cell rung launches").decide_lane_requirements
 
     refused: list[str] = []
     refused_decoders: set[str] = set()
@@ -3908,8 +3894,6 @@ def _require_keys(payload: Mapping[str, Any], where: str, *,
     """
     record_fields.admit_fields(payload, where, required=required, optional=optional,
                                error=LaneEligibilityError)
-
-
 
 
 __all__ = [

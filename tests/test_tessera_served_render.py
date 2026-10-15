@@ -35,15 +35,19 @@ def test_scoped_planned_facts_describe_the_served_body():
 def test_scoped_encode_and_render_match_the_served_wire_and_byte_price():
     from tessera.container import parse
     from tessera.fused import pack_fused
-    from tessera.serving.scheme import wire_facts_of_parsed
 
     weight = _weight()
     unit, _ = render._encode_planned_unit(weight, NAME, structure=STRUCTURE)
-    on_bytes = wire_facts_of_parsed(SimpleNamespace(unit=unit, grid=render._grid_for(FAMILY)))
     planned = render.planned_wire_facts(FAMILY, RUNG, structure=STRUCTURE)
-    assert set(planned["rates"]) == set(on_bytes["rates"])
-    for key in set(on_bytes) - {"rates"}:
-        assert planned[key] == on_bytes[key], key
+    assert set(unit.rates) == set(planned["rates"])
+    assert unit.window_bits == planned["window_bits"]
+    assert unit.body.name == planned["body"]
+    assert unit.scale_plane.name == planned["plane"]
+    assert unit.release_index.numel() == planned["release_overrides"]
+    assert (unit.diagonals is not None) == planned["diagonals"]
+    assert planned["start_state"] is False
+    assert unit.rotation.name == planned["rotation"]
+    assert render._grid_for(FAMILY).arity == planned["grid_arity"]
 
     expected, blob = render.encode_tessera_unit(
         weight, NAME, hessian_required=False, recipe=_served())

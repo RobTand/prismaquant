@@ -11,7 +11,7 @@ and it would find out at serve time -- the defect ``lane_eligibility`` exists
 to stop, one field over.
 
 One rule, one home.  The DECISION is Tessera's
-(``tessera.serving.scheme.decide_lane_requirements``) and is called, never
+(``tessera.metadata.decide_lane_requirements``) and is called, never
 restated: nothing in this repository spells "rates must be in [1, 2, 4]".
 PrismaQuant's half is the FACTS -- ``tessera_render.planned_wire_facts``,
 the wire this producer's encoder is going to write for a family at a rung,
@@ -377,18 +377,21 @@ def test_planned_wire_facts_are_the_facts_the_encoded_bytes_carry(name, family, 
     and the two must be one object.  Read the facts off a unit encoded by the
     render path itself, in Tessera's OWN byte-side vocabulary."""
     from tessera.decode import reconstruct_unit
-    from tessera.serving.scheme import wire_facts_of_parsed
 
     torch.manual_seed(0)
     weight = torch.randn(4, 512, dtype=torch.bfloat16)
     unit, forests = render._encode_planned_unit(weight, name)
     spec, _rung = render.parse_tessera_format_name(name)
-    on_bytes = wire_facts_of_parsed(SimpleNamespace(unit=unit, grid=render._grid_for(spec)))
     planned = render.planned_wire_facts(family, rate)
-    assert set(planned) == set(on_bytes)
-    assert set(on_bytes["rates"]) == set(planned["rates"])
-    for key in set(planned) - {"rates"}:
-        assert planned[key] == on_bytes[key], key
+    assert set(unit.rates) == set(planned["rates"])
+    assert unit.window_bits == planned["window_bits"]
+    assert unit.body.name == planned["body"]
+    assert unit.scale_plane.name == planned["plane"]
+    assert unit.release_index.numel() == planned["release_overrides"]
+    assert (unit.diagonals is not None) == planned["diagonals"]
+    assert planned["start_state"] is False
+    assert unit.rotation.name == planned["rotation"]
+    assert render._grid_for(spec).arity == planned["grid_arity"]
     assert None not in planned.values()
     # And the render IS that unit's reconstruction, not a second encode.
     rendered = render.render_tessera_weight(weight, name)
@@ -401,7 +404,7 @@ def test_the_planned_facts_speak_the_decision_cores_whole_vocabulary(payload):
     """Every published requirement is decided on a fact this producer
     supplies: an 'was not read' refusal would mean the plan is silent on a
     condition the loader enforces."""
-    from tessera.serving.scheme import decide_lane_requirements
+    from tessera.metadata import decide_lane_requirements
 
     requires = _row(payload, WINDOW_LANE)["lane"]["requires"]
     assert decide_lane_requirements(

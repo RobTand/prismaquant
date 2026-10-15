@@ -35,7 +35,7 @@ exists (``native_extensions``), and the chain is:
    them is the runtime's.
 
 The contract is read by ``json`` through ``tessera_runtime_contract`` -- located
-through ``importlib.resources.files("tessera.serving")``, which imports only
+through ``importlib.resources.files("tessera").joinpath("serving")``, which imports only
 that package's lazy ``__init__`` (it defines ``register()`` and calls nothing
 at module scope, so it registers nothing and needs no GPU), and never through
 ``tessera.serving.contract``, whose validator imports the plugin's dispatch
@@ -78,7 +78,7 @@ def _packaged_contract() -> dict:
     """The installed plugin's contract payload, as JSON.
 
     ``trc.contract_path()`` locates the table through
-    ``importlib.resources.files("tessera.serving")``: that imports only the
+    ``importlib.resources.files("tessera").joinpath("serving")``: that imports only the
     package's lazy ``__init__``, never ``tessera.serving.contract`` (whose
     validator imports the plugin's dispatch tables) and never vLLM.
     """

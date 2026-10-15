@@ -375,8 +375,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: no code-digest/v3 activation, compiled-cell or release-card waiver.
 #: Re-pinned 2026-10-07 to fca4c6ce0 (Tessera #1033, PQ #2426).
 #: Contract v60 retains the v56 cells and extension rows.
+#: API-only exact-v60 backport reviewed 2026-10-15: public producer metadata
+#: owns smoke grammar/derivation and lane decisions. Contract bytes, every
+#: native qualification and both admission policies are unchanged.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+    "d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
@@ -390,7 +393,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+    "d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

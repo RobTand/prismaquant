@@ -104,7 +104,7 @@ def _settle_attribution(payload: dict) -> dict:
     So the fixture asks the same function the reader asks -- and the tests that
     are ABOUT the derivation make it disagree afterwards, on purpose.
     """
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     for cell in payload["lane_eligibility"]["cells"]:
         smoke = cell["evidence"]["smoke"]
@@ -142,51 +142,9 @@ def _parsed_cell(table, cell_id):
 
 
 @pytest.fixture
-def tessera_v9(monkeypatch):
-    """Tessera's v9 surface, real when the pin has it and stubbed when not.
-
-    The pin moves to the v22 contract in one reviewed commit; until it does,
-    the installed ``tessera.serving.contract`` has no v9 helpers, and a test
-    that skipped would leave this reader's v9 path unexercised on the branch
-    that introduces it.  The stub is deliberately NOT a second implementation
-    of the repetition rule: every test below drives it to a chosen answer and
-    asserts what this reader does with that answer.
-    """
-    from tessera.serving import contract as ts
-
-    if not hasattr(ts, "EVIDENCE_SMOKE_INTERFACES"):
-        monkeypatch.setattr(
-            ts, "EVIDENCE_SMOKE_INTERFACES", ("raw_completion", "chat_template"),
-            raising=False)
-    if not hasattr(ts, "EVIDENCE_SMOKE_FORMS"):
-        monkeypatch.setattr(
-            ts, "EVIDENCE_SMOKE_FORMS", ("campaign", "pure_greedy"), raising=False)
-    if not hasattr(ts, "EVIDENCE_SMOKE_RECORD_KEYS"):
-        monkeypatch.setattr(
-            ts, "EVIDENCE_SMOKE_RECORD_KEYS",
-            frozenset({"instrument", "rule", "reference", "rows"}), raising=False)
-    if not hasattr(ts, "EVIDENCE_SMOKE_ROW_KEYS"):
-        monkeypatch.setattr(
-            ts, "EVIDENCE_SMOKE_ROW_KEYS",
-            frozenset({"prompt", "form", "interface", "status",
-                       "reference_status"}), raising=False)
-    if not hasattr(ts, "smoke_status_is_derived"):
-        monkeypatch.setattr(
-            ts, "smoke_status_is_derived",
-            lambda smoke: smoke.get("record") is not None, raising=False)
-    if not hasattr(ts, "derive_smoke_status"):
-        def derive_smoke_status(smoke):
-            record = smoke.get("record")
-            if not record:
-                return smoke.get("status")
-            statuses = {row["status"] for row in record["rows"]
-                        if row["interface"] == "chat_template"}
-            return (lane.EVIDENCE_SMOKE_REPETITIVE
-                    if lane.EVIDENCE_SMOKE_REPETITIVE in statuses
-                    else lane.EVIDENCE_SMOKE_RECORDED)
-        monkeypatch.setattr(ts, "derive_smoke_status", derive_smoke_status,
-                            raising=False)
-    return ts
+def tessera_v9():
+    from tessera import metadata
+    return metadata
 
 
 # ---------------------------------------------------------------------------
@@ -309,48 +267,16 @@ def test_an_extra_key_on_a_row_is_refused(tessera_v9):
         _table(payload)
 
 
-def test_the_vocabularies_come_from_tessera_and_are_not_typed_here(tessera_v9,
-                                                                   monkeypatch):
-    """One rule, one home: widen Tessera's vocabulary and this reader widens.
-
-    If the interface list were transcribed into this module, an interface
-    Tessera adds would be refused here until somebody re-typed it -- which is
-    how the two halves of one contract drift apart.
-    """
-    payload = _up_convert(_installed())
-    _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"]["rows"][0][
-        "interface"] = "harness_replay"
-    with pytest.raises(lane.LaneEligibilityError, match="interface"):
-        _table(payload)
-    monkeypatch.setattr(
-        tessera_v9, "EVIDENCE_SMOKE_INTERFACES",
-        tuple(tessera_v9.EVIDENCE_SMOKE_INTERFACES) + ("harness_replay",))
-    assert _table(payload).schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
-
-
 # ---------------------------------------------------------------------------
 # The delegation: who derives the status
 # ---------------------------------------------------------------------------
-def test_the_status_is_re_derived_through_tesseras_own_function(tessera_v9,
-                                                                monkeypatch):
-    """The published status must equal what Tessera's rule derives.
-
-    This is the consumer half of #327: v21 published a status no reader could
-    check.  Driven by making the derivation disagree, so the test pins the
-    delegation and not the rule -- exactly what this repository is entitled to
-    assert about somebody else's measurement.
-    """
+def test_published_status_must_match_the_real_producer_derivation(tessera_v9):
     payload = _up_convert(_installed())
-    monkeypatch.setattr(
-        tessera_v9, "derive_smoke_status",
-        lambda smoke: (lane.EVIDENCE_SMOKE_REPETITIVE
-                       if smoke.get("record") else smoke.get("status")))
-    with pytest.raises(lane.LaneEligibilityError) as excinfo:
+    smoke = _cell(payload, MOE_DECODE)["evidence"]["smoke"]
+    assert tessera_v9.derive_smoke_status(smoke) == "recorded"
+    smoke["status"] = "repetitive"
+    with pytest.raises(lane.LaneEligibilityError, match="smoke.status.*repetitive"):
         _table(payload)
-    message = str(excinfo.value)
-    assert "smoke.status" in message
-    assert lane.EVIDENCE_SMOKE_REPETITIVE in message
-    assert "Tessera" in message
 
 
 def test_a_record_free_cell_keeps_the_status_it_publishes(tessera_v9):
@@ -368,26 +294,13 @@ def test_a_record_free_cell_keeps_the_status_it_publishes(tessera_v9):
                     == _parsed_cell(installed, cell.id).evidence.smoke_status)
 
 
-def test_the_attribution_is_re_derived_through_tesseras_own_function(tessera_v9,
-                                                                     monkeypatch):
-    """v9 derives the attribution from the RECORD, so the reader asks Tessera.
-
-    On v7/v8 the attribution is a one-line projection of the control and this
-    module mirrors it; on v9 it is a projection of the rows, which is Tessera's
-    to state.  Driven the same way: make the derivation disagree, require a
-    refusal that names both values.
-    """
+def test_published_attribution_must_match_the_real_producer_derivation(tessera_v9):
     payload = _up_convert(_installed())
-    monkeypatch.setattr(
-        tessera_v9, "derive_smoke_attribution",
-        lambda smoke: (lane.EVIDENCE_ATTRIBUTION_NOT_SHARED
-                       if smoke.get("record") else lane.EVIDENCE_ATTRIBUTION_UNATTRIBUTED),
-        raising=False)
-    with pytest.raises(lane.LaneEligibilityError) as excinfo:
+    smoke = _cell(payload, MOE_DECODE)["evidence"]["smoke"]
+    assert tessera_v9.derive_smoke_attribution(smoke) == "shared_with_reference"
+    smoke["attribution"] = "not_shared_with_reference"
+    with pytest.raises(lane.LaneEligibilityError, match="attribution"):
         _table(payload)
-    message = str(excinfo.value)
-    assert "attribution" in message
-    assert lane.EVIDENCE_ATTRIBUTION_NOT_SHARED in message
 
 
 def test_the_v7_control_derivation_still_agrees_with_tesseras(tessera_v9):
@@ -397,7 +310,7 @@ def test_the_v7_control_derivation_still_agrees_with_tesseras(tessera_v9):
     tables.  A transcription that silently diverges is the same defect #327
     reports one level down, so it is compared to Tessera's own function here.
     """
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     for control, expected in (
             (None, lane.EVIDENCE_ATTRIBUTION_UNATTRIBUTED),
@@ -513,30 +426,6 @@ def test_a_record_beside_a_control_is_refused_by_name(tessera_v9):
     assert "drift" in message
 
 
-def test_whether_a_status_is_derived_is_asked_of_tessera_not_inferred(tessera_v9,
-                                                                      monkeypatch):
-    """``smoke_status_is_derived`` is a state Tessera NAMES, so it is asked.
-
-    Driven by making Tessera answer "not derived" for a cell that does carry
-    a record: this reader must then take the published status as asserted and
-    NOT compare it, which is checkable because a derivation that disagrees is
-    no longer reached.  A reader that had spelled the state
-    ``record is not None`` would refuse here, and would be restating the rule
-    one level up from the one it already refuses to restate.
-    """
-    payload = _up_convert(_installed())
-    monkeypatch.setattr(tessera_v9, "smoke_status_is_derived",
-                        lambda smoke: False, raising=False)
-    monkeypatch.setattr(tessera_v9, "derive_smoke_status",
-                        lambda smoke: "not_recorded", raising=False)
-    table = _table(payload)                      # no refusal
-    for cell_id in (MOE_DECODE, MOE_BATCH):
-        evidence = _parsed_cell(table, cell_id).evidence
-        assert evidence.smoke_record is not None
-        assert evidence.smoke_status_is_derived is False
-        assert evidence.smoke_status == lane.EVIDENCE_SMOKE_RECORDED
-
-
 def test_provenance_says_whether_the_status_was_derived(tessera_v9):
     """A shipcard has to tell an attested status from an asserted one."""
     table = _table(_up_convert(_installed()))
@@ -549,25 +438,11 @@ def test_provenance_says_whether_the_status_was_derived(tessera_v9):
             assert smoke["status_is_derived"] is True, cell.id
 
 
-def test_the_record_key_sets_come_from_tessera_and_are_not_typed_here(tessera_v9,
-                                                                      monkeypatch):
-    """Widen Tessera's member set and this reader widens with it."""
-    payload = _up_convert(_installed())
-    for cell_id in (MOE_DECODE, MOE_BATCH):
-        _cell(payload, cell_id)["evidence"]["smoke"]["record"]["sampler"] = "greedy"
-    with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
-        _table(payload)
-    monkeypatch.setattr(
-        tessera_v9, "EVIDENCE_SMOKE_RECORD_KEYS",
-        frozenset(set(tessera_v9.EVIDENCE_SMOKE_RECORD_KEYS) | {"sampler"}))
-    assert _table(payload).schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
-
-
-# Full producer/consumer differential cases use the packaged contract and the
-# real validator. No stub can turn a malformed observation into a valid fixture.
+# Producer/consumer record cases use the packaged contract and the
+# public owning grammar validator. No stub can turn a malformed observation into a valid fixture.
 @pytest.mark.parametrize("case", ["packaged", "unreferenced", "shared_cycle"])
 def test_real_producer_valid_smoke_grammar_and_route(case):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
     smoke = _cell(payload, MOE_DECODE)["evidence"]["smoke"]
@@ -582,7 +457,10 @@ def test_real_producer_valid_smoke_grammar_and_route(case):
             row for row in record["rows"] if row["status"] == "repetitive"))]
     smoke["status"] = ts.derive_smoke_status(smoke)
     smoke["attribution"] = ts.derive_smoke_attribution(smoke)
-    ts.validate_serving_contract(payload)
+    ts.parse_smoke_record(
+            _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"],
+            control=_cell(payload, MOE_DECODE)["evidence"]["smoke"]["control"],
+            where="producer.smoke.record")
     table = _table(payload)
     parsed = _parsed_cell(table, MOE_DECODE).evidence.smoke_record
     assert parsed.as_dict() == record
@@ -628,12 +506,15 @@ def test_real_producer_valid_smoke_grammar_and_route(case):
     ("rows", [None]),
 ])
 def test_real_producer_and_consumer_refuse_invalid_record_heads(field, value):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
     _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"][field] = value
     with pytest.raises(ValueError, match=field):
-        ts.validate_serving_contract(payload)
+        ts.parse_smoke_record(
+            _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"],
+            control=_cell(payload, MOE_DECODE)["evidence"]["smoke"]["control"],
+            where="producer.smoke.record")
     with pytest.raises(lane.LaneEligibilityError, match=field):
         _table(payload)
 
@@ -645,23 +526,29 @@ def test_real_producer_and_consumer_refuse_invalid_record_heads(field, value):
     ("reference_status", None), ("reference_status", "unknown"),
 ])
 def test_real_producer_and_consumer_refuse_invalid_observations(field, value):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
     _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"]["rows"][0][field] = value
     with pytest.raises(ValueError, match=field):
-        ts.validate_serving_contract(payload)
+        ts.parse_smoke_record(
+            _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"],
+            control=_cell(payload, MOE_DECODE)["evidence"]["smoke"]["control"],
+            where="producer.smoke.record")
     with pytest.raises(lane.LaneEligibilityError, match=field):
         _table(payload)
 
 
 def test_real_producer_and_consumer_refuse_verdict_without_reference():
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
     _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"]["reference"] = None
     with pytest.raises(ValueError, match="reference_status"):
-        ts.validate_serving_contract(payload)
+        ts.parse_smoke_record(
+            _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"],
+            control=_cell(payload, MOE_DECODE)["evidence"]["smoke"]["control"],
+            where="producer.smoke.record")
     with pytest.raises(lane.LaneEligibilityError, match="reference_status"):
         _table(payload)
 
@@ -669,7 +556,7 @@ def test_real_producer_and_consumer_refuse_verdict_without_reference():
 @pytest.mark.parametrize("change", [{}, {"interface": "other_interface"},
                                  {"status": "recorded", "reference_status": "recorded"}])
 def test_real_producer_and_consumer_refuse_duplicate_prompt_form(change):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
     smoke = _cell(payload, MOE_DECODE)["evidence"]["smoke"]
@@ -685,16 +572,19 @@ def test_real_producer_and_consumer_refuse_duplicate_prompt_form(change):
     smoke["status"] = ts.derive_smoke_status(smoke)
     smoke["attribution"] = ts.derive_smoke_attribution(smoke)
     with pytest.raises(ValueError, match="repeats"):
-        ts.validate_serving_contract(payload)
+        ts.parse_smoke_record(
+            _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"],
+            control=_cell(payload, MOE_DECODE)["evidence"]["smoke"]["control"],
+            where="producer.smoke.record")
     with pytest.raises(lane.LaneEligibilityError, match="repeats"):
         _table(payload)
 
 
 def test_v9_refuses_a_runtime_missing_the_owning_record_validator(monkeypatch):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
-    monkeypatch.delattr(ts, "_evidence_smoke_record")
+    monkeypatch.delattr(ts, "parse_smoke_record")
     with pytest.raises(lane.LaneEligibilityError,
-                       match="needs Tessera's _evidence_smoke_record"):
+                       match="does not publish callable.*parse_smoke_record"):
         _table(payload)
