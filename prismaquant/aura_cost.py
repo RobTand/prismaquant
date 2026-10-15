@@ -3060,7 +3060,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "calibration-resampling variance of the cost.")
     p.add_argument("--dataset", default=None,
                    help="Optional calibration source (HF dataset id, .jsonl, "
-                        "or .txt) via sensitivity_probe.load_calibration, so "
+                        "or .txt) via calibration_data.load_calibration, so "
                         "the cost draws from the same corpus as the pipeline "
                         "probe/render. Default keeps the historical WikiText "
                         "windowed loader (--calib-split/--calib-seed).")

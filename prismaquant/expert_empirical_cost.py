@@ -1593,7 +1593,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dataset", default=None,
         help="Optional calibration source (HF id, .jsonl, .txt) via "
-        "sensitivity_probe.load_calibration; default is the WikiText "
+        "calibration_data.load_calibration; default is the WikiText "
         "windowed loader (matches aura_cost).")
     p.add_argument("--expert-chunk", type=int, default=16,
                    help="Experts quantized per in-place RTN chunk.")
