@@ -1618,8 +1618,8 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     reasons name which of the two diverged.
 
     Under the active allowed-tier policy the bytes come from a
-    lifetime-pinned window (RAM leg refused fast for want of RAM-mover
-    covers, SSD re-acquired honestly): exact length plus one probe byte
+    lifetime-pinned window (RAM with qualified covers, SSD re-acquired
+    after an availability refusal): exact length plus one probe byte
     through the held descriptor, the SDK serving record registered at the
     successful actual open, the descriptor closed and the exact ref
     released before the caller deserializes. Unmapped/unfenced refuses
