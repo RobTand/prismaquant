@@ -700,10 +700,11 @@ def test_band_serial_refuses_what_it_cannot_run(tmp_path, monkeypatch, capsys, c
         tmp_path, monkeypatch, run_identity_extra=extra)
     flags = ["--band-serial"] + ([] if case == "no-tier" else ["--handoff-tier", TIER])
     if case == "legacy-rows":
+        from prismaquant.joint_campaign_ledger import seal_quantum_record
         for path in records.glob("layer-*.json"):
             record = json.loads(path.read_text())
             del record["executable_readset"]
-            path.write_text(json.dumps(record))
+            path.write_text(json.dumps(seal_quantum_record(record)))
     gateway = dispatch.FakeGateway()
     if case == "foreign-handoff":
         assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
