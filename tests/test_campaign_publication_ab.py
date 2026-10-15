@@ -2,7 +2,6 @@
 import pytest
 
 import json
-import time
 
 from experiments.campaign_publication_ab import (OVERLAP_BUDGET, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3,
     MemorySampler, arm_order, command_batch, plan_order, preferred_batches, with_batch, PhaseRecorder)
@@ -72,19 +71,54 @@ def test_batch_width_arms_keep_the_recipe_width_unless_named():
         plan_order(dict(schema=SCHEMA_V2, command=command, order=[[B, I, 8]]))
 
 
-def test_memory_sampler_records_a_continuous_series_with_peaks(tmp_path):
-    sampler = MemorySampler(tmp_path/'memory-samples.json', interval=0.05)
+def test_memory_sampler_records_a_continuous_series_with_peaks(monkeypatch, tmp_path):
+    from threading import Event, Thread
+
+    live = MemorySampler.read()
+    assert live['vmhwm_bytes'] >= live['vmrss_bytes'] > 0
+    assert live['mem_available_bytes'] >= 0
+    readings = [
+        dict(unix=1, vmrss_bytes=10, vmhwm_bytes=12, mem_available_bytes=90),
+        dict(unix=2, vmrss_bytes=20, vmhwm_bytes=25, mem_available_bytes=80),
+        dict(unix=3, vmrss_bytes=15, vmhwm_bytes=25, mem_available_bytes=70),
+        dict(unix=4, vmrss_bytes=12, vmhwm_bytes=25, mem_available_bytes=85),
+    ]
+    source = iter(readings)
+    last_started, release, stop_observed = Event(), Event(), Event()
+    sampler = MemorySampler(tmp_path/'memory-samples.json', interval=0)
+
+    def controlled_read():
+        sample = next(source)
+        if sample['unix'] == 3:
+            last_started.set()
+            if not release.wait(30):
+                raise RuntimeError('sampler close did not release the pending read')
+        return sample
+
+    def release_after_close():
+        if sampler.stopped.wait(30):
+            stop_observed.set()
+            release.set()
+
+    monkeypatch.setattr(MemorySampler, 'read', staticmethod(controlled_read))
+    releaser = Thread(target=release_after_close, daemon=True)
     sampler.start()
-    ballast = bytearray(64*1024**2)
-    ballast[::4096] = b'x'*len(ballast[::4096])
-    time.sleep(0.3)
-    sampler.close()
-    del ballast
+    try:
+        assert last_started.wait(30)
+        releaser.start()
+        sampler.close()
+        assert stop_observed.is_set()
+    finally:
+        sampler.stopped.set()
+        release.set()
+        sampler.join(30)
+        if releaser.ident is not None:
+            releaser.join(30)
+    assert not sampler.is_alive() and not releaser.is_alive()
     record = json.loads((tmp_path/'memory-samples.json').read_text())
-    assert record['samples'] >= 4 and len(record['series']) == record['samples']
-    assert record['peak']['vmhwm_bytes'] >= record['peak']['vmrss_bytes'] > 64*1024**2
-    assert record['peak']['mem_available_bytes'] == min(s['mem_available_bytes'] for s in record['series'])
-    assert all(b['unix'] >= a['unix'] for a, b in zip(record['series'], record['series'][1:]))
+    assert record['samples'] == 4
+    assert record['series'] == readings
+    assert record['peak'] == dict(vmrss_bytes=20, vmhwm_bytes=25, mem_available_bytes=70)
 
 
 def test_with_headroom_replaces_the_floor_and_refuses_a_recipe_without_one():
