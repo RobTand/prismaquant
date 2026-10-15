@@ -1298,12 +1298,14 @@ class TestRoundTrip(unittest.TestCase):
         real_scale = _native_render_codec._select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         snapped_scale = _native_render_codec._select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
             global_real=global_real,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         mse_6 = _native_render_codec._nvfp4_mse_for_group_scale(
             grouped,
             scale_6,
@@ -1323,7 +1325,8 @@ class TestRoundTrip(unittest.TestCase):
             grouped,
             global_real_override=global_real,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         torch.testing.assert_close(pack_global, global_real)
         torch.testing.assert_close(pack_scale, expected)
 
@@ -1431,7 +1434,8 @@ class TestRoundTrip(unittest.TestCase):
             X,
             fmt="FP8_E4M3",
             damp=0.01,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         self.assertEqual(q.dtype, torch.float8_e4m3fn)
         self.assertEqual(tuple(q.shape), tuple(W.shape))
         self.assertEqual(tuple(s.shape), (4, 1))
@@ -1448,14 +1452,16 @@ class TestRoundTrip(unittest.TestCase):
             fmt="MXFP8_E5M2",
             damp=0.01,
             joint_scale_opt=True,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         q_ref, s_ref, dq_ref = _native_render_codec._gptq_obs_rounding_fp8_like(
             W,
             X,
             fmt="MXFP8_E5M2",
             damp=0.01,
             joint_scale_opt=False,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         self.assertEqual(q.dtype, torch.float8_e5m2)
         self.assertEqual(tuple(q.shape), tuple(W.shape))
         self.assertEqual(tuple(s.shape), (4, 1))
@@ -1506,7 +1512,8 @@ class TestRoundTrip(unittest.TestCase):
                 damp=damp,
                 static_act_order=False,
                 joint_scale_opt=False,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         torch.testing.assert_close(actual, expected, atol=0, rtol=0)
 
     def test_fp8_gptq_matches_fpquant_column_update(self):
@@ -1543,7 +1550,8 @@ class TestRoundTrip(unittest.TestCase):
                 X,
                 fmt="FP8_E4M3",
                 damp=damp,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, q_ref))
         torch.testing.assert_close(s, scale, atol=0, rtol=0)
         torch.testing.assert_close(dq, expected, atol=0, rtol=0)
@@ -1566,7 +1574,8 @@ class TestRoundTrip(unittest.TestCase):
                 joint_scale_opt=False,
                 element_dtype=torch.float8_e4m3fn,
                 element_max=_native_render_codec.MXFP8_E4M3_MAX,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             scale[:, group_idx] = scale_block
         scale_by_col = e8m0_to_scale(scale).repeat_interleave(
             group_size,
@@ -1598,7 +1607,8 @@ class TestRoundTrip(unittest.TestCase):
                 fmt="MXFP8_E4M3",
                 group_size=group_size,
                 damp=damp,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, q_ref))
         self.assertTrue(torch.equal(s, scale))
         torch.testing.assert_close(_expected_w, expected_dq, atol=0, rtol=0)
@@ -1633,7 +1643,8 @@ class TestRoundTrip(unittest.TestCase):
                 joint_scale_opt=False,
                 element_dtype=torch.float8_e4m3fn,
                 element_max=_native_render_codec.MXFP8_E4M3_MAX,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             scale[:, group_idx] = scale_block
         scale_by_col = e8m0_to_scale(scale).repeat_interleave(
             group_size,
@@ -1681,7 +1692,8 @@ class TestRoundTrip(unittest.TestCase):
                 group_size=group_size,
                 damp=damp,
                 static_act_order=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, expected_q))
         self.assertTrue(torch.equal(s, scale))
         torch.testing.assert_close(dq, expected_dq, atol=0, rtol=0)
@@ -1734,7 +1746,8 @@ class TestRoundTrip(unittest.TestCase):
                 X,
                 group_size=group_size,
                 damp=damp,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, expected_q))
         self.assertTrue(torch.equal(s, scale))
         torch.testing.assert_close(_expected_w, expected_dq, atol=0, rtol=0)
@@ -1810,7 +1823,8 @@ class TestRoundTrip(unittest.TestCase):
                 group_size=group_size,
                 damp=damp,
                 static_act_order=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, expected_q))
         self.assertTrue(torch.equal(s, scale))
         torch.testing.assert_close(expected_w, expected_dq, atol=0, rtol=0)
@@ -1826,13 +1840,15 @@ class TestRoundTrip(unittest.TestCase):
                 X,
                 fmt="FP8_E4M3",
                 static_act_order=False,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="FP8_E4M3",
                 static_act_order=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         self.assertTrue(torch.equal(q, q_ref))
         torch.testing.assert_close(s, s_ref, atol=0, rtol=0)
         torch.testing.assert_close(dq, dq_ref, atol=0, rtol=0)
@@ -2476,7 +2492,8 @@ class TestQuantize2DDispatch(unittest.TestCase):
                 gptq_enabled=True,
                 static_act_order_enabled=True,
                 cached_activations=X,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         finally:
             _native_render_codec._gptq_obs_rounding_fp8_like = saved
             if saved_sweep is None:
@@ -2524,7 +2541,8 @@ class TestQuantize2DDispatch(unittest.TestCase):
                 "MXFP8_E4M3",
                 gptq_enabled=True,
                 cached_activations=X,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         finally:
             _native_render_codec._gptq_obs_rounding_fp8_like = saved
             if saved_sweep is None:
@@ -4417,7 +4435,8 @@ class TestActivationAwarePasses(unittest.TestCase):
                 x,
                 4,
                 clip_threshold=10.0,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
         finally:
             if saved is None:
                 os.environ.pop("PRISMAQUANT_ACT_CLIP_QUANTILE", None)
@@ -4437,7 +4456,8 @@ class TestActivationAwarePasses(unittest.TestCase):
             2,
             clip_quantile=0.0,
             row_weights=torch.tensor([0.0, 2.0]),
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
 
         self.assertTrue(torch.allclose(out[0], torch.zeros(2)))
         self.assertTrue(torch.allclose(out[1], torch.full((2,), 2 ** 0.5)))
@@ -4539,11 +4559,13 @@ class TestActivationAwarePasses(unittest.TestCase):
         scale_f6 = _native_render_codec._select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         scale_joint = _native_render_codec._select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         mse_f6 = _native_render_codec._nvfp4_mse_for_group_scale(grouped, scale_f6)
         mse_joint = _native_render_codec._nvfp4_mse_for_group_scale(grouped, scale_joint)
 
@@ -4566,7 +4588,8 @@ class TestActivationAwarePasses(unittest.TestCase):
                 group_size=16,
                 static_act_order=True,
                 joint_scale_opt=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             wp, ws, wg = _native_render_codec.quantize_dequantize_nvfp4(W_gptq, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
             dq = self._decode_nvfp4(wp, ws, wg)
         finally:
@@ -4632,7 +4655,8 @@ class TestActivationAwarePasses(unittest.TestCase):
                     gptq_enabled=True,
                     cached_activations=X,
                     linear_name="demo.linear",
-                 levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                    levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+                )
                 failure_count = _native_render_codec._DO_NO_HARM_STATS["NVFP4_failures"]
         finally:
             _native_render_codec._DO_NO_HARM_STATS.clear()
@@ -4684,7 +4708,8 @@ class TestActivationAwarePasses(unittest.TestCase):
             W, "NVFP4",
             gptq_enabled=True,
             cached_activations=X,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         W_aa = self._decode_nvfp4(
             out_aa["weight_packed"], out_aa["weight_scale"],
             out_aa["weight_global_scale"],
@@ -4770,10 +4795,12 @@ class TestActivationAwarePasses(unittest.TestCase):
             "nvfp4_scale_rule": "joint_mse", "do_no_harm": False})
         expected = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
             weight, acts, static_act_order=True, joint_scale_opt=True,
-            levers=options)
+            levers=options,
+        )
         actual = _native_render_codec._quantize_2d(
             weight, "NVFP4", cached_activations=acts, compute_only=True,
-            levers=options)["_w_dq"]
+            levers=options,
+        )["_w_dq"]
         self.assertTrue(torch.equal(actual, expected))
 
     def test_post_nonlinearity_name_preserves_actual_render(self):
@@ -4829,7 +4856,7 @@ class TestPerRoleGptqDamp(unittest.TestCase):
     def test_unset_is_exact_noop(self):
         # No env => per-role resolver == the global fixed default (1.0), so the
         # production render is preserved bit-for-bit.
-        self.assertEqual(self.m._resolve_gptq_fixed_damp( levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
+        self.assertEqual(self.m._resolve_gptq_fixed_damp(levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
         for q in ("model.layers.1.mlp.gate_proj",
                   "model.layers.1.mlp.down_proj",
                   "model.layers.1.self_attn.q_proj"):

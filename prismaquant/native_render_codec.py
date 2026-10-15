@@ -211,18 +211,12 @@ def _nvfp4_best_max_to_level_scale(
     return best_scale
 
 
-
-
-
-
-
 def _select_nvfp4_group_scales(
     grouped: torch.Tensor,
     *,
     scale_rule: str | None = None,
     global_real: torch.Tensor | None = None,
     joint_scale_levels: tuple[float, ...] | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Return per-block real NVFP4 scales for ``grouped[..., group_size]``.
@@ -234,7 +228,7 @@ def _select_nvfp4_group_scales(
     if levers is None:
         levers = NativeRenderLevers.resolve()
     rule = (
-        _nvfp4_scale_rule_from_env( levers=levers)
+        _nvfp4_scale_rule_from_env(levers=levers)
         if scale_rule is None
         else resolve_nvfp4_scale_rule(scale_rule)
     )
@@ -286,13 +280,12 @@ def _select_nvfp4_pack_scales_and_global(
     scale_rule: str | None = None,
     snapped_scale_scoring: bool | None = None,
     joint_scale_levels: tuple[float, ...] | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if levers is None:
         levers = NativeRenderLevers.resolve()
     score_snapped = (
-        _nvfp4_snapped_scale_scoring_enabled( levers=levers)
+        _nvfp4_snapped_scale_scoring_enabled(levers=levers)
         if snapped_scale_scoring is None
         else bool(snapped_scale_scoring)
     )
@@ -305,7 +298,8 @@ def _select_nvfp4_pack_scales_and_global(
             grouped,
             scale_rule=scale_rule,
             joint_scale_levels=joint_scale_levels,
-         levers=levers)
+            levers=levers,
+        )
         if global_real_override is not None:
             global_real = global_real_override.to(
                 grouped.device, dtype=torch.float32).clamp_min(1e-12)
@@ -316,7 +310,8 @@ def _select_nvfp4_pack_scales_and_global(
         grouped,
         scale_rule=scale_rule,
         joint_scale_levels=joint_scale_levels,
-     levers=levers)
+        levers=levers,
+    )
     if global_real_override is not None:
         global_real = global_real_override.to(
             grouped.device,
@@ -327,7 +322,8 @@ def _select_nvfp4_pack_scales_and_global(
             scale_rule=scale_rule,
             global_real=global_real,
             joint_scale_levels=joint_scale_levels,
-         levers=levers)
+            levers=levers,
+        )
         return scale, global_real
 
     global_real = (scale.amax() / FP8_E4M3_MAX).clamp_min(1e-12)
@@ -337,7 +333,8 @@ def _select_nvfp4_pack_scales_and_global(
             scale_rule=scale_rule,
             global_real=global_real,
             joint_scale_levels=joint_scale_levels,
-         levers=levers)
+            levers=levers,
+        )
         next_global = (
             snapped_scale.amax() / FP8_E4M3_MAX
         ).clamp_min(1e-12)
@@ -346,9 +343,6 @@ def _select_nvfp4_pack_scales_and_global(
             break
         global_real = next_global
     return scale, global_real
-
-
-
 
 
 def _nvfp4_effective_scale_from_real(
@@ -418,7 +412,6 @@ def _nvfp4_quantize_grouped_codec(
     global_real: torch.Tensor,
     scale_real: torch.Tensor | None = None,
     scale_rule: str | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> _NVFP4CodecResult:
     if levers is None:
@@ -429,7 +422,8 @@ def _nvfp4_quantize_grouped_codec(
             grouped_f,
             scale_rule=scale_rule,
             global_real=global_real,
-         levers=levers)
+            levers=levers,
+        )
     scale_fp8 = _nvfp4_fp8_scale_from_real(
         scale_real.to(grouped_f.device, dtype=torch.float32),
         global_real,
@@ -455,7 +449,6 @@ def _select_nvfp4_joint_gptq_eff_scale(
     global_real: torch.Tensor,
     *,
     col_importance: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Return GPTQ-time effective scales for Lift-style joint scale search.
@@ -506,7 +499,6 @@ def _optimize_nvfp4_joint_global_real(
     *,
     group_size: int,
     base_global_real: torch.Tensor,
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Choose a tensor global scale jointly with group-scale candidates.
@@ -650,7 +642,6 @@ def _activation_matrix_for_gptq(
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Flatten activations and apply the same optional clipping used by GPTQ.
@@ -676,7 +667,7 @@ def _activation_matrix_for_gptq(
             mode=_normalize_act_clip_rescale(clip_rescale),
         )
     else:
-        q = _resolve_act_clip_quantile( levers=levers) if clip_quantile is None else clip_quantile
+        q = _resolve_act_clip_quantile(levers=levers) if clip_quantile is None else clip_quantile
         if q is not None and 0.0 < q < 1.0 and X.numel() > 0:
             thresh = X.abs().quantile(float(q), dim=1, keepdim=True)
             X = X.clamp(min=-thresh, max=thresh)
@@ -691,7 +682,6 @@ def _normalize_fisher_row_weights(
     row_weights: torch.Tensor | None,
     n_rows: int,
     device: torch.device,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor | None:
@@ -730,7 +720,6 @@ def _activation_col_importance_for_gptq(
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     if levers is None:
@@ -743,7 +732,8 @@ def _activation_col_importance_for_gptq(
         clip_quantile=clip_quantile,
         clip_rescale=clip_rescale,
         row_weights=row_weights,
-     levers=levers)
+        levers=levers,
+    )
     if X.numel() == 0:
         return torch.ones(cols, device=device, dtype=torch.float32)
     return X.pow(2).mean(dim=0).clamp_min(1e-12)
@@ -757,7 +747,6 @@ def _activation_weighted_weight_error(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> float:
     """Score a rendered weight with the same cheap local gate as NVFP4.
@@ -777,7 +766,8 @@ def _activation_weighted_weight_error(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=row_weights,
-     levers=levers)
+        levers=levers,
+    )
     return float((a2 * (ref - cand).pow(2).sum(dim=0)).sum())
 
 
@@ -833,7 +823,6 @@ def _nvfp4_input_gscale_fp8_range_enabled(
 
 def _nvfp4_input_global_scale_from_max_abs(
     max_abs: float, *, policy: str | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> float:
     """input_global_scale for a calibrated activation ``max_abs``.
@@ -1022,9 +1011,6 @@ def _gptq_role_of(qname: str) -> str:
     return "other"
 
 
-
-
-
 def _resolve_gptq_damp_for_role(qname: str,
     *,
     levers: NativeRenderLevers | None = None,
@@ -1049,7 +1035,6 @@ def _gptq_obs_rounding_nvfp4(
     fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
@@ -1082,7 +1067,7 @@ def _gptq_obs_rounding_nvfp4(
     if levers is None:
         levers = NativeRenderLevers.resolve()
     if damp is None:
-        damp = _resolve_gptq_fixed_damp( levers=levers)
+        damp = _resolve_gptq_fixed_damp(levers=levers)
     W = weight.to(torch.float32).clone()
     rows, cols = W.shape
     if cols % group_size != 0:
@@ -1102,7 +1087,8 @@ def _gptq_obs_rounding_nvfp4(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     # H = X^T X; guard against near-zero diagonal (dead channels).
     H = X.t() @ X                                         # [in, in]
     # Dead-channel handling: columns whose H diagonal is non-positive
@@ -1144,14 +1130,16 @@ def _gptq_obs_rounding_nvfp4(
         s_g_real_full = _select_nvfp4_group_scales(
             grouped_full,
             scale_rule=scale_rule,
-         levers=levers)
+            levers=levers,
+        )
         global_real = (s_g_real_full.amax() / FP8_E4M3_MAX).clamp_min(1e-12)
         if joint_scale_opt:
             global_real = _optimize_nvfp4_joint_global_real(
                 W,
                 group_size=group_size,
                 base_global_real=global_real,
-             levers=levers)
+                levers=levers,
+            )
 
     scales_by_group = torch.empty(
         (rows, cols // group_size),
@@ -1166,7 +1154,8 @@ def _gptq_obs_rounding_nvfp4(
                 block,
                 global_real,
                 col_importance=col_importance[block_start:block_end],
-             levers=levers)
+                levers=levers,
+            )
         else:
             s_g_real = _select_nvfp4_group_scales(block, levers=levers)
             eff = _nvfp4_effective_scale_from_real(
@@ -1209,7 +1198,8 @@ def _gptq_obs_rounding_nvfp4(
             weight,
             group_size=group_size,
             global_real_override=global_real,
-         levers=levers)
+            levers=levers,
+        )
 
     def _quantize_nvfp4_col(col: torch.Tensor, col_idx: int) -> torch.Tensor:
         eff_scale = scale_by_col[:, col_idx:col_idx + 1].clamp_min(1e-12)
@@ -1242,7 +1232,6 @@ def _gptq_obs_rounding_nvfp4_swept(
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
     linear_name: str | None = None,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
@@ -1276,7 +1265,8 @@ def _gptq_obs_rounding_nvfp4_swept(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     H_full = X.t() @ X  # [in, in], shared evaluator
 
     # Optional research instrumentation (#46-followup): log per-Linear
@@ -1330,7 +1320,8 @@ def _gptq_obs_rounding_nvfp4_swept(
                     fisher_row_weights=fisher_row_weights,
                     static_act_order=static_act_order,
                     joint_scale_opt=joint_scale_opt,
-                 levers=levers)
+                    levers=levers,
+                )
                 diff = W_orig - w_q.to(torch.float32)
                 err = float(torch.einsum("oi,ij,oj->", diff, H_full, diff))
                 if math.isfinite(err) and err > 0:
@@ -1367,7 +1358,8 @@ def _gptq_obs_rounding_nvfp4_swept(
                 fisher_row_weights=fisher_row_weights,
                 static_act_order=static_act_order,
                 joint_scale_opt=joint_scale_opt,
-             levers=levers)
+                levers=levers,
+            )
         except Exception:
             per_damp_err[damp] = float("inf")
             continue
@@ -1402,7 +1394,8 @@ def _gptq_obs_rounding_nvfp4_swept(
             W_orig,
             group_size=group_size,
             global_real_override=global_real_override,
-         levers=levers)
+            levers=levers,
+        )
     return best_w
 
 
@@ -1416,7 +1409,6 @@ def _scale_sweep_nvfp4(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
@@ -1468,7 +1460,8 @@ def _scale_sweep_nvfp4(
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
             row_weights=fisher_row_weights,
-         levers=levers)
+            levers=levers,
+        )
     else:
         a = _activation_matrix_for_gptq(
             activations,
@@ -1476,7 +1469,8 @@ def _scale_sweep_nvfp4(
             device=W_in.device,
             clip_quantile=0.0,
             row_weights=fisher_row_weights,
-         levers=levers)
+            levers=levers,
+        )
     col_importance = a.pow(2).mean(dim=0).clamp_min(1e-12)  # [in]
 
     # Use the REFERENCE weight to set the default per-group scale (s0)
@@ -1564,7 +1558,6 @@ def compute_nvfp4_global_real(weight: torch.Tensor, group_size: int = 16
 def quantize_dequantize_nvfp4(
     weight: torch.Tensor, group_size: int = 16,
     global_real_override: torch.Tensor | None = None,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -1599,12 +1592,14 @@ def quantize_dequantize_nvfp4(
     s_g_real, global_real = _select_nvfp4_pack_scales_and_global(
         grouped,
         global_real_override=global_real_override,
-     levers=levers)
+        levers=levers,
+    )
     codec = _nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=s_g_real,
-     levers=levers)
+        levers=levers,
+    )
     fp4_idx = codec.indices.reshape(rows, cols)
     weight_packed = pack_fp4_indices(fp4_idx, cols)
     return (
@@ -1617,7 +1612,6 @@ def quantize_dequantize_nvfp4(
 def _rtn_dequant_nvfp4(
     weight: torch.Tensor, group_size: int = 16,
     global_real_override: torch.Tensor | None = None,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
@@ -1636,12 +1630,14 @@ def _rtn_dequant_nvfp4(
     s_g_real, global_real = _select_nvfp4_pack_scales_and_global(
         grouped,
         global_real_override=global_real_override,
-     levers=levers)
+        levers=levers,
+    )
     codec = _nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=s_g_real,
-     levers=levers)
+        levers=levers,
+    )
     return codec.dequant.reshape(rows, cols)
 
 
@@ -1653,7 +1649,6 @@ def render_nvfp4_dequant(
     scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
     snapped_scale_scoring: bool = False,
     joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Render a 2-D weight through the exact production NVFP4 codec.
@@ -1684,13 +1679,15 @@ def render_nvfp4_dequant(
         scale_rule=resolve_nvfp4_scale_rule(scale_rule),
         snapped_scale_scoring=snapped_scale_scoring,
         joint_scale_levels=joint_scale_levels,
-     levers=levers)
+        levers=levers,
+    )
     codec = _nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=scale_real,
         scale_rule=resolve_nvfp4_scale_rule(scale_rule),
-     levers=levers)
+        levers=levers,
+    )
     return codec.dequant.reshape(rows, cols)
 
 
@@ -1701,7 +1698,6 @@ def nvfp4_global_real(
     scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
     snapped_scale_scoring: bool = False,
     joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-
     levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Return the explicit production-codec global multiplier for a weight.
@@ -1728,13 +1724,13 @@ def nvfp4_global_real(
         scale_rule=resolve_nvfp4_scale_rule(scale_rule),
         snapped_scale_scoring=snapped_scale_scoring,
         joint_scale_levels=joint_scale_levels,
-     levers=levers)
+        levers=levers,
+    )
     return global_real
 
 
 def quantize_dequantize_nvfp4_packed(
     packed: torch.Tensor, group_size: int = 16,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -1756,7 +1752,8 @@ def quantize_dequantize_nvfp4_packed(
         snapped = _select_nvfp4_group_scales(
             grouped,
             global_real=global_real.view(E, 1, 1),
-         levers=levers)
+            levers=levers,
+        )
         next_global = (
             snapped.reshape(E, -1).amax(dim=-1) / FP8_E4M3_MAX
         ).clamp_min(1e-12)
@@ -1768,7 +1765,8 @@ def quantize_dequantize_nvfp4_packed(
         grouped,
         global_real=global_real.view(E, 1, 1),
         scale_real=s_g_real,
-     levers=levers)
+        levers=levers,
+    )
     fp4_idx = codec.indices.reshape(E, M, N)
     weight_packed = pack_fp4_indices(fp4_idx, N)
     return (
@@ -2098,7 +2096,6 @@ def _mxfp8_scale_sweep_quantize(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted E8M0 scale search for MXFP8_E4M3.
@@ -2132,7 +2129,8 @@ def _mxfp8_scale_sweep_quantize(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers).reshape(1, cols // group_size, group_size)
+        levers=levers,
+    ).reshape(1, cols // group_size, group_size)
 
     base_e = _mxfp8_base_exponent(grouped, element_max=MXFP8_E4M3_MAX)
     shift_t = torch.tensor(shifts, device=W.device, dtype=torch.float32)
@@ -2252,9 +2250,6 @@ def _rtn_dequant_mxfp8(
     return _mxfp8_dequantize_2d(q, s, group_size=group_size)
 
 
-
-
-
 def _mxfp8_joint_scale_shifts(
     *,
     levers: NativeRenderLevers | None = None,
@@ -2292,7 +2287,6 @@ def _mxfp8_quantize_dequantize_block(
     joint_scale_opt: bool,
     element_dtype: torch.dtype,
     element_max: float,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return MXFP8_E4M3/MXFP8_E5M2 q/scale/dequant for one `[rows, group_size]` block.
@@ -2310,7 +2304,7 @@ def _mxfp8_quantize_dequantize_block(
     if joint_scale_opt:
         best_err: torch.Tensor | None = None
         best_e: torch.Tensor | None = None
-        for shift in _mxfp8_joint_scale_shifts( levers=levers):
+        for shift in _mxfp8_joint_scale_shifts(levers=levers):
             e = (base_e + float(shift)).clamp(-127, 127)
             codec = _mxfp8_grouped_codec(
                 block,
@@ -2350,7 +2344,6 @@ def _gptq_obs_rounding_mxfp4(
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """GPTQ one-shot OBS rounding for MXFP4 weights.
@@ -2374,9 +2367,10 @@ def _gptq_obs_rounding_mxfp4(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     if damp is None:
-        damp = _resolve_gptq_fixed_damp( levers=levers)
+        damp = _resolve_gptq_fixed_damp(levers=levers)
     H = X.t() @ X
     # Dead-channel handling: detect diag(H) <= 0 BEFORE damping (see
     # _gptq_obs_rounding_nvfp4), exclude dead entries from the damp
@@ -2467,7 +2461,6 @@ def _gptq_obs_rounding_mxfp4_swept(
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if levers is None:
@@ -2480,7 +2473,8 @@ def _gptq_obs_rounding_mxfp4_swept(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     H_full = X.t() @ X
     best: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
     best_err = float("inf")
@@ -2495,7 +2489,8 @@ def _gptq_obs_rounding_mxfp4_swept(
                 clip_rescale=clip_rescale,
                 fisher_row_weights=fisher_row_weights,
                 static_act_order=static_act_order,
-             levers=levers)
+                levers=levers,
+            )
         except Exception:
             continue
         diff = W_orig - candidate[2].to(torch.float32)
@@ -2514,7 +2509,8 @@ def _gptq_obs_rounding_mxfp4_swept(
         clip_rescale=clip_rescale,
         fisher_row_weights=fisher_row_weights,
         static_act_order=static_act_order,
-     levers=levers)
+        levers=levers,
+    )
 
 
 def _gptq_obs_rounding_fp8_like(
@@ -2529,7 +2525,6 @@ def _gptq_obs_rounding_fp8_like(
     fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """GPTQ one-shot OBS rounding for FP8_E4M3/E5M2 and MXFP8_E4M3/E5M2 weights.
@@ -2568,9 +2563,10 @@ def _gptq_obs_rounding_fp8_like(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     if damp is None:
-        damp = _resolve_gptq_fixed_damp( levers=levers)
+        damp = _resolve_gptq_fixed_damp(levers=levers)
     H = X.t() @ X
     # Dead-channel handling: detect diag(H) <= 0 BEFORE damping (see
     # _gptq_obs_rounding_nvfp4), exclude dead entries from the damp
@@ -2610,7 +2606,8 @@ def _gptq_obs_rounding_fp8_like(
                 joint_scale_opt=joint_scale_opt,
                 element_dtype=element_dtype,
                 element_max=element_max,
-             levers=levers)
+                levers=levers,
+            )
             scale_out[:, group_idx] = scale_block
         scale_by_col = e8m0_to_scale(
             scale_out,
@@ -2690,7 +2687,6 @@ def _gptq_obs_rounding_fp8_like_swept(
     fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if levers is None:
@@ -2703,7 +2699,8 @@ def _gptq_obs_rounding_fp8_like_swept(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
     H_full = X.t() @ X
     best: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
     best_err = float("inf")
@@ -2720,7 +2717,8 @@ def _gptq_obs_rounding_fp8_like_swept(
                 fisher_row_weights=fisher_row_weights,
                 joint_scale_opt=joint_scale_opt,
                 static_act_order=static_act_order,
-             levers=levers)
+                levers=levers,
+            )
         except Exception:
             continue
         diff = W_orig - candidate[2].to(torch.float32)
@@ -2741,7 +2739,8 @@ def _gptq_obs_rounding_fp8_like_swept(
         fisher_row_weights=fisher_row_weights,
         joint_scale_opt=joint_scale_opt,
         static_act_order=static_act_order,
-     levers=levers)
+        levers=levers,
+    )
 
 
 def _fp8_scale_sweep_factors(
@@ -2760,7 +2759,6 @@ def _fp8_dynamic_scale_sweep_quantize(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
-
     levers: NativeRenderLevers | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted per-row scale search for vLLM FP8 E4M3."""
@@ -2780,7 +2778,8 @@ def _fp8_dynamic_scale_sweep_quantize(
         clip_threshold=clip_threshold,
         clip_rescale=clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers).to(device=w_f.device, dtype=torch.float32)
+        levers=levers,
+    ).to(device=w_f.device, dtype=torch.float32)
     base = (
         w_f.abs().amax(dim=-1, keepdim=True).clamp_min(2.0 ** -127)
         / FP8_E4M3_MAX
@@ -2788,7 +2787,7 @@ def _fp8_dynamic_scale_sweep_quantize(
     best_score = torch.full((rows,), float("inf"), device=w_f.device)
     best_dequant = torch.empty_like(w_f)
     best_scale = torch.empty((rows, 1), device=w_f.device, dtype=torch.float32)
-    for factor in _fp8_scale_sweep_factors( levers=levers):
+    for factor in _fp8_scale_sweep_factors(levers=levers):
         scale = base * float(factor)
         codec = _fp8_codec(
             w_f,
@@ -2857,7 +2856,6 @@ def _quantize_2d(
     joint_scale_opt_enabled: bool | None = None,
     cached_activations: torch.Tensor | None = None,
     compute_only: bool = False,
-
     *,
     levers: NativeRenderLevers | None = None,
 ) -> dict[str, torch.Tensor]:
@@ -2953,7 +2951,7 @@ def _quantize_2d(
                 # _resolve_gptq_fixed_damp() (1.0, :1860).
                 # PRISMAQUANT_GPTQ_DAMP_SWEEP=1 reproduces historical
                 # sweep-rendered artifacts.
-                if gptq_damp_sweep_enabled( levers=levers):
+                if gptq_damp_sweep_enabled(levers=levers):
                     w_work = _gptq_obs_rounding_nvfp4_swept(
                         w_work, acts_work, group_size=16,
                         global_real_override=nvfp4_global_real_override,
@@ -2963,7 +2961,8 @@ def _quantize_2d(
                         static_act_order=static_act_order_enabled,
                         joint_scale_opt=joint_scale_opt_enabled,
                         linear_name=linear_name,
-                     levers=levers)
+                        levers=levers,
+                    )
                 else:
                     w_work = _gptq_obs_rounding_nvfp4(
                         w_work, acts_work, group_size=16,
@@ -2973,7 +2972,8 @@ def _quantize_2d(
                         fisher_row_weights=fisher_row_weights,
                         static_act_order=static_act_order_enabled,
                         joint_scale_opt=joint_scale_opt_enabled,
-                     levers=levers)
+                        levers=levers,
+                    )
 
         # Step 3: closed-form per-group scale sweep. Joint (scale,
         # rounding-set) search on the NVFP4 codebook, activation-
@@ -2990,7 +2990,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                 levers=levers)
+                    levers=levers,
+                )
 
         # Do-no-harm gate (codex review #3): if GPTQ ran and we have
         # cached activations, compute the activation-weighted
@@ -3006,7 +3007,8 @@ def _quantize_2d(
                 w_rtn = _rtn_dequant_nvfp4(
                     w_orig_f, group_size=16,
                     global_real_override=nvfp4_global_real_override,
-                 levers=levers)
+                    levers=levers,
+                )
                 a2 = _activation_col_importance_for_gptq(
                     acts,
                     w_orig_f.shape[1],
@@ -3014,7 +3016,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     row_weights=fisher_row_weights,
-                 levers=levers)
+                    levers=levers,
+                )
                 mse_rtn = float((a2 * (w_orig_f - w_rtn).pow(2)
                                  .sum(dim=0)).sum())
                 mse_work = float((a2 * (w_orig_f - w_work).pow(2)
@@ -3056,7 +3059,8 @@ def _quantize_2d(
         wp, ws, wg = quantize_dequantize_nvfp4(
             w_work, group_size=16,
             global_real_override=nvfp4_global_real_override,
-         levers=levers)
+            levers=levers,
+        )
         return {
             "weight_packed": wp,
             "weight_scale": ws,
@@ -3095,7 +3099,7 @@ def _quantize_2d(
             def _mxfp8_gptq_candidate(
                 use_static_act_order: bool,
             ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-                if gptq_damp_sweep_enabled( levers=levers):
+                if gptq_damp_sweep_enabled(levers=levers):
                     return _gptq_obs_rounding_fp8_like_swept(
                         w_work,
                         acts_work,
@@ -3106,7 +3110,8 @@ def _quantize_2d(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=False,
                         static_act_order=use_static_act_order,
-                     levers=levers)
+                        levers=levers,
+                    )
                 return _gptq_obs_rounding_fp8_like(
                     w_work,
                     acts_work,
@@ -3117,7 +3122,8 @@ def _quantize_2d(
                     fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
                     static_act_order=use_static_act_order,
-                 levers=levers)
+                    levers=levers,
+                )
 
             candidates = [_mxfp8_gptq_candidate(False)]
             if static_act_order_enabled:
@@ -3131,7 +3137,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     row_weights=fisher_row_weights,
-                 levers=levers),
+                    levers=levers,
+                ),
             )
             if scale_sweep_enabled and fmt == "MXFP8_E4M3":
                 w, ws, dq = _mxfp8_scale_sweep_quantize(
@@ -3141,7 +3148,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                 levers=levers)
+                    levers=levers,
+                )
             if levers.do_no_harm:
                 try:
                     q_rtn, s_rtn, dq_rtn = _mxfp8_rtn()
@@ -3152,7 +3160,8 @@ def _quantize_2d(
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
                         row_weights=fisher_row_weights,
-                     levers=levers)
+                        levers=levers,
+                    )
                     err_work = _activation_weighted_weight_error(
                         w_work,
                         dq,
@@ -3160,7 +3169,8 @@ def _quantize_2d(
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
                         row_weights=fisher_row_weights,
-                     levers=levers)
+                        levers=levers,
+                    )
                     if err_rtn < err_work:
                         _record_do_no_harm_revert(fmt)
                         if os.environ.get(
@@ -3181,7 +3191,8 @@ def _quantize_2d(
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
                 fisher_row_weights=fisher_row_weights,
-             levers=levers)
+                levers=levers,
+            )
         else:
             w, ws, _ = _mxfp8_rtn()
         return {"weight": w, "weight_scale": ws}
@@ -3190,7 +3201,7 @@ def _quantize_2d(
         acts_work = acts
         if (gptq_enabled and acts_work is not None
                 and acts_work.shape[-1] == w_work.shape[1]):
-            if gptq_damp_sweep_enabled( levers=levers):
+            if gptq_damp_sweep_enabled(levers=levers):
                 w, ws, dq = _gptq_obs_rounding_fp8_like_swept(
                     w_work,
                     acts_work,
@@ -3199,7 +3210,8 @@ def _quantize_2d(
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
-                 levers=levers)
+                    levers=levers,
+                )
             else:
                 w, ws, dq = _gptq_obs_rounding_fp8_like(
                     w_work,
@@ -3209,7 +3221,8 @@ def _quantize_2d(
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
                     joint_scale_opt=False,
-                 levers=levers)
+                    levers=levers,
+                )
             if scale_sweep_enabled and fmt == "FP8_E4M3":
                 w, ws, _ = _fp8_dynamic_scale_sweep_quantize(
                     dq,
@@ -3217,7 +3230,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                 levers=levers)
+                    levers=levers,
+                )
         elif (scale_sweep_enabled and acts_work is not None
               and acts_work.shape[-1] == w_work.shape[1]
               and fmt == "FP8_E4M3"):
@@ -3227,7 +3241,8 @@ def _quantize_2d(
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
                 fisher_row_weights=fisher_row_weights,
-             levers=levers)
+                levers=levers,
+            )
         else:
             if fmt == "FP8_E5M2":
                 raise ValueError("FP8_E5M2 export packing is research-only")
@@ -3250,7 +3265,7 @@ def _quantize_2d(
             def _mxfp4_gptq_candidate(
                 use_static_act_order: bool,
             ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-                if gptq_damp_sweep_enabled( levers=levers):
+                if gptq_damp_sweep_enabled(levers=levers):
                     return _gptq_obs_rounding_mxfp4_swept(
                         w_work,
                         acts_work,
@@ -3259,7 +3274,8 @@ def _quantize_2d(
                         clip_rescale=act_clip_rescale,
                         fisher_row_weights=fisher_row_weights,
                         static_act_order=use_static_act_order,
-                     levers=levers)
+                        levers=levers,
+                    )
                 return _gptq_obs_rounding_mxfp4(
                     w_work,
                     acts_work,
@@ -3268,7 +3284,8 @@ def _quantize_2d(
                     clip_rescale=act_clip_rescale,
                     fisher_row_weights=fisher_row_weights,
                     static_act_order=use_static_act_order,
-                 levers=levers)
+                    levers=levers,
+                )
 
             candidates = [_mxfp4_gptq_candidate(False)]
             if static_act_order_enabled:
@@ -3282,7 +3299,8 @@ def _quantize_2d(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=act_clip_rescale,
                     row_weights=fisher_row_weights,
-                 levers=levers),
+                    levers=levers,
+                ),
             )
             if levers.do_no_harm:
                 try:
@@ -3294,7 +3312,8 @@ def _quantize_2d(
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
                         row_weights=fisher_row_weights,
-                     levers=levers)
+                        levers=levers,
+                    )
                     err_work = _activation_weighted_weight_error(
                         w_work,
                         dq,
@@ -3302,7 +3321,8 @@ def _quantize_2d(
                         clip_threshold=act_clip_threshold,
                         clip_rescale=act_clip_rescale,
                         row_weights=fisher_row_weights,
-                     levers=levers)
+                        levers=levers,
+                    )
                     if err_rtn < err_work:
                         _record_do_no_harm_revert("MXFP4")
                         if os.environ.get(
@@ -3403,7 +3423,6 @@ def _quantize_2d_nvfp4_group_batched(
     joint_globals: dict,
     device: torch.device,
     expert_chunk: int = 32,
-
     *,
     levers: NativeRenderLevers | None = None,
     activations: object | None = None,
@@ -3478,7 +3497,8 @@ def _quantize_2d_nvfp4_group_batched(
             sub_results = _quantize_2d_nvfp4_group_batched(
                 sub, joint_globals, device, expert_chunk=expert_chunk,
                 activations=activations, input_global_scales=input_global_scales,
-                levers=levers)
+                levers=levers,
+            )
             for i, r in zip(with_idx, sub_results):
                 results[i] = r
         if without_idx:
@@ -3486,7 +3506,8 @@ def _quantize_2d_nvfp4_group_batched(
             sub_results = _quantize_2d_nvfp4_group_batched(
                 sub, joint_globals, device, expert_chunk=expert_chunk,
                 activations=activations, input_global_scales=input_global_scales,
-                levers=levers)
+                levers=levers,
+            )
             for i, r in zip(without_idx, sub_results):
                 results[i] = r
         return results
@@ -3501,7 +3522,7 @@ def _quantize_2d_nvfp4_group_batched(
     if levers.gptq:
         # Default ON (validated on Qwen3-0.6B audit). =0 to disable.
         damp_sweep_on = (
-            gptq_damp_sweep_enabled( levers=levers))
+            gptq_damp_sweep_enabled(levers=levers))
         if damp_sweep_on:
             damp_candidates = (0.001, 0.005, 0.01, 0.05, 0.1)
             best_w = None
@@ -3527,7 +3548,8 @@ def _quantize_2d_nvfp4_group_batched(
                     joint_scale_opt=bool(
                         levers.joint_scale_opt
                     ),
-                 levers=levers)
+                    levers=levers,
+                )
                 # Per-Linear activation-weighted MSE vs reference.
                 diff = reference_weights - cand_w
                 err = (col_imp.unsqueeze(1) * diff.pow(2)).sum(dim=(1, 2))
@@ -3552,14 +3574,16 @@ def _quantize_2d_nvfp4_group_batched(
                 joint_scale_opt=bool(
                     levers.joint_scale_opt
                 ),
-             levers=levers)
+                levers=levers,
+            )
     if levers.scale_sweep:
         weights = scale_sweep_nvfp4_batched(
             weights, acts_list,
             reference_weights=reference_weights,
             global_real_overrides=global_real_overrides,
             expert_chunk=expert_chunk,
-         levers=levers)
+            levers=levers,
+        )
 
     # Codex review #47 batched extension: per-Linear do-no-harm gate.
     # If the post-pass weight is worse on activation-weighted MSE than
@@ -3588,7 +3612,8 @@ def _quantize_2d_nvfp4_group_batched(
                 w_rtn = _rtn_dequant_nvfp4(
                     reference_weights[i], group_size=16,
                     global_real_override=override,
-                 levers=levers)
+                    levers=levers,
+                )
                 ref_i = reference_weights[i]
                 imp = col_imp[i]
                 mse_pass = float(
@@ -3614,7 +3639,8 @@ def _quantize_2d_nvfp4_group_batched(
         wp, ws, wg = quantize_dequantize_nvfp4(
             weights[i], group_size=16,
             global_real_override=override,
-         levers=levers)
+            levers=levers,
+        )
         input_scale = _resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=input_global_scales)
         out.append({
             "weight_packed": wp,

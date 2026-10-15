@@ -296,7 +296,8 @@ def _render_dense_layer(
                 activations=X,
                 activation_max_abs=max_abs,
                 input_global_scale_policy=stream_score_policy,
-             levers=NativeRenderLevers.from_record(levers))
+                levers=NativeRenderLevers.from_record(levers),
+            )
             render_score_records[score_key] = render_score
             if not retain_rendered:
                 canonical_render = _canonical_rendered_weight_tensor(

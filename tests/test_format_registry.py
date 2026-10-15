@@ -240,7 +240,8 @@ def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
         export = _rtn_dequant_nvfp4(
             x.reshape(-1, x.shape[-1]),
             group_size=16,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())).reshape_as(x)
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ).reshape_as(x)
 
         assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:

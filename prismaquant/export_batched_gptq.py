@@ -82,7 +82,7 @@ def _build_H_stack(
         from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
         )
-        damp = _resolve_gptq_fixed_damp( levers=levers)
+        damp = _resolve_gptq_fixed_damp(levers=levers)
 
     E = len(activations_list)
     H_stack = torch.zeros(
@@ -122,7 +122,8 @@ def _build_H_stack(
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
             row_weights=row_weights,
-         levers=levers)
+            levers=levers,
+        )
         H = X.t() @ X
         # Dead columns (all-zero activation channel): detect BEFORE
         # damping (damping lifts every diagonal above zero, which made
@@ -189,7 +190,7 @@ def gptq_obs_rounding_nvfp4_batched(
         from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
         )
-        damp = _resolve_gptq_fixed_damp( levers=levers)
+        damp = _resolve_gptq_fixed_damp(levers=levers)
 
     if weights.dim() != 3:
         raise ValueError(f"weights must be [E, out, in]; got {weights.shape}")
@@ -229,7 +230,8 @@ def gptq_obs_rounding_nvfp4_batched(
                 fisher_row_weights=row_weights,
                 static_act_order=static_act_order,
                 joint_scale_opt=joint_scale_opt,
-             levers=levers))
+                levers=levers,
+            ))
         return torch.stack(outputs, dim=0)
 
     device = weights.device
@@ -251,7 +253,8 @@ def gptq_obs_rounding_nvfp4_batched(
                 row_weights_list[e_start:e_end]
                 if row_weights_list is not None else None
             ),
-         levers=levers)
+            levers=levers,
+        )
         # We do NOT zero the weights of dead columns (deliberate
         # serving-safe deviation from reference GPTQ — a column
         # unexercised by calibration must not be destroyed for serving
@@ -383,7 +386,8 @@ def gptq_obs_rounding_nvfp4_batched(
                     weights[e_start + j],
                     group_size=group_size,
                     global_real_override=override,
-                 levers=levers)
+                    levers=levers,
+                )
 
         out_buf[e_start:e_end] = W
 
@@ -469,7 +473,8 @@ def scale_sweep_nvfp4_batched(
                 clip_rescale=clip_rescale,
                 clip_quantile=0.0 if clip_threshold is None else None,
                 row_weights=row_weights,
-             levers=levers)
+                levers=levers,
+            )
             col_imp[j] = a32.pow(2).mean(dim=0).clamp_min(1e-12)
         col_imp_g = col_imp.reshape(Ec, 1, n_g, group_size)  # [Ec, 1, n_g, gs]
 

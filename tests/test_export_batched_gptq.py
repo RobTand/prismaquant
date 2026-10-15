@@ -68,12 +68,14 @@ def test_gptq_batched_matches_per_linear(seeded):
     for e in range(E):
         per_outputs.append(_gptq_obs_rounding_nvfp4(
             weights[e], activations_list[e], group_size=16,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ))
     per_stack = torch.stack(per_outputs, dim=0)
 
     batch_out = gptq_obs_rounding_nvfp4_batched(
         weights, activations_list, group_size=16, expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     # Reduction-order may differ — allow a tight tolerance.
     assert torch.allclose(per_stack, batch_out, atol=1e-4, rtol=1e-3), (
         f"max abs diff: {(per_stack - batch_out).abs().max().item():.3e}\n"
@@ -92,7 +94,8 @@ def test_gptq_batched_empty_acts_ships_rtn_not_zeros(seeded):
 
     out = gptq_obs_rounding_nvfp4_batched(
         weights, activations_list, group_size=16, expert_chunk=4,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     # The empty-acts Linear ships the same bytes as plain RTN — nonzero.
     expected_rtn = _rtn_dequant_nvfp4(weights[1], group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
     assert out[1].abs().max() > 0.0
@@ -115,7 +118,8 @@ def test_gptq_batched_dead_activation_column_not_zeroed(seeded):
 
     out = gptq_obs_rounding_nvfp4_batched(
         weights, activations_list, group_size=16, expert_chunk=4,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     # The dead column survives (quantized, not destroyed).
     assert out[0][:, dead_col].abs().max() > 0.0
     # And it stays consistent with the per-Linear path on the same input.
@@ -136,13 +140,15 @@ def test_gptq_batched_with_global_real_overrides(seeded):
         per_outputs.append(_gptq_obs_rounding_nvfp4(
             weights[e], activations_list[e], group_size=16,
             global_real_override=overrides[e],
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ))
     per_stack = torch.stack(per_outputs, dim=0)
 
     batch_out = gptq_obs_rounding_nvfp4_batched(
         weights, activations_list, group_size=16,
         global_real_overrides=overrides, expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     assert torch.allclose(per_stack, batch_out, atol=1e-4, rtol=1e-3)
 
 
@@ -156,7 +162,8 @@ def test_gptq_batched_cholesky_failure_falls_back_to_rtn(seeded):
             activations_list,
             group_size=16,
             expert_chunk=4,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
 
     expected = torch.stack([
         _rtn_dequant_nvfp4(weights[e], group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
@@ -178,14 +185,16 @@ def test_scale_sweep_batched_matches_per_linear(seeded):
             weights[e], activations_list[e],
             reference_weight=reference_weights[e],
             group_size=16,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ))
     per_stack = torch.stack(per_outputs, dim=0)
 
     batch_out = scale_sweep_nvfp4_batched(
         weights, activations_list,
         reference_weights=reference_weights,
         group_size=16, expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     assert torch.allclose(per_stack, batch_out, atol=1e-4, rtol=1e-3), (
         f"max abs diff: {(per_stack - batch_out).abs().max().item():.3e}")
 
@@ -203,7 +212,8 @@ def test_scale_sweep_batched_with_overrides(seeded):
             reference_weight=reference_weights[e],
             group_size=16,
             global_real_override=overrides[e],
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ))
     per_stack = torch.stack(per_outputs, dim=0)
 
     batch_out = scale_sweep_nvfp4_batched(
@@ -212,7 +222,8 @@ def test_scale_sweep_batched_with_overrides(seeded):
         group_size=16,
         global_real_overrides=overrides,
         expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     assert torch.allclose(per_stack, batch_out, atol=1e-4, rtol=1e-3)
 
 
@@ -227,19 +238,22 @@ def test_batched_paths_match_per_linear_with_four_over_six(seeded):
         per_gptq = torch.stack([
             _gptq_obs_rounding_nvfp4(
                 weights[e], activations_list[e], group_size=16,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             for e in range(E)
         ], dim=0)
         batch_gptq = gptq_obs_rounding_nvfp4_batched(
             weights, activations_list, group_size=16, expert_chunk=2,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
 
         per_sweep = torch.stack([
             _scale_sweep_nvfp4(
                 weights[e], activations_list[e],
                 reference_weight=reference_weights[e],
                 group_size=16,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             for e in range(E)
         ], dim=0)
         batch_sweep = scale_sweep_nvfp4_batched(
@@ -247,7 +261,8 @@ def test_batched_paths_match_per_linear_with_four_over_six(seeded):
             reference_weights=reference_weights,
             group_size=16,
             expert_chunk=2,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
     finally:
         _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), nvfp4_scale_rule=prev)
 
@@ -272,7 +287,8 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
             group_size=16,
             clip_threshold=clip_threshold,
             fisher_row_weights=row_weights_list[e],
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         for e in range(E)
     ], dim=0)
     batch_gptq = gptq_obs_rounding_nvfp4_batched(
@@ -282,7 +298,8 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
         clip_threshold=clip_threshold,
         row_weights_list=row_weights_list,
         expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
 
     per_sweep = torch.stack([
         _scale_sweep_nvfp4(
@@ -292,7 +309,8 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
             group_size=16,
             clip_threshold=clip_threshold,
             fisher_row_weights=row_weights_list[e],
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
         for e in range(E)
     ], dim=0)
     batch_sweep = scale_sweep_nvfp4_batched(
@@ -303,7 +321,8 @@ def test_batched_paths_match_per_linear_with_clip_and_fisher(seeded):
         clip_threshold=clip_threshold,
         row_weights_list=row_weights_list,
         expert_chunk=2,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
 
     assert torch.allclose(per_gptq, batch_gptq, atol=1e-4, rtol=1e-3)
     assert torch.allclose(per_sweep, batch_sweep, atol=1e-4, rtol=1e-3)
@@ -323,7 +342,8 @@ def test_gptq_batched_matches_per_linear_with_lift_options(seeded):
                 group_size=16,
                 static_act_order=True,
                 joint_scale_opt=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+            )
             for e in range(E)
         ], dim=0)
         batch_gptq = gptq_obs_rounding_nvfp4_batched(
@@ -333,7 +353,8 @@ def test_gptq_batched_matches_per_linear_with_lift_options(seeded):
             expert_chunk=2,
             static_act_order=True,
             joint_scale_opt=True,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        )
     finally:
         _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), nvfp4_scale_rule=prev)
 
@@ -358,12 +379,14 @@ def test_gptq_batched_realistic_moe_shape(seeded):
     for e in range(E):
         per_outputs.append(_gptq_obs_rounding_nvfp4(
             weights[e], activations_list[e], group_size=16,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+            levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+        ))
     per_stack = torch.stack(per_outputs, dim=0)
 
     batch_out = gptq_obs_rounding_nvfp4_batched(
         weights, activations_list, group_size=16, expert_chunk=8,
-     levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
+    )
     # Tolerance scales mildly with size due to FP32 reduction-order
     # drift on bigger Cholesky / bmm; 5e-4 is comfortable.
     assert torch.allclose(per_stack, batch_out, atol=5e-4, rtol=1e-3), (

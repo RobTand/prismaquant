@@ -2241,7 +2241,8 @@ def _gate_activation_matrix(
         clip_threshold=act_clip_threshold,
         clip_rescale=act_clip_rescale,
         row_weights=fisher_row_weights,
-     levers=levers)
+        levers=levers,
+    )
 
 
 def _render_score_record_key(qname: str, fmt: str) -> str:
@@ -3198,7 +3199,8 @@ def _render_nvfp4_progressive_candidate(
         weight_scaled,
         group_size=16,
         global_real_override=joint_global_real,
-     levers=render_options)
+        levers=render_options,
+    )
     if activations_scaled is None or activations_scaled.numel() == 0:
         return current
     if include_gptq:
@@ -3217,7 +3219,8 @@ def _render_nvfp4_progressive_candidate(
                 joint_scale_opt=bool(
                     levers.get("joint_scale_opt", False)
                 ),
-             levers=render_options)
+                levers=render_options,
+            )
         else:
             current = _native_render_codec._gptq_obs_rounding_nvfp4(
                 weight_scaled,
@@ -3234,7 +3237,8 @@ def _render_nvfp4_progressive_candidate(
                 joint_scale_opt=bool(
                     levers.get("joint_scale_opt", False)
                 ),
-             levers=render_options)
+                levers=render_options,
+            )
     if include_scale_sweep:
         current = _native_render_codec._scale_sweep_nvfp4(
             current,
@@ -3245,7 +3249,8 @@ def _render_nvfp4_progressive_candidate(
             clip_threshold=act_clip_threshold,
             clip_rescale=act_clip_rescale,
             fisher_row_weights=fisher_row_weights,
-         levers=render_options)
+            levers=render_options,
+        )
     return current
 
 
@@ -3845,7 +3850,8 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
-                         levers=render_options)
+                            levers=render_options,
+                        )
                     else:
                         _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4(
                             reference,
@@ -3855,7 +3861,8 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
-                         levers=render_options)
+                            levers=render_options,
+                        )
                 elif use_damp_sweep:
                     _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like_swept(
                         reference,
@@ -3867,7 +3874,8 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
-                     levers=render_options)
+                        levers=render_options,
+                    )
                 else:
                     _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like(
                         reference,
@@ -3879,7 +3887,8 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
-                     levers=render_options)
+                        levers=render_options,
+                    )
                 return _non_nv_candidate(
                     label=f"{fmt.lower()}+{'+'.join(package)}",
                     weight_dq=candidate,
@@ -3912,7 +3921,8 @@ def render_production_weight(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                 levers=render_options)
+                    levers=render_options,
+                )
             else:
                 from prismaquant.native_render_codec import (
                     _fp8_dynamic_scale_sweep_quantize,
@@ -3924,7 +3934,8 @@ def render_production_weight(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                 levers=render_options)
+                    levers=render_options,
+                )
             candidate = _non_nv_candidate(
                 label=f"{current.label}+scale_sweep",
                 weight_dq=w_dq,
@@ -3955,7 +3966,8 @@ def render_production_weight(
         act_clip_rescale=clip_rescale,
         fisher_row_weights=fisher_row_weights,
         compute_only=True,
-     levers=render_options)
+        levers=render_options,
+    )
     w_dq = result["_w_dq"]
     return w_dq.to(device=weight.device, dtype=weight.dtype).contiguous()
 
@@ -6069,7 +6081,8 @@ def fill_production_weight_cache(
             model,
             synthetic_assignment,
             profile=model_profile,
-         levers=render_options)
+            levers=render_options,
+        )
         if progress:
             print(
                 f"[prod-cache] computed joint NVFP4 globals for "
@@ -6231,7 +6244,8 @@ def fill_production_weight_cache(
                                 activations=activations_local.get(qname),
                                 activation_max_abs=max_abs,
                                 input_global_scale_policy=render_score_policy,
-                             levers=render_options)
+                                levers=render_options,
+                            )
                             del cached
                         except Exception:
                             pass
@@ -6268,7 +6282,8 @@ def fill_production_weight_cache(
                         activations=activations_local.get(qname),
                         activation_max_abs=max_abs,
                         input_global_scale_policy=render_score_policy,
-                     levers=render_options)
+                        levers=render_options,
+                    )
                 )
                 if gate_trace:
                     render_gate_records.append({
@@ -6801,7 +6816,8 @@ def _packed_expert_render_score_record(
                 activations=acts_e,
                 activation_max_abs=activation_max_abs,
                 input_global_scale_policy=input_global_scale_policy,
-             levers=levers)
+                levers=levers,
+            )
         )
         del acts_e
     if not per_expert:
@@ -7766,7 +7782,8 @@ def fill_packed_expert_cache_entries(
                         device=device,
                         score_rows_source="fit_corpus_tail",
                         input_global_scale_policy=packed_score_policy,
-                     levers=render_options)
+                        levers=render_options,
+                    )
                 )
                 del resumed_render
             packed_gate_records[gate_key] = _packed_expert_render_gate_record(
@@ -7899,11 +7916,13 @@ def fill_packed_expert_cache_entries(
                 global_real_overrides=overrides,
                 static_act_order=False,
                 joint_scale_opt=False,
-             levers=render_options)  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
+                levers=render_options,
+            )  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
             for e in range(E):
                 w_rtn = _rtn_dequant_nvfp4(
                     src[e], group_size=16, global_real_override=overrides[e],
-                 levers=render_options)
+                    levers=render_options,
+                )
                 src_a = (
                     per_expert_acts[e] if e < len(per_expert_acts) else None
                 )
@@ -7994,7 +8013,8 @@ def fill_packed_expert_cache_entries(
             device=device,
             score_rows_source="fit_corpus_tail",
             input_global_scale_policy=packed_score_policy,
-         levers=render_options)
+            levers=render_options,
+        )
         packed_gate_records[gate_key] = _packed_expert_render_gate_record(
             qname=full,
             fmt=fmt,

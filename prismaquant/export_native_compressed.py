@@ -1289,7 +1289,8 @@ def _pack_production_cached_2d(
             w_work,
             group_size=16,
             global_real_override=nvfp4_global_real_override,
-         levers=_export_render_options(cache))
+            levers=_export_render_options(cache),
+        )
         input_scale = _native_render_codec._resolve_nvfp4_input_global_scale(target=linear_name, calibrated_scales=_INPUT_GLOBAL_SCALES)
         return {
             "weight_packed": wp,
@@ -2741,7 +2742,8 @@ def materialize_tensors_streaming(
         # match-render-scale re-derive (_pack_production_cached_2d).
         joint_globals = _compute_layer_joint_nvfp4(
             layer_mod, layer_qname, assignment, profile,
-         levers=_export_render_options())
+            levers=_export_render_options(),
+        )
 
         # 3c. Emit Linears.
         covered: set[str] = set()
@@ -3178,7 +3180,8 @@ def materialize_tensors_streaming(
                                     per_expert_joint[orig_e]),
                                 input_global_scale_override=(
                                     expert_input_scale),
-                             levers=packed_render_options)
+                                levers=packed_render_options,
+                            )
                             for suffix, t in compressed.items():
                                 out[f"{base}.{suffix}"] = t.cpu()
                 covered.add(full)
@@ -3356,7 +3359,8 @@ def _materialize_tensors_inmemory(
         model,
         assignment,
         profile=profile,
-     levers=_export_render_options())
+        levers=_export_render_options(),
+    )
 
     for qname, mod in model.named_modules():
         if not isinstance(mod, nn.Linear):
@@ -3546,7 +3550,8 @@ def _materialize_tensors_inmemory(
                             expert_2d, fmt,
                             nvfp4_global_real_override=per_expert_joint[e],
                             input_global_scale_override=expert_input_scale,
-                         levers=packed_render_options)
+                            levers=packed_render_options,
+                        )
                         for suffix, tensor in compressed.items():
                             out[f"{base}.{suffix}"] = tensor.cpu()
             covered.add(full_name)
