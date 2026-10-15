@@ -130,3 +130,52 @@ def streamed_calibration_request(args) -> CensusRequest | CaptureRequest:
         streaming_cache_slots=args.streaming_cache_slots,
         streaming_prefetch_workers=args.streaming_prefetch_workers,
         streaming_cache_headroom_gb=args.streaming_cache_headroom_gb)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignScopeRequest:
+    """Controls read by loaded-model scope, census and topology admission."""
+    model: str
+    nsamples: int
+    seqlen: int
+    seed: int
+    calibration_input_receipt: Mapping | None
+    layer_stride: int
+    allow_pinned: str | None
+    pinned_roster_only: bool
+    census_out: str | None
+    calibration_census: str | None
+    units: str | None
+    research_exact_member: str | None
+    rate_band: str | None
+    max_rounds: int
+    seed_checkpoint: Sequence[str] | None
+    seed_wire_dir: str | None
+    capture_calibration_out: str | None
+    calibration_cache: str | None
+    family_restriction: Mapping | None
+
+
+def campaign_scope_request(args) -> CampaignScopeRequest:
+    """Bind scope admission after the CLI's phase and source gates."""
+    return CampaignScopeRequest(
+        model=args.model,
+        nsamples=args.nsamples,
+        seqlen=args.seqlen,
+        seed=args.seed,
+        calibration_input_receipt=args.calibration_input_receipt,
+        layer_stride=args.layer_stride,
+        allow_pinned=args.allow_pinned,
+        pinned_roster_only=args.pinned_roster_only,
+        census_out=args.census_out,
+        calibration_census=args.calibration_census,
+        units=args.units,
+        research_exact_member=args.research_exact_member,
+        rate_band=args.rate_band,
+        max_rounds=args.max_rounds,
+        seed_checkpoint=args.seed_checkpoint,
+        seed_wire_dir=args.seed_wire_dir,
+        capture_calibration_out=args.capture_calibration_out,
+        calibration_cache=args.calibration_cache,
+        family_restriction=args.family_restriction,
+    )

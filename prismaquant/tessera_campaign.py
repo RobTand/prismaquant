@@ -62,6 +62,7 @@ from __future__ import annotations
 from .tessera_campaign_requests import (
     CaptureJoinRequest, CapturePrepRequest, capture_chain_bookend_request,
     CensusRequest, CaptureRequest, CaptureQuantum, census_request, streamed_calibration_request,
+    CampaignScopeRequest, campaign_scope_request,
 )
 
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -4522,6 +4523,242 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         return result
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedCampaignScope:
+    """The loaded model's full scope and the exact subset this row prices."""
+    population: ExpertPopulation
+    roster: CampaignRoster
+    pinned_roster: dict | None
+    dense_targets: list[str]
+    expert_targets: list[str]
+    expert_members: dict
+    census_dense_targets: list[str]
+    census_expert_targets: list[str]
+    scope_groups: dict[str, list[str]]
+    census: dict | None
+    census_only: bool
+    selection: dict | None
+    stack_samples: dict
+    exact_member_scope: dict | None
+    partition_menu_targets: list[str] | None
+    partition_unit_records: dict
+    selected_groups: list[str]
+    audit_units: set[str]
+    inclusion_probability: dict[str, float]
+    context_by_unit: dict | None
+    structure_by_unit: dict | None
+    encode_structure: dict | None
+    acquisition: dict | None
+
+
+def resolve_campaign_scope(request: CampaignScopeRequest, model, profile, *,
+                           mode, device, serving_target, selected_capture_census,
+                           capture_unit_names, acquisition) -> ResolvedCampaignScope:
+    """Resolve and refuse roster, draw, selection and topology in one order."""
+    from .tessera_serving_scope import context_by_unit_from_stats, unit_structure_from_stats
+
+    # The packed expert population the producer bridge covers, or a refusal by
+    # name before calibration.  Its members are priced as the producer's
+    # projected units below (PrismaQuant #183).
+    # A pinned-roster-only campaign prices the lifted Linears and no expert
+    # (PQ #1843); its census records that the population was left out.
+    population = (ExpertPopulation(members=(), declared={}, packed_in_scope={},
+                                   omitted_outside_layer_stride={})
+                  if request.pinned_roster_only else
+                  _require_campaign_population(model, profile, request.layer_stride))
+    # Names only: no module is retained after source teardown.
+    roster = campaign_roster(
+        profile.campaign_dense_unit_names(model, allow_pinned=request.allow_pinned),
+        profile, allow_pinned=request.allow_pinned, pinned_roster_only=request.pinned_roster_only)
+    all_dense = list(roster.dense)
+    pinned = list(roster.pinned)
+    pinned_roster = pinned_roster_block(request, roster)
+    if pinned_roster is not None:
+        print(f"[campaign] --allow-pinned {pinned_roster['allow_pinned']} lifts "
+              f"{len(roster.lifted)} profile-pinned Linears"
+              + (" (pinned roster only)" if request.pinned_roster_only else ""), flush=True)
+    dense_targets = _campaign_layer_scope(all_dense, request.layer_stride)
+    expert_targets = population.qnames
+    expert_members = {member.qname: member for member in population.members}
+    targets = [*dense_targets, *expert_targets]
+    # The whole priced scope, before any selection narrows the encoding work.
+    # It is what the census counts, what the population block enumerates, and
+    # what a merge checks a set of shards covers.
+    census_dense_targets = list(dense_targets)
+    census_expert_targets = list(expert_targets)
+    census_targets = list(targets)
+    scope_groups = resolve_anchor_groups(
+        census_targets, profile=profile, expert_members=expert_members)
+    print(f"[campaign] {len(dense_targets)} target Linears + {len(expert_targets)} "
+          f"projected expert units in {len(population.declared)} stacks, "
+          f"{len(scope_groups)} anchor groups, mode={mode}, "
+          f"device={device}", flush=True)
+
+    # The census quantum: the whole prologue over the whole scope -- one
+    # calibration forward that counts rows and calibrates the static A-side
+    # maxima, and one producer projection request -- written out and stopped
+    # before a single anchor is encoded.  Every later shard reads it, so no
+    # shard re-derives a scope-wide answer and none of them can disagree
+    # about one.
+    census_only = bool(request.census_out)
+    if census_only and request.units:
+        raise RuntimeError(
+            "--census-out takes the whole scope; it cannot be narrowed by --units")
+    if census_only and request.calibration_census:
+        raise RuntimeError("--census-out writes a census; it does not read one")
+
+    selection = None
+    stack_samples = {}
+    exact_member_scope = None
+    partition_members = {}
+    partition_menu_targets = None
+    partition_unit_records = {}
+    full_expert_members = expert_members
+    census = (selected_capture_census if selected_capture_census is not None else
+              (None if not request.calibration_census
+               else load_calibration_census(request.calibration_census, args=request)))
+    selected_groups: list[str] = sorted(scope_groups)
+    audit_units: set = set()
+    inclusion_probability: dict = {}
+    if request.units:
+        selection = load_unit_selection(request.units)
+        if (selection.get("model", request.model) != request.model
+                or selection.get("layer_stride", request.layer_stride) != request.layer_stride):
+            raise StackSampleError("--units model/layer_stride disagrees with this campaign")
+        if selection.get("schema") == UNITS_SCHEMA_V3:
+            if census is None or request.research_exact_member is not None:
+                raise RuntimeError("expert partition requires a census and excludes research exact-member")
+            from .tessera_expert_projection import carried_units
+            _source, partition_unit_records, partition_stacks = carried_units(census["expert_projection"])
+            partition_members = expert_partition_members(
+                selection, unit_records=partition_unit_records, stack_of=partition_stacks,
+                rate_band=request.rate_band, max_rounds=request.max_rounds,
+                seeded=bool(request.seed_checkpoint or request.seed_wire_dir))
+            partition_menu_targets = sorted(name for entry in selection["groups"] for name in entry["members"])
+            # Existing unit receipts bind the local subset; the scope-wide
+            # producer projection binds the full group geometry/source frame.
+        stack_samples = selection_stack_samples(selection, profile)
+        selected_groups = select_anchor_groups(
+            selection, scope_groups, where=f"--units {request.units}")
+        priced, audit_units, inclusion_probability = selection_priced_units(
+            selection)
+        if request.research_exact_member is not None:
+            if (mode != "research" or not request.calibration_census or
+                    not request.calibration_cache or parse_rate_band(request.rate_band) is None):
+                raise RuntimeError("--research-exact-member requires research menu, "
+                                   "calibration census/cache and --rate-band")
+            exact_member_scope = research_exact_member_scope(
+                selection, scope_groups, request.research_exact_member)
+            priced = {exact_member_scope["member"]}
+            audit_units = set()
+            inclusion_probability = {}
+        if request.capture_calibration_out:
+            # The census-derived scope the pre-model check derived; the run's
+            # own grouping must resolve the selection to exactly that set.
+            confirmed = selected_capture_unit_names(selection, args=request,
+                                                    resolved=scope_groups)
+            if confirmed != capture_unit_names:
+                raise RuntimeError(
+                    f"--units {request.units}: this run's grouping resolves the "
+                    f"selection to {confirmed} but its census to "
+                    f"{capture_unit_names}; the scope is not exact")
+        # The group's membership was already checked whole; what the sample
+        # narrows is only which of those members this run encodes. Keeping the
+        # two separate is what lets a sampled run stay identity-honest: the
+        # checkpoint's ``units`` map holds exactly the priced units, so a
+        # different draw is a different identity and cannot silently resume
+        # over this one.
+        keep = {name for key in selected_groups for name in scope_groups[key]
+                if name in priced}
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items()
+                          if name in keep}
+        targets = [*dense_targets, *expert_targets]
+        sampled_groups = sum(1 for entry in selection["groups"]
+                             if entry.get("sampled"))
+        print(f"[campaign] --units selects {len(selected_groups)} of "
+              f"{len(scope_groups)} anchor groups: {len(dense_targets)} dense + "
+              f"{len(expert_targets)} projected expert units"
+              + (f"; {sampled_groups} group(s) sampled, "
+                 f"{len(audit_units)} audit unit(s)" if sampled_groups else ""),
+              flush=True)
+        if not targets:
+            raise RuntimeError(
+                f"--units {request.units}: the selection prices no unit")
+    elif request.research_exact_member is not None:
+        raise RuntimeError("--research-exact-member requires --units")
+
+    if acquisition is not None:
+        acquisition, selected_groups, keep = campaign_acquisition_row_scope(
+            acquisition, scope_groups, selected=targets if request.units else None)
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items() if name in keep}
+        targets = [*dense_targets, *expert_targets]
+
+    context_by_unit = None
+    structure_by_unit = None
+    if serving_target is not None or request.family_restriction is not None:
+        from .sensitivity_probe import discover_moe_structure
+        routed = discover_moe_structure(model, profile=profile)
+        topology = {
+            name: dict(zip(("router_path", "expert_id"), routed.get(name, (None, None))))
+            for name in dense_targets
+        }
+        topology_experts = ({name: full_expert_members[name] for name in partition_menu_targets}
+                            if partition_menu_targets is not None else expert_members)
+        topology_targets = partition_menu_targets or targets
+        for name, member in topology_experts.items():
+            if name not in topology_targets:
+                continue
+            # The packed facts the probe would record for this unit: its
+            # packed module and expert count, never a shape guess.
+            topology[name] = {
+                "_packed_experts_module": member.module_qname,
+                "num_experts": int(getattr(member.module, member.param_name).shape[0]),
+            }
+        context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
+        if request.family_restriction is not None:
+            if len(set(topology_targets)) != len(topology_targets) or set(topology) != set(topology_targets):
+                raise ValueError("family restriction requires unambiguous topology for every target")
+            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
+                                 for name in topology_targets}
+    # The serving structure each unit's wire is resolved on (#1502): the
+    # restriction's authoritative map when there is one, else the serving
+    # context's. A run that declares neither prices the research recipe it
+    # always priced, and stamps that it did (``encode_structure: null``).
+    encode_structure = (dict(structure_by_unit) if structure_by_unit is not None
+                        else None if context_by_unit is None
+                        else {name: context.structure for name, context in context_by_unit.items()})
+
+    return ResolvedCampaignScope(
+        population=population,
+        roster=roster,
+        pinned_roster=pinned_roster,
+        dense_targets=dense_targets,
+        expert_targets=expert_targets,
+        expert_members=expert_members,
+        census_dense_targets=census_dense_targets,
+        census_expert_targets=census_expert_targets,
+        scope_groups=scope_groups,
+        census=census,
+        census_only=census_only,
+        selection=selection,
+        stack_samples=stack_samples,
+        exact_member_scope=exact_member_scope,
+        partition_menu_targets=partition_menu_targets,
+        partition_unit_records=partition_unit_records,
+        selected_groups=selected_groups,
+        audit_units=audit_units,
+        inclusion_probability=inclusion_probability,
+        context_by_unit=context_by_unit,
+        structure_by_unit=structure_by_unit,
+        encode_structure=encode_structure,
+        acquisition=acquisition,
+    )
+
+
 def _main(argv, *, source_scope, waits) -> int:
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
@@ -4537,7 +4774,7 @@ def _main(argv, *, source_scope, waits) -> int:
     )
     from .tessera_serving_scope import (
         serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance, unit_structure_from_stats,
+        scope_provenance,
     )
 
     from .tessera_campaign_cli import campaign_argument_parser
@@ -4858,180 +5095,37 @@ def _main(argv, *, source_scope, waits) -> int:
         capture_runtime = dict(torch=torch.__version__,cuda=torch.version.cuda,
             transformers=importlib.metadata.version("transformers"))
 
-    # The packed expert population the producer bridge covers, or a refusal by
-    # name before calibration.  Its members are priced as the producer's
-    # projected units below (PrismaQuant #183).
-    # A pinned-roster-only campaign prices the lifted Linears and no expert
-    # (PQ #1843); its census records that the population was left out.
-    population = (ExpertPopulation(members=(), declared={}, packed_in_scope={},
-                                   omitted_outside_layer_stride={})
-                  if args.pinned_roster_only else
-                  _require_campaign_population(model, profile, args.layer_stride))
-    # Names only: no module is retained after source teardown.
-    roster = campaign_roster(
-        profile.campaign_dense_unit_names(model, allow_pinned=args.allow_pinned),
-        profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
+    scope = resolve_campaign_scope(campaign_scope_request(args), model, profile,
+        mode=mode, device=device, serving_target=serving_target,
+        selected_capture_census=selected_capture_census,
+        capture_unit_names=capture_unit_names, acquisition=acquisition)
+    population = scope.population
+    roster = scope.roster
+    pinned_roster = scope.pinned_roster
+    dense_targets = scope.dense_targets
+    expert_targets = scope.expert_targets
+    expert_members = scope.expert_members
+    census_dense_targets = scope.census_dense_targets
+    census_expert_targets = scope.census_expert_targets
+    scope_groups = scope.scope_groups
+    census = scope.census
+    census_only = scope.census_only
+    selection = scope.selection
+    stack_samples = scope.stack_samples
+    exact_member_scope = scope.exact_member_scope
+    partition_menu_targets = scope.partition_menu_targets
+    partition_unit_records = scope.partition_unit_records
+    selected_groups = scope.selected_groups
+    audit_units = scope.audit_units
+    inclusion_probability = scope.inclusion_probability
+    context_by_unit = scope.context_by_unit
+    structure_by_unit = scope.structure_by_unit
+    encode_structure = scope.encode_structure
+    acquisition = scope.acquisition
     all_dense = list(roster.dense)
     pinned = list(roster.pinned)
-    pinned_roster = pinned_roster_block(args, roster)
-    if pinned_roster is not None:
-        print(f"[campaign] --allow-pinned {pinned_roster['allow_pinned']} lifts "
-              f"{len(roster.lifted)} profile-pinned Linears"
-              + (" (pinned roster only)" if args.pinned_roster_only else ""), flush=True)
-    dense_targets = _campaign_layer_scope(all_dense, args.layer_stride)
-    expert_targets = population.qnames
-    expert_members = {member.qname: member for member in population.members}
     targets = [*dense_targets, *expert_targets]
-    # The whole priced scope, before any selection narrows the encoding work.
-    # It is what the census counts, what the population block enumerates, and
-    # what a merge checks a set of shards covers.
-    census_dense_targets = list(dense_targets)
-    census_expert_targets = list(expert_targets)
-    census_targets = list(targets)
-    scope_groups = resolve_anchor_groups(
-        census_targets, profile=profile, expert_members=expert_members)
-    print(f"[campaign] {len(dense_targets)} target Linears + {len(expert_targets)} "
-          f"projected expert units in {len(population.declared)} stacks, "
-          f"{len(scope_groups)} anchor groups, mode={mode}, "
-          f"device={device}", flush=True)
-
-    # The census quantum: the whole prologue over the whole scope -- one
-    # calibration forward that counts rows and calibrates the static A-side
-    # maxima, and one producer projection request -- written out and stopped
-    # before a single anchor is encoded.  Every later shard reads it, so no
-    # shard re-derives a scope-wide answer and none of them can disagree
-    # about one.
-    census_only = bool(args.census_out)
-    if census_only and args.units:
-        raise RuntimeError(
-            "--census-out takes the whole scope; it cannot be narrowed by --units")
-    if census_only and args.calibration_census:
-        raise RuntimeError("--census-out writes a census; it does not read one")
-
-    selection = None
-    stack_samples = {}
-    exact_member_scope = None
-    partition_members = {}
-    partition_menu_targets = None
-    partition_unit_records = {}
-    full_expert_members = expert_members
-    census = (selected_capture_census if selected_capture_census is not None else
-              (None if not args.calibration_census
-               else load_calibration_census(args.calibration_census, args=args)))
-    selected_groups: list[str] = sorted(scope_groups)
-    audit_units: set = set()
-    inclusion_probability: dict = {}
-    if args.units:
-        selection = load_unit_selection(args.units)
-        if (selection.get("model", args.model) != args.model
-                or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
-            raise StackSampleError("--units model/layer_stride disagrees with this campaign")
-        if selection.get("schema") == UNITS_SCHEMA_V3:
-            if census is None or args.research_exact_member is not None:
-                raise RuntimeError("expert partition requires a census and excludes research exact-member")
-            from .tessera_expert_projection import carried_units
-            _source, partition_unit_records, partition_stacks = carried_units(census["expert_projection"])
-            partition_members = expert_partition_members(
-                selection, unit_records=partition_unit_records, stack_of=partition_stacks,
-                rate_band=args.rate_band, max_rounds=args.max_rounds,
-                seeded=bool(args.seed_checkpoint or args.seed_wire_dir))
-            partition_menu_targets = sorted(name for entry in selection["groups"] for name in entry["members"])
-            # Existing unit receipts bind the local subset; the scope-wide
-            # producer projection binds the full group geometry/source frame.
-        stack_samples = selection_stack_samples(selection, profile)
-        selected_groups = select_anchor_groups(
-            selection, scope_groups, where=f"--units {args.units}")
-        priced, audit_units, inclusion_probability = selection_priced_units(
-            selection)
-        if args.research_exact_member is not None:
-            if (mode != "research" or not args.calibration_census or
-                    not args.calibration_cache or parse_rate_band(args.rate_band) is None):
-                raise RuntimeError("--research-exact-member requires research menu, "
-                                   "calibration census/cache and --rate-band")
-            exact_member_scope = research_exact_member_scope(
-                selection, scope_groups, args.research_exact_member)
-            priced = {exact_member_scope["member"]}
-            audit_units = set()
-            inclusion_probability = {}
-        if args.capture_calibration_out:
-            # The census-derived scope the pre-model check derived; the run's
-            # own grouping must resolve the selection to exactly that set.
-            confirmed = selected_capture_unit_names(selection, args=args,
-                                                    resolved=scope_groups)
-            if confirmed != capture_unit_names:
-                raise RuntimeError(
-                    f"--units {args.units}: this run's grouping resolves the "
-                    f"selection to {confirmed} but its census to "
-                    f"{capture_unit_names}; the scope is not exact")
-        # The group's membership was already checked whole; what the sample
-        # narrows is only which of those members this run encodes. Keeping the
-        # two separate is what lets a sampled run stay identity-honest: the
-        # checkpoint's ``units`` map holds exactly the priced units, so a
-        # different draw is a different identity and cannot silently resume
-        # over this one.
-        keep = {name for key in selected_groups for name in scope_groups[key]
-                if name in priced}
-        dense_targets = [name for name in dense_targets if name in keep]
-        expert_targets = [name for name in expert_targets if name in keep]
-        expert_members = {name: member for name, member in expert_members.items()
-                          if name in keep}
-        targets = [*dense_targets, *expert_targets]
-        sampled_groups = sum(1 for entry in selection["groups"]
-                             if entry.get("sampled"))
-        print(f"[campaign] --units selects {len(selected_groups)} of "
-              f"{len(scope_groups)} anchor groups: {len(dense_targets)} dense + "
-              f"{len(expert_targets)} projected expert units"
-              + (f"; {sampled_groups} group(s) sampled, "
-                 f"{len(audit_units)} audit unit(s)" if sampled_groups else ""),
-              flush=True)
-        if not targets:
-            raise RuntimeError(
-                f"--units {args.units}: the selection prices no unit")
-    elif args.research_exact_member is not None:
-        raise RuntimeError("--research-exact-member requires --units")
-
-    if acquisition is not None:
-        acquisition, selected_groups, keep = campaign_acquisition_row_scope(
-            acquisition, scope_groups, selected=targets if args.units else None)
-        dense_targets = [name for name in dense_targets if name in keep]
-        expert_targets = [name for name in expert_targets if name in keep]
-        expert_members = {name: member for name, member in expert_members.items() if name in keep}
-        targets = [*dense_targets, *expert_targets]
-
-    context_by_unit = None
-    structure_by_unit = None
-    if serving_target is not None or args.family_restriction is not None:
-        from .sensitivity_probe import discover_moe_structure
-        routed = discover_moe_structure(model, profile=profile)
-        topology = {
-            name: dict(zip(("router_path", "expert_id"), routed.get(name, (None, None))))
-            for name in dense_targets
-        }
-        topology_experts = ({name: full_expert_members[name] for name in partition_menu_targets}
-                            if partition_menu_targets is not None else expert_members)
-        topology_targets = partition_menu_targets or targets
-        for name, member in topology_experts.items():
-            if name not in topology_targets:
-                continue
-            # The packed facts the probe would record for this unit: its
-            # packed module and expert count, never a shape guess.
-            topology[name] = {
-                "_packed_experts_module": member.module_qname,
-                "num_experts": int(getattr(member.module, member.param_name).shape[0]),
-            }
-        context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
-        if args.family_restriction is not None:
-            if len(set(topology_targets)) != len(topology_targets) or set(topology) != set(topology_targets):
-                raise ValueError("family restriction requires unambiguous topology for every target")
-            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
-                                 for name in topology_targets}
-    # The serving structure each unit's wire is resolved on (#1502): the
-    # restriction's authoritative map when there is one, else the serving
-    # context's. A run that declares neither prices the research recipe it
-    # always priced, and stamps that it did (``encode_structure: null``).
-    encode_structure = (dict(structure_by_unit) if structure_by_unit is not None
-                        else None if context_by_unit is None
-                        else {name: context.structure for name, context in context_by_unit.items()})
+    census_targets = [*census_dense_targets, *census_expert_targets]
 
     if saved_calibration is None:
         tokens, corpus_text = _calibration_tokens(

@@ -103,6 +103,12 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): one loaded-model
+campaign scope resolver owns roster, whole scope, selection/sample and expert
+partition admission, followed by topology. Census and pricing consume the same
+resolved facts. Phase, source and head custody stay separate; this result owns
+no cache, source descriptor, seal, journal or publication lifecycle.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): campaign
 checkpoint identity consumes a copy of the original raw CLI settings mapping,
 captured after acquisition normalization. Typed execution requests never define
