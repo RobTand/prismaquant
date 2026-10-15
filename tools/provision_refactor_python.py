@@ -9,7 +9,6 @@ wheel. A subsequent pbtest action owns strict Git/RECORD qualification.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +16,11 @@ import subprocess
 import sys
 import sysconfig
 import venv
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+from prismaquant.digests import bytes_sha256hex
 
 
 def main():
@@ -35,7 +39,7 @@ def main():
     git_env[f"GIT_CONFIG_VALUE_{git_config_index}"] = "1"
     git_env["GIT_CONFIG_COUNT"] = str(git_config_index + 1)
     raw = args.wheel.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != args.wheel_sha256:
+    if bytes_sha256hex(raw) != args.wheel_sha256:
         parser.error('wheel bytes differ from the reviewed delivery')
     kind = subprocess.check_output(['git', '-C', str(args.source_repo),
                                     'cat-file', '-t', args.source_commit], text=True, env=git_env).strip()
@@ -97,7 +101,9 @@ def main():
                         '--no-build-isolation', '--ignore-installed',
                         'git+' + source.as_uri() + '@' + args.source_commit], check=True, env=git_env)
     code = '''
-import hashlib, importlib.metadata, importlib.resources, json, pathlib, sys, zipfile
+import importlib.metadata, importlib.resources, json, pathlib, sys, zipfile
+sys.path.insert(0, sys.argv[5])
+from prismaquant.digests import bytes_sha256hex
 import tessera
 from tessera import metadata
 import torch
@@ -115,20 +121,20 @@ with zipfile.ZipFile(wheel) as archive:
 assert pathlib.Path(tessera.__file__).resolve().is_relative_to(site.resolve())
 assert metadata.METADATA_API_VERSION == 'tessera.producer-metadata.v1'
 contract = importlib.resources.files('tessera').joinpath('serving', 'runtime_contract.json').read_bytes()
-assert hashlib.sha256(contract).hexdigest() == expected
+assert bytes_sha256hex(contract) == expected
 record = dist._path.joinpath('RECORD').read_bytes()
 print(json.dumps({'python': sys.executable, 'prefix': sys.prefix,
     'torch': torch.__version__, 'torch_file': torch.__file__,
     'tessera_file': tessera.__file__, 'metadata_file': metadata.__file__,
     'metadata_api': metadata.METADATA_API_VERSION, 'contract_sha256': expected,
     'cuda_available': torch.cuda.is_available(), 'owners': owners,
-    'direct_url': direct, 'record_sha256': hashlib.sha256(record).hexdigest(),
+    'direct_url': direct, 'record_sha256': bytes_sha256hex(record),
     'wheel_package_files_verified': len(package_files),
     'strict_pbtest_record_gate': 'pending supported CLI action'}))
 '''
     qualified = json.loads(subprocess.check_output(
         [str(python), '-B', '-c', code, str(site), str(wheel), args.source_commit,
-         args.contract_sha256], text=True))
+         args.contract_sha256, str(REPO_ROOT)], text=True))
     receipt = {'schema': 'prismaquant.refactor_environment.v2', 'identity': identity,
                'base_python': sys.executable, 'borrowed_dependencies': borrowed,
                'source_repository': str(args.source_repo), 'wheel_source': str(args.wheel),
