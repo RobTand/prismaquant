@@ -509,6 +509,10 @@ class CalibrationRequest:
     split: str
     repeat_seed_stride: int
 
+    def __post_init__(self):
+        if min(self.n_samples, self.seqlen, self.repeats) <= 0 or self.skip_first < 0:
+            raise ValueError("calibration counts must be positive and skip-first nonnegative")
+
     @classmethod
     def from_namespace(cls, args) -> CalibrationRequest:
         return cls(
@@ -524,6 +528,7 @@ class CalibrationRequest:
 @dataclass(frozen=True)
 class CalibrationDraw:
     selection_repeats: tuple[torch.Tensor, ...]
+    fit_ids: torch.Tensor | None = None
 
 
 def load_validation_calibration(tokenizer, request: CalibrationRequest) -> CalibrationDraw:
@@ -549,43 +554,40 @@ def load_validation_calibration(tokenizer, request: CalibrationRequest) -> Calib
             "VALIDATED_FRONTIER_DATASET."
         )
 
-    def _load_jsonl(n: int) -> torch.Tensor:
-        all_ids = load_calibration(
-            tokenizer,
-            request.source,
-            n + skip,
-            request.seqlen,
+    if request.source:
+        n = n_samples * repeats
+        complete = load_calibration(
+            tokenizer, request.source, n + skip, request.seqlen,
             calib_seed=request.seed,
         )
-        if all_ids.size(0) < n + skip:
+        if complete.size(0) < n + skip:
             raise RuntimeError(
-                f"calibration source yielded {all_ids.size(0)} windows; "
+                f"calibration source yielded {complete.size(0)} windows; "
                 f"need {n + skip} (n={n} + skip-first={skip}). Use a larger "
                 "corpus or reduce --calib-skip-first."
             )
-        return all_ids[skip:]
-
-    if repeats == 1:
-        if request.source:
-            return CalibrationDraw((_load_jsonl(n_samples),))
-        return CalibrationDraw((load_wikitext_calibration_windowed(
-            tokenizer,
-            n_samples,
-            request.seqlen,
-            split=request.split,
-            seed=request.seed,
-        ),))
-    if request.source:
-        all_ids = _load_jsonl(n_samples * repeats)
-        if all_ids.size(0) < n_samples * repeats:
-            raise RuntimeError(
-                f"requested {repeats} calibration repeats of {n_samples} samples, "
-                f"but only loaded {all_ids.size(0)} samples"
+        fit_ids = None
+        if skip:
+            independently_requested_fit = load_calibration(
+                tokenizer, request.source, skip, request.seqlen,
+                calib_seed=request.seed,
             )
+            if not torch.equal(independently_requested_fit, complete[:skip]):
+                raise ValueError(
+                    "calibration source does not preserve the requested fit prefix; "
+                    "skip-first cannot establish a held-out split for this source, "
+                    "seed and sample count. Use a distinct selection corpus."
+                )
+            fit_ids = complete[:skip].contiguous()
         return CalibrationDraw(tuple(
-            all_ids[idx * n_samples:(idx + 1) * n_samples].contiguous()
+            complete[skip + idx * n_samples:skip + (idx + 1) * n_samples].contiguous()
             for idx in range(repeats)
-        ))
+        ), fit_ids=fit_ids)
+    if repeats == 1:
+        return CalibrationDraw((load_wikitext_calibration_windowed(
+            tokenizer, n_samples, request.seqlen,
+            split=request.split, seed=request.seed,
+        ),))
     stride = request.repeat_seed_stride
     return CalibrationDraw(tuple(
         load_wikitext_calibration_windowed(

@@ -8,6 +8,12 @@ Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
 were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
 ledgers. Current execution and admission paths have no callers to these modules.
+Re-stamped 2026-10-15: a requested holdout checks that the separately requested
+fit draw equals the captured draw's prefix. An unstable prefix refuses before
+model loading. Lazy expert rendering reuses that captured prefix. This check
+binds the requested split; legacy upstream hashes alone do not prove token
+position disjointness for arbitrary sample counts or sequence lengths.
+
 Re-stamped 2026-10-15: validation sampling takes a `CalibrationRequest` and
 returns a `CalibrationDraw` from `calibration_data`. CLI normalization lives
 at the boundary; selection callers consume the owned repeat tuple.
@@ -20878,8 +20884,10 @@ research-only unless Robert explicitly accepts the trade. (The selector has no t
 today; §12 D1.)
 
 **Held-out discipline.** The selection split must be disjoint from the text that generated any
-cost — an audit found "validation" KL had been in-sample; the house rule and the
-token-disjoint construction are documented at `validate_assignments_kl.py:513,581`. Small-scale
+cost. An audit found selection KL had been in-sample. `calibration_data` now checks
+the requested fit prefix and supplies the captured split to validation and lazy
+rendering. Upstream draws must also match source, seed and sequence length;
+legacy draw hashes alone do not prove corpus-position disjointness. Small-scale
 levers are validated on Qwen3-0.6B *and* 4B with `--calib-repeats ≥ 4`; single-seed n=8/T=512
 is dangerously noisy (+10% can flip to −5.2% across repeats).
 

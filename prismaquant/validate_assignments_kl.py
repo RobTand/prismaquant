@@ -69,7 +69,6 @@ from prismaquant.select_validated_frontier import (
     TAIL_VETO_COLUMNS as _TAIL_REPEAT_COLUMNS,
 )
 from prismaquant.schemas import validate_cost_payload
-from prismaquant.calibration_data import load_calibration
 from prismaquant.source_prefetch import (
     _available_memory_bytes,
     prefetch_safetensors_checkpoint,
@@ -575,34 +574,6 @@ def _activation_quant_assignment(
 
 
 
-def _load_expert_render_calib(tokenizer, args) -> torch.Tensor | None:
-    """Calib draw for the M4 lazy packed-expert (FP8) render — the BUILD/render
-    split, DISJOINT from the selection split that KL is measured on.
-
-    With ``--calib-skip-first K`` the selection calib is windows ``[K, K+n)``
-    (see ``_load_calibration_repeats``); this returns ALL K withheld render
-    windows ``[0, K)`` at the validator's seqlen — token-disjoint from
-    selection by construction (same-seqlen windowing; do NOT draw at a
-    different seqlen or the [0,K)/[K,K+n) split stops being token-disjoint).
-    Known volume caveat: the eager NVFP4 rung was rendered on the BUILD's
-    calib volume, which can exceed this draw under thin-frontier configs — a
-    render-volume asymmetry in the NVFP4-vs-FP8 comparison that the served
-    re-validation gate, not this screen, ultimately arbitrates. Without a
-    disjoint render split (skip==0) or a dataset it returns ``None`` so the
-    caller can fall back to the selection calib WITH a loud in-sample warning
-    (the FP8 rung is then in-sample and a reject-FP8 outcome is
-    conservative-only — never promote an FP8-favorable frontier point off an
-    in-sample render). House rule: held-out split disjoint from cost/render
-    generation."""
-    skip = max(int(getattr(args, "calib_skip_first", 0) or 0), 0)
-    if skip <= 0 or not args.dataset:
-        return None
-    ids = load_calibration(
-        tokenizer, args.dataset, skip, args.calib_seqlen,
-        calib_seed=int(getattr(args, "calib_seed", 42) or 42))
-    return ids[:skip].contiguous() if ids.size(0) >= 1 else None
-
-
 def _persist_lazy_expert_renders(
     production_cache,
     cache_path: str,
@@ -983,10 +954,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calib-seed", type=int, default=42)
     parser.add_argument(
         "--calib-skip-first", type=int, default=0,
-        help="Drop the first K windows of the deterministic calibration "
-        "loader before drawing validation windows. Pass the render "
-        "calibration's NSAMPLES here to make selection KL token-disjoint "
-        "from probe/cost/render calibration (review criticals C3/C5).")
+        help="Withhold K fit windows after checking the requested fit prefix "
+        "against the captured dataset draw. Use matching source, seed and "
+        "sequence length for upstream fitting; mismatched provenance cannot "
+        "establish a held-out split.")
     parser.add_argument(
         "--calib-repeats",
         type=int,
@@ -1371,7 +1342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # the frontier compares NVFP4 vs FP8 under the same no-gate recipe,
             # but ship export must REUSE this cache (not re-render assignment-
             # mode) or the selection rides on different bytes (principle #8).
-            _expert_render_ids = _load_expert_render_calib(tokenizer, args)
+            _expert_render_ids = calibration_draw.fit_ids
             if _expert_render_ids is None:
                 _expert_render_ids = calib_repeats[0]
                 print(
