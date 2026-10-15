@@ -13,9 +13,9 @@ record, not a claim that every pending unit is finished.
 | J4 row contract | Implemented shared phase order, compute meaning and authenticated argv/resource contract. |
 | A1 reviewed pin | Implemented captured contract snapshot, packaged reviewed answer, private maps and exact TP fallback. |
 | A2 admission | Implemented typed rung verdicts and canonical cells; preserve separate menu, serving and export policies. |
-| T1 campaign metadata | Table/payload/merge, census union and reseal owners implemented. Readset migration is in progress. |
-| T2 requests | Pending source-grounded request/kind runner migration. |
-| T3 measurement | Pending cell-measurement/calibration-forward ownership migration. |
+| T1 campaign metadata | Table/payload/merge, census union, reseal and source readset owners implemented. Complete repository-boundary migration waits on additional public Tessera APIs. |
+| T2 requests | Actual parser, typed prep/join/census/capture requests, phase runners, scope resolver and raw checkpoint mapping are implemented. Shared menu/projection and final loaded-campaign execution remain in progress. |
+| T3 measurement | Calibration-forward and wire-custody owners implemented. Selected-wire recipe and cell-measurement migration waits on additional public Tessera APIs. |
 | T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
 | S1 staged reads | Implemented shared mount facts, topmost-NFS retry and checkpoint whole-entry transaction. Implemented grouped acquisition and shared counters in staged_lease. Borrowed descriptor and sealed-buffer lifetimes stay distinct. |
 | S2 block walk | Implemented ordinary forward/capture/expert lifetime owner and prefetch-failure cleanup. Fisher work retains distinct tape and source policies. |
