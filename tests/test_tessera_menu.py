@@ -897,81 +897,51 @@ def test_the_licence_and_the_route_admission_come_from_one_read(monkeypatch):
         "fused_module_licence bypassed the module's one read")
 
 
-def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu():
-    """Package data via ``importlib.resources``, and no runtime behind it.
-
-    Locating the packaged contract imports the ``tessera.serving`` package
-    itself -- ``resources.files`` imports it -- but that import is lazy by
-    design (it defines ``register()`` and calls nothing at module scope), so
-    it registers nothing and needs no GPU.
-
-    Until lane schema v9 this also asserted that ``tessera.serving.contract``
-    stayed out of ``sys.modules``, on the stated grounds that "its validator
-    imports the plugin's dispatch tables".  Two things changed.  Reading a v9
-    table REQUIRES that module -- the smoke record's status and attribution
-    are derived by Tessera's own ``derive_smoke_status`` /
-    ``derive_smoke_attribution``, and restating those rules here is the
-    two-homes defect RobTand/tessera#327 was filed about.  And the stated
-    grounds stopped being true: at the pinned commit that module imports only
-    the standard library at module scope and defers every dispatch-table
-    import into a function body (Tessera's own ``test_contract_is_portable``
-    holds it there).
-
-    So the module name was a PROXY for the property, and the proxy no longer
-    tracks it.  This asserts the property in two halves instead.
-
-    First: the read pulls in no vLLM, and its ``tessera.serving`` surface is
-    confined to the portable contract module -- none of the dispatch modules
-    (``ops``, ``native_ops``, ``moe_route``, ``sharding``, ``ext``, ``lane``,
-    ``scheme``) is loaded, which is what "no serving runtime" actually means.
-    Second, checked separately because it is Tessera's claim and not this
-    repository's: importing ``tessera.serving.contract`` on its own pulls in
-    no torch, no Triton and no vLLM.
-
-    The second half is measured in a bare interpreter deliberately.  Torch is
-    already in ``sys.modules`` by the time the first half runs -- ``prismaquant``
-    itself imports it, on this branch and on main alike -- so asserting
-    "no torch" around the read would assert something about this package's
-    own import weight and prove nothing about Tessera.
-    """
+def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu(tmp_path):
+    """The menu reads exact pinned metadata without loading a runtime stack."""
+    from pathlib import Path
     import subprocess
     import sys
 
-    script = (
-        "import sys\n"
-        "from prismaquant import tessera_runtime_contract as trc\n"
-        "import os\n"
-        f"os.environ['{trc.TESSERA_DEV_PIN_ENV}'] = '{trc.TESSERA_DEV_PIN_COMMIT}'\n"
-        "c = trc.load_tessera_contract()\n"
-        "assert c is not None\n"
-        "assert 'vllm' not in sys.modules, sorted(\n"
-        "    m for m in sys.modules if m.startswith('vllm'))\n"
-        "serving = sorted(m for m in sys.modules if m.startswith('tessera.serving'))\n"
-        # Contract v25 added ``activation_attestation``: ``contract`` validates
-        # the published quantiser table through it.  It is portable (stdlib and
-        # ``tessera.alphabet``); the bare-interpreter half below measures that.
-        "assert serving == ['tessera.serving', 'tessera.serving.activation_attestation',"
-        " 'tessera.serving.contract'], serving\n"
-        "print('OK')\n"
+    script = """
+import json
+import os
+import sys
+
+class ForbiddenRuntime:
+    def find_spec(self, name, path=None, target=None):
+        if (name == 'tessera.serving' or name.startswith('tessera.serving.')
+                or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm'}):
+            raise AssertionError('forbidden runtime import: ' + name)
+
+sys.meta_path.insert(0, ForbiddenRuntime())
+sys.path.insert(0, sys.argv[1])
+from prismaquant import tessera_runtime_contract as trc
+
+os.environ[trc.TESSERA_DEV_PIN_ENV] = trc.TESSERA_DEV_PIN_COMMIT
+contract = trc.load_tessera_contract()
+snapshot = trc.installed_runtime_snapshot()
+pin = snapshot.require_exact_pin()
+assert contract is not None
+assert contract.commit == pin.commit == trc.TESSERA_DEV_PIN_COMMIT
+assert contract.sha256 == snapshot.sha256 == pin.contract_sha256 == trc.TESSERA_DEV_PIN_CONTRACT_SHA256
+published = {cell['id'] for cell in json.loads(snapshot.raw)['lane_eligibility']['cells']}
+assert len(published) == 22
+assert {cell.id for cell in contract.cells} == published
+assert {cell.id for cell in snapshot.eligibility.cells} == published
+assert 'tessera.metadata' in sys.modules
+for name in sys.modules:
+    assert name != 'tessera.serving' and not name.startswith('tessera.serving.'), name
+    assert name.split('.')[0] not in {'torch', 'transformers', 'triton', 'vllm'}, name
+print('PINNED-MENU-METADATA-OK')
+"""
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, '-I', '-c', script, str(root)], cwd=tmp_path,
+        capture_output=True, text=True,
     )
-    portable = subprocess.run(
-        [sys.executable, "-c",
-         "import sys\n"
-         "import tessera.serving.contract\n"
-         "heavy = sorted(m for m in sys.modules\n"
-         "               if m.split('.')[0] in ('vllm', 'torch', 'triton'))\n"
-         "assert not heavy, heavy\n"
-         "print('PORTABLE')\n"],
-        capture_output=True, text=True)
-    assert portable.returncode == 0, (
-        "tessera.serving.contract stopped being importable without a GPU "
-        "stack, and the v9 reader derives through it: "
-        + portable.stderr[-2000:])
-    assert "PORTABLE" in portable.stdout
-    out = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True)
-    assert out.returncode == 0, out.stderr[-2000:]
-    assert "OK" in out.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == 'PINNED-MENU-METADATA-OK'
 
 
 def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pin):
