@@ -25,11 +25,18 @@ class NoNumericalRuntime:
             raise AssertionError('CLI imported numerical runtime: ' + name)
 sys.meta_path.insert(0, NoNumericalRuntime())
 from prismaquant.tessera_campaign_cli import campaign_argument_parser, parse_campaign_arguments
+from prismaquant.tessera_campaign_requests import loaded_campaign_request, LoadedCensusRequest, ResidentCampaignWeights
+from pathlib import Path
 parser = campaign_argument_parser(description='campaign')
 assert '--capture-chain' in parser.format_help()
 args = parse_campaign_arguments(['--model', 'm', '--out', 'o', '--cache-dir', 'c'])
 assert (args.anchors, args.menu_mode, args.row_head, args.hessian) == (3, None, 'stream', 'require')
 assert (args.nsamples, args.seqlen, args.seed, args.pinned_roster_only) == (8, 512, 0, False)
+request = loaded_campaign_request(args, mode='research', selected_source=False, streaming_head=False, wire_dir=Path('c/wire'), checkpoint=Path('anchors.json'), identity_threads=1)
+assert isinstance(request.source, ResidentCampaignWeights)
+args.census_out, args.calibration_input_receipt = 'census.json', None
+request = loaded_campaign_request(args, mode='research', selected_source=False, streaming_head=False, wire_dir=Path('c/wire'), checkpoint=Path('anchors.json'), identity_threads=1)
+assert isinstance(request, LoadedCensusRequest) and request.census.census_out == 'census.json'
 print('COLD-CAMPAIGN-CLI-OK')
 '''.replace('ROOT', repr(str(root)))
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True)

@@ -9,7 +9,6 @@ shares the same one-line recipe; its row is pinned by the baseline tripwire.
 """
 import hashlib
 import json
-import types
 
 import pytest
 
@@ -33,9 +32,8 @@ def _spy(monkeypatch, module, name):
 def test_publish_load_execution_routes(monkeypatch, tmp_path):
     dumps_calls = _spy(monkeypatch, tc, "indent2_json_file_bytes")
     hash_calls = _spy(monkeypatch, tc, "bytes_sha256hex")
-    args = types.SimpleNamespace(cache_dir=str(tmp_path))
     out = tc._publish_capture_load_execution(
-        args, capture={"c": 1}, execution={"e": 2}, resources={})
+        tmp_path, capture={"c": 1}, execution={"e": 2}, resources={})
     assert len(dumps_calls) == 1
     assert len(hash_calls) == 1
     assert out["sha256"] == bytes_sha256hex(indent2_json_file_bytes(dumps_calls[0]))

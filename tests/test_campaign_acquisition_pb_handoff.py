@@ -1,5 +1,8 @@
 """Original authenticated joint request -> actual PB rows -> scalar wires -> strict merge."""
+
 from __future__ import annotations
+
+from prismaquant.tessera_campaign_requests import anchor_placement
 
 from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
@@ -436,7 +439,7 @@ def render_handoff(handoff, *, aliased=False):
         grids, _ = campaign.anchor_group_rate_grids(groups, rates, encode_structure=None, projected_units={})
         args = arguments(acquisition_request=binding["path"],
             acquisition_request_sha256=binding["sha256"])
-        scheduled = campaign._campaign_round_one_schedule(groups, grids, args=args,
+        scheduled = campaign._campaign_round_one_schedule(groups, grids, placement=anchor_placement(args),
             audit_units=set(), snap=None, requests=projected["requests"], rates_by_unit=rates)
         schedules.update(scheduled)
         args.acquisition_schedule = scheduled
@@ -447,7 +450,8 @@ def render_handoff(handoff, *, aliased=False):
         wire_dir.mkdir(parents=True)
         primed = []
         checkpoint = row_dir / "cost.anchors.json"
-        campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), args=args,
+        campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), placement=anchor_placement(args), seed_checkpoint=args.seed_checkpoint,
+            batch_size=args.anchor_batch_size, max_artifact_bpp=args.max_artifact_bpp,
             checkpoint=checkpoint, targets=sorted(members), menus=menus, weights=weights,
             profile=DefaultProfile(), expert_members={}, encode_structure=None, projected_units={},
             audit_units=set(), route_cache={}, acquisition_requests=projected["requests"])

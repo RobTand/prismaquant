@@ -553,7 +553,19 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             groups=[dict(key='u:'+UNIT, members=[UNIT])])))
         argv += ['--streaming', '--units', str(selection),
                  '--calibration-cache-sha256', cc.sha256(root/'capture_manifest.json')]
+    from prismaquant.tessera_campaign_requests import ResidentCampaignWeights, SelectedCampaignWeights
+    real_loaded = tc.run_loaded_campaign
+    loaded = []
+    def run_loaded(request, **kwargs):
+        loaded.append((request.source, kwargs['calibration_cache']))
+        return real_loaded(request, **kwargs)
+    monkeypatch.setattr(tc, 'run_loaded_campaign', run_loaded)
     assert tc.main([*argv,'--calibration-cache',str(root/'capture_manifest.json')]) == tc.EXIT_EMPTY_MENU
+    assert len(loaded) == 1
+    source_request, actual_capture = loaded[0]
+    assert isinstance(source_request, SelectedCampaignWeights if streamed_selection else ResidentCampaignWeights)
+    assert actual_capture['path'] == str((root/'capture_manifest.json').resolve())
+    assert actual_capture['sha256'] == cc.sha256(root/'capture_manifest.json')
     if streamed_selection:
         assert source_calls == [[UNIT], 'shutdown']
 

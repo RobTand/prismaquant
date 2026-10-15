@@ -1,8 +1,9 @@
-"""Bound requests for campaign census and calibration-capture operations."""
+"""Bound requests for campaign preparation, capture and loaded execution."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 
@@ -179,3 +180,129 @@ def campaign_scope_request(args) -> CampaignScopeRequest:
         calibration_cache=args.calibration_cache,
         family_restriction=args.family_restriction,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignEncoding:
+    mode: Literal['attested', 'readable', 'research']
+    tp_degree: int
+    family_restriction: Mapping | None
+    hessian: Literal['require', 'off']
+    identity_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class AnchorPlacement:
+    anchors: int
+    rate_band: str | None
+    exhaustive_rate_grid: bool
+    max_rounds: int
+
+
+def anchor_placement(args) -> AnchorPlacement:
+    """Bind the actual round-one plan shared by priming and execution."""
+    return AnchorPlacement(anchors=args.anchors, rate_band=args.rate_band,
+        exhaustive_rate_grid=args.exhaustive_rate_grid, max_rounds=args.max_rounds)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignRefinement:
+    placement: AnchorPlacement
+    anchor_budget: int
+    loo_gate: float
+    max_artifact_bpp: float
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignPublication:
+    batch_size: int
+    overlap_bytes: int
+    deadline_seconds: float
+    requested_identity_threads: int
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignOutputs:
+    out: str
+    wire_dir: Path
+    checkpoint: Path
+    hessian_reference_policy: Mapping | None
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignDraw:
+    model: str
+    nsamples: int
+    seqlen: int
+    max_act_rows: int
+    layer_stride: int
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSeed:
+    checkpoint: str
+    wire_dir: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResidentCampaignWeights:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedCampaignWeights:
+    capture: str
+    capture_sha256: str
+    census: str
+    load_policy: Mapping | None
+    snapshot_policy: Literal['whole-layer-v1', 'selected-tensors-v1']
+    head: Literal['stream', 'load-all']
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedCensusRequest:
+    census: CensusRequest
+    menu_mode: Literal['attested', 'readable', 'research']
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedPricingRequest:
+    encoding: CampaignEncoding
+    draw: CampaignDraw
+    source: ResidentCampaignWeights | SelectedCampaignWeights
+    recipe: CampaignRefinement
+    publication: CampaignPublication
+    outputs: CampaignOutputs
+    seed: CampaignSeed | None
+    selection_requested: bool
+
+
+def loaded_campaign_request(args, *, mode, selected_source, streaming_head,
+                            wire_dir, checkpoint,
+                            identity_threads) -> LoadedCensusRequest | LoadedPricingRequest:
+    """Bind one admitted loaded phase; raw CLI settings remain a separate wire."""
+    if args.census_out:
+        return LoadedCensusRequest(census_request(args), mode)
+    encoding = CampaignEncoding(mode=mode, tp_degree=args.tp_degree,
+        family_restriction=args.family_restriction, hessian=args.hessian,
+        identity_bytes=args.campaign_identity_bytes)
+    source = (SelectedCampaignWeights(capture=args.calibration_cache,
+        capture_sha256=args.calibration_cache_sha256, census=args.calibration_census,
+        load_policy=args.capture_load_policy, snapshot_policy=args.source_snapshot_policy,
+        head='stream' if streaming_head else 'load-all')
+        if selected_source else ResidentCampaignWeights())
+    return LoadedPricingRequest(encoding=encoding,
+        draw=CampaignDraw(model=args.model, nsamples=args.nsamples,
+            seqlen=args.seqlen, max_act_rows=args.max_act_rows, layer_stride=args.layer_stride),
+        source=source,
+        recipe=CampaignRefinement(placement=anchor_placement(args),
+            anchor_budget=args.anchor_budget, loo_gate=args.loo_gate,
+            max_artifact_bpp=args.max_artifact_bpp),
+        publication=CampaignPublication(batch_size=args.anchor_batch_size,
+            overlap_bytes=args.publication_overlap_bytes, deadline_seconds=args.deadline_seconds,
+            requested_identity_threads=identity_threads),
+        outputs=CampaignOutputs(out=args.out, wire_dir=wire_dir,
+            checkpoint=checkpoint, hessian_reference_policy=args.export_hessian_reference_policy),
+        seed=(None if not args.seed_checkpoint else
+              CampaignSeed(args.seed_checkpoint, args.seed_wire_dir)),
+        selection_requested=bool(args.units))

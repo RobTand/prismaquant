@@ -103,6 +103,13 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): loaded campaign
+execution takes separate typed census/pricing requests, resolved scope and named
+calibration statistics. The synchronous operation owns the existing source/memo/
+cache/menu, row-stream, journal and publication lifecycles; its caller retains the
+authenticated source ExitStack. Requested reader counts remain distinct from the
+affinity-capped execution count. Raw settings remain a separate checkpoint wire.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): acquisition
 keeps its three derived checkpoint settings in the original raw CLI mapping,
 with ordered updates before a read-only identity handoff. Typed execution

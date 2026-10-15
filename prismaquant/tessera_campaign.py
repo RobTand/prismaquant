@@ -63,6 +63,8 @@ from .tessera_campaign_requests import (
     CaptureJoinRequest, CapturePrepRequest, capture_chain_bookend_request,
     CensusRequest, CaptureRequest, CaptureQuantum, census_request, streamed_calibration_request,
     CampaignScopeRequest, campaign_scope_request,
+    AnchorPlacement, anchor_placement, LoadedCensusRequest, LoadedPricingRequest,
+    ResidentCampaignWeights, SelectedCampaignWeights, loaded_campaign_request,
 )
 
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -925,7 +927,7 @@ def _load_campaign_acquisition(args, parser):
     return load_joint_campaign_acquisition(binding={"path": binding[0], "sha256": binding[1]})
 
 
-def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap,
+def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacement, audit_units, snap,
                                  requests=None, rates_by_unit=None):
     """One seam for early priming and actual round one; validate the whole plan.
 
@@ -937,8 +939,8 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
     if requests is not None:
         if set(requests) != names:
             raise ValueError("acquisition schedule requires every atomic member, no extra units")
-        if (audit_units or getattr(args, "rate_band", None) is not None
-                or args.exhaustive_rate_grid or args.max_rounds != 1):
+        if (audit_units or placement.rate_band is not None
+                or placement.exhaustive_rate_grid or placement.max_rounds != 1):
             raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
     requested_schedule = None if requests is None else requested_acquisition_schedule(groups, requests)
     for key, members in sorted(groups.items()):
@@ -949,8 +951,8 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
         for family in families:
             allowed = group_rates[key].get(family, [])
             if requests is None:
-                want = round_one_rates(allowed, band=parse_rate_band(getattr(args, "rate_band", None)),
-                    anchors=args.anchors, snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+                want = round_one_rates(allowed, band=parse_rate_band(placement.rate_band),
+                    anchors=placement.anchors, snap=snap, exhaustive_band=placement.exhaustive_rate_grid)
                 extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
             else:
                 proposed = [q for name in members for q in requests[name].get(family, [])]
@@ -993,10 +995,11 @@ def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None
         raise ValueError(f"acquisition source weight identity differs for {name}")
 
 
-def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
+def _prime_first_anchor_batch(row_stream, *, placement: AnchorPlacement, seed_checkpoint,
+                              batch_size, max_artifact_bpp, checkpoint, targets, menus,
                               weights, profile, expert_members, encode_structure,
                               projected_units, audit_units, route_cache,
-                              partitioned=False, acquisition_requests=None):
+                              partitioned=False, acquisition_requests=None, finalize_checkpoint=False):
     """Overlap a new head's exact first batch; never read ahead of resume gates.
 
     Use the existing group/anchor/batch mechanisms and row-local refusal memo.
@@ -1006,7 +1009,7 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
     # A partition's legal grid depends on unpriced full-group siblings. Keep
     # its existing admit-time reads until this early-batch planner carries that
     # full-group contract; a subset-derived prime could disagree with admit.
-    if partitioned or args.seed_checkpoint or getattr(args, "finalize_checkpoint", False):
+    if partitioned or seed_checkpoint or finalize_checkpoint:
         return
     for path in (checkpoint, checkpoint.with_name(checkpoint.name + ".parts"),
                  checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX)):
@@ -1022,7 +1025,7 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
             return None
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
-    cap = float(args.max_artifact_bpp)
+    cap = float(max_artifact_bpp)
     rates_by_unit = {}
     for name in targets:
         per_family = {}
@@ -1035,13 +1038,13 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
     group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
         encode_structure=encode_structure, projected_units=projected_units,
         route_cache=route_cache)
-    schedule = _campaign_round_one_schedule(groups, group_rates, args=args,
+    schedule = _campaign_round_one_schedule(groups, group_rates, placement=placement,
         audit_units=audit_units, snap=snap, requests=acquisition_requests,
         rates_by_unit=rates_by_unit)
     pending = [(name, family, rate) for key, members in sorted(groups.items())
                for family in sorted({f for name in members for f in schedule[name]})
                for name in members for rate in schedule[name].get(family, [])]
-    batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
+    batches = _anchor_batches(pending, weights=weights, batch_size=batch_size,
                               structures=encode_structure)
     if batches:
         row_stream.prime([item[0] for item in batches[0]])
@@ -4491,10 +4494,10 @@ def _prefetch_selected_capture(args, *, expected_identity, census, names, device
     if execution is None:
         return values, capture, None
     return values, capture, _publish_capture_load_execution(
-        args, capture=capture, execution=execution, resources=resources, guard=guard)
+        args.cache_dir, capture=capture, execution=execution, resources=resources, guard=guard)
 
 
-def _publish_capture_load_execution(args, *, capture, execution, resources, guard=None):
+def _publish_capture_load_execution(cache_dir, *, capture, execution, resources, guard=None):
     """Write one row's capture load execution record; ``{path, sha256}``.
 
     The one writer for both row heads: the load-all prefetch's folded record,
@@ -4510,7 +4513,7 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
     digest = bytes_sha256hex(raw)
     # A later refused/interrupted resume must not replace execution evidence
     # already referenced by a surviving priced output.
-    output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
+    output = Path(cache_dir)/f'capture-load-execution-{digest}.json'
     atomic_write_bytes(output, raw)
     return dict(path=str(output.resolve()), sha256=digest)
 
@@ -5543,6 +5546,101 @@ def _main(argv, *, source_scope, waits) -> int:
         del model
     torch.cuda.empty_cache()
 
+    checkpoint_settings = vars(args).copy()
+    request = loaded_campaign_request(args, mode=mode, selected_source=selected_source,
+        streaming_head=streaming_head, wire_dir=wire_dir, checkpoint=checkpoint,
+        identity_threads=identity_threads_requested)
+    return run_loaded_campaign(request, weights=weights,
+        statistics=calibration_forward.CalibrationStatistics(acts, hessians, hessian_rows, act_max_abs),
+        hessian_identity=hessian_identity, hessian_token_count=hessian_token_count,
+        hessian_token_min=hessian_token_min, scope=scope, profile=profile,
+        static_scales=static_scales, static_scale_policy=static_scale_policy,
+        device=device, cache_dir=cache_dir, calibration_cache=calibration_cache,
+        capture_identity=capture_identity, hessian_status=hessian_status,
+        model_load_contract=model_load_contract, attention_implementation=attention_implementation,
+        capture_runtime=capture_runtime, serving_target=serving_target,
+        source_scope=source_scope, waits=waits, encoder_seal_ahead=encoder_seal_ahead,
+        source_authentication=source_authentication,
+        selected_source_preparation=selected_source_preparation,
+        selected_resources=selected_resources if selected_source else None,
+        selected_guard=selected_guard, checkpoint_settings=checkpoint_settings)
+
+
+def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
+                        weights, statistics: calibration_forward.CalibrationStatistics,
+                        hessian_identity, hessian_token_count, hessian_token_min,
+                        scope: ResolvedCampaignScope, profile, static_scales,
+                        static_scale_policy, device, cache_dir,
+                        calibration_cache, capture_identity, hessian_status,
+                        model_load_contract, attention_implementation, capture_runtime,
+                        serving_target, source_scope, waits, encoder_seal_ahead,
+                        source_authentication, selected_source_preparation,
+                        selected_resources, selected_guard, checkpoint_settings) -> int:
+    """Execute one loaded scope with its existing source and publication custody.
+
+    Census and pricing share the established source/memo/cache/menu construction.
+    The caller retains source-scope lifetime and calibration/source authority;
+    this operation owns the synchronous row stream, journals and publisher.
+    Raw checkpoint settings are only a wire input, never a policy fallback.
+    """
+    import torch
+    from .production_weight_cache import ProductionWeightCache
+    from .tessera_publication import PublicationError
+    from .tessera_rate_surface import leave_one_anchor_out
+    from .tessera_render import HessianContractError
+    from .tessera_serving_scope import scope_provenance
+    from .tessera_row_stream import RECEIPT_FIELDS, checkpoint_present
+
+    census_only = isinstance(request, LoadedCensusRequest)
+    if census_only:
+        mode = request.menu_mode
+        tp_degree = request.census.tp_degree
+        family_restriction = request.census.family_restriction
+        model_path = request.census.model
+        identity_bytes = 0  # Actual CLI admits no census identity budget.
+        source = ResidentCampaignWeights()
+        want_h = False
+    else:
+        mode = request.encoding.mode
+        tp_degree = request.encoding.tp_degree
+        family_restriction = request.encoding.family_restriction
+        model_path = request.draw.model
+        identity_bytes = request.encoding.identity_bytes
+        source = request.source
+        want_h = request.encoding.hessian == 'require'
+    selected_source = isinstance(source, SelectedCampaignWeights)
+    streaming_head = selected_source and source.head == 'stream'
+    if selected_source:
+        from . import tessera_calibration_cache as calibration_store
+
+    population = scope.population
+    roster = scope.roster
+    pinned_roster = scope.pinned_roster
+    dense_targets = scope.dense_targets
+    expert_targets = scope.expert_targets
+    expert_members = scope.expert_members
+    census_dense_targets = scope.census_dense_targets
+    census_expert_targets = scope.census_expert_targets
+    scope_groups = scope.scope_groups
+    census = scope.census
+    selection = scope.selection
+    stack_samples = scope.stack_samples
+    exact_member_scope = scope.exact_member_scope
+    partition_menu_targets = scope.partition_menu_targets
+    partition_unit_records = scope.partition_unit_records
+    selected_groups = scope.selected_groups
+    audit_units = scope.audit_units
+    inclusion_probability = scope.inclusion_probability
+    context_by_unit = scope.context_by_unit
+    structure_by_unit = scope.structure_by_unit
+    encode_structure = scope.encode_structure
+    acquisition = scope.acquisition
+    all_dense = list(roster.dense)
+    pinned = list(roster.pinned)
+    targets = [*dense_targets, *expert_targets]
+    census_targets = [*census_dense_targets, *census_expert_targets]
+    acts, hessians, hessian_rows, act_max_abs = statistics
+
     # ONE ActivationSource for the whole campaign, and ONE set of encoder
     # keywords per unit PER SCALE PLANE. The block-LDL is a function of the
     # unit's Hessian alone -- not of its rate -- so a twelve-anchor surface
@@ -5563,7 +5661,7 @@ def _main(argv, *, source_scope, waits) -> int:
     # The stream head builds one source per entry on its reader threads.
     if want_h and not streaming_head:
         calibration_source = th.activation_source(hessians, hessian_identity)
-        if args.campaign_identity_bytes > 0:
+        if identity_bytes > 0:
             # The producer's capture seal, taken now on a helper thread so it
             # runs under the projection and the identity plan rather than as
             # the first receipt of the hold.  Joined before the hold and, on
@@ -5596,8 +5694,8 @@ def _main(argv, *, source_scope, waits) -> int:
                   **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
     menu = resolve_campaign_menu(weights, scope, profile, mode=mode,
-        tp_degree=args.tp_degree, family_restriction=args.family_restriction,
-        model_path=args.model, cache_dir=cache_dir,
+        tp_degree=tp_degree, family_restriction=family_restriction,
+        model_path=model_path, cache_dir=cache_dir,
         selected_source=selected_source, streaming_head=streaming_head,
         source_authentication=source_authentication, selected_guard=selected_guard)
     menus = menu.menus
@@ -5623,20 +5721,19 @@ def _main(argv, *, source_scope, waits) -> int:
             source_authentication.close()
 
     route_cache: dict[tuple, str | None] = {}
-    checkpoint_settings = vars(args).copy()
     acquisition_schedule = None
-    if acquisition is not None:
+    if isinstance(request, LoadedPricingRequest) and acquisition is not None:
         acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
         acquisition_rates = {name: {} for name in targets}
         for name in targets:
             for rung in menus[name]:
-                if args.max_artifact_bpp > 0 and rung.bpp > args.max_artifact_bpp:
+                if request.recipe.max_artifact_bpp > 0 and rung.bpp > request.recipe.max_artifact_bpp:
                     continue
                 acquisition_rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
         acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
             encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
         acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
-            args=args, audit_units=audit_units, snap=None, requests=acquisition["requests"],
+            placement=request.recipe.placement, audit_units=audit_units, snap=None, requests=acquisition["requests"],
             rates_by_unit=acquisition_rates)
         checkpoint_settings["acquisition_schedule"] = acquisition_schedule
         acquisition_origin = campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
@@ -5651,8 +5748,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # two heads' cost payloads stay byte-identical.
         selected_source_preparation['source_authentication'] = None
 
-    if census_only:
-        return run_census(census_request(args), counts=hessian_rows, maxima=act_max_abs,
+    if isinstance(request, LoadedCensusRequest):
+        return run_census(request.census, counts=hessian_rows, maxima=act_max_abs,
             groups=scope_groups, dense_targets=census_dense_targets,
             expert_targets=census_expert_targets,
             shapes={name: tuple(weight.shape) for name, weight in weights.items()},
@@ -5660,6 +5757,17 @@ def _main(argv, *, source_scope, waits) -> int:
             model_load_contract=model_load_contract,
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
             pinned_roster=pinned_roster, expected_units=census_targets)
+
+    recipe = request.recipe
+    placement = recipe.placement
+    publication = request.publication
+    outputs = request.outputs
+    draw = request.draw
+    checkpoint = outputs.checkpoint
+    wire_dir = outputs.wire_dir
+    seed_checkpoint = None if request.seed is None else request.seed.checkpoint
+    seed_wire_dir = None if request.seed is None else request.seed.wire_dir
+    identity_threads_requested = publication.requested_identity_threads
 
     checkpoint_settings = MappingProxyType(checkpoint_settings)
 
@@ -5676,7 +5784,7 @@ def _main(argv, *, source_scope, waits) -> int:
     # empty-menu refusal path instead of constructing a synthetic holder.
     # The stream head builds each unit's holder on its reader thread, inside
     # the window, so it never holds the population's.
-    reuse_campaign_identity = bool(not streaming_head and args.campaign_identity_bytes > 0
+    reuse_campaign_identity = bool(not streaming_head and identity_bytes > 0
                                    and all(menus.values()))
     # The plan charges the requested builder count; the row never runs more
     # builders, readers or wire verifiers than the CPUs it was admitted with.
@@ -5692,7 +5800,7 @@ def _main(argv, *, source_scope, waits) -> int:
                 threads=identity_threads_requested)
         identity_metadata_bytes = sum(identity_metadata_bounds.values())
         if selected_source:
-            reserved_identity_bytes = int(args.campaign_identity_bytes)
+            reserved_identity_bytes = int(identity_bytes)
             if identity_metadata_bytes + identity_planning_scratch_bytes > reserved_identity_bytes:
                 raise RuntimeError('campaign identity closed-roster plan exceeds --campaign-identity-bytes')
             if selected_guard is not None:
@@ -5720,7 +5828,7 @@ def _main(argv, *, source_scope, waits) -> int:
         print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
               f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
               f"{sum(identity_metadata_bounds.values())} B + scratch "
-              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B; "
+              f"{identity_planning_scratch_bytes} B, reserved {identity_bytes} B; "
               f"{identity_threads} threads, {identity_hold_seconds:.1f} s"
               + ("" if seal_ahead is None else
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
@@ -5744,8 +5852,8 @@ def _main(argv, *, source_scope, waits) -> int:
             projected_units=projected_units, static_scales=static_scales,
             threads=stream_threads)
         window_metadata_bytes = window_scratch_bytes + sum(sorted(
-            window_bounds.values(), reverse=True)[:2 * args.anchor_batch_size + stream_threads])
-        if 0 < args.campaign_identity_bytes < window_metadata_bytes:
+            window_bounds.values(), reverse=True)[:2 * publication.batch_size + stream_threads])
+        if 0 < identity_bytes < window_metadata_bytes:
             raise RuntimeError('row stream identity window plan exceeds --campaign-identity-bytes')
         if selected_guard is not None:
             selected_guard.check('before_row_stream_identity_window',
@@ -5756,7 +5864,7 @@ def _main(argv, *, source_scope, waits) -> int:
             _require_streamed_projection(
                 streamed_units, projected_units, expert_projection['producer']['source'],
                 selected_resources.get('source_tensor_keys')
-                if args.source_snapshot_policy == 'selected-tensors-v1' else None)
+                if source.snapshot_policy == 'selected-tensors-v1' else None)
 
         def load_projected_source(name):
             """One projected unit's source tensor, on a reader thread (PQ #1654).
@@ -5766,7 +5874,7 @@ def _main(argv, *, source_scope, waits) -> int:
             copy is taken.
             """
             weight, release = _read_projected_unit(
-                name, projected_units[name], model_path=args.model,
+                name, projected_units[name], model_path=model_path,
                 source=expert_projection['producer']['source'], release_source_pages=True,
                 source_authentication=source_authentication)
             release()
@@ -5793,12 +5901,12 @@ def _main(argv, *, source_scope, waits) -> int:
             return holder, receipts
 
         row_stream = RowStream(
-            capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
+            capture_path=source.capture, expected_sha256=source.capture_sha256,
             expected_identity=capture_identity, census=census, names=targets,
-            policy=args.capture_load_policy, weights=weights, hessian_identity=hessian_identity,
+            policy=source.load_policy, weights=weights, hessian_identity=hessian_identity,
             bind=bind_stream_unit,
             load_unit=load_projected_source if streamed_units else None,
-            threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
+            threads=stream_threads, batch_size=publication.batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
             wait_sink=waits.ledger.sink,
@@ -5806,7 +5914,9 @@ def _main(argv, *, source_scope, waits) -> int:
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
         calibration_cache = row_stream.capture
-        _prime_first_anchor_batch(row_stream, args=args, checkpoint=checkpoint,
+        _prime_first_anchor_batch(row_stream, placement=placement, seed_checkpoint=seed_checkpoint,
+            batch_size=publication.batch_size, max_artifact_bpp=recipe.max_artifact_bpp,
+            checkpoint=checkpoint,
             targets=targets, menus=menus, weights=weights, profile=profile,
             expert_members=expert_members, encode_structure=encode_structure,
             projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
@@ -5892,11 +6002,11 @@ def _main(argv, *, source_scope, waits) -> int:
     unservable: dict[str, dict[str, dict]] = {}
     wire_records = {name: {} for name in targets}
     dirty_checkpoint_units = set()
-    restricted_rate_band = (parse_rate_band(args.rate_band)
-                            if args.family_restriction is not None else None)
+    restricted_rate_band = (parse_rate_band(placement.rate_band)
+                            if family_restriction is not None else None)
 
     def validate_seed_scope(name, state):
-        require_seed_family_scope(name, state, family_restriction=args.family_restriction,
+        require_seed_family_scope(name, state, family_restriction=family_restriction,
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band, profile=profile)
         on_menu = {entry.format_name for entry in menus[name]}
@@ -6052,8 +6162,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # units stay dirty, so the finalized journal carries them.
         adopt_started = _time.monotonic()
         names = sorted(stream_resumed)
-        chunks = [names[start:start + args.anchor_batch_size]
-                  for start in range(0, len(names), args.anchor_batch_size)]
+        chunks = [names[start:start + publication.batch_size]
+                  for start in range(0, len(names), publication.batch_size)]
         row_stream.plan(chunks)
         for index, chunk in enumerate(chunks):
             row_stream.admit(index)
@@ -6085,8 +6195,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # load-all resume, they are not rewritten.
         adopt_started = _time.monotonic()
         names = sorted(window_resumed)
-        chunks = [names[start:start + args.anchor_batch_size]
-                  for start in range(0, len(names), args.anchor_batch_size)]
+        chunks = [names[start:start + publication.batch_size]
+                  for start in range(0, len(names), publication.batch_size)]
         row_stream.plan(chunks)
         for index, chunk in enumerate(chunks):
             row_stream.admit(index)
@@ -6102,9 +6212,9 @@ def _main(argv, *, source_scope, waits) -> int:
               f"window in {_time.monotonic() - adopt_started:.1f} s", flush=True)
 
     seed_provenance = None
-    if args.seed_checkpoint:
+    if seed_checkpoint:
         seed_provenance = _adopt_seed_checkpoint(
-            args.seed_checkpoint, args.seed_wire_dir,
+            seed_checkpoint, seed_wire_dir,
             targets=[name for name in targets if name not in resumed],
             wire_dir=wire_dir, adopt=adopt_state,
             admits=lambda name, fmt: any(
@@ -6140,10 +6250,10 @@ def _main(argv, *, source_scope, waits) -> int:
             static_scales=static_scales,
             static_scale_policy=static_scale_policy,
             **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
-                    census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy),
+                    census_path=source.census,load_policy=outputs.hessian_reference_policy),
                     **({} if hessian_identities is None
                        else dict(hessian_identities=hessian_identities)))
-               if args.export_hessian_reference_policy is not None else {}),
+               if outputs.hessian_reference_policy is not None else {}),
             **(dict(release_file_pages=True,
                     resource_check=None if selected_guard is None else selected_guard.check)
                if selected_source else {}),
@@ -6189,7 +6299,7 @@ def _main(argv, *, source_scope, waits) -> int:
         census_max_abs(census, row_stream.observed_max_abs())
         receipts = row_stream.unit_identities()
         selected_source_preparation['capture_load_execution'] = _publish_capture_load_execution(
-            args, capture=row_stream.capture, execution=row_stream.load_execution(),
+            cache_dir, capture=row_stream.capture, execution=row_stream.load_execution(),
             resources=selected_resources, guard=selected_guard)
         checkpoint_identity = run_identity(unit_receipts=receipts)
         if journal is None:
@@ -6233,7 +6343,7 @@ def _main(argv, *, source_scope, waits) -> int:
               f"peak {record['peak_resident_units']} units; finalize "
               f"{record['finalize_seconds']} s)", flush=True)
 
-    if args.export_hessian_reference_policy is not None and not streaming_head:
+    if outputs.hessian_reference_policy is not None and not streaming_head:
         # Resume was checked before any export input changed. Now reuse the
         # commitments just computed from these same resident tensors, so the
         # first anchor does not hash the full population again. Both encoder
@@ -6383,7 +6493,7 @@ def _main(argv, *, source_scope, waits) -> int:
         flush_checkpoint()
 
     started = time.time()
-    deadline = float(args.deadline_seconds)
+    deadline = float(publication.deadline_seconds)
     stopped_early = False
     # Every (unit, format) whose last attempt failed to price, with its error.
     # The loop keeps pricing past a failure, so the round's successes are
@@ -6398,7 +6508,7 @@ def _main(argv, *, source_scope, waits) -> int:
     # Capped by --max-artifact-bpp, which is a wall-clock budget and says so:
     # the menu keeps every legal rung, and the ones above the envelope are
     # left unpriced rather than extrapolated into.
-    cap = float(args.max_artifact_bpp)
+    cap = float(recipe.max_artifact_bpp)
     rates_by_unit: dict[str, dict[str, set[int]]] = {}
     rate_menu_targets = partition_menu_targets or targets
     rate_menus = full_partition_menus if partition_menu_targets is not None else menus
@@ -6445,7 +6555,7 @@ def _main(argv, *, source_scope, waits) -> int:
         projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units),
         route_cache=route_cache)
     if partition_menu_targets is not None:
-        fixed_rate = parse_rate_band(args.rate_band)[0]
+        fixed_rate = parse_rate_band(placement.rate_band)[0]
         if any(not any(fixed_rate in rates for rates in families.values())
                for families in group_rates.values()):
             raise RuntimeError("expert partition pinned rate has no legal full-group family/grid")
@@ -6472,17 +6582,17 @@ def _main(argv, *, source_scope, waits) -> int:
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
     round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
-        args=args, audit_units=audit_units, snap=_snap,
+        placement=placement, audit_units=audit_units, snap=_snap,
         requests=None if acquisition is None else acquisition["requests"], rates_by_unit=rates_by_unit)
 
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.
-    budget = int(args.anchor_budget)
+    budget = int(recipe.anchor_budget)
     # Why the group's own worst member drives the split: the grid is shared,
     # so a rung added for one sibling is measured for all of them anyway. The
     # gate closes for a GROUP surface only when it closes for every member.
     surface_stop: dict[tuple[str, str], str] = {}
-    rate_band = parse_rate_band(getattr(args, "rate_band", None))
+    rate_band = parse_rate_band(placement.rate_band)
     if rate_band is not None:
         print(f"[campaign] rate band q256 {rate_band[0]}..{rate_band[1]}: two "
               "anchors per window family at the band ends"
@@ -6493,20 +6603,20 @@ def _main(argv, *, source_scope, waits) -> int:
     # what is queued, so files already computed still land, and it cannot
     # raise, so it cannot mask the exception that brought us here.
     try:
-        if int(args.publication_overlap_bytes) > 0:
+        if int(publication.overlap_bytes) > 0:
             from .tessera_publication import BoundedPublisher
             publisher = BoundedPublisher(
-                budget_bytes=int(args.publication_overlap_bytes))
+                budget_bytes=int(publication.overlap_bytes))
             ledger.open(publisher)
             print(f"[campaign] publication overlap: staging up to "
-                  f"{int(args.publication_overlap_bytes)} bytes on one writer "
+                  f"{int(publication.overlap_bytes)} bytes on one writer "
                   "thread", flush=True)
 
         round_index = 0
         while True:
             round_index += 1
-            if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
-                print(f"[campaign] --max-rounds {args.max_rounds} reached",
+            if int(placement.max_rounds) > 0 and round_index > int(placement.max_rounds):
+                print(f"[campaign] --max-rounds {placement.max_rounds} reached",
                       flush=True)
                 break
             pending: list[tuple[str, str, int]] = []
@@ -6562,7 +6672,7 @@ def _main(argv, *, source_scope, waits) -> int:
                     elif not interpolable:
                         surface_stop.setdefault((key, family), "non_interpolable")
                         continue
-                    elif worst <= args.loo_gate:
+                    elif worst <= recipe.loo_gate:
                         surface_stop.setdefault((key, family), "gate_closed")
                         continue
                     nxt = next_anchor_rate(grid, worst_loo)
@@ -6586,7 +6696,7 @@ def _main(argv, *, source_scope, waits) -> int:
             batches = _anchor_batches(
                 [item for item in pending
                  if row_stream is not None or acts.get(item[0]) is not None],
-                weights=weights, batch_size=args.anchor_batch_size,
+                weights=weights, batch_size=publication.batch_size,
                 structures=encode_structure)
             if row_stream is not None:
                 row_stream.plan([[item[0] for item in batch] for batch in batches])
@@ -6726,7 +6836,7 @@ def _main(argv, *, source_scope, waits) -> int:
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.
-                if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
+                if publication.batch_size > 1 or (completed - 1) % 10 == 0:
                     flush_checkpoint()
                     print(f"[campaign] r{round_index} {completed}/{len(pending)} "
                           f"batch={len(anchors)} {fmt} "
@@ -6865,17 +6975,17 @@ def _main(argv, *, source_scope, waits) -> int:
             },
             **({"research_exact_member_scope": exact_member_scope}
                if exact_member_scope is not None else {}),
-            "tp_degree": int(args.tp_degree),
-            "model": str(args.model),
-            "nsamples": int(args.nsamples),
-            "seqlen": int(args.seqlen),
-            "max_act_rows": int(args.max_act_rows),
-            "layer_stride": int(args.layer_stride),
+            "tp_degree": int(tp_degree),
+            "model": str(model_path),
+            "nsamples": int(draw.nsamples),
+            "seqlen": int(draw.seqlen),
+            "max_act_rows": int(draw.max_act_rows),
+            "layer_stride": int(draw.layer_stride),
             **({PROJECTION_KEY: expert_projection}
                if expert_projection is not None else {}),
-            "anchors_round_one": int(args.anchors),
-            "max_rounds": int(args.max_rounds),
-            "anchor_budget": int(args.anchor_budget),
+            "anchors_round_one": int(placement.anchors),
+            "max_rounds": int(placement.max_rounds),
+            "anchor_budget": int(recipe.anchor_budget),
             "rounds_run": int(round_index),
             "anchor_placement": "fused_group",
             "anchor_groups": {
@@ -6890,7 +7000,7 @@ def _main(argv, *, source_scope, waits) -> int:
             "seed_checkpoint": seed_provenance,
             "unit_selection": ({**selection, "selected": True} if selection else {
                 "schema": UNITS_SCHEMA,
-                "selected": True if args.units else False,
+                "selected": True if request.selection_requested else False,
                 "groups": [
                     {"key": key, "members": list(scope_groups[key])}
                     for key in sorted(selected_groups)
@@ -6939,10 +7049,10 @@ def _main(argv, *, source_scope, waits) -> int:
                         # and a zero here would read as the former.
                         "loo_max_abs_log2_error": _surface_loo(
                             loo_pre.get(name, {}).get(family),
-                            float(args.loo_gate))[0],
+                            float(recipe.loo_gate))[0],
                         "gate_closed": _surface_loo(
                             loo_pre.get(name, {}).get(family),
-                            float(args.loo_gate))[1],
+                            float(recipe.loo_gate))[1],
                         "non_interpolable": _loo_refused(
                             loo_pre.get(name, {}).get(family) or {}),
                         "stopped_by": (
@@ -6973,11 +7083,11 @@ def _main(argv, *, source_scope, waits) -> int:
             "encode_structure": (None if encode_structure is None else {
                 structure: sum(1 for value in encode_structure.values() if value == structure)
                 for structure in sorted(set(encode_structure.values()))}),
-            "loo_gate": float(args.loo_gate),
-            "max_artifact_bpp": float(args.max_artifact_bpp),
-            **({"family_restriction": {"policy": args.family_restriction,
+            "loo_gate": float(recipe.loo_gate),
+            "max_artifact_bpp": float(recipe.max_artifact_bpp),
+            **({"family_restriction": {"policy": family_restriction,
                  "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
-               if args.family_restriction is not None else {}),
+               if family_restriction is not None else {}),
             "stopped_early": bool(stopped_early),
             "wall_seconds": time.time() - started,
             "cache_dir": str(cache_dir),
@@ -7005,7 +7115,7 @@ def _main(argv, *, source_scope, waits) -> int:
             },
             "hessian": {
                 "supplied": bool(want_h),
-                "mode": str(args.hessian),
+                "mode": str(request.encoding.hessian),
                 "reason": str(hessian_status["reason"]),
                 "consumed_by": (
                     "prismaquant.tessera_render.encode_tessera_unit"
@@ -7021,7 +7131,7 @@ def _main(argv, *, source_scope, waits) -> int:
                                  else str(hessian_capture_path)),
                 **({'reference_binding':calibration_store.hessian_reference_binding(
                     calibration_cache['sha256'],capture_identity['census_sha256'])}
-                   if args.export_hessian_reference_policy is not None else {}),
+                   if outputs.hessian_reference_policy is not None else {}),
                 # The content digest of that payload (Tessera's own seal
                 # rule), stamped on every row so the allocation binds to
                 # the capture BY CONTENT, not by the draw's triple alone
@@ -7057,7 +7167,7 @@ def _main(argv, *, source_scope, waits) -> int:
     payload["provenance"][POPULATION_KEY] = campaign_population_block(
         dense_targets=dense_targets, expert_targets=expert_targets,
         dense_all=all_dense, pinned=pinned, population=population,
-        layer_stride=int(args.layer_stride), costs=payload["costs"], menus=menus,
+        layer_stride=int(draw.layer_stride), costs=payload["costs"], menus=menus,
         stack_samples=stack_samples, profile=profile)
     if projected_units:
         # The producer's receipts for every priced expert wire, keyed by unit
@@ -7089,13 +7199,13 @@ def _main(argv, *, source_scope, waits) -> int:
             f"campaign row priced no rung out of a non-empty menu "
             f"({sum(len(m) for m in menus.values())} admitted rungs over "
             f"{sum(1 for m in menus.values() if m)} units); no cost table was written")
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(outputs.out).parent.mkdir(parents=True, exist_ok=True)
     # Canonical bytes: a resumed or adopted row is an equal but distinct object
     # from the one a fresh encode shares, and plain ``pickle.dump`` would make
     # the file's digest depend on which path built it (PQ #1403).
     from .digests import canonical_pickle_bytes
-    Path(args.out).write_bytes(canonical_pickle_bytes(payload))
-    print(f"[campaign] wrote {args.out}: {len(payload['costs'])} units, "
+    Path(outputs.out).write_bytes(canonical_pickle_bytes(payload))
+    print(f"[campaign] wrote {outputs.out}: {len(payload['costs'])} units, "
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
           flush=True)
     return 0
