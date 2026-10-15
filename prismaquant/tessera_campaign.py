@@ -138,9 +138,6 @@ __all__ = [
 ]
 
 
-#: The currency every row is measured or interpolated in.  Named, because the
-#: allocator's cost-source precedence reads a field, not a convention.
-
 #: The stream head's journal before finalize (PQ #1403), beside the checkpoint
 #: and never inside ``<checkpoint>.parts``: a present checkpoint means a run
 #: identity was already bound, and the stream head resumes that journal instead,

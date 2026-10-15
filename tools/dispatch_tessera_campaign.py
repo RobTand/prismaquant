@@ -175,30 +175,12 @@ def publish_namespace_requests(rows: list[dict]) -> None:
         establish_namespace_temporaries(row)
 
 
-#: What ``plan`` writes beside the manifest, so ``merge`` reads the row layout
-#: from the plan rather than from the directory listing it happens to find.
-
 #: The plan key that declares a census scope deliberately left partly unpriced:
 #: the rows the plan dropped and why.  ``merge`` reads only this declaration
 #: to expect less than the scope -- never which row directories happen to hold
 #: a ``cost.pkl`` -- and writes what it read into the merged table under
 #: ``provenance.coverage``.  A plan without it claims the whole scope.
 DENSE_ROWS_EXCLUDED_KEY = "dense_rows_excluded"
-
-#: Provenance fields every row must agree on before a merge is possible.  Each
-#: one describes the run, not the selection, so a disagreement means two
-#: campaigns are being merged into one table.
-
-#: Hessian identity fields every row must already agree on.  ``capture_sha256``
-#: is deliberately absent: it is the digest of the capture a row wrote for its
-#: own units, and reconciling it is what the merge is for.
-
-
-#: Checkpoint-identity keys the merge RECONCILES instead of requiring equal.
-#: Every one of them is per-selection: it describes the units this row was
-#: given, not the campaign. Everything outside this set must already agree,
-#: because a difference there means the rows priced two different campaigns.
-
 
 class RowClassRefused(RuntimeError):
     """The spec asks for a row this fleet cannot place, or must not place."""
