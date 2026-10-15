@@ -61,6 +61,7 @@ from __future__ import annotations
 
 from .tessera_campaign_requests import (
     CaptureJoinRequest, CapturePrepRequest, capture_chain_bookend_request,
+    CensusRequest, CaptureRequest, CaptureQuantum, census_request, streamed_calibration_request,
 )
 
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -103,6 +104,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from .digests import (
     DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_SPACED_LAX,
     DIRECT_ASCII_STRICT,
     bytes_sha256hex,
     indent2_json_file_bytes,
@@ -4164,7 +4166,34 @@ def _write_capture_load_execution(args, writer, *, guard, resources):
         (DIRECT_ASCII_INDENT2_LAX.text(execution_record)+'\n').encode())
 
 
-def _run_streamed_calibration(args, runner, profile, *, mode, population,
+def run_census(request: CensusRequest, *, counts, maxima, groups,
+               dense_targets, expert_targets, shapes, identity, expert_projection,
+               model_load_contract, attention_implementation, capture_runtime,
+               pinned_roster, expected_units) -> int:
+    """Publish the counted scope only when every expected unit was observed."""
+    payload = calibration_census(
+        counts, maxima, args=request, groups=groups,
+        dense_targets=dense_targets,
+        expert_targets=expert_targets,
+        shapes=shapes,
+        identity=identity, expert_projection=expert_projection,
+        model_load_contract=model_load_contract,
+        attention_implementation=attention_implementation,capture_runtime=capture_runtime,
+        pinned_roster=pinned_roster)
+    if set(payload["counts"]) != set(expected_units):
+        raise RuntimeError(
+            "the census did not observe every unit in scope: missing "
+            + ", ".join(sorted(set(expected_units) - set(payload["counts"]))))
+    out = Path(request.census_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
+    print(f"[campaign] wrote {out}: {len(payload['counts'])} units, rows "
+          f"{min(payload['counts'].values())}..{max(payload['counts'].values())}, "
+          f"{len(payload['anchor_groups'])} anchor groups", flush=True)
+    return 0
+
+
+def run_streamed_calibration(request: CensusRequest | CaptureRequest, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
                               attention_implementation, capture_runtime,
@@ -4182,6 +4211,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     from .routed_experts import refresh_packed_expert_projections
     from .tessera_menu import PARALLEL_NONE
 
+    capture = request if isinstance(request, CaptureRequest) else None
     targets = [*dense_targets, *expert_targets]
     modules = dict(runner.model.named_modules())
     # Meta views are used only for shape/menu/projection planning. Live views
@@ -4199,26 +4229,26 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     # The capture's unit scope is the whole selection's, before a quantum
     # narrows ``targets`` to its own layer range: the prep sealed exactly
     # this identity, and every quantum must re-derive the same one.
-    capture_unit_names = sorted(targets) if getattr(args, 'units', None) else None
+    capture_unit_names = sorted(targets) if (capture is not None and capture.units) else None
     names_by_layer = {}
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
-    menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
+    menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=request.tp_degree,
         parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-        family_restriction=getattr(args, "family_restriction", None),
+        family_restriction=request.family_restriction,
         structure_by_unit=structure_by_unit, profile=profile)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
         projection, _ = _project_expert_population(population, weights=weights,
-            menus=menus, model_path=args.model, cache_dir=Path(args.cache_dir),
+            menus=menus, model_path=request.model, cache_dir=Path(request.cache_dir),
             measured=set(), projection=None if census is None else census.get('expert_projection'))
     del weights
 
-    capture_policy = getattr(args, 'streaming_capture_policy', 'legacy')
+    capture_policy = 'legacy' if capture is None else capture.streaming_capture_policy
     shared_capture = capture_policy in ('shared-inputs-release-v1', 'shared-inputs-bounded-v1')
     bounded_capture = capture_policy == 'shared-inputs-bounded-v1'
-    capture_load_policy = getattr(args, 'capture_load_policy', None)
+    capture_load_policy = None if capture is None else capture.capture_load_policy
     guard = capture_guard
     if guard is None and bounded_capture and runner.device.type == 'cuda':
         from .memory_management import CaptureMemoryGuard
@@ -4229,9 +4259,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     # A capture chain quantum (PQ #1885) runs layers [start, stop) of this
     # same traversal; everything else about the capture is unchanged.
     quantum = None
-    if getattr(args, 'capture_chain', None) == 'quantum':
+    if capture is not None and isinstance(capture.phase, CaptureQuantum):
         from .capture_layer_chain import ChainQuantum
-        quantum = ChainQuantum(args.capture_calibration_out, args.capture_layer_range,
+        quantum = ChainQuantum(capture.capture_calibration_out, capture.phase.layer_range,
                                num_layers=runner.num_layers,
                                source_authentication=runner.context.source_authentication)
     layer_stop = runner.num_layers if quantum is None else quantum.stop
@@ -4247,13 +4277,13 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         # binds what was read.
         if not getattr(source, 'is_recording', False):
             raise RuntimeError('a streamed capture reads its source through its recording owner')
-        identity = _streamed_capture_identity(args, census, tokens, corpus_text,
+        identity = _streamed_capture_identity(request, census, tokens, corpus_text,
             attention_implementation=attention_implementation, source_authentication=source,
             unit_names=capture_unit_names)
         if quantum is not None:
             identity = quantum.require_identity(identity, n_batches=len(tokens))
-        writer = store.CaptureWriter(args.capture_calibration_out,
-            census_path=args.calibration_census, identity=identity,
+        writer = store.CaptureWriter(capture.capture_calibration_out,
+            census_path=capture.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
             resource_check=None if guard is None else guard.check,
             verified_load_policy=capture_load_policy)
@@ -4263,11 +4293,11 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     counts, maxima, telemetry = {}, {}, []
     if guard is not None:
         from .autoscale import streamed_calibration_resources
-        resources = streamed_calibration_resources(args.model, unit_shapes=shapes,
-            counts=census['counts'], nsamples=args.nsamples, seqlen=args.seqlen,
-            max_act_rows=args.max_act_rows, cache_slots=args.streaming_cache_slots,
-            prefetch_workers=args.streaming_prefetch_workers,
-            headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy,
+        resources = streamed_calibration_resources(request.model, unit_shapes=shapes,
+            counts=census['counts'], nsamples=request.nsamples, seqlen=request.seqlen,
+            max_act_rows=capture.max_act_rows, cache_slots=capture.streaming_cache_slots,
+            prefetch_workers=capture.streaming_prefetch_workers,
+            headroom_gb=capture.streaming_cache_headroom_gb, capture_policy=capture_policy,
             capture_load_policy=capture_load_policy,
             source_recording=getattr(source, 'is_recording', False))
         if resources['memory_bytes'] > guard.cap_bytes:
@@ -4278,9 +4308,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             # taken no reading yet.
             raise RuntimeError(
                 'capture cgroup budget is smaller than its checked phase plan: '
-                + json.dumps(memory_admission_detail(
+                + DIRECT_ASCII_SPACED_LAX.text(memory_admission_detail(
                     plan_bytes=resources['memory_bytes'],
-                    cap_bytes=guard.cap_bytes), sort_keys=True))
+                    cap_bytes=guard.cap_bytes)))
         if 'source_retained_page_bytes' in resources:
             # Clean page cache, outside the plan (PQ #1896). Past the slack the
             # kernel reclaims retained pages and their ranges are read again,
@@ -4304,7 +4334,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         live = refresh_packed_expert_projections(members, profile)
         if live:
             _checked_projected_units(projection['stacks'],
-                weights={m.qname: m.weight for m in live}, model_path=args.model,
+                weights={m.qname: m.weight for m in live}, model_path=request.model,
                 source=projection['producer']['source'], measured={m.qname for m in live},
                 resource_check=None if guard is None else guard.check,
                 release_source_pages=guard is not None,
@@ -4328,7 +4358,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             from .routed_experts import declared_shared_capture_groups
             expected_groups = declared_shared_capture_groups({name: shapes[name] for name in names}, profile)
             if guard is not None:
-                capture_bytes = sum(4*(shapes[name][1]**2+args.max_act_rows*shapes[name][1])
+                capture_bytes = sum(4*(shapes[name][1]**2+capture.max_act_rows*shapes[name][1])
                                     for name in expected_groups)
                 guard.check('before_capture_tensor_growth', reserve_bytes=capture_bytes)
         def checked_forward(batch):
@@ -4339,7 +4369,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
 
         before = time.perf_counter()
         acts, hessians, rows, amax = calibration_forward.capture_activation_statistics(runner.model, names, tokens,
-            args.max_act_rows if writer is not None else 0, runner.device,
+            capture.max_act_rows if writer is not None else 0, runner.device,
             want_hessian=writer is not None, profile=profile,
             forward_batch=forward_batch if guard is None else checked_forward,
             shared_packed_inputs=shared_capture,
@@ -4393,14 +4423,14 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         if guard is not None:
             from .cost_stage_checkpoint import atomic_write_bytes
             failure = dict(completed_layers=telemetry, physical_memory_guard=guard.snapshot())
-            atomic_write_bytes(Path(args.cache_dir)/'capture-memory-refusal.json',
-                (json.dumps(failure, indent=2, sort_keys=True)+'\n').encode())
+            atomic_write_bytes(Path(request.cache_dir)/'capture-memory-refusal.json',
+                (DIRECT_ASCII_INDENT2_LAX.text(failure)+'\n').encode())
         raise
     if quantum is not None:
-        _write_capture_load_execution(args, writer, guard=guard,
+        _write_capture_load_execution(request, writer, guard=guard,
                                       resources=resources if guard is not None else None)
-        Path(args.cache_dir, 'streamed-calibration-telemetry.json').write_text(
-            json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
+        Path(request.cache_dir, 'streamed-calibration-telemetry.json').write_text(
+            DIRECT_ASCII_INDENT2_LAX.text(telemetry)+'\n')
         print(f"[campaign] capture chain layers {quantum.start}:{quantum.stop} complete: "
               f"{fragment}", flush=True)
         return 0
@@ -4409,7 +4439,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         raise RuntimeError('streamed calibration did not observe every in-scope unit')
     hi, lo = census_token_counts(census, counts)
     calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
-        **_campaign_calibration_parameters(args), fit_tokens_min=lo)
+        **_campaign_calibration_parameters(request), fit_tokens_min=lo)
     if writer is not None:
         census_max_abs(census, maxima)
         # The files the forward never read (MTP sidecars, tokenizer assets)
@@ -4417,24 +4447,24 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         source_receipt = source.authenticate_complete_source()
         receipt = writer.finish(model_load_contract=contract,
                                 source_files=source.recorded_source_files())
-        _write_capture_load_execution(args, writer, guard=guard,
+        _write_capture_load_execution(request, writer, guard=guard,
                                       resources=resources if guard is not None else None)
         from .cost_stage_checkpoint import atomic_write_bytes
-        atomic_write_bytes(Path(args.cache_dir)/'capture-source-authentication.json',
+        atomic_write_bytes(Path(request.cache_dir)/'capture-source-authentication.json',
                            indent2_json_file_bytes(source_receipt))
         print(f"[campaign] complete streamed calibration capture: {receipt}", flush=True)
     else:
-        payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
+        payload = calibration_census(counts, maxima, args=request, groups=scope_groups,
             dense_targets=dense_targets, expert_targets=expert_targets, shapes=shapes,
             identity=calibration, expert_projection=projection, model_load_contract=contract,
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
             pinned_roster=pinned_roster)
         from .cost_stage_checkpoint import atomic_write_bytes
-        atomic_write_bytes(Path(args.census_out),
+        atomic_write_bytes(Path(request.census_out),
             indent2_json_file_bytes(payload))
-        print(f"[campaign] wrote streamed calibration census {args.census_out}", flush=True)
-    telemetry_path = Path(args.cache_dir)/'streamed-calibration-telemetry.json'
-    telemetry_path.write_text(json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
+        print(f"[campaign] wrote streamed calibration census {request.census_out}", flush=True)
+    telemetry_path = Path(request.cache_dir)/'streamed-calibration-telemetry.json'
+    telemetry_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(telemetry)+'\n')
     return 0
 
 
@@ -5027,7 +5057,7 @@ def _main(argv, *, source_scope, waits) -> int:
         runner = None
     if runner is not None and not selected_source and not completed_capture_reuse:
         try:
-            return _run_streamed_calibration(args, runner, profile, mode=mode, population=population,
+            return run_streamed_calibration(streamed_calibration_request(args), runner, profile, mode=mode, population=population,
                 dense_targets=dense_targets, expert_targets=expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
@@ -5456,26 +5486,14 @@ def _main(argv, *, source_scope, waits) -> int:
         selected_source_preparation['source_authentication'] = None
 
     if census_only:
-        payload = calibration_census(
-            hessian_rows, act_max_abs, args=args, groups=scope_groups,
-            dense_targets=census_dense_targets,
+        return run_census(census_request(args), counts=hessian_rows, maxima=act_max_abs,
+            groups=scope_groups, dense_targets=census_dense_targets,
             expert_targets=census_expert_targets,
             shapes={name: tuple(weight.shape) for name, weight in weights.items()},
             identity=hessian_identity, expert_projection=expert_projection,
             model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,capture_runtime=capture_runtime,
-            pinned_roster=pinned_roster)
-        if set(payload["counts"]) != set(census_targets):
-            raise RuntimeError(
-                "the census did not observe every unit in scope: missing "
-                + ", ".join(sorted(set(census_targets) - set(payload["counts"]))))
-        out = Path(args.census_out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        print(f"[campaign] wrote {out}: {len(payload['counts'])} units, rows "
-              f"{min(payload['counts'].values())}..{max(payload['counts'].values())}, "
-              f"{len(payload['anchor_groups'])} anchor groups", flush=True)
-        return 0
+            attention_implementation=attention_implementation, capture_runtime=capture_runtime,
+            pinned_roster=pinned_roster, expected_units=census_targets)
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
     from .prismabuild_progress import report as report_progress

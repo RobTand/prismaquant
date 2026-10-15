@@ -178,7 +178,6 @@
   "sorted-json:prismaquant/stage_b_workspace_profile.py::write_profile",
   "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status",
   "sorted-json:prismaquant/tessera_campaign.py::_main",
-  "sorted-json:prismaquant/tessera_campaign.py::_run_streamed_calibration",
   "sorted-json:prismaquant/tessera_expert_projection.py::request_expert_projection",
   "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
   "sorted-json:prismaquant/tessera_export_lane.py::main",

@@ -51,3 +51,82 @@ def capture_chain_bookend_request(args) -> CapturePrepRequest | CaptureJoinReque
         capture_chain_ranges=args.capture_chain_ranges,
         capture_chain_boundary_storage=args.capture_chain_boundary_storage,
         capture_calibration_out=args.capture_calibration_out)
+
+
+@dataclass(frozen=True, slots=True)
+class CensusRequest:
+    model: str
+    nsamples: int
+    seqlen: int
+    seed: int
+    layer_stride: int
+    calibration_input_receipt: Mapping | None
+    cache_dir: str
+    census_out: str
+    tp_degree: int
+    family_restriction: Mapping | None
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureMonolith:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureQuantum:
+    layer_range: tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureRequest:
+    model: str
+    nsamples: int
+    seqlen: int
+    seed: int
+    calibration_input_receipt: Mapping | None
+    cache_dir: str
+    tp_degree: int
+    family_restriction: Mapping | None
+    calibration_census: str
+    capture_calibration_out: str
+    units: str | None
+    phase: CaptureMonolith | CaptureQuantum
+    max_act_rows: int
+    streaming_capture_policy: Literal['legacy', 'shared-inputs-release-v1', 'shared-inputs-bounded-v1']
+    capture_load_policy: Mapping | None
+    streaming_cache_slots: int
+    streaming_prefetch_workers: int
+    streaming_cache_headroom_gb: float
+
+
+def census_request(args) -> CensusRequest:
+    """Bind the draw/scope and destination consumed by census publication."""
+    if not args.census_out:
+        raise ValueError('census request requires its output')
+    return CensusRequest(model=args.model, nsamples=args.nsamples, seqlen=args.seqlen,
+        seed=args.seed, layer_stride=args.layer_stride,
+        calibration_input_receipt=args.calibration_input_receipt,
+        cache_dir=args.cache_dir, census_out=args.census_out,
+        tp_degree=args.tp_degree, family_restriction=args.family_restriction)
+
+
+def streamed_calibration_request(args) -> CensusRequest | CaptureRequest:
+    """Bind a model-running phase after prep/join and source admission."""
+    if args.census_out:
+        return census_request(args)
+    if not args.capture_calibration_out or args.capture_chain not in (None, 'quantum'):
+        raise ValueError('streamed calibration requires census, monolith or quantum')
+    phase = (CaptureMonolith() if args.capture_chain is None
+             else CaptureQuantum(args.capture_layer_range))
+    return CaptureRequest(model=args.model, nsamples=args.nsamples, seqlen=args.seqlen,
+        seed=args.seed, calibration_input_receipt=args.calibration_input_receipt,
+        cache_dir=args.cache_dir, tp_degree=args.tp_degree,
+        family_restriction=args.family_restriction,
+        calibration_census=args.calibration_census,
+        capture_calibration_out=args.capture_calibration_out, units=args.units,
+        phase=phase, max_act_rows=args.max_act_rows,
+        streaming_capture_policy=args.streaming_capture_policy,
+        capture_load_policy=args.capture_load_policy,
+        streaming_cache_slots=args.streaming_cache_slots,
+        streaming_prefetch_workers=args.streaming_prefetch_workers,
+        streaming_cache_headroom_gb=args.streaming_cache_headroom_gb)

@@ -135,7 +135,10 @@ def test_streamed_capture_uses_the_profile_unit_menu(expanded, monkeypatch):
 
     monkeypatch.setattr(campaign, "expand_menus_for_targets", stop_after_menu)
     with pytest.raises(MenuPlanned):
-        campaign._run_streamed_calibration(SimpleNamespace(tp_degree=1), runner, profile,
+        campaign.run_streamed_calibration(
+            campaign.CensusRequest(model='/source', nsamples=1, seqlen=4, seed=0,
+                layer_stride=1, calibration_input_receipt=None, cache_dir='/cache',
+                census_out='/census', tp_degree=1, family_restriction=None), runner, profile,
             mode="readable", population=campaign_table.ExpertPopulation(members=(), declared={},
                 packed_in_scope={}, omitted_outside_layer_stride={}),
             dense_targets=[name], expert_targets=[], scope_groups={name: [name]},

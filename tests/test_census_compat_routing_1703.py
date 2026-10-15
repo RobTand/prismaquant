@@ -4,7 +4,7 @@ Routing: tessera_campaign._publish_capture_load_execution and
 glm_capture_compatibility.create_capture_compatibility must call
 indent2_json_file_bytes for the record and bytes_sha256hex for its digest.
 Values: the delegation is byte-identical to the verbatim old spelling
-(sort_keys, indent 2, allow_nan=False, one LF, UTF-8). _run_streamed_calibration
+(sort_keys, indent 2, allow_nan=False, one LF, UTF-8). run_streamed_calibration
 shares the same one-line recipe; its row is pinned by the baseline tripwire.
 """
 import hashlib

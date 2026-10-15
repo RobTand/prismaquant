@@ -576,7 +576,7 @@ def main():
                     check_guard('after_prefix_batch')
                 mark('source_prefix_layer_forward_complete', source_layer=layer,
                      samples=args.nsamples)
-                # Match _run_streamed_calibration.visit's existing boundary
+                # Match run_streamed_calibration.visit's existing boundary
                 # cleanup even though these prefix layers collect no H/X.
                 torch.cuda.empty_cache()
                 mark('source_prefix_layer_allocator_released', source_layer=layer)
