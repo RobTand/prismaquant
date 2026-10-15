@@ -60,11 +60,11 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
     formats = ["TESSERA_E4M3_K1_R768", "TESSERA_E4M3_K1_R1024"]
     args = SimpleNamespace(model="fixture", units="whole.json", rate_band="768,768",
                            max_rounds=1, family_restriction=None, source_scope=None)
-    common = dict(args=args, calibration_identity={"text_sha256": "same-draw"},
+    common = dict(settings=vars(args), calibration_identity={"text_sha256": "same-draw"},
                   serving_scope=None, static_scales={}, static_scale_policy="same-policy")
 
     def identity(priced):
-        return campaign._campaign_checkpoint_identity(
+        return campaign.campaign_checkpoint_identity(
             weights={name: "weight:" + name for name in priced},
             acts={name: None for name in priced}, hessians={name: None for name in priced},
             menus={name: [SimpleNamespace(format_name=fmt) for fmt in formats] for name in priced},

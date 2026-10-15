@@ -147,18 +147,18 @@ def test_the_checkpoint_identity_covers_only_the_selected_units(monkeypatch):
     common = dict(
         acts={n: None for n in weights}, hessians={n: None for n in weights},
         menus={n: [] for n in weights},
-        args=argparse.Namespace(model="m", layer_stride=1, out="o", cache_dir="c",
+        settings=dict(model="m", layer_stride=1, out="o", cache_dir="c",
                                 checkpoint="k", deadline_seconds=0.0, units="path",
                                 calibration_census=None, census_out=None,
                                 seed_checkpoint=None, seed_wire_dir=None),
         calibration_identity={"text_sha256": "t"}, serving_scope=None,
         static_scales={}, static_scale_policy="policy")
 
-    whole = tc._campaign_checkpoint_identity(weights=weights, **common)
-    left = tc._campaign_checkpoint_identity(
+    whole = tc.campaign_checkpoint_identity(weights=weights, **common)
+    left = tc.campaign_checkpoint_identity(
         weights={"a": "wa"}, **{**common, "acts": {"a": None},
                                 "hessians": {"a": None}, "menus": {"a": []}})
-    right = tc._campaign_checkpoint_identity(
+    right = tc.campaign_checkpoint_identity(
         weights={"b": "wb", "c": "wc"},
         **{**common, "acts": {"b": None, "c": None},
            "hessians": {"b": None, "c": None}, "menus": {"b": [], "c": []}})
@@ -204,9 +204,9 @@ def test_streaming_residency_knobs_are_scheduling_not_identity(monkeypatch):
             streaming_prefetch_workers=1, anchor_batch_size=8)
         for name, value in overrides.items():
             setattr(args, name, value)
-        return tc._campaign_checkpoint_identity(
+        return tc.campaign_checkpoint_identity(
             weights={"a": "wa"}, acts={"a": None}, hessians={"a": None},
-            menus={"a": []}, args=args, calibration_identity={"text_sha256": "t"},
+            menus={"a": []}, settings=vars(args), calibration_identity={"text_sha256": "t"},
             serving_scope=None, static_scales={}, static_scale_policy="policy")
 
     base = identity()
@@ -251,9 +251,9 @@ def test_source_identity_cache_flags_are_not_checkpoint_identity(monkeypatch):
             streaming=True, streaming_capture_policy="legacy")
         for name, value in overrides.items():
             setattr(args, name, value)
-        return tc._campaign_checkpoint_identity(
+        return tc.campaign_checkpoint_identity(
             weights={"a": "wa"}, acts={"a": None}, hessians={"a": None},
-            menus={"a": []}, args=args, calibration_identity={"text_sha256": "t"},
+            menus={"a": []}, settings=vars(args), calibration_identity={"text_sha256": "t"},
             serving_scope=None, static_scales={}, static_scale_policy="policy")
 
     without = json.dumps(identity(), sort_keys=True)

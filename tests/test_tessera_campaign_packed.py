@@ -515,8 +515,6 @@ def test_main_prices_the_producer_projected_expert_population(monkeypatch, tmp_p
         wire = tmp_path / "cache" / "wire" / record["file"]
         assert wire.is_file() and wire.stat().st_size == record["blob_bytes"]
     assert dense not in wires
-    # The checkpoint identity binds the projection the rows were priced under.
-    assert campaign._campaign_checkpoint_identity.__doc__  # (bound in the journal; see resume tests)
 
 
 def test_main_refuses_a_live_view_that_disagrees_with_the_producer_source(monkeypatch, tmp_path):

@@ -165,9 +165,9 @@ def test_selected_load_policy_and_source_keep_existing_resume_boundaries(tmp_pat
     monkeypatch.setattr(pwc, '_production_cache_source_sha256', lambda: source['value'])
     args = SimpleNamespace(capture_load_policy=policy(), cache_dir='/first-cache')
     def identity():
-        return campaign._campaign_checkpoint_identity(weights={'a': torch.ones(2, 2)},
+        return campaign.campaign_checkpoint_identity(weights={'a': torch.ones(2, 2)},
             acts={'a': torch.ones(2, 2)}, hessians={'a': torch.eye(2)}, menus={'a': []},
-            args=args, calibration_identity={'fit_ids_sha256': 'original-draw'},
+            settings=vars(args), calibration_identity={'fit_ids_sha256': 'original-draw'},
             serving_scope=None, static_scales={}, static_scale_policy='fixture')
     before = identity()
     journal = tmp_path/'journal'

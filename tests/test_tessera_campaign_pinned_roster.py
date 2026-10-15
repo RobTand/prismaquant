@@ -155,9 +155,9 @@ def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):
                 seed_checkpoint=None, seed_wire_dir=None)
 
     def identity(**extra):
-        return tc._campaign_checkpoint_identity(
+        return tc.campaign_checkpoint_identity(
             weights={"a": "wa"}, acts={"a": None}, hessians={"a": None}, menus={"a": []},
-            args=argparse.Namespace(**base, **extra), calibration_identity={"text_sha256": "t"},
+            settings=dict(**base, **extra), calibration_identity={"text_sha256": "t"},
             serving_scope=None, static_scales={}, static_scale_policy="policy")
 
     before = identity()

@@ -41,11 +41,11 @@ def multi_unit_fixture():
 def run_level_identity(tc, names, weights, hessians, source, kwargs, bound):
     common = dict(weights=weights, acts={name: torch.ones(2, 2) for name in names},
                   hessians=hessians, menus=kwargs["menus"],
-                  args=SimpleNamespace(family_restriction=None),
+                  settings=dict(family_restriction=None),
                   calibration_identity=source.provenance, serving_scope=None,
                   static_scales=kwargs["static_scales"], static_scale_policy="fixture",
                   expert_projection=None)
-    return tc._campaign_checkpoint_identity(**common, bound_units=bound)
+    return tc.campaign_checkpoint_identity(**common, bound_units=bound)
 
 
 def anchor_templates(tc, names, weights, source, kwargs, bound):

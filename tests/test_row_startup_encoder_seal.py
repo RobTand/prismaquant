@@ -1,8 +1,6 @@
 """Overlap the producer's exact cold source seal, never replace it (PQ #1742)."""
 
 from prismaquant import tessera_campaign_wire as campaign_wire
-import ast
-import inspect
 from concurrent.futures import Future
 from contextlib import ExitStack
 from functools import lru_cache
@@ -105,24 +103,53 @@ def test_pricing_scopes_have_no_shared_future(monkeypatch):
     scope_b.close()
 
 
-def test_main_starts_before_model_and_joins_before_identity_uses():
-    tree = ast.parse(inspect.getsource(campaign._main))
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+def test_main_submits_before_model_and_joins_before_producer_identity(monkeypatch, tmp_path):
+    from prismaquant import cost_streaming
+    from test_tessera_row_stream import stream_fixture
 
-    def named(name):
-        return [node.lineno for node in calls
-                if isinstance(node.func, ast.Name) and node.func.id == name]
+    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    events = []
+    ahead_started = False
+    joined = False
+    start = campaign._start_encoder_source_seal_ahead
+    wait = campaign._EncoderSourceSealAhead.wait
+    build = cost_streaming.build_streamed_causal_lm
+    identity = campaign.campaign_checkpoint_identity
 
-    start, = named("_start_encoder_source_seal_ahead")
-    join, = [node.lineno for node in calls if isinstance(node.func, ast.Attribute)
-             and node.func.attr == "wait" and isinstance(node.func.value, ast.Name)
-             and node.func.value.id == "encoder_seal_ahead"]
-    assert start < min(named("build_streamed_causal_lm")) < join
-    assert join < min(named("_campaign_identity_metadata_plan"))
-    assert join < min(named("_campaign_bound_identities"))
-    assert join < min(named("_campaign_checkpoint_identity"))
-    # Still ask the producer in the existing identity, not a new digest/field.
-    identity = ast.parse(inspect.getsource(campaign._campaign_checkpoint_identity))
-    assert sum(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "encoder_source_sha256"
-               for node in ast.walk(identity)) == 1
+    def observed_start(*args, **kwargs):
+        nonlocal ahead_started
+        ahead = start(*args, **kwargs)
+        assert ahead is not None
+        ahead_started = True
+        events.append('submitted')
+        return ahead
+
+    def observed_build(*args, **kwargs):
+        assert ahead_started
+        assert not joined
+        events.append('model')
+        return build(*args, **kwargs)
+
+    def observed_wait(self):
+        nonlocal joined
+        result = wait(self)
+        joined = True
+        events.append('joined')
+        return result
+
+    def observed_identity(*args, **kwargs):
+        assert joined
+        result = identity(*args, **kwargs)
+        events.append(('identity', result['encoder_source_sha256']))
+        return result
+
+    monkeypatch.setattr(campaign, '_start_encoder_source_seal_ahead', observed_start)
+    monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', observed_build)
+    monkeypatch.setattr(campaign._EncoderSourceSealAhead, 'wait', observed_wait)
+    monkeypatch.setattr(campaign, 'campaign_checkpoint_identity', observed_identity)
+    assert campaign.main([*argv, '--row-head', 'load-all']) == 0
+    assert events[:3] == ['submitted', 'model', 'joined']
+    identities = [item[1] for item in events if isinstance(item, tuple)]
+    assert identities
+    assert set(identities) == {
+        campaign_wire.require_checkpoint_identity_api().encoder_source_sha256()}

@@ -103,6 +103,12 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): campaign
+checkpoint identity consumes a copy of the original raw CLI settings mapping,
+captured after acquisition normalization. Typed execution requests never define
+its wire fields. Existing filters, unknown settings, explicit zero/false/null,
+per-unit acquisition proofs and source-seal migration rules remain unchanged.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): census
 publication and streamed calibration consume distinct `CensusRequest` and
 `CaptureRequest` values. Capture explicitly names monolith or quantum scope.

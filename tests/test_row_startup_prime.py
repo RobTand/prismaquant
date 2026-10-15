@@ -99,7 +99,7 @@ def test_a_new_head_starts_first_reads_before_run_identity(monkeypatch, tmp_path
     campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
     started = threading.Event()
     original_load = cc._verified_capture_entry
-    original_identity = campaign._campaign_checkpoint_identity
+    original_identity = campaign.campaign_checkpoint_identity
 
     def verified(*args, **kwargs):
         started.set()
@@ -110,7 +110,7 @@ def test_a_new_head_starts_first_reads_before_run_identity(monkeypatch, tmp_path
         return original_identity(*args, **kwargs)
 
     monkeypatch.setattr(cc, "_verified_capture_entry", verified)
-    monkeypatch.setattr(campaign, "_campaign_checkpoint_identity", identity)
+    monkeypatch.setattr(campaign, "campaign_checkpoint_identity", identity)
     assert campaign.main(argv) == 0
 
 

@@ -1,4 +1,4 @@
-"""Bound requests for capture-chain operations that never load a model."""
+"""Bound requests for campaign census and calibration-capture operations."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

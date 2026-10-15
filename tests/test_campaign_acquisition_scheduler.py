@@ -371,13 +371,13 @@ def test_unset_flags_leave_checkpoint_identity_settings_byte_identical(monkeypat
     monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "b" * 64)
     common = dict(weights={}, acts={}, hessians={}, menus={}, calibration_identity={},
                   serving_scope=None, static_scales={}, static_scale_policy=None)
-    old = campaign._campaign_checkpoint_identity(args=SimpleNamespace(), **common)
-    new = campaign._campaign_checkpoint_identity(args=SimpleNamespace(
+    old = campaign.campaign_checkpoint_identity(settings=dict(), **common)
+    new = campaign.campaign_checkpoint_identity(settings=dict(
         acquisition_request=None, acquisition_request_sha256=None), **common)
     assert canonical_json(old, where="old") == canonical_json(new, where="new")
     schedule_value = {"q": {FAMILY: [896]}}
     origin = {"request_sha256": "a" * 64, "expanded_actual_work_count": 1}
-    bound = [campaign._campaign_checkpoint_identity(args=SimpleNamespace(
+    bound = [campaign.campaign_checkpoint_identity(settings=dict(
         acquisition_request=path, acquisition_request_sha256="a" * 64,
         acquisition_schedule=schedule_value, acquisition_origin=origin), **common)
         for path in ("first/request.json", "second/request.json")]

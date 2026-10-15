@@ -131,6 +131,7 @@ __all__ = [
     'anchor_schedule',
     'calibration_census',
     'campaign_roster',
+    'campaign_checkpoint_identity',
     'census_max_abs',
     'census_token_counts',
     'contract_source_label',
@@ -1214,13 +1215,17 @@ def _manifest_unit_receipts(identity, names):
 
 
 
-def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
+def campaign_checkpoint_identity(*, weights, acts, hessians, menus, settings: Mapping[str, object],
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
                                   expert_projection=None, stack_sampling_identity=None,
                                   structure_by_unit=None, bound_units=None,
                                   unit_receipts=None):
     """Bind the priced population, including score inputs when H is off.
+
+    ``settings`` is the original raw CLI wire mapping, after acquisition
+    normalization. The operation copies it before applying the existing wire
+    filters; request/dataclass field names are never serialized here.
 
     ``unit_receipts`` (``{unit: {weight, scoring_rows, hessian}}``) are the
     streaming row head's per-entry receipts (``tessera_row_stream``): the same
@@ -1241,7 +1246,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     from .production_weight_cache import _production_cache_source_sha256
 
     api = campaign_wire.require_checkpoint_identity_api()
-    settings = vars(args).copy()
+    settings = dict(settings)
+    acquisition_source_weights = settings.get("acquisition_source_weights")
     # Locations and a duplicate digest are never scheduling identity. Opted-in
     # origin + exact atomic-expanded schedule below stay bound by value; unset
     # flags leave the historical settings bytes unchanged.
@@ -1344,8 +1350,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
-                **({"acquisition_source_weight": dict(args.acquisition_source_weights[name])}
-                   if getattr(args, "acquisition_source_weights", None) is not None else {}),
+                **({"acquisition_source_weight": dict(acquisition_source_weights[name])}
+                   if acquisition_source_weights is not None else {}),
                 # A campaign hold creates this exact producer template once
                 # before journal admission.  The journal retains the same
                 # source/H records the former direct calls made, without a
@@ -3801,7 +3807,7 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
 
     This is the per-row half of the resume identity rule, shared by pre-link
     seed admission and :func:`_checkpoint_anchor_identity`. The run-level
-    half, :func:`_campaign_checkpoint_identity`, binds this run's static scales
+    half, :func:`campaign_checkpoint_identity`, binds this run's static scales
     and policy into the journal. Resume merges checkpoint rows into
     this run's table, and the table's rows must be one currency.  A W4A4
     anchor with no ``input_global_scale`` was measured under the pre-#194
@@ -5495,6 +5501,8 @@ def _main(argv, *, source_scope, waits) -> int:
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
             pinned_roster=pinned_roster, expected_units=census_targets)
 
+    checkpoint_settings = vars(args).copy()
+
     from .cost_stage_checkpoint import prepare_journal, write_unit
     from .prismabuild_progress import report as report_progress
 
@@ -5650,8 +5658,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # including the static A-side contract (scales + policy) the W4A4 rows
         # are scored under.  A checkpoint from another calibration or policy is
         # refused here, by field, before a row of it is read.
-        return _campaign_checkpoint_identity(
-            weights=weights, acts=acts, hessians=hessians, menus=menus, args=args,
+        return campaign_checkpoint_identity(
+            weights=weights, acts=acts, hessians=hessians, menus=menus, settings=checkpoint_settings,
             calibration_identity=hessian_identity,
             serving_scope=(scope_provenance(serving_target, context_by_unit)
                            if serving_target is not None else None),

@@ -472,9 +472,9 @@ def render_handoff(handoff, *, aliased=False):
                         menus=menus, calibration_source=source, static_scales=static_scales, projected_units={})
                     wire_records.setdefault(name, {})[anchor.format_name] = campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity)
                     measured.setdefault(name, {}).setdefault(family, []).append(anchor)
-        identity = campaign._campaign_checkpoint_identity(weights=weights,
+        identity = campaign.campaign_checkpoint_identity(weights=weights,
             acts={name: handoff.run.inputs[name] for name in members},
-            hessians={name: hessians[name] for name in members}, menus=menus, args=args,
+            hessians={name: hessians[name] for name in members}, menus=menus, settings=vars(args),
             calibration_identity=calibration, serving_scope=None, static_scales=static_scales,
             static_scale_policy=static_policy)
         journal, identity_sha, _ = prepare_journal(checkpoint.with_name(checkpoint.name + ".parts"),

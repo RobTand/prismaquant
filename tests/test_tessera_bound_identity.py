@@ -124,11 +124,11 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     tc, name, weight, hessian, source, anchors, projection, kwargs = fixture(projected=True)
     args = SimpleNamespace(family_restriction=None)
     common = dict(weights=kwargs["weights"], acts={name: torch.ones(2, 2)},
-        hessians={name: hessian}, menus=kwargs["menus"], args=args,
+        hessians={name: hessian}, menus=kwargs["menus"], settings=vars(args),
         calibration_identity=source.provenance, serving_scope=None,
         static_scales=kwargs["static_scales"], static_scale_policy="fixture",
         expert_projection=None)
-    expected = tc._campaign_checkpoint_identity(**common)
+    expected = tc.campaign_checkpoint_identity(**common)
     actual_hash = cached_unit.tensor_identity
     calls = []
     def observed(value):
@@ -142,7 +142,7 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     bound = tc._campaign_bound_identities(weights=kwargs["weights"], menus=kwargs["menus"],
         calibration_source=source, projected_units={name: projection},
         static_scales=kwargs["static_scales"], metadata_bounds=metadata_bounds)
-    actual = tc._campaign_checkpoint_identity(**common, bound_units=bound)
+    actual = tc.campaign_checkpoint_identity(**common, bound_units=bound)
     assert actual == expected
     # Exact identity parity is the same-campaign resume/merge compatibility
     # predicate; source identity is intentionally still a normal identity field.

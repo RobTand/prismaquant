@@ -162,9 +162,9 @@ def _identity(monkeypatch, *, policy=POLICY, structure="dense"):
         tensor_identity=lambda value: {"fixture": True}, encoder_source_sha256=lambda: "encoder"))
     monkeypatch.setattr(production_weight_cache, "_production_cache_source_sha256", lambda: "pq")
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {"fixture": True})
-    return campaign._campaign_checkpoint_identity(weights={"unit": object()}, acts={}, hessians={},
+    return campaign.campaign_checkpoint_identity(weights={"unit": object()}, acts={}, hessians={},
         menus={"unit": [SimpleNamespace(format_name="TESSERA_E4M3_K1_R896")]},
-        args=SimpleNamespace(menu_mode="readable", family_restriction=policy),
+        settings=dict(menu_mode="readable", family_restriction=policy),
         calibration_identity={}, serving_scope=None, static_scales={}, static_scale_policy="fixture",
         structure_by_unit={"unit": structure})
 

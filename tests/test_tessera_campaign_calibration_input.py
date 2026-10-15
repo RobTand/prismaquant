@@ -230,8 +230,8 @@ def test_absent_intake_keeps_historical_checkpoint_settings_identity():
     common = {"weights": {}, "acts": {}, "hessians": {}, "menus": {},
               "calibration_identity": th.calibration_identity("real corpus", [], fit_tokens=0),
               "serving_scope": None, "static_scales": {}, "static_scale_policy": "fixture"}
-    legacy = campaign._campaign_checkpoint_identity(args=SimpleNamespace(seed=0), **common)
-    current = campaign._campaign_checkpoint_identity(args=SimpleNamespace(seed=0,
+    legacy = campaign.campaign_checkpoint_identity(settings=dict(seed=0), **common)
+    current = campaign.campaign_checkpoint_identity(settings=dict(seed=0,
         calibration_input=None, calibration_input_sha256=None,
         calibration_corpus=None, calibration_input_receipt=None), **common)
     assert current == legacy
