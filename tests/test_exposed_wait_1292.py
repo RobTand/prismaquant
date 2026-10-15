@@ -299,7 +299,7 @@ def test_read_stream_without_a_sink_is_unchanged(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def _counters(tmp_path, sampler):
+def _counters(tmp_path, sampler, *, io_spans=None):
     from prismaquant.joint_cost_quantum import ChunkFrontier, QuantumCounters
     chunks = [{"name": "layer-001-chunk-000", "start_bytes": 0, "end_bytes": 100},
               {"name": "layer-001-chunk-001", "start_bytes": 100, "end_bytes": 200}]
@@ -307,7 +307,8 @@ def _counters(tmp_path, sampler):
                 "render_file_upper_bound_bytes": 100, "candidate_count": 1}]
     frontier = ChunkFrontier(chunks=chunks, windows=windows)
     return QuantumCounters(quantum_id="layer-001", identity_sha256="1" * 64,
-                           chunks=chunks, frontier=frontier, sampler=sampler)
+                           chunks=chunks, frontier=frontier, sampler=sampler,
+                           io_spans=io_spans)
 
 
 class _FakeSampler:
@@ -350,19 +351,25 @@ def test_counters_carry_the_exposed_wait_block_per_phase(tmp_path):
 
 def test_counters_read_spans_as_wait_kinds(tmp_path):
     from prismaquant.joint_quantum_row import (CHECKPOINT_LOAD_PHASE)
-    counters = _counters(tmp_path, _FakeSampler([], []))
+    clock = iter((0.0, 0.125))
+    wall = iter((10.0, 10.125))
+    spans = io_spans.IoSpanLog(scope="layer-001",
+                              clock=lambda: next(clock), wall=lambda: next(wall))
+    counters = _counters(tmp_path, _FakeSampler([], []), io_spans=spans)
     counters.open()
     counters.enter_phase()
     with counters.io.span(CHECKPOINT_LOAD_PHASE):
-        time.sleep(0.02)
+        pass
     block = counters.finish(units_done=1, units_total=1)
     # The load precedes every chunk phase (the frontier has not advanced), so
     # the row total carries it and ``outside_phases_s`` names the remainder.
     total = block["exposed_wait"]["total"]
     kinds = total["by_kind"]
     assert kinds[CHECKPOINT_LOAD_PHASE]["count"] == 1
-    assert kinds[CHECKPOINT_LOAD_PHASE]["wait_s"] >= 0.02
-    assert total["outside_phases_s"] == pytest.approx(total["wait_s"])
+    assert kinds[CHECKPOINT_LOAD_PHASE]["wait_s"] == 0.125
+    assert total["wait_s"] == 0.125
+    assert total["outside_phases_s"] == 0.125
+    assert block["io_spans"][0]["wall_s"] == 0.125
 
 
 # --------------------------------------------------------------------------
