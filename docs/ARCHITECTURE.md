@@ -166,7 +166,8 @@ exporter retains names, serving policy, artifact IO and CLI orchestration.
 codec receives that immutable value, activation rows and calibrated scales
 explicitly; cache fill and export record the same complete schema. Native
 re-packing refuses historical partial recipes because their omitted controls
-cannot establish an identical render. Explicit False flags remain authoritative.
+cannot establish an identical render. Completed recipes reject malformed or
+non-finite controls at parsing; explicit False flags remain authoritative.
 
 vLLM metadata discovery loads the registered class entry directly when available.
 It does not construct a serving `ModelConfig`; errors from the installed class

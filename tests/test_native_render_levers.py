@@ -94,3 +94,39 @@ def test_export_match_opt_out_still_refuses_unproven_historical_options(monkeypa
     monkeypatch.setattr(exporter, "_RENDER_LEVERS", NativeRenderLevers(nvfp4_export_match_render_scale=False))
     with pytest.raises(ValueError, match="incomplete.*re-render"):
         exporter._export_render_options(cache)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("nvfp4_joint_scale_levels", "6,4"),
+    ("nvfp4_joint_scale_levels", []),
+    ("nvfp4_joint_scale_levels", [6.0, float("nan")]),
+    ("fp8_scale_sweep_factors", [1.0, float("inf")]),
+    ("mxfp8_joint_scale_shifts", [True, 0]),
+    ("gptq_damp_roles", [["down", 3.0]]),
+    ("gptq_damp_roles", {"down": "3.0"}),
+    ("gptq_damp_roles", {"down": float("inf")}),
+    ("gptq_fixed_damp", float("nan")),
+    ("fisher_row_weight_clip", float("inf")),
+    ("act_clip_quantile", True),
+    ("act_clip_quantile", 2.0),
+    ("nvfp4_joint_scale_global_span_hi", 0.25),
+    ("nvfp4_joint_scale_global_grid", 0),
+    ("gptq_block_size", 0),
+    ("nvfp4_scale_rule", "unknown"),
+    ("nvfp4_input_global_scale_policy", "unknown"),
+])
+def test_completed_recipe_refuses_corrupt_controls(field, value):
+    record = NativeRenderLevers().record()
+    record[field] = value
+    with pytest.raises(ValueError, match="native render option"):
+        NativeRenderLevers.from_record(record)
+
+
+def test_completed_recipe_preserves_supported_disabled_controls():
+    options = NativeRenderLevers(
+        act_clip_quantile=None, fisher_row_weight_clip=0.0,
+        gptq_damp_analytical_c=0.0, gptq_damp_roles=(("unmatched", 0.25),))
+    parsed = NativeRenderLevers.from_record(options.record())
+    assert parsed == options
+    acts = torch.tensor([[100.0, -5.0], [1.0, 2.0]])
+    assert torch.equal(codec._activation_matrix_for_gptq(acts, 2, levers=parsed), acts)
