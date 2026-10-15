@@ -134,3 +134,33 @@ def test_unretained_delivery_is_consumed_without_a_second_read(source_context, m
                 assert block.source == 'wait'
     assert sorted(reads) == [0, 1, 2]
     assert context.prefetch_delivered_unretained == 3
+
+
+@pytest.mark.parametrize('where', ['install-top-up', 'walk-successor'])
+def test_prefetch_failure_after_materialization_releases_the_current_source(
+        source_context, monkeypatch, where):
+    context, _weights, events, _reads = source_context
+    def fail():
+        assert not context.layers[0].weight.is_meta
+        raise OSError('successor queue failed')
+    if where == 'install-top-up':
+        monkeypatch.setattr(context, '_top_up_prefetch', lambda layer: fail())
+    else:
+        install, schedule = context.install, context.schedule_prefetch
+        installed = False
+        def materialize(layer, **kwargs):
+            nonlocal installed
+            result = install(layer, **kwargs)
+            installed = True
+            return result
+        def successor(layer):
+            if installed and layer == 1:
+                fail()
+            return schedule(layer)
+        monkeypatch.setattr(context, 'install', materialize)
+        monkeypatch.setattr(context, 'schedule_prefetch', successor)
+    with pytest.raises(OSError, match='successor queue failed'):
+        with context.walk_layers(range(3), prefetch_lookahead=1, require_prefetched=True) as walk:
+            next(walk)
+    assert context.layers[0].weight.is_meta
+    assert [event for event in events if event[0] == 'unload'] == [('unload', 0)]

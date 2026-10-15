@@ -1209,11 +1209,11 @@ class StreamingContext:
         def blocks():
             for layer in order:
                 owned = layer != pinned_layer
-                source = (self.install(layer, require_prefetched=require_prefetched)
-                          if owned else None)
-                self.schedule_prefetch(layer + prefetch_lookahead * order.step)
-                block = InstalledBlock(self, layer, source, owned=owned)
+                block = InstalledBlock(self, layer, None, owned=owned)
                 try:
+                    if owned:
+                        block.source = self.install(layer, require_prefetched=require_prefetched)
+                    self.schedule_prefetch(layer + prefetch_lookahead * order.step)
                     yield block
                 finally:
                     block.close()
