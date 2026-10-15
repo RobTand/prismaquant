@@ -220,7 +220,7 @@ def test_produced_reference_uses_existing_byte_owner(tmp_path, monkeypatch):
         seen.append(value)
         return hashlib.sha256(value).hexdigest()
 
-    monkeypatch.setattr(streamed, "bytes_sha256hex", digest)
+    monkeypatch.setattr(streamed_boundaries, "bytes_sha256hex", digest)
     with _owner(tmp_path) as owner:
         references = owner.write_produced_files(files, kind="fixture", boundary_index=0)
         assert seen == [b"\xff\x00", b"AB"]
