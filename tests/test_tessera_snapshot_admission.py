@@ -1,4 +1,6 @@
 """A fresh pin check cannot qualify cells read from another document."""
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import json
 import subprocess
 import sys
@@ -41,6 +43,7 @@ runtime.contract_path = lambda: Path(sys.argv[1])
 context = ServingContext(**json.loads(sys.argv[3]))
 if sys.argv[4] == 'True':
     read_bytes = Path.read_bytes
+
     def replace_after_capture(path):
         raw = read_bytes(path)
         if path == Path(sys.argv[1]):
@@ -51,10 +54,9 @@ if sys.argv[4] == 'True':
 else:
     warmed = render.tessera_attesting_cells(sys.argv[2], serving_context=context)
     runtime.contract_path = lambda: canonical
-attested = render.tessera_lane_attested(sys.argv[2], serving_context=context)
+attested = render.tessera_lane_admission(sys.argv[2], serving_context=context).admitted
 require_pinned_tessera_runtime()
-print(json.dumps({"warmed_cells": len(warmed) if warmed is not None else None,
-                  "attested": attested}))
+print(json.dumps({'warmed_cells': len(warmed) if warmed is not None else None, 'attested': attested}))
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(altered), name, json.dumps(context),

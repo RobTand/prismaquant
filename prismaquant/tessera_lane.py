@@ -383,7 +383,7 @@ def allocation_shape_price_scope(serving_target, *, tensor_parallel):
     installed contract's bytes against it (``require_pinned_tessera_runtime``),
     plus the serving target the flags name and the world size the caller
     declares; the eligibility table and the format rows are the installed
-    contract's own (``tessera_render._pinned_serving_table``). The table's
+    contract's own (``tessera_runtime_contract.installed_runtime_snapshot``). The table's
     ``tessera_commit`` is the commit the serve installs, so it is compared with
     the pin's ``serving_commit``.
     """
@@ -396,7 +396,10 @@ def allocation_shape_price_scope(serving_target, *, tensor_parallel):
                           "--tessera-execution-mode and --tessera-residency")
     pin = pins.load_tessera_serving_runtime_pin()
     pins.require_pinned_tessera_runtime(pin)
-    eligibility, published = tessera_render._pinned_serving_table()
+    from .tessera_runtime_contract import installed_runtime_snapshot
+
+    snapshot = installed_runtime_snapshot()
+    eligibility, published = snapshot.eligibility, snapshot.published_formats
     scope = ShapeTableScope(
         contract_sha256=pin.contract_sha256, tessera_commit=pin.serving_commit,
         runtime_image_digest=serving_target.runtime_image,

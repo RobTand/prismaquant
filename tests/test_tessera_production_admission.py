@@ -1,5 +1,9 @@
 """Production pin admission preserves the conditions its cells attest."""
 import json
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 
 import pytest
 
@@ -24,7 +28,8 @@ def test_production_pin_preserves_attested_conditions(monkeypatch):
     """
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
     require_pinned_tessera_runtime()  # Exercise the real production pin, no substitute.
-    table, formats = render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, formats = snapshot.eligibility, snapshot.published_formats
     name = "TESSERA_E4M3_K1_R896"
     reference = next(cell for cell in table.cells
                      if cell.family == "TESSERA_E4M3_K1"
@@ -69,7 +74,8 @@ def test_a_streamed_context_has_no_cell_to_attest_it(monkeypatch):
     """
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
     require_pinned_tessera_runtime()
-    table, formats = render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, formats = snapshot.eligibility, snapshot.published_formats
     assert not [cell for cell in table.cells
                 if "TESSERA_SERVE_MODE=streamed" in cell.requires_serve_flags]
     resident = next(cell for cell in table.cells
@@ -85,42 +91,55 @@ def test_a_streamed_context_has_no_cell_to_attest_it(monkeypatch):
 
 
 @pytest.mark.parametrize("dev_pin", [False, True])
-def test_conflicting_cell_statuses_refuse_with_named_cells(monkeypatch, dev_pin):
-    from dataclasses import replace
+def test_scoped_population_refuses_native_status_without_its_residency_selector(monkeypatch, dev_pin):
+    from prismaquant.lane_eligibility import LaneEligibilityError
 
-    monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, "1")
-    parsed = contract.load_tessera_contract()
-    table, formats = render._pinned_serving_table()
-    reference = next(cell for cell in table.cells if cell.family == "TESSERA_E4M3_K1"
-                     and cell.structure == "routed_moe" and cell.regime == "decode"
-                     and "TESSERA_SERVE_MODE=resident" in cell.requires_serve_flags)
-    context = ServingContext(platform=reference.platform, structure="routed_moe", residency="resident",
-                             runtime_image=reference.runtime_image,
-                             execution_mode=reference.execution_modes[0])
+    payload = json.loads(installed_runtime_snapshot().raw)
+    row = next(cell for cell in payload["lane_eligibility"]["cells"]
+               if cell["family"] == "TESSERA_E4M3_K1" and cell["structure"] == "routed_moe")
+    row["route_status"] = "backed"
+    row["requires_serve_flags"] = []
     if dev_pin:
-        altered = replace(parsed, cells=tuple(
-            replace(cell, route_status="backed") if cell.id == reference.id else cell
-            for cell in parsed.cells))
-        monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: altered)
+        with pytest.raises(contract.TesseraContractError, match="TESSERA_SERVE_MODE"):
+            contract._parse(payload, commit="owned-invalid", sha="owned-invalid", path="owned-invalid")
     else:
-        monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV)
-        altered = replace(table, cells=tuple(
-            replace(cell, route_status="backed") if cell.id == reference.id else cell
-            for cell in table.cells))
-        monkeypatch.setattr(render, "_pinned_serving_table", lambda: (altered, formats))
+        install_metadata(monkeypatch, payload, pinned=False)
+        with pytest.raises(LaneEligibilityError, match="TESSERA_SERVE_MODE"):
+            menu.route_admission("TESSERA_E4M3_K1_R896")
+
+
+def test_valid_legacy_native_status_conflict_refuses_with_named_cells(monkeypatch):
+    from tests.conftest import down_convert_lane_table
+
+    payload = json.loads(installed_runtime_snapshot().raw)
+    reference = next(cell for cell in payload["lane_eligibility"]["cells"]
+                     if cell["family"] == "TESSERA_E4M3_K1" and cell["structure"] == "routed_moe")
+    image = reference["runtime"]["image"]
+    payload["lane_eligibility"]["cells"] = [
+        cell for cell in payload["lane_eligibility"]["cells"]
+        if cell["family"] == reference["family"] and cell["structure"] == reference["structure"]
+        and cell["platform"] == reference["platform"] and cell["runtime"]["image"] == image]
+    payload = down_convert_lane_table(payload, "tessera.lane-eligibility.v3")
+    row = next(cell for cell in payload["lane_eligibility"]["cells"] if cell["id"] == reference["id"])
+    row["route_status"] = "backed"
+    row["requires_serve_flags"] = []
+    install_metadata(monkeypatch, payload)
     with pytest.raises(menu.TesseraMenuError, match="native cells disagree about route status") as err:
-        menu.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
-    assert reference.id in str(err.value)
+        menu.route_admission("TESSERA_E4M3_K1_R896")
+    assert reference["id"] in str(err.value)
     assert "backed_with_serve_flag" in str(err.value)
 
 
 def test_production_conditions_do_not_override_pin_refusal(monkeypatch):
     monkeypatch.delenv(contract.TESSERA_DEV_PIN_ENV, raising=False)
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: False)
-    table, _ = render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _ = snapshot.eligibility, snapshot.published_formats
     reference = next(cell for cell in table.cells if cell.family == "TESSERA_E4M3_K1"
                      and cell.structure == "routed_moe" and cell.regime == "decode"
                      and "TESSERA_SERVE_MODE=resident" in cell.requires_serve_flags)
+    payload = json.loads(snapshot.raw)
+    payload["contract_version"] += 1
+    install_metadata(monkeypatch, payload, pinned=False)
     context = ServingContext(platform=reference.platform, structure="routed_moe", residency="resident",
                              runtime_image=reference.runtime_image,
                              execution_mode=reference.execution_modes[0])

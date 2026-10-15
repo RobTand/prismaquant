@@ -35,6 +35,10 @@ claim that launch at all; the test below pins that a cell which did would be
 refused by name at all three legs, on the E2M1 dense pair, whose rung 896
 plans rate 7 for the same reason.
 """
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import copy
 import dataclasses
 import hashlib
@@ -562,13 +566,15 @@ def test_all_three_admission_legs_read_the_one_gate(payload, monkeypatch):
     context = _context(moved, CLAIMING, "resident")
 
     # 1. The menu.
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
+    install_metadata(monkeypatch, moved)
+
     assert render.tessera_attesting_cells(CLAIMING_NAME, serving_context=context) == ()
-    admitted, reason = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    verdict = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    admitted, reason = verdict.admitted, verdict.reason
+    assert verdict.kind == "lane_requirements"
     assert not admitted
     assert "column_rates" in reason and CLAIMING in reason and WINDOW_LANE in reason
-    assert not render.tessera_lane_attested(CLAIMING_NAME, serving_context=context)
+    assert not (render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)).admitted
 
     # 2. The per-unit export gate names the cell AND the reason.
     facts = lane.UnitStructuralFacts(
@@ -595,9 +601,11 @@ def test_the_untouched_table_admits_the_same_rung_at_every_leg(payload, monkeypa
     the family or the rung."""
     table, formats = _table(payload), _formats(payload)
     context = _context(payload, CLAIMING, "resident")
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
-    assert render.tessera_lane_admission(CLAIMING_NAME, serving_context=context) == (True, "")
+    install_metadata(monkeypatch, payload)
+
+    verdict = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    assert verdict.admitted is True
+    assert verdict.reason == ""
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     assert parsed.native_cells(CLAIMING_FAMILY, CLAIMING_RATE, serving_context=context)
 

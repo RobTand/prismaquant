@@ -396,7 +396,7 @@ TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the
 #: value every packaged eligibility cell publishes in ``requires_plugin``, and
-#: ``tessera_render.tessera_lane_attested`` refuses a cell that claims a route
+#: ``tessera_render.tessera_lane_admission`` refuses a cell that claims a route
 #: without naming it.
 TESSERA_SERVING_PLUGIN_NAME = "tessera"
 
@@ -918,21 +918,17 @@ def load_tessera_serving_runtime_pin(
 def installed_tessera_contract_sha256() -> str:
     """SHA-256 of the ``runtime_contract.json`` the INSTALLED Tessera packages.
 
-    Resolved through ``tessera_runtime_contract.contract_path()`` -- the one
-    resolver both producer readers share -- so the bytes hashed here are the
-    bytes every other gate on this side reads.  Hashing a different copy would
-    make the pin attest a file nothing consumes.
+    Capture through ``tessera_runtime_contract.installed_runtime_snapshot``.
+    The snapshot hashes the same immutable bytes its metadata readers consume;
+    each public call captures the installed resource anew.
 
     Raises :class:`TesseraServingRuntimePinError` when there is no importable
     Tessera at all, because "no runtime" and "the wrong runtime" must both
     refuse; neither may read as "fine".
     """
-    from importlib.resources import as_file
-
     try:
-        from .tessera_runtime_contract import contract_path
-        with as_file(contract_path()) as path:
-            return bytes_sha256hex(path.read_bytes())
+        from .tessera_runtime_contract import installed_runtime_snapshot
+        return installed_runtime_snapshot().sha256
     except TesseraServingRuntimePinError:
         raise
     except Exception as exc:  # ImportError, OSError, ModuleNotFoundError...

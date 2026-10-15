@@ -145,7 +145,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from . import record_fields
 
@@ -332,6 +332,7 @@ ROUTE_ATTESTATION_SCHEMA = "prismaquant.lane_route_attestation.v3"
 # --- Principle 9's lane vocabulary, verbatim. -------------------------------
 ROUTE_STATUS_BACKED = "backed"
 ROUTE_STATUS_BACKED_WITH_SERVE_FLAG = "backed_with_serve_flag"
+NATIVE_ROUTE_STATUSES = frozenset({ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG})
 ROUTE_STATUS_UNBACKED = "unbacked"
 #: Not one of principle 9's three: the honest state when the pinned runtime
 #: publishes no claim covering this unit -- because it packages no eligibility
@@ -2246,7 +2247,7 @@ class EligibilityCell:
         """Whether this cell publishes a device-qualified native route."""
         return (
             self.qualification == QUALIFICATION_DEVICE_QUALIFIED
-            and self.route_status in (ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG)
+            and self.route_status in NATIVE_ROUTE_STATUSES
         )
 
     def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
@@ -3041,6 +3042,87 @@ def native_rung_cells(
     if scoped and {cell.regime for cell in matched} != set(population.regimes):
         return ()
     return matched
+
+
+@dataclass(frozen=True)
+class NativeRungVerdict:
+    """One rung decision and the matched cells that produced it."""
+
+    kind: Literal["native", "table_absent", "rung_unpublished", "family_unpublished",
+                  "legacy_scope", "context_missing", "evidence", "lane_requirements",
+                  "regime_population", "cell_missing", "pin"]
+    reason: str = ""
+    cells: tuple[EligibilityCell, ...] = ()
+    rate_q256: int | None = None
+
+    @property
+    def admitted(self) -> bool:
+        return self.kind == "native"
+
+    @property
+    def route_status(self) -> str | None:
+        if not self.admitted:
+            return ROUTE_STATUS_UNATTESTED
+        statuses = {cell.route_status for cell in self.cells}
+        return next(iter(statuses)) if len(statuses) == 1 else None
+
+    @property
+    def requires_serve_flags(self) -> tuple[str, ...]:
+        if not self.admitted:
+            return ()
+        return tuple(sorted({flag for cell in self.cells for flag in cell.requires_serve_flags}))
+
+    @property
+    def requires_plugins(self) -> tuple[str, ...]:
+        if not self.admitted:
+            return ()
+        return tuple(sorted({cell.requires_plugin for cell in self.cells if cell.requires_plugin}))
+
+
+def native_rung_verdict(
+    name: str, table: EligibilityTable,
+    formats: Mapping[str, Mapping[str, Any]], *,
+    serving_context: ServingContext | None = None,
+) -> NativeRungVerdict:
+    """Decide the shape-free native rung policy before its independent pin."""
+    from .tessera_serving_runtime_pin import TESSERA_SERVING_PLUGIN_NAME
+
+    if not table.present:
+        return NativeRungVerdict('table_absent', 'no packaged Tessera serving contract is readable' + (f' ({table.absent_reason})' if table.absent_reason else ''))
+    family, _k, rate = resolve_payload_rung(name, published_formats=formats)
+    if rate is None:
+        return NativeRungVerdict('rung_unpublished', f"{name} resolves to no rung the packaged Tessera contract's formats table publishes")
+    if not table.governs(family):
+        return NativeRungVerdict('family_unpublished', f'the packaged Tessera contract does not publish {family}')
+    scoped = table.schema in SCOPED_LANE_SCHEMAS
+    if not scoped and serving_context is not None:
+        return NativeRungVerdict('legacy_scope', legacy_runtime_scope_refusal(table.schema))
+    if scoped and serving_context is None:
+        return NativeRungVerdict('context_missing', f'{name}: the packaged Tessera {table.schema} contract requires an explicit serving context (platform, structure, residency, runtime image and execution mode)')
+    matched = native_rung_cells(table, family, rate, serving_context=serving_context)
+    if not matched:
+        evidence_refused: list[str] = []
+        lane_refused: list[str] = []
+        for cell in native_rung_cells(table, family, rate, serving_context=serving_context, ignore_evidence=True):
+            admits, why = cell_evidence_admits(cell)
+            if not admits:
+                evidence_refused.append(why)
+                continue
+            admits, why = cell_lane_admits(cell, rate, table.lanes)
+            if not admits:
+                lane_refused.append(why)
+        if evidence_refused:
+            return NativeRungVerdict('evidence', f"{name}: the packaged Tessera contract's own evidence refuses this route. " + ' '.join(sorted(set(evidence_refused))))
+        if lane_refused:
+            return NativeRungVerdict('lane_requirements', f"{name}: the packaged Tessera contract's lane predicate refuses this producer's plan on this route. " + ' '.join(sorted(set(lane_refused))))
+        if scoped:
+            return NativeRungVerdict('regime_population', f'the packaged Tessera contract has no complete device-qualified native regime population for {family} R{rate} in serving context {serving_context.as_dict()}')
+        published = sorted(int(r) for r in formats.get(family, {}).get("candidate_rungs_q256", ()))
+        return NativeRungVerdict('cell_missing', f'the packaged Tessera contract publishes {family} at rungs {published} and no device-qualified native cell names R{rate}')
+    unstated = [cell.id for cell in matched if cell.requires_plugin != TESSERA_SERVING_PLUGIN_NAME]
+    if unstated:
+        raise LaneEligibilityError(f"{name}: cell(s) {unstated} claim a native Tessera route without declaring requires_plugin={TESSERA_SERVING_PLUGIN_NAME!r}. Stock vLLM has no reader for Tessera bytes, so every such route is plugin-gated; a cell that omits the requirement would let an artifact be admitted whose serve command need not install the runtime that reads it. This is a contract defect -- fix the packaged table, never this gate.")
+    return NativeRungVerdict('native', cells=matched, rate_q256=rate)
 
 
 def eligibility_table_from_contract(
@@ -3907,6 +3989,11 @@ __all__ = [
     "UnitStructuralFacts",
     "EligibilityCell",
     "EligibilityTable",
+    "NativeCellPopulation",
+    "NativeRungVerdict",
+    "NATIVE_ROUTE_STATUSES",
+    "native_rung_cells",
+    "native_rung_verdict",
     "RegimeRoute",
     "UnitRoute",
     "resolve_unit_route",

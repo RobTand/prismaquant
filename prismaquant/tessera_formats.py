@@ -1398,7 +1398,7 @@ class TesseraServingRoute:
 
     This is a statement about *layouts*, which is all a producer may assert on
     its own.  It is **not** an attestation that a pinned runtime routes these
-    bytes (principle 14): that is ``tessera_render.tessera_lane_attested``,
+    bytes (principle 14): that is ``tessera_render.tessera_lane_admission``,
     a lookup against the contract Tessera's OWN vLLM plugin packages
     (``tessera.serving``, ``quant_method: "tessera"``), ANDed with the reviewed
     release pin in ``prismaquant/tessera_runtime/``; a rung is

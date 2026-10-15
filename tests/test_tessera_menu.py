@@ -15,6 +15,7 @@ with no Tessera rung on it behaves exactly as it did before any of this
 existed.
 """
 import hashlib
+import json
 from fractions import Fraction
 
 import pytest
@@ -1587,23 +1588,25 @@ def _synthetic_contract(monkeypatch, *, reader=(256, 2048), attested=(1024,)):
     census that attests one rung of it -- and the three modes are asked to
     disagree in the one direction that proves each read its own field.
     """
-    from types import SimpleNamespace
+    from tests.conftest import down_convert_lane_table, set_cell_census
 
+    payload = json.loads(trc.installed_runtime_snapshot().raw)
+    payload = down_convert_lane_table(payload, "tessera.lane-eligibility.v4")
     family = "TESSERA_E4M3_K1"
-    cell = SimpleNamespace(
-        cell_id="synthetic_cell", route_status=tm.ROUTE_STATUS_BACKED,
-        activation_contract="fp8_per_token_dynamic",
-        requires_serve_flags=(),
-    )
-    contract = SimpleNamespace(
-        commit="synthetic", requires_serving_context=False, lane_schema="legacy",
-        max_world_size={family: 1},
-        reader_rate_range={family: reader},
-        attested_rungs={family: frozenset(attested)},
-        governs=lambda name: name == family,
-        native_cells=lambda name, rate, **_kw: (
-            (cell,) if name == family and rate in attested else ()),
-    )
+    chosen = {}
+    for row in payload["lane_eligibility"]["cells"]:
+        if row["family"] == family and row["regime"] not in chosen:
+            chosen[row["regime"]] = row
+    payload["lane_eligibility"]["cells"] = list(chosen.values())
+    payload["formats"] = [row for row in payload["formats"] if row["family"] == family]
+    payload["formats"][0].pop("allowable_rungs", None)
+    payload["formats"][0]["reader_rate_range_q256"] = list(reader)
+    payload["formats"][0]["attested_rungs_q256"] = list(attested)
+    payload["formats"][0]["candidate_rungs_q256"] = list(attested)
+    for row in chosen.values():
+        row["structure"] = "dense"
+        set_cell_census(payload, row, list(attested))
+    contract = trc._parse(payload, commit="owned-range", sha="owned-range", path="owned-range")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     return contract
 
@@ -1669,9 +1672,13 @@ def test_the_packaged_reader_range_is_read_from_its_own_field():
         "candidate_rungs_q256": [1024],
     }
     formats = {"TESSERA_E4M3_K1": row}
-    assert tm._published_reader_range(formats, "TESSERA_E4M3_K1") == (256, 2048)
-    assert tm._published_reader_range(formats, "TESSERA_E2M1_K1") is None
-    assert tm._published_reader_range({"X": {"family": "X"}}, "X") is None
+    from prismaquant.tessera_runtime_contract import RuntimeContractSnapshot
+    snapshot = RuntimeContractSnapshot(
+        json.dumps({"formats": list(formats.values()) + [{"family": "X"}]}).encode(),
+        "owned-reader-range")
+    assert snapshot.reader_rate_range("TESSERA_E4M3_K1") == (256, 2048)
+    assert snapshot.reader_rate_range("TESSERA_E2M1_K1") is None
+    assert snapshot.reader_rate_range("X") is None
     assert tm._rate_is_readable(256, (256, 2048))
     assert tm._rate_is_readable(2048, (256, 2048))
     assert not tm._rate_is_readable(255, (256, 2048))

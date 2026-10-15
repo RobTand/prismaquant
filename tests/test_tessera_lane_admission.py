@@ -23,6 +23,11 @@ move and the shape must not:
 """
 from __future__ import annotations
 
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+from prismaquant.lane_eligibility import native_rung_verdict
+
 import json
 
 import pytest
@@ -120,7 +125,7 @@ def released_pin(tmp_path, monkeypatch):
 
     The fixture writes a pin file with a resolved commit/version/digest, points
     the three pinned constants at it, and substitutes the loader on the pin
-    MODULE -- which is where ``tessera_render._release_pin_satisfied`` looks it
+    MODULE -- which is where ``RuntimeContractSnapshot.require_exact_pin`` looks it
     up, at call time.  Nothing here weakens the parser or the gate: the digest
     is the INSTALLED contract's real one, so the enforced conjunct runs for
     real and only the two recorded-identity values are synthetic.
@@ -187,7 +192,6 @@ def test_the_tracked_pin_is_an_exact_commit_and_the_installed_contracts_digest()
     assert pin.plugin_entry_point == "tessera = tessera.serving:register"
 
     require_pinned_tessera_runtime(pin)
-    assert tr._release_pin_satisfied() is True
 
     with pytest.raises(TesseraServingRuntimePinError,
                        match="the installed Tessera is not the pinned Tessera"):
@@ -280,7 +284,7 @@ def test_a_cell_claiming_a_route_with_no_plugin_requirement_is_refused(tmp_path)
 
     A Tessera cell that claims a native route while naming no plugin would let
     an artifact be admitted whose serve command need not install the runtime
-    that reads its bytes. ``tessera_lane_attested`` raises on it rather than
+    that reads its bytes. ``tessera_lane_admission`` raises on it rather than
     answering either True or False -- and it raises BEFORE the pin conjunct, so
     the defect surfaces today rather than on the day a tag is cut.
     """
@@ -289,8 +293,7 @@ def test_a_cell_claiming_a_route_with_no_plugin_requirement_is_refused(tmp_path)
         cell["requires_plugin"] = ""
     with pytest.raises(LaneEligibilityError, match="requires_plugin"):
         table, formats = _load(_write(tmp_path, contract, "no_plugin.json"))
-        tr.tessera_lane_attested(
-            "TESSERA_E2M1_K2_R896", table=table, formats=formats)
+        (native_rung_verdict("TESSERA_E2M1_K2_R896", table, formats)).admitted
 
 
 def test_a_plugin_requirement_on_a_fallback_cell_is_refused(tmp_path):
@@ -317,33 +320,32 @@ def test_admission_is_true_under_a_released_pin_on_the_real_packaged_contract(
     and a rate the contract does not publish is not. That is what proves the
     refusal above is the pin's and not an artefact of an unreadable table.
     """
-    assert tr._release_pin_satisfied() is True
     context = _dense_context()
     e2m1_routed = _routed_context("TESSERA_E2M1_K2")
     e4m3_routed = _routed_context("TESSERA_E4M3_K1")
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K2_R896", serving_context=context) is True
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K2_R896", serving_context=context)).admitted is True
     # v39 attests both q896 and q1024 at the routed GLM-image scope.
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R896", serving_context=e4m3_routed) is True
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=e4m3_routed) is True
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R896", serving_context=e4m3_routed)).admitted is True
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R1024", serving_context=e4m3_routed)).admitted is True
     # a serialisable rate no DENSE cell names, on a published family
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K2_R512", serving_context=context) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K2_R512", serving_context=context)).admitted is False
     # v39 withdrew the old routed full-domain cell. Readability is not a
     # route attestation: q512 now refuses in both structures.
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K2_R512", serving_context=e2m1_routed) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K2_R512", serving_context=e2m1_routed)).admitted is False
     # A writer-supported rate with no attesting cell
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R2048", serving_context=e4m3_routed) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R2048", serving_context=e4m3_routed)).admitted is False
     # a family the contract does not publish at all
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K1_R640", serving_context=context) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K1_R640", serving_context=context)).admitted is False
     # and the same admitted rung, asked with no scope at all: refused by the
     # SCOPE of the v8 table, not by the pin the fixture satisfied.
-    assert tr.tessera_lane_attested("TESSERA_E2M1_K2_R896") is False
+    assert (tr.tessera_lane_admission("TESSERA_E2M1_K2_R896")).admitted is False
 
 
 def test_the_synthesized_spec_reads_the_same_lookup(released_pin):
@@ -383,8 +385,7 @@ def test_the_lookup_fails_closed_on_every_cell_axis(
             _load(_write(tmp_path, contract, f"{name}.json"))
         return
     table, formats = _load(_write(tmp_path, contract, f"{name}.json"))
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K2_R896", table=table, formats=formats) is False
+    assert (native_rung_verdict("TESSERA_E2M1_K2_R896", table, formats)).admitted is False
 
 
 # ---------------------------------------------------------------------------
@@ -481,9 +482,12 @@ def test_the_rungs_a_cell_names_are_the_whole_admitted_set(tmp_path,
     assert tr.tessera_attesting_cells(
         "TESSERA_E2M1_K2_R896", table=table, formats=formats,
         serving_context=context)
-    admitted, reason = tr.tessera_lane_admission(
-        "TESSERA_E2M1_K2_R896", table=table, formats=formats,
+    from prismaquant.tessera_runtime_contract import read_runtime_snapshot
+    verdict = tr._rung_admission(
+        "TESSERA_E2M1_K2_R896", read_runtime_snapshot(tmp_path / "narrow.json"),
         serving_context=context)
+    admitted, reason = verdict.admitted, verdict.reason
+    assert verdict.kind == "pin"
     assert admitted is False
     assert "pinned commit/contract digest" in reason
     # inside the reader range, so the rate RESOLVES -- and is still refused,
@@ -500,8 +504,7 @@ def test_an_absent_table_admits_nothing(tmp_path, released_pin):
     contract.pop("lane_eligibility")
     table, formats = _load(_write(tmp_path, contract, "no_table.json"))
     assert table.present is False
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K2_R896", table=table, formats=formats) is False
+    assert (native_rung_verdict("TESSERA_E2M1_K2_R896", table, formats)).admitted is False
 
 
 # ---------------------------------------------------------------------------
@@ -662,7 +665,7 @@ def test_route_admission_refuses_a_drifted_a_side(tmp_path, monkeypatch):
             cell["activation_contract"] = "fp8_per_token_dynamic"
     path = _write(tmp_path, contract, "a_side_drift.json")
     table, formats = _load(path)
-    monkeypatch.setattr(tr, "_pinned_serving_table", lambda: (table, formats))
+    install_metadata(monkeypatch, contract, pinned=False)
     # All metadata must come from this fixture's bytes, including the TP
     # ceiling. Otherwise digest consistency refuses before the A-side check.
     monkeypatch.setattr(tr, "tessera_serving_contract_path", lambda: path)
@@ -698,14 +701,15 @@ def test_the_stamped_attestation_source_names_the_table_that_answered():
     archived on 2026-09-02 (``archive/gridbook_lane_2026-09-02/``) whose pin
     no longer governs anything.  The table that actually answers is Tessera's
     OWN packaged ``runtime_contract.json``, read through
-    ``tessera_render._pinned_serving_table``.  Principle 14 is about the
+    ``tessera_runtime_contract.installed_runtime_snapshot``.  Principle 14 is about the
     *value* a gate reads, not only about where the verdict comes from: a
     correct verdict carrying the name of a retired runtime is still an
     unattested claim about a runtime.
     """
     from prismaquant import tessera_menu as tm
 
-    table, _formats = tr._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _formats = snapshot.eligibility, snapshot.published_formats
     admission = tm.route_admission("TESSERA_E2M1_K2_R896")
 
     assert "gridbook" not in admission.source

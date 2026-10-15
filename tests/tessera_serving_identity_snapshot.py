@@ -30,6 +30,8 @@ Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.
 """
 from __future__ import annotations
 
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import copy
 import json
 import os
@@ -186,7 +188,8 @@ def _trace_verdicts() -> dict:
 def snapshot() -> dict:
     from prismaquant import tessera_render
 
-    table, _formats = tessera_render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _formats = snapshot.eligibility, snapshot.published_formats
     return {
         "pin": _pin_answer(),
         "cells": [cell.as_dict() for cell in table.cells],

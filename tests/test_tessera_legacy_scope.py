@@ -21,6 +21,10 @@ regime)`` scope keeps its own published rungs, flags and launches, so the
 v4-era dense E4M3 rung exists in the table again exactly as it did when the
 grammar was live, while every admission fact stays the pin's real one.
 """
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import json
 
 import pytest
@@ -53,8 +57,8 @@ def legacy(monkeypatch):
                               "fixture", "fixture", "fixture",
                               native_extensions=payload["native_extensions"])
     formats = {row["family"]: row for row in payload["formats"]}
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda *_: True)
+    install_metadata(monkeypatch, payload)
+
     context = lane.ServingContext(
         platform="sm_121", structure="dense", residency="resident",
         runtime_image=payload["versions"]["default_serve_image"],
@@ -80,16 +84,17 @@ def test_legacy_development_cannot_attest_even_a_global_image_context(legacy):
 
 
 def test_legacy_released_lookup_keeps_its_context_free_behavior(legacy):
-    assert render.tessera_lane_attested(NAME)
+    assert (render.tessera_lane_admission(NAME)).admitted
 
 
 def test_legacy_renderer_cannot_attach_unreviewed_scope_to_backed_route(legacy):
     _, _, context = legacy
     assert render.tessera_attesting_cells(NAME, serving_context=context) == ()
-    admitted, reason = render.tessera_lane_admission(NAME, serving_context=context)
+    verdict = render.tessera_lane_admission(NAME, serving_context=context)
+    admitted, reason = verdict.admitted, verdict.reason
     assert not admitted
     assert "runtime scope" in reason
-    assert not render.tessera_lane_attested(NAME, serving_context=context)
+    assert not (render.tessera_lane_admission(NAME, serving_context=context)).admitted
 
 
 @pytest.mark.parametrize("axes", ["image", "execution", "both"])

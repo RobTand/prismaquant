@@ -2615,6 +2615,34 @@ class RuntimeContractSnapshot:
 
         return deepcopy(self._tensor_parallel)
 
+    def native_rung_verdict(self, name: str, *, serving_context=None):
+        """Query the captured facts without exposing cached mutable collections."""
+        from copy import deepcopy
+        from .lane_eligibility import native_rung_verdict
+
+        return deepcopy(native_rung_verdict(
+            name, self._eligibility, self._format_rows,
+            serving_context=serving_context))
+
+    @property
+    def runtime_version(self) -> str:
+        return self._eligibility.runtime_version
+
+    @property
+    def requires_serving_context(self) -> bool:
+        return self._eligibility.requires_serving_context
+
+    def reader_rate_range(self, family: str) -> tuple[int, int] | None:
+        """The published reader range, independent of cell and pin admission."""
+        row = self._format_rows.get(str(family))
+        if not isinstance(row, Mapping):
+            return None
+        try:
+            lo, hi = (int(value) for value in row["reader_rate_range_q256"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return lo, hi
+
     def require_exact_pin(self):
         """Require the tracked serving identity for THESE captured bytes."""
         from .tessera_serving_runtime_pin import (

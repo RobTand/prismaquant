@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -45,28 +44,15 @@ _COLUMN_CUT_REFUSED = {"row": "refused", "column": "sharded"}
 
 
 def _axis_contract(monkeypatch, axes, *, max_world_size=8):
-    """A stand-in contract that publishes ``axes`` and attests nothing.
-
-    It governs no family on purpose: the axis leg is a LOADER fact and must
-    answer without a route claim, so a table that attests nothing is the
-    honest witness for it.
-
-    ``max_world_size`` is deliberately generous. The attestation leg is a
-    different question and it must not be the leg that answers here: a table
-    that attested nothing would refuse first and hide whether the axis leg
-    works at all.
-    """
-    contract = SimpleNamespace(
-        commit="synthetic",
-        requires_serving_context=False,
-        lane_schema="legacy",
+    """A typed loader-policy fixture with no native route population."""
+    from dataclasses import replace
+    payload = json.loads(trc.installed_runtime_snapshot().raw)
+    reference = trc._parse(payload, commit="owned", sha="owned", path="owned")
+    contract = replace(
+        reference, reader_rate_range={}, attested_rungs={}, cells=(),
+        lane_schema="tessera.lane-eligibility.v4",
         max_world_size={family: max_world_size for family in axes},
-        reader_rate_range={},
-        attested_rungs={},
-        loader_axes=axes,
-        governs=lambda name: False,
-        native_cells=lambda name, rate, **_kw: (),
-    )
+        loader_axes=axes)
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     return contract
 

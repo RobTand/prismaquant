@@ -69,6 +69,14 @@ Re-stamped 2026-10-14: `mount_facts` owns kernel mount-table decoding and
 containing-mount selection for staged read shape and portable source identity.
 The range reader retains its cache, transport count, chunk sizing and lease
 lifetime; source identity retains its resolved-path and client-local device policy.
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`lane_eligibility.NativeRungVerdict` carries the selected cells, native status,
+flags, plugins and refusal kind. Rung consumers use one decision rather than
+separate Boolean, reason and cell queries. The serving boundary verifies its
+captured snapshot after cell, evidence, lane, context and plugin checks.
+Development answer, reader range, per-unit predicates and export ranking retain
+their independent policies. One menu expansion captures its runtime once;
+returned verdict cells and metadata views cannot mutate cached facts.
 
 Re-stamped 2026-10-14 (`sol/refactor-tessera-boundary-20261014`): shared
 `lane_eligibility.native_rung_cells` selects the complete native regime population
