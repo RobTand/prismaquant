@@ -88,7 +88,9 @@ unchanged.
 
 `source_read_plan` owns artifact shard/header inventory as well as the shared
 safetensors framing parser. Autoscale reads those headers directly from the IO
-owner; `artifact_completeness` retains decoder coverage classification.
+owner; `artifact_completeness` retains decoder coverage classification. The
+checker reads the emitted `config.json.quantization_config`, accepts historical
+`quant_config.json` when unambiguous, and refuses conflicting decoder contracts.
 
 `NameProjection` owns the complete serving-unit roster, fusion name derivation
 and component closure. Allocation and export

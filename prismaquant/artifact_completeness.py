@@ -18,8 +18,9 @@ each off by their own power of two. Nothing raises. On DSv4-Flash that was 43
 So this module asks the question the exporter's own asserts could not: **for
 every scale-bearing weight tensor actually present in the artifact, which
 mechanism decodes it, and is that mechanism complete?** It reads only the
-artifact — safetensors headers and ``quant_config.json``, never the source
-checkpoint — because that is exactly what a consumer has.
+artifact, its safetensors headers and ``config.json.quantization_config``,
+never the source checkpoint. Historical ``quant_config.json`` remains readable;
+contradictory current and historical decoder contracts are refused.
 
 Cheap by construction: safetensors headers only, no tensor data, so it runs on
 a 92 GB artifact in about the time it takes to open the shards.
@@ -556,6 +557,31 @@ def _validate_per_expert_format_groups(
         )
 
 
+def _read_quantization_config(root: Path) -> dict:
+    """Read the emitted decoder contract, refusing contradictory sidecars."""
+    config_path = root / "config.json"
+    current = None
+    if config_path.exists():
+        config = json.loads(config_path.read_text())
+        if not isinstance(config, dict):
+            raise ValueError("artifact config.json must contain an object")
+        if "quantization_config" in config:
+            current = config["quantization_config"]
+            if current is None:
+                current = {}
+            if not isinstance(current, dict):
+                raise ValueError("artifact quantization_config must be an object")
+    legacy_path = root / "quant_config.json"
+    legacy = None
+    if legacy_path.exists():
+        legacy = json.loads(legacy_path.read_text())
+        if not isinstance(legacy, dict):
+            raise ValueError("artifact quant_config.json must contain an object")
+    if current is not None and legacy is not None and current != legacy:
+        raise ValueError("conflicting quantization configurations in artifact")
+    return current if current is not None else (legacy if legacy is not None else {})
+
+
 def check_artifact_completeness(
     artifact_dir: str | Path,
     *,
@@ -571,7 +597,7 @@ def check_artifact_completeness(
     """
 
     root = Path(artifact_dir)
-    quant_config = json.loads((root / "quant_config.json").read_text())
+    quant_config = _read_quantization_config(root)
     header = read_artifact_header(root)
 
     profile = _detect_profile_quietly(root)
