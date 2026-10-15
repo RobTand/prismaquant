@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: G3 staged ranges re-cover and re-acquire the same declared
+bytes on stage after a RAM acquisition availability refusal. Integrity and unknown
+refusals still fail closed. An unsuccessful acquisition publishes no reader window.
+
 Re-stamped 2026-10-15: candidate prices, activation branch labels and unknown-zero
 refusals share one classified price basis. Fixed qualified/exact, joint, output
 and weight-space bases retain existing precedence, gains, transfers and clamps.
