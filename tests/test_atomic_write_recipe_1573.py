@@ -60,8 +60,9 @@ except owner.Refused as error:
 else:
     raise AssertionError('empty row scope admitted')
 path = Path('metadata.json')
-owner.atomic_write(path, owner.canonical_bytes(value))
-assert path.read_bytes() == owner.canonical_bytes(value)
+owner.write_json(path, value)
+import json
+assert json.loads(path.read_bytes()) == value
 print('RESEAL-OWNER-OK')
 """.replace('ROOT', repr(str(root)), 1)
     result = subprocess.run([sys.executable, '-c', script], cwd=tmp_path,

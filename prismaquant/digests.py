@@ -20,6 +20,9 @@ unless the profile states otherwise:
   retain their own ``json.loads`` round trip and publication writers their LF.
 - ``DIRECT_UTF8_INDENT2_STRICT``: two-space indentation, UTF-8 characters,
   strict nonfinite refusal and no fallback serializer. No final LF is added.
+- ``DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR``: one-space indentation, ASCII,
+  lax nonfinite values and ``default=str`` for reseal reports. Publication
+  retains its final LF.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -319,6 +322,9 @@ DIRECT_ASCII_SPACED_STRICT = JsonProfile(
 DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
     "direct-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
     separators=(",", ": "), indent=2)
+DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-indent1-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=1, default=str)
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)

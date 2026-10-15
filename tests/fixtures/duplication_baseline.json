@@ -121,11 +121,6 @@
   "hashlib:tools/regenerate_joint_quanta.py::main",
   "hashlib:tools/render_window_bench.py::_renders",
   "hashlib:tools/render_window_bench.py::cmd_child",
-  "hashlib:prismaquant/tessera_campaign_reseal.py::identity_sha256",
-  "hashlib:prismaquant/tessera_campaign_reseal.py::prismaquant_tree_sha256",
-  "hashlib:prismaquant/tessera_campaign_reseal.py::sha256_bytes",
-  "hashlib:prismaquant/tessera_campaign_reseal.py::sha256_file",
-  "hashlib:prismaquant/tessera_campaign_reseal.py::unit_path",
   "hashlib:tools/reselect_mtp_fixed.py::main",
   "hashlib:tools/seal_tessera_census_identity.py::main",
   "hashlib:tools/serve_fingerprint.py::_canonical_sha256",
@@ -265,9 +260,6 @@
   "sorted-json:tools/render_window_bench.py::_renders",
   "sorted-json:tools/render_window_bench.py::cmd_analyze",
   "sorted-json:tools/render_window_bench.py::cmd_child",
-  "sorted-json:prismaquant/tessera_campaign_reseal.py::canonical_bytes",
-  "sorted-json:prismaquant/tessera_campaign_reseal.py::manifest_bytes",
-  "sorted-json:prismaquant/tessera_campaign_reseal.py::write_json",
   "sorted-json:tools/reselect_mtp_fixed.py::main",
   "sorted-json:tools/seal_tessera_census_identity.py::main",
   "sorted-json:tools/serve_fingerprint.py::_canonical_sha256",
@@ -904,10 +896,6 @@
   "stage_multimodal": [
    "prismaquant/build_rtn_cache.py",
    "prismaquant/sensitivity_probe.py"
-  ],
-  "unit_path": [
-   "prismaquant/cost_stage_checkpoint.py",
-   "prismaquant/tessera_campaign_reseal.py"
   ],
   "verify_policy": [
    "prismaquant/joint_served_activation.py",

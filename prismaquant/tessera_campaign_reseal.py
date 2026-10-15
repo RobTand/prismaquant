@@ -6,8 +6,6 @@ content retain their independent checks. Numerical model loading is not needed.
 from __future__ import annotations
 
 import getpass
-import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -26,6 +24,12 @@ JOURNAL_SCHEMA = 'prismaquant.reseal_row_journal.v1'
 MANIFEST_SCHEMA = 'prismaquant.cost_stage_checkpoint.manifest.v1'
 UNIT_SCHEMA = 'prismaquant.cost_stage_checkpoint.unit.v1'
 from .tessera_campaign_table import STAGE
+from .digests import (
+    DIRECT_UTF8_STRICT, DIRECT_UTF8_INDENT2_STRICT,
+    DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR, LengthFramedSourceSha256,
+    SOURCE_TREE_V1, source_tree_profiles, bytes_sha256hex, file_sha256hex,
+)
+from .cost_stage_checkpoint import atomic_write_bytes, unit_path as checkpoint_unit_path
 PIN_KEYS = ('prismaquant_source_sha256', 'encoder_source_sha256')
 LIVE_WORKSPACE_MARKER = 'first-proof-anchor-preparation-05/workspace/rows'
 # The floor every assembled bundle must cover, whatever rows it is later used
@@ -108,7 +112,7 @@ def bundle_coverage(bundle, path):
 
 
 # ---------------------------------------------------------------------------
-# hashing: the two pins and the checkpoint digests, reimplemented in stdlib
+# source pins and checkpoint byte encodings
 # ---------------------------------------------------------------------------
 
 def prismaquant_tree_sha256(package_dir):
@@ -116,40 +120,17 @@ def prismaquant_tree_sha256(package_dir):
     root = Path(package_dir)
     paths = sorted(p for p in root.rglob('*') if p.is_file()
                    and '__pycache__' not in p.relative_to(root).parts and p.suffix not in {'.pyc', '.pyo'})
-    digest = hashlib.sha256()
+    digest = LengthFramedSourceSha256()
     for path in paths:
-        rel = path.relative_to(root).as_posix().encode('utf-8')
-        payload = path.read_bytes()
-        digest.update(len(rel).to_bytes(4, 'big'))
-        digest.update(rel)
-        digest.update(len(payload).to_bytes(8, 'big'))
-        digest.update(payload)
+        digest.update(path.relative_to(root).as_posix(), path.read_bytes())
     return digest.hexdigest(), len(paths)
-
-
-def _source_digest_owner():
-    """Load the repository's stdlib owner, not an installed PQ/torch package."""
-    name = '_pq_reseal_digest_owner'
-    if name not in sys.modules:
-        path = Path(__file__).resolve().parents[1] / 'prismaquant' / 'digests.py'
-        spec = importlib.util.spec_from_file_location(name, path)
-        if spec is None or spec.loader is None:
-            raise Refused(f'cannot load required source digest owner: {path}')
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        try:
-            spec.loader.exec_module(module)
-        except BaseException:
-            del sys.modules[name]
-            raise
-    return sys.modules[name]
 
 
 def encoder_tree_profiles(src_tessera_dir):
     """Label both profiles; preserve the original encoder suffixes and order."""
     root = Path(src_tessera_dir)
     paths = sorted(p for p in root.rglob('*') if p.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'})
-    profiles = _source_digest_owner().source_tree_profiles(
+    profiles = source_tree_profiles(
         (path.relative_to(root).as_posix(), path.read_bytes()) for path in paths)
     return profiles, len(paths)
 
@@ -157,35 +138,22 @@ def encoder_tree_profiles(src_tessera_dir):
 def encoder_tree_sha256(src_tessera_dir):
     """The unchanged Tessera legacy scalar and count over src/tessera."""
     profiles, count = encoder_tree_profiles(src_tessera_dir)
-    return profiles[_source_digest_owner().SOURCE_TREE_V1], count
+    return profiles[SOURCE_TREE_V1], count
 
 
 def canonical_bytes(value):
     """The byte form cost_stage_checkpoint.canonical_json_sha256 digests."""
-    canonical = json.loads(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False))
-    return json.dumps(canonical, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+    canonical = json.loads(DIRECT_UTF8_STRICT.text(value))
+    return DIRECT_UTF8_STRICT.encoded(canonical)
 
 
 def identity_sha256(identity):
-    return hashlib.sha256(canonical_bytes(identity)).hexdigest()
+    return bytes_sha256hex(canonical_bytes(identity))
 
 
 def manifest_bytes(manifest):
     """The byte form the campaign and the dispatcher merge write."""
-    return json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False).encode('utf-8')
-
-
-def unit_path(parts_root, qname):
-    return Path(parts_root)/'units'/(hashlib.sha256(str(qname).encode('utf-8')).hexdigest()+'.pkl')
-
-
-def sha256_bytes(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def sha256_file(path):
-    with open(path, 'rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+    return DIRECT_UTF8_INDENT2_STRICT.encoded(manifest)
 
 
 def pickle_protocol(data):
@@ -209,24 +177,8 @@ def loads(data):
     return StdlibUnpickler(io.BytesIO(data)).load()
 
 
-def atomic_write(path, data):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name+'.tmp')
-    with tmp.open('wb') as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
 def write_json(path, value):
-    atomic_write(path, json.dumps(value, indent=1, sort_keys=True, default=str).encode('utf-8')+b'\n')
+    atomic_write_bytes(Path(path), DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR.encoded(value) + b'\n')
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +331,7 @@ def load_bundle(path, pins):
     if encoder_moves and not (bundle.get('fixture_id') or {}).get('result'):
         raise Refused(f'{path}: the encoder pin moves but the bundle carries no fixture-id arm')
     for arm in bundle['arms']:
-        actual = sha256_file(arm['result'])
+        actual = file_sha256hex(arm['result'])
         if actual != arm['result_sha256']:
             raise Refused(f'{path}: arm result {arm["result"]} changed since the bundle was assembled')
         result = json.loads(Path(arm['result']).read_text())
@@ -390,7 +342,7 @@ def load_bundle(path, pins):
         if encoder_moves:
             arm_engagement(result, comparison, where=f'{path}: {arm["result"]}')
     bundle['covered'] = bundle_coverage(bundle, path)
-    bundle['bundle_sha256'] = sha256_file(path)
+    bundle['bundle_sha256'] = file_sha256hex(path)
     bundle['path'] = str(Path(path).resolve())
     return bundle
 
@@ -407,7 +359,7 @@ def assemble_bundle(pins_path, *, arm_paths, fixture_id=None, action_keys=()):
         seals = fixture['encoder_source_sha256']
         if set(seals.values()) != {pins['old']['encoder_source_sha256'], pins['new']['encoder_source_sha256']}:
             raise Refused(f'fixture-id arm compared producers {seals}, not the pins file old/new encoder pins')
-        fixture_record = dict(result=str(Path(fixture_id).resolve()), result_sha256=sha256_file(fixture_id),
+        fixture_record = dict(result=str(Path(fixture_id).resolve()), result_sha256=file_sha256hex(fixture_id),
                               ids=fixture['encoder_fixture_ids'], seals=seals,
                               fixture_id_equal=bool(fixture.get('fixture_id_equal')))
     else:
@@ -455,7 +407,7 @@ def assemble_bundle(pins_path, *, arm_paths, fixture_id=None, action_keys=()):
             cells.append(dict(qname=cell['qname'], format_name=cell['format_name'], family=cell['family'], kind=kind,
                               body_rate_q256=cell['body_rate_q256'], blob_sha256=cell['blob_sha256'], blob_bytes=cell['blob_bytes'],
                               dloss=cell['dloss'], encoder_fixture_id=cell.get('encoder_fixture_id')))
-        arms.append(dict(result=str(Path(path).resolve()), result_sha256=sha256_file(path), kind=result.get('kind', 'comparison'),
+        arms.append(dict(result=str(Path(path).resolve()), result_sha256=file_sha256hex(path), kind=result.get('kind', 'comparison'),
                          cells=len(comparison['cells']), strata=comparison.get('strata'), environment=result.get('environment'),
                          pin_scope=scope, old_pins=dict(comparison['old_pins']), new_pins=dict(comparison['new_pins']),
                          fused_engagement=(result.get('fused_engagement') or {}).get('summary'),
@@ -651,7 +603,7 @@ def plan_row(row, pins, *, run_id, audit_states=None):
     shards = []
     for entry in manifest['units']:
         path = parts/entry['file']
-        if path != unit_path(parts, entry['qname']):
+        if path != checkpoint_unit_path(parts, entry['qname']):
             raise Refused(f'{row}: {entry["qname"]} names a noncanonical shard {entry["file"]}')
         if not path.is_file():
             if plan['kind'] == 'complete':
@@ -667,7 +619,7 @@ def plan_row(row, pins, *, run_id, audit_states=None):
             if envelope.get(field) != expected:
                 raise Refused(f'{row}: shard {path.name} {field}={envelope.get(field)!r}, expected {expected!r}')
         payload = envelope['payload']
-        if sha256_bytes(payload) != envelope['payload_sha256']:
+        if bytes_sha256hex(payload) != envelope['payload_sha256']:
             raise Refused(f'{row}: shard {path.name} payload_sha256 does not describe its payload')
         state_obj = loads(payload)
         # The strata come from the sealed menu; a shard that priced anything
@@ -696,7 +648,7 @@ def plan_row(row, pins, *, run_id, audit_states=None):
             new_payload = dumps_like(state_obj, payload)
         else:
             new_payload = payload
-        new_envelope = dict(envelope, identity_sha256=new_sha, payload_sha256=sha256_bytes(new_payload), payload=new_payload)
+        new_envelope = dict(envelope, identity_sha256=new_sha, payload_sha256=bytes_sha256hex(new_payload), payload=new_payload)
         if dumps_like(envelope, raw) != raw:
             raise Refused(f'{row}: shard {path.name} envelope does not re-pickle to its own bytes')
         new_raw = dumps_like(new_envelope, raw)
@@ -764,10 +716,10 @@ def migrate_row(row, plan, work, record, *, keep_previous):
     manifest['identity_sha256'] = work['new_sha']
     manifest['identity_migration'] = list(manifest.get('identity_migration') or []) + [record]
     new_manifest_raw = manifest_bytes(manifest)
-    atomic_write(stage/'cost.anchors.json', new_manifest_raw)
+    atomic_write_bytes(stage/'cost.anchors.json', new_manifest_raw)
     written = len(new_manifest_raw)
     for shard in work['shards']:
-        atomic_write(stage/'cost.anchors.json.parts'/'units'/shard['path'].name, shard['new_raw'])
+        atomic_write_bytes(stage/'cost.anchors.json.parts'/'units'/shard['path'].name, shard['new_raw'])
         written += len(shard['new_raw'])
     cost_raw_new = None
     if work['cost']:
@@ -775,7 +727,7 @@ def migrate_row(row, plan, work, record, *, keep_previous):
         cost['provenance'] = dict(cost['provenance'])
         cost['provenance']['identity_migration'] = list(cost['provenance'].get('identity_migration') or []) + [record]
         cost_raw_new = dumps_like(cost, work['cost']['raw'])
-        atomic_write(stage/'cost.pkl', cost_raw_new)
+        atomic_write_bytes(stage/'cost.pkl', cost_raw_new)
         written += len(cost_raw_new)
     # verify the staged row exactly as a consumer would read it
     check = verify_row(stage, pins={'new': record['new_pins'], 'drop_settings': tuple(record.get('dropped_settings') or ())},
@@ -867,7 +819,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
             if envelope.get(field) != expected:
                 fail(dict(what='envelope', file=path.name, field=field, stored=envelope.get(field), expected=expected))
         payload = envelope.get('payload', b'')
-        if sha256_bytes(payload) != envelope.get('payload_sha256'):
+        if bytes_sha256hex(payload) != envelope.get('payload_sha256'):
             fail(dict(what='payload_sha256', file=path.name))
         state = loads(payload)
         result['shards'] += 1
@@ -881,7 +833,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
                     fail(dict(what='wire_missing', file=str(wire)))
                     continue
                 size = wire.stat().st_size
-                if size != record['blob_bytes'] or sha256_file(wire) != record['blob_sha256']:
+                if size != record['blob_bytes'] or file_sha256hex(wire) != record['blob_sha256']:
                     fail(dict(what='wire_bytes', file=str(wire), size=size, expected=record['blob_bytes']))
                 result['wire_bytes_checked'] += size
         anchors = {a['format_name'] for a in state.get('anchors', [])}
@@ -921,7 +873,7 @@ def hash_trees(*, prismaquant_root=None, producer_root=None):
         out['prismaquant_source_sha256'], out['prismaquant_files'] = prismaquant_tree_sha256(Path(prismaquant_root)/'prismaquant')
     if producer_root:
         profiles, count = encoder_tree_profiles(Path(producer_root)/'src'/'tessera')
-        out['encoder_source_sha256'] = profiles[_source_digest_owner().SOURCE_TREE_V1]
+        out['encoder_source_sha256'] = profiles[SOURCE_TREE_V1]
         out['encoder_files'] = count
         out['encoder_source_profiles'] = profiles
     return out

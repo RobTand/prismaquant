@@ -62,6 +62,13 @@ move preserves predicates, branch precedence, constants and initialization guard
 Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
+
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): reseal
+publication uses the shared checkpoint atomic writer with process-specific
+staging. Two processes can no longer consume the same fixed `.tmp` inode.
+Digest, JSON and source-framing profiles use the existing byte owners; pin,
+manifest, scored-content and report bytes retain their inherited encodings.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_reseal` owns proof assembly, strata and coverage checks,
 source-seal classification, plain checkpoint migration and verification.
