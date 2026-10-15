@@ -661,3 +661,114 @@ verification is next. Additional producer APIs still block complete removal
 of eleven serving imports in three files and the remaining T1/T3 work; no
 Tessera source, runtime table, admission gate or serving default was changed
 as a workaround.
+
+
+## Final independent verification, 2026-10-15 06:42 UTC
+
+The accepted CPU verification matrix has 8,881 passes, 144 case skips and one
+collection-time skip for missing Triton, with 72 passing subtests recorded
+separately. Its 9,025 collected cases reconcile across 441 files and sixteen
+PrismaBuild shards. The original run remains failed with 8,878 passes, three
+failures and 145 skip records. Three complete shard replacements supply the
+accepted results below. Their file and collected-node populations exactly match
+the originals. Neither the historical LIST nor its failed terminal records was
+rewritten.
+
+This is an explicit revision matrix, not one whole-suite execution on a single
+final revision. Root source differences and qualified byte identities are
+recorded for each step. No overlapping focused or companion pass counts are
+added into a unique total.
+
+| Source | Scope | Verified outcome |
+| --- | --- | --- |
+| `9c6164490d` | Original sixteen-shard CPU population | 8,878 passed, three failed, 145 skip records; preserved failed. |
+| `e6c87281f6` | Complete original AQUA shard 9, 31 files | 642 passed, 33 skipped. Replaces the obsolete empty-row predicate mock with a validated Joint AURA row; no production changes. |
+| `4f2db7494d` | Complete original materialization shard 11, 32 files | 541 passed, three skipped. Campaign grammar is applied only to declared campaign modules; real producer/translator and resource/container gates remain active. |
+| `c00349318e` | Complete original thread-site shard 14, 32 files | 513 passed, one skipped and two passing subtests. The new qualification-tool thread uses the existing PeriodicSampler; allowlist unchanged. |
+| `9c6164490d` | Declared GLM data lane | One passed, no skips, using the two-file 1,454,802,228-byte declared manifest. |
+| `9ed23194c0` | Explicit four-file task-suite companion | 76 collected, ran and passed, no skips. |
+| `9ed23194c0` | Seven guard/settings/runtime modules and all-source compile | 49 passed, no skips; package, tools and experiments compile. |
+| `c00349318e` | Final nine-module guards, container and sampler checks, plus all-source compile | 108 passed, no skips; package, tools and experiments compile. |
+
+The initial task companion `153da70de106bf8af2d92a6c5db2fee5777a2dbfd6294aded8cc7f109a8e0682`
+remains failed with 72 passes and four failures. Commit `215e2f1fab` moves the
+real HF-reader refusal before optional backend imports. Existing refusal cases
+now explicitly block lm_eval imports while retaining real configurations and
+reader checks. Commit `9ed23194c0` separately removes only trailing newlines in
+six extracted owners; their syntax trees are unchanged. The valid task-engine
+execution path and real quality inference are not qualified by these fixtures.
+
+The materialization fix was independently qualified in a ten-module action with
+230 passes, no skips and three compiles. Two new host/container cases preserve
+literal command, environment and resource demand. Its real producer-to-translator
+case is unchanged, and its plan check now reads the actual manifest instead of
+mocking the row builder. The sampler fix was independently qualified with 44
+passes, no skips and compilation. Five event-driven cases cover both hosts,
+body failures, unavailable telemetry and an in-flight write after the bounded
+join returns. The numerical/profiler loop is byte-identical at 1,821 bytes,
+SHA-256 `58d9074d5c7160c18274516ec05711d047c03d7e863432731d487b3b9e8bd227`.
+No numerical GPU rerun or speed claim is inferred from this tooling change.
+
+The source-derived accounting tool covers all 443 surviving changed test files,
+with no uncovered files or pending evidence. It checks 451 distinct selected
+files across the recorded lanes. The frozen 441-file CPU population retains
+its original selection provenance. The additional task-reader, container,
+telemetry and declared-data modules have explicit separate coverage. Actual
+sealed commands and runner bytes establish focused file selection. This is
+file-selection accounting, not a claim that skipped cases ran or that every
+source file has one same-revision broad execution.
+
+The 145 CPU skip records remain explicit: 57 task cases qualified separately
+by the current 76-case companion, 41 private Stage B scratch cases, six direct-I/O
+cases, two unavailable DSv4 checkpoint cases, two closed-package campaign-env
+cases, and 37 device or GPU-dependency cases. One of the latter is the collection
+skip for missing Triton. Private scratch, device-dependent checks and missing
+artifacts remain unqualified by this CPU run. No scratch fallback, dependency
+stub or exclusion was introduced to make the matrix pass.
+
+Each main shard reserves aggregate CPU4/RAM16 GiB with four pytest workers and
+native threads1, with portable placement. Task, guard and compile lanes reserve
+CPU1/RAM3 or RAM4 GiB with native threads1; the declared-data lane uses CPU2/RAM16.
+The materialization focus uses CPU2/RAM8 and the sampler focus CPU1/RAM4.
+PB-assigned affinity is preserved. All tests and compiles execute through the
+published PrismaBuild client. The accepted matrix's 21 actual terminal records,
+CAS action identities, result hashes/sizes, embedded receipts and both captured
+log hashes/sizes were independently verified. Focused action evidence is verified
+separately by the coverage accounting tool.
+
+The rerunnable artifacts are under `/home/rob/tmp/pq-refactor-20261014/reports/`:
+`final-verification-summary.json`, `final-verified-receipts.json`,
+`final-shard-repairs.json`, `final-test-coverage.json`, source/difference records,
+and the lane-specific skip records. `summarize_final_verification.py` reconciles
+outcomes and receipts; `account_final_test_coverage.py` derives final changed
+files from Git and checks their evidence. The original CPU result file's hash
+and size are retained in `final-original-cpu-record.json`.
+
+| Accepted action | Result SHA-256 | Embedded receipt SHA-256 |
+| --- | --- | --- |
+| `197577d1bc53589ce0fd92c5d0fcd2af031b81f13ae827053bd835939120587e` | `878eea474b2811c5c29b6a44bd472c7def7ecd72e850952f635123308f229f30` | `0436f8f094188679677f8341551afe98059a4d92ebad69963f8b5a6b8d3a1bb8` |
+| `88af616e5806bd5c5c8fdccce4cfb8d58688a9018a0b4477c2279d7b2ae883eb` | `c144967a9199aa3511802168b23c07184a5c40e7a92ec55015340d151e3e913a` | `16f84d16a87de957301550633d6824ed22e805eb0a0a0055e13954be765d6d04` |
+| `b9a48061cd3f8c0fcfaa176805129a92772e0cdf31bd725e625f6c717aab454f` | `93e2568ff638d3195d80c688569dfbe5e2b86d5ed7890e67d11d2ab2e7fdee2e` | `7d4df90dad73694227a74e4ab666f1154dc53d6a35b34bce62d51601412ae4e2` |
+| `45a25542521e04aada1362b8947d7f35c67fc72296530751be307d5bfd7a796e` | `5c2e81b9a1b2cf908843dc3c8d7a61880b6817016adf9c1a2d1ef8ceeffff4ec` | `ec4d311b24c65311883767de3156b19821b9f6d26843e15b3ab8ae7b1f681cd1` |
+| `1445439a47ad35d8dffa51bac75124b75bcebbc2340aa0caeb97a3b992cdc507` | `365a0e1e445e9373c89961123ebbf928794db8a6ca9ac652b975bb36beaec66b` | `934853ec6dd34207038eec40cc5e2d8a40d2348a023e2024d0193d5723710eba` |
+| `7003e82c5682803e9bd843d8253746ec951b3788b5141cf0a0dcec70ab7e2c56` | `867403f6741ef87ac5df7c087f60a1b98bf2703cbad987f47176129bf275852f` | `c1144113c9e7d21d93addfd2daf7ef328e4c2a0dcd20ca279d494e84a44444c5` |
+| `68c1950e6ec3d8eec539cec3086a7b2d0024d55a6072ae8ab870ba5ebb7d386f` | `6a656dc666f6c1d3bdfe91e3bf78600e13fd91739450e86203c01ec9fa4466b4` | `2861d25da55d284558f646daf624ce0ad581f7e95282154b23ee004b14897866` |
+| `743190a292f3d6406685d57868e0027f58797432eb393b5f74b1066ee1c4e5fd` | `545bad91faed4ad435dde28a0bfc21cd3933857a8da38879c18d36613230ee59` | `9e8ab42376d1157faff017c20692b3d3330f6b4027e322d933b9a519576cf8cf` |
+| `c53a98a3003e20db4eb7e8b66c7664f94f4a1eaf4213a868c4027e941546cf19` | `1e55c99d906a6aee343d7afaea1ccf7d984a253870a722e30a7b0e12ec515365` | `77e6dc1ff99dde7c7e9b903a5a22213c4fc164f1cbec4a73c8e5c5ebd955e31c` |
+| `7a45a4edb07f0673a09f460fadb49ce1eda3f08e674586d6c9c84807b6a2bc69` | `16ea321848c6398ed7ab60511ba6ca723c961448b06593654c93f8b2e92c118c` | `a910cb2d3326d53e8214b13d350452586819872182221f65fa2a9e5e54307d50` |
+| `76a09541422c85d31204870802c785d34dd82f2de7562a6cf0e8442f71b74132` | `4883f6bd7481a6f57a1ab5f4ec0886c377582eef6a3cd66f7102f37436cf083a` | `d1722de3d9584b1dd9f7298fd9ef4142827473bdb8da46d5b73345a39b5e78d0` |
+| `af6e69ab81f0d820bf1d55e3b18bf504dd1a7bc66e8db434591714970cd87ddd` | `a8dc01885d6bd5b9e01fd20ec7f9a16d1919cbc81689d4b1cc291ae58ee189d9` | `03db1f49351d2c1443cd977cd2112e57ef0bc14af05fece7762fade1f1a7968a` |
+| `7d35a187dc2f6c223495d2afb1dd3830813a1ad4ea51892117ef999f58bedf3d` | `efdee7a964d592d4b3fe433cf16c69199843c21f255751ad309f0ae4c4927b31` | `e37c78d33555fa0b64456cfab20e52b73844c7e736a8bd35d5a7678f5b039122` |
+| `f206585055ea30a16bf95a255f54ac4d7acc2e599c37d6d0245e67ce2052b24d` | `41062d5a4f5ab2b06beb8f59eded41c2e3673749f5c98a492389a91b404c580d` | `883d8c0bef265d350a4ad15e6821e4ca7c100d75b80284f3067f9584f6a8fdd8` |
+| `a1ccfbb36644bdf78e94b8aa3c58b0f22484f53e5c20df9e3e9ba7bccf23713d` | `94dc0ba8af524df145548d71fe87c432f30e605db676b262d29f4c74b27c2af0` | `48a97bcd65e49dddf3a98ae6526192a5c19828a745868624b3b49e2aacdd2822` |
+| `6a1b117401a5a4678ac77ec2941340c71def43e4bdc08f1fa1154be722154041` | `fa0c8f926a45c0bd1c33224f05bf40d33efdc23108a200d46fd57f09e2d3597f` | `7d8fb4f63544d23ae95ce3fb6eb55ec843ec82aa962ea294f69b0431ef58907d` |
+| `d8104473fe7cc65128028f4beae1a8adcd9ecd0cb38f8dcaa9017210b5c574d6` | `afa2878a8c3adf383ec176e00fb6fbe38997894053b51630951c1759b3bafa93` | `7ebf285204443316384d0dd5fa8d098fda0ee8dcb953271ac31be95767aae8a7` |
+| `d21cbd04fc5b2573da775511a029b6a6ebbb6576a264974849f33e0da41eb1c6` | `2575182b66340976661daca78fba7d736ea57ab5f785d5b0f840dea486e6c028` | `4a9d1dfc5d7b8d8ff4f3f5fef98922c7bc5e6665a69a25c9f2436ead69049398` |
+| `7599875dfab54299031e4dd1fe9666ae29d5b8858ef8d40f6d0711909e85c0f9` | `1e44fa9cf5e9b8dd215712d8639e1a824e1fbe2d54bd4fa6d8b65e76b75dfe1e` | `1f9c94c801c1977ad251a5f4dfd356ad64efa4add37f7e251fb5dfe9414dd31f` |
+| `7107d48da14393d9dc2131a9f9a6120e46377965ee6330602cc6484591e5d400` | `237c2099fd2a892f4991988abd14de401f5337d378d0a03c4b2c4f0c96f2983d` | `a6185a5fbb1cd2c8fd47a993f668de808c9d0ed6364d048dd77542d93926c9a0` |
+| `3d0161618cd41d888c00cc9f848e7a055cef47ebc2f73089dde27c92948c5ac0` | `d545f1f66798c6d2f89fa203a74e1f970338e8ab3f267af1b0654ea7512e0456` | `fcea94f678b8a7d3214aef00f250c395e7ca3bf4a285dc7a4db71d7059c5502a` |
+
+The API-dependent T1/T3 remainder stays open. These checks do not extend the
+reviewed v60/22-cell roster, serving/export gates, quality qualification or
+performance claims. Historical failed runs and historical measurements above
+retain their original status and source.

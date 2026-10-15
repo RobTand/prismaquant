@@ -44,3 +44,11 @@ The S1 review does not yet justify retiring #2641. Existing live tests cover muc
 of its intent, but a fixed sampling-seed vector and census mutation during the
 read still need equivalent behavior coverage. Retain it until those obligations
 are met; the staged-reader extraction is not a substitute for either.
+
+
+Final read-only refresh at 2026-10-15 06:42:56 UTC retains all 36 open PRs and the same
+head commits. `open-pr-refresh-20261015T064256Z.json` records the exact heads.
+The disposition remains one local incorporation, 22 independent changes, seven
+unrelated changes, two blocks and four conditional retirements. All remain open.
+No remote disposition was executed; final refactor verification does not
+automatically qualify an independent PR or discharge its replacement proof.

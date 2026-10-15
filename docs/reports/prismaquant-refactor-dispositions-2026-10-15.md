@@ -188,3 +188,65 @@ the additional API-only backport has no producer acknowledgement. The canonical
 brief is `/mnt/shared/agent-mailbox/contexts/prismaquant-refactor-20261014/tessera-additional-producer-api-handoff.md`.
 No algorithms are copied into PrismaQuant and the separate Tessera repository
 remains untouched. This checkpoint does not mark those remaining items done.
+
+
+## Final independent result, 2026-10-15 06:42 UTC
+
+The accepted independent refactoring is implemented on
+`sol/refactor-simplify-20261014`, with GPT-6.1-Sol workers isolated by branch and
+worktree and calibrated by task difficulty. The final explicit verification
+matrix records 8,881 CPU passes and 145 skip records, with all three original
+failed shards repaired and rerun in full. The task companion passes 76 cases;
+the declared-data lane passes one; final combined guards and compilation pass
+108 cases without skips. These overlapping lanes are not summed into a unique
+case count. All 443 surviving changed test files have selected-file evidence.
+See the verification report's revision, receipt and qualification limits.
+
+The final sweep fixed the optional-import refusal order and the dispatcher
+module-grammar boundary. It also replaced an obsolete AQUA sentinel mock with a
+validating row and moved the qualification tool's telemetry onto the shared
+sampler. The concurrency allowlist remains unchanged. Earlier timing assertions
+use controlled clocks and real span lifecycle events, and live historical byte
+oracles remain active. Removing a brittle assertion does not justify deleting
+the correctness contract it was meant to protect.
+
+The proposal's generic session, second fleet client, allocation facade, universal
+runtime-price adapter, common numerical sweep and round-bag abstractions remain
+rejected for the reasons in the item table. Source, sealing, numerical and
+publication lifetimes differ at those boundaries. The existing append publisher
+already owns its callers. The final live Python diff under prismaquant, tools
+and experiments removes a net 21,713 lines; this excludes tests, archive and
+generated data and is a source-size observation, not a performance claim.
+
+| Principle | Choice it changed |
+| --- | --- |
+| Laziness Protocol; Subtract Before You Add | Remove unreachable producers, unused reexports and obsolete APIs. Reject generic stage sessions, runtime adapters and another fleet client. |
+| Model the Domain; Foundational Thinking; Type System Discipline | Use actual census/pricing and resident/selected request variants, calibration statistics and resolved scope. Keep requested thread counts separate from the execution cap. |
+| Boundary Discipline | Keep raw CLI wire separate from internal policy, refuse unreadable HF artifacts before optional backend imports, and request public Tessera APIs instead of copying serving algorithms. |
+| Migrate Callers Then Delete Legacy APIs; Outcome-Oriented Execution | Move all live callers in each unit, including manual instrumentation. Keep no compatibility facade for the deleted checkpoint API. |
+| Separate Before Serializing Shared State | Give workers isolated branches and worktrees; use immutable root-composed source snapshots for admitted tests. |
+| Build the Lever; Encode Lessons in Structure | Bind proof baselines to their recorded root commit, check actual function global dependencies, derive final test populations from Git and reconcile published outcomes and receipts. |
+| Prove It Works; Fix Root Causes; Sequence Work into Verifiable Units | Replace source execution and wall-clock assertions with real entry-point, custody, clock and lifecycle checks. Retain independent historical byte oracles and verify every integrated unit through PrismaBuild. |
+| Never Block on the Human; Guard the Context Window | Complete independent PrismaQuant work while the producer API handoff waits, with bounded independent reviews and no edits to the separate Tessera repository. |
+
+T1 repository-boundary completion and T3 selected-wire/cell measurement remain
+blocked on additional public Tessera APIs. Eleven serving-runtime imports remain
+in three production files. The first serving-free API delivery at exact
+`d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff` is integrated; the existing v60 contract,
+22-cell scope and code/JSON pin remain authoritative. No algorithms are copied,
+no gate is tightened as a workaround, and the separate Tessera repository is
+untouched by this swarm.
+
+The canonical producer brief is
+`/mnt/shared/agent-mailbox/contexts/prismaquant-refactor-20261014/tessera-additional-producer-api-handoff.md`.
+Message `1792044309004-a9236dee` asks the producer and parent coordinators to
+resume an active owner and deliver the API-only handoff. No acknowledgement or
+additional API delivery is recorded at this checkpoint. The consumer cannot
+complete those remaining items by editing the other swarm's repository.
+
+All 36 reviewed PRs remain open. The plan retains one locally incorporated
+change, 22 independent changes, seven unrelated changes, two blocked changes and
+four conditional retirements. No push, issue creation, PR publication, merge or
+closure occurred. PR #2669 remains linked to this thread. Remote delivery still
+requires the repository's issue/PR process and the specific replacement proofs
+in the open-PR plan.
