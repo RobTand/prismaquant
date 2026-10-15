@@ -691,10 +691,11 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
                          deadline=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
-    Returns the entered ``(window, key, staged)``: the RAM leg refuses
-    fast (RAM-mover covers unresolved), the SSD copy acquires honestly
-    with the map's leads. Raises ``LeaseRefused`` before any pool payload
-    byte when unmapped, unfenced, or unpermitted. The caller opens keys,
+    Returns the unentered ``(window, key, staged, resolver)``. The shared
+    lease owner selects RAM when allowed and covered, or acquires the SSD
+    copy with its own covers after a RAM availability refusal. Raises
+    ``LeaseRefused`` before any pool payload byte when unmapped, unfenced,
+    or unpermitted. The caller enters the window and opens keys,
     reads through held descriptors, verifies content against
     ``expected_sha256``, re-checks the declared file's binding, and exits
     the window (close-then-release) on every path.
