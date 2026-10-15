@@ -3955,9 +3955,12 @@ def render_production_weight(
         _quantize_2d,
     )
 
+    render_activations = activations.get(qname)
+    if render_activations is None and qname.endswith(".weight"):
+        render_activations = activations.get(qname[:-7])
     result = _quantize_2d(
         weight.detach().clone(),
-        cached_activations=activations.get(qname),
+        cached_activations=render_activations,
         fmt="NVFP4",
         linear_name=qname,
         nvfp4_global_real_override=joint_global_real,

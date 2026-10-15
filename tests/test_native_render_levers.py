@@ -130,3 +130,18 @@ def test_completed_recipe_preserves_supported_disabled_controls():
     assert parsed == options
     acts = torch.tensor([[100.0, -5.0], [1.0, 2.0]])
     assert torch.equal(codec._activation_matrix_for_gptq(acts, 2, levers=parsed), acts)
+
+
+def test_explicit_activation_rows_preserve_existing_weight_name_alias():
+    generator = torch.Generator().manual_seed(51)
+    weight = torch.randn(16, 16, generator=generator)
+    acts = torch.randn(64, 16, generator=generator)
+    record = NativeRenderLevers.resolve({
+        "gptq": True, "render_progressive_gates": False,
+        "do_no_harm": False}).record()
+    expected = pwc.render_production_weight(
+        weight, "NVFP4", qname="linear", activations={"linear": acts}, levers=record)
+    actual = pwc.render_production_weight(
+        weight, "NVFP4", qname="linear.weight", activations={"linear": acts}, levers=record)
+    assert not torch.equal(expected, weight)
+    assert torch.equal(actual, expected)
