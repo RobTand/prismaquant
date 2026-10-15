@@ -12,6 +12,12 @@ Re-stamped 2026-10-15: G3 staged ranges re-cover and re-acquire the same declare
 bytes on stage after a RAM acquisition availability refusal. Integrity and unknown
 refusals still fail closed. An unsuccessful acquisition publishes no reader window.
 
+Re-stamped 2026-10-15: `render_cache_paths` owns the existing rendered-cache
+leaf spelling and coordinate filename injectivity refusal without loading
+the numerical runtime. ProductionWeightCache, streaming/MTP, campaign metadata,
+publication and their callers consume that owner. Filename bytes, format
+spelling, cache schemas and refusal scope remain unchanged.
+
 Re-stamped 2026-10-15: `assignment_space.AssignmentSpace` owns the admitted
 run's per-name stats lookup, complete scope view, packed/fused expansion, fixed
 format join, serving promotion and exact tensor payload accounting. Expansion

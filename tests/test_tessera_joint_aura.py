@@ -45,7 +45,7 @@ def fixture(tmp_path):
     cache.mkdir(parents=True)
     wire = tmp_path / "merged/cache/wire"
     wire.mkdir(parents=True)
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     source = {"shape": [4, 4], "dtype": "bfloat16", "sha256": "a" * 64}
     encoder_seal = installed_encoder_source_sha256()
     identity = {"campaign_schema": "prismaquant.tessera_campaign_cost.v1",
@@ -69,7 +69,7 @@ def fixture(tmp_path):
         filename = n + ".tessera"
         blob = ("inert " + n).encode()
         (wire / filename).write_bytes(blob)
-        (cache / _cache_weight_filename(n, fmt)).write_bytes(b"inert render")
+        (cache / cache_weight_filename(n, fmt)).write_bytes(b"inert render")
         anchor = {"qname": n, "format_name": fmt, "family": "TESSERA_E4M3_K1",
                   "body_rate_q256": 1024, "dloss": 0.25, "dloss_stderr": 0.0,
                   "memory_bytes": 16, "bits_per_param": 8.0,
@@ -176,8 +176,8 @@ def test_incomplete_or_conflicting_anchor_evidence_refuses(tmp_path, mutation):
         # Synthesis is the answer to a missing shard only when the wire behind
         # it decodes. The fixture's wires are inert bytes, so this is the
         # refusal that survives; removing the wire too is the other one.
-        from prismaquant.production_weight_cache import _cache_weight_filename
-        (tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(names[0], fmt)).unlink()
+        from prismaquant.render_cache_paths import cache_weight_filename
+        (tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(names[0], fmt)).unlink()
         if mutation == "missing_render_and_wire":
             (Path(payload["provenance"]["wire_dir"]) /
              states[names[0]]["wire_records"][fmt]["file"]).unlink()
@@ -730,9 +730,9 @@ def test_prepare_refuses_oversized_later_render_before_loading_any_layer(tmp_pat
 
 
 def _unlink_render(tmp_path, name, fmt):
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
-    path = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(name, fmt)
+    path = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(name, fmt)
     path.unlink()
     return path
 
@@ -929,14 +929,14 @@ def test_a_real_wire_synthesizes_the_same_shard_bytes_every_time(tmp_path, fmt):
     """The shard is a function of (wire bytes, decoder) -- the property #549's
     fan-out rests on. Two CPU decodes of one wire must publish one byte string."""
     import torch
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import _synthesize_render_from_wire
 
     weight, blob = _real_wire(fmt)
     kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
     written = []
     for run in ("a", "b"):
-        render = tmp_path / run / _cache_weight_filename(kwargs["name"], fmt)
+        render = tmp_path / run / cache_weight_filename(kwargs["name"], fmt)
         assert _synthesize_render_from_wire(render, **kwargs) == "synthesized_from_wire"
         written.append(render)
     assert written[0].read_bytes() == written[1].read_bytes()
@@ -950,7 +950,7 @@ def test_a_real_wire_synthesizes_the_same_shard_bytes_every_time(tmp_path, fmt):
 def test_a_cuda_decode_publishes_the_same_shard_as_a_cpu_decode(tmp_path, fmt):
     """#549's whole premise: moving the decode onto the reserved GPU changes
     where the work runs and nothing about the bytes it publishes."""
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import (
         _render_origin_marker_path, _synthesize_render_from_wire)
 
@@ -958,7 +958,7 @@ def test_a_cuda_decode_publishes_the_same_shard_as_a_cpu_decode(tmp_path, fmt):
     kwargs = _synthesis_kwargs(tmp_path, blob, fmt, weight.shape)
     published = {}
     for device in ("cpu", "cuda"):
-        render = tmp_path / device / _cache_weight_filename(kwargs["name"], fmt)
+        render = tmp_path / device / cache_weight_filename(kwargs["name"], fmt)
         assert _synthesize_render_from_wire(render, device=device, **kwargs) == "synthesized_from_wire"
         published[device] = (render.read_bytes(),
                              _render_origin_marker_path(render).read_bytes())
@@ -1025,14 +1025,14 @@ def test_the_staging_name_keeps_the_bytes_the_campaign_already_published(tmp_pat
     property it must not cost."""
     import torch
     from prismaquant import cost_stage_checkpoint as journal
-    from prismaquant.production_weight_cache import (
-        _cache_weight_filename, _store_rendered_weight_entry)
+    from prismaquant.production_weight_cache import _store_rendered_weight_entry
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     assert journal.unique_temp_suffix().count(".") == 1
     tensor = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4)
     _store_rendered_weight_entry(weights={}, cache_dir_path=tmp_path, qname="a.b",
                                  fmt="NVFP4", tensor=tensor, weight_dtype=torch.bfloat16)
-    published = tmp_path / _cache_weight_filename("a.b", "NVFP4")
+    published = tmp_path / cache_weight_filename("a.b", "NVFP4")
     legacy = tmp_path / "legacy" / published.name
     legacy.parent.mkdir()
     # Exactly what the pre-#549 writer did: one fixed ``.tmp``, then replace.
@@ -1084,7 +1084,7 @@ def test_the_standalone_stage_mirrors_its_shards_and_leaves_the_row_cache_alone(
     the campaign's bytes, and publishing into them needs explicit authority."""
     import torch
     from prismaquant import tessera_joint_aura as bridge
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     config, names, fmt, _payload, _states = fixture(tmp_path)
     _decoder(monkeypatch, torch.zeros((4, 4), dtype=torch.bfloat16))
@@ -1094,7 +1094,7 @@ def test_the_standalone_stage_mirrors_its_shards_and_leaves_the_row_cache_alone(
         bridge.synthesize_renders(plan, plan_sha256="0" * 64)
     # The row cache holds both campaign shards; the mirror holds neither.
     before = {n: (tmp_path / "campaign/rows/row-0000/cache"
-                  / _cache_weight_filename(n, fmt)).read_bytes() for n in names}
+                  / cache_weight_filename(n, fmt)).read_bytes() for n in names}
     record = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
                                        mirror_root=mirror, compare=True,
                                        receipt=tmp_path / "synth.json")
@@ -1103,7 +1103,7 @@ def test_the_standalone_stage_mirrors_its_shards_and_leaves_the_row_cache_alone(
     assert record["unit_scope"] == (0, 1) and record["decoder_source"]["kind"] == "installed"
     assert json.loads((tmp_path / "synth.json").read_text())["schema"] == bridge.SYNTHESIS_SCHEMA
     assert all((tmp_path / "campaign/rows/row-0000/cache"
-                / _cache_weight_filename(n, fmt)).read_bytes() == before[n] for n in names)
+                / cache_weight_filename(n, fmt)).read_bytes() == before[n] for n in names)
     # Idempotent: a second row over the same range writes nothing further.
     again = bridge.synthesize_renders(plan, plan_sha256="0" * 64, units="0:1",
                                       mirror_root=mirror, compare=True)
@@ -1301,7 +1301,7 @@ def colliding_two_owner_fixture(tmp_path, formats=None):
     (root / "rows-link").symlink_to(root / "rows", target_is_directory=True)
     wire = tmp_path / "merged/cache/wire"
     wire.mkdir(parents=True)
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     source = {"shape": [4, 4], "dtype": "bfloat16", "sha256": "a" * 64}
     encoder_seal = installed_encoder_source_sha256()
     identity = {"campaign_schema": "prismaquant.tessera_campaign_cost.v1",
@@ -1326,7 +1326,7 @@ def colliding_two_owner_fixture(tmp_path, formats=None):
         n_fmt = fmt_a if n == name_a else fmt_b
         # Both names alias one shard leaf; at one format the fixture writes
         # that one file twice with identical bytes.
-        (cache / _cache_weight_filename(n, n_fmt)).write_bytes(b"inert render")
+        (cache / cache_weight_filename(n, n_fmt)).write_bytes(b"inert render")
         blob = ("inert " + n).encode()
         (wire / (n + ".tessera")).write_bytes(blob)
         anchor = {"qname": n, "format_name": n_fmt, "family": "TESSERA_E4M3_K1",
@@ -1425,7 +1425,7 @@ def test_joint_aura_admits_a_cross_format_alias_with_an_unmeasured_cost(
     tmp_path, monkeypatch,
 ):
     from prismaquant import tessera_joint_aura as bridge
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     config, names, fmt_a, fmt_b = colliding_two_owner_fixture(
         tmp_path, formats=("TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"),
@@ -1443,12 +1443,12 @@ def test_joint_aura_admits_a_cross_format_alias_with_an_unmeasured_cost(
     plan = json.loads(Path(config["campaign_plan"]["path"]).read_text())
     cache = Path(plan["rows"][0]["dir"]).resolve() / "cache"
     expected = {
-        cache / _cache_weight_filename(names[0], fmt_a),
-        cache / _cache_weight_filename(names[1], fmt_b),
+        cache / cache_weight_filename(names[0], fmt_a),
+        cache / cache_weight_filename(names[1], fmt_b),
     }
     assert len(expected) == 2
-    assert (cache / _cache_weight_filename(names[0], fmt_b)
-            == cache / _cache_weight_filename(names[1], fmt_b))
+    assert (cache / cache_weight_filename(names[0], fmt_b)
+            == cache / cache_weight_filename(names[1], fmt_b))
     reads = []
     resolve_origin = bridge._resolve_render_origin
 
@@ -1469,7 +1469,7 @@ def test_joint_aura_refuses_measured_aliases_before_the_walk(
     tmp_path, monkeypatch, fmt,
 ):
     from prismaquant import tessera_joint_aura as bridge
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     config, names, _, _ = colliding_two_owner_fixture(tmp_path, formats=(fmt, fmt))
 
@@ -1483,4 +1483,4 @@ def test_joint_aura_refuses_measured_aliases_before_the_walk(
     message = str(exc_info.value)
     assert all(name in message for name in names)
     assert fmt in message
-    assert _cache_weight_filename(names[0], fmt) in message
+    assert cache_weight_filename(names[0], fmt) in message

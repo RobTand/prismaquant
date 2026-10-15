@@ -275,12 +275,12 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     # other and were released once, each against its own identity.
     wire_dir = selected_cache / 'wire'
     from prismaquant import format_registry as fr
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     want = set()
     for name, fmt in sorted(expected):
         wire = campaign._wire_path(wire_dir, name, fmt)
-        rendered = selected_cache / _cache_weight_filename(
+        rendered = selected_cache / cache_weight_filename(
             name, fr.canonical_format_name(fmt.strip().upper()))
         assert wire.is_file() and rendered.is_file()
         want.update({wire.resolve(), rendered.resolve()})

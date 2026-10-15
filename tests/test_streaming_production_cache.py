@@ -238,11 +238,11 @@ def _write_act_cache(model, calib_ids, dense_qnames, experts_qnames, cache_dir,
 
 
 def _load_key(cache, cache_dir, key):
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     value = cache.weights[key]
     path = cache_dir / (
-        value if isinstance(value, str) else _cache_weight_filename(*key)
+        value if isinstance(value, str) else cache_weight_filename(*key)
     )
     return torch.load(path, map_location="cpu", weights_only=False)
 

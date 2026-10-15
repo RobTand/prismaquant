@@ -1,4 +1,6 @@
 """Write opens must refuse colliding coordinates before publishing any bytes."""
+
+from prismaquant.render_cache_paths import cache_weight_filename
 from types import SimpleNamespace
 
 import pytest
@@ -92,7 +94,7 @@ def test_campaign_publication_checks_existing_manifest(
 def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path):
     cache, wire_dir, weight, prepare = anchor_inputs
     dense, new = "layer.a", "layer__a"
-    dense_filename = pwc._cache_weight_filename(dense, FORMAT)
+    dense_filename = cache_weight_filename(dense, FORMAT)
     dense_path = tmp_path / dense_filename
     torch.save(weight, dense_path)
     dense_bytes = dense_path.read_bytes()
@@ -202,7 +204,7 @@ def test_campaign_admits_cross_format_name_aliases(anchor_inputs, tmp_path):
 def test_packed_append_checks_dense_manifest_before_sidecar(tmp_path, monkeypatch):
     dense = "mlp_experts_gate_up_proj"
     packed = "mlp.experts.gate_up_proj"
-    filename = pwc._cache_weight_filename(dense, "NVFP4")
+    filename = cache_weight_filename(dense, "NVFP4")
     shard = tmp_path / filename
     shard.write_bytes(b"existing dense shard")
     cache = pwc.ProductionWeightCache(

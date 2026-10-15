@@ -182,7 +182,7 @@ def build_fixture(root):
 def measured_input(fixture):
     """Read actual selected journals; make no whole-campaign completion claim."""
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path, canonical_json_sha256
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import MeasuredAnchorInput
 
     for key in ('census', 'capture', 'selected_cost', 'selected_checkpoint'):
@@ -216,7 +216,7 @@ def measured_input(fixture):
                 raise RuntimeError(f'{name}@{fmt}: actual measured cost/journal mismatch')
             record = state['wire_records'][fmt]
             wire = Path(payload['provenance']['wire_dir']) / record['file']
-            render = Path(payload['provenance']['cache_dir']) / _cache_weight_filename(name, fmt)
+            render = Path(payload['provenance']['cache_dir']) / cache_weight_filename(name, fmt)
             if sha(wire) != record['blob_sha256'] or wire.stat().st_size != record['blob_bytes']:
                 raise RuntimeError(f'{name}@{fmt}: actual wire differs from its journal')
             cells[name, fmt] = dict(anchor=anchor, record=record, wire=str(wire),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prismaquant.render_cache_paths import cache_weight_filename
+
 import prismaquant.native_render_codec as _native_render_codec
 
 from pathlib import Path
@@ -325,7 +327,7 @@ def test_cache_fill_refuses_a_retired_codebook_rung(tmp_path):
     from prismaquant import format_registry as fr
 
     model = _TinyL1()
-    shard = tmp_path / pwc._cache_weight_filename("l1", "NVFP4_CB_K16")
+    shard = tmp_path / cache_weight_filename("l1", "NVFP4_CB_K16")
     torch.save(model.l1.weight.detach(), shard)
     with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         fill_production_weight_cache(
@@ -1227,7 +1229,7 @@ def test_resume_collects_activations_when_render_scores_missing(tmp_path):
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
 
     cache = fill_production_weight_cache(
@@ -1303,7 +1305,7 @@ def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):
     model = _TinyChain()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     (tmp_path / "render_scores.json").write_text(json.dumps({
         "schema": "prismaquant.production_render_scores.v1",
@@ -1334,7 +1336,7 @@ def test_resume_loads_existing_activation_max_abs_sidecar(tmp_path):
     model = _TinyChain()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     (tmp_path / "render_scores.json").write_text(json.dumps({
         "schema": "prismaquant.production_render_scores.v1",
@@ -1688,7 +1690,7 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
 
 
 # ------------------------------------------------------------------ #2219 --
-# ``_cache_weight_filename`` is not injective in the qualified name: the
+# ``cache_weight_filename`` is not injective in the qualified name: the
 # mangled leaf aliases ``.`` with ``_`` (and ``/`` with ``__``), and the
 # stored payload is the bare tensor, so a colliding pair reads and overwrites
 # each other's shard with no refusal anywhere. These tests pin the
@@ -1703,9 +1705,7 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
 
 def test_require_injective_cache_filenames_refuses_colliding_pair():
     # The issue's own example pair: `a.b` and `a_b` mangle to one leaf.
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
@@ -1722,9 +1722,7 @@ def test_require_injective_cache_filenames_refuses_colliding_pair():
 
 
 def test_require_injective_cache_filenames_refuses_slash_alias_pair():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
@@ -1741,9 +1739,7 @@ def test_require_injective_cache_filenames_refuses_slash_alias_pair():
 
 
 def test_require_injective_cache_filenames_allows_one_qname_two_formats():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     # One qname at two formats is two filenames (`...__BF16.pt` vs
     # `...__NVFP4.pt`), not a collision; only two distinct coordinates that
@@ -1762,9 +1758,7 @@ def test_require_injective_cache_filenames_admits_cross_format_alias_pair():
     # two different files (`...__BF16.pt` vs `...__FP8_E4M3.pt`), so the
     # coordinate set is admitted; the same pair at one format refuses (the
     # colliding-pair tests above).
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     require_injective_cache_filenames(
         [("layer.a", "BF16"), ("layer_a", "FP8_E4M3")],
@@ -1773,9 +1767,7 @@ def test_require_injective_cache_filenames_admits_cross_format_alias_pair():
 
 
 def test_require_injective_cache_filenames_accepts_realistic_roster():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     # A GLM-5.3-shaped dense + packed-expert roster: every real model the
     # issue checked (GLM-5.3-Flash, DeepSeek-V4.1-Flash, Qwen3.8-Flash-Next)

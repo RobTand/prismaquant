@@ -105,7 +105,7 @@ def make_boundary_policy(directory):
 def build_fixture(root, device, *, source_layers=2, boundary_storage='resident'):
     from prismaquant import aura_cost, format_registry as fr
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
     tests = Path(__file__).resolve().parents[1] / 'tests'
     sys.path.insert(0, str(tests))
@@ -140,7 +140,7 @@ def build_fixture(root, device, *, source_layers=2, boundary_storage='resident')
                 rendered = rendered.to(device='cpu', dtype=torch.bfloat16).contiguous()
                 if tuple(rendered.shape) != tuple(weight.shape) or not bool(torch.isfinite(rendered).all()):
                     raise RuntimeError(f'invalid real RTN donor: {name}@{fmt}')
-                path = pwc / _cache_weight_filename(name, fmt)
+                path = pwc / cache_weight_filename(name, fmt)
                 torch.save(rendered, path)
                 entries.append(dict(name=name, format=fmt, path=str(path),
                     file_sha256=sha(path), serialized_bytes=path.stat().st_size,

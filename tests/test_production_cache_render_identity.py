@@ -10,6 +10,8 @@ sidecar means a pre-guard directory: warn, do not refuse.
 """
 from __future__ import annotations
 
+from prismaquant.render_cache_paths import cache_weight_filename
+
 import json
 from types import SimpleNamespace
 
@@ -192,7 +194,7 @@ def test_preguard_directory_warns_and_adopts_identity(
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     assert not _sidecar(tmp_path).exists()
 
@@ -270,7 +272,7 @@ def test_preguard_shards_record_trust_admission(tmp_path, monkeypatch):
 
     _fake_render_env(monkeypatch)
     model = _TinyTwoLinear()
-    shard_name = pwc._cache_weight_filename("l1", "NVFP4")
+    shard_name = cache_weight_filename("l1", "NVFP4")
     torch.save(
         model.l1.weight.detach().to(torch.float32),
         tmp_path / shard_name,
@@ -319,7 +321,7 @@ def test_append_merge_preserves_trust_admission(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     _fill(model, torch.tensor([[0, 1]], dtype=torch.long), tmp_path)
     before = json.loads(_sidecar(tmp_path).read_text())
@@ -346,7 +348,7 @@ def test_base_adoption_preserves_trust_admission(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     # An append running first in a pre-guard directory records the admission
     # alongside its section; the base fill then adopts the append-only file.
@@ -380,7 +382,7 @@ def test_trust_admission_causes_no_false_mismatch(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     _fill(model, calib_ids, tmp_path)

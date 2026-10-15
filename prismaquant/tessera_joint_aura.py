@@ -1089,8 +1089,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
     reused state is read-only for the walk.
     """
-    from .production_weight_cache import (
-        _cache_weight_filename,
+    from .render_cache_paths import (
+        cache_weight_filename,
         require_injective_cache_filenames,
     )
 
@@ -1377,7 +1377,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             _require(not wire.is_symlink(), f"{name}: escaping wire path")
             wire_stat = wire.stat()
             _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
-            render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            render = owner_roots[str(owners[name])] / "cache" / cache_weight_filename(name, fmt)
             # The mirror keeps the render's absolute path under the mirror
             # root so a cell's two copies stay comparable by name and a
             # measuring run can never replace the campaign's own bytes.

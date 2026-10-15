@@ -67,6 +67,9 @@ from __future__ import annotations
 
 import prismaquant.native_render_codec as _native_render_codec
 from .native_render_levers import NativeRenderLevers
+from .render_cache_paths import (
+    cache_weight_filename, require_injective_cache_filenames,
+)
 from dataclasses import replace
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -182,59 +185,6 @@ def _render_base_format(fmt: str) -> str:
     case-insensitively as its last probe (#218).  Do not paper over it here.
     """
     return str(fmt).strip().upper()
-
-
-def _cache_weight_leaf(qname: str) -> str:
-    """The mangled, filesystem-safe leaf body of a qualified name.
-
-    One home for the mangling (#2219): ``_cache_weight_filename`` spells the
-    shard leaf with it and ``require_injective_cache_filenames`` tests
-    injectivity against it, so the two can never disagree.
-    """
-    return str(qname).replace("/", "__").replace(".", "_")
-
-
-def _cache_weight_filename(qname: str, fmt: str) -> str:
-    return f"{_cache_weight_leaf(qname)}__{fmt}.pt"
-
-
-def require_injective_cache_filenames(
-    coordinates: Iterable[tuple[str, str]],
-    *,
-    where: str,
-) -> None:
-    """Refuse two render coordinates that share one cache filename (#2219).
-
-    The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
-    filesystem-safe, so distinct qualified names can share one shard leaf
-    (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
-    the bare tensor -- nothing in the file names the Linear it belongs to --
-    so two coordinates that land on one file would silently read and
-    overwrite each other's shard. The mangled spelling itself is load-bearing
-    (archive names, existing caches), so instead of changing it this fails
-    closed on the whole SET: call it where a cache directory is opened for a
-    model's rendered coordinate set, before any shard is written or read --
-    that is what covers resumes, pre-existing caches and concurrent
-    producers. Injectivity is filename-level over ``(qname, canonical
-    format)`` coordinates: ``layer.a`` and ``layer_a`` at two different
-    formats name two different files and are admitted -- the layout #1859
-    deliberately admits -- while the same pair at one format refuses.
-    Callers pass canonical formats; ``_check_rendered_cache_destinations``
-    canonicalizes the identity's ``"qname|FMT"`` pairs before delegating.
-    """
-    owners: dict[str, tuple[str, str]] = {}
-    for coordinate in sorted(
-        {(str(qname), str(fmt)) for qname, fmt in coordinates}
-    ):
-        filename = _cache_weight_filename(*coordinate)
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"{where}: coordinates {previous!r} and {coordinate!r} map "
-                f"to one rendered cache destination {filename!r}; the "
-                f"mangled leaf is not injective and the rendered shards "
-                f"would silently overwrite each other"
-            )
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -455,7 +405,7 @@ class ProductionWeightCache:
             for key, value in list(self.weights.items()):
                 if not isinstance(value, torch.Tensor):
                     continue
-                fname = _cache_weight_filename(key[0], key[1])
+                fname = cache_weight_filename(key[0], key[1])
                 if (cache_dir / fname).is_file():
                     self.weights[key] = fname
                     compacted += 1
@@ -2111,7 +2061,7 @@ def _store_rendered_weight_entry(
         preserve_fp32=preserve_fp32,
     )
     if cache_dir_path is not None:
-        fname = _cache_weight_filename(qname, fmt)
+        fname = cache_weight_filename(qname, fmt)
         final_path = cache_dir_path / fname
         # Per-process staging: a fan-out that re-renders a cell another writer
         # is publishing must not share its inode. The suffix adds exactly one
@@ -4257,7 +4207,7 @@ def _check_rendered_cache_destinations(
 
     The render-identity sidecars spell coordinates as ``"qname|FMT"`` pair
     strings; this is the pair-shaped entry into the one shared check next to
-    ``_cache_weight_filename``, which owns the rule.
+    ``cache_weight_filename``, which owns the rule.
     """
     from prismaquant import format_registry as fr
 
@@ -5901,7 +5851,7 @@ def fill_production_weight_cache(
         for q in list(qname_set):
             missing = {
                 f for f in render_formats_by_qname.get(q, ())
-                if not (cache_dir_path / _cache_weight_filename(q, f)).is_file()
+                if not (cache_dir_path / cache_weight_filename(q, f)).is_file()
             }
             missing_formats_by_qname[q] = missing
             if not missing:
@@ -6225,7 +6175,7 @@ def fill_production_weight_cache(
             # resume without re-doing the work — just rebuild the manifest
             # from the surviving .pt files.
             if cache_dir_path is not None:
-                fname = _cache_weight_filename(qname, fmt_key)
+                fname = cache_weight_filename(qname, fmt_key)
                 disk_path = cache_dir_path / fname
                 if disk_path.is_file():
                     weights[(qname, fmt_key)] = fname
@@ -7532,7 +7482,7 @@ def fill_packed_expert_cache_entries(
                 or not _has_render_score(full, fmt)
             )
         if cache_dir_path is not None:
-            shard = cache_dir_path / _cache_weight_filename(full, fmt)
+            shard = cache_dir_path / cache_weight_filename(full, fmt)
             if shard.is_file():
                 return (
                     cache.activation_max_abs.get(full) is None
@@ -7661,7 +7611,7 @@ def fill_packed_expert_cache_entries(
     for idx, (experts_qname, mod, parent, pn, full, fmt) in enumerate(in_scope):
         key = (full, fmt)
         fname = (
-            _cache_weight_filename(full, fmt)
+            cache_weight_filename(full, fmt)
             if cache_dir_path is not None else None
         )
         shard_exists = (key in weights) or (

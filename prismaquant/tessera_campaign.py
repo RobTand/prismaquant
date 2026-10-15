@@ -1206,7 +1206,7 @@ def _campaign_wire_coordinates(cache, wire_dir):
 
 def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
     """Check actual rendered and wire destinations before either write."""
-    from .production_weight_cache import require_injective_cache_filenames
+    from .render_cache_paths import require_injective_cache_filenames
 
     coordinates = set(coordinates)
     if cache.cache_dir:

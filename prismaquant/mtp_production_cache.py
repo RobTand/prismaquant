@@ -35,8 +35,8 @@ from prismaquant.production_weight_cache import (
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
-    require_injective_cache_filenames,
 )
+from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_production_cache import _render_dense_layer
 
 

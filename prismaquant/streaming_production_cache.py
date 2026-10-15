@@ -60,8 +60,8 @@ from prismaquant.production_weight_cache import (
     _production_cache_source_sha256,
     fill_packed_expert_cache_entries,
     render_production_weight,
-    require_injective_cache_filenames,
 )
+from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_model import _build_streaming_context
 
 

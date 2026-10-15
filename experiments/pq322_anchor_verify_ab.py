@@ -23,7 +23,8 @@ def main():
     from prismaquant.joint_aura import prefetch_joint_cache
     from prismaquant.model_profiles import detect_profile
     from prismaquant.tessera_reader import load_declared_reader, _source_tree
-    from prismaquant.production_weight_cache import ProductionWeightCache, _cache_weight_filename
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import calibrated_maxima, verify_anchor_render
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -75,7 +76,7 @@ def main():
                            identity_sha256=manifest['identity_sha256'])
         for anchor in state['anchors']:
             fmt = anchor['format_name']; record = state['wire_records'][fmt]
-            render = Path(payload['provenance']['cache_dir']) / _cache_weight_filename(name, fmt)
+            render = Path(payload['provenance']['cache_dir']) / cache_weight_filename(name, fmt)
             cells[name, fmt] = dict(anchor=anchor, record=record,
                 wire=str(Path(payload['provenance']['wire_dir']) / record['file']),
                 render=str(render), render_file_sha256=cc.sha256(render))
