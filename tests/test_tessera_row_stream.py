@@ -849,3 +849,27 @@ def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
     assert demand(["--seed-checkpoint", "/seed"])["plan_bytes"] == 10 * 1024 ** 3
     assert demand(["--campaign-identity-threads", "2"])["plan_bytes"] == 1024 ** 3
     assert seen[-1]["campaign_identity_threads"] == 2
+
+
+def test_dispatcher_head_and_publication_reservation_follow_effective_cli(monkeypatch):
+    from prismaquant import autoscale
+    from tools import dispatch_tessera_campaign as dispatch
+    seen = []
+    def resource_plan(_model, **kwargs):
+        seen.append(kwargs)
+        return {'memory_bytes': 10 * 1024**3, 'stream_memory_bytes': 1024**3}
+    monkeypatch.setattr(autoscale, 'selected_anchor_resources', resource_plan)
+    census = {'unit_shapes': {'a': [3, 4]}, 'counts': {'a': 9}}
+    base = ['--streaming', '--capture-load-policy=' + json.dumps(LOAD_POLICY),
+            '--export-hessian-reference-policy=' + json.dumps(REFERENCE_POLICY),
+            '--max-rounds=1']
+    def demand(extra):
+        return dispatch._row_memory_demand({'model': '/source', 'cpus': 2,
+            'process_baseline_bytes': 0, 'campaign_argv': [*base, *extra]},
+            ['a'], census, selected_source=True)
+    assert demand(['--row-head', 'load-all', '--row-he=stream'])['plan_bytes'] == 1024**3
+    assert demand(['--row-he=load-all'])['plan_bytes'] == 10 * 1024**3
+    demand(['--publication-overlap-bytes', '0', '--publication-overlap-bytes=4096'])
+    assert seen[-1]['publication_overlap_bytes'] == 4096
+    demand(['--publication-overlap-bytes=0'])
+    assert seen[-1]['publication_overlap_bytes'] == 0

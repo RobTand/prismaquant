@@ -76,7 +76,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.campaign_data_manifests import (
     CAMPAIGN_BASE, POOL_BASE, UNITS_RE, RECORD_SIZE, Campaign,
-    argv_value, to_pool, read_optional_campaign_json as _json,
+    to_pool, read_optional_campaign_json as _json,
 )
 
 ARC_PATH = "/proc/spl/kstat/zfs/arcstats"

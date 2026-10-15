@@ -371,3 +371,17 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
         glm_data_manifests.check_manifest_bytes(
             b"x" * (glm_data_manifests.MAX_MANIFEST_BYTES + 1))
     assert glm_data_manifests.check_manifest_bytes(b"{}") == b"{}"
+
+
+def test_seed_readset_uses_the_last_equal_or_abbreviated_directory(tmp_path, shared_mount):
+    workspace, units, seed_dir = _workspace(tmp_path)
+    campaign = glm_data_manifests.Campaign(str(workspace))
+    row = _row(units, tmp_path / 'unused-first-seed', extra=[
+        '--seed-wire-d=' + str(seed_dir)])
+    manifest = glm_data_manifests.build_campaign_row_manifest(
+        campaign, 'row-0000', {'tool': 'test'}, row['argv'])
+    declared = {entry['path']: entry['bytes'] for entry in manifest['entries']}
+    assert manifest['annotations']['seed_wire_dir'] == str(seed_dir)
+    for name, size in SEED_WIRE.items():
+        assert declared[str(seed_dir / name)] == size
+    assert not any('unused-first-seed' in path for path in declared)

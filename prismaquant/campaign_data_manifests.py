@@ -14,6 +14,7 @@ import stat as statmod
 import subprocess
 
 from .render_cache_paths import cache_weight_filename
+from .tessera_campaign_cli import explicit_campaign_options
 from . import tessera_campaign_selection as _selection_owner
 from . import tessera_acquisition_inputs as _acquisition_owner
 from . import joint_prewarm_phases as _phase_module
@@ -27,8 +28,6 @@ POOL_BASE = "/storage_pool/shared/tessera-measurements/glm-canonical-census-2026
 UNITS_RE = re.compile(r"units/(row-\d{4}(?:-p\d{4})?)\.json")
 _POOL_LOCAL = os.path.isdir("/storage_pool/shared")
 RECORD_SIZE = 1 << 20
-SEED_CHECKPOINT_FLAG = "--seed-checkpoint"
-SEED_WIRE_DIR_FLAG = "--seed-wire-dir"
 
 
 def read_optional_campaign_json(path):
@@ -54,22 +53,6 @@ def to_pool(path: str) -> str:
     if path.startswith("/mnt/shared/"):
         return "/storage_pool/shared/" + path[len("/mnt/shared/"):]
     return path
-
-
-def argv_value(argv, flag: str) -> "str | None":
-    """The value a row's argv gives ``flag``, in either spelling, or None.
-
-    The last spelling wins, matching ``argparse``: a campaign that appends a
-    global ``--seed-checkpoint`` after a per-row one runs with the last.
-    """
-    items = [str(a) for a in argv]
-    found = None
-    for index, item in enumerate(items):
-        if item == flag and index + 1 < len(items):
-            found = items[index + 1]
-        elif item.startswith(flag + "="):
-            found = item[len(flag) + 1:]
-    return found
 
 
 def _seed_read_files(path: str) -> list[tuple[str, int]]:
@@ -327,8 +310,9 @@ class Campaign:
         """
         ckpt, wire_dir = None, None
         if argv is not None:
-            ckpt = argv_value(argv, SEED_CHECKPOINT_FLAG)
-            wire_dir = argv_value(argv, SEED_WIRE_DIR_FLAG)
+            options = explicit_campaign_options(argv)
+            ckpt = options.get('seed_checkpoint')
+            wire_dir = options.get('seed_wire_dir')
         if ckpt is None and wire_dir is None:
             seed = self.rows[row_id].get("seed") or {}
             ckpt, wire_dir = seed.get("checkpoint"), seed.get("wire_dir")
@@ -348,8 +332,9 @@ class Campaign:
 
     def acquisition_reads(self, argv):
         """Use the public bound-input owner; this read set is not an intake parser."""
-        path = None if argv is None else argv_value(argv, "--acquisition-request")
-        digest = None if argv is None else argv_value(argv, "--acquisition-request-sha256")
+        options = {} if argv is None else explicit_campaign_options(argv)
+        path = options.get('acquisition_request')
+        digest = options.get('acquisition_request_sha256')
         if path is None and digest is None:
             return []
         if not path or not digest:
@@ -490,6 +475,7 @@ def _producer_commit(tree: str) -> str:
 #: ``build_campaign_row_manifest``, the ``Campaign`` expansion it walks, and the
 #: shared path/phase rules it executes. Relative to the repository root.
 PRODUCER_SOURCES = ("prismaquant/campaign_data_manifests.py",
+                    "prismaquant/tessera_campaign_cli.py",
                     "prismaquant/tessera_campaign_selection.py",
                     "prismaquant/tessera_acquisition_inputs.py",
                     "prismaquant/render_cache_paths.py",
@@ -606,7 +592,8 @@ def build_campaign_row_manifest(campaign: Campaign, row_id: str, produced_by: di
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
                    "cumulative_bytes": plan["total_bytes"]})
-    named_seed_dir = None if argv is None else argv_value(argv, SEED_WIRE_DIR_FLAG)
+    options = {} if argv is None else explicit_campaign_options(argv)
+    named_seed_dir = options.get('seed_wire_dir')
     # The wire directory's own files, not the row's seed total: a row carries
     # ``--seed-checkpoint`` as well, and counting both together would let a
     # present checkpoint mask an empty wire directory -- the same silent zero
@@ -622,7 +609,7 @@ def build_campaign_row_manifest(campaign: Campaign, row_id: str, produced_by: di
         # read set, not an empty one, so it fails closed here rather than
         # warming nothing at 41 MB/s.
         raise SystemExit(
-            f"{row_id}: argv names {SEED_WIRE_DIR_FLAG} {named_seed_dir} but no "
+            f"{row_id}: argv names --seed-wire-dir {named_seed_dir} but no "
             "readable file was found there; refusing to declare a read set "
             "that omits the row's seed wire")
     for e in entries:
@@ -664,8 +651,7 @@ def build_campaign_row_manifest(campaign: Campaign, row_id: str, produced_by: di
             # The directory the row's argv named, so a reader can tell a row
             # that declared no seeds from one whose seed directory was empty
             # or unreadable when the manifest was built.
-            "seed_wire_dir": (None if argv is None
-                              else argv_value(argv, SEED_WIRE_DIR_FLAG)),
+            "seed_wire_dir": named_seed_dir,
             # Where one phase of the row's read ends and the next begins, as a
             # running byte sum over ``entries``.  The prewarm reader walks the
             # list in order and can stop at a byte budget, so a consumer that

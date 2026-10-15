@@ -226,3 +226,30 @@ def parse_campaign_arguments(argv: Sequence[str] | None = None, *,
                              description: str | None = None) -> argparse.Namespace:
     """Parse external CLI values; execution normalizes and binds requests next."""
     return campaign_argument_parser(description=description).parse_args(argv)
+
+
+def campaign_action_arguments(argv: Sequence[str]) -> list[str]:
+    """The campaign arguments after an action's last Python module invocation."""
+    items = [str(token) for token in argv]
+    if '-m' not in items:
+        raise ValueError('row argv runs no python module, so its demand cannot be derived')
+    index = len(items) - 1 - items[::-1].index('-m')
+    return items[index + 2:]
+
+
+def explicit_campaign_options(argv: Sequence[str]) -> dict[str, object]:
+    """Parse partial planning argv using execution's syntax and conversions.
+
+    Missing fields stay absent, including false/zero-valued explicit options.
+    The planner supplies model/output/cache paths outside shared campaign argv;
+    only those execution-only requirements are relaxed here.
+    """
+    parser = campaign_argument_parser()
+    for action in parser._actions:
+        if action.dest in {'model', 'out', 'cache_dir'}:
+            action.required = False
+        action.default = argparse.SUPPRESS
+    items = [str(token) for token in argv]
+    if items and not items[0].startswith('-'):
+        items = campaign_action_arguments(items)
+    return vars(parser.parse_args(items))

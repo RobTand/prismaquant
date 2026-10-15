@@ -9,6 +9,7 @@ import pytest
 
 @pytest.mark.parametrize('dependency', [
     'render_cache_paths.py',
+    'tessera_campaign_cli.py',
     'joint_prewarm_phases.py',
     'joint_replay_frontier.py',
     'joint_run_progress.py',

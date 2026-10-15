@@ -76,3 +76,35 @@ def test_bookend_binding_refuses_quantum_instead_of_guessing_a_phase():
     args = parse_campaign_arguments(BASE + ['--capture-chain', 'quantum'])
     with pytest.raises(ValueError, match='prep or join'):
         capture_chain_bookend_request(args)
+
+
+def test_explicit_planner_options_keep_absence_separate_from_zero_and_null():
+    from prismaquant.tessera_campaign_cli import explicit_campaign_options
+    assert explicit_campaign_options([]) == {}
+    parsed = explicit_campaign_options(['--seed=0', '--publication-overlap-bytes', '0',
+                                        '--capture-load-policy=null'])
+    assert parsed == {'seed': 0, 'publication_overlap_bytes': 0, 'capture_load_policy': None}
+    assert 'pinned_roster_only' not in parsed
+    assert explicit_campaign_options(['--row-he', 'load-all', '--row-head=stream']) == {
+        'row_head': 'stream'}
+
+
+def test_explicit_options_read_the_campaign_after_the_last_module_invocation():
+    from prismaquant.tessera_campaign_cli import explicit_campaign_options
+    action = ['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{}', '--',
+              'python3', '-u', '-m', 'prismaquant.tessera_campaign',
+              '--seed-checkpoint=actual-checkpoint', '--publication-overlap-bytes=4096']
+    assert explicit_campaign_options(action) == {
+        'seed_checkpoint': 'actual-checkpoint', 'publication_overlap_bytes': 4096}
+
+
+@pytest.mark.parametrize('option', ['--mod=other-checkpoint', '--out=other-cost',
+                                    '--deadline-seconds=0'])
+def test_spec_cannot_hide_dispatcher_owned_or_deadline_options_in_another_spelling(tmp_path, option):
+    import json
+    from tools import dispatch_tessera_campaign as dispatch
+    path = tmp_path / 'spec.json'
+    path.write_text(json.dumps({'model': 'm', 'cwd': str(tmp_path), 'python': 'python3',
+                               'env': {}, 'campaign_argv': [option]}))
+    with pytest.raises(RuntimeError, match='this tool owns per row|deadline-seconds'):
+        dispatch.load_spec(path)

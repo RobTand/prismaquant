@@ -116,6 +116,7 @@ from tools.tessera_campaign_namespace import (
     validate_namespace_request,
 )
 from prismaquant import campaign_data_manifests
+from prismaquant.tessera_campaign_cli import campaign_action_arguments, explicit_campaign_options
 from prismaquant.tessera_campaign_table import (
     CAMPAIGN_IDENTITY_SCHEMA,
     CAMPAIGN_SCOPE_KINDS,
@@ -460,12 +461,13 @@ def load_spec(path: Path) -> dict:
                  "--seed-wire-dir", "--capture-calibration-out",
                  "--calibration-cache", "--calibration-cache-sha256",
                  "--source-identity-cache", "--source-identity-cache-sha256"}
-    named = forbidden.intersection(spec["campaign_argv"])
+    options = explicit_campaign_options(spec["campaign_argv"])
+    named = {flag for flag in forbidden if flag[2:].replace('-', '_') in options}
     if named:
         raise RuntimeError(
             f"{path}: campaign_argv names {sorted(named)}, which this tool "
             "owns per row")
-    if "--deadline-seconds" in spec["campaign_argv"]:
+    if "deadline_seconds" in options:
         # The in-process deadline stops a run mid-round, in the sorted-key
         # order the round's pending list happens to have; two rows stopped that
         # way price different anchor sets than one run would have. A row's
@@ -634,7 +636,7 @@ def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
     gib = 1024 ** 3
     baseline, policy = _process_baseline(spec)
     margin = _guard_margin_bytes()
-    if "--streaming" in spec['campaign_argv']:
+    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
         resource = _streamed_resource_plan(spec, census, members,
                                            selected_source=selected_source)
         # A selected row that runs the streaming row head holds a window, not
@@ -666,75 +668,59 @@ def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
 
 def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
-    argv = spec['campaign_argv']
+    options = explicit_campaign_options(spec['campaign_argv'])
     baseline_bytes, baseline_policy = _process_baseline(spec)
-    def argument(name, default, convert=int):
-        return campaign_argv_argument(argv, name, default, convert)
     shapes = census.get('unit_shapes') or {}
     counts = census.get('counts') or {}
-    options = dict(
+    resource_options = dict(
         unit_shapes={n: shapes[n] for n in members}, counts=counts,
-        max_act_rows=argument('--max-act-rows', int(spec.get('max_act_rows', 512))),
-        cache_slots=argument('--streaming-cache-slots', 2),
-        prefetch_workers=argument('--streaming-prefetch-workers', 1),
+        max_act_rows=options.get('max_act_rows', int(spec.get('max_act_rows', 512))),
+        cache_slots=options.get('streaming_cache_slots', 2),
+        prefetch_workers=options.get('streaming_prefetch_workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)),
+                        options.get('streaming_cache_headroom_gb', 24.)),
         # Recorded beside ``memory_bytes``, never summed into it: the plan
         # stays pure phase deltas and the reservation is charged once, in
         # ``_row_memory_demand``, on the demand.
         process_baseline_bytes=baseline_bytes,
         process_baseline_policy=baseline_policy)
     if selected_source:
-        return selected_anchor_resources(spec['model'], **options,
-            anchor_batch_size=argument('--anchor-batch-size', 1),
-            source_snapshot_policy=argument('--source-snapshot-policy', 'whole-layer-v1', str),
+        return selected_anchor_resources(spec['model'], **resource_options,
+            anchor_batch_size=options.get('anchor_batch_size', 1),
+            source_snapshot_policy=options.get('source_snapshot_policy', 'whole-layer-v1'),
             # A scoped row (``--source-scope mtp``) is planned over its own
             # source, as its runner reads it (PQ #1316).
-            **({'source_scope': argument('--source-scope', None, str)}
-               if '--source-scope' in argv else {}),
+            **({'source_scope': options.get('source_scope', None)}
+               if 'source_scope' in options else {}),
             # The row's own campaign will hold this many host bytes of staged
             # artifacts, so the box that admits the row has to be told. A
             # dispatcher that planned without it would size a worker for a
             # campaign it is not about to run.
-            publication_overlap_bytes=argument('--publication-overlap-bytes', 0),
-            campaign_identity_bytes=argument('--campaign-identity-bytes', 0),
+            publication_overlap_bytes=options.get('publication_overlap_bytes', 0),
+            campaign_identity_bytes=options.get('campaign_identity_bytes', 0),
             # The campaign's default is the CPUs the row is admitted with,
             # which is the class's declared ``cpus`` demand.
-            campaign_identity_threads=argument('--campaign-identity-threads',
-                                               int(spec.get('cpus', 4))),
-            **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
-               if '--capture-load-policy' in argv else {}))
-    return streamed_calibration_resources(spec['model'], **options,
-        nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
-        capture_policy=argument('--streaming-capture-policy', 'legacy', str),
+            campaign_identity_threads=options.get('campaign_identity_threads', int(spec.get('cpus', 4))),
+            **(dict(capture_load_policy=options.get('capture_load_policy', None))
+               if 'capture_load_policy' in options else {}))
+    return streamed_calibration_resources(spec['model'], **resource_options,
+        nsamples=options.get('nsamples', 8), seqlen=options.get('seqlen', 512),
+        capture_policy=options.get('streaming_capture_policy', 'legacy'),
         # A streamed capture reads its source through a recording owner; the
         # plan reports the owner's retained clean pages beside, not in, its
         # memory demand (PQ #1896).
-        source_recording='--capture-calibration-out' in argv)
-
-
-def campaign_argv_argument(argv, name, default=None, convert=str):
-    """Read a row's explicit option, shared by admission and partition gates."""
-    return convert(argv[argv.index(name) + 1]) if name in argv else default
+        source_recording=bool(options.get('capture_calibration_out')))
 
 
 def _row_head_dependency(argv):
-    """What makes a selected row's argv run the load-all head, or ``None``.
-
-    The campaign's own rule (``tessera_row_stream.stream_head_dependency``)
-    applied to what argv can say. A checkpoint an earlier attempt leaves
-    behind is not a dependency: the row resumes it on the stream head, under
-    the same window plan this demand is derived from (PQ #1613).
-    """
+    """Apply the campaign's own head rule to the options it will execute."""
     from prismaquant.tessera_row_stream import stream_head_dependency
-
-    def value(name, default=None):
-        return campaign_argv_argument(argv, name, default)
+    options = explicit_campaign_options(argv)
     return stream_head_dependency(
-        row_head=value('--row-head', 'stream'), selected_source=True,
-        capture_load_policy='--capture-load-policy' in argv,
-        export_hessian_reference_policy='--export-hessian-reference-policy' in argv,
-        max_rounds=int(value('--max-rounds', 0)), seed_checkpoint=value('--seed-checkpoint'))
+        row_head=options.get('row_head', 'stream'), selected_source=True,
+        capture_load_policy=options.get('capture_load_policy'),
+        export_hessian_reference_policy=options.get('export_hessian_reference_policy'),
+        max_rounds=options.get('max_rounds', 0), seed_checkpoint=options.get('seed_checkpoint'))
 
 
 class DemandRefused(RuntimeError):
@@ -752,18 +738,17 @@ def _inner_campaign_argv(row: dict) -> list:
     the manifest while the spec that planned it did not
     (RobTand/prismaquant#522).
     """
-    argv = list(row.get("argv") or [])
-    if "-m" not in argv:
-        raise DemandRefused("row argv runs no python module, so its demand "
-                            "cannot be derived")
-    index = len(argv) - 1 - argv[::-1].index("-m")
-    return argv[index + 2:]
+    try:
+        return campaign_action_arguments(row.get('argv') or [])
+    except ValueError as error:
+        raise DemandRefused(str(error)) from error
 
 
 def _row_label(inner_argv: list, index: int) -> str:
     """The row id, taken from the selection file it names."""
-    if "--units" in inner_argv:
-        return Path(inner_argv[inner_argv.index("--units") + 1]).stem
+    options = explicit_campaign_options(inner_argv)
+    if options.get('units'):
+        return Path(options['units']).stem
     return f"row-{index:04d}"
 
 
@@ -772,16 +757,16 @@ def _units_members(inner_argv: list, *, census: dict, where: str) -> list:
     from prismaquant.tessera_campaign_selection import UNITS_SCHEMA_V3, load_unit_selection, selection_priced_units
     from prismaquant.tessera_campaign_table import expert_partition_members
 
-    selection = load_unit_selection(inner_argv[inner_argv.index("--units") + 1])
+    options = explicit_campaign_options(inner_argv)
+    selection = load_unit_selection(options['units'])
     select_anchor_groups(selection, census["anchor_groups"], where=where)
     if selection["schema"] == UNITS_SCHEMA_V3:
         from prismaquant.tessera_expert_projection import carried_units
         _source, records, stacks = carried_units(census["expert_projection"])
         expert_partition_members(selection, unit_records=records, stack_of=stacks,
-            rate_band=campaign_argv_argument(inner_argv, "--rate-band"),
-            max_rounds=campaign_argv_argument(inner_argv, "--max-rounds", 0, int),
-            seeded=any(flag in inner_argv for flag in (
-                "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+            rate_band=options.get('rate_band'),
+            max_rounds=options.get('max_rounds', 0),
+            seeded=any(options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member')))
     return sorted(selection_priced_units(selection)[0])
 
 
@@ -803,16 +788,16 @@ def verify_row_demand(spec: dict, census: dict, row: dict, *,
     """
     inner = _inner_campaign_argv(row)
     label = label or "row"
-    model = (inner[inner.index("--model") + 1] if "--model" in inner
-             else spec["model"])
+    options = explicit_campaign_options(inner)
+    model = options.get('model', spec['model'])
     row_spec = {**spec, "model": model, "campaign_argv": inner}
     try:
         members = (_units_members(inner, census=census, where=label)
-                   if "--units" in inner else sorted(census.get("counts") or {}))
+                   if options.get('units') else sorted(census.get("counts") or {}))
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:
         raise DemandRefused(f"{label}: invalid unit selection: {exc}") from exc
     demand = _row_memory_demand(row_spec, members, census,
-                                selected_source="--streaming" in inner)
+                                selected_source=options.get('streaming', False))
     gib = 1024 ** 3
     declared_gb = int(row["demand"]["mem_gb"])
     record = {"row": label, "declared_mem_gb": declared_gb,
@@ -1064,18 +1049,10 @@ def _row_is_bounded(argv: list[str]) -> bool:
     SAME environment. A legacy row that declares its own purge delay is not a
     bounded row and is not refused for a contract it does not fall under.
     """
-    policy_flag = '--streaming-capture-policy'
-    # ``--streaming-capture-policy`` takes a value, and a malformed argv that
-    # ends on the flag has no next element: reading it blindly raised
-    # IndexError, which is a crash rather than the refusal a malformed flag
-    # deserves. A flag with no value is not the bounded policy.
-    index = argv.index(policy_flag) if policy_flag in argv else None
-    named = (argv[index + 1] if index is not None and index + 1 < len(argv)
-             else None)
-    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv
-               or named == 'shared-inputs-bounded-v1')
-    return bounded or all(flag in argv for flag in
-        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
+    options = explicit_campaign_options(argv)
+    return (options.get('streaming_capture_policy') == 'shared-inputs-bounded-v1'
+            or all(options.get(field) for field in (
+                'streaming', 'units', 'calibration_cache', 'calibration_cache_sha256')))
 
 
 def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
@@ -1188,7 +1165,7 @@ def cmd_census(args) -> int:
         progress_phases=(),
     )
     manifest.write_text(json.dumps([row], indent=2) + "\n")
-    if '--streaming' in spec['campaign_argv']:
+    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
         (workspace/'census-resources.json').write_text(json.dumps(
             _streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)+'\n')
     print(f"[dispatch] census manifest {manifest}")
@@ -1219,7 +1196,7 @@ def cmd_capture(args) -> int:
         # anchor-counter reports.
         progress_phases=())
     manifest.write_text(json.dumps([row], indent=2) + "\n")
-    if '--streaming' in spec['campaign_argv']:
+    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
         (workspace/'capture-resources.json').write_text(json.dumps(
             _streamed_resource_plan(spec, census, sorted(census['counts'])),
             indent=2, sort_keys=True)+'\n')
@@ -1483,17 +1460,15 @@ def _source_identity_cache_binding(path, model, calibration_cache=None):
     return dict(path=str(path), sha256=proof_sha256)
 
 
-def _row_is_selected_source(inner_argv: list) -> bool:
+def _row_is_selected_source(options: dict[str, object]) -> bool:
     """Whether a campaign row reuses a hash-bound selected capture.
 
     ``tessera_campaign``'s own ``selected_source``: streaming, a unit
     selection and a bound capture, and neither census nor capture output.
     """
-    return ("--streaming" in inner_argv and "--units" in inner_argv
-            and "--calibration-cache" in inner_argv
-            and "--calibration-cache-sha256" in inner_argv
-            and "--census-out" not in inner_argv
-            and "--capture-calibration-out" not in inner_argv)
+    return bool(options.get('streaming') and options.get('units')
+                and options.get('calibration_cache') and options.get('calibration_cache_sha256')
+                and not (options.get('census_out') or options.get('capture_calibration_out')))
 
 
 def require_source_identity_proofs(rows: list) -> None:
@@ -1506,7 +1481,8 @@ def require_source_identity_proofs(rows: list) -> None:
     missing = []
     for index, row in enumerate(rows):
         inner = _inner_campaign_argv(row)
-        if _row_is_selected_source(inner) and "--source-identity-cache" not in inner:
+        options = explicit_campaign_options(inner)
+        if _row_is_selected_source(options) and not options.get('source_identity_cache'):
             missing.append(_row_label(inner, index))
     if missing:
         raise DemandRefused(
@@ -1651,20 +1627,14 @@ def _campaign_acquisition_argv(argv):
         raise RuntimeError("acquisition flags must use their complete declared names")
     if not any(token in names for token in tokens):
         return None
-    parser = argparse.ArgumentParser(add_help=False)
-    for name in ("acquisition-request", "acquisition-request-sha256", "menu-mode", "rate-band",
-                 "census-out", "capture-calibration-out", "capture-chain", "research-exact-member"):
-        parser.add_argument("--" + name, default=None)
-    parser.add_argument("--max-rounds", type=int, default=0)
-    parser.add_argument("--exhaustive-rate-grid", action="store_true")
-    options, _ = parser.parse_known_args(argv)
-    binding = (options.acquisition_request, options.acquisition_request_sha256)
+    values = explicit_campaign_options(argv)
+    binding = (values.get('acquisition_request'), values.get('acquisition_request_sha256'))
     if all(value is None for value in binding):
         return None
-    if (not all(binding) or options.menu_mode != "research" or options.max_rounds != 1
-            or options.rate_band is not None or options.exhaustive_rate_grid
-            or options.census_out or options.capture_calibration_out or options.capture_chain
-            or options.research_exact_member is not None):
+    if (not all(binding) or values.get('menu_mode', None) != "research" or values.get('max_rounds', 0) != 1
+            or values.get('rate_band', None) is not None or values.get('exhaustive_rate_grid', False)
+            or values.get('census_out', None) or values.get('capture_calibration_out', None) or values.get('capture_chain', None)
+            or values.get('research_exact_member', None) is not None):
         raise RuntimeError("acquisition rows require paired binding, explicit research/max-rounds=1 and no band/exhaustive/capture/partial modes")
     return {"path": binding[0], "sha256": binding[1]}
 
@@ -1713,7 +1683,8 @@ def cmd_plan(args) -> int:
     acquisition, acquisition_binding = _planned_campaign_acquisition(spec, args, census)
     calibration_cache = _calibration_cache_binding(
         getattr(args, "calibration_cache", None), workspace / "census.json")
-    selected_source = '--streaming' in spec['campaign_argv']
+    spec_options = explicit_campaign_options(spec['campaign_argv'])
+    selected_source = spec_options.get('streaming', False)
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
     proof = _planned_source_identity_cache(
@@ -1751,15 +1722,14 @@ def cmd_plan(args) -> int:
     partition_records, partition_stacks = {}, {}
     if experts_per_row:
         from prismaquant.tessera_campaign_table import parse_rate_band
-        band = parse_rate_band(campaign_argv_argument(spec["campaign_argv"], "--rate-band"))
+        band = parse_rate_band(spec_options.get('rate_band'))
         if (type(experts_per_row) is not int or experts_per_row <= 0
                 or args.groups_per_row != 1 or getattr(args, "row_work_profile", None)
                 or args.stack_sample is not None or getattr(args, "seed_workspace", None)
                 or args.seed_checkpoint or args.seed_wire_dir
-                or any(flag in spec["campaign_argv"] for flag in (
-                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member"))
+                or any(spec_options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member'))
                 or band is None or band[0] != band[1]
-                or campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int) != 1):
+                or spec_options.get('max_rounds', 0) != 1):
             raise RuntimeError("expert partition requires positive size, groups-per-row=1, pinned band, max-rounds=1, no sampling/seeds/work-profile")
         from prismaquant.tessera_expert_projection import carried_units
         _source, partition_records, partition_stacks = carried_units(census["expert_projection"])
@@ -1843,8 +1813,8 @@ def cmd_plan(args) -> int:
         from prismaquant.tessera_campaign_selection import selection_priced_units
         if part is not None:
             expert_partition_members(selection, unit_records=partition_records,
-                stack_of=partition_stacks, rate_band=campaign_argv_argument(spec["campaign_argv"], "--rate-band"),
-                max_rounds=campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int))
+                stack_of=partition_stacks, rate_band=spec_options.get('rate_band'),
+                max_rounds=spec_options.get('max_rounds', 0))
         members = sorted(selection_priced_units(selection)[0])
         if acquisition is not None:
             from prismaquant.tessera_campaign_table import campaign_acquisition_row_scope
@@ -1884,11 +1854,11 @@ def cmd_plan(args) -> int:
                    timeout_s=(None if args.timeout_s is None else int(args.timeout_s)))
         if part is not None:
             effective_argv = _inner_campaign_argv(row)
+            effective_options = explicit_campaign_options(effective_argv)
             expert_partition_members(selection, unit_records=partition_records,
-                stack_of=partition_stacks, rate_band=campaign_argv_argument(effective_argv, "--rate-band"),
-                max_rounds=campaign_argv_argument(effective_argv, "--max-rounds", 0, int),
-                seeded=any(flag in effective_argv for flag in (
-                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+                stack_of=partition_stacks, rate_band=effective_options.get('rate_band'),
+                max_rounds=effective_options.get('max_rounds', 0),
+                seeded=any(effective_options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member')))
         if acquisition is not None:
             _check_acquisition_binding(_campaign_acquisition_argv(_inner_campaign_argv(row)),
                 acquisition_binding, refusal=RuntimeError, where="acquisition row argv")
