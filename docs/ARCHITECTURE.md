@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: validation's surrogate diagnostic uses the shared
+row estimator with supplied probe sensitivity, unit gains, no family transfer,
+no uncertainty hedge and ordinary output MSE. It labels this unadjusted estimate
+explicitly and withholds an incomplete sum. Raw recorded price fields remain
+separate; the diagnostic does not claim an exact DP objective replay.
+
 Re-stamped 2026-10-15: `CandidateBuild` returns candidates and explicit owned
 cost rows. Admitted canonical chord rows and synthesized source prices flow to
 aggregation and selected quality metadata through these rows, replacing hidden

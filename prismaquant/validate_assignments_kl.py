@@ -205,12 +205,22 @@ def _lookup_cost_entry(costs: Mapping, name: str, fmt: str) -> Mapping | None:
 def _assignment_cost_summary(
     costs: Mapping,
     assignment: Mapping[str, str],
+    *, stats: Mapping,
 ) -> dict[str, object]:
     """Summarize local cost-table MSE for an assignment.
 
     These are local render/probe metrics, not end-to-end KL.  BF16 entries are
     counted as zero-error because they preserve the original Linear weights.
+    The row-price estimate uses the shared estimator with unit gains, no family
+    transfer, no UCB hedge and ordinary output MSE. It is not a replay of the
+    allocator's recorded clipping, calibration or grouped objective.
     """
+    from .per_row_pricing import price_row
+    from .priced_cell import CostPricingPolicy, cost_entry_prices_unmeasured_activation_at_zero
+
+    policy = CostPricingPolicy(ucb_z=0.0, fisher_output_mse=False)
+    prices: list[float] = []
+    price_missing: list[str] = []
     sums = {
         "weight_mse": 0.0,
         "output_mse": 0.0,
@@ -232,10 +242,21 @@ def _assignment_cost_summary(
         fmt = fr.canonical_format_name(str(raw_fmt).strip().upper())
         format_counts[fmt] += 1
         if fmt == "BF16":
+            prices.append(0.0)
             for key in ("weight_mse", "output_mse", "rel_output_mse"):
                 counts[key] += 1
             continue
         entry = _lookup_cost_entry(costs, str(name), fmt)
+        try:
+            price = price_row(str(name), fmt, stats[str(name)], costs.get(str(name), {}),
+                activation_pricing=None, pricing_policy=policy)
+            if entry is not None and cost_entry_prices_unmeasured_activation_at_zero(
+                    stats[str(name)], entry, max(price, 0.0), fmt):
+                price_missing.append(str(name))
+            else:
+                prices.append(price)
+        except KeyError:
+            price_missing.append(str(name))
         if entry is None:
             missing.append(str(name))
             continue
@@ -255,6 +276,9 @@ def _assignment_cost_summary(
         key: (sums[key] / counts[key] if counts[key] else None)
         for key in sums
     }
+    recorded_predicted_count = counts["predicted_dloss"]
+    counts["predicted_dloss"] = len(prices)
+    estimated_price = sum(prices) if not price_missing else None
     return {
         "objective": "local_cost_table_mse",
         "weight_mse_sum": float(sums["weight_mse"]),
@@ -265,8 +289,15 @@ def _assignment_cost_summary(
         "fisher_output_mse_mean": means["fisher_output_mse"],
         "rel_output_mse_sum": float(sums["rel_output_mse"]),
         "rel_output_mse_mean": means["rel_output_mse"],
-        "predicted_dloss_sum": float(sums["predicted_dloss"]),
-        "predicted_dloss_mean": means["predicted_dloss"],
+        "predicted_dloss_sum": estimated_price,
+        "predicted_dloss_mean": (estimated_price / len(prices)
+                                 if estimated_price is not None and prices else None),
+        "predicted_dloss_basis": "unadjusted_cost_row_estimate",
+        "recorded_predicted_dloss_sum": (float(sums["predicted_dloss"])
+                                         if recorded_predicted_count else None),
+        "recorded_predicted_dloss_count": recorded_predicted_count,
+        "price_missing_count": len(price_missing),
+        "price_missing_sample": price_missing[:8],
         "counts": dict(counts),
         "formats": dict(format_counts),
         "missing_count": int(len(missing)),
@@ -1650,7 +1681,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "operator_non_tensor_reserve"
                 )
             if costs is not None:
-                result["mse"] = _assignment_cost_summary(costs, assignment)
+                result["mse"] = _assignment_cost_summary(costs, assignment, stats=stats)
             if cache_diagnostics is not None:
                 result["production_cache_diagnostics"] = cache_diagnostics
             if prefetch_stats is not None:
@@ -1659,9 +1690,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             mse_msg = ""
             if costs is not None:
                 mse = result["mse"]
+                price_text = (f"{mse['predicted_dloss_sum']:.6g}"
+                              if mse["predicted_dloss_sum"] is not None else "unavailable")
                 mse_msg = (
                     f" output_mse={mse['output_mse_sum']:.6g}"
-                    f" pred_dloss={mse['predicted_dloss_sum']:.6g}"
+                    f" unadjusted_row_dloss={price_text}"
                     f" mse_missing={mse['missing_count']}"
                 )
             print(
