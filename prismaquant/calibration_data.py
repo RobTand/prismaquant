@@ -462,14 +462,14 @@ def load_calibration(tokenizer, source: str, n_samples: int,
     if calib_seed != 42:
         rng_shuffle = random.Random(calib_seed)
         rng_shuffle.shuffle(texts)
-    random.seed(calib_seed)
+    rng = random.Random(calib_seed)
     samples = []
     used_documents = set()
     for document, t in enumerate(texts):
         ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
         if ids.size(1) < seqlen:
             continue
-        start = random.randint(0, ids.size(1) - seqlen)
+        start = rng.randint(0, ids.size(1) - seqlen)
         samples.append(ids[0, start:start + seqlen])
         used_documents.add(document)
         if len(samples) >= n_samples:
@@ -518,8 +518,7 @@ class CalibrationRequest:
         return cls(
             source=args.dataset, n_samples=int(args.n_calib_samples),
             seqlen=int(args.calib_seqlen), repeats=max(int(args.calib_repeats), 1),
-            seed=(int(getattr(args, "calib_seed", 42) or 42) if args.dataset
-                  else int(args.calib_seed)),
+            seed=int(getattr(args, "calib_seed", 42)),
             skip_first=max(int(getattr(args, "calib_skip_first", 0) or 0), 0),
             split=args.calib_split, repeat_seed_stride=int(args.calib_repeat_seed_stride),
         )

@@ -8,6 +8,10 @@ Re-stamped 2026-10-14: seven prototypes reachable only from their own tests
 were retired: proposal comparison, propagated-sensitivity coverage, shard
 layout/progress, quality-ceiling selection and two Tessera coverage/repair
 ledgers. Current execution and admission paths have no callers to these modules.
+Re-stamped 2026-10-15: explicit calibration seed zero reaches the sampler
+unchanged. Corpus sampling uses its own seeded RNG and preserves the caller's
+random state; nonzero-seed window selection retains the same algorithm.
+
 Re-stamped 2026-10-15: a requested holdout checks that the separately requested
 fit draw equals the captured draw's prefix. An unstable prefix refuses before
 model loading. Lazy expert rendering reuses that captured prefix. This check
