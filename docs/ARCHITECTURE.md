@@ -92,6 +92,13 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): campaign
+readset producer provenance also binds its shared rendered-cache filename and
+joint phase/replay owners. Their actual bytes derive declared paths and read
+order. The existing producer-source digest keeps its exact path/length/NUL
+framing; its source inventory now includes these four executed dependencies.
+Readset schema, operation labels and admission policy remain unchanged.
+
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_wire` owns canonical wire destinations, cache-owned coordinate
 reservation, seed adoption and producer byte receipts. Campaign pricing,

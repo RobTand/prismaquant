@@ -487,11 +487,15 @@ def _producer_commit(tree: str) -> str:
 
 
 #: The source files whose code derives a row's read set: this module's
-#: ``build_campaign_row_manifest`` and the ``Campaign`` expansion it walks.  Relative to the
-#: repository root.
+#: ``build_campaign_row_manifest``, the ``Campaign`` expansion it walks, and the
+#: shared path/phase rules it executes. Relative to the repository root.
 PRODUCER_SOURCES = ("prismaquant/campaign_data_manifests.py",
                     "prismaquant/tessera_campaign_selection.py",
                     "prismaquant/tessera_acquisition_inputs.py",
+                    "prismaquant/render_cache_paths.py",
+                    "prismaquant/joint_prewarm_phases.py",
+                    "prismaquant/joint_replay_frontier.py",
+                    "prismaquant/joint_run_progress.py",
                     "prismaquant/digests.py", "prismaquant/file_identity.py",
                     "prismaquant/schemas.py")
 
