@@ -262,6 +262,13 @@ existing policy-derived CPU/host/GPU demand and the ordered PB envelope.
 These values contain admitted bindings, not readers or runtime callbacks.
 The dispatcher still performs every file/readset/projection/scratch admission
 before building the row and retains the container/gateway adapters.
+`StreamingContext.walk_layers` owns ordinary whole-forward opening and successor
+prefetch, install and block release through its existing Future/LayerCache owners.
+The streamed runner's ordinary forward/capture and expert format-fork forward use
+installed block scopes; borrowed runner pins remain installed until their owner
+releases them. Block exit precedes progress and memory observations. Selected
+snapshots, layer-major capture and Joint sealed source-phase walks retain their
+special prefetch, settlement, page and release policies.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.

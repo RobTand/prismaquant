@@ -15,6 +15,7 @@ import prismaquant.aura_cost as aura
 import prismaquant.expert_empirical_cost as expert_cost
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streaming_model import StreamingContext
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
 from prismaquant.model_profiles.default import DefaultProfile
@@ -22,6 +23,8 @@ from prismaquant.model_profiles.default import DefaultProfile
 
 class _FakeStreamingContext:
     """Logical one-layer residency context for exact CPU contract tests."""
+
+    walk_layers = StreamingContext.walk_layers
 
     def __init__(self, model):
         self.model = model

@@ -36,7 +36,7 @@ import threading
 import time
 from contextlib import contextmanager
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
-from typing import Any
+from typing import Any, Iterator
 from pathlib import Path
 
 import torch
@@ -644,6 +644,26 @@ def _is_prefetch_availability(exc: BaseException) -> bool:
     return isinstance(exc, StagedRangeNotLanded)
 
 
+class InstalledBlock:
+    """One installed block's lifetime, borrowed when the runner pins it."""
+
+    def __init__(self, context, layer: int, source: str | None, *, owned: bool):
+        self.layer = layer
+        self.source = source
+        self._context = context if owned else None
+
+    def __enter__(self):
+        return self
+
+    def close(self) -> None:
+        context, self._context = self._context, None
+        if context is not None:
+            context.unload(self.layer)
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+
+
 class StreamingContext:
     def __init__(self, *, model, base_model, layers, layers_prefix: str,
                  num_layers: int, install_resolvers: list[dict],
@@ -1172,6 +1192,37 @@ class StreamingContext:
     def unload(self, L: int, *, trim_cache: bool = True):
         _unload(self.model, [f"{self.layers_prefix}{L}."])
         return self.layer_cache.trim_for_memory_pressure() if trim_cache else 0
+
+    @contextmanager
+    def walk_layers(self, order: range, *, prefetch_lookahead: int,
+                    require_prefetched: bool = False,
+                    pinned_layer: int | None = None) -> Iterator[Iterator[InstalledBlock]]:
+        """Own an ordinary sequential walk through the existing source cache.
+
+        A block scope closes before post-work progress or memory observations.
+        The walk also closes its current block on early break or an exception.
+        Sealed source-phase and selected-snapshot walks retain their own policy.
+        """
+        for depth in range(prefetch_lookahead):
+            self.schedule_prefetch(order.start + depth * order.step)
+
+        def blocks():
+            for layer in order:
+                owned = layer != pinned_layer
+                source = (self.install(layer, require_prefetched=require_prefetched)
+                          if owned else None)
+                self.schedule_prefetch(layer + prefetch_lookahead * order.step)
+                block = InstalledBlock(self, layer, source, owned=owned)
+                try:
+                    yield block
+                finally:
+                    block.close()
+
+        walk = blocks()
+        try:
+            yield walk
+        finally:
+            walk.close()
 
     def source_files_by_layer(self) -> dict[int, frozenset[str]]:
         """``{layer: source files its read opens}``: its weights' and FP8 scales' shards.

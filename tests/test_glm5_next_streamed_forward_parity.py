@@ -25,7 +25,7 @@ semantics).
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 
@@ -39,6 +39,7 @@ glm5 = pytest.importorskip(
 
 from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant.cost_streaming import StreamedCausalLM  # noqa: E402
+from prismaquant.streaming_model import StreamingContext  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 
 
@@ -178,6 +179,7 @@ def _streamed_runner(model):
         unload=lambda layer: None,
         schedule_prefetch=lambda layer: None,
     )
+    context.walk_layers = MethodType(StreamingContext.walk_layers, context)
     return StreamedCausalLM(
         context,
         Glm5NextProfile(),

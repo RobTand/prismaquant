@@ -1364,54 +1364,46 @@ def measure_expert_unit_costs_forked(
         for f_i, fmt in enumerate(measured_fmts):
             t_pass0 = time.time()
             forks: dict[str, torch.Tensor] = {}
-            for depth in range(runner.prefetch_lookahead):
-                runner.context.schedule_prefetch(depth)
-            for layer in range(num_layers):
-                runner.context.install(
-                    layer,
-                    require_prefetched=runner.require_prefetched_residency,
-                )
-                runner.context.schedule_prefetch(
-                    layer + runner.prefetch_lookahead
-                )
-                try:
-                    # Advance every existing fork through this live layer
-                    # BEFORE forking at it, so a new fork's hidden is not
-                    # double-advanced.
-                    for qn in list(forks):
-                        forks[qn] = runner.isolated_layer(
-                            batch, layer, forks[qn], pass_state=None
-                        )
-                    for qn in pending:
-                        if layer_of[qn] != layer:
-                            continue
-                        forks[qn] = _fork_quantized_unit(
-                            runner,
-                            batch,
-                            layer,
-                            kind_by_qname[qn],
-                            unit_by_qname[qn],
-                            qn,
-                            fmt,
-                            profile=profile,
-                            expert_chunk=expert_chunk,
-                            col_weights=weights,
-                            rows_meta=rows_meta,
-                        )
-                        torch.cuda.empty_cache()
-                finally:
-                    runner.context.unload(layer)
-                if progress and (
-                    layer % 5 == 4 or layer == num_layers - 1
-                ):
-                    avail, swap = _avail_swap_gb()
-                    rate = (time.time() - t_pass0) / (layer + 1)
-                    eta_min = rate * (num_layers - layer - 1) / 60.0
-                    _log(f"fork pass {fmt} ({f_i + 1}/"
-                         f"{len(measured_fmts)}): layer "
-                         f"{layer + 1}/{num_layers}, {len(forks)} forks "
-                         f"live, avail {avail:.0f}G swap {swap:.1f}G, "
-                         f"~{eta_min:.0f} min left in pass")
+            with runner.context.walk_layers(
+                    range(num_layers), prefetch_lookahead=runner.prefetch_lookahead,
+                    require_prefetched=runner.require_prefetched_residency) as walk:
+                for block in walk:
+                    with block:
+                        layer = block.layer
+                        # Advance existing forks before creating this layer's
+                        # fork, so its hidden state is advanced exactly once.
+                        for qn in list(forks):
+                            forks[qn] = runner.isolated_layer(
+                                batch, layer, forks[qn], pass_state=None
+                            )
+                        for qn in pending:
+                            if layer_of[qn] != layer:
+                                continue
+                            forks[qn] = _fork_quantized_unit(
+                                runner,
+                                batch,
+                                layer,
+                                kind_by_qname[qn],
+                                unit_by_qname[qn],
+                                qn,
+                                fmt,
+                                profile=profile,
+                                expert_chunk=expert_chunk,
+                                col_weights=weights,
+                                rows_meta=rows_meta,
+                            )
+                            torch.cuda.empty_cache()
+                    if progress and (
+                        layer % 5 == 4 or layer == num_layers - 1
+                    ):
+                        avail, swap = _avail_swap_gb()
+                        rate = (time.time() - t_pass0) / (layer + 1)
+                        eta_min = rate * (num_layers - layer - 1) / 60.0
+                        _log(f"fork pass {fmt} ({f_i + 1}/"
+                             f"{len(measured_fmts)}): layer "
+                             f"{layer + 1}/{num_layers}, {len(forks)} forks "
+                             f"live, avail {avail:.0f}G swap {swap:.1f}G, "
+                             f"~{eta_min:.0f} min left in pass")
             for qn in pending:
                 logits = runner.tail_logits(batch, forks.pop(qn))
                 total = 0.0

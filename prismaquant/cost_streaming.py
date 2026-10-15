@@ -359,27 +359,20 @@ class StreamedCausalLM:
             resource_check(batch, pass_state)
         batch.activations_cpu.append(hidden.detach().to("cpu") if boundary_writer is None
                                      else boundary_writer(0, hidden))
-        for depth in range(self.prefetch_lookahead):
-            self.context.schedule_prefetch(depth)
-        for layer in range(self.num_layers):
-            if self._pinned_layer != layer:
-                self.context.install(
-                    layer,
-                    require_prefetched=self.require_prefetched_residency,
-                )
-            self.context.schedule_prefetch(layer + self.prefetch_lookahead)
-            try:
-                with torch.no_grad():
-                    hidden = self._call(
-                        layer, hidden, batch=batch, pass_state=pass_state
-                    )
-                if resource_check is not None:
-                    resource_check(batch, pass_state)
-                batch.activations_cpu.append(hidden.detach().to("cpu") if boundary_writer is None
-                                             else boundary_writer(layer + 1, hidden))
-            finally:
-                if self._pinned_layer != layer:
-                    self.context.unload(layer)
+        with self.context.walk_layers(
+                range(self.num_layers), prefetch_lookahead=self.prefetch_lookahead,
+                require_prefetched=self.require_prefetched_residency, pinned_layer=self._pinned_layer) as walk:
+            for block in walk:
+                with block:
+                    layer = block.layer
+                    with torch.no_grad():
+                        hidden = self._call(
+                            layer, hidden, batch=batch, pass_state=pass_state
+                        )
+                    if resource_check is not None:
+                        resource_check(batch, pass_state)
+                    batch.activations_cpu.append(hidden.detach().to("cpu") if boundary_writer is None
+                                                 else boundary_writer(layer + 1, hidden))
         batch.shared_pass_state = self.profile.capture_forward_pass_state(
             pass_state
         )
@@ -431,22 +424,15 @@ class StreamedCausalLM:
             shared_pass_state=None,
         )
         pass_state = self.profile.new_forward_pass_state()
-        for depth in range(self.prefetch_lookahead):
-            self.context.schedule_prefetch(depth)
-        for layer in range(self.num_layers):
-            if self._pinned_layer != layer:
-                self.context.install(
-                    layer,
-                    require_prefetched=self.require_prefetched_residency,
-                )
-            self.context.schedule_prefetch(layer + self.prefetch_lookahead)
-            try:
-                hidden = self._call(
-                    layer, hidden, batch=batch, pass_state=pass_state
-                )
-            finally:
-                if self._pinned_layer != layer:
-                    self.context.unload(layer)
+        with self.context.walk_layers(
+                range(self.num_layers), prefetch_lookahead=self.prefetch_lookahead,
+                require_prefetched=self.require_prefetched_residency, pinned_layer=self._pinned_layer) as walk:
+            for block in walk:
+                with block:
+                    layer = block.layer
+                    hidden = self._call(
+                        layer, hidden, batch=batch, pass_state=pass_state
+                    )
         return SimpleNamespace(logits=self.tail_logits(batch, hidden))
 
     def shutdown(self) -> None:
