@@ -82,7 +82,7 @@ NOT_TENSORS = [None, [1.0, 2.0], 3, "tensor"]
 # Identity dicts: ``{dtype, shape, sha256}`` and ``{shape, dtype, sha256}``.
 # ---------------------------------------------------------------------------
 IDENTITY_SITES = [
-    "prismaquant.sample_parallel_probe_merge._tensor_identity",
+    "prismaquant.tensor_digests.tensor_identity",
     "prismaquant.expert_empirical_cost._tensor_value_stamp",
 ]
 

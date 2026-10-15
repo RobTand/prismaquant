@@ -38,7 +38,6 @@ from prismaquant import (
     quality_prefill_pb_adapter,
     quality_prefill_screen,
     runtime_provenance,
-    sample_parallel_probe,
     schemas,
     tessera_anchored_surface,
     tessera_campaign,
@@ -77,7 +76,6 @@ TEXT_LOADERS = {
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
     "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
-    "sample_parallel_probe": lambda text: sample_parallel_probe._strict_json_loads(text, where="probe"),
     "tessera_campaign": campaign_table.parse_family_restriction,
 }
 

@@ -16,6 +16,15 @@ Re-stamped 2026-10-15: `CandidateBuild` returns candidates and explicit owned
 cost rows. Admitted canonical chord rows and synthesized source prices flow to
 aggregation and selected quality metadata through these rows, replacing hidden
 canonical price/quality maps on probe stats. Callers migrate directly.
+Re-stamped 2026-10-15: sample-parallel producer and reducer execution, their
+five offline manual commands, and the uncalled resident whole-model probe are
+archived at `archive/sample_parallel_probe_2026-10-15/`. The incremental CLI
+keeps its early retirement refusal. `sample_parallel_artifacts` owns the unchanged
+recorded source-census, dense-stat, digest and activation-priority contracts read
+by existing shard/precompute reuse. Body, MTP and visual computations retain
+their separate tapes, objectives and source lifetimes. No stage, calibration,
+format, lane, cache, export or serving default changes.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
 
 Re-stamped 2026-10-15: allocation captures the UCB and Fisher-output pricing
 policy once at its CLI boundary and shares it with activation calibration, body,
@@ -3306,8 +3315,8 @@ Re-stamped 2026-09-29 (PQ #1392/#1532, `sonnet/1392-refusals-declared-reads`):
 **the #1374 uncovered-source refusal now guards every GPU entry point that
 builds a source identity, and the source-identity cache flags no longer enter
 the campaign checkpoint identity.** Stage B (`joint_cost_quantum`), Stage A
-(`joint_cost_stage_a`) and the sample-parallel workers
-(`sample_parallel_probe prepare-worker-source-cache`) pass
+(`joint_cost_stage_a`) and the historical, now archived sample-parallel workers
+(`archive/sample_parallel_probe_2026-10-15/`) passed
 `tessera_joint_aura.source_identity_proof_kwargs(model, ...)` to
 `build_streamed_model_identity`, so a row that holds neither an identity cache
 nor a digest proof covering every shard refuses before hashing a byte, with the
@@ -8330,7 +8339,7 @@ tensor's host-byte recipe (`detach().to("cpu").contiguous()` viewed as
 `uint8`) in four profiles: `tensor_host_bytes`, `tensor_identity`
 (`{dtype, shape, sha256}`), `tensor_value_stamp` (`{shape, dtype, sha256}`
 after `torch.as_tensor`) and `tensor_hash_update` (the calibration content
-hash). `sample_parallel_probe_merge`, `measure_quant_cost`'s verified loader,
+hash). The archived `sample_parallel_probe_merge`, `measure_quant_cost`'s verified loader,
 `expert_empirical_cost`, `perturbed_x_cache`, `prismasnap_checkpoint` and,
 through a lazy import, `tessera_export_lane` hash through it; every site keeps
 its name and key order. `tests/test_tensor_digests_1384.py` now uses explicit
@@ -21394,7 +21403,7 @@ which is what the rows touched since are keyed on.
 | **PLANNED → MATERIALIZED (optional, pre-pipeline; ×2)** | Stream disjoint original shard sets through the merged transform program, transfer the remote part by explicit receipt, then exact-union on the coordinator. The strict 27B low-space arm requires hardlinks and proves device/inode identity in staging and after commit | `tools/prismasnap.py materialize-part --resume`; `merge-checkpoint-parts --resume --require-hardlinks` | two `part.json` directories with per-shard receipts; atomically committed BF16 HF checkpoint + `prismasnap_provenance.json` state `MATERIALIZED` | plan/source/header identity; exact disjoint source-shard cover; source/output hash, size, tensor shape/dtype and transform census per shard; same-filesystem hardlink proof; producer/container attestation on the merge as well as on each part; fsynced no-clobber staging and committed-tree replay | still outside `run-pipeline.sh`; `MATERIALIZED` is not downstream admission |
 | **MATERIALIZED → VERIFIED → COMMITTED (optional, pre-pipeline)** | Serve snapped BF16 against the original BF16 teacher, attest all-position fold KL, atomically replace provenance with the verified receipt, then hand the ordinary checkpoint to the unchanged native pipeline | `tools/measure_vllm_full_kl.py`; `tools/prismasnap.py attest-fold-fidelity`; admission by `python -m prismaquant.prismasnap_contract --model "$MODEL_PATH"` | student result + teacher metadata/payload; `prismasnap_provenance.json` state `VERIFIED`; native output copy `source_prismasnap_provenance.json` | BF16/no-quantization/no-spec-decode launch contracts; teacher/source/calibration windows and corpus; both serve fingerprints; coherent metrics; current index/weight-map/every-shard identity; forward KL `≤5e-4` | native compressed-tensors `{NVFP4, FP8_DYNAMIC, BF16}` only; GGUF and Gridbook/codebook refuse any marker; an absent marker is the historical no-op path |
 | **1/4** | Sensitivity probe — per-Linear empirical Fisher `h_trace`, body + MTP in one pass; tied heads materialized and excluded, KV-sharing cotangents grafted (§7.5) | `prismaquant.incremental_probe` (`544-560`) | `artifacts/probe.pkl`; activations → `act/`; shards → `work/`; `logs/probe.log` | settings-hash `probe` (`703`); reuse also re-checks stored `calibration_modality` | — |
-| **1/4×N (retired; unavailable)** | Historical exact sample-axis probe map/reduce. Every worker processes the complete dense text qname census over one canonical contiguous sample partition. Stage 1 publishes raw shifted-token CE; a global scalar barrier closes the cover; stage 2 reruns phase 1 with that global mean, then the strict reducer finalizes raw Fisher/marginals once and publishes the deterministic dense-body activation union (§4.1) | `prismaquant.sample_parallel_probe` + `prismaquant.incremental_probe` + `prismaquant.sample_parallel_probe_merge` | immutable calibration/run contract and digest-bound sample cover; per-worker CE/probe/cache shards; global CE receipt; ordinary merged `probe.pkl` + `act/` | committed read-only source snapshot + host-verified immutable registry RepoDigest; source/config/header/content identity; exact sample cover replayed before GPU setup; duplicate-key-free trusted JSON; marginal-to-trace and independently replayed global top-R/fused-row checks; no-follow same-byte probe and committed-identity lazy activation consumption; no-clobber output | opt-in operator workflow; no `torch.distributed`, qname/layer partitioning, alternate cache, serving-runtime change, h-detail, visual, routed, or packed path |
+| **1/4×N (retired; unavailable)** | Historical exact sample-axis probe map/reduce. Every worker processes the complete dense text qname census over one canonical contiguous sample partition. Stage 1 publishes raw shifted-token CE; a global scalar barrier closes the cover; stage 2 reruns phase 1 with that global mean, then the strict reducer finalizes raw Fisher/marginals once and publishes the deterministic dense-body activation union (§4.1) | `archive/sample_parallel_probe_2026-10-15/`; read-only contracts remain in `prismaquant.sample_parallel_artifacts` | immutable calibration/run contract and digest-bound sample cover; per-worker CE/probe/cache shards; global CE receipt; ordinary merged `probe.pkl` + `act/` | committed read-only source snapshot + host-verified immutable registry RepoDigest; source/config/header/content identity; exact sample cover replayed before GPU setup; duplicate-key-free trusted JSON; marginal-to-trace and independently replayed global top-R/fused-row checks; no-follow same-byte probe and committed-identity lazy activation consumption; no-clobber output | opt-in operator workflow; no `torch.distributed`, qname/layer partitioning, alternate cache, serving-runtime change, h-detail, visual, routed, or packed path |
 | **2/4** | Baseline per-(Linear,format) RTN cost. The measured menu is derived `COST_FORMATS`; `lm_head` is included only for a fixed non-BF16 or DP-unpinned head | `prismaquant.incremental_measure_quant_cost --[no-]include-lm-head` | `artifacts/cost.pkl` (`COST_MODE=local`) or `artifacts/cost_baseline.pkl`; `logs/cost.log` | settings-hash `base-cost`, including all three resolved head-policy axes and `COST_FORMATS` | — |
 | **2a-CB** | imatrix column-weight harvest | `harvest_cb_col_weights` — ONE shell function, four call sites (`[2/4] pre-cost`, `[2b/4] cost-cache`, `[2d-CB]`, `[4/4]`) → `export_gguf.build_imatrix_from_act_cache` + `moe_imatrix.synthesize_packed_expert_col_weights` | `artifacts/cb_col_weights.pkl` | settings-hash `cb-col-weights` | CB lane; called by whichever stage needs the vector first |
 | **pre-2-CBL** | Train/verify the immutable value-bearing codebook bundle. Historical trainer v1 keeps its measured rung policy. Trainer v2 derives the existing probe imatrix and emits lattice for every FP8 producer rung unless an independently validated per-rung promotion receipt authorizes the exact learned candidate | `ensure_cb_learned_bundle` → `prismaquant.build_cb_learned_bundle` → streaming source reader; v2 additionally uses `moe_imatrix.imatrix_from_probe_file` (moved from `cb_imatrix` 2026-09-25, #1304) + `cb_learned_promotion` | `artifacts/cb_learned_bundle.pqcb`; optional external `prismaquant.fp8_cbl_promotion_receipt.v1` input is embedded and digest-bound | settings-hash `cb-learned-bundle` includes the calibration/imatrix input identity; bundle load revalidates complete source, role, candidate-table, and receipt bindings | CB lane, learned scope only; runs before the first cost/cache/KL render. V2 without a valid receipt is all-lattice, never a guessed learned/lattice crossover |
@@ -22026,7 +22035,12 @@ probe/`CALIBRATION_MODALITY` mismatch (`:562-599`).
 
 **Exact sample-axis probe map/reduce is retired and unavailable.** Its source census
 depended on the removed Gridbook lane, and the current CLI refuses its global
-calibration input. The following describes the historical design.
+calibration input. Its producer and reducer, all five manual commands, and
+unreachable incremental branches are archived at
+`archive/sample_parallel_probe_2026-10-15/`. The live
+`sample_parallel_artifacts` module retains exact artifact admission recipes for
+resume; it has no worker, publication or merge entry point. The following
+describes the historical design.
 `sample_parallel_probe.py` prepared one immutable `ids[N,T]` tensor,
 derives the complete qname/disposition manifests from the strict Qwen3.8 configuration and
 safetensors headers, binds the source checkpoint's value-bearing content identity, and emits a

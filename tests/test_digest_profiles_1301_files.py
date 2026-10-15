@@ -64,7 +64,7 @@ FILE_SITES = [
     ("prismaquant.prismasnap_checkpoint._sha256_file", False, {}),
     ("prismaquant.prismasnap_validation._sha256_file", False, {}),
     ("prismaquant.production_cache_stripes._sha256", False, {}),
-    ("prismaquant.sample_parallel_probe._sha256_file", True, {}),
+    ("prismaquant.digests.file_sha256hex", True, {"block_size": 1024 * 1024}),
     ("prismaquant.stage_a_chain_split._file_sha256", True, {}),
     ("prismaquant.tessera_anchored_surface._sha", True, {}),
     ("prismaquant.tessera_joint_aura._sha", True, {}),

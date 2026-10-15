@@ -1,19 +1,6 @@
 {
- "must_differ": [
-  {
-   "pair": [
-    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
-    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
-   ],
-   "reason": "_reference_mullo32_scalar is the merge's independent reference for the contract's uint32 low product; an oracle that shares code with the implementation it checks proves nothing (PQ #1302)."
-  }
- ],
- "near_duplicates": [
-  [
-   "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
-   "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
-  ]
- ],
+ "must_differ": [],
+ "near_duplicates": [],
  "primitive_digest_sites": [
   "hashlib:prismaquant/allocator.py::main",
   "hashlib:prismaquant/container_runtime_identity.py::_receipt_sha256",
@@ -43,9 +30,7 @@
   "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry",
   "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
   "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
-  "hashlib:prismaquant/sample_parallel_probe.py::_open_regular_bytes_at",
-  "hashlib:prismaquant/sample_parallel_probe_contract.py::activation_priority_key",
-  "hashlib:prismaquant/sample_parallel_probe_merge.py::_reference_activation_priority_key",
+  "hashlib:prismaquant/sample_parallel_artifacts.py::activation_priority_key",
   "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd",
   "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
   "hashlib:prismaquant/tessera_calibration_cache.py::sha256",
@@ -191,7 +176,6 @@
   "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait",
   "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait",
   "sorted-json:prismaquant/prismabuild_progress.py::report",
-  "sorted-json:prismaquant/sample_parallel_probe.py::main",
   "sorted-json:prismaquant/select_validated_frontier.py::main",
   "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume",
   "sorted-json:prismaquant/stage_a_chain_split.py::main",
@@ -350,7 +334,6 @@
    "tools/build_prismasnap_27b_campaign.py"
   ],
   "_canonical_sha256": [
-   "prismaquant/sample_parallel_probe.py",
    "tools/measure_served_gold.py",
    "tools/measure_vllm_wikitext_ppl.py",
    "tools/serve_fingerprint.py"

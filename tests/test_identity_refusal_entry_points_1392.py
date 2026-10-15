@@ -179,37 +179,3 @@ def test_stage_b_head_role_list_names_the_digest_proof():
 
 
 # -- sample-parallel worker -------------------------------------------------
-
-def test_worker_refuses_an_uncovered_source_before_hashing(
-        checkpoint, tmp_path, monkeypatch):
-    from prismaquant.sample_parallel_probe import _build_worker_source_identity
-    root, shards = checkpoint
-    _payload_hashes(monkeypatch, refuse=True)
-    with pytest.raises(RuntimeError, match=REFUSAL):
-        _build_worker_source_identity(
-            _runner(shards), root, tmp_path / "id.json")
-
-
-def test_worker_covered_source_reproduces_the_full_hash_identity(
-        checkpoint, tmp_path, monkeypatch):
-    from prismaquant.sample_parallel_probe import _build_worker_source_identity
-    root, shards = checkpoint
-    reference = _reference(root, shards)
-    digests = tmp_path / "digests.json"
-    _identity_quantum(root, digests)
-    _payload_hashes(monkeypatch, refuse=True)
-    identity = _build_worker_source_identity(
-        _runner(shards), root, tmp_path / "id.json",
-        source_digest_cache=digests,
-        source_digest_cache_sha256=cs_identity._file_sha256(digests))
-    assert identity == reference
-
-
-def test_worker_source_cache_cli_names_the_digest_proof():
-    from prismaquant.sample_parallel_probe import _build_parser
-    args = _build_parser().parse_args([
-        "prepare-worker-source-cache", "--model", "m",
-        "--output", "o", "--offload-folder", "f",
-        "--source-digest-cache", "d", "--source-digest-cache-sha256", "x"])
-    assert args.source_digest_cache == "d"
-    assert args.source_digest_cache_sha256 == "x"

@@ -109,12 +109,7 @@ SITE_INPUTS = {
         {"a": 1, "pre_render_recipe_identity_sha256": "x", "p": PurePosixPath("/x")},
         {"n": float("nan"), "s": {3}},
     ),
-    ("prismaquant.sample_parallel_probe", "_runtime_snapshot_closure_sha256"): (
-        [{"path": "a", "sha256": "0" * 64}, {"path": "b", "sha256": "1" * 64}],
-        ({"b": 1},),
-        [{"café": "ü"}],
-        [{"x": float("nan")}],
-    ),
+
     ("prismaquant.artifact_registry", "canonical_layer_config_json"): (
         {"model.layers.0.self_attn.q_proj": {"format": "NVFP4"}},
     ),
@@ -135,8 +130,8 @@ SITES = (
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),
-    ("prismaquant.sample_parallel_probe", "_canonical_sha256", _WHERE),
-    ("prismaquant.sample_parallel_probe", "_runtime_snapshot_closure_sha256", {}),
+    ("prismaquant.sample_parallel_artifacts", "_sample_artifact_sha256", _WHERE),
+
     ("prismaquant.joint_aura", "identity_sha256", {}),
     ("prismaquant.measured_runtime_prices", "identity_sha256", {}),
     ("prismaquant.glm_mtp_capture", "_json_sha256", {}),
