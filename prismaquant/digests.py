@@ -13,6 +13,8 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
   ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
   is direct JSON, not a round trip; its inherited spaces are identity bytes.
+- ``DIRECT_ASCII_SPACED_LAX_DEFAULT_STR``: the spaced lax encoding with
+  ``default=str`` for campaign metadata comparison and refusal details.
 - ``DIRECT_ASCII_SPACED_STRICT``: the same direct, ASCII-escaped, default-spaced
   recipe with ``allow_nan=False`` and no fallback serializer. Snapshot readers
   retain their own ``json.loads`` round trip and publication writers their LF.
@@ -308,6 +310,9 @@ DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_SPACED_LAX = JsonProfile(
     "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "))
+DIRECT_ASCII_SPACED_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-spaced-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "), default=str)
 DIRECT_ASCII_SPACED_STRICT = JsonProfile(
     "direct-ascii-spaced-strict", ensure_ascii=True, allow_nan=False,
     separators=(", ", ": "))

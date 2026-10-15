@@ -11,12 +11,23 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .digests import DIRECT_ASCII_STRICT, text_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_STRICT, DIRECT_ASCII_SPACED_LAX_DEFAULT_STR,
+    DIRECT_UTF8_INDENT2_STRICT, text_sha256hex, file_sha256hex,
+)
+from .cost_stage_checkpoint import merge_identity_migrations
 from .schemas import strict_json_loads
 from .tessera_campaign_selection import (
     UNITS_SCHEMA, UNITS_SCHEMA_V2, UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
     selection_priced_units, validate_unit_selection,
 )
+
+STAGE = "Tessera campaign"
+COST_NAME = "cost.pkl"
+MANIFEST_NAME = "cost.anchors.json"
+PARTS_NAME = MANIFEST_NAME + ".parts"
+REFERENCES_NAME = "hessian_capture.references.json"
+SCALES_NAME = "input_scales.safetensors"
 
 SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 
@@ -1182,12 +1193,9 @@ def _keystream(seed: int, label: str):
     stamped into a checkpoint identity: a sample that changed when CPython
     changed its sampler would silently re-key every journal it appears in.
     """
-    import hashlib
-
     counter = 0
     while True:
-        digest = hashlib.sha256(
-            f"{int(seed)}:{label}:{counter}".encode()).digest()
+        digest = bytes.fromhex(text_sha256hex(f"{int(seed)}:{label}:{counter}"))
         for offset in range(0, 32, 8):
             yield int.from_bytes(digest[offset:offset + 8], "big") / float(1 << 64)
         counter += 1
@@ -2208,9 +2216,9 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
 
 
 def _require_equal(field: str, values: dict) -> object:
-    distinct = {json.dumps(value, sort_keys=True, default=str) for value in values.values()}
+    distinct = {DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text(value) for value in values.values()}
     if len(distinct) != 1:
-        detail = ", ".join(f"{row}={json.dumps(value, sort_keys=True, default=str)[:160]}"
+        detail = ", ".join(f"{row}={DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text(value)[:160]}"
                            for row, value in sorted(values.items()))
         raise MergeRefused(f"rows disagree on {field}: {detail}")
     return next(iter(values.values()))
@@ -2719,7 +2727,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
             acquisition_schedule=acquisition_union["schedule"],
             acquisition_source_weights=acquisition_union["sources"])
     carried_migration = merge_identity_migrations(
-        {row: prov.get("identity_migration") for row, prov in provenances.items()})
+        {row: prov.get("identity_migration") for row, prov in provenances.items()},
+        error=MergeRefused)
     if carried_migration is not None:
         provenance["identity_migration"] = carried_migration
     if family_policy is not None:
@@ -2828,7 +2837,7 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path, *, acquisition=None, sc
     migrations = {}
     states: dict[str, dict] = {}
     states_by_row = {}
-    stage = "Tessera campaign"
+    stage = STAGE
     for row_id in sorted(row_dirs):
         manifest_path = Path(row_dirs[row_id]) / "cost.anchors.json"
         manifest = json.loads(manifest_path.read_text())
@@ -2920,20 +2929,11 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path, *, acquisition=None, sc
                    "file": str(unit_path(parts, qname).relative_to(parts))}
                   for qname in sorted(merged_identity["units"])],
     }
-    carried = merge_identity_migrations(migrations)
+    carried = merge_identity_migrations(migrations, error=MergeRefused)
     if carried is not None:
         manifest["identity_migration"] = carried
-    atomic_write_bytes(out_manifest, json.dumps(
-        manifest, indent=2, sort_keys=True, ensure_ascii=False,
-        allow_nan=False).encode("utf-8"))
+    atomic_write_bytes(out_manifest, DIRECT_UTF8_INDENT2_STRICT.encoded(manifest))
     return manifest
-
-
-def merge_identity_migrations(per_row: dict) -> "list | None":
-    """The rows' ``identity_migration`` records, merged by
-    ``cost_stage_checkpoint.merge_identity_migrations``."""
-    from prismaquant.cost_stage_checkpoint import merge_identity_migrations as merge
-    return merge(per_row, error=MergeRefused)
 
 
 def _merge_family_restriction(left, right, row_id):

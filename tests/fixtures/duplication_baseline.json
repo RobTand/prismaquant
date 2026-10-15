@@ -34,7 +34,6 @@
   "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd",
   "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
   "hashlib:prismaquant/tessera_calibration_cache.py::sha256",
-  "hashlib:prismaquant/tessera_campaign.py::_keystream",
   "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob",
   "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
   "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
@@ -230,11 +229,9 @@
   "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id",
   "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv",
   "sorted-json:tools/dispatch_stage_a_split.py::main",
-  "sorted-json:tools/dispatch_tessera_campaign.py::_require_equal",
   "sorted-json:tools/dispatch_tessera_campaign.py::cmd_capture",
   "sorted-json:tools/dispatch_tessera_campaign.py::cmd_census",
   "sorted-json:tools/dispatch_tessera_campaign.py::cmd_plan",
-  "sorted-json:tools/dispatch_tessera_campaign.py::merge_checkpoint",
   "sorted-json:tools/dspark_memavailable_sampler.py::_append_sample",
   "sorted-json:tools/dspark_memavailable_sampler.py::_record_error",
   "sorted-json:tools/duplication_inventory.py::main",
@@ -857,10 +854,6 @@
   "measure_assignment_kl": [
    "prismaquant/gguf_kl_evaluator.py",
    "prismaquant/kl_measurement.py"
-  ],
-  "merge_identity_migrations": [
-   "prismaquant/cost_stage_checkpoint.py",
-   "tools/dispatch_tessera_campaign.py"
   ],
   "nvfp4_activation_qdq_served": [
    "prismaquant/format_registry.py",
