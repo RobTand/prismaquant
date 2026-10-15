@@ -4,8 +4,7 @@ import hashlib
 import json
 import pickle
 import shutil
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,10 +42,9 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
             format_name=format_name, family=format_name.rsplit("_R", 1)[0],
             body_rate_q256=int(format_name.rsplit("_R", 1)[1]), bpp=4.0)] if priced else []),
     }
-    transformers = ModuleType("transformers")
-    transformers.AutoModelForCausalLM = SimpleNamespace(
-        from_pretrained=lambda *_args, **_kwargs: model)
-    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    from transformers import AutoModelForCausalLM
+    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained",
+                        lambda *_args, **_kwargs: model)
     # The fresh run prices under the default static-scale policy so a test
     # can change the policy afterwards and see the identity refuse it.
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)

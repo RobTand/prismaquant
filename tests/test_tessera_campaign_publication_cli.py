@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import pickle
-import sys
 import time
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,10 +45,9 @@ def _fixture(monkeypatch, tmp_path):
         model.model.layers[index].proj = linear
     rows = torch.randn(4, 256, generator=torch.Generator().manual_seed(183))
 
-    transformers = ModuleType("transformers")
-    transformers.AutoModelForCausalLM = SimpleNamespace(
-        from_pretrained=lambda *_args, **_kwargs: model)
-    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    from transformers import AutoModelForCausalLM
+    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained",
+                        lambda *_args, **_kwargs: model)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
     monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: DefaultProfile())
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
