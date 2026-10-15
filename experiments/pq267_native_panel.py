@@ -64,9 +64,9 @@ def prepare(args):
     from prismaquant.native_operator_panel import EXECUTION, prepare_native_inputs
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.tessera_calibration_cache import prefetch_capture
-    from prismaquant.tessera_formats import parse_tessera_format_name
+    from prismaquant.tessera_formats import parse_tessera_format_name, tessera_wire_recipe
     from prismaquant.tessera_hessian import activation_source, encoder_kwargs
-    from prismaquant.tessera_render import encode_tessera_unit, rung_accepts_hessian, tessera_wire_recipe
+    from prismaquant.tessera_render import encode_tessera_unit, rung_accepts_hessian
 
     plan = json.loads(checked(args.plan, args.plan_sha256).read_text())
     if re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", plan["runtime_image"]) is None:
