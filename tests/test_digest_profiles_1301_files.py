@@ -59,7 +59,7 @@ FILE_SITES = [
     ("prismaquant.joint_adjoint_band._sha256_file", True, {}),
     ("prismaquant.joint_projection_backend._sha", True, {}),
     ("prismaquant.joint_quanta_join._sha_file", False, {"where": "w"}),
-    ("prismaquant.lane_eligibility._sha256", False, {}),
+    ("prismaquant.digests.file_sha256hex", False, {}),
     ("prismaquant.native_receipt_table.file_sha256", True, {}),
     ("prismaquant.prismasnap_checkpoint._sha256_file", False, {}),
     ("prismaquant.prismasnap_validation._sha256_file", False, {}),

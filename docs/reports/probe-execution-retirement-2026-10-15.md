@@ -155,3 +155,14 @@ reuse gap was also found: absent sample fields were omitted from expected metada
 allowing a recorded sample-stamped shard with otherwise matching fields to enter
 ordinary reuse. Its reproduction and fail-closed fix follow this structural unit
 in a separate commit. Neither finding changes the numerical refactor above.
+
+### Separate digest-test caller repair
+
+The stale `lane_eligibility._sha256` test row now calls its actual shared owner,
+`digests.file_sha256hex`, with the same original default block size and Path
+argument. It keeps the frozen byte/error outcomes and call ordinals. No dead
+helper or compatibility export was restored. PB
+`7737ce196413b85c37a56bccbd379eb52ab40fe43450a63fc80937f9c259c999`
+passes all 45 file/byte digest cases with no skips. Its terminal and CAS payload
+were independently checked. Combined latest coverage is now 729 passes and seven
+skips across 20 files; the failed pre-edit baseline remains recorded above.
