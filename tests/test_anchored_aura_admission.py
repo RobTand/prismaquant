@@ -152,9 +152,8 @@ def test_the_flag_is_not_documented_as_an_activation_error_model():
     source = (_REPO / "prismaquant/allocator_candidates.py").read_text()
     assert "activation-quantization-BLIND" in source
     assert "NOT a claim that AURA models activation-QUANTIZATION error" in source
-    predicate = source.split(
-        "def cost_entry_is_anchored_aura_supersurrogate")[1].split(
-            "\ndef ")[0]
+    predicate = priced_cell.cost_entry_is_anchored_aura_supersurrogate.__doc__
+    assert predicate is not None
     assert "weights-only" in predicate
     assert "activation-quantization-blind" in predicate
 
