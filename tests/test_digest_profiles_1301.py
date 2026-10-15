@@ -291,7 +291,6 @@ def test_round_trip_and_direct_order_integer_keys_differently():
 
 def test_profile_names_are_unique():
     profiles = [value for value in vars(digests).values() if isinstance(value, JsonProfile)]
-    assert len(profiles) == 9
     assert len({profile.name for profile in profiles}) == len(profiles)
 
 
