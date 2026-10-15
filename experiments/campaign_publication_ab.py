@@ -252,8 +252,11 @@ class PhaseRecorder:
 def instrument(campaign, recorder, projection):
     from prismaquant import production_weight_cache, perturbed_x_cache, cost_stage_checkpoint
     from prismaquant.tessera_publication import BoundedPublisher
+    from prismaquant import tessera_campaign_wire as campaign_wire
+    wire_operations = {'_checkpoint_wire_record': 'checkpoint_wire_record'}
     targets = [
-        (campaign, name) for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor',
+        (campaign_wire, wire_operations[name]) if name in wire_operations else (campaign, name)
+        for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor',
                                       '_campaign_bound_identities', '_adopt_seed_checkpoint')
     ] + [
         # The per-anchor derivation off a sealed template.  Its thread name
@@ -298,7 +301,9 @@ def instrument(campaign, recorder, projection):
 
     try:
         for owner, name, original in originals:
-            setattr(owner, name, recorder.wrap(original, owner.__name__+'.'+name))
+            setattr(owner, name, recorder.wrap(original, (campaign.__name__+'.'+next(
+                old for old, current in wire_operations.items() if current == name))
+                if owner is campaign_wire else owner.__name__+'.'+name))
         campaign._anchor_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
         campaign._activation_kwargs_memo = memo_with_record
         BoundedPublisher.close = close_with_stats

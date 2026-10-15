@@ -1,6 +1,7 @@
 """Write opens must refuse colliding coordinates before publishing any bytes."""
 
 from prismaquant.render_cache_paths import cache_weight_filename
+from prismaquant import tessera_campaign_wire as campaign_wire
 from types import SimpleNamespace
 
 import pytest
@@ -70,7 +71,7 @@ def test_campaign_publication_checks_existing_manifest(
     before = dict(cache.weights)
     existing_wire = None
     if filename.endswith(".tessera"):
-        existing_wire = campaign._wire_path(wire_dir, first, FORMAT)
+        existing_wire = campaign_wire.wire_path(wire_dir, first, FORMAT)
         existing_wire.write_bytes(b"existing wire")
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
                         lambda **_kwargs: pytest.fail("collision reached the rendered write"))
@@ -99,7 +100,7 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     torch.save(weight, dense_path)
     dense_bytes = dense_path.read_bytes()
     cache.weights[(dense, FORMAT)] = dense_filename
-    assert not campaign._wire_path(wire_dir, dense, FORMAT).exists()
+    assert not campaign_wire.wire_path(wire_dir, dense, FORMAT).exists()
 
     campaign._finish_anchor(
         qname=new, weight=weight, activations=weight, format_name=FORMAT,
@@ -113,7 +114,7 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     new_render = tmp_path / cache.weights[(new, FORMAT)]
     torch.testing.assert_close(torch.load(new_render, weights_only=True),
                                (weight * 0.75).to(torch.bfloat16))
-    new_wire = campaign._wire_path(wire_dir, new, FORMAT)
+    new_wire = campaign_wire.wire_path(wire_dir, new, FORMAT)
     assert new_wire.read_bytes() == b"new wire"
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
         dense_path, new_render, new_wire,
@@ -127,7 +128,7 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     )
     assert dense_path.read_bytes() == dense_bytes
     assert new_wire.read_bytes() == b"new wire"
-    assert campaign._wire_path(wire_dir, "other", FORMAT).read_bytes() == b"other wire"
+    assert campaign_wire.wire_path(wire_dir, "other", FORMAT).read_bytes() == b"other wire"
     assert cache._campaign_wire_coordinates == {(new, FORMAT), ("other", FORMAT)}
 
 
@@ -139,7 +140,7 @@ def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
     # Resume and seed adoption read priced wires, but do not reconstruct the
     # render manifest. Their explicit roster must survive that distinction.
     cache._campaign_wire_coordinates = {(first, FORMAT)}
-    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    first_wire = campaign_wire.wire_path(wire_dir, first, FORMAT)
     if existing_wire:
         first_wire.write_bytes(b"resumed wire")
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
@@ -283,7 +284,7 @@ def test_queued_campaign_collision_preserves_first_publication(
     assert write_calls == [(first, FORMAT)]
     assert set(cache.weights) == {(first, FORMAT)}
     first_render = tmp_path / cache.weights[(first, FORMAT)]
-    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    first_wire = campaign_wire.wire_path(wire_dir, first, FORMAT)
     assert first_render.read_bytes() == first_render_bytes[0]
     torch.testing.assert_close(torch.load(first_render, weights_only=True),
                                (weight * 0.75).to(torch.bfloat16))
@@ -302,7 +303,7 @@ def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
     cache, wire_dir, weight, prepare = anchor_inputs
     first, alias = "layer.a", "layer__a"
     cache.weights[(first, FORMAT)] = weight
-    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    first_wire = campaign_wire.wire_path(wire_dir, first, FORMAT)
     producer_paused, release_producer = Event(), Event()
     outcomes = []
     exists = Path.exists

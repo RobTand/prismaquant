@@ -8,6 +8,8 @@ encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 
@@ -436,7 +438,7 @@ def _killed_run(monkeypatch, tmp_path):
 
 def test_a_tampered_journalled_wire_is_refused_not_adopted(monkeypatch, tmp_path):
     campaign, argv, _state = _killed_run(monkeypatch, tmp_path)
-    wire = campaign._wire_path(tmp_path / "cache" / "wire", UNITS[0], FORMAT)
+    wire = campaign_wire.wire_path(tmp_path / "cache" / "wire", UNITS[0], FORMAT)
     data = bytearray(wire.read_bytes())
     data[len(data) // 2] ^= 0xFF
     wire.write_bytes(bytes(data))
@@ -488,7 +490,7 @@ def test_a_corrupt_late_entry_refuses_before_any_identity_bound_write(monkeypatc
     # The batches before it encoded and published their wires, which cite no
     # run identity.
     assert sorted(path.name for path in (cache / "wire").glob("*.tessera")) == sorted(
-        campaign._wire_path(cache / "wire", name, FORMAT).name for name in UNITS[:-1])
+        campaign_wire.wire_path(cache / "wire", name, FORMAT).name for name in UNITS[:-1])
 
 
 def _checkpoint_shard(root, name):

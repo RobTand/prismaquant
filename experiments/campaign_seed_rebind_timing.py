@@ -104,7 +104,10 @@ def run(path, expected):
     command += ['--seed-checkpoint', p['seed_checkpoint'], '--seed-wire-dir', p['seed_wire_dir']]
     command += arm_flags(p['overlap_bytes'], p['identity_bytes'])
     recorder = PhaseRecorder(limit=200000)
-    targets = [(campaign, name) for name in (
+    from prismaquant import tessera_campaign_wire as campaign_wire
+    wire_operations = {'_checkpoint_wire_record': 'checkpoint_wire_record', '_link_seed_wire': 'link_seed_wire'}
+    targets = [(campaign_wire, wire_operations[name]) if name in wire_operations else (campaign, name)
+        for name in (
         '_prefetch_selected_capture', '_campaign_bound_identities', '_adopt_seed_checkpoint',
         '_checkpoint_anchor_identity', '_checkpoint_wire_record', '_link_seed_wire',
         '_campaign_checkpoint_identity', 'campaign_cost_payload')] + [
@@ -116,7 +119,9 @@ def run(path, expected):
     returncode = None
     try:
         for owner, name, original in originals:
-            setattr(owner, name, recorder.wrap(original, owner.__name__+'.'+name))
+            setattr(owner, name, recorder.wrap(original, (campaign.__name__+'.'+next(
+                old for old, current in wire_operations.items() if current == name))
+                if owner is campaign_wire else owner.__name__+'.'+name))
         returncode = campaign.main(command)
     finally:
         for owner, name, original in originals:

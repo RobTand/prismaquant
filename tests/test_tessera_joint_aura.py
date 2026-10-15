@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from prismaquant import aura_provenance
+from prismaquant import tessera_campaign_wire as campaign_wire
 
 import hashlib
 import json
@@ -269,7 +270,7 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
     def verify(blob, record, expected):
         seen.append((blob, expected)); assert record == expected
     monkeypatch.setattr(tc, "_checkpoint_anchor_identity", derive)
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: SimpleNamespace(verify_cached_unit=verify))
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: SimpleNamespace(verify_cached_unit=verify))
     monkeypatch.setattr(unit_artifact, "read_unit_artifact", lambda blob, device: rendered.clone())
     kwargs = dict(calibration_source=expected_inputs["calibration"],
                   projected_unit=expected_inputs["projection"], static_scales={})
@@ -863,7 +864,7 @@ def test_a_corrupted_synthesized_shard_fails_its_round_trip_leg(tmp_path, monkey
 
     monkeypatch.setattr(tc, "_checkpoint_anchor_identity",
                         lambda *_args, **_kwargs: {"expected": "derived"})
-    monkeypatch.setattr(tc, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(verify_cached_unit=lambda *_args: None))
     monkeypatch.setattr(unit_artifact, "read_unit_artifact",
                         lambda blob, device="cpu": decoded.clone())

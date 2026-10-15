@@ -6,6 +6,8 @@ allocator's grammar), ``--pinned-roster-only`` keeps only what it lifts, and the
 records the lift so a run under another lift refuses it. Unset, nothing changes.
 """
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 import argparse
 import json
@@ -144,7 +146,7 @@ def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):
         def tensor_identity(tensor):
             return {"id": tensor}
 
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr("prismaquant.production_weight_cache._production_cache_source_sha256",
                         lambda: "package")

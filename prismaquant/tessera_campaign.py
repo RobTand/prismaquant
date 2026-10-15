@@ -59,6 +59,8 @@ cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant.tessera_campaign_table import (
     CENSUS_SCHEMA,
@@ -702,12 +704,12 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
     # named the way the cache names its weight shards, so the export leg can
     # find the exact bytes this row was priced on instead of re-encoding.
-    wire_path = _wire_path(wire_dir, qname, format_name)
+    wire_path = campaign_wire.wire_path(wire_dir, qname, format_name)
 
     def _publish():
         # Check on the writer thread as well as at batch admission, so queued
         # publications see every earlier durable coordinate before any write.
-        _require_injective_anchor_filenames(
+        campaign_wire.require_injective_anchor_filenames(
             cache, wire_dir, ((qname, format_name),))
         _store_rendered_weight_entry(
             weights=cache.weights,
@@ -720,7 +722,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, wire_path)
-        _campaign_wire_coordinates(cache, wire_dir).add((qname, format_name))
+        campaign_wire.wire_coordinates(cache, wire_dir).add((qname, format_name))
         if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
             # The existing PWC entry is already disk-backed. Completed anchor
             # files must not accumulate an unbounded page-cache owner across
@@ -800,7 +802,7 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
             raise ValueError(
                 f"anchor batch {format_name}: {name} prepares a different wire "
                 f"recipe or Hessian requirement than {qnames[0]}")
-    _require_injective_anchor_filenames(
+    campaign_wire.require_injective_anchor_filenames(
         cache, wire_dir, ((name, format_name) for name in qnames))
     started = time.time()
     encoded = encode_tessera_units(
@@ -1178,78 +1180,19 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Checkpoint identity and resume
 # ---------------------------------------------------------------------------
 
-def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
-    return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
 
 
-def _campaign_wire_coordinates(cache, wire_dir):
-    """The wires this cache owns, independent of its rendered-only entries.
-
-    A pre-existing manifest contributes only destinations already present in
-    the wire directory. Snapshot that roster once: checking existence again
-    after an alias is published would misidentify a dense-only entry as the
-    new wire's owner. Fresh publications and resume/seed admission explicitly
-    add their coordinates, including wires with no rendered-manifest entry.
-    This is process-local campaign ownership, not a cross-process index.
-    """
-    coordinates = getattr(cache, "_campaign_wire_coordinates", None)
-    if coordinates is None:
-        coordinates = {key for key in cache.weights
-                       if _wire_path(wire_dir, *key).exists()}
-        # Batch admission may bootstrap while the ordered writer publishes.
-        # Install only once and adopt the winner's object, so a stale snapshot
-        # can never replace a roster another thread has created or updated.
-        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
-    return coordinates
 
 
-def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
-    """Check actual rendered and wire destinations before either write."""
-    from .render_cache_paths import require_injective_cache_filenames
-
-    coordinates = set(coordinates)
-    if cache.cache_dir:
-        require_injective_cache_filenames(
-            set(cache.weights).union(coordinates), where="campaign rendered weights")
-    _require_injective_wire_filenames(
-        wire_dir, _campaign_wire_coordinates(cache, wire_dir).union(coordinates))
 
 
-def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
-    """Reserve resume/seed wires before their links or receipt reads."""
-    # The roster belongs to the cache object: one cache, one wire_dir.
-    # This check/update is not atomic with the writer; register before publication.
-    coordinates = set(coordinates)
-    owned = _campaign_wire_coordinates(cache, wire_dir)
-    _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
-    owned.update(coordinates)
 
 
-def _require_injective_wire_filenames(wire_dir, coordinates):
-    # Resume and export consume _wire_path: its legacy dot-to-double-
-    # underscore spelling is different from the rendered-weight leaf.
-    owners = {}
-    for coordinate in sorted(coordinates):
-        filename = str(_wire_path(wire_dir, *coordinate).relative_to(wire_dir))
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"campaign wire shards: coordinates {previous!r} and "
-                f"{coordinate!r} map to one wire destination {filename!r}; "
-                "the wire shards would silently overwrite each other")
 
 
-def _checkpoint_identity_api():
-    try:
-        from tessera import cached_unit
-    except ImportError as exc:
-        raise RuntimeError(
-            "Tessera campaign checkpoint identity requires the producer's "
-            "cached_unit input/byte receipt API; refusing unbound resume") from exc
-    return cached_unit
 
 
 def _manifest_unit_receipts(identity, names):
@@ -1272,8 +1215,6 @@ def _manifest_unit_receipts(identity, names):
     return receipts
 
 
-#: Producer provenance only; every recipe, input and sampling field still refuses.
-CAMPAIGN_CHECKPOINT_SEAL_FIELDS = frozenset({"prismaquant_source_sha256", "encoder_source_sha256"})
 
 
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
@@ -1302,7 +1243,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     """
     from .production_weight_cache import _production_cache_source_sha256
 
-    api = _checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     settings = vars(args).copy()
     # Locations and a duplicate digest are never scheduling identity. Opted-in
     # origin + exact atomic-expanded schedule below stay bound by value; unset
@@ -1506,7 +1447,7 @@ class _BoundCheckpointUnitIdentity:
         if self._calibration is None:
             return None
         import copy
-        api = _checkpoint_identity_api()
+        api = campaign_wire.require_checkpoint_identity_api()
         source = self._calibration
         # This is ActivationSource.config_block() minus its capture_sha256()
         # call. The producer receipt has already sealed H in `_template`; a
@@ -1746,7 +1687,7 @@ class _EncoderSourceSealAhead:
 
     @staticmethod
     def _take():
-        return _checkpoint_identity_api().encoder_source_sha256()
+        return campaign_wire.require_checkpoint_identity_api().encoder_source_sha256()
 
     def wait(self) -> str:
         return self._future.result()
@@ -1982,7 +1923,7 @@ def _stream_unit_identity(name, *, weight, inputs, hessian, source, menu, projec
     nothing has no holder and is receipted directly. Returns ``(holder,
     {weight, scoring_rows, hessian})``.
     """
-    api = _checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     holder = None
     try:
         weight_receipt = hessian_receipt = None
@@ -2008,7 +1949,7 @@ def _stream_unit_identity(name, *, weight, inputs, hessian, source, menu, projec
 
 
 def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
-    """Run ``_checkpoint_wire_record`` for every pending resumed row.
+    """Run ``tessera_campaign_wire.checkpoint_wire_record`` for pending resumed rows.
 
     ``pending`` is ``[(anchor, identity, existing), ...]`` in the adopt loop's
     own order and the records come back in that order; the first failure in
@@ -2019,12 +1960,12 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
     """
     threads = _identity_threads(threads)
     if threads == 1 or len(pending) <= 1:
-        return [_checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
+        return [campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
                 for anchor, identity, existing in pending]
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=min(threads, len(pending)),
                             thread_name_prefix="campaign-wire-verify") as pool:
-        futures = [pool.submit(_checkpoint_wire_record, anchor, wire_dir, identity,
+        futures = [pool.submit(campaign_wire.checkpoint_wire_record, anchor, wire_dir, identity,
                                existing=existing)
                    for anchor, identity, existing in pending]
         try:
@@ -2085,7 +2026,7 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
         raise RuntimeError("checkpoint anchor Hessian applicability disagrees with the producer")
     _require_resumable_anchor(anchor, static_scales,
                              check_scoring_metadata=check_scoring_metadata, profile=profile)
-    api = _checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     projected = (projected_units or {}).get(anchor.qname)
     if bound_unit is not None:
         if not isinstance(bound_unit, _BoundCheckpointUnitIdentity):
@@ -2105,45 +2046,6 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     )
 
 
-def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
-    """Use the producer's one receipt grammar for fresh and resumed bytes."""
-    path = _wire_path(wire_dir, anchor.qname, anchor.format_name)
-    if path.is_symlink() or path.resolve().parent != wire_dir.resolve():
-        raise RuntimeError(f"checkpoint cached wire escapes its directory: {path}")
-    try:
-        blob = path.read_bytes()
-        api = _checkpoint_identity_api()
-        if existing is None:
-            record = api.make_unit_record(blob, identity, filename=path.name)
-        else:
-            record = existing
-            verification_identity = identity
-            producer_field = "encoder_source_sha256"
-            observed = record.get("identity") if isinstance(record, dict) else None
-            if (producer_field in CAMPAIGN_CHECKPOINT_SEAL_FIELDS
-                    and isinstance(observed, dict)
-                    and producer_field in observed and producer_field in identity
-                    and observed[producer_field] != identity[producer_field]):
-                # Defer only this declared producer seal. The real reader still
-                # verifies own bytes, grammar and every comparability field.
-                verification_identity = {**identity, producer_field: observed[producer_field]}
-            api.verify_cached_unit(blob, record, verification_identity)
-            if record.get("file") != path.name:
-                raise ValueError("cached wire filename differs from the priced unit/rung")
-        # CampaignAnchor.wire_bytes means the full blob, not plane-region bytes.
-        if anchor.wire_bytes != record["blob_bytes"]:
-            raise ValueError("cached wire length differs from the measured anchor")
-        if existing is not None and verification_identity is not identity:
-            from .dev_mode import seal_check
-
-            seal_check(f"campaign wire {producer_field}", observed[producer_field], identity[producer_field],
-                       where=f"{anchor.qname}@{anchor.format_name}",
-                       refusal=ValueError(f"cached unit {producer_field} identity mismatch"))
-        return record
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        raise RuntimeError(
-            f"checkpoint cached wire identity refused for {anchor.qname} "
-            f"{anchor.format_name}: {exc}") from exc
 
 
 # Job namespaces on the one publication queue. They exist so a completion
@@ -2401,7 +2303,7 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         for fmt, record in state.get("wire_records", {}).items():
             if not admits(name, fmt):
                 continue
-            _link_seed_wire(seed_wire, wire_dir, record.get("file"),
+            campaign_wire.link_seed_wire(seed_wire, wire_dir, record.get("file"),
                             qname=name, format_name=fmt)
         adopt(name, state, where=f"seed checkpoint {manifest}")
         adopted.append(name)
@@ -2416,32 +2318,8 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     }
 
 
-def _require_seed_wire_filename(wire_dir: Path, filename, *,
-                                qname: str, format_name: str) -> None:
-    """Refuse a seed receipt whose file name is not its unit/rung destination.
-
-    Pure name arithmetic: callers run it before they read or link the wire.
-    """
-    if not isinstance(filename, str) or not filename or "/" in filename:
-        raise RuntimeError(f"seed wire receipt names an unusable file: {filename!r}")
-    if filename != _wire_path(wire_dir, qname, format_name).name:
-        raise RuntimeError(f"{qname}: seed wire filename differs from priced unit/rung")
 
 
-def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
-                    qname: str, format_name: str) -> None:
-    """Put a seed's priced wire where this run's receipt check will read it."""
-    _require_seed_wire_filename(wire_dir, filename, qname=qname, format_name=format_name)
-    target = wire_dir / filename
-    if target.exists():
-        return
-    source = seed_wire / filename
-    if not source.is_file():
-        raise RuntimeError(f"seed checkpoint has no priced wire at {source}")
-    try:
-        os.link(source, target)
-    except OSError:
-        target.write_bytes(source.read_bytes())
 
 
 
@@ -5963,7 +5841,7 @@ def _main(argv, *, source_scope, waits) -> int:
         return prepare_journal(
             checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
             stage="Tessera campaign", resume=True, identity=identity,
-            qnames=targets, seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
+            qnames=targets, seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
         )
 
     # Under the stream head the identity, and so the journal, exist only at
@@ -6006,7 +5884,7 @@ def _main(argv, *, source_scope, waits) -> int:
         stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
             checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
             stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
-            seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
+            seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
             identity=run_identity(unit_receipts={
                 name: dict.fromkeys(RECEIPT_FIELDS, STREAM_JOURNAL_RECEIPT)
                 for name in weights}))
@@ -6041,7 +5919,7 @@ def _main(argv, *, source_scope, waits) -> int:
         # before adopt_state reads them. Reserve every admitted coordinate
         # here, before either path touches those bytes, including stale rows
         # whose seed files are linked but whose prices are not adopted.
-        _register_campaign_wire_coordinates(
+        campaign_wire.register_wire_coordinates(
             cache, wire_dir,
             ((row["qname"], row["format_name"]) for row in state["anchors"]
              if row["format_name"] in on_menu))
@@ -6141,7 +6019,7 @@ def _main(argv, *, source_scope, waits) -> int:
             if deferred is not None:
                 deferred.append((name, anchor, identity, existing))
             else:
-                wire_records[name][anchor.format_name] = _checkpoint_wire_record(
+                wire_records[name][anchor.format_name] = campaign_wire.checkpoint_wire_record(
                     anchor, wire_dir, identity, existing=existing)
             measured.setdefault(name, {}).setdefault(anchor.family, []).append(anchor)
         if formats != set(state["wire_records"]):
@@ -6429,7 +6307,7 @@ def _main(argv, *, source_scope, waits) -> int:
 
     ledger = _AnchorPublicationLedger(
         publisher=None,
-        make_record=lambda anchor, identity: _checkpoint_wire_record(
+        make_record=lambda anchor, identity: campaign_wire.checkpoint_wire_record(
             anchor, wire_dir, identity),
         journal_anchor=journal_anchor)
 

@@ -93,6 +93,17 @@ prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_campaign_wire` owns canonical wire destinations, cache-owned coordinate
+reservation, seed adoption and producer byte receipts. Campaign pricing,
+selected-wire materialization and joint readers use that owner directly.
+Whole-assignment reservation precedes reuse or publication. Rendered-cache
+filenames use `render_cache_paths`; wire filename spelling remains unchanged.
+Producer capability refusal, exact byte verification and optional source-seal
+classification retain their existing meaning. Historical receipt operations,
+schemas and explicit migration proofs retain their spelling and requirements.
+
+
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `campaign_data_manifests` owns campaign input membership, source tensor extents,
 read order, schema validation and readset publication. The dispatcher imports
 that package owner directly. Historical experiment commands retain argv and

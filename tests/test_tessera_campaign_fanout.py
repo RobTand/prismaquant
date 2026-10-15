@@ -13,6 +13,8 @@ Three properties make the split honest, and these tests pin them:
   not describe one campaign: a mixed Hessian identity, a gap in the coverage,
   or a unit priced twice.
 """
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
@@ -135,7 +137,7 @@ def test_the_checkpoint_identity_covers_only_the_selected_units(monkeypatch):
         def tensor_identity(tensor):
             return {"id": tensor}
 
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr(
         "prismaquant.production_weight_cache._production_cache_source_sha256",
@@ -186,7 +188,7 @@ def test_streaming_residency_knobs_are_scheduling_not_identity(monkeypatch):
         def tensor_identity(tensor):
             return {"id": tensor}
 
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr(
         "prismaquant.production_weight_cache._production_cache_source_sha256",
@@ -235,7 +237,7 @@ def test_source_identity_cache_flags_are_not_checkpoint_identity(monkeypatch):
         def tensor_identity(tensor):
             return {"id": tensor}
 
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr(
         "prismaquant.production_weight_cache._production_cache_source_sha256",
@@ -615,7 +617,7 @@ def test_a_seed_links_only_the_wire_bytes_its_adopter_will_price(tmp_path, malfo
 
     seed = tmp_path / "seed"
     (seed / "cache" / "wire").mkdir(parents=True)
-    priced_filename = campaign._wire_path(seed / "cache" / "wire", "a", "ON").name
+    priced_filename = campaign_wire.wire_path(seed / "cache" / "wire", "a", "ON").name
     receipt_filename = "other-coordinate.tessera" if malformed else priced_filename
     for name in (receipt_filename, "evidence.wire"):
         (seed / "cache" / "wire" / name).write_bytes(b"x")
@@ -1190,7 +1192,6 @@ def test_the_planner_and_the_campaign_agree_on_the_selection_schemas():
     test that fails when it drifts.
     """
     import dispatch_tessera_campaign as dispatch
-    from prismaquant import tessera_campaign
 
     assert dispatch.UNITS_SCHEMA == campaign_selection.UNITS_SCHEMA
     assert dispatch.UNITS_SCHEMA_V2 == campaign_selection.UNITS_SCHEMA_V2

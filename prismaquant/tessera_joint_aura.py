@@ -6,6 +6,8 @@ Tessera's existing source/H/settings receipt and decoder qualify them before
 ordinary streamed joint AURA consumes the exact per-Linear candidate roster.
 """
 from __future__ import annotations
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
@@ -729,7 +731,7 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     """Name where this rung's decoded PWC shard came from, never guess it.
 
     The campaign journals fresh and resumed wires through one receipt grammar
-    (``_checkpoint_wire_record``), so nothing in the record distinguishes an
+    (``tessera_campaign_wire.checkpoint_wire_record``), so nothing in the record distinguishes an
     adopted rung from an encoded one. The marker beside the shard is the only
     place that fact can live, and its absence beside an existing shard is the
     campaign's own render.
@@ -894,9 +896,8 @@ def _read_campaign_metadata(inputs, reuse_policy):
     # The one encoder identity a run can re-derive is the installed package's
     # own. Refuse anything else here -- before the per-cell origin walk reads
     # or decodes a wire -- unless the plan named that exact digest.
-    from . import tessera_campaign as tc
     encoder_source_reuse = resolve_encoder_source_reuse(
-        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        identity["encoder_source_sha256"], campaign_wire.require_checkpoint_identity_api().encoder_source_sha256(),
         reuse_policy, where="joint anchor checkpoint encoder source")
     parts = merged_checkpoint_parts(paths["merged_checkpoint"])
     for row in manifest["units"]:
@@ -1652,7 +1653,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
                 wire_sha256, f"{name}@{fmt} read-ahead wire digest")
         _same(actual_wire_sha256, cell["record"].get("blob_sha256"),
               f"{name}@{fmt}: read-ahead wire checksum")
-    verifier = tc._checkpoint_identity_api() if reader is None else reader
+    verifier = campaign_wire.require_checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
     decoded = _decode_wire(blob, reader=reader,
                            device=str(rendered_weight.device)).to(torch.bfloat16)

@@ -7,6 +7,8 @@ packed allocation, after the ordinary receipt and priced-input gates pass.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 
 import argparse
@@ -157,7 +159,7 @@ def _inputs(plan_path, group_index=None):
     census = _check_census(plan_data['census_path'], cost, source, units)
     if plan_data['groups'] != _planned_groups(census, expected, cost):
         raise RuntimeError('materialization plan differs from selected census groups')
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     source_sha = api.encoder_source_sha256()
     # Every measured receipt must describe the same producer source.
     priced_receipts = 0
@@ -199,17 +201,6 @@ def _journal(plan_data, identity, index, names):
         identity={**identity, 'group': index}, qnames=names)
 
 
-def _expert_input_identity(api, weight, unit, fmt, activation):
-    """The same served expert identity at completion, resume and finalization."""
-    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
-    from .tessera_render import rung_accepts_hessian
-
-    family, rung = parse_tessera_format_name(fmt)
-    wire = tessera_served_wire_recipe(family, rung, structure='routed_moe')
-    active = (activation if activation is not None and rung_accepts_hessian(fmt, wire)
-              else None)
-    return api.unit_input_identity(weight, unit, family.payload_grid(), rung,
-                                   activation=active, structure='routed_moe')
 
 
 def run(plan_path, group_index, *, anchor_batch_size=1):
@@ -302,20 +293,20 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     # Missing selections and adopted/resumed wires share this directory.
     # Reserve the whole group before iteration: a later seeded alias must
     # not appear after an earlier coordinate has been scheduled to encode.
-    tc._register_campaign_wire_coordinates(cache, wire_dir, group['assignment'].items())
-    api = tc._checkpoint_identity_api()
+    campaign_wire.register_wire_coordinates(cache, wire_dir, group['assignment'].items())
+    api = campaign_wire.require_checkpoint_identity_api()
     missing, expected_by_name = [], {}
     for name in names:
         fmt = group['assignment'][name]
         family, rung = parse_tessera_format_name(fmt)
-        expected = _expert_input_identity(api, weights[name], units[name], fmt, activation)
-        wire_path = tc._wire_path(wire_dir, name, fmt)
+        expected = campaign_wire.expert_input_identity(api, weights[name], units[name], fmt, activation)
+        wire_path = campaign_wire.wire_path(wire_dir, name, fmt)
         state = completed.get(name)
         record = None if state is None else state['record']
         if record is None:
             record = cost.get(tep.EXPERT_WIRES_KEY, {}).get(name, {}).get(fmt)
             if record is not None:
-                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
+                campaign_wire.link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
                                    qname=name, format_name=fmt)
         if record is not None:
             if record['file'] != wire_path.name:
@@ -355,7 +346,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
                 structures={name: structures[name] for name in batch_names}, **common)
         for anchor in anchors:
             name = anchor.qname
-            record = tc._checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])
+            record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])
             write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
                 state=dict(format=anchor.format_name, record=record, anchor=asdict(anchor)))
     capture, scale_file, digest = tc.write_export_inputs(root, hessians=hessians if want_h else None,
@@ -421,7 +412,7 @@ def finalize(plan_path):
         if set(counts) != set(hessians):
             raise RuntimeError('original priced capture counts do not cover its Hessians')
     receipts = copy.deepcopy(cost.get(tep.EXPERT_WIRES_KEY, {}))
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     completed_names = set()
     for index, group in enumerate(data['groups']):
         names = sorted(group['assignment'])
@@ -476,18 +467,18 @@ def finalize(plan_path):
                 break
         family, rung = parse_tessera_format_name(fmt)
         weight = tep.source_unit_weight(provenance['model'], source, units[name])
-        expected = _expert_input_identity(api, weight, units[name], fmt, activation)
+        expected = campaign_wire.expert_input_identity(api, weight, units[name], fmt, activation)
         checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
             grid=family.payload_grid().name)
         # The name is checked before the source wire is located or read: a
         # misnamed receipt is refused without touching its bytes (#2310).
-        tc._require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
+        campaign_wire.require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
         source_path = source_dir / checked['file']
         tep.locate_expert_wire(checked, name=name, wire_dir=source_dir)
         # One content check per blob: the verified bytes are the ones the hard
         # link below carries into the published wire directory (#643).
         api.verify_cached_unit(source_path.read_bytes(), checked, expected)
-        tc._link_seed_wire(source_dir, wire_dir, checked['file'],
+        campaign_wire.link_seed_wire(source_dir, wire_dir, checked['file'],
                            qname=name, format_name=fmt)
         linked_path = wire_dir / checked['file']
         if not os.path.samefile(source_path, linked_path):

@@ -5,6 +5,8 @@ this entry point can run. It never treats a partial capture as canonical.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 import argparse
 import cProfile
 from contextlib import ExitStack
@@ -116,7 +118,7 @@ def main():
     for name in ('fit_ids_sha256', 'text_sha256', 'nsamples', 'seqlen', 'seed'):
         if capture['identity']['calibration'][name] != union['fixed']['calibration'][name]:
             raise ValueError('complete capture differs from the original sealed calibration draw')
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     if api.encoder_source_sha256() != plan['encoder_source_sha256']:
         raise ValueError('actual Tessera encoder source differs from the frozen producer')
     from prismaquant.tessera_runtime_contract import contract_path
@@ -270,7 +272,7 @@ def main():
                         menus={name: [SimpleNamespace(format_name=fmt)]},
                         calibration_source=calibration, static_scales=scales,
                         projected_units=projected, bound_unit=bound)
-                    record = tc._checkpoint_wire_record(anchor, wire_dir, identity)
+                    record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity)
                     render_path = cache_dir/cache.weights[(name, fmt)]
                     cell = dict(anchor=asdict(anchor), record=record,
                         wire=str(wire_dir/record['file']), render=str(render_path),

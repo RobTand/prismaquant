@@ -7,6 +7,8 @@ byte for byte what the serial head stamped, and refuses where it refused.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 import json
 import threading
 from types import SimpleNamespace
@@ -316,7 +318,7 @@ def test_resumed_wire_receipts_verify_on_threads_in_adopt_order(monkeypatch):
             raise RuntimeError(f"refused {anchor.qname}")
         return dict(existing, verified=identity["i"], on=threading.current_thread().name)
 
-    monkeypatch.setattr(tc, "_checkpoint_wire_record", fake)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', fake)
     accepted = [row for row in pending if row[0].qname not in {"u2", "u4"}]
     records = tc._verify_wire_records_on_threads(accepted, "/wire", threads=3)
     assert [record["verified"] for record in records] == [0, 1, 3, 5]

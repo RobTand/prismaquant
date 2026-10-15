@@ -1,4 +1,6 @@
 """Packed probe -> persisted draw -> packed campaign prices -> scoped allocator."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign
@@ -42,7 +44,6 @@ def _plan(tmp_path, monkeypatch):
 
 
 def test_real_packed_probe_plans_and_rehydrates_shared_projection_draw(tmp_path, monkeypatch):
-    from prismaquant import tessera_campaign as campaign
     selection, stats = _plan(tmp_path, monkeypatch)
     samples = campaign_table.selection_stack_samples(selection, _profile())
     assert set(samples) == set(stats)
@@ -66,7 +67,6 @@ def test_real_packed_probe_plans_and_rehydrates_shared_projection_draw(tmp_path,
 
 
 def test_selection_rejects_independent_gate_and_up_draws(tmp_path, monkeypatch):
-    from prismaquant import tessera_campaign as campaign
     selection, _ = _plan(tmp_path, monkeypatch)
     selection['groups'][0]['sampled'].pop()
     with pytest.raises(campaign_table.StackSampleError, match='sampled members'):
@@ -151,7 +151,6 @@ def test_a_stack_payload_allocates_through_the_real_allocator(tmp_path, monkeypa
 
 
 def test_draw_receipt_must_replay_from_the_carried_probe(tmp_path, monkeypatch):
-    from prismaquant import tessera_campaign as campaign
     selection, _ = _plan(tmp_path, monkeypatch)
     record = next(iter(selection['groups'][0]['stack_samples'].values()))
     record['seed'] += 1
@@ -162,7 +161,7 @@ def test_draw_receipt_must_replay_from_the_carried_probe(tmp_path, monkeypatch):
 def test_checkpoint_binds_fisher_and_probability_values_with_same_measured_units(monkeypatch):
     from prismaquant import tessera_campaign as campaign
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-    monkeypatch.setattr(campaign, '_checkpoint_identity_api', lambda: SimpleNamespace(
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: SimpleNamespace(
         encoder_source_sha256=lambda: 'encoder', tensor_identity=lambda t: t))
     monkeypatch.setattr(campaign.th, 'encoder_recipe', lambda: {})
     monkeypatch.setattr('prismaquant.production_weight_cache._production_cache_source_sha256', lambda: 'pq')

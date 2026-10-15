@@ -244,7 +244,7 @@ def unit_activation_source_recorder(captured_source, activation_source):
 def retain_production_wire(weight, rendered, blob, *, qname, fmt, activation_source, wire_dir):
     """Retain the original bytes using the existing campaign/producer grammar."""
     from prismaquant.production_weight_cache import _cb_cache_tensor_identity
-    from prismaquant.tessera_campaign import _wire_path
+    from prismaquant.tessera_campaign_wire import wire_path
     from prismaquant.tessera_formats import parse_tessera_format_name
     from tessera import cached_unit
     from tessera.unit_artifact import read_unit_artifact
@@ -252,7 +252,7 @@ def retain_production_wire(weight, rendered, blob, *, qname, fmt, activation_sou
     family, rung = parse_tessera_format_name(fmt)
     input_identity = cached_unit.encoding_input_identity(
         weight, qname, family.payload_grid(), int(rung), activation=activation_source)
-    path = _wire_path(Path(wire_dir), qname, fmt)
+    path = wire_path(Path(wire_dir), qname, fmt)
     record = cached_unit.make_unit_record(blob, input_identity, filename=path.name)
     temporary = path.with_suffix(".tessera.tmp")
     temporary.write_bytes(blob)

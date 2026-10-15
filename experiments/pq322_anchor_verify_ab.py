@@ -1,5 +1,7 @@
 """PB-only equal-work A/B of original versus bound, namespaced anchor verification."""
 from __future__ import annotations
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
@@ -88,7 +90,7 @@ def main():
     if len(names) != 2 or len(cells) != 14:
         raise ValueError('qualification requires original two-unit, fourteen-cell roster')
     # Load the producer API before the reader so module preservation is observable.
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     import tessera
     from tessera.unit_artifact import read_unit_artifact
     primary_root = Path(tessera.__file__).resolve().parent

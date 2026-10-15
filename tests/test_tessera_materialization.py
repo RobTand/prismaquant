@@ -1,5 +1,7 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
@@ -162,7 +164,7 @@ def _completed(selection, monkeypatch, *, hessian=False):
         tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
             cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, data, _calls = _plan(selection, monkeypatch)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:ReceiptAPI())
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())
     monkeypatch.setattr(th, 'encoder_recipe', lambda:{'fixture':True})
     monkeypatch.setattr(tm, '_verify_source', lambda *args:None)
     monkeypatch.setattr(tep, 'source_unit_weight', lambda *args:torch.ones(N,N))
@@ -297,7 +299,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
     api.unit_input_identity = unit_identity
     api.make_unit_record = lambda blob, identity, filename: dict(file=filename,
         blob_bytes=len(blob), blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:api)
     monkeypatch.setattr(th, 'encoder_recipe', lambda:{'fixture':True})
     monkeypatch.setattr(tm, '_verify_source', lambda *args:None)
     weight = torch.ones(N,N)
@@ -364,14 +366,14 @@ def test_selected_subcap_identity_verifies_real_served_wire_and_refuses_research
     from prismaquant.tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
     from prismaquant.tessera_render import encode_tessera_unit
 
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     _, _, _, units, _ = tm._request(selection.request)
     unit = units[selection.missing]
     weight = torch.ones(unit['rows'], unit['cols'], dtype=torch.bfloat16)
     fmt = f'TESSERA_E2M1_K2_R{rung}'
     family, _ = parse_tessera_format_name(fmt)
     served = tessera_served_wire_recipe(family, rung, structure='routed_moe')
-    expected = tm._expert_input_identity(api, weight, unit, fmt, None)
+    expected = campaign_wire.expert_input_identity(api, weight, unit, fmt, None)
     assert expected['recipe'] == {'grid': family.payload_grid().name, 'q256': rung,
                                   **served.to_config()}
     _, blob = encode_tessera_unit(weight, fmt, hessian_required=False, recipe=served)
@@ -566,7 +568,7 @@ def test_materialization_refuses_unbound_producer_source(selection, monkeypatch)
     tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
         cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, _data, _calls = _plan(s, monkeypatch)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:ReceiptAPI())
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())
     with pytest.raises(RuntimeError, match='no priced producer receipt'):
         tm._inputs(path)
 
@@ -593,13 +595,13 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     api.make_unit_record = lambda blob, identity, filename: dict(
         file=filename, blob_bytes=len(blob),
         blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: api)
     family, rung = parse_tessera_format_name(FMT)
     seed_blob = b"priced seed wire"
     seed_record = copy.deepcopy(s.case.receipts[s.missing])
     seed_record.update(api.make_unit_record(seed_blob,
-        tm._expert_input_identity(api, weight, units[second], FMT, None),
-        tc._wire_path(s.case.wire_dir, second, FMT).name))
+        campaign_wire.expert_input_identity(api, weight, units[second], FMT, None),
+        campaign_wire.wire_path(s.case.wire_dir, second, FMT).name))
     if malformed:
         seed_record["file"] = "other-coordinate.tessera"
     seed_path = s.case.wire_dir / seed_record["file"]
@@ -639,7 +641,7 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     monkeypatch.setattr(tc, "_encode_and_render",
                         lambda tensor, *_args, **_kwargs: (tensor * 0.75, b"fresh wire"))
     publications, links, reads = [], [], []
-    store, link, verify = pwc._store_rendered_weight_entry, tc._link_seed_wire, api.verify_cached_unit
+    store, link, verify = pwc._store_rendered_weight_entry, campaign_wire.link_seed_wire, api.verify_cached_unit
 
     def publish(**kwargs):
         publications.append(kwargs["qname"])
@@ -667,7 +669,7 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
 
     monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry", publish)
-    monkeypatch.setattr(tc, "_link_seed_wire", seed_link)
+    monkeypatch.setattr(campaign_wire, 'link_seed_wire', seed_link)
     monkeypatch.setattr(api, "verify_cached_unit", read_wire)
     if malformed:
         with pytest.raises(RuntimeError, match="wire filename differs"):
@@ -687,8 +689,8 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
         assert publications == [first]
         assert len(links) == len(reads) == 1
         group_wire = s.workspace / "groups" / "0" / "wire"
-        assert tc._wire_path(group_wire, first, FMT).read_bytes() == b"fresh wire"
-        assert tc._wire_path(group_wire, second, FMT).read_bytes() == seed_blob
+        assert campaign_wire.wire_path(group_wire, first, FMT).read_bytes() == b"fresh wire"
+        assert campaign_wire.wire_path(group_wire, second, FMT).read_bytes() == seed_blob
         # A real resume re-registers completed coordinates without injection.
         tm.run(tmp_path / "plan.json", 0)
         assert publications == [first]

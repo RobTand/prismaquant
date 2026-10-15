@@ -1,5 +1,7 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 import hashlib
@@ -248,7 +250,7 @@ def test_main_registers_resumed_wire_before_receipt_read(
     (campaign, _checkpoint, argv, _model, inputs), _payload = priced_campaign()
     caches = []
     cache_type = pwc.ProductionWeightCache
-    verify = campaign._checkpoint_wire_record
+    verify = campaign_wire.checkpoint_wire_record
     expected = {(UNIT, inputs["menu"][0].format_name)}
 
     def capture_cache(**kwargs):
@@ -266,7 +268,7 @@ def test_main_registers_resumed_wire_before_receipt_read(
         return verify(*args, **kwargs)
 
     monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
-    monkeypatch.setattr(campaign, "_checkpoint_wire_record", read_wire)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', read_wire)
     _forbid_reencode(monkeypatch, campaign)
     assert campaign.main(argv) == 0
     assert len(reads) == 1
@@ -456,7 +458,7 @@ def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_camp
         blob = bytearray(wire.read_bytes())
         blob[-1] ^= 1
         wire.write_bytes(blob)
-    api = campaign._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     verifications = []
     original_verify = api.verify_cached_unit
 

@@ -13,6 +13,8 @@ failure stops the action instead of being absorbed by it.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 
 import hashlib
@@ -359,7 +361,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
 
     monkeypatch.setattr(campaign, "_encode_and_render", encode)
     held: list[dict] = []
-    real_record = campaign._checkpoint_wire_record
+    real_record = campaign_wire.checkpoint_wire_record
 
     def record(anchor, wire_dir, identity, **kwargs):
         if not held:
@@ -367,7 +369,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
                              next_encode_started=next_encode_started.wait(20.0)))
         return real_record(anchor, wire_dir, identity, **kwargs)
 
-    monkeypatch.setattr(campaign, "_checkpoint_wire_record", record)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', record)
     assert campaign.main([
         *_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)]) == 0
     assert held == [dict(thread="tessera-publication", next_encode_started=True)]

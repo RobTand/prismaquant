@@ -1,4 +1,6 @@
 """An explicit pricing restriction cannot become routed support or seed leakage."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
@@ -156,7 +158,7 @@ def test_seed_scope_refuses_before_linking_any_wire_from_the_unit(tmp_path, prof
 
 def _identity(monkeypatch, *, policy=POLICY, structure="dense"):
     from prismaquant import production_weight_cache
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api", lambda: SimpleNamespace(
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: SimpleNamespace(
         tensor_identity=lambda value: {"fixture": True}, encoder_source_sha256=lambda: "encoder"))
     monkeypatch.setattr(production_weight_cache, "_production_cache_source_sha256", lambda: "pq")
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {"fixture": True})

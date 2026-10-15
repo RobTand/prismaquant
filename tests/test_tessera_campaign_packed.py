@@ -1,4 +1,6 @@
 """A campaign must account for the live packed expert population."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_table as campaign_table
 from types import ModuleType, SimpleNamespace
 import json
@@ -427,7 +429,7 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
         # of ``_measure_anchor`` is left out, for the reason in the docstring.
         render, blob = tessera_campaign._encode_and_render(
             weight, format_name, hessian_required=False)
-        path = tessera_campaign._wire_path(wire_dir, qname, format_name)
+        path = campaign_wire.wire_path(wire_dir, qname, format_name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(blob)
         encoded.append((qname, format_name, tuple(weight.shape)))

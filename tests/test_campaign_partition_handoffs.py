@@ -1,4 +1,6 @@
 """Partition handoffs use real reference/journal owners, without GPU claims."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
@@ -50,7 +52,7 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
         def tensor_identity(value):
             return {"id": value}
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr("prismaquant.production_weight_cache._production_cache_source_sha256",
                         lambda: "package")

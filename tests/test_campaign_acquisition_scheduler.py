@@ -1,4 +1,6 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 from copy import deepcopy
@@ -363,7 +365,7 @@ def test_checkpoint_seed_extra_rungs_are_refused(domain):
 def test_unset_flags_leave_checkpoint_identity_settings_byte_identical(monkeypatch):
     from prismaquant.cost_stage_checkpoint import canonical_json
     from prismaquant import production_weight_cache as pwc
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
         lambda: SimpleNamespace(encoder_source_sha256=lambda: "a" * 64))
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {})
     monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "b" * 64)
@@ -402,7 +404,7 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
         format_name=fmt, cache=cache, wire_dir=tmp_path, hessian_required=True,
         activation_kwargs_for=campaign._activation_kwargs_memo(source, {name: weight}, "cpu"))
     campaign_table.require_campaign_acquisition_anchor(anchor, actual)
-    wire = campaign._wire_path(tmp_path, name, fmt)
+    wire = campaign_wire.wire_path(tmp_path, name, fmt)
     assert wire.is_file() and anchor.wire_bytes == wire.stat().st_size
     decoded = read_unit_artifact(wire.read_bytes(), device="cpu")
     assert torch.equal(decoded.to(torch.bfloat16), cache.weights[name, fmt])
@@ -411,5 +413,5 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
     identity = campaign._checkpoint_anchor_identity(anchor, weights={name: weight},
         menus={name: [SimpleNamespace(format_name=fmt)]}, calibration_source=source,
         static_scales={}, projected_units={})
-    record = campaign._checkpoint_wire_record(anchor, tmp_path, identity)
-    assert campaign._checkpoint_wire_record(anchor, tmp_path, identity, existing=record) == record
+    record = campaign_wire.checkpoint_wire_record(anchor, tmp_path, identity)
+    assert campaign_wire.checkpoint_wire_record(anchor, tmp_path, identity, existing=record) == record

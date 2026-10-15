@@ -1,5 +1,7 @@
 """Adaptive scheduler progress and durable resume, with controlled producer calls."""
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_table as campaign_table
 from collections import Counter
@@ -35,7 +37,7 @@ def fixture(monkeypatch, tmp_path):
         if existing is not None:
             assert existing == expected
         return expected
-    monkeypatch.setattr(campaign, '_checkpoint_wire_record', record)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', record)
     calls, controls = [], {'fail': True, 'hard': None}
     def measure(*, qname, format_name, **_):
         rate = int(format_name.rsplit('R', 1)[1])

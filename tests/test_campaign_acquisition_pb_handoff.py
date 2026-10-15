@@ -1,5 +1,7 @@
 """Original authenticated joint request -> actual PB rows -> scalar wires -> strict merge."""
 from __future__ import annotations
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
 
@@ -270,7 +272,7 @@ def records(handoff, *, menu_families=None):
                                          families=menu_families)}
         schedule = campaign_table.requested_acquisition_schedule({key: handoff.census["anchor_groups"][key]
             for key in keys}, projected["requests"])
-        unit = {"weight": campaign._checkpoint_identity_api().tensor_identity(handoff.run.weights[name]),
+        unit = {"weight": campaign_wire.require_checkpoint_identity_api().tensor_identity(handoff.run.weights[name]),
                 "acquisition_source_weight": projected["source_weights"][name],
                 "menu": sorted(rung.format_name for rung in menus[name])}
         result[f"row-{index:04d}"] = dict(origin=campaign_table.campaign_acquisition_origin(projected, schedule, menus),
@@ -468,7 +470,7 @@ def render_handoff(handoff, *, aliased=False):
                     campaign_table.require_campaign_acquisition_anchor(anchor, scheduled)
                     identity = campaign._checkpoint_anchor_identity(anchor, weights=weights,
                         menus=menus, calibration_source=source, static_scales=static_scales, projected_units={})
-                    wire_records.setdefault(name, {})[anchor.format_name] = campaign._checkpoint_wire_record(anchor, wire_dir, identity)
+                    wire_records.setdefault(name, {})[anchor.format_name] = campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity)
                     measured.setdefault(name, {}).setdefault(family, []).append(anchor)
         identity = campaign._campaign_checkpoint_identity(weights=weights,
             acts={name: handoff.run.inputs[name] for name in members},

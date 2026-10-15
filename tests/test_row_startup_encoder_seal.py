@@ -1,4 +1,6 @@
 """Overlap the producer's exact cold source seal, never replace it (PQ #1742)."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
 import ast
 import inspect
 from concurrent.futures import Future
@@ -48,7 +50,7 @@ def test_start_submits_without_waiting_and_uses_the_same_producer_seal(monkeypat
         calls.append("producer")
         return digest
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=source_seal))
     ahead, submit, scope = _start(monkeypatch)
     assert ahead is not None
@@ -58,7 +60,7 @@ def test_start_submits_without_waiting_and_uses_the_same_producer_seal(monkeypat
     submit.run()
     assert ahead.wait() == digest
     # The unchanged run-identity call and producer bind now see their own cache.
-    assert campaign._checkpoint_identity_api().encoder_source_sha256() == digest
+    assert campaign_wire.require_checkpoint_identity_api().encoder_source_sha256() == digest
     assert calls == ["producer"]
     scope.close()
 
@@ -77,7 +79,7 @@ def test_source_seal_failure_reaches_identity_and_cleanup_does_not_mask_it(monke
     def fail():
         raise failure
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=fail))
     ahead, submit, scope = _start(monkeypatch)
     assert ahead is not None
@@ -89,7 +91,7 @@ def test_source_seal_failure_reaches_identity_and_cleanup_does_not_mask_it(monke
 
 
 def test_pricing_scopes_have_no_shared_future(monkeypatch):
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=lambda: "a" * 64))
     first, a, scope_a = _start(monkeypatch)
     assert first is not None

@@ -15,6 +15,8 @@ checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 import json
@@ -281,7 +283,7 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
 
     want = set()
     for name, fmt in sorted(expected):
-        wire = campaign._wire_path(wire_dir, name, fmt)
+        wire = campaign_wire.wire_path(wire_dir, name, fmt)
         rendered = selected_cache / cache_weight_filename(
             name, fr.canonical_format_name(fmt.strip().upper()))
         assert wire.is_file() and rendered.is_file()
