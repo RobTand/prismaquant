@@ -13,7 +13,7 @@ record, not a claim that every pending unit is finished.
 | J4 row contract | Implemented shared phase order, compute meaning and authenticated argv/resource contract. |
 | A1 reviewed pin | Implemented captured contract snapshot, packaged reviewed answer, private maps and exact TP fallback. |
 | A2 admission | Implemented typed rung verdicts and canonical cells; preserve separate menu, serving and export policies. |
-| T1 campaign metadata | Table/payload/merge owner implemented. Union, reseal and readset owners are being migrated independently. |
+| T1 campaign metadata | Table/payload/merge, census union and reseal owners implemented. Readset migration is in progress. |
 | T2 requests | Pending source-grounded request/kind runner migration. |
 | T3 measurement | Pending cell-measurement/calibration-forward ownership migration. |
 | T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
@@ -21,9 +21,9 @@ record, not a claim that every pending unit is finished.
 | S2 block walk | Implemented ordinary forward/capture/expert lifetime owner and prefetch-failure cleanup. Fisher work retains distinct tape and source policies. |
 | S3 cost streaming | Implemented separate forward, artifact and identity owners with direct caller migration. |
 | S4 store append | Reject another append wrapper. Existing publication owner already handles five callers, unique temporary files, fsync, rename and indexing. Wire synthesis with no cache owner is a different operation. |
-| L1 allocation run | Reject generic solve/price/write facade. Existing sweep contexts already reuse loaded state; four frontier calls are mutually exclusive paths. Bounded AssignmentSpace extraction is in progress. |
+| L1 allocation run | Reject generic solve/price/write facade. Existing sweep contexts already reuse loaded state; four frontier calls are mutually exclusive paths. Implemented bounded AssignmentSpace for stats, expansion, promotion and exact tensor accounting. |
 | L2 priced cells | Implemented source-format contracts, captured pricing policy, one typed price basis and explicit returned cost rows. |
-| L3 runtime prices | Shared device placement formula and off-step transient peak fixed. Remaining adapter proposal under review; measured evidence, shape proposals and dispatch SLO claims must remain distinct. |
+| L3 runtime prices | Shared device formula, off-step transient peak and assignment member views implemented. Reject universal runtime adapter: admission ordering, missing-price policy, rank vectors and evidence claims differ. |
 | L4 expert replay | Implemented public discovery, router normalization, explicit-weight replay, activation derivation and pair ordering in routed_experts. Historical receipt operation names remain unchanged. |
 | P1 Fisher rows | Implemented shared statistics owner and corrected visual normalization to use the visual writer's denominator. |
 | P2 inventory | Implemented inventory, explicit exclusions and propagation of declared profile failures. |
