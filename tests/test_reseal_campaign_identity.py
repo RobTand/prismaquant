@@ -17,7 +17,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from tools import reseal_campaign_identity as tool  # noqa: E402
+from prismaquant import tessera_campaign_reseal as tool
+from tools.reseal_campaign_identity import main as reseal_main  # noqa: E402
 
 OLD = dict(prismaquant_source_sha256='a'*64, encoder_source_sha256='b'*64)
 NEW = dict(prismaquant_source_sha256='c'*64, encoder_source_sha256='d'*64)
@@ -112,7 +113,7 @@ def write_bundle(path, old=OLD, new=NEW, ok=True, strata=DEFAULT_STRATA):
 
 
 def run(*argv):
-    return tool.main([str(a) for a in argv])
+    return reseal_main([str(a) for a in argv])
 
 
 def test_dry_run_lists_every_edit_and_writes_nothing(tmp_path, capsys):

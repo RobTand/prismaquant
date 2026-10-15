@@ -424,7 +424,7 @@ class EncoderAdoptionValidation:
 
     def verify(self, adoption, *, fmt):
         _require(self._active, "adoption validation is outside its operation")
-        from tools.reseal_campaign_identity import unit_kind, format_family
+        from .tessera_campaign_reseal import unit_kind, format_family
         _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
         reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
         bound = adoption.get("encoder_source_proof")
@@ -485,7 +485,7 @@ def validated_encoder_adoption(adoption, *, fmt):
     cell, and a named proof's bytes and internal consistency stay walls in
     both modes.
     """
-    from tools.reseal_campaign_identity import load_bundle, unit_kind, format_family, Refused
+    from .tessera_campaign_reseal import load_bundle, unit_kind, format_family, Refused
 
     _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
     reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]

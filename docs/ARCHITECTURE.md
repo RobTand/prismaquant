@@ -54,6 +54,14 @@ Re-stamped 2026-10-14: the unused weight-session and layer-state-cache
 prototypes are retired. Their helper-oracle checks now use the live owner,
 and live cache publication, source refusal and optional Tessera checks remain.
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
+`tessera_campaign_reseal` owns proof assembly, strata and coverage checks,
+source-seal classification, plain checkpoint migration and verification.
+The executable parses argv and prints returned reports and row progress.
+Public operations receive explicit paths and selections, never argparse state.
+Package consumers import the proof owner directly. Proof requirements, wire
+identities, scored content and idempotent row semantics keep their prior gates.
+
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_census_union` owns union planning, source/cell/Hessian/receipt checks and
 publication of sealed campaign tables. Shared layout and stage names belong to
 `tessera_campaign_table`. The executable parses arguments and prints results;
