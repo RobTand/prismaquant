@@ -667,8 +667,8 @@ def _synthetic_two_rung_contract(monkeypatch):
     for cell in parsed.cells:
         if cell.family == "TESSERA_E4M3_K1" and cell.structure == "routed_moe":
             cell = dataclasses.replace(
-                cell, rungs_q256=cell.rungs_q256 | {1088},
-                covered_rungs_q256=cell.covered_rungs_q256 | {1088})
+                cell, rungs_q256=tuple(sorted(set(cell.rungs_q256) | {1088})),
+                covered_rungs_q256=tuple(sorted(set(cell.covered_rungs_q256) | {1088})))
         cells.append(cell)
     extended = dataclasses.replace(
         parsed, cells=tuple(cells),
