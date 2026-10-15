@@ -14,7 +14,7 @@ record, not a claim that every pending unit is finished.
 | A1 reviewed pin | Implemented captured contract snapshot, packaged reviewed answer, private maps and exact TP fallback. |
 | A2 admission | Implemented typed rung verdicts and canonical cells; preserve separate menu, serving and export policies. |
 | T1 campaign metadata | Table/payload/merge, census union, reseal and source readset owners implemented. Complete repository-boundary migration waits on additional public Tessera APIs. |
-| T2 requests | Actual parser, typed prep/join/census/capture requests, phase runners, scope resolver and raw checkpoint mapping are implemented. Shared menu/projection is integrated; raw acquisition wire ownership is integrated, and final loaded-campaign execution remains in progress. |
+| T2 requests | Implemented actual parser, typed phase requests/runners, shared scope and menu/projection, raw acquisition/checkpoint mapping and synchronous loaded census/pricing execution. All direct callers migrated. Final composed verification follows unit qualification. |
 | T3 measurement | Calibration-forward and wire-custody owners implemented. Selected-wire recipe and cell-measurement migration waits on additional public Tessera APIs. |
 | T4 fleet port | Reject another generic client. Published CLI and shared row parser already own the protocol; Joint has Gateway/FakeGateway. Preserve domain-specific complete-set, chain-output and key-verdict checks. |
 | S1 staged reads | Implemented shared mount facts, topmost-NFS retry and checkpoint whole-entry transaction. Implemented grouped acquisition and shared counters in staged_lease. Borrowed descriptor and sealed-buffer lifetimes stay distinct. |
@@ -172,3 +172,19 @@ operation, raw acquisition wire ownership and final typed loaded-campaign
 execution remain in progress. Cache constructors and their census effects
 must retain their current order and lifetime. Final composed verification and
 the additional Tessera producer API handoff remain outstanding.
+
+
+## Independent implementation checkpoint
+
+The typed loaded-campaign operation is integrated in `f92a4d8d33`, completing
+accepted T2 implementation. All 515 cases in its 25-file qualification pass
+without skips; source parity, compile and binding proofs also pass. Root files
+match the qualified capsule. Final composed CPU, task-suite fixture, declared
+data and compile checks remain pending at this checkpoint.
+
+The API-dependent remainder is still T1 repository-boundary completion and
+T3 selected-wire/cell measurement. The initial metadata API is integrated;
+the additional API-only backport has no producer acknowledgement. The canonical
+brief is `/mnt/shared/agent-mailbox/contexts/prismaquant-refactor-20261014/tessera-additional-producer-api-handoff.md`.
+No algorithms are copied into PrismaQuant and the separate Tessera repository
+remains untouched. This checkpoint does not mark those remaining items done.

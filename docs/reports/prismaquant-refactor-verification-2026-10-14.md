@@ -600,3 +600,64 @@ the test. Result is
 `86409332e7dc04c55585c925b09db0e82fed2d65d7edef6001632c8715a2b33b`.
 The actual diff, successful terminal and CAS payload/receipt were independently
 checked. CPU1, RAM4 GiB and native threads1 are reserved with portable eligibility.
+
+
+Typed loaded-campaign execution is integrated in `f92a4d8d33`. Ten actual
+production/test/tool files equal the final qualified root-composed capsule.
+The request is either loaded census or pricing; source and head variants,
+placement, refinement, publication and outputs bind actual admitted controls.
+The operation receives named calibration statistics and explicit runtime facts,
+creates the existing cache/memo/row-stream/journal/publisher, and completes
+synchronously inside its caller's authenticated source ExitStack. No Namespace
+or serialized request becomes checkpoint policy. Requested identity threads
+remain distinct from the affinity-capped execution count. Census retains H-off
+and its existing constructor effects; resident capture provenance is retained.
+
+Independent review found no implementation defect in the recorded source.
+The final source-preserving function placement changes the campaign diff to
+276 lines. All scheduling, priming and capture-publication helper callers move
+in the same unit. Real census cases check constructor order and H-off under
+both CLI modes; real resident/selected reuse retains capture evidence. A cold
+subprocess constructs both request variants while refusing numerical imports.
+No tests are removed in this unit.
+
+The final four-shard PrismaBuild run selects 25 files and passes all 515
+collected cases without skips. Per-action collected, executed and outcome
+counts reconcile without gaps. Each action reserves CPU1, RAM4 GiB and native
+threads1 with portable eligibility. The actual successful terminal records,
+result bytes and embedded CAS receipt identities were independently checked.
+
+| Action | Passed | Result SHA-256 | Embedded receipt SHA-256 |
+| --- | ---: | --- | --- |
+| `ec29cad4dba5836d4338057d52a191e0f54946cc61f2099681df3f54ce9ef269` | 169 | `b2bcb2664db2ad498168376db0d2d258cb4428b606964c6de1d1ffce2b25967b` | `2df282124d52b586a7689d3f616828676f2b55c03e6a298ca60b39357c31d05c` |
+| `18b67acbe9495bf071df5265cdf9a5c4899f55f0ad629ea459e58415b75df6d8` | 87 | `fd073b1d4f1c8b41f21e289170d92c7498ead8cd2d63e3757fbc3c7d8eb2db08` | `a975d3932624c50370b33d4273a9d4f95280ea9441b3e53ced92dc1fd550e542` |
+| `9c58eff190f011803d6d5a64b70d6a2e7da044f0b7b6f3a16d230fcc1edb1f1e` | 121 | `d4a50500dcf020442151ebf97f651773dc455feb22365e95623aa4faf3458ff8` | `8e4ba114e5c52861c55ed9f3ca400e0bcdc3440b412bce22a3057aec5c3ebfe6` |
+| `c9e3a19e0dc3d261ea8ee86e27ad127e916b66ef4664879f10ce3ac3e21ab0da` | 138 | `b980e7068951743421db20f133017304c078c79290b8e7350f2506b752954657` | `2cfcaf209881d2243590d0d525c45ecdb6bcfe09c35282de55968a7b8a8bd76e` |
+
+Final proof action
+`475c6781e93c7222978b4422ea4d7993158680a71925e73fc489f52ddbd564b0`
+compiles eleven sources, checks the actual three operation global closures,
+and verifies the root-bound main prefix, static-scale/detachment/raw-copy
+order, moved numerical/callback/publication body and three helper bodies.
+Constructor, priming and operation-input bindings are checked separately.
+Result is `56c665051b60fb8bec3fa33e66d0168bcb257cdfbc4d984da801cbd72a5bb686`,
+450 bytes; receipt is
+`847d31c9c367376400e2bc8989dfe6ef1a69a1c2c08e18826f4ec7e550f7dee6`.
+It uses CPU1, RAM3 GiB and native threads1, with portable eligibility.
+
+The corrected focused action `afd859745198c7bbc6dd762f9b5cb0cad00f8b84609c9bbaa36270feed41f71c`
+passes 23 cases without skips and compiles ten sources. Its result is
+`f37a056074d70e7adde00f46716452bf9c0ae7828eb705682c59177b38165eb6`;
+receipt is `dd2ce7d63765b275bb5c952bba9cd5de9bed2f1b0fd7711ab28cfe4675c72a51`.
+These cases overlap the final 515 and are not added into a unique count.
+The initial `0535525b` action failed compilation because the test migration
+placed an import before __future__. The helper now preserves future imports.
+A later controller attempt refused unsupported reporting options before any
+publication; the accepted run uses the supported empty pytest-options list.
+Neither failed attempt is reported as a passing action.
+
+The independent accepted implementation is complete. Final composed branch
+verification is next. Additional producer APIs still block complete removal
+of eleven serving imports in three files and the remaining T1/T3 work; no
+Tessera source, runtime table, admission gate or serving default was changed
+as a workaround.
