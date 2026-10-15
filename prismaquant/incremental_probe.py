@@ -8,10 +8,8 @@ resident and decoder layers offloaded to disk and streamed in on demand.
 Small models just pay the no-op cost of a LayerCache that can hold every
 layer resident; large models drain the cache to disk as needed.
 
-Each shard (body layer range, MTP, lm_head) runs one streaming pass: the
-exact phase-1 / phase-2 / phase-3 flow from `streaming_probe.run_streaming_probe`,
-specialized to Fisher-instrument only the Linears matching that shard's
-regex. MTP is a built-in shard kind: after the body forward we ask the
+The body captures hidden boundaries and the terminal CE gradient once. Each
+body shard then runs a reverse Fisher sweep over its regex-scoped Linears. MTP is a built-in shard kind: after the body forward we ask the
 model profile to build its MTP module (`profile.build_mtp_module`), load
 the source MTP weights straight from safetensors
 (`profile.read_mtp_source_state_dict` / `profile.load_mtp_state_dict`),
@@ -1614,12 +1612,9 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
 _PROBE_CTX_CACHE: dict = {}
 
 
-def _persistent_probe_context_enabled(
-) -> bool:
-    """Legacy warm model reuse is forbidden on the source-attested lane."""
-    return (
-        (os.environ.get("PRISMAQUANT_PROBE_CTX_CACHE") == "1")
-    )
+def _persistent_probe_context_enabled() -> bool:
+    """Whether the ordinary probe context cache is explicitly enabled."""
+    return os.environ.get("PRISMAQUANT_PROBE_CTX_CACHE") == "1"
 
 
 # v22 Fix A: lazy weight-stats cache.
@@ -1936,7 +1931,7 @@ def _compute_global_precompute(
     resident_input_rows_limit = 256
     _resident_cache_dir = (
         Path(activation_cache_dir)
-        if (activation_cache_dir)
+        if activation_cache_dir
         else None
     )
     if _resident_cache_dir is not None:
@@ -2115,7 +2110,7 @@ def _compute_global_precompute(
     grad_buf = torch.zeros_like(norm_out_d)
     chunk_T = 256
     N, T, _ = norm_out_d.shape
-    if (importance_weighting):
+    if importance_weighting:
         total_ce, total_count = 0.0, 0
         for start in range(0, T - 1, chunk_T):
             end = min(start + chunk_T, T)
@@ -2844,7 +2839,7 @@ def _run_body_streaming_shard(
             # 2× storage cost; recommended when disk is plentiful.
             cache_dtype = (
                 torch.float32
-                if (os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0")
+                if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
                 else torch.bfloat16
             )
             X = torch.cat(snaps, dim=0).to(
@@ -3925,7 +3920,7 @@ def _run_body_streaming_shard(
         flush_activation_snapshots(packed_act_snaps)
         cache_dtype = (
             torch.float32
-            if (os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0")
+            if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
             else torch.bfloat16
         )
         for name, snaps in resident_act_snaps.items():
@@ -4030,7 +4025,7 @@ def _load_mtp_source_for_probe(
     inner_mtp: nn.Module,
     model_path: str,
 ) -> tuple[dict[str, torch.Tensor], list[str], list[str]]:
-    """Load MTP weights, closing source/module coverage before any forward."""
+    """Load MTP source weights and report unmatched source/module parameters."""
     raw = mtp_profile.read_mtp_source_state_dict(model_path)
     if not raw:
         return {}, [], []
@@ -4188,7 +4183,7 @@ def _run_mtp_streaming_shard(
 
     cache_dir = (
         Path(activation_cache_dir)
-        if (activation_cache_dir)
+        if activation_cache_dir
         else None
     )
     if cache_dir is not None:
@@ -4360,37 +4355,69 @@ def main():
                          "Default 42 reproduces historical behavior.")
     ap.add_argument(
         "--global-calibration-tensor", default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--sample-partition-index", type=int, default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--sample-run-contract", default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--sample-cover", default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--producer-snapshot-root",
         default=os.environ.get("PRISMAQUANT_PRODUCER_SNAPSHOT_ROOT"),
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--container-image-digest",
         default=os.environ.get("PRISMAQUANT_PRODUCER_IMAGE_DIGEST"),
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--sample-importance-stats-output", default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument(
         "--sample-global-importance-receipt", default=None,
-        help='Retired sample-parallel flag. Execution and offline commands are archived at archive/sample_parallel_probe_2026-10-15/; --global-calibration-tensor refuses before model reads.',
+        help=(
+            'Retired sample-parallel flag. Execution and offline commands are '
+            'archived at archive/sample_parallel_probe_2026-10-15/; '
+            '--global-calibration-tensor refuses before model reads.'
+        ),
     )
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--device-map", default=None)
@@ -4825,7 +4852,6 @@ def main():
               f"{precompute_cache_path}", flush=True)
         return precomputed
 
-
     # Linear-level reuse cache (LPS-invariant): union of per-Linear
     # Fisher stats from all existing shards that share the same
     # content-level meta (model, dataset, nsamples, seqlen, dtype,
@@ -4850,18 +4876,10 @@ def main():
         "activation_rows_limit": int(args.activation_rows_limit),
         "router_coverage_version": _ROUTER_COVERAGE_VERSION,
         "emit_marginals": _marginals_enabled(),
-        "sample_parallel": (
-            (None)
-        ),
-        "sample_parallel_importance": (
-            (None)
-        ),
-        "sample_parallel_activation_scope": (
-            (None)
-        ),
-        "sample_parallel_execution_identity": (
-            (None)
-        ),
+        "sample_parallel": None,
+        "sample_parallel_importance": None,
+        "sample_parallel_activation_scope": None,
+        "sample_parallel_execution_identity": None,
     }
     linear_cache = scan_cached_linear_stats(shard_dir, content_meta_anchor)
     if linear_cache:

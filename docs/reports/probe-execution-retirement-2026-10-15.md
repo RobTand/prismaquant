@@ -187,3 +187,11 @@ and `42dc97aa7d33d2aacc1d64a9e61392b2621ab41304e8334c2b20bc6559e85a90`
 returned 90 passes and no skips across seven affected files. Three files compile
 under PB `e3f3b9aa25c1`. All terminal exits, settled cleanup and CAS payloads were
 checked. Combined latest coverage is 739 passes and seven skips across 20 files.
+
+### Separate source cleanup
+
+A final cosmetic commit removes specialization parentheses/empty signature lines,
+wraps identical CLI help literals and corrects comments naming retired owners.
+Both changed Python modules have identical complete executable ASTs after excluding
+only docstrings. No additional tests were dispatched for this comment/format-only
+unit; the source invariant is retained in `reports/p4-cosmetic-ast-invariants.json`.
