@@ -145,6 +145,11 @@ unchanged.
 `native_render_codec` owns the existing native weight arithmetic and wire
 codecs shared by ProductionWeightCache and compressed-tensors export. The
 exporter retains names, serving policy, artifact IO and CLI orchestration.
+`NativeRenderLevers` binds all native numerical and gate controls once. The
+codec receives that immutable value, activation rows and calibrated scales
+explicitly; cache fill and export record the same complete schema. Native
+re-packing refuses historical partial recipes because their omitted controls
+cannot establish an identical render.
 
 vLLM metadata discovery loads the registered class entry directly when available.
 It does not construct a serving `ModelConfig`; errors from the installed class
@@ -170,7 +175,7 @@ architecture. Failures loading registered model metadata propagate through
 profiles, allocation and export; a failed lookup remains failed on a repeated
 call. Activation-scale joins require the same successful fused declaration.
 
-As of: 2026-10-14 · `sol/refactor-export-gates-20261014`, native panel and ship-record ownership.
+As of: 2026-10-15 · `sol/refactor-export-gates-20261014`, native codec/options, panel and ship-record ownership.
 `native_panel_kind` owns the schema-keyed dense and routed panel adapters. Receipt
 emission and runtime admission ask the same adapter for its row binding, runtime
 scope, world size and consumer. The adapter also projects final joint panels onto

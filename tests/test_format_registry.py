@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+import prismaquant.export_native_compressed as _test_exporter
+from prismaquant.native_render_levers import NativeRenderLevers
+from dataclasses import replace
+import pytest
+
+@pytest.fixture(autouse=True)
+def _isolate_export_inputs():
+    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+             _test_exporter._INPUT_GLOBAL_SCALES)
+    _test_exporter._RENDER_LEVERS = None
+    _test_exporter._CACHED_ACTIVATIONS = None
+    _test_exporter._INPUT_GLOBAL_SCALES = None
+    yield
+    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+     _test_exporter._INPUT_GLOBAL_SCALES) = saved
+
+
 import prismaquant.native_render_codec as _native_render_codec
 
 import torch
@@ -191,8 +208,8 @@ def test_mx_e8m0_rtn_matches_export_scale_rounding():
 def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
     import prismaquant.export_native_compressed as enc
 
-    previous = _native_render_codec._NVFP4_SCALE_RULE
-    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", _native_render_codec.NVFP4_SCALE_RULE_STATIC_6)
+    previous = (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).nvfp4_scale_rule
+    monkeypatch.setattr(_test_exporter, "_RENDER_LEVERS", NativeRenderLevers())
     try:
         cases = [
             torch.linspace(-3.7, 3.7, steps=64, dtype=torch.float32).reshape(4, 16)
@@ -203,19 +220,19 @@ def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
 
         for w in cases:
             registry = fr.get_format("NVFP4").quantize_dequantize(w)
-            export = _rtn_dequant_nvfp4(w, group_size=16)
+            export = _rtn_dequant_nvfp4(w, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
             assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:
-        monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", previous)
+        monkeypatch.setattr(_test_exporter, "_RENDER_LEVERS", NativeRenderLevers(nvfp4_scale_rule=previous))
 
 
 def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
     # WEIGHTS follow the export codec (one rendering everywhere).
     import prismaquant.export_native_compressed as enc
 
-    previous = _native_render_codec._NVFP4_SCALE_RULE
-    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", _native_render_codec.NVFP4_SCALE_RULE_STATIC_6)
+    previous = (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).nvfp4_scale_rule
+    monkeypatch.setattr(_test_exporter, "_RENDER_LEVERS", NativeRenderLevers())
     try:
         torch.manual_seed(23)
         x = torch.randn(2, 5, 32, dtype=torch.float32) * 2.0
@@ -223,11 +240,11 @@ def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
         export = _rtn_dequant_nvfp4(
             x.reshape(-1, x.shape[-1]),
             group_size=16,
-        ).reshape_as(x)
+         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())).reshape_as(x)
 
         assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:
-        monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", previous)
+        monkeypatch.setattr(_test_exporter, "_RENDER_LEVERS", NativeRenderLevers(nvfp4_scale_rule=previous))
 
 
 def test_nvfp4_activation_emulation_is_batch_independent():

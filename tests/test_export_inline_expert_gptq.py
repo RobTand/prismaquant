@@ -31,6 +31,23 @@ Runs in a FRESH subprocess with the cuBLAS workspace pinned from process start.
 """
 from __future__ import annotations
 
+import prismaquant.export_native_compressed as _test_exporter
+from prismaquant.native_render_levers import NativeRenderLevers
+from dataclasses import replace
+import pytest
+
+@pytest.fixture(autouse=True)
+def _isolate_export_inputs():
+    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+             _test_exporter._INPUT_GLOBAL_SCALES)
+    _test_exporter._RENDER_LEVERS = None
+    _test_exporter._CACHED_ACTIVATIONS = None
+    _test_exporter._INPUT_GLOBAL_SCALES = None
+    yield
+    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+     _test_exporter._INPUT_GLOBAL_SCALES) = saved
+
+
 import prismaquant.native_render_codec as _native_render_codec
 
 import os
@@ -113,19 +130,22 @@ def _set_export_act_globals(enc, act_dir):
     """Populate the export module's activation globals from the act cache."""
     from prismaquant.measure_quant_cost import ActivationIndex
 
+    enc._RENDER_LEVERS = NativeRenderLevers.resolve({
+        "gptq": True, "scale_sweep": False,
+        "static_act_order": True, "joint_scale_opt": True})
     idx = ActivationIndex(act_dir, [])
-    _native_render_codec._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
+    _test_exporter._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
     scales: dict[str, float] = {}
     for name in idx.names():
         try:
-            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(idx.load(name))
+            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(idx.load(name), levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         except Exception:
             pass
-    _native_render_codec._INPUT_GLOBAL_SCALES = scales
-    _native_render_codec._ACT_AWARE_FLAGS["gptq"] = True
-    _native_render_codec._ACT_AWARE_FLAGS["scale_sweep"] = False
-    _native_render_codec._ACT_AWARE_FLAGS["static_act_order"] = True
-    _native_render_codec._ACT_AWARE_FLAGS["joint_scale_opt"] = True
+    _test_exporter._INPUT_GLOBAL_SCALES = scales
+    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"gptq": True})
+    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"scale_sweep": False})
+    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"static_act_order": True})
+    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"joint_scale_opt": True})
 
 
 def _packed_tensor_bytes(tensors):
@@ -191,8 +211,8 @@ def _inline_export_body(workdir: str) -> None:
     )
 
     saved = (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-             _native_render_codec._CACHED_ACTIVATIONS, _native_render_codec._INPUT_GLOBAL_SCALES,
-             dict(_native_render_codec._ACT_AWARE_FLAGS))
+             _test_exporter._CACHED_ACTIVATIONS, _test_exporter._INPUT_GLOBAL_SCALES,
+             dict({key: (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).record()[key] for key in ("gptq", "scale_sweep", "static_act_order", "joint_scale_opt")}))
     try:
         enc._PRODUCTION_WEIGHT_CACHE = cache
         enc._INLINE_EXPERT_GPTQ = False
@@ -208,8 +228,8 @@ def _inline_export_body(workdir: str) -> None:
             model, assignment, bf16_passthrough=set(), profile=profile)
     finally:
         (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-         _native_render_codec._CACHED_ACTIVATIONS, _native_render_codec._INPUT_GLOBAL_SCALES) = saved[:4]
-        _native_render_codec._ACT_AWARE_FLAGS.update(saved[4])
+         _test_exporter._CACHED_ACTIVATIONS, _test_exporter._INPUT_GLOBAL_SCALES) = saved[:4]
+        _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **saved[4])
 
     packed_a = _packed_tensor_bytes(tensors_a)
     packed_b = _packed_tensor_bytes(tensors_b)

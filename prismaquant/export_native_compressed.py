@@ -54,6 +54,12 @@ from __future__ import annotations
 
 
 import prismaquant.native_render_codec as _native_render_codec
+from .native_render_levers import NativeRenderLevers
+
+# Export-run inputs; numerical routines receive these explicitly.
+_RENDER_LEVERS: NativeRenderLevers | None = None
+_CACHED_ACTIVATIONS = None
+_INPUT_GLOBAL_SCALES = None
 
 import argparse
 import gc
@@ -363,7 +369,7 @@ def _production_cache_fingerprint(
 def _production_cache_scales(cache, *, profile=None) -> dict[str, float]:
     activation_max_abs = getattr(cache, "activation_max_abs", None) or {}
     scales = {
-        name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(max_abs))
+        name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(max_abs), levers=_export_render_options())
         for name, max_abs in activation_max_abs.items()
         if max_abs and float(max_abs) > 0.0
     }
@@ -1230,71 +1236,25 @@ def _production_cache_prefetch_assignment(
     return loaded
 
 
-@contextmanager
-def _temporary_export_nvfp4_scale_rule(rule_name: str | None):
-    """Temporarily set the active NVFP4 scale rule for an export re-derive.
-
-    No-op when ``rule_name`` is falsy (keeps the export-entry default)."""
-    pass
-    if not rule_name:
-        yield
-        return
-    prev = _native_render_codec._NVFP4_SCALE_RULE
-    try:
-        _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule(rule_name)
-        yield
-    finally:
-        _native_render_codec._NVFP4_SCALE_RULE = prev
 
 
-def _export_match_render_scale_rule(cache) -> str | None:
-    """M19: the NVFP4 scale rule the render used, for a byte-faithful re-derive.
-
-    The production cache stores the render's fp32 weights as bf16; export then
-    re-quantizes that dequant. Re-deriving under the render's RECORDED scale
-    rule (e.g. ``joint_mse`` when JSO was on) instead of the export-entry
-    default (``static_6``) makes the re-quant near-idempotent — the shipped
-    NVFP4 bytes track the KL-validated render rather than diverging to a
-    different per-group scale choice. Returns ``None`` (legacy behavior, bytes
-    unchanged) when ``PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE`` is ``0`` or
-    the cache carries no recorded rule.
-    """
-    if os.environ.get(
-            "PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE", "1") == "0":
-        return None
-    levers = getattr(cache, "levers", None) or {}
-    rule = levers.get("nvfp4_scale_rule")
-    return str(rule) if rule else None
 
 
-def _packed_expert_render_scale_rule(
-    cache: "ProductionWeightCache | None" = None,
-) -> str | None:
-    """M2 (2026-07-02 audit): render scale rule for packed-expert re-derives.
 
-    The packed-expert re-pack re-derives NVFP4 codes/scales from the cached
-    3-D dequant exactly like the dense ``_pack_production_cached_2d`` path,
-    so it needs the same M19 match-render-scale wrap: without it a
-    joint_mse/four_over_six-rendered expert re-derived under the export-entry
-    default (``static_6``) cannot recover its codes (measured 43% packed-byte
-    flips). The cache's ``nvfp4_scale_rule`` lever is cache-global — the
-    packed-expert render (both ``batched`` and ``per_expert`` modes in
-    ``fill_packed_expert_cache_entries``) runs under the same module-level
-    rule the lever records — so the cache-level lever IS the expert render's
-    rule. Resolution: recorded rule if present, else ``None`` (the current
-    env default; behavior unchanged when nothing is recorded). Residual:
-    ``PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS`` is not recorded in the lever
-    dict, so non-default joint levels must still match between cache-build
-    and export env. Gated by ``PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE``
-    (the existing M19 flag, default on).
 
-    ``cache`` overrides the module-level production cache: the inline-render
-    export path passes its transient per-layer cache so the re-derive keys off
-    the SAME recorded rule the inline render used.
-    """
+
+
+
+def _export_render_options(cache=None) -> NativeRenderLevers:
+    """Use the recorded numerical recipe for a cached native re-pack."""
+    options = _RENDER_LEVERS or NativeRenderLevers.resolve()
     if cache is None:
         cache = _PRODUCTION_WEIGHT_CACHE
-    return _export_match_render_scale_rule(cache)
+    if cache is not None:
+        recorded = NativeRenderLevers.from_record(cache.levers)
+        if options.nvfp4_export_match_render_scale:
+            return recorded
+    return options
 
 
 def _pack_production_cached_2d(
@@ -1325,14 +1285,12 @@ def _pack_production_cached_2d(
     target_device = device or torch.device("cpu")
     if fmt == "NVFP4":
         w_work = w.to(device=target_device, dtype=torch.float32)
-        with _temporary_export_nvfp4_scale_rule(
-                _export_match_render_scale_rule(cache)):
-            wp, ws, wg = _native_render_codec.quantize_dequantize_nvfp4(
-                w_work,
-                group_size=16,
-                global_real_override=nvfp4_global_real_override,
-            )
-        input_scale = _native_render_codec._resolve_nvfp4_input_global_scale(target=linear_name)
+        wp, ws, wg = _native_render_codec.quantize_dequantize_nvfp4(
+            w_work,
+            group_size=16,
+            global_real_override=nvfp4_global_real_override,
+         levers=_export_render_options(cache))
+        input_scale = _native_render_codec._resolve_nvfp4_input_global_scale(target=linear_name, calibrated_scales=_INPUT_GLOBAL_SCALES)
         return {
             "weight_packed": wp,
             "weight_scale": ws,
@@ -1355,7 +1313,7 @@ def _pack_production_cached_2d(
                 or bool(cache_levers.get("gptq", False))
                 or bool(cache_levers.get("joint_scale_opt", False))
             )
-            and _native_render_codec._CACHED_ACTIVATIONS is not None
+            and _CACHED_ACTIVATIONS is not None
         ):
             return None
         w_work = w.to(device=target_device, dtype=torch.float32)
@@ -1374,7 +1332,7 @@ def _pack_production_cached_2d(
                 bool(cache_levers.get("scale_sweep", False))
                 or bool(cache_levers.get("gptq", False))
             )
-            and _native_render_codec._CACHED_ACTIVATIONS is not None
+            and _CACHED_ACTIVATIONS is not None
         ):
             return None
         if fmt == "FP8_E5M2":
@@ -1384,7 +1342,7 @@ def _pack_production_cached_2d(
         return {"weight": q, "weight_scale": qs}
     if fmt == "MXFP4":
         cache_levers = getattr(cache, "levers", {}) or {}
-        if bool(cache_levers.get("gptq", False)) and _native_render_codec._CACHED_ACTIVATIONS is not None:
+        if bool(cache_levers.get("gptq", False)) and _CACHED_ACTIVATIONS is not None:
             return None
         w_work = w.to(device=target_device, dtype=torch.float32)
         q, qs = _native_render_codec.quantize_dequantize_mxfp4(w_work, group_size=32)
@@ -1451,7 +1409,7 @@ def _packed_expert_input_global_scale(
     mx = max_abs_map.get(experts_param_name)
     if mx is None or float(mx) <= 0:
         return None
-    return _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(mx))
+    return _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(mx), levers=_export_render_options())
 
 
 def _packed_expert_stage_attestation(
@@ -1519,7 +1477,7 @@ def _packed_expert_stage_attestation(
     policy = _nvfp4_activation_contract.resolve_input_global_scale_policy()
     return _nvfp4_activation_contract.build_routed_moe_stage_attestation(
         {
-            name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(value)
+            name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(value, levers=_export_render_options())
             for name, value in max_abs_by_target.items()
         },
         policy=policy,
@@ -1590,18 +1548,9 @@ def _packed_expert_export_provenance() -> dict[str, object]:
 
 
 def _inline_expert_render_levers() -> dict[str, object]:
-    """Render levers for the inline packed-expert path, taken from the export's
-    resolved act-aware flags (the same flags that drive the dense inline
-    ``_quantize_2d`` GPTQ path). The batched NVFP4 render ignores JSO/act-order
-    and uses fixed damp — matching the cache builder's ``"batched"`` mode — but
-    FP8 experts fall to per-expert ``render_production_weight``, which consumes
-    these levers, so we forward the real flags."""
-    return {
-        "gptq": bool(_native_render_codec._ACT_AWARE_FLAGS.get("gptq", False)),
-        "scale_sweep": bool(_native_render_codec._ACT_AWARE_FLAGS.get("scale_sweep", False)),
-        "static_act_order": bool(_native_render_codec._ACT_AWARE_FLAGS.get("static_act_order", False)),
-        "joint_scale_opt": bool(_native_render_codec._ACT_AWARE_FLAGS.get("joint_scale_opt", False)),
-    }
+    """The complete immutable options used by the dense inline renderer."""
+    return (_RENDER_LEVERS or NativeRenderLevers.resolve()).record()
+
 
 
 def _dump_live_cuda_tensors(where: str, min_mb: float = 200.0) -> None:
@@ -1747,13 +1696,13 @@ def _inline_render_packed_expert_module(
         return None
     if _PRODUCTION_WEIGHT_CACHE is not None or _ALLOW_PACKED_EXPERT_RTN:
         return None
-    if _native_render_codec._CACHED_ACTIVATIONS is None:
+    if _CACHED_ACTIVATIONS is None:
         return None
     # Activation-residency landmine: _LazyActivationCache.get() returns a
     # CPU-resident fp32 tensor; fill_packed_expert_cache_entries' override path
     # reshapes + moves it to the compute device itself (derive_per_expert_
     # activations runs the router on `device`), so no manual .to() here.
-    X = _native_render_codec._CACHED_ACTIVATIONS.get(experts_qname)
+    X = _CACHED_ACTIVATIONS.get(experts_qname)
     if X is None or X.numel() == 0:
         return None
 
@@ -1987,11 +1936,12 @@ def _compute_nvfp4_joint_global(
     assignment: dict[str, str],
     *,
     profile=None,
-) -> dict[str, torch.Tensor]:
+levers: NativeRenderLevers | None = None, ) -> dict[str, torch.Tensor]:
     """Pre-pass over the model: for each fused-sibling group whose
     members are all assigned to NVFP4, compute the joint global_real
     (max across siblings). Return a dict mapping each sibling's qname
     to the shared global_real tensor."""
+    levers = levers or _export_render_options()
     # Bucket siblings by (parent_prefix, kind). Missing siblings are
     # OK — vLLM's loader handles partial fusion fine.
     groups: dict[str, list[tuple[str, nn.Linear]]] = {}
@@ -2022,7 +1972,7 @@ def _compute_nvfp4_joint_global(
         # consistency (defensive — a mixed-format fused group is a bug
         # upstream of the export and would fail the load anyway).
         candidates = [
-            _native_render_codec.compute_nvfp4_global_real(mod.weight.detach().float())
+            _native_render_codec.compute_nvfp4_global_real(mod.weight.detach().float(), levers=levers)
             for _, mod in siblings
         ]
         joint = torch.stack(candidates).max()
@@ -2088,13 +2038,14 @@ def _compute_layer_joint_nvfp4(layer_mod: nn.Module,
                                layer_qname: str,
                                assignment: dict[str, str],
                                profile,
-                               ) -> dict[str, torch.Tensor]:
+                               *, levers: NativeRenderLevers | None = None, ) -> dict[str, torch.Tensor]:
     """Return {recipe_key -> joint global scale} for NVFP4 fused-sibling
     groups inside this decoder layer. Only keys assigned NVFP4 get an
     override entry; the rest compute per-Linear scales at quantize time.
 
     Semantically equivalent to a scoped `_compute_nvfp4_joint_global`
     across just this layer's modules."""
+    levers = levers or _export_render_options()
     groups: dict[str, list[tuple[str, str, nn.Linear]]] = defaultdict(list)
     for sub_name, mod in layer_mod.named_modules():
         if not isinstance(mod, nn.Linear):
@@ -2120,7 +2071,7 @@ def _compute_layer_joint_nvfp4(layer_mod: nn.Module,
             continue
         candidates = [
             _native_render_codec.compute_nvfp4_global_real(mod.weight.detach().float(),
-                                      group_size=16)
+                                      group_size=16, levers=levers)
             for _, _, _, mod in fqn_fmt
         ]
         joint = torch.stack(candidates).max()
@@ -2663,7 +2614,7 @@ def materialize_tensors_streaming(
                     param.detach().float(), fmt,
                     nvfp4_global_real_override=joint,
                     linear_name=recipe_key,
-                )
+                 cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
             for suffix, t in compressed.items():
                 base_name = (full_qname[:-len(".weight")]
                              if full_qname.endswith(".weight")
@@ -2788,11 +2739,9 @@ def materialize_tensors_streaming(
         # M2: computed under the render's recorded scale rule so the
         # fused joint-global pre-pass is consistent with the
         # match-render-scale re-derive (_pack_production_cached_2d).
-        with _temporary_export_nvfp4_scale_rule(
-                _export_match_render_scale_rule(_PRODUCTION_WEIGHT_CACHE)):
-            joint_globals = _compute_layer_joint_nvfp4(
-                layer_mod, layer_qname, assignment, profile,
-            )
+        joint_globals = _compute_layer_joint_nvfp4(
+            layer_mod, layer_qname, assignment, profile,
+         levers=_export_render_options())
 
         # 3c. Emit Linears.
         covered: set[str] = set()
@@ -2810,15 +2759,11 @@ def materialize_tensors_streaming(
             list[tuple[str, str, str, nn.Linear]]
         ] = defaultdict(list)
         # v26: default ON.
-        _raw_batched = os.environ.get("PRISMAQUANT_BATCHED_NVFP4_EXPORT")
-        _batched_env_on = (
-            True if _raw_batched is None
-            else _raw_batched not in ("0", "", "false", "False", "FALSE", "no", "NO")
-        )
+        _batched_env_on = _export_render_options().batched_nvfp4_export
         _batched_nvfp4_enabled = (
             _batched_env_on
-            and (_native_render_codec._ACT_AWARE_FLAGS["gptq"] or _native_render_codec._ACT_AWARE_FLAGS["scale_sweep"])
-            and _native_render_codec._CACHED_ACTIVATIONS is not None
+            and (_export_render_options().gptq or _export_render_options().scale_sweep)
+            and _CACHED_ACTIVATIONS is not None
         )
 
         for sub_name, mod in layer_mod.named_modules():
@@ -2958,7 +2903,7 @@ def materialize_tensors_streaming(
                 mod.weight.detach().float(), fmt,
                 nvfp4_global_real_override=override,
                 linear_name=recipe_key,
-            )
+             cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
             for suffix, t in compressed.items():
                 out[f"{emit_full}.{suffix}"] = t.cpu()
             if mod.bias is not None:
@@ -3010,7 +2955,7 @@ def materialize_tensors_streaming(
                     compressed_per_linear = _native_render_codec._quantize_2d_nvfp4_group_batched(
                         chunk, joint_globals, export_dev,
                         expert_chunk=chunk_len,
-                    )
+                     activations=_CACHED_ACTIVATIONS, input_global_scales=_INPUT_GLOBAL_SCALES, levers=_export_render_options())
                     for (full, emit_full, _recipe_key, mod), compressed in zip(
                         chunk, compressed_per_linear,
                     ):
@@ -3095,20 +3040,17 @@ def materialize_tensors_streaming(
                 # Per-expert joint global scale when NVFP4 splits gate+up.
                 # M2: computed under the render's recorded scale rule so
                 # the joint global is consistent with the re-derive below.
-                packed_render_rule = _packed_expert_render_scale_rule(
-                    active_cache)
+                packed_render_options = _export_render_options(active_cache)
                 per_expert_joint: list[torch.Tensor | None] = [None] * E
                 if fmt == "NVFP4" and len(proj_split) > 1:
-                    with _temporary_export_nvfp4_scale_rule(
-                            packed_render_rule):
-                        for orig_e, _ in iter_experts:
-                            cands = [
-                                _native_render_codec.compute_nvfp4_global_real(
-                                    sp[orig_e].float(), group_size=16)
-                                for _, sp in proj_split
-                            ]
-                            per_expert_joint[orig_e] = (
-                                torch.stack(cands).max())
+                    for orig_e, _ in iter_experts:
+                        cands = [
+                            _native_render_codec.compute_nvfp4_global_real(
+                                sp[orig_e].float(), group_size=16, levers=packed_render_options)
+                            for _, sp in proj_split
+                        ]
+                        per_expert_joint[orig_e] = (
+                            torch.stack(cands).max())
 
                 # Pull the GPTQ-rendered dequant from the production cache (or
                 # the inline transient cache above). Packed experts go through
@@ -3197,49 +3139,48 @@ def materialize_tensors_streaming(
                 # to packed experts) — a joint_mse-rendered expert
                 # re-derived under the export-entry default (static_6)
                 # cannot recover its codes.
-                with _temporary_export_nvfp4_scale_rule(packed_render_rule):
-                    # Index-based on purpose: `enumerate` caches its last
-                    # yielded result tuple internally (CPython reuse), and a
-                    # surviving enumerate pinned the (proj_name, 9G-view)
-                    # tuple — and through it an 18G fp32 stack — across
-                    # layers (mem-dump attribution, GLM-5.3 probe runs).
-                    # Never pass tensor-bearing tuples through enumerate in
-                    # this function's scope.
-                    for pi in range(len(proj_split)):
-                        proj_name = proj_split[pi][0]
-                        sub_packed = proj_split[pi][1]
-                        cached_sub = (
-                            cached_split[pi][1]
-                            if cached_split is not None else None
-                        )
-                        for orig_e, new_e in iter_experts:
-                            base = f"{disk_qname}.{new_e}.{proj_name}"
-                            if is_bf16:
-                                expert_2d = sub_packed[orig_e]
-                                out[f"{base}.weight"], label = (
-                                    _passthrough_tensor(
-                                        full, expert_2d,
-                                        source_dtype_by_name))
-                            else:
-                                # Re-pack the GPTQ-rendered dequant when
-                                # cached (re-derives codes from the dequant,
-                                # same ~1e-3 approximation as the 2-D path —
-                                # not bit-lossless); fall back to source only
-                                # on the no-cache warning.
-                                expert_2d = (
-                                    cached_sub[orig_e]
-                                    if cached_sub is not None
-                                    else sub_packed[orig_e]
-                                )
-                                compressed = _native_render_codec._quantize_2d(
-                                    expert_2d, fmt,
-                                    nvfp4_global_real_override=(
-                                        per_expert_joint[orig_e]),
-                                    input_global_scale_override=(
-                                        expert_input_scale),
-                                )
-                                for suffix, t in compressed.items():
-                                    out[f"{base}.{suffix}"] = t.cpu()
+                # Index-based on purpose: `enumerate` caches its last
+                # yielded result tuple internally (CPython reuse), and a
+                # surviving enumerate pinned the (proj_name, 9G-view)
+                # tuple — and through it an 18G fp32 stack — across
+                # layers (mem-dump attribution, GLM-5.3 probe runs).
+                # Never pass tensor-bearing tuples through enumerate in
+                # this function's scope.
+                for pi in range(len(proj_split)):
+                    proj_name = proj_split[pi][0]
+                    sub_packed = proj_split[pi][1]
+                    cached_sub = (
+                        cached_split[pi][1]
+                        if cached_split is not None else None
+                    )
+                    for orig_e, new_e in iter_experts:
+                        base = f"{disk_qname}.{new_e}.{proj_name}"
+                        if is_bf16:
+                            expert_2d = sub_packed[orig_e]
+                            out[f"{base}.weight"], label = (
+                                _passthrough_tensor(
+                                    full, expert_2d,
+                                    source_dtype_by_name))
+                        else:
+                            # Re-pack the GPTQ-rendered dequant when
+                            # cached (re-derives codes from the dequant,
+                            # same ~1e-3 approximation as the 2-D path —
+                            # not bit-lossless); fall back to source only
+                            # on the no-cache warning.
+                            expert_2d = (
+                                cached_sub[orig_e]
+                                if cached_sub is not None
+                                else sub_packed[orig_e]
+                            )
+                            compressed = _native_render_codec._quantize_2d(
+                                expert_2d, fmt,
+                                nvfp4_global_real_override=(
+                                    per_expert_joint[orig_e]),
+                                input_global_scale_override=(
+                                    expert_input_scale),
+                             levers=packed_render_options)
+                            for suffix, t in compressed.items():
+                                out[f"{base}.{suffix}"] = t.cpu()
                 covered.add(full)
                 hist[(
                     "packed_moe_per_expert",
@@ -3411,13 +3352,11 @@ def _materialize_tensors_inmemory(
     # q/k/v (or gate/up, etc.) share one weight_global_scale slot.
     # M2: under the render's recorded scale rule, consistent with the
     # _pack_production_cached_2d match-render-scale re-derive below.
-    with _temporary_export_nvfp4_scale_rule(
-            _export_match_render_scale_rule(_PRODUCTION_WEIGHT_CACHE)):
-        nvfp4_joint_global = _compute_nvfp4_joint_global(
-            model,
-            assignment,
-            profile=profile,
-        )
+    nvfp4_joint_global = _compute_nvfp4_joint_global(
+        model,
+        assignment,
+        profile=profile,
+     levers=_export_render_options())
 
     for qname, mod in model.named_modules():
         if not isinstance(mod, nn.Linear):
@@ -3458,7 +3397,7 @@ def _materialize_tensors_inmemory(
                 mod.weight.detach().float(), fmt,
                 nvfp4_global_real_override=joint,
                 linear_name=fmt_key,
-            )
+             cached_activations=(_CACHED_ACTIVATIONS.get(fmt_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=fmt_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
         for suffix, tensor in compressed.items():
             out[f"{qname}.{suffix}"] = tensor.cpu()
         if mod.bias is not None:
@@ -3513,17 +3452,16 @@ def _materialize_tensors_inmemory(
 
             # M2: joint globals + re-derive below run under the render's
             # recorded NVFP4 scale rule (see _packed_expert_render_scale_rule).
-            packed_render_rule = _packed_expert_render_scale_rule(active_cache)
+            packed_render_options = _export_render_options(active_cache)
             per_expert_joint: list[torch.Tensor | None] = [None] * E
             if fmt == "NVFP4" and len(proj_split) > 1:
-                with _temporary_export_nvfp4_scale_rule(packed_render_rule):
-                    for e in range(E):
-                        candidates = [
-                            _native_render_codec.compute_nvfp4_global_real(sub_packed[e].float(),
-                                                      group_size=16)
-                            for _, sub_packed in proj_split
-                        ]
-                        per_expert_joint[e] = torch.stack(candidates).max()
+                for e in range(E):
+                    candidates = [
+                        _native_render_codec.compute_nvfp4_global_real(sub_packed[e].float(),
+                                                  group_size=16, levers=packed_render_options)
+                        for _, sub_packed in proj_split
+                    ]
+                    per_expert_joint[e] = torch.stack(candidates).max()
 
             # Read the GPTQ-rendered dequant from the production cache (same
             # contract as the streaming path); hard-fail on RTN-by-omission
@@ -3584,34 +3522,33 @@ def _materialize_tensors_inmemory(
 
             # M2: re-derive under the render's RECORDED NVFP4 scale rule
             # (same wrap as the streaming packed-expert path).
-            with _temporary_export_nvfp4_scale_rule(packed_render_rule):
-                # Index-based on purpose — see the streaming emit: enumerate's
-                # result-tuple reuse pins tensor-bearing tuples across layers.
-                for pi in range(len(proj_split)):
-                    proj_name = proj_split[pi][0]
-                    sub_packed = proj_split[pi][1]
-                    cached_sub = (
-                        cached_split[pi][1]
-                        if cached_split is not None else None
-                    )
-                    E_p, Mp, Np = sub_packed.shape
-                    for e in range(E_p):
-                        base = f"{disk_qname}.{e}.{proj_name}"
-                        if is_bf16:
-                            out[f"{base}.weight"], label = _passthrough_tensor(
-                                full_name, sub_packed[e])
-                        else:
-                            expert_2d = (
-                                cached_sub[e] if cached_sub is not None
-                                else sub_packed[e]
-                            )
-                            compressed = _native_render_codec._quantize_2d(
-                                expert_2d, fmt,
-                                nvfp4_global_real_override=per_expert_joint[e],
-                                input_global_scale_override=expert_input_scale,
-                            )
-                            for suffix, tensor in compressed.items():
-                                out[f"{base}.{suffix}"] = tensor.cpu()
+            # Index-based on purpose — see the streaming emit: enumerate's
+            # result-tuple reuse pins tensor-bearing tuples across layers.
+            for pi in range(len(proj_split)):
+                proj_name = proj_split[pi][0]
+                sub_packed = proj_split[pi][1]
+                cached_sub = (
+                    cached_split[pi][1]
+                    if cached_split is not None else None
+                )
+                E_p, Mp, Np = sub_packed.shape
+                for e in range(E_p):
+                    base = f"{disk_qname}.{e}.{proj_name}"
+                    if is_bf16:
+                        out[f"{base}.weight"], label = _passthrough_tensor(
+                            full_name, sub_packed[e])
+                    else:
+                        expert_2d = (
+                            cached_sub[e] if cached_sub is not None
+                            else sub_packed[e]
+                        )
+                        compressed = _native_render_codec._quantize_2d(
+                            expert_2d, fmt,
+                            nvfp4_global_real_override=per_expert_joint[e],
+                            input_global_scale_override=expert_input_scale,
+                         levers=packed_render_options)
+                        for suffix, tensor in compressed.items():
+                            out[f"{base}.{suffix}"] = tensor.cpu()
             covered.add(full_name)
             hist[(
                 "packed_moe_per_expert",
@@ -4770,48 +4707,15 @@ def _admit_export_resume_cache(cache_path: Path, fp_state: dict) -> bool:
 
 
 def _render_lever_provenance() -> dict:
-    """The quality-affecting render state of this export run.
-
-    Two consumers, one definition: the per-layer export cache folds this dict
-    into its `manifest.json` fingerprint (a change means the cached layer
-    tensors were quantized under a different recipe and the cache is silently
-    wrong), and the shipcard echoes it so an artifact carries the levers it was
-    rendered under. Keep the key set stable — changing it invalidates every
-    in-flight export cache.
-
-    This is HOW the export renders, not WHAT it renders. The source checkpoint
-    identity, the requested dtype and the declared buffer-dtype map belong to
-    the cache fingerprint only (`_export_resume_fingerprint`, #340); the
-    shipcard records the source through its own `source_model` field.
-    """
+    """The actual resolved render recipe shared by resume and ship evidence."""
     return {
-        # Older layer_*.pt payloads may already contain narrowed persistent
-        # buffers. Recompute them even when the source and render knobs match:
-        # replay bypasses the corrected reader and cannot recover lost bits.
         "persistent_buffer_read_policy": "model_declared_v1",
-        "PRISMAQUANT_DO_NO_HARM": os.environ.get(
-            "PRISMAQUANT_DO_NO_HARM", "1"),
-        "PRISMAQUANT_GPTQ_DAMP_SWEEP": os.environ.get(
-            "PRISMAQUANT_GPTQ_DAMP_SWEEP", "0"),
-        "PRISMAQUANT_GPTQ_DAMP": os.environ.get(
-            "PRISMAQUANT_GPTQ_DAMP", ""),
-        "PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING": os.environ.get(
-            "PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", "0"),
-        "PRISMAQUANT_ACT_CLIP_QUANTILE": os.environ.get(
-            "PRISMAQUANT_ACT_CLIP_QUANTILE", "0.999"),
-        # Walled 2026-07-30 (re-vet R25): the lever no longer exists, so the
-        # key records that fact rather than echoing an env var nothing reads.
-        # This DOES move the fingerprint once — intended: any in-flight export
-        # cache was built by a binary that still carried the (unreachable)
-        # branch, and re-rendering is the honest outcome.
+        "native_render_levers": _export_render_options().record(),
         "PRISMAQUANT_BLOCK_OUTPUT_MATCH": "archived_2026-07-30",
-        "PRISMAQUANT_BATCHED_NVFP4_EXPORT": os.environ.get(
-            "PRISMAQUANT_BATCHED_NVFP4_EXPORT", "1"),
-        _native_render_codec.NVFP4_SCALE_RULE_ENV: _native_render_codec._nvfp4_scale_rule_from_env(),
-        "ACT_AWARE_FLAGS": dict(sorted(_native_render_codec._ACT_AWARE_FLAGS.items())),
         "activation_cache_fingerprint": _ACTIVATION_CACHE_FINGERPRINT,
         "production_cache_fingerprint": _PRODUCTION_CACHE_FINGERPRINT,
     }
+
 
 
 #: The container this exporter writes.  Named from the lane vocabulary rather
@@ -5039,16 +4943,17 @@ def main(argv: Sequence[str] | None = None):
 
 def _main_impl(argv: Sequence[str] | None = None):
     global _ACTIVATION_CACHE_FINGERPRINT
+    global _RENDER_LEVERS, _CACHED_ACTIVATIONS, _INPUT_GLOBAL_SCALES
     global _PRODUCTION_WEIGHT_CACHE, _PRODUCTION_CACHE_FINGERPRINT
     global _PRODUCTION_CACHE_PREFETCH_WORKERS
     global _PRODUCTION_CACHE_PREFETCH_MODE, _ALLOCATOR_TARGET_PROFILE
     _refuse_archived_block_output_match()
-    _native_render_codec._INPUT_GLOBAL_SCALES = None
-    _native_render_codec._CACHED_ACTIVATIONS = None
+    _INPUT_GLOBAL_SCALES = None
+    _CACHED_ACTIVATIONS = None
     _ACTIVATION_CACHE_FINGERPRINT = None
     _PRODUCTION_WEIGHT_CACHE = None
     _PRODUCTION_CACHE_FINGERPRINT = None
-    _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule()
+    _RENDER_LEVERS = NativeRenderLevers.resolve()
     _native_render_codec._DO_NO_HARM_STATS.clear()
 
     ap = argparse.ArgumentParser(description=__doc__)
@@ -5286,7 +5191,7 @@ def _main_impl(argv: Sequence[str] | None = None):
             production_cache,
             expected_keys,
         )
-        _native_render_codec._INPUT_GLOBAL_SCALES = _production_cache_scales(
+        _INPUT_GLOBAL_SCALES = _production_cache_scales(
             production_cache,
             profile=profile,
         )
@@ -5323,12 +5228,6 @@ def _main_impl(argv: Sequence[str] | None = None):
     )
     static_act_order_enabled = bool(gptq_enabled and static_act_order_enabled)
     joint_scale_opt_enabled = bool(gptq_enabled and joint_scale_opt_enabled)
-    if (
-        joint_scale_opt_enabled
-        and _native_render_codec.NVFP4_SCALE_RULE_ENV not in os.environ
-        and _native_render_codec._NVFP4_SCALE_RULE == _native_render_codec.NVFP4_SCALE_RULE_STATIC_6
-    ):
-        _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE
     act_passes_any = gptq_enabled or scale_sweep_enabled
     # The activation-aware passes need the actual activations, not just
     # the scale summary. We only load raw activations when at least one
@@ -5346,15 +5245,14 @@ def _main_impl(argv: Sequence[str] | None = None):
           f"scale_sweep={scale_sweep_enabled} "
           f"static_act_order={static_act_order_enabled} "
           f"joint_scale_opt={joint_scale_opt_enabled}", flush=True)
-    print(f"[export-stream] NVFP4 scale rule: {_native_render_codec._nvfp4_scale_rule_from_env()}",
+    _RENDER_LEVERS = NativeRenderLevers.resolve({
+        "gptq": gptq_enabled,
+        "scale_sweep": scale_sweep_enabled,
+        "static_act_order": static_act_order_enabled,
+        "joint_scale_opt": joint_scale_opt_enabled,
+    })
+    print(f"[export-stream] NVFP4 scale rule: {_RENDER_LEVERS.nvfp4_scale_rule}",
           flush=True)
-    # Publish to the module-level config so `_quantize_2d` picks them
-    # up from every call site without needing the flags threaded
-    # through `materialize_tensors_streaming` + MTP helpers.
-    _native_render_codec._ACT_AWARE_FLAGS["gptq"] = gptq_enabled
-    _native_render_codec._ACT_AWARE_FLAGS["scale_sweep"] = scale_sweep_enabled
-    _native_render_codec._ACT_AWARE_FLAGS["static_act_order"] = static_act_order_enabled
-    _native_render_codec._ACT_AWARE_FLAGS["joint_scale_opt"] = joint_scale_opt_enabled
 
     # Populate the module-level input-global-scale cache (used by
     # `_quantize_2d` for NVFP4 linears) from cached activations.
@@ -5391,7 +5289,7 @@ def _main_impl(argv: Sequence[str] | None = None):
             for name in idx.names():
                 try:
                     acts = idx.load(name)
-                    scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(acts)
+                    scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(acts, levers=_export_render_options())
                 except Exception as e:
                     print(f"[export-stream] WARN could not load "
                           f"activations for {name}: {e}", flush=True)
@@ -5413,9 +5311,9 @@ def _main_impl(argv: Sequence[str] | None = None):
                 scales,
                 profile=profile,
             )
-            _native_render_codec._INPUT_GLOBAL_SCALES = scales
+            _INPUT_GLOBAL_SCALES = scales
             if act_passes_any:
-                _native_render_codec._CACHED_ACTIVATIONS = _LazyActivationCache(idx)
+                _CACHED_ACTIVATIONS = _LazyActivationCache(idx)
                 print(f"[export-stream] raw activations will be loaded "
                       f"lazily for GPTQ/round/scale-sweep passes "
                       f"({len(idx)}/{len(_recipe_names)} Linears indexed)",
@@ -6134,7 +6032,7 @@ def _apply_visual_recipe_quant(
                 weight, fmt,
                 nvfp4_global_real_override=None,
                 linear_name=base,
-            )
+             cached_activations=(_CACHED_ACTIVATIONS.get(base) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=base, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
         except Exception as e:
             raise RuntimeError(
                 f"[export-stream] visual quant failed for {base} ({fmt}); "

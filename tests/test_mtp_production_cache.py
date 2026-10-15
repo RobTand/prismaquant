@@ -1,4 +1,5 @@
 from __future__ import annotations
+from prismaquant.native_render_levers import NativeRenderLevers
 
 from types import SimpleNamespace
 
@@ -77,13 +78,7 @@ def _empty_cache(cache_dir=None):
         weights={
             ("model.body", "FP8_E4M3"): torch.zeros((4, 4)),
         },
-        levers={
-            "gptq": False,
-            "scale_sweep": False,
-            "static_act_order": False,
-            "joint_scale_opt": False,
-            "fisher_gptq": False,
-        },
+        levers=NativeRenderLevers().record(),
         activation_max_abs={},
         failed={},
         cache_dir=str(cache_dir) if cache_dir is not None else None,

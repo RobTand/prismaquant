@@ -66,6 +66,8 @@ Usage:
 from __future__ import annotations
 
 import prismaquant.native_render_codec as _native_render_codec
+from .native_render_levers import NativeRenderLevers
+from dataclasses import replace
 
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
@@ -377,7 +379,7 @@ class ProductionWeightCache:
     ``native_render_codec._nvfp4_input_global_scale_from_max_abs``.
     """
     weights: dict[tuple[str, str], object]  # tensor OR str(path)
-    levers: dict[str, bool]
+    levers: dict[str, object]
     activation_max_abs: dict[str, float] | None = None
     failed: dict[tuple[str, str], str] | None = None
     cache_dir: str | None = None  # set when disk-streaming was used at fill time
@@ -1951,50 +1953,10 @@ class _LinearActivationCollector:
         return out
 
 
-@contextmanager
-def _temporarily_install_act_aware(
-    activations: Mapping[str, torch.Tensor],
-    levers: Mapping[str, object],
-):
-    """Install module-level state expected by ``_quantize_2d``.
-
-    The codec reads ``_CACHED_ACTIVATIONS`` and ``_ACT_AWARE_FLAGS`` from
-    its globals. Restore the prior state after this render.
-    """
-
-    prev_cache = _native_render_codec._CACHED_ACTIVATIONS
-    prev_flags = dict(_native_render_codec._ACT_AWARE_FLAGS)
-    prev_scale_rule = _native_render_codec._NVFP4_SCALE_RULE
-    _native_render_codec._CACHED_ACTIVATIONS = _DictActivations(activations)
-    _native_render_codec._ACT_AWARE_FLAGS = {
-        "gptq": bool(levers.get("gptq", True)),
-        "scale_sweep": bool(levers.get("scale_sweep", False)),
-        "static_act_order": bool(levers.get("static_act_order", False)),
-        "joint_scale_opt": bool(levers.get("joint_scale_opt", False)),
-    }
-    _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule(
-        str(levers.get("nvfp4_scale_rule", "static_6"))
-    )
-    try:
-        yield
-    finally:
-        _native_render_codec._CACHED_ACTIVATIONS = prev_cache
-        _native_render_codec._ACT_AWARE_FLAGS.clear()
-        _native_render_codec._ACT_AWARE_FLAGS.update(prev_flags)
-        _native_render_codec._NVFP4_SCALE_RULE = prev_scale_rule
 
 
-class _DictActivations:
-    """`.get(name)` shim matching `_LazyActivationCache`'s interface."""
 
-    def __init__(self, mapping: Mapping[str, torch.Tensor]):
-        self._mapping = mapping
 
-    def get(self, name: str) -> torch.Tensor | None:
-        a = self._mapping.get(name)
-        if a is None and name.endswith(".weight"):
-            a = self._mapping.get(name[:-7])
-        return a
 
 
 class _FisherRowWeightCache:
@@ -2101,11 +2063,7 @@ def _fused_sibling_leaf_mapping_from_profile(profile) -> dict[str, tuple[str, ..
     }
 
 
-def _damp_sweep_enabled() -> bool:
-    from prismaquant.native_render_codec import (
-        gptq_damp_sweep_enabled,
-    )
-    return gptq_damp_sweep_enabled()
+
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -2131,15 +2089,7 @@ def _env_float(name: str, default: float, *, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
-@contextmanager
-def _temporary_nvfp4_scale_rule(rule: str):
 
-    previous = _native_render_codec._NVFP4_SCALE_RULE
-    _native_render_codec._NVFP4_SCALE_RULE = _native_render_codec.resolve_nvfp4_scale_rule(rule)
-    try:
-        yield
-    finally:
-        _native_render_codec._NVFP4_SCALE_RULE = previous
 
 def _store_rendered_weight_entry(
     *,
@@ -2263,6 +2213,7 @@ def _render_score_for_gate(
 
 
 def _gate_activation_matrix(
+    levers: NativeRenderLevers,
     acts_for_render: torch.Tensor | None,
     cols: int,
     *,
@@ -2290,7 +2241,7 @@ def _gate_activation_matrix(
         clip_threshold=act_clip_threshold,
         clip_rescale=act_clip_rescale,
         row_weights=fisher_row_weights,
-    )
+     levers=levers)
 
 
 def _render_score_record_key(qname: str, fmt: str) -> str:
@@ -2324,7 +2275,9 @@ def _render_score_record(
     activations: torch.Tensor | None,
     activation_max_abs: float | None,
     input_global_scale_policy: str | None = None,
+    levers: NativeRenderLevers | None = None,
 ) -> dict[str, object]:
+    levers = levers or NativeRenderLevers.resolve(gptq_default=True)
     raw_score, raw_metric = _render_score_for_gate(
         reference_weight.detach().to(torch.float32),
         rendered_weight,
@@ -2385,6 +2338,7 @@ def _render_score_record(
                     activations=activations,
                     activation_quantize=activation_quantize,
                     activation_max_abs=activation_clip_max,
+                    apply_calibrated_clip=levers.production_activation_scales,
                 )
             )
         except Exception as exc:
@@ -2552,6 +2506,7 @@ def _local_forward_render_score(
     activation_quantize,
     activation_max_abs: float | None,
     row_chunk: int = 128,
+    apply_calibrated_clip: bool = True,
 ) -> tuple[float, str, bool, bool]:
     rows, cols = reference_weight.shape
     if rendered_weight.shape != reference_weight.shape:
@@ -2566,7 +2521,7 @@ def _local_forward_render_score(
     if (
         activation_max_abs is not None
         and float(activation_max_abs) > 0
-        and _env_flag("PRISMAQUANT_PROD_ACT_SCALES", True)
+        and apply_calibrated_clip
     ):
         x_quant_input = x.clamp(-float(activation_max_abs), float(activation_max_abs))
         clipped = True
@@ -3238,60 +3193,60 @@ def _render_nvfp4_progressive_candidate(
     include_scale_sweep: bool,
 ) -> torch.Tensor:
 
-    with _temporary_nvfp4_scale_rule(scale_rule):
-        current = _native_render_codec._rtn_dequant_nvfp4(
-            weight_scaled,
-            group_size=16,
-            global_real_override=joint_global_real,
-        )
-        if activations_scaled is None or activations_scaled.numel() == 0:
-            return current
-        if include_gptq:
-            if _damp_sweep_enabled():
-                current = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
-                    weight_scaled,
-                    activations_scaled,
-                    group_size=16,
-                    global_real_override=joint_global_real,
-                    clip_threshold=act_clip_threshold,
-                    clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
-                    static_act_order=bool(
-                        levers.get("static_act_order", False)
-                    ),
-                    joint_scale_opt=bool(
-                        levers.get("joint_scale_opt", False)
-                    ),
-                )
-            else:
-                current = _native_render_codec._gptq_obs_rounding_nvfp4(
-                    weight_scaled,
-                    activations_scaled,
-                    group_size=16,
-                    damp=_native_render_codec._resolve_gptq_damp_for_role(qname),
-                    global_real_override=joint_global_real,
-                    clip_threshold=act_clip_threshold,
-                    clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
-                    static_act_order=bool(
-                        levers.get("static_act_order", False)
-                    ),
-                    joint_scale_opt=bool(
-                        levers.get("joint_scale_opt", False)
-                    ),
-                )
-        if include_scale_sweep:
-            current = _native_render_codec._scale_sweep_nvfp4(
-                current,
+    render_options = replace(NativeRenderLevers.resolve(levers, gptq_default=True), nvfp4_scale_rule=scale_rule)
+    current = _native_render_codec._rtn_dequant_nvfp4(
+        weight_scaled,
+        group_size=16,
+        global_real_override=joint_global_real,
+     levers=render_options)
+    if activations_scaled is None or activations_scaled.numel() == 0:
+        return current
+    if include_gptq:
+        if render_options.gptq_damp_sweep:
+            current = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
+                weight_scaled,
                 activations_scaled,
                 group_size=16,
                 global_real_override=joint_global_real,
-                reference_weight=weight_scaled,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
                 fisher_row_weights=fisher_row_weights,
-            )
-        return current
+                static_act_order=bool(
+                    levers.get("static_act_order", False)
+                ),
+                joint_scale_opt=bool(
+                    levers.get("joint_scale_opt", False)
+                ),
+             levers=render_options)
+        else:
+            current = _native_render_codec._gptq_obs_rounding_nvfp4(
+                weight_scaled,
+                activations_scaled,
+                group_size=16,
+                damp=_native_render_codec._resolve_gptq_damp_for_role(qname, levers=render_options),
+                global_real_override=joint_global_real,
+                clip_threshold=act_clip_threshold,
+                clip_rescale=act_clip_rescale,
+                fisher_row_weights=fisher_row_weights,
+                static_act_order=bool(
+                    levers.get("static_act_order", False)
+                ),
+                joint_scale_opt=bool(
+                    levers.get("joint_scale_opt", False)
+                ),
+             levers=render_options)
+    if include_scale_sweep:
+        current = _native_render_codec._scale_sweep_nvfp4(
+            current,
+            activations_scaled,
+            group_size=16,
+            global_real_override=joint_global_real,
+            reference_weight=weight_scaled,
+            clip_threshold=act_clip_threshold,
+            clip_rescale=act_clip_rescale,
+            fisher_row_weights=fisher_row_weights,
+         levers=render_options)
+    return current
 
 
 def _render_nvfp4_progressively(
@@ -3307,6 +3262,7 @@ def _render_nvfp4_progressively(
     gate_trace: list[dict[str, object]] | None,
 ) -> torch.Tensor:
 
+    render_options = NativeRenderLevers.resolve(levers, gptq_default=True)
     requested_rule = _native_render_codec.resolve_nvfp4_scale_rule(
         str(levers.get("nvfp4_scale_rule", "static_6"))
     )
@@ -3331,12 +3287,7 @@ def _render_nvfp4_progressively(
         if joint_scale_opt_enabled
         else None
     )
-    min_gain = _env_float(
-        "PRISMAQUANT_RENDER_GATE_MIN_GAIN",
-        0.0,
-        lo=-1.0,
-        hi=1.0,
-    )
+    min_gain = render_options.render_gate_min_gain
 
     reference = weight.detach().to(device=weight.device, dtype=torch.float32)
     acts = activations.get(qname)
@@ -3350,7 +3301,7 @@ def _render_nvfp4_progressively(
     # act_clip_threshold/act_clip_rescale/fisher_row_weights into
     # _activation_matrix_for_gptq, so the gate must too.
     acts_for_gate = _gate_activation_matrix(
-        acts_for_render,
+        render_options, acts_for_render,
         int(weight.shape[1]),
         device=weight.device,
         act_clip_threshold=act_clip_threshold,
@@ -3713,7 +3664,8 @@ def render_production_weight(
         "none",
     }:
         raise ValueError("activation clip rescaling is not supported")
-    progressive_gates = _env_flag("PRISMAQUANT_RENDER_PROGRESSIVE_GATES", True)
+    render_options = NativeRenderLevers.resolve(levers, gptq_default=True)
+    progressive_gates = render_options.render_progressive_gates
     if fmt in NVFP4_RENDER_EQUIVALENT and progressive_gates:
         return _render_nvfp4_progressively(
             weight,
@@ -3751,7 +3703,7 @@ def render_production_weight(
         # progressive path (audit 2026-07-02 §3.9): score under the matrix
         # the GPTQ/scale-sweep passes optimize on.
         acts_for_gate = _gate_activation_matrix(
-            acts_for_render,
+            render_options, acts_for_render,
             int(weight.shape[1]),
             device=weight.device,
             act_clip_threshold=act_clip_threshold,
@@ -3795,12 +3747,7 @@ def render_production_weight(
                 baseline_score=current.score,
                 candidate_score=best.score,
                 metric=best.metric,
-                min_relative_gain=_env_float(
-                    "PRISMAQUANT_RENDER_GATE_MIN_GAIN",
-                    0.0,
-                    lo=-1.0,
-                    hi=1.0,
-                ),
+                min_relative_gain=render_options.render_gate_min_gain,
             )
             if gate_trace is not None:
                 gate_trace.append({
@@ -3876,7 +3823,7 @@ def render_production_weight(
                 ("gptq",)
             )
             use_damp_sweep = (
-                _damp_sweep_enabled()
+                render_options.gptq_damp_sweep
             )
 
             def _gptq_candidate(use_static_act_order: bool) -> _RenderedCandidate:
@@ -3898,7 +3845,7 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
-                        )
+                         levers=render_options)
                     else:
                         _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4(
                             reference,
@@ -3908,7 +3855,7 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
-                        )
+                         levers=render_options)
                 elif use_damp_sweep:
                     _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like_swept(
                         reference,
@@ -3920,7 +3867,7 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
-                    )
+                     levers=render_options)
                 else:
                     _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like(
                         reference,
@@ -3932,7 +3879,7 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
-                    )
+                     levers=render_options)
                 return _non_nv_candidate(
                     label=f"{fmt.lower()}+{'+'.join(package)}",
                     weight_dq=candidate,
@@ -3965,7 +3912,7 @@ def render_production_weight(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                )
+                 levers=render_options)
             else:
                 from prismaquant.native_render_codec import (
                     _fp8_dynamic_scale_sweep_quantize,
@@ -3977,7 +3924,7 @@ def render_production_weight(
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
-                )
+                 levers=render_options)
             candidate = _non_nv_candidate(
                 label=f"{current.label}+scale_sweep",
                 weight_dq=w_dq,
@@ -3997,99 +3944,30 @@ def render_production_weight(
         _quantize_2d,
     )
 
-    with _temporarily_install_act_aware(activations, levers):
-        result = _quantize_2d(
-            weight.detach().clone(),
-            fmt="NVFP4",
-            linear_name=qname,
-            nvfp4_global_real_override=joint_global_real,
-            input_global_scale_override=input_global_scale,
-            act_clip_threshold=act_clip_threshold,
-            act_clip_rescale=clip_rescale,
-            fisher_row_weights=fisher_row_weights,
-            compute_only=True,
-        )
+    result = _quantize_2d(
+        weight.detach().clone(),
+        cached_activations=activations.get(qname),
+        fmt="NVFP4",
+        linear_name=qname,
+        nvfp4_global_real_override=joint_global_real,
+        input_global_scale_override=input_global_scale,
+        act_clip_threshold=act_clip_threshold,
+        act_clip_rescale=clip_rescale,
+        fisher_row_weights=fisher_row_weights,
+        compute_only=True,
+     levers=render_options)
     w_dq = result["_w_dq"]
     return w_dq.to(device=weight.device, dtype=weight.dtype).contiguous()
 
 
-def _resolve_production_render_levers(
-    levers: Mapping[str, object] | None,
-) -> dict:
-    """Normalize a caller lever dict to the production render contract.
+def _resolve_production_render_levers(levers: Mapping[str, object] | None) -> dict:
+    """Resolve the shared resident/streamed native options once and record all."""
+    record = dict(levers or {})
+    record.pop("none", None)
+    record.update(NativeRenderLevers.resolve(
+        levers, gptq_default=True, optional_flags_from_env=True).record())
+    return record
 
-    Shared by ``fill_production_weight_cache`` (resident) and the streaming
-    driver so both apply IDENTICAL damp/JSO/act-order/scale-rule defaulting —
-    the rendered weights must be byte-identical between the two paths.
-    """
-    levers = dict(levers) if levers is not None else {}
-    default_optional_levers = not bool(levers.pop("none", False))
-    if not default_optional_levers:
-        for name in (
-            "gptq",
-            "scale_sweep",
-            "fisher_gptq",
-            "static_act_order",
-            "joint_scale_opt",
-        ):
-            levers.setdefault(name, False)
-    levers.setdefault("gptq", True)
-    levers.setdefault(
-        "gptq_damp_sweep",
-        bool(levers.get("gptq", True))
-        and _damp_sweep_enabled(),
-    )
-    if not levers["gptq_damp_sweep"]:
-        # Provenance: which fixed damp the no-sweep renders used
-        # (PRISMAQUANT_GPTQ_DAMP, default 0.01) — without this, two
-        # fixed-damp caches are metadata-indistinguishable.
-        from prismaquant.native_render_codec import (
-            _resolve_gptq_fixed_damp,
-        )
-        levers.setdefault("gptq_fixed_damp", _resolve_gptq_fixed_damp())
-    levers.setdefault("scale_sweep", False)
-    levers.setdefault(
-        "static_act_order",
-        _env_flag("PRISMAQUANT_GPTQ_STATIC_ACT_ORDER", False),
-    )
-    levers.setdefault(
-        "joint_scale_opt",
-        _env_flag("PRISMAQUANT_NVFP4_JOINT_SCALE_OPT", False),
-    )
-    if not bool(levers.get("gptq", True)):
-        levers["static_act_order"] = False
-        levers["joint_scale_opt"] = False
-    levers.setdefault(
-        "fisher_gptq",
-        _env_flag("PRISMAQUANT_FISHER_WEIGHTED_GPTQ", False),
-    )
-    from prismaquant.native_render_codec import (
-        NVFP4_SCALE_RULE_ENV,
-        NVFP4_SCALE_RULE_JOINT_MSE,
-        resolve_nvfp4_scale_rule,
-    )
-    if (
-        bool(levers.get("joint_scale_opt", False))
-        and "nvfp4_scale_rule" not in levers
-        and NVFP4_SCALE_RULE_ENV not in os.environ
-    ):
-        levers["nvfp4_scale_rule"] = NVFP4_SCALE_RULE_JOINT_MSE
-    levers.setdefault("nvfp4_scale_rule", resolve_nvfp4_scale_rule())
-    # The A-side scale policy is a render input like the W-side scale rule
-    # beside it: it already reaches ``render_production_weight`` as this
-    # fill's ``input_global_scale``, and it decides what every
-    # activation-aware render SCORE means.  Resolve it here, once, and let it
-    # travel with the levers -- into the directory render identity, the
-    # union per-shard identity and each score record --
-    # so a cache priced under one policy cannot be silently resumed, rescored
-    # or KL-validated under another (#227).  An explicit caller value wins and
-    # is canonicalized; a bad one refuses here rather than mid-fill.
-    levers[RENDER_LEVER_INPUT_GLOBAL_SCALE_POLICY] = (
-        _resolve_render_input_global_scale_policy(
-            levers.get(RENDER_LEVER_INPUT_GLOBAL_SCALE_POLICY)
-        )
-    )
-    return levers
 
 
 def _resolve_render_input_global_scale_policy(
@@ -5815,6 +5693,7 @@ def fill_production_weight_cache(
             "production assignment"
         )
     levers = _resolve_production_render_levers(levers)
+    render_options = NativeRenderLevers.from_record(levers)
     mechanism_plan = _resolve_render_mechanism_plan(levers)
     if progress and mechanism_plan.ordered:
         print(
@@ -6190,7 +6069,7 @@ def fill_production_weight_cache(
             model,
             synthetic_assignment,
             profile=model_profile,
-        )
+         levers=render_options)
         if progress:
             print(
                 f"[prod-cache] computed joint NVFP4 globals for "
@@ -6310,7 +6189,7 @@ def fill_production_weight_cache(
         )
         export_scale = (
             _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=render_score_policy)
+                float(max_abs), policy=render_score_policy, levers=render_options)
             if (max_abs is not None and max_abs > 0)
             else None
         )
@@ -6352,7 +6231,7 @@ def fill_production_weight_cache(
                                 activations=activations_local.get(qname),
                                 activation_max_abs=max_abs,
                                 input_global_scale_policy=render_score_policy,
-                            )
+                             levers=render_options)
                             del cached
                         except Exception:
                             pass
@@ -6389,7 +6268,7 @@ def fill_production_weight_cache(
                         activations=activations_local.get(qname),
                         activation_max_abs=max_abs,
                         input_global_scale_policy=render_score_policy,
-                    )
+                     levers=render_options)
                 )
                 if gate_trace:
                     render_gate_records.append({
@@ -6877,6 +6756,7 @@ def _packed_expert_render_score_record(
     device: torch.device,
     score_rows_source: str,
     input_global_scale_policy: str | None = None,
+    levers: NativeRenderLevers | None = None,
 ) -> dict[str, object]:
     """Score one packed 3-D expert cache entry honestly.
 
@@ -6921,7 +6801,7 @@ def _packed_expert_render_score_record(
                 activations=acts_e,
                 activation_max_abs=activation_max_abs,
                 input_global_scale_policy=input_global_scale_policy,
-            )
+             levers=levers)
         )
         del acts_e
     if not per_expert:
@@ -7554,6 +7434,7 @@ def fill_packed_expert_cache_entries(
         )
 
     resolved_packed_levers = _resolve_production_render_levers(levers)
+    render_options = NativeRenderLevers.from_record(resolved_packed_levers)
     packed_score_policy = _render_levers_input_global_scale_policy(
         resolved_packed_levers
     )
@@ -7885,7 +7766,7 @@ def fill_packed_expert_cache_entries(
                         device=device,
                         score_rows_source="fit_corpus_tail",
                         input_global_scale_policy=packed_score_policy,
-                    )
+                     levers=render_options)
                 )
                 del resumed_render
             packed_gate_records[gate_key] = _packed_expert_render_gate_record(
@@ -7907,7 +7788,7 @@ def fill_packed_expert_cache_entries(
         per_expert_global: list[torch.Tensor | None] = [None] * E
         for e in range(E):
             cands = [
-                compute_nvfp4_global_real(sp[e].float(), group_size=16)
+                compute_nvfp4_global_real(sp[e].float(), group_size=16, levers=render_options)
                 for _, sp in proj_split
             ]
             per_expert_global[e] = (
@@ -8018,11 +7899,11 @@ def fill_packed_expert_cache_entries(
                 global_real_overrides=overrides,
                 static_act_order=False,
                 joint_scale_opt=False,
-            )  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
+             levers=render_options)  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
             for e in range(E):
                 w_rtn = _rtn_dequant_nvfp4(
                     src[e], group_size=16, global_real_override=overrides[e],
-                )
+                 levers=render_options)
                 src_a = (
                     per_expert_acts[e] if e < len(per_expert_acts) else None
                 )
@@ -8113,7 +7994,7 @@ def fill_packed_expert_cache_entries(
             device=device,
             score_rows_source="fit_corpus_tail",
             input_global_scale_policy=packed_score_policy,
-        )
+         levers=render_options)
         packed_gate_records[gate_key] = _packed_expert_render_gate_record(
             qname=full,
             fmt=fmt,

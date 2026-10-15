@@ -414,7 +414,8 @@ def test_production_cache_records_damp_sweep_lever(monkeypatch):
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "1")
     on = _normalized_production_cache_levers("gptq,scale_sweep")
     assert on["gptq_damp_sweep"] is True
-    assert "gptq_fixed_damp" not in on
+    assert on["gptq_fixed_damp"] == _resolve_gptq_fixed_damp()
+    # The complete recipe retains both fixed and swept choices.
 
     # The probe's provenance must follow the production policy default
     # (sweep OFF since 2026-06-12, f2363e2) — it kept a stale sweep-ON
@@ -1590,8 +1591,9 @@ def test_render_gate_scores_on_gptq_clipped_activations():
 
     # Baseline candidate = static_6 RTN; its recorded gate score must be the
     # shared scorer evaluated on the CLIPPED matrix, not on raw acts.
-    with pwc._temporary_nvfp4_scale_rule(_native_render_codec.NVFP4_SCALE_RULE_STATIC_6):
-        baseline = _native_render_codec._rtn_dequant_nvfp4(weight.float(), group_size=16)
+    from prismaquant.native_render_levers import NativeRenderLevers
+    baseline = _native_render_codec._rtn_dequant_nvfp4(
+        weight.float(), group_size=16, levers=NativeRenderLevers())
     expected_clipped = score_render_error(weight.float(), baseline, X)
     raw_score = score_render_error(weight.float(), baseline, acts.float())
     assert trace[0]["mechanism"] == "baseline"

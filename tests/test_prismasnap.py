@@ -41,7 +41,6 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
     weight = torch.randn(7, 32, generator=generator) * 0.31
     monkeypatch.delenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, raising=False)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", raising=False)
-    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", None)
 
     legacy = _native_render_codec._rtn_dequant_nvfp4(weight, group_size=16)
     explicit_before = _native_render_codec.render_nvfp4_dequant(weight)
@@ -62,10 +61,9 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
 
     # Both historical process-global selectors now disagree with the explicit
     # request.  The receipt-selected codec must nevertheless be byte-stable.
-    monkeypatch.setenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, "joint_mse")
+    monkeypatch.setenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, "invalid-after-explicit-receipt")
     monkeypatch.setenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", "1")
-    monkeypatch.setattr(_native_render_codec, "_NVFP4_SCALE_RULE", "four_over_six_mse")
-    monkeypatch.setattr(_native_render_codec, "_NVFP4_JOINT_SCALE_LEVELS", (6.0, 3.0, 1.0))
+    monkeypatch.setenv("PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS", "6,3,1")
     explicit_after = _native_render_codec.render_nvfp4_dequant(
         weight,
         scale_rule=_native_render_codec.NVFP4_SCALE_RULE_STATIC_6,

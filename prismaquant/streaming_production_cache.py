@@ -22,6 +22,7 @@ offline from that snapshot + the resident gate weight, exactly as the resident
 packed render does.
 """
 from __future__ import annotations
+from .native_render_levers import NativeRenderLevers
 
 import os
 from collections import defaultdict
@@ -262,7 +263,7 @@ def _render_dense_layer(
                 _nvfp4_input_global_scale_from_max_abs,
             )
             export_scale = _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=stream_score_policy)
+                float(max_abs), policy=stream_score_policy, levers=NativeRenderLevers.from_record(levers))
         row_weights = (
             fisher_rows.get(qname)
             if (fisher_rows is not None
@@ -295,7 +296,7 @@ def _render_dense_layer(
                 activations=X,
                 activation_max_abs=max_abs,
                 input_global_scale_policy=stream_score_policy,
-            )
+             levers=NativeRenderLevers.from_record(levers))
             render_score_records[score_key] = render_score
             if not retain_rendered:
                 canonical_render = _canonical_rendered_weight_tensor(
