@@ -1,6 +1,6 @@
 """One shared projection between PrismaQuant's parameter-name namespaces.
 
-A Linear in this pipeline has four names, and until this module every
+A Linear in this pipeline has five names, and until this module every
 consumer re-derived the mapping between them ad hoc — which is how a
 weight consumed through a skipped module class (DSv4's ``attn.wo_a``)
 could stay invisible to the allocator while its bytes shipped. This
