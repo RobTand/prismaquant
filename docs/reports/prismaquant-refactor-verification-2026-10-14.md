@@ -252,3 +252,59 @@ fixture. The separate table coordinate-validation path still imports Torch;
 its scalar row-contract extraction is under implementation. These are pending
 findings, not verified completed repairs. The broad suite remains in progress;
 individual passing units do not establish a whole-branch pass.
+
+
+The earlier frozen broad run is now terminal. Its 367 hermetic changed-test
+files produced 7,790 passes, 144 skips, 45 failures and 70 passing subtests
+across 16 PB shards, with no reconciliation gaps. This is a failed historical
+run, not a final branch pass. Every failed node has a disposition in
+`/home/rob/tmp/pq-refactor-20261014/reports/broad-failure-dispositions.tsv`.
+
+Further verified repairs:
+
+| Repair | Commit | PB action | Actual outcome |
+| --- | --- | --- | --- |
+| Real override registration before injected refusal | `4802a4459d` | `be9a53cb30bfd9c9749233ada6cab38c65e87607bdbd63f2e6d741bf0c6e49cb` | 43 passed, zero skips; fresh baseline `366b4aba` failed 17 cases |
+| MTP schema import at its initialization owner | `44dfdbe8d7` | `e086db439d430d0f343a3706c995606dfa7555560dac590dd30fa56cd2b0084d` | 29 passed, zero skips; four broad failures reproduced in initial composed capture check |
+| Ordered typed-rung fixture extension | `48ddd219cb` | `1f203eeee2540fa2111a77e3454c8d119ca451e156e811d2882e1e4aee937591` | Both original allocator entrypoint/overflow cases passed |
+| Anchored limitation at the predicate's actual owner | `d68412a07a` | `355dbb3fd6b586ffa59947eb56a5e6e26d482d5415b76ab1c90807791f5cb97f` | 10 passed, zero skips |
+| Controlled scheduler clock and real queue barriers | `84e5db56ec` | `b1ebbe742f73ae0fab503b6354131accd2c9e43d69524512bea8817e62e4fe58` | 14 passed, zero skips |
+| Manual transition digest and native panel recipe imports | `06732f05f2`, `4a031cef88` | `3535839499722e92eb79baa05a7baf6f6eaedaafe65e5104ce042df5ab037f2e` | 36 related cases passed, zero skips; both callers compiled |
+
+The scheduler case now advances a controlled monotonic clock while the actual
+executor runs closures and barriers. It checks that a deferred task yields to
+another optional task, stays deferred before its due time, runs when due,
+completes once and records exactly two 0.25-second execution intervals excluding
+a ten-second deferral. Real waits are failure watchdogs. No production scheduler
+body changed, and no timing or throughput claim follows.
+
+The historical activation-reader finding is fixed by `e4ffde062c`. Both original
+mutation/custody tests now use a frozen plain committed-blob fixture and the real
+`ActivationIndex` and chunk stream. PB `b4d31cde45fb` passed 44 cases without
+skips. Deliberate incorrect content identities and pathname-based prefetch each
+fail their restored check in admitted proof `67eb18d313d2`. The retired producer
+and its CLI remain retired. The ship fixtures use actual attestation and captured
+complete native recipes in `50981d14a0`; their checks pass 99 ordinary cases and
+38 explicitly selected task-suite cases, with zero skips. Existing same-size
+weight-content tampering refusal remains covered.
+
+The manual caller inspection also checks relative internal imports, which the
+earlier absolute-only scan missed. The rerunnable source scanner and bounded
+output are `reports/check_internal_imports.py` and `reports/internal-import-review.json`
+under the local refactor directory. Current inspected explicit internal imports
+have no unresolved names. Dynamic exports are outside that static check.
+
+Calibration capture and readsets are integrated in `7ecd85752b` and `b86a87a8f1`.
+See `tessera-calibration-forward-qualification-2026-10-15.md` for actual inputs,
+failed harness attempt, corrected CUDA equality and profiler/Netdata evidence.
+The composed capture body has identical normalized AST to its immediate root
+predecessor except the final tuple becomes `CalibrationStatistics`; both body
+hashes are `8f031fc1af1df4f550c28e0c1796c129c2f7fdaf0fd10f08715c18825d363971`.
+Existing routed helper ownership was retained during integration. The first
+composed check has 130 passes, two explicit artifact skips, two subtests and four
+MTP-import failures; the independently verified MTP fix above resolves those
+four failures. This does not relabel that first action as passing.
+
+The cold table row-contract extraction, wire/cell/request units, one obsolete
+menu-test import expectation and additional public producer APIs remain under
+work. No final whole-branch qualification is claimed.
