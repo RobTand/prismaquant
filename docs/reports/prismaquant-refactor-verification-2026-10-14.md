@@ -64,3 +64,58 @@ Off-task fixes encountered during these moves: the existing pin was omitted
 from wheel data; mutable metadata views could alter later admission facts;
 source-snapshot capture could race ongoing edits. The pin packaging, owned
 metadata views and immutable verification capsules address those findings.
+
+Additional verified units, 2026-10-15:
+
+| Unit | PB action | Outcome | Result CAS SHA-256 |
+| --- | --- | --- | --- |
+| Relocated publication allowance and dead streaming imports | `db2ebbe46bbf49c9a454d4d25ab7c02888eb5ab94a62e11d31a1009e65257e0f` | 27 passed, no skips | `ae7592a5707ee80b41b54c934c91d3a72b25c6552432594a7f7514c2acac6f73` |
+| Typed calibration request and draw | `6af3ecf1c2c0f02ffa7f0bb002a5c81673250a98a00f312e416efe2d30406795` | 16 passed, no skips; two modules compiled | recorded terminal receipt |
+| Checked calibration prefix and captured lazy fit samples | `615fd7e68ce4864fd9f9a5af882c3df1207c614e124a2172ca75becddc316346` | 32 passed, no skips; two modules compiled | `b330d60c465775ff8e62111ab72a4dab75105fa33c3885062af2b5f80cc23c63` |
+| Explicit seed zero and isolated sampling RNG | `6de56ed06f534062958565eb9e99761422390d8b391fa0cb6f7a122ab7ca4ea2` | 34 passed, no skips; two modules compiled | `0a04143b030b9aca3b62d44baca47f3e71636e3c18393df14d46c78a5ad67699` |
+| Composed quantum phase, codec and calibration changes | `3c9a75ea793d501fa2abae373ce232d869cc2222f87ce51cae94d5f7557ddebc` | 447 passed, 59 subtests passed, three skips; package and tools compiled | `8aaf348723610508de898c6786fd919d0df5ec9004cf88dc2e296b1bf1fa18a0` |
+
+The composed check's skips were two Stage B spill cases requiring
+administrator-provisioned private scratch in `PQ_STAGE_B_SPILL_TEST_ROOT`,
+whose qualification remains incomplete, and one inline packed-expert render
+requiring a GPU. These CPU checks grant no new spill or serving qualification.
+
+The original shuffled-corpus prefix assertion failed in PB
+`a14d7a7f53e645a9166952313793191a28821e69cc40f1d6c8fb96030f8ad8f4`.
+Two actual calibration regressions, explicit zero seed and preservation of
+caller RNG state, failed in
+`0100fdf485536e91fccf6028e1b7c2588f39e1c5942ec30ec12583c21bda0c1d`.
+Their corrected units above passed. The old holdout test's assumed loader was
+replaced by actual corpus sampling; equality of legacy draw hashes is not a
+proof of corpus-position disjointness across arbitrary draw dimensions.
+
+The native codec extraction passed 436 CPU cases and 59 subtests, with four
+explicit CUDA/Triton skips, at
+`5942bde1e21b71a91f45e5d94f23dbb92a2ad913c51ab9b366dc7f7afe36d657`.
+Its real CUDA before and after runs were
+`a5850a70c36403926d5245d02f52cb65ca2ae3834466b2ba55bf09dd339312ef`
+and `26908018f5156e947f50bc9f73c1d00dd386ef712f2af53783060e7f56e2ee4d`.
+PB `d50fa0d877aab166d77785dfc3a87bfeadd6f039a528c4be02c805f894bd0426`
+verified exact equality of 14 rendered tensors, 14 native wire packs, scores,
+gates, calibration, assignment, render levers and prefetch results. The
+comparison, profiler trace hashes and both-box Netdata hashes are recorded at
+`/mnt/shared/pq-refactor-20261014-native/structure-comparison.json`.
+There is no speed claim. These receipts do not qualify a new format or engine.
+
+Two commands named nonexistent test files and failed without valid coverage:
+`af449b26e0ffc5f9523984a7b60a4d750363f381ebf34bec77c87a6136561e20`
+and `f78d42bedc91d2717ac295966b986990ecf416eaf744d9c33b438ec9f201f7ef`.
+An absolute helper outside the frozen checkout was rejected before submission.
+`tools/submit_refactor_unit.py` now validates every source/check path before
+freezing and submitting, and invokes the helper inside the captured checkout.
+
+Eight completed source capsules were moved intact to
+`/mnt/shared/pq-refactor-20261014-source-capsules/`, preserving tracked edits,
+untracked files and ignored files, with repaired Git worktree links. The
+old/new mapping and preserved HEAD/status are recorded at
+`/home/rob/tmp/pq-refactor-20261014/reports/source-capsule-archive.json`.
+Scientific inputs, fleet queues, CAS objects and other agents' worktrees were
+not deleted. This is retained source relocation, with no measured space claim.
+
+Additional encountered fixes: CLI help now names the calibration owner, and
+architecture text identifies sample-parallel probing as retired and unavailable.
