@@ -214,3 +214,41 @@ with one collected and one completed case, no skips. Result CAS SHA-256 is
 `756cb881249eff7ac834e2a17a8ad7b96a687fca910d69d763675aca51cabe0b`.
 It validates the actual digest-bound historical probe/census roster and raw
 statistics. It grants no new served quality or speed qualification.
+
+
+Further integration checks, 2026-10-15:
+
+- Cold rendered-cache paths are shared through `render_cache_paths` in
+  `2379886723`. PB `90ae0951766f` passed 373 cases with six unchanged CUDA skips;
+  filenames, format spelling and collision refusals are preserved.
+- DSv4 initialization repair `062cce9920` preserves packed expert class identity
+  while selecting the probe constructor through `experts_type`. The original
+  grouped Fisher failure and fresh initialization refusal are retained in
+  `dsv4-initialization-2026-10-15.md`. Follow-up checks passed 95 cases without
+  skips, including poisoned real parameters and initialization-context isolation.
+- The broad changed-file suite found an unmigrated `CandidateBuild` consumer in
+  the streamed Joint research harness and a digest spy aimed at the old streaming
+  import alias. Fixes `d668b0939c` and `dc312bf438` pass 29 cases without skips in
+  PB `579e7275606a2717d299c223449f835db4fdb0bb2b472b4969540129992e7d2b`.
+  Its result is `7f34676a85163194cba6ee074ed1c99f3a34d336cd8bd4fa3f916a1e2ef70a1e`;
+  receipt `6954ff86fbbf6c2f8eb10cef00c7707a879b8c393df874393e81012015cf9c6f`.
+- Campaign seal classifications now follow their table owner in `c5301f9796`.
+  Scanning that owner also finds the existing declared-size versus replayed-draw
+  digest comparison. It is classified as byte integrity, with no new runtime
+  check or refusal waiver. PB `fa98a351fe6538b544fba2c8791e8a5a67c2a26f119f039ebc66026d6092ccec`
+  passes all 18 lint and fault-injection cases without skips. Result is
+  `013c4ed7158360db0e60f3801b802cb2a7926d617bfeb1da62b4ef5d96625b65`;
+  receipt `beb12339d5ac1e199d32cb079695b44049bff65e76af81219b70edadfdc4ac24`.
+  Both result blobs above were read and their SHA-256 and byte counts verified.
+- Real Transformers stays loaded in the corrected campaign test fixtures,
+  `f5722ef4f5`. Only `AutoModelForCausalLM.from_pretrained` is patched. Independent
+  fresh checks passed 79 cases without skips, rather than concealing imports
+  behind a replacement module.
+
+Independent review found two historical `ActivationIndex` reader tests were
+incorrectly archived as producer-only. Their actual post-validation mutation and
+prefetched-directory custody checks are being restored with a committed-blob
+fixture. The separate table coordinate-validation path still imports Torch;
+its scalar row-contract extraction is under implementation. These are pending
+findings, not verified completed repairs. The broad suite remains in progress;
+individual passing units do not establish a whole-branch pass.
