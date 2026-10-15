@@ -1993,11 +1993,11 @@ def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool
     """Whether this row is a joint A-side **for this cell**.
 
     The predicate itself is the shared one
-    (:func:`prismaquant.allocator_candidates.joint_row_binds_cell`) so that the
+    (:func:`prismaquant.joint_aura_rows.joint_row_binds_cell`) so that the
     submission-time gate and the stage that computes coverage cannot drift; the
     only thing added here is this tool's own refusal type and label.
     """
-    from prismaquant.allocator_candidates import joint_row_binds_cell
+    from prismaquant.joint_aura_rows import joint_row_binds_cell
 
     try:
         return joint_row_binds_cell(row, name, fmt, where=label)

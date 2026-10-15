@@ -14,6 +14,7 @@ committing nothing under it`` 15 times, while ``commit()`` kept reporting
 under the last declared phase. The line now says once where units commit.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import hashlib
 import json
@@ -35,13 +36,13 @@ def _validations(monkeypatch):
     import time
 
     stamps = []
-    validate = joint_aura.validate_joint_aura_entry
+    validate = joint_aura_rows.validate_joint_aura_entry
 
     def stamped(entry):
         stamps.append(time.time())
         return validate(entry)
 
-    monkeypatch.setattr(joint_aura, "validate_joint_aura_entry", stamped)
+    monkeypatch.setattr(joint_aura_rows, 'validate_joint_aura_entry', stamped)
     return stamps
 
 

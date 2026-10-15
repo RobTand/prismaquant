@@ -26,11 +26,8 @@ import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_adjoint_slices import adjoint_slice_sha256, stage_a_slice
-from prismaquant.joint_aura import (
-    arithmetic_identity,
-    identity_sha256,
-    make_joint_aura_entry,
-)
+from prismaquant.joint_aura import arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.joint_quanta_join import (
     JOINED_RESULTS_SCHEMA,
     JoinRefused,
@@ -81,7 +78,7 @@ def _row(qname, fmt, probe, sign=0.1):
                 "format": fmt, "source_weight": weight,
                 "rendered_weight": weight, "activation": activation,
                 "arithmetic": probe["arithmetic"],
-                "probe_identity_sha256": identity_sha256(probe)}
+                "probe_identity_sha256": joint_identity_sha256(probe)}
     steps = [sign * (i + 1) * (1 if i % 2 == 0 else -1) for i in range(3)]
     return make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,

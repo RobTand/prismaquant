@@ -9,7 +9,8 @@ import pickle
 import hashlib
 
 import prismaquant.aura_cost as aura
-from prismaquant.joint_aura import validate_joint_aura_entry, paired_candidate_difference
+from prismaquant.joint_aura import paired_candidate_difference
+from prismaquant.joint_aura_rows import validate_joint_aura_entry
 from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.perturbed_x_cache import _activation_qdq
 from prismaquant import format_registry as fr

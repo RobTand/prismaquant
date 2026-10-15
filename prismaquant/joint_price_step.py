@@ -116,7 +116,7 @@ class JointPriceStep:
         self.operators = {}
 
     def restore_unit(self, name, state):
-        from .joint_aura import validate_joint_aura_entry
+        from prismaquant.joint_aura_rows import validate_joint_aura_entry
         self.measurements.restore_unit(name, state)
         rows = state.get("joint_aura_rows")
         if not isinstance(rows, Mapping) or set(rows) != set(self.formats_by_qname[name]):
@@ -147,7 +147,7 @@ class JointPriceStep:
         self.rows[name] = dict(rows)
 
     def consume_probe(self, probe_index, terms, diagnostics):
-        from .joint_aura import squared_signed
+        from prismaquant.joint_aura_rows import squared_signed
         values = self.measurements
         for name, diagnostic in diagnostics.items():
             values.g_trace[name] += diagnostic["g_trace"]
@@ -165,7 +165,7 @@ class JointPriceStep:
             values.x2_probe[key].append(value)
 
     def prepare_rows(self, names, *, sidecar=None):
-        from .joint_aura import make_joint_aura_entry
+        from prismaquant.joint_aura_rows import make_joint_aura_entry
         for name in names:
             self.rows[name] = {}
             for fmt in self.formats_by_qname[name]:

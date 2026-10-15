@@ -142,7 +142,7 @@ def test_handoff_refuses_changed_evidence(mutation):
     elif mutation == 'shape': joint['stats'][name]['n_params'] = 5
     elif mutation == 'overwritten_metadata': row['wire_bytes'] = 999
     elif mutation == 'nonzero_bf16':
-        from prismaquant.joint_aura import make_joint_aura_entry
+        from prismaquant.joint_aura_rows import make_joint_aura_entry
         old = joint['costs'][name]['BF16']
         joint['costs'][name]['BF16'] = make_joint_aura_entry(
             operator_identity=old['joint_operator_identity'], probe_identity=old['probe_identity'],

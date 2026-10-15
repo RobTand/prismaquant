@@ -157,7 +157,7 @@ def probe(args):
     from transformers import AutoModelForCausalLM
     from prismaquant import aura_cost, genuine_weight_initialization
     from prismaquant.calibration_data import load_calibration_input
-    from prismaquant.joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from prismaquant.model_profiles import detect_profile
 
     inputs = json.loads(checked(args.inputs, args.inputs_sha256).read_text())

@@ -8,6 +8,7 @@ production collector and the checkpoint resume boundary. No model-quality,
 estimator or serving claim is made; probe-sampling scope is unchanged.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 from prismaquant import aura_provenance
 
@@ -44,7 +45,7 @@ def _sidecar(blocks, components_per_probe, totals, *, gate_relative=1e-3,
              arithmetic_scope="test_per_invocation_contractions",
              sequence_length=4, selected_tokens_per_row=4, n_sequences=None,
              calibration_sha256="c" * 64, with_leaveout=None):
-    return joint.sequence_attribution_sidecar(
+    return joint_aura_rows.sequence_attribution_sidecar(
         blocks=blocks, components_per_probe=components_per_probe,
         authoritative_totals=totals, gate_relative=gate_relative,
         arithmetic_scope=arithmetic_scope, sequence_length=sequence_length,
@@ -62,7 +63,7 @@ def _row_with_sidecar(sidecar, *, signed=(3.0, -1.0), authority_components=None)
                      for key in ("weight", "activation", "mixed")}
             parts["weight"] += total - math.fsum(parts.values())
             authority_components.append({**parts, "total": total})
-    row = joint.make_joint_aura_entry(
+    row = joint_aura_rows.make_joint_aura_entry(
         operator_identity=row["joint_operator_identity"],
         probe_identity=row["probe_identity"],
         signed_components=copy.deepcopy(authority_components),
@@ -76,7 +77,7 @@ def _row_with_sidecar(sidecar, *, signed=(3.0, -1.0), authority_components=None)
 def test_row_without_uncertainty_scope_stays_legacy_conditional():
     row = _row(UNIT_A, [2.0, -3.0])
     del row["uncertainty_scope"]
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 @pytest.mark.parametrize("scope", [
@@ -87,7 +88,7 @@ def test_foreign_uncertainty_scope_is_refused(scope):
     row = _row(UNIT_A, [2.0, -3.0])
     row["uncertainty_scope"] = scope
     with pytest.raises(ValueError, match="uncertainty_scope"):
-        joint.validate_joint_aura_entry(row)
+        joint_aura_rows.validate_joint_aura_entry(row)
 
 
 # ---- publisher oracle ------------------------------------------------------
@@ -105,7 +106,7 @@ def test_sidecar_exact_reconstruction_concentrates_and_reconciles():
               components[1][0]["total"] + components[1][1]["total"]]
     sidecar = _sidecar(blocks, components, totals)
     row = _row_with_sidecar(sidecar, signed=tuple(totals))
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
     published = row["sequence_attribution"]
     assert published["scope"] == "per_sequence"
     assert published["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
@@ -134,7 +135,7 @@ def test_sidecar_residual_stays_separate_from_the_price():
     totals = [3.0, 3.0]  # authority differs from the reconstructed 2.0
     sidecar = _sidecar(blocks, components, totals, gate_relative=0.5)
     row = _row_with_sidecar(sidecar, signed=tuple(totals))
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
     published = row["sequence_attribution"]
     # residual = reconstruction minus authoritative total
     assert published["reconciliation"]["residual_per_probe"] == [-1.0, -1.0]
@@ -217,14 +218,14 @@ def test_sidecar_cohort_summary_binds_whole_blocks_and_selected_tokens():
     totals = [10.0, 10.0]
     sidecar = _sidecar(blocks, components, totals, sequence_length=4,
                        selected_tokens_per_row=4)
-    cohort = joint.sequence_cohort_summary(
+    cohort = joint_aura_rows.sequence_cohort_summary(
         sidecar, first_block_index=0, block_count=1)
     assert cohort["restricted_price"] == pytest.approx(0.5 * 1.0 ** 2)
     assert cohort["renormalized_scale"] == pytest.approx(4.0)
     assert cohort["renormalized_full_draw_estimate"] == pytest.approx(2.0)
     assert cohort["selected_tokens_per_row"] == 4
     with pytest.raises(ValueError):
-        joint.sequence_cohort_summary(sidecar, first_block_index=3,
+        joint_aura_rows.sequence_cohort_summary(sidecar, first_block_index=3,
                                       block_count=2)
 
 
@@ -271,7 +272,7 @@ def test_malformed_sidecar_is_refused(mutation):
                        [1.75, 1.25])
     mutation(sidecar)
     with pytest.raises(ValueError):
-        joint.make_joint_aura_entry(
+        joint_aura_rows.make_joint_aura_entry(
             operator_identity=_row(UNIT_A, [1.75, 1.25])["joint_operator_identity"],
             probe_identity=_row(UNIT_A, [1.75, 1.25])["probe_identity"],
             signed_components=[{"weight": 1.75, "activation": 0.0, "mixed": 0.0,
@@ -369,7 +370,7 @@ def test_streamed_production_rows_carry_sidecar_and_authoritative_bitwise():
         sequence_attribution=dict(_ATTR))
     for name, rows in on["costs"].items():
         for fmt, row in rows.items():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in aura._ZERO_COST_FORMATS:
                 # A passthrough row's price is exact by rule; it publishes no
                 # sidecar and claims none.
@@ -396,7 +397,7 @@ def test_streamed_single_sequence_blocks_publish_per_sequence_scope():
         sequence_attribution=dict(_ATTR))
     for name, rows in payload["costs"].items():
         for fmt, row in rows.items():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in aura._ZERO_COST_FORMATS:
                 assert "sequence_attribution" not in row
                 continue
@@ -444,7 +445,7 @@ def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeyp
         sequence_attribution=dict(_ATTR), checkpoint_dir=tmp_path, resume=True)
     for rows in again["costs"].values():
         for row in rows.values():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 def test_checkpoint_resume_attribution_on_plain_rows_refuses(tmp_path, monkeypatch):
@@ -493,9 +494,9 @@ def test_sidecar_geometry_must_match_priced_calibration_shape():
     probe = {**row["probe_identity"], "calibration_shape": [3, 4],
              "token_scope": "all"}
     operator = {**row["joint_operator_identity"],
-                "probe_identity_sha256": joint.identity_sha256(probe)}
+                "probe_identity_sha256": joint_aura_rows.joint_identity_sha256(probe)}
     with pytest.raises(ValueError, match="calibration|geometry"):
-        joint.make_joint_aura_entry(
+        joint_aura_rows.make_joint_aura_entry(
             operator_identity=operator, probe_identity=probe,
             signed_components=row["signed_components_per_probe"],
             sequence_attribution=sidecar)

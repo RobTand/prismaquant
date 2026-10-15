@@ -1,4 +1,4 @@
-"""Joint_aura probe identity routes through DIRECT_ASCII_STRICT (issue #1688).
+"""Joint row probe identity routes through DIRECT_ASCII_STRICT (issue #1688).
 
 RED: the routing test swaps the profile for a recorder and builds an
 identity (model validation stubbed at its lazy import seam). Before
@@ -9,6 +9,7 @@ int keys (numeric sort) and non-ASCII (escaped).
 """
 
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import hashlib
 from pathlib import Path
@@ -23,7 +24,6 @@ sys.path.insert(0, str(REPOSITORY))
 
 from prismaquant import streamed_model_identity as cs_identity  # noqa: E402
 from prismaquant import digests as owners  # noqa: E402
-from prismaquant import joint_aura as ja  # noqa: E402
 
 
 def test_probe_identity_routes_through_owner(monkeypatch):
@@ -32,11 +32,11 @@ def test_probe_identity_routes_through_owner(monkeypatch):
     seen = []
     stub = types.SimpleNamespace(
         encoded=lambda v: seen.append(("encode", v)) or b'{"b":1}')
-    monkeypatch.setattr(ja, "DIRECT_ASCII_STRICT", stub)
-    monkeypatch.setattr(ja, "bytes_sha256hex",
+    monkeypatch.setattr(joint_aura_rows, "DIRECT_ASCII_STRICT", stub)
+    monkeypatch.setattr(joint_aura_rows, "bytes_sha256hex",
                         lambda data: seen.append(("hash", bytes(data))) or "routed")
     probe = {"source_model": {"x": 1}, "b": 1}
-    ident = ja._ValidatedProbeIdentity(probe)
+    ident = joint_aura_rows._ValidatedProbeIdentity(probe)
     assert ("encode", probe) in [(n, v) for n, v in seen if n == "encode"]
     assert ident._sha256 == "routed"
 

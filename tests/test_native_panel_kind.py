@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from prismaquant.joint_aura import identity_sha256
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from prismaquant.measured_runtime_prices import RuntimePriceError
 from prismaquant.native_panel_kind import (
     DENSE_PANEL_SCHEMA, MOE_PANEL_SCHEMA, bind_execution_receipt,
@@ -25,7 +25,7 @@ def final_panel(request):
         joint = {"qname": "q", **{key: member[key] for key in
                  ("format", "source_weight", "rendered_weight", "activation")}}
         panel.update(joint_operator_identity=joint,
-                     joint_operator_identity_sha256=identity_sha256(joint), wire=member["wire"])
+                     joint_operator_identity_sha256=joint_identity_sha256(joint), wire=member["wire"])
     else:
         panel.update(members=[member], runtime_binding={
             "member_formats": {"q": "f"},
@@ -38,7 +38,7 @@ def test_each_kind_preserves_the_raw_receipt_and_rejects_measured_changes(final_
     kind = panel_kind(final_panel)
     measured = execution_panel_from_joint(final_panel)
     raw = {"schema": kind.raw_receipt_schema, "status": "timing_admissible",
-           "panel": measured, "panel_sha256": identity_sha256(measured),
+           "panel": measured, "panel_sha256": joint_identity_sha256(measured),
            "samples": [1.0, 2.0]}
     original = copy.deepcopy(raw)
     binding = bind_execution_receipt(raw, final_panel)

@@ -1,5 +1,6 @@
 """Measure synthetic paired-trade reports through the actual allocator command."""
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import argparse
 import gc
@@ -50,7 +51,7 @@ def fixture(directory, config, probes, layers):
     source_content = {"config": config, "weight_map": {"synthetic": "none"},
                       "shards": [{"path": "/synthetic/no-weights", "size": 1, "sha256": "a" * 64}]}
     source_model = {"schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic GLM-5.3-Flash dimensions",
-                    "resolved_commit": None, "content_sha256": joint.identity_sha256(source_content), **source_content}
+                    "resolved_commit": None, "content_sha256": joint_aura_rows.joint_identity_sha256(source_content), **source_content}
     arithmetic = joint.arithmetic_identity(torch.float32)
     probe = {"schema": "prismaquant.joint_aura.probes.v2", "seed_base": 228600,
              "n_probes": probes, "calibration_sha256": "c" * 64, "producer_source_sha256": "d" * 64,
@@ -69,18 +70,18 @@ def fixture(directory, config, probes, layers):
                 rows = {}
                 for fmt, signed in zip((LOW, HIGH), samples(layer, expert, role, probes)):
                     operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name, "format": fmt,
-                                "probe_identity_sha256": joint.identity_sha256(probe),
-                                "source_weight": {"content_sha256": joint.identity_sha256({"synthetic_source": name}),
+                                "probe_identity_sha256": joint_aura_rows.joint_identity_sha256(probe),
+                                "source_weight": {"content_sha256": joint_aura_rows.joint_identity_sha256({"synthetic_source": name}),
                                                   "shape": shape, "dtype": "torch.float32", "logical_bytes": n * 4},
-                                "rendered_weight": {"content_sha256": joint.identity_sha256({"synthetic_render": name, "format": fmt}),
+                                "rendered_weight": {"content_sha256": joint_aura_rows.joint_identity_sha256({"synthetic_render": name, "format": fmt}),
                                                     "shape": shape, "dtype": "torch.float32", "logical_bytes": n * 4},
                                 "activation": joint.activation_identity(fr.get_format(fmt), {}, name), "arithmetic": arithmetic}
-                    rows[fmt] = joint.make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
+                    rows[fmt] = joint_aura_rows.make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
                         signed_components=[{"weight": x, "activation": 0.0, "mixed": 0.0, "total": x} for x in signed])
                     identities[fmt][name] = rows[fmt]["joint_operator_identity_sha256"]
                 costs[name] = rows
     payload = {"costs": costs, "meta": {"formats": [LOW, HIGH]},
-               "provenance": {"cost_mode": "aura", "joint_activation": True, "cost_currency": joint.JOINT_CURRENCY}}
+               "provenance": {"cost_mode": "aura", "joint_activation": True, "cost_currency": joint_aura_rows.JOINT_CURRENCY}}
     (directory / "probe.pkl").write_bytes(pickle.dumps({"stats": stats, "meta": {"model": None}}))
     (directory / "costs.pkl").write_bytes(pickle.dumps(payload))
     (directory / "baseline.json").write_text(json.dumps(dict.fromkeys(costs, HIGH)))
@@ -142,7 +143,7 @@ def main():
     assert trade["probe_ids"] == list(range(228600, 228600 + args.probes))
     for key, fmt in (("assignment_a", LOW), ("assignment_b", HIGH)):
         assert trade[key]["operator_identity_sha256_by_unit"] == identities[fmt]
-        assert trade[key]["assignment_identity_sha256"] == joint.identity_sha256(identities[fmt])
+        assert trade[key]["assignment_identity_sha256"] == joint_aura_rows.joint_identity_sha256(identities[fmt])
     expected = [math.fsum(sign * 0.5 * x[k] ** 2 for layer in layers for expert in range(c["n_routed_experts"])
                           for role in range(3) for sign, x in zip((1, -1), samples(layer, expert, role, args.probes)))
                 for k in range(args.probes)]
@@ -161,7 +162,7 @@ def main():
         if int(name.split(".experts.")[1].split(".")[0]) != 0:
             row = rows[HIGH]
             signed = [component["total"] + 1 / 4096 for component in rows[LOW]["signed_components_per_probe"]]
-            rows[HIGH] = joint.make_joint_aura_entry(operator_identity=row["joint_operator_identity"],
+            rows[HIGH] = joint_aura_rows.make_joint_aura_entry(operator_identity=row["joint_operator_identity"],
                 probe_identity=row["probe_identity"], signed_components=[
                     {"weight": x, "activation": 0.0, "mixed": 0.0, "total": x} for x in signed])
     (fixture_dir / "costs.pkl").write_bytes(pickle.dumps(payload))

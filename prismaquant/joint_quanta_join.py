@@ -44,8 +44,7 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json_bytes,
     canonical_json_sha256,
 )
-from prismaquant.joint_aura import (
-    prepare_joint_aura_identities, validate_joint_aura_entry)
+from prismaquant.joint_aura_rows import prepare_joint_aura_identities, validate_joint_aura_entry
 from prismaquant.joint_campaign_ledger import (quantum_id, roster_digest)
 from prismaquant.joint_layer_quanta import (phase_ranges, qname_layer)
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex

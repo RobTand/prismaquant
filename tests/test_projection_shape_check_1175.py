@@ -20,6 +20,7 @@ selects the fused kernel:
   run on the reference arithmetic and the shapes themselves, and publishes.
 """
 from __future__ import annotations
+from prismaquant import joint_projection_contract
 
 import hashlib
 import json
@@ -68,9 +69,9 @@ WINDOW_PAIRS = (
 #: The R13 plan's selector: the packaged binary, bound by its digest. The
 #: dispatcher never loads it; ``normalize_projection_backend`` checks the
 #: digest against the packaged qualification only.
-FUSED = {"name": backend.FUSED_NAME,
+FUSED = {"name": joint_projection_contract.FUSED_NAME,
          "binary": {"path": "/qualified/pq_joint_projection_reduce.so",
-                    "sha256": backend._qualification()[0]["build"]["binary_sha256"]}}
+                    "sha256": joint_projection_contract.projection_qualification()[0]["build"]["binary_sha256"]}}
 
 
 def _sha(path: Path) -> str:
@@ -222,7 +223,7 @@ def test_certified_mode_refuses_glm_shapes_before_the_row_runs(tmp_path, dispatc
     # The message names the unqualified shapes and the qualified set.
     for shape in GLM_SHAPES:
         assert str(shape) in captured.err
-    for shape in backend._qualification()[0]["qualified_shapes"]:
+    for shape in joint_projection_contract.projection_qualification()[0]["qualified_shapes"]:
         assert str(tuple(shape)) in captured.err
 
 
@@ -327,7 +328,7 @@ def test_a_record_without_prepared_windows_reads_the_prepared_roster(
 
 def test_a_selector_outside_the_qualification_refuses(tmp_path):
     import dispatch_joint_quanta as dispatch
-    foreign = {"name": backend.FUSED_NAME,
+    foreign = {"name": joint_projection_contract.FUSED_NAME,
                "binary": {"path": "/other.so", "sha256": "0" * 64}}
     with pytest.raises(dispatch.DispatchRefused, match="outside the packaged qualification"):
         dispatch.check_projection_shapes(

@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: `joint_aura_rows` owns scalar row publication and
+validation, immutable probe-identity custody, coordinate binding and sequence
+attribution reconstruction. `joint_projection_contract` owns the packaged
+qualification and serialized backend identity. Numerical execution remains in
+`joint_aura` and `joint_projection_backend`; campaign table coverage validates
+ordinary, measured, malformed and rekeyed rows without importing tensor or
+serving runtimes. Existing schema strings, scalar operations, encodings and
+scientific refusals remain unchanged; package provenance records the changed
+producer source as usual. No cache, format, stage or serving gate changes.
+Provenance: 2026-10-14 PrismaQuant architecture refactor, base 138069b7993.
+
 Re-stamped 2026-10-15: DSv4 sparse blocks select the per-expert probe
 constructor through `experts_type`. Registration preserves the packed expert
 class's identity, so genuine HF initialization dispatches packed parameters

@@ -16,6 +16,7 @@ mode refuses at both, dev mode records at both.
 CPU-only.
 """
 from __future__ import annotations
+from prismaquant import joint_projection_contract
 
 import ast
 from pathlib import Path
@@ -99,13 +100,13 @@ def test_prepared_backend_change_is_one_seal_at_completion_and_cache(
     from prismaquant import joint_projection_backend as backend
     from prismaquant.production_weight_cache import ProductionWeightCache
 
-    qualification, digest = backend._qualification()
-    stored = dict(schema=backend.SCHEMA, name=backend.FUSED_NAME,
+    qualification, digest = joint_projection_contract.projection_qualification()
+    stored = dict(schema=joint_projection_contract.SCHEMA, name=joint_projection_contract.FUSED_NAME,
                   qualification_sha256=digest, build=qualification['build'],
                   runtime=qualification['runtime'],
                   qualified_shapes=qualification['qualified_shapes'],
                   ineligible_layout='torch_reference')
-    running = deepcopy(backend.REFERENCE_IDENTITY)
+    running = deepcopy(joint_projection_contract.REFERENCE_IDENTITY)
     completion = {**_completion(), 'reader_identity': {'reader': 'same'},
                   'projection_backend': deepcopy(stored)}
     cache = ProductionWeightCache({}, {}, metadata={'projection_backend': deepcopy(stored)})

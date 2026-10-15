@@ -66,6 +66,7 @@ MODULES = (
     "prismaquant/joint_forward_resume.py",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/joint_projection_backend.py",
+    "prismaquant/joint_projection_contract.py",
     "prismaquant/joint_quanta_join.py",
     "prismaquant/joint_quantum_handoff.py",
     "prismaquant/joint_replay_spill.py",
@@ -217,7 +218,7 @@ ALLOWLIST = {
         "binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_projection_backend.py", "normalize_projection_backend"): (
         1, INTEGRITY, "the kernel binary against its packaged qualification"),
-    ("prismaquant/joint_projection_backend.py", "validate_projection_backend_identity"): (
+    ("prismaquant/joint_projection_contract.py", "validate_projection_backend_identity"): (
         1, AMBIGUOUS, "a serialized arithmetic record must name a qualified backend "
         "(numerics; the runtime comparison is a seal_check)"),
     ("prismaquant/joint_projection_backend.py", "prewarm_projection_backend"): (
@@ -545,7 +546,9 @@ def test_d32_consumers_add_no_run_identity_refusals():
         'prismaquant/joint_aura.py': {
             'paired_assignment_difference': 0,
             '_validated_assignment': 1,  # operator coordinate against the row's own unit
-            '_require_probe_alignment': 1,  # same mathematical probe coordinates
+        },
+        'prismaquant/joint_aura_rows.py': {
+            'require_probe_alignment': 1,  # same mathematical probe coordinates
         },
     }
     for path, expected in scopes.items():

@@ -1486,14 +1486,8 @@ def compute_aura_cost_streamed(
                 source_bytes=(None if retained_budget is None
                               else retained_operator_windows['source_reserve_bytes']))
         from prismaquant.streamed_model_identity import validate_streamed_model_identity
-        from prismaquant.joint_aura import (
-            SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity,
-            identity_sha256, make_joint_probe_identity,
-            prefetch_joint_cache, squared_signed,
-            source_execution_identity,
-            validate_joint_aura_entry,
-            sequence_attribution_run_identity, sequence_attribution_sidecar,
-        )
+        from prismaquant.joint_aura import SignedJointProjectionLease, JointOperatorStatisticsLease, activation_identity, arithmetic_identity, make_joint_probe_identity, prefetch_joint_cache, source_execution_identity, sequence_attribution_run_identity
+        from prismaquant.joint_aura_rows import joint_identity_sha256, squared_signed, validate_joint_aura_entry, sequence_attribution_sidecar
         from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
         joint_probe_identity = make_joint_probe_identity(
@@ -1899,9 +1893,9 @@ def compute_aura_cost_streamed(
                 "cost_mode": "aura", "joint_activation": True,
                 "cost_currency": "joint_aura_predicted_dloss",
                 "joint_aura_identity": joint_run_identity,
-                "joint_aura_identity_sha256": identity_sha256(joint_run_identity),
+                "joint_aura_identity_sha256": joint_identity_sha256(joint_run_identity),
                 "probe_identity": joint_probe_identity,
-                "probe_identity_sha256": identity_sha256(joint_probe_identity),
+                "probe_identity_sha256": joint_identity_sha256(joint_probe_identity),
                 "joint_prefetch": joint_prefetch_stats,
                 **({'joint_operator_windows': operator_window_receipts,
                     'joint_operator_memory': operator_guard.snapshot() if operator_guard is not None else None}
@@ -1986,7 +1980,7 @@ def compute_aura_cost_streamed(
             "rendered_weight": rendered_identity,
             "activation": activation,
             "arithmetic": joint_probe_identity["arithmetic"],
-            "probe_identity_sha256": identity_sha256(joint_probe_identity),
+            "probe_identity_sha256": joint_identity_sha256(joint_probe_identity),
         }
         joint_components.setdefault((name, fmt), [])
 

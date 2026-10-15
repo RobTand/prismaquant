@@ -128,9 +128,8 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
     ``name`` is the first unit, as before.
     """
     import torch
-    from prismaquant.joint_aura import (
-        activation_identity, arithmetic_identity, identity_sha256, make_joint_aura_entry,
-    )
+    from prismaquant.joint_aura import activation_identity, arithmetic_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
     from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     from prismaquant.measured_runtime_prices import SCHEMA, CONTEXT_SCHEMA
@@ -156,7 +155,7 @@ def _main_fixture(tmp_path, *, fixed_ms=0.0, units=("model.layers.0.self_attn.o_
                      "distribution": "rademacher", "normalization": "global_kl_fisher",
                      "temperature": 1.0, "arithmetic": arithmetic}
             operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": unit,
-                        "format": fmt, "probe_identity_sha256": identity_sha256(probe),
+                        "format": fmt, "probe_identity_sha256": joint_identity_sha256(probe),
                         "source_weight": {"content_sha256": "a" * 64, "shape": list(shape),
                                           "dtype": "torch.float32", "logical_bytes": n_params * 4},
                         "rendered_weight": {"content_sha256": "b" * 64, "shape": list(shape),
@@ -311,7 +310,7 @@ def test_real_cli_binds_expected_context_to_joint_cost_evidence(tmp_path, monkey
 def test_real_cli_rejects_cost_bytes_swapped_between_admission_and_parsing(tmp_path, monkeypatch):
     """Restoring admitted bytes after parsing must not authenticate different prices."""
     from prismaquant import measured_runtime_prices
-    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.joint_aura_rows import make_joint_aura_entry
 
     name, argv = _main_fixture(tmp_path)
     cost_path = tmp_path / "costs.pkl"

@@ -570,10 +570,6 @@
    "tools/render_window_bench.py",
    "tools/unit_journal_bench.py"
   ],
-  "_qualification": [
-   "prismaquant/glm_kda_capture_kernel.py",
-   "prismaquant/joint_projection_backend.py"
-  ],
   "_quantile": [
    "prismaquant/kl_measurement.py",
    "prismaquant/stage_a_chain_seed.py"
@@ -821,7 +817,6 @@
    "tools/serve_fingerprint.py"
   ],
   "identity_sha256": [
-   "prismaquant/joint_aura.py",
    "prismaquant/tessera_campaign_reseal.py",
    "prismaquant/tessera_census_union.py"
   ],

@@ -1,5 +1,6 @@
 """Cost-row evidence, objective and activation-price interpretation."""
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 from dataclasses import dataclass
 import math
@@ -71,7 +72,7 @@ def _price_basis(stats_entry: dict, cost_entry: dict, format_name: str | None,
         branch = ("canonical_qualified_chord" if cost_entry.get("canonical_quality") is not None
                   else "qualified_served_kl")
         return _FixedPrice(complete, branch)
-    if cost_entry_is_joint_aura(cost_entry):
+    if joint_aura_rows.cost_entry_is_joint_aura(cost_entry):
         return _JointPrice()
     if cost_entry_is_source_passthrough(cost_entry, format_name):
         return _FixedPrice(0.0, BRANCH_SOURCE_PASSTHROUGH)
@@ -524,15 +525,6 @@ def cost_entry_weight_only_dloss(
         gain=gain,
     )
 
-def cost_entry_is_joint_aura(cost_entry: dict) -> bool:
-    """Validate any joint claim before interpreting generic cost fields."""
-    from .joint_aura import validate_joint_aura_entry
-    from .rung_allowability import CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE, complete_scientific_price
-    if (cost_entry.get("cost_source") in (CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE)
-            or "canonical_quality" in cost_entry or "canonical_members" in cost_entry):
-        complete_scientific_price(cost_entry)
-        return False
-    return validate_joint_aura_entry(cost_entry)
 
 def cost_entry_is_anchored_aura_supersurrogate(cost_entry: dict) -> bool:
     """Whether one row was priced by the anchored-AURA campaign.

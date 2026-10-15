@@ -8,6 +8,7 @@ are packed and dispatched through ``F.grouped_mm``, and require the two
 paths' unit envelopes and cost rows to be byte-identical.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 from prismaquant import aura_provenance
 
@@ -1117,16 +1118,16 @@ def _restamp_unit_probe(path, field, value):
     """
     import pickle
 
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     envelope = pickle.loads(path.read_bytes())
     state = pickle.loads(envelope["payload"])
     for entry in state["joint_aura_rows"].values():
         entry["probe_identity"][field] = value
         operator = entry["joint_operator_identity"]
-        digest = identity_sha256(entry["probe_identity"])
+        digest = joint_identity_sha256(entry["probe_identity"])
         entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
-        entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+        entry["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
     envelope["payload"] = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
     envelope["payload_sha256"] = hashlib.sha256(envelope["payload"]).hexdigest()
     path.write_bytes(pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL))
@@ -2032,7 +2033,7 @@ def test_spill_quantum_sidecar_is_collected_per_sequence(campaign, monkeypatch, 
     assert getattr(state, "error", None) is None
     for name, rows in payload["costs"].items():
         for fmt, row in rows.items():
-            assert joint_aura_mod.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in ("BF16",):
                 assert "sequence_attribution" not in row
                 continue

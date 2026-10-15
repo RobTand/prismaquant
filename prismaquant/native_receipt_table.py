@@ -215,7 +215,7 @@ def load_cost_payload(path: Path) -> tuple[Mapping, str]:
 
 def bind_cost_row(panel: Mapping, cost_payload: Mapping, cost_sha256: str) -> Mapping:
     """The joint AURA row this panel was frozen against, or a named refusal."""
-    from .joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
 
     unit, fmt = panel["unit"], panel["format"]
     where = f"{unit}@{fmt}"
@@ -251,7 +251,7 @@ def _bind_routed_cost_rows(panel: Mapping, cost_payload: Mapping, cost_sha256: s
     binding it returns is what the table row and the loader's intake gate both
     compare, so no member can be dropped or re-spelled between them.
     """
-    from .joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
 
     where = f"{panel['unit']}@{panel['format']}"
     if panel["cost_sha256"] != cost_sha256:

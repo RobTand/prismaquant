@@ -14,6 +14,7 @@ The rows are synthetic measurements on random weights; they make no claim
 about GLM-5.3's costs.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import copy
 import pickle
@@ -54,7 +55,7 @@ def _source_model():
                "weight_map": {"fixture.weight": "fixture.safetensors"},
                "shards": [{"path": "/fixture/fixture.safetensors", "size": 1, "sha256": "a" * 64}]}
     return {"schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic",
-            "resolved_commit": None, **content, "content_sha256": joint.identity_sha256(content)}
+            "resolved_commit": None, **content, "content_sha256": joint_aura_rows.joint_identity_sha256(content)}
 
 
 def _layer(seed=20260927):
@@ -209,7 +210,7 @@ def test_activation_rungs_carry_their_quantized_input_terms(env):
     assert any(part["mixed"] != 0.0 for part in parts)
     for rows in payload["costs"].values():
         for row in rows.values():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 def test_rows_carry_the_mtp_objective_and_one_probe_identity(env):
@@ -382,4 +383,4 @@ def test_the_source_model_identity_is_validated_once_not_per_row(env, monkeypatc
     for row in rows:
         assert type(row["probe_identity"]) is dict
     monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", original)
-    assert all(joint.validate_joint_aura_entry(row) for row in rows)
+    assert all(joint_aura_rows.validate_joint_aura_entry(row) for row in rows)

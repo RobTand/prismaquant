@@ -1,5 +1,6 @@
 """Candidate construction and coupled-candidate aggregation."""
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 from . import priced_cell
 
@@ -787,48 +788,8 @@ def drop_census_interpolated_within_loo(
     return out
 
 
-class JointCellCoordinateError(ValueError):
-    """A joint row found under a key its own operator identity does not name.
-
-    Distinct from the ``ValueError`` ``validate_joint_aura_entry`` raises for a
-    malformed row, so a caller can turn the coordinate mismatch into its own
-    refusal while leaving malformed-evidence failures exactly as they were.
-    """
 
 
-def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -> bool:
-    """Whether a joint A-side found at ``name@fmt`` was produced *for* that cell.
-
-    ``cost_entry_is_joint_aura`` validates a row *internally*: its currency, its
-    Fisher application count, and that its operator and probe digests match the
-    objects they name. Every one of those is true of a row correctly produced
-    for one Linear when it is read under another: the row is self-consistent,
-    and nothing in it was ever compared with the key it was found under. The
-    operator identity carries the coordinate the row was produced for, so a
-    coverage decision -- which reads keys -- has to compare the two. Without
-    that comparison a row copied, mis-merged or re-keyed onto another cell
-    reports an A-side nobody measured, and the cell it landed on keeps a
-    weight-only cost that reads as covered.
-
-    Returns False when the entry is not a joint row at all, so a caller can ask
-    about every row it holds. Raises ``JointCellCoordinateError`` on a joint row
-    whose operator identity does not name this cell: a known coordinate
-    mismatch is a refusal, never a row to skip quietly.
-    """
-    if not priced_cell.cost_entry_is_joint_aura(cost_entry):
-        return False
-    operator = cost_entry.get("joint_operator_identity")
-    produced = (f"{operator.get('qname')!r}@{operator.get('format')!r}"
-                if isinstance(operator, Mapping) else "no operator identity")
-    if (not isinstance(operator, Mapping) or operator.get("qname") != name
-            or operator.get("format") != fmt):
-        raise JointCellCoordinateError(
-            f"{where}: the joint A-side at {name}@{fmt} was produced for "
-            f"{produced}. A joint row carries the activation term of the "
-            "operator it measured, so it is only its own cell; a row copied, "
-            "mis-merged or re-keyed onto another (unit, format) is a refusal "
-            "rather than coverage.")
-    return True
 
 
 #: AQUA-AURA: the A-side Δloss of a (unit, format), written into the cost row by
@@ -901,7 +862,7 @@ def collect_activation_calibration_rows(
             entry, _entry_fmt = priced_cell.resolve_cost_row(costs[name], spec.name)
             if entry is None or "error" in entry:
                 continue
-            if priced_cell.cost_entry_is_joint_aura(entry):
+            if joint_aura_rows.cost_entry_is_joint_aura(entry):
                 continue
             if priced_cell.cost_entry_is_bit_exact(entry, spec.name):
                 continue
@@ -996,7 +957,7 @@ def price_paired_rate_trade(
             row, _entry_fmt = priced_cell.resolve_cost_row(costs.get(name, {}), fmt)
             if row is None or "error" in row:
                 raise ValueError(f"paired rate trade missing matched cost row: {name}@{fmt}")
-            if not joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
+            if not joint_aura_rows.joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
                 raise ValueError(f"paired rate trade requires matched joint AURA currency: {name}@{fmt}")
             rows[name] = row
         return rows
@@ -1256,7 +1217,7 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
         from .rung_allowability import complete_scientific_price
         if complete_scientific_price(cost_entry) is not None:
             continue
-        if priced_cell.cost_entry_is_joint_aura(cost_entry):
+        if joint_aura_rows.cost_entry_is_joint_aura(cost_entry):
             # The family transfer never scaled the full-residual member, so
             # it must not scale the hedge removed from that member either.
             gain = 1.0

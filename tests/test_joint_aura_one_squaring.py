@@ -10,8 +10,8 @@ import torch
 from prismaquant import format_registry as fr
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
-from prismaquant.joint_aura import (activation_identity, arithmetic_identity, identity_sha256,
-                                    make_joint_aura_entry, squared_signed)
+from prismaquant.joint_aura import activation_identity, arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry, squared_signed
 
 # Two signed totals recorded in joint-streamed-run-02 whose pow/mul squares
 # differ by one ulp on this platform.
@@ -38,7 +38,7 @@ def test_row_squares_with_squared_signed():
              "temperature": 1.0, "arithmetic": arithmetic}
     name, fmt = "model.layers.0.mlp.down_proj", "NVFP4"
     operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name, "format": fmt,
-                "probe_identity_sha256": identity_sha256(probe),
+                "probe_identity_sha256": joint_identity_sha256(probe),
                 "source_weight": {"content_sha256": "a" * 64, "shape": [64, 64],
                                   "dtype": "torch.float32", "logical_bytes": 16384},
                 "rendered_weight": {"content_sha256": "b" * 64, "shape": [64, 64],

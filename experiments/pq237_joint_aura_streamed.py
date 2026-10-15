@@ -121,9 +121,8 @@ def expected_currency_bindings(runner, calibration, protocol, model_identity, ca
     """Seal dense qualification inputs before the producer returns any rows."""
     from prismaquant import format_registry as fr
     from prismaquant.aura_provenance import (producer_package_sha256 as source_sha256)
-    from prismaquant.joint_aura import (
-        activation_identity, arithmetic_identity, identity_sha256, source_execution_identity,
-    )
+    from prismaquant.joint_aura import activation_identity, arithmetic_identity, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
     plan = protocol["plan"]
@@ -137,8 +136,8 @@ def expected_currency_bindings(runner, calibration, protocol, model_identity, ca
         "source_execution": source_execution_identity(runner.model),
         "arithmetic": arithmetic_identity(runner.dtype),
     }
-    expected_probe_sha256 = identity_sha256(expected_probe)
-    expected = {name: {fmt: identity_sha256({
+    expected_probe_sha256 = joint_identity_sha256(expected_probe)
+    expected = {name: {fmt: joint_identity_sha256({
         "schema": "prismaquant.joint_aura.operator.v2", "qname": name, "format": fmt,
         "source_weight": renders[name][fmt]["source_weight"],
         "rendered_weight": renders[name][fmt]["rendered_weight"],
@@ -158,7 +157,7 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
     from prismaquant import format_registry as fr
     from prismaquant.allocator_candidates import build_candidates
     from prismaquant.cost_currency import require_run_currency
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     with Path(path).open("rb") as stream:
         payload = pickle.load(stream)
@@ -168,13 +167,13 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
     if actual != coordinates or set(payload["stats"]) != set(plan):
         raise ValueError("persisted joint coordinate scope differs from frozen plan")
     provenance = payload["provenance"]
-    if (identity_sha256(provenance["probe_identity"]) != probe_sha256
+    if (joint_identity_sha256(provenance["probe_identity"]) != probe_sha256
             or provenance["probe_identity_sha256"] != probe_sha256):
         raise ValueError("persisted joint probe identity differs from measured input")
-    if (identity_sha256(provenance["joint_aura_identity"])
+    if (joint_identity_sha256(provenance["joint_aura_identity"])
             != provenance["joint_aura_identity_sha256"]):
         raise ValueError("persisted joint provenance digest mismatch")
-    if (identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
+    if (joint_identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
             != probe_sha256):
         raise ValueError("persisted joint provenance probe mismatch")
     currency = require_run_currency(payload)
@@ -570,7 +569,8 @@ def main():
     from prismaquant.aura_cost import compute_aura_cost_streamed
     from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.streamed_model_identity import build_streamed_model_identity
-    from prismaquant.joint_aura import arithmetic_identity, identity_sha256, prefetch_joint_cache
+    from prismaquant.joint_aura import arithmetic_identity, prefetch_joint_cache
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.model_profiles import detect_profile
 
     if not torch.cuda.is_available():
@@ -658,7 +658,7 @@ def main():
         for name, rows in payload["costs"].items():
             for fmt, row in rows.items():
                 operator = row["joint_operator_identity"]
-                if identity_sha256(operator) != expected[name][fmt]:
+                if joint_identity_sha256(operator) != expected[name][fmt]:
                     raise ValueError("streamed operator differs from independently recorded production render")
         restored = compute_aura_cost_streamed(runner, calibration, formats, resume=True, **kwargs)
         if restored["costs"] != payload["costs"]:

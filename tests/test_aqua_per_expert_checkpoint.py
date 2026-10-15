@@ -12,6 +12,7 @@ stacking 19 GiB of gate_up. The risk in reordering a reduction is that it stops
 being the same reduction, so the load-bearing test here is the agreement one:
 streamed must equal `_activation_dloss_packed` on the stacked equivalent.
 """
+from prismaquant import joint_aura_rows
 import numpy as np
 import pytest
 import torch
@@ -347,7 +348,7 @@ def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
 
     joint: dict = {}                      # sentinel: the predicate is the subject
     costs = {"a": {"NVFP4": joint}}
-    monkeypatch.setattr(aqc, "cost_entry_is_joint_aura", lambda e: e is joint,
+    monkeypatch.setattr(joint_aura_rows, 'cost_entry_is_joint_aura', lambda e: e is joint,
                         raising=False)
     report = aqc.merge_act_dloss(costs, {"a": {"NVFP4": 0.1}})
 
@@ -376,9 +377,8 @@ def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
 
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
-    from prismaquant.joint_aura import (
-        arithmetic_identity, identity_sha256, make_joint_aura_entry,
-    )
+    from prismaquant.joint_aura import arithmetic_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 
     content = {"config": {"fixture": True},
                "weight_map": {"fixture.weight": "fixture.weight"},
@@ -397,7 +397,7 @@ def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
              "distribution": "rademacher", "normalization": "global_kl_fisher",
              "temperature": 1.0, "arithmetic": arithmetic}
     operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name,
-                "format": fmt, "probe_identity_sha256": identity_sha256(probe),
+                "format": fmt, "probe_identity_sha256": joint_identity_sha256(probe),
                 "source_weight": {"content_sha256": "a" * 64,
                                   "shape": list(shape),
                                   "dtype": "torch.float32",
@@ -569,7 +569,7 @@ def test_a_malformed_joint_claim_refuses_before_any_pricing(tmp_path,
     import sys
 
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.joint_aura import JOINT_CURRENCY
+    from prismaquant.joint_aura_rows import JOINT_CURRENCY
 
     name = "model.layers.0.mlp.down_proj"
     cost_out, argv = _cli_fixture(

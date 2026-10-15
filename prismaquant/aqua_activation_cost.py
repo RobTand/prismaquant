@@ -75,11 +75,9 @@ import time
 
 import numpy as np
 
-from prismaquant.priced_cell import ACT_DLOSS_KEY, cost_entry_is_joint_aura
-from prismaquant.allocator_candidates import (
-    JointCellCoordinateError,
-    joint_row_binds_cell,
-)
+from prismaquant.priced_cell import ACT_DLOSS_KEY
+from prismaquant.joint_aura_rows import cost_entry_is_joint_aura
+from prismaquant.joint_aura_rows import JointCellCoordinateError, joint_row_binds_cell
 from .schemas import refuse_retired_codebook_format
 
 #: Return the CUDA pool to the OS once it has reserved this much. On GB10's

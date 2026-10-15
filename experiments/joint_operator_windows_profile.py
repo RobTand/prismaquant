@@ -260,7 +260,7 @@ class StorageObserver:
 
 
 def cost_rows(payload):
-    from prismaquant.joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     result = []
     for name, choices in sorted(payload['costs'].items()):
         for fmt, row in sorted(choices.items()):

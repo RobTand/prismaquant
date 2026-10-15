@@ -156,7 +156,7 @@ def _restamp_probe(root, quantum, field, value, *, first_only=False):
     """
     import pickle
 
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     path = root / "layer-quanta" / quantum / "cost.pkl"
     payload = pickle.loads(path.read_bytes())
@@ -171,9 +171,9 @@ def _restamp_probe(root, quantum, field, value, *, first_only=False):
             entry = copy.deepcopy(entry)
             entry["probe_identity"][field] = value
             operator = entry["joint_operator_identity"]
-            digest = identity_sha256(entry["probe_identity"])
+            digest = joint_identity_sha256(entry["probe_identity"])
             entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
-            entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+            entry["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
             rows[fmt] = entry
             rewritten += 1
     path.write_bytes(pickle.dumps(payload))

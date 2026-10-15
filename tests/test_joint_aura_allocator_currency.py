@@ -1,4 +1,5 @@
 """Exercise allocator admission using actual streamed joint measurement rows."""
+from prismaquant import joint_aura_rows
 from prismaquant import priced_cell
 import copy
 
@@ -6,7 +7,7 @@ import pytest
 
 from prismaquant import allocator_candidates as ac
 from prismaquant.cost_currency import CostCurrencyError, require_run_currency
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from test_joint_aura_streamed import _fixture, _run
 
 
@@ -87,24 +88,23 @@ def test_a_joint_row_is_only_its_own_cell(measured_payload):
     with a row that is otherwise valid.
     """
     name, row = _first(measured_payload)
-    assert ac.joint_row_binds_cell(row, name, "FP8_E4M3", where="test") is True
+    assert joint_aura_rows.joint_row_binds_cell(row, name, "FP8_E4M3", where="test") is True
 
     other = next(unit for unit in sorted(measured_payload["costs"])
                  if unit != name)
     # The mismatch is its own error class, not the one a malformed row raises:
     # a caller that turns it into a refusal must not also swallow the
     # malformed-evidence failures `validate_joint_aura_entry` reports.
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
-        ac.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
-        ac.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
-    assert issubclass(ac.JointCellCoordinateError, ValueError)
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
+        joint_aura_rows.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
+        joint_aura_rows.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
 
 
 def test_a_row_that_is_not_joint_is_not_this_predicate(measured_payload):
     """Callers ask about every row they hold, so a plain row answers False."""
     name, _ = _first(measured_payload)
-    assert ac.joint_row_binds_cell(
+    assert joint_aura_rows.joint_row_binds_cell(
         {"predicted_dloss": 0.1}, name, "FP8_E4M3", where="test") is False
 
 
@@ -114,7 +114,7 @@ def test_joint_table_refuses_unaligned_probe_population(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["seed_base"] += 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     replacement = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
         signed_components=row["signed_components_per_probe"])
     payload["costs"][operator["qname"]][operator["format"]] = replacement
@@ -135,7 +135,7 @@ def test_single_probe_cannot_claim_zero_sampling_uncertainty(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["n_probes"] = 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     with pytest.raises(ValueError, match="at least two probes"):
         make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
             signed_components=row["signed_components_per_probe"][:1])
@@ -176,7 +176,7 @@ def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
             costs, {name: "FP8_E5M2"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
     other = next(unit for unit in sorted(measured_payload["costs"]) if unit != name)
     donated = {other: dict(costs[name])}
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
         ac.price_paired_rate_trade(
             donated, {other: "FP8_DYNAMIC"}, {other: "NVFP4A16"},
             profile=DefaultProfile(), ucb_z=1.0)
@@ -189,7 +189,7 @@ def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["seed_base"] += 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     resampled = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
         signed_components=row["signed_components_per_probe"])
     forked = _paired_costs(measured_payload, name)

@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from prismaquant.joint_aura import identity_sha256
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from prismaquant.native_panel_kind import execution_panel_from_joint
 from prismaquant.native_execution_binding import freeze_execution_panel
 from prismaquant.native_operator_panel import EXECUTION, freeze_native_panel
@@ -17,14 +17,14 @@ def tp2_inputs(joined, axis, rank):
                              'init_method': 'tcp://fixture:29517', 'timeout_seconds': 120}
     full_shape = [8, 4] if axis == 'output' else [4, 8]
     inputs['wire']['record']['identity'] = {'source': {'shape': full_shape}}
-    preflight['operator']['wire_record_sha256'] = identity_sha256(inputs['wire']['record'])
+    preflight['operator']['wire_record_sha256'] = joint_identity_sha256(inputs['wire']['record'])
     preflight['operator']['scheme'] = {'rows': full_shape[0], 'columns': full_shape[1],
                                       'roles': [['weight', full_shape[0]]]}
-    preflight['scheme_sha256'] = identity_sha256(preflight['operator']['scheme'])
+    preflight['scheme_sha256'] = joint_identity_sha256(preflight['operator']['scheme'])
     preflight['runtime'].update(execution=copy.deepcopy(inputs['execution']),
                                  distributed=copy.deepcopy(inputs['distributed']),
                                  gpu={'uuid': f'CPU-FIXTURE-RANK-{rank}'})
-    preflight['runtime_sha256'] = identity_sha256(preflight['runtime'])
+    preflight['runtime_sha256'] = joint_identity_sha256(preflight['runtime'])
     return inputs, preflight, row
 
 
@@ -78,9 +78,9 @@ def test_tp2_freezer_refuses_bad_or_unbound_coordinates(joined, mutation, kind):
     parts = tp2_inputs(joined, 'output', 0)
     mutation(parts[0], parts[1])
     # Rehash producer facts so the semantic binding, not a stale digest, refuses.
-    parts[1]['runtime_sha256'] = identity_sha256(parts[1]['runtime'])
-    parts[1]['scheme_sha256'] = identity_sha256(parts[1]['operator']['scheme'])
-    parts[1]['operator']['wire_record_sha256'] = identity_sha256(parts[0]['wire']['record'])
+    parts[1]['runtime_sha256'] = joint_identity_sha256(parts[1]['runtime'])
+    parts[1]['scheme_sha256'] = joint_identity_sha256(parts[1]['operator']['scheme'])
+    parts[1]['operator']['wire_record_sha256'] = joint_identity_sha256(parts[0]['wire']['record'])
     with pytest.raises(ValueError):
         freeze(parts, kind)
 

@@ -244,8 +244,7 @@ def enrich_mtp_cost_wires(payload: Mapping) -> dict:
 def _mtp_probe(payload) -> tuple[str, dict]:
     """The one MTP probe identity every row carries, validated."""
     from .glm_mtp import MTP_OBJECTIVE, MTP_OBJECTIVE_SCHEMA
-    from .joint_aura import (prepare_joint_aura_identities, release_joint_aura_identities,
-                             validate_joint_aura_entry)
+    from prismaquant.joint_aura_rows import prepare_joint_aura_identities, release_joint_aura_identities, validate_joint_aura_entry
 
     digests, last_row = set(), None
     try:

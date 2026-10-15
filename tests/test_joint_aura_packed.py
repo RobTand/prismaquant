@@ -11,7 +11,7 @@ from torch.nn import functional as F
 import prismaquant.aura_cost as aura
 import prismaquant.format_registry as fr
 from prismaquant.cost_streaming import StreamedCausalLM
-from prismaquant.joint_aura import validate_joint_aura_entry
+from prismaquant.joint_aura_rows import validate_joint_aura_entry
 from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from prismaquant.perturbed_x_cache import _activation_qdq

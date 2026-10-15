@@ -299,7 +299,7 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
         for _, _, entry in rows)
     if not claimed:
         return None
-    from .joint_aura import JOINT_AURA_COST_CURRENCY, validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import JOINT_AURA_COST_CURRENCY, validate_joint_aura_entry
     from . import format_registry as fr
 
     if (provenance.get("cost_mode") != "aura"

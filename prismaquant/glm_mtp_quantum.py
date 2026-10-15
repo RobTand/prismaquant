@@ -18,7 +18,7 @@ the MTP objective as the seed:
   (packed routed experts and the shared expert) and projects each render's
   ``dW`` through ``joint_statistics_replay.observe_and_project_windows``, the
   same statistics and projection arithmetic as a body layer.
-* **Rows.** ``joint_aura.make_joint_aura_entry`` on a probe identity carrying
+* **Rows.** ``joint_aura_rows.make_joint_aura_entry`` on a probe identity carrying
   ``glm_mtp.mtp_objective_identity``, so a body join refuses them.
 
 The output is a ``prismaquant.glm_mtp_cost.v1`` payload, the input of the
@@ -186,9 +186,8 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     """
     from . import format_registry as fr
     from .glm_mtp_capture import sequence_progress
-    from .joint_aura import (activation_identity, identity_sha256, make_joint_aura_entry,
-                             source_execution_identity,
-                             validated_probe_identity)
+    from .joint_aura import activation_identity, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry, validated_probe_identity
     from .joint_served_activation import joint_activation_maxima
     from .joint_statistics_replay import (observe_and_project_windows,
                                           statistics_arithmetic_identity)
@@ -228,7 +227,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
         source_execution=source_execution_identity(model),
         mtp_layer=model.layer.layer_idx, vocab_size=int(lm_head.weight.shape[0]))
     validated = validated_probe_identity(probe_identity)
-    probe_sha256 = identity_sha256(validated)
+    probe_sha256 = joint_identity_sha256(validated)
 
     # The installed sources and the activation contracts depend on nothing a
     # probe computes, so they are checked against the preparation before the
@@ -325,7 +324,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
                                         signed_components=components[(name, fmt)])
             row["probe_identity"] = probe_identity
             costs[name][fmt] = row
-    if identity_sha256(probe_identity) != probe_sha256:
+    if joint_identity_sha256(probe_identity) != probe_sha256:
         raise RuntimeError("MTP probe identity changed during measurement")
     return {
         "schema": SCHEMA,

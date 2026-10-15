@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from prismaquant import tessera_expert_projection as tep
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from prismaquant.tessera_joint_eval_panel import make_panel
 from prismaquant.tessera_sampled_stack_proposal import propose_bound_payload

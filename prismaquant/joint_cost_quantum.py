@@ -230,7 +230,7 @@ class SpillSequenceAttribution:
         if missing:
             raise QuantumIdentityRefused(
                 f"sequence_attribution missing requested probes {missing} for {key[0]}@{key[1]}")
-        from .joint_aura import sequence_attribution_sidecar
+        from prismaquant.joint_aura_rows import sequence_attribution_sidecar
         return sequence_attribution_sidecar(
             blocks=self.blocks, components_per_probe=per_probe,
             authoritative_totals=signed_totals,
@@ -1770,16 +1770,8 @@ def run_layer_quantum_core(
         normalize_boundary_storage, prefetched_boundary_batches,
     )
     from .streamed_model_identity import validate_streamed_model_identity
-    from .joint_aura import (
-        JointOperatorStatisticsLease,
-        activation_identity,
-        identity_sha256,
-        make_joint_probe_identity,
-        normalize_sequence_attribution,
-        source_execution_identity,
-        validate_joint_aura_entry,
-        validated_probe_identity,
-    )
+    from .joint_aura import JointOperatorStatisticsLease, activation_identity, make_joint_probe_identity, normalize_sequence_attribution, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, validate_joint_aura_entry, validated_probe_identity
     from .joint_adjoint_checkpoints import (
         load_adjoint_checkpoint,
         reference_from_record,
@@ -2760,7 +2752,7 @@ def run_layer_quantum_core(
                 "rendered_weight": rendered_identity,
                 "activation": activation,
                 "arithmetic": joint_probe_identity["arithmetic"],
-                "probe_identity_sha256": identity_sha256(joint_probe),
+                "probe_identity_sha256": joint_identity_sha256(joint_probe),
             }
             if activation_policy is not None and fmt != "BF16":
                 policy_record = operator_policy_record(
@@ -3613,14 +3605,14 @@ def run_layer_quantum_core(
     payload["costs"] = joint_rows
     if observation_counts is not None:
         stamp_observations(payload, observation_counts, pilot_panel)
-    probe_identity_sha256 = identity_sha256(joint_probe_identity)
-    if probe_identity_sha256 != identity_sha256(joint_probe):
+    probe_identity_sha256 = joint_identity_sha256(joint_probe_identity)
+    if probe_identity_sha256 != joint_identity_sha256(joint_probe):
         raise RuntimeError("joint probe identity changed after it was validated")
     payload["provenance"].update({
         "cost_mode": "aura", "joint_activation": True,
         "cost_currency": "joint_aura_predicted_dloss",
         "joint_aura_identity": joint_run_identity,
-        "joint_aura_identity_sha256": identity_sha256(joint_run_identity),
+        "joint_aura_identity_sha256": joint_identity_sha256(joint_run_identity),
         "probe_identity": joint_probe_identity,
         "probe_identity_sha256": probe_identity_sha256,
         "joint_operator_windows": operator_window_receipts,

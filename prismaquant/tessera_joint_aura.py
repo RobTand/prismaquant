@@ -2862,7 +2862,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .streamed_model_identity import build_streamed_model_identity
-    from .joint_aura import source_execution_identity, validate_joint_aura_entry
+    from .joint_aura import source_execution_identity
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache

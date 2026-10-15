@@ -1,6 +1,7 @@
 """Whole packed MoE execution receipts before final distortion rows exist."""
 import copy
-from .joint_aura import identity_sha256, require_native_source_execution
+from .joint_aura import require_native_source_execution
+from prismaquant.joint_aura_rows import joint_identity_sha256
 
 from .native_panel_kind import (
     MOE_EXECUTION_PANEL_SCHEMA as RAW_PANEL_SCHEMA, member_execution_identity,
@@ -22,7 +23,7 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
     members=owner._member_roster(inputs['unit'],inputs['members'],inputs['shape'])
     owner._calibration_and_capture(inputs['calibration'],inputs['routing_capture'],
         unit=inputs['unit'],shape=inputs['shape'],routing=inputs['routing'])
-    _equal(inputs['routing_capture_sha256'],identity_sha256(inputs['routing_capture']),'routing capture')
+    _equal(inputs['routing_capture_sha256'],joint_identity_sha256(inputs['routing_capture']),'routing capture')
     from .native_execution_binding import require_reference_quantizer
     reference=require_reference_quantizer(inputs,members[0]['activation'])
     operator=preflight['operator']
@@ -30,12 +31,12 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
     for key in ('shape','routing','profile_role_order','routing_capture_sha256','serving_config_sha256'):
         _equal(operator[key],inputs[key],'native '+key)
     for key in ('native_tensors','scheme','config'):
-        _equal((operator if key=='config' else preflight)[key+'_sha256'],identity_sha256(operator[key]),key+' digest')
-    _equal(preflight['runtime_sha256'],identity_sha256(preflight['runtime']),'runtime digest')
+        _equal((operator if key=='config' else preflight)[key+'_sha256'],joint_identity_sha256(operator[key]),key+' digest')
+    _equal(preflight['runtime_sha256'],joint_identity_sha256(preflight['runtime']),'runtime digest')
     _equal(preflight['runtime']['image'],inputs['runtime_image'],'runtime image')
     _equal(preflight['runtime']['execution'],inputs['execution'],'runtime execution')
     owner._workspace_identity(preflight['workspace'])
-    _equal(preflight['workspace_sha256'],identity_sha256(preflight['workspace']),'workspace digest')
+    _equal(preflight['workspace_sha256'],joint_identity_sha256(preflight['workspace']),'workspace digest')
     route=operator['declared_route'];owner.validate_compact_native_route(inputs,route)
     execution=require_native_source_execution(inputs['routing_capture'].get('source_execution'),unit=inputs['unit'])
     phases={}
@@ -47,7 +48,7 @@ def freeze_execution_panel(inputs,preflight,*,source_sha256):
             _equal(expected[key],inputs['routing_capture']['phases'][phase][key],phase+' capture '+key)
         phases[phase]={**expected,'expected_route':route}
     binding={'member_formats':{m['unit']:m['format'] for m in members},
-        'member_execution_identity_sha256':{m['unit']:identity_sha256(member_execution_identity(m)) for m in members},
+        'member_execution_identity_sha256':{m['unit']:joint_identity_sha256(member_execution_identity(m)) for m in members},
         'member_shapes':{m['unit']:owner.rank_local_member_shape(inputs['shape'],m['role']) for m in members},
         'operator_route':operator_route_identity(route)}
     return copy.deepcopy({'schema':RAW_PANEL_SCHEMA, **({'source_acquisition':inputs['source_acquisition']} if 'source_acquisition' in inputs else {}),**({'reference_served_quantizer':reference} if reference is not None else {}),'unit':inputs['unit'],'format':inputs['format'],

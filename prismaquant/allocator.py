@@ -2806,7 +2806,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     validate_probe_payload(probe, args.probe)
     validate_cost_payload(cost_data, args.costs)
     require_no_research_exact_member_scalar(cost_data)
-    from .joint_aura import prepare_joint_aura_identities
+    from prismaquant.joint_aura_rows import prepare_joint_aura_identities
     prepare_joint_aura_identities(cost_data)
     # One DP prices in one currency: a cost table carrying Tessera-currency
     # rows (output_mse under the route's activation contract) is admissible
@@ -3780,7 +3780,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             RuntimeBinding, build_runtime_resources, rank_local_member_shapes,
             reconcile_serving_unit_rows,
         )
-        from .joint_aura import validate_joint_aura_entry
+        from prismaquant.joint_aura_rows import validate_joint_aura_entry
         try:
             if dict(measured_runtime_table.fixed_assignment) != fixed_format_assignment:
                 raise ValueError("measured table fixed auxiliary assignment differs "

@@ -6,7 +6,7 @@ import pickle
 import pytest
 
 from experiments.pq237_joint_aura_streamed import compare_assignments, load_candidate_payload
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from test_joint_aura_streamed import _fixture, _run
 
 
@@ -64,7 +64,7 @@ def test_streamed_checkpoint_pickle_candidates_and_identity_refusal(tmp_path, mo
     changed = copy.deepcopy(restored)
     wrong_probe = copy.deepcopy(changed["provenance"]["probe_identity"])
     wrong_probe["seed_base"] += 100
-    wrong_digest = identity_sha256(wrong_probe)
+    wrong_digest = joint_identity_sha256(wrong_probe)
     for rows in changed["costs"].values():
         for fmt, row in list(rows.items()):
             operator = copy.deepcopy(row["joint_operator_identity"])
@@ -75,7 +75,7 @@ def test_streamed_checkpoint_pickle_candidates_and_identity_refusal(tmp_path, mo
     provenance["probe_identity"] = wrong_probe
     provenance["probe_identity_sha256"] = wrong_digest
     provenance["joint_aura_identity"]["probe_identity"] = wrong_probe
-    provenance["joint_aura_identity_sha256"] = identity_sha256(provenance["joint_aura_identity"])
+    provenance["joint_aura_identity_sha256"] = joint_identity_sha256(provenance["joint_aura_identity"])
     _write(path, changed)
     with pytest.raises(ValueError, match="probe identity"):
         load_candidate_payload(path, plan, bindings, probe)

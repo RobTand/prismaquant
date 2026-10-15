@@ -684,7 +684,8 @@ def _glm_routing():
 def _glm_cell(tmp_path):
     """One whole GLM routed owner at TP2, in the producer's own input shape."""
     from prismaquant import native_moe_panel as panel
-    from prismaquant.joint_aura import arithmetic_identity, make_joint_aura_entry
+    from prismaquant.joint_aura import arithmetic_identity
+    from prismaquant.joint_aura_rows import make_joint_aura_entry
 
     shape, routing = _glm_shape(), _glm_routing()
     activation = {"schema": "prismaquant.joint_aura.activation.v1", "quantizes_input": True,

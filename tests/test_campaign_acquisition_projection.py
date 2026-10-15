@@ -9,7 +9,7 @@ import pytest
 
 from prismaquant import tessera_campaign as campaign
 from prismaquant.cost_currency import CostCurrencyError
-from prismaquant.joint_aura import make_joint_aura_entry
+from prismaquant.joint_aura_rows import make_joint_aura_entry
 from prismaquant.model_profiles import DefaultProfile
 from prismaquant.tessera_full_domain_acquisition import (
     joint_acquisition_from_cost_data,

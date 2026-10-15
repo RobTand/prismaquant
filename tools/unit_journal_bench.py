@@ -142,7 +142,7 @@ def _load_sample(path: Path) -> dict:
 
 def _unit_inputs(sample: dict, units: int):
     """Per-unit inputs shaped like the quantum's, from one production unit."""
-    from prismaquant.joint_aura import validated_probe_identity
+    from prismaquant.joint_aura_rows import validated_probe_identity
 
     rows = sample["joint_aura_rows"]
     first = next(iter(rows.values()))

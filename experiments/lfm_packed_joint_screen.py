@@ -31,7 +31,8 @@ def main():
     from prismaquant.aura_cost import compute_aura_cost_streamed
     from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.streamed_model_identity import build_streamed_model_identity
-    from prismaquant.joint_aura import validate_joint_aura_entry, source_execution_identity
+    from prismaquant.joint_aura import source_execution_identity
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from prismaquant.kl_fisher import fisher_probe_scalar
     from prismaquant.model_profiles import detect_profile
     from prismaquant.production_weight_cache import ProductionWeightCache

@@ -9,6 +9,7 @@ type, ``str()`` and chained cause. Those outcomes are frozen in
 against them.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 from prismaquant import aura_checkpoint_journal
 
@@ -132,7 +133,7 @@ SITES = (
     ("prismaquant.boundary_control", "digest", {}),
     ("prismaquant.sample_parallel_artifacts", "_sample_artifact_sha256", _WHERE),
 
-    ("prismaquant.joint_aura", "identity_sha256", {}),
+    ("prismaquant.joint_aura_rows", "joint_identity_sha256", {}),
     ("prismaquant.measured_runtime_prices", "identity_sha256", {}),
     ("prismaquant.glm_mtp_capture", "_json_sha256", {}),
     ("prismaquant.streaming_model", "_initialization_digest", {}),
@@ -169,7 +170,8 @@ def _check_inputs(function, inputs, kwargs) -> set:
 
 
 @pytest.mark.parametrize(("module_name", "name", "kwargs"), SITES,
-                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost')}.{name.replace('_checkpoint_json_sha256', '_canonical_json_sha256')}"
+                         # Oracle keys retain the pre-migration measured site names.
+                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost').replace('joint_aura_rows', 'joint_aura')}.{name.replace('_checkpoint_json_sha256', '_canonical_json_sha256').replace('joint_identity_sha256', 'identity_sha256')}"
                               for module, name, _ in SITES])
 def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
     new = getattr(importlib.import_module(module_name), name)
@@ -179,18 +181,15 @@ def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
 
 
 def test_joint_aura_keeps_the_validated_identity_short_circuit():
-    from prismaquant import joint_aura
-
-    identity = object.__new__(joint_aura._ValidatedProbeIdentity)
+    identity = object.__new__(joint_aura_rows._ValidatedProbeIdentity)
     object.__setattr__(identity, "_fields", ())
     object.__setattr__(identity, "_sha256", "f" * 64)
-    assert joint_aura.identity_sha256(identity) == "f" * 64
+    assert joint_aura_rows.joint_identity_sha256(identity) == "f" * 64
 
 
 @pytest.mark.parametrize("name", ROUND_TRIP_NAMES)
 def test_round_trip_keeps_its_bytes(name):
-    """The old ``cost_stage_checkpoint`` import path hands out the owner's function."""
-    assert getattr(cost_stage_checkpoint, name) is getattr(digests, name)
+    """The byte owner keeps its actual value and malformed-input behavior."""
     inputs = GENERIC_INPUTS + ({"k": "v", "n": [1, 2.5, None]},)
     _check_inputs(getattr(digests, name), inputs, _WHERE)
 

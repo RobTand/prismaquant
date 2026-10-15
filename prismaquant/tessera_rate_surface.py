@@ -256,7 +256,7 @@ class TesseraRateSurface:
             lower_value=self.anchor_dloss[lower], upper_value=self.anchor_dloss[upper],
             lower_scope=self.anchor_scopes[self.anchor_q256[lower]],
             upper_scope=self.anchor_scopes[self.anchor_q256[upper]])
-        from .joint_aura import JOINT_CURRENCY
+        from prismaquant.joint_aura_rows import JOINT_CURRENCY
         from .rung_allowability import CANONICAL_CHORD_SOURCE
         anchors = []
         for index in (lower, upper):

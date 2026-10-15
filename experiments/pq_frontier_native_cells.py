@@ -163,7 +163,8 @@ def prepare(args):
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.streamed_model_identity import build_streamed_model_identity
-    from prismaquant.joint_aura import arithmetic_identity, identity_sha256, prefetch_joint_cache
+    from prismaquant.joint_aura import arithmetic_identity, prefetch_joint_cache
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.model_profiles import detect_profile
     from prismaquant.native_operator_panel import EXECUTION, prepare_native_inputs
     from prismaquant.perturbed_x_cache import activation_cache_filename
@@ -286,7 +287,7 @@ def prepare(args):
             raise ValueError("streamed producer probe identity differs from frozen inputs")
         for name, rows in payload["costs"].items():
             for fmt, row in rows.items():
-                if identity_sha256(row["joint_operator_identity"]) != expected[name][fmt]:
+                if joint_identity_sha256(row["joint_operator_identity"]) != expected[name][fmt]:
                     raise ValueError("streamed operator differs from independently recorded production render")
     finally:
         runner.shutdown()

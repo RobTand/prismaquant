@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Callable, Mapping
 
-from .joint_aura import identity_sha256
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from .measured_runtime_prices import RuntimePriceError
 
 DENSE_PANEL_SCHEMA = "tessera.native_dense_panel.v1"
@@ -31,14 +31,14 @@ def member_execution_identity(member):
 def _dense_execution_panel(panel):
     value = copy.deepcopy(panel)
     joint = value.pop("joint_operator_identity")
-    if identity_sha256(joint) != value.pop("joint_operator_identity_sha256"):
+    if joint_identity_sha256(joint) != value.pop("joint_operator_identity_sha256"):
         raise ValueError("final joint operator digest differs")
     value.pop("cost_sha256")
     value.pop("probe_identity_sha256")
     value["schema"] = DENSE_EXECUTION_PANEL_SCHEMA
     value["operator_identity"] = {key: joint[key] for key in
         ("qname", "format", "source_weight", "rendered_weight", "activation")}
-    value["operator_identity_sha256"] = identity_sha256(value["operator_identity"])
+    value["operator_identity_sha256"] = joint_identity_sha256(value["operator_identity"])
     return value
 
 
@@ -49,7 +49,7 @@ def _moe_execution_panel(panel):
     value.pop("probe_identity_sha256")
     value["runtime_binding"].pop("member_operator_identity_sha256")
     value["runtime_binding"]["member_execution_identity_sha256"] = {
-        member["unit"]: identity_sha256(member_execution_identity(member))
+        member["unit"]: joint_identity_sha256(member_execution_identity(member))
         for member in value["members"]}
     return value
 
@@ -98,7 +98,7 @@ class NativePanelKind:
         world = execution["tensor_parallel"]
         owner = panel.get("execution")
         if isinstance(owner, Mapping) and "tensor_parallel" in owner:
-            if identity_sha256(owner["tensor_parallel"]) != identity_sha256(world):
+            if joint_identity_sha256(owner["tensor_parallel"]) != joint_identity_sha256(world):
                 raise RuntimePriceError("native owner/runtime world size differs")
         return world
 
@@ -142,13 +142,13 @@ def bind_execution_receipt(raw_receipt, final_panel):
         from .native_execution_binding import require_reference_quantizer
         require_reference_quantizer(final_panel, final_panel["joint_operator_identity"]["activation"])
     panel = kind.execution_projection(final_panel)
-    equal = (identity_sha256(raw_receipt["panel"]) == identity_sha256(panel)
+    equal = (joint_identity_sha256(raw_receipt["panel"]) == joint_identity_sha256(panel)
              if kind.routed else raw_receipt["panel"] == panel)
-    if not equal or raw_receipt["panel_sha256"] != identity_sha256(panel):
+    if not equal or raw_receipt["panel_sha256"] != joint_identity_sha256(panel):
         raise ValueError("late joint binding changes measured execution identity")
     return copy.deepcopy({"schema": kind.bound_schema,
-        "raw_receipt": raw_receipt, "raw_receipt_sha256": identity_sha256(raw_receipt),
-        "panel": final_panel, "panel_sha256": identity_sha256(final_panel)})
+        "raw_receipt": raw_receipt, "raw_receipt_sha256": joint_identity_sha256(raw_receipt),
+        "panel": final_panel, "panel_sha256": joint_identity_sha256(final_panel)})
 
 
 def resolve_execution_binding(binding, final_panel):
@@ -156,13 +156,13 @@ def resolve_execution_binding(binding, final_panel):
     if not kind.routed and binding.get("schema") != kind.bound_schema:
         raise ValueError("unsupported execution binding")
     raw = binding["raw_receipt"]
-    if identity_sha256(raw) != binding["raw_receipt_sha256"]:
+    if joint_identity_sha256(raw) != binding["raw_receipt_sha256"]:
         raise ValueError("raw receipt digest differs")
     if binding != bind_execution_receipt(raw, final_panel):
         raise ValueError("late execution binding differs from final panel")
     view = copy.deepcopy(raw)
     view.update(schema=kind.operator_receipt_schema,
-                panel=copy.deepcopy(final_panel), panel_sha256=identity_sha256(final_panel))
+                panel=copy.deepcopy(final_panel), panel_sha256=joint_identity_sha256(final_panel))
     return view
 
 

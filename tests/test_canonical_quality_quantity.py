@@ -1,5 +1,6 @@
 """Synthetic regressions for complete scientific coordinates and one quantity."""
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 from prismaquant import priced_cell
 
 import copy
@@ -17,7 +18,7 @@ from canonical_quality_fixtures import complete_probe, scope_for
 
 
 
-def anchor_rows(*, currency=joint.JOINT_CURRENCY, producer="d", upper_seed=7000):
+def anchor_rows(*, currency=joint_aura_rows.JOINT_CURRENCY, producer="d", upper_seed=7000):
     rows = {}
     for rate, value, source, seed in ((768, 2.0, "d", 7000), (1024, 1.0, producer, upper_seed)):
         name = f"{FAMILY}_R{rate}"
@@ -51,7 +52,7 @@ def nontrivial_calibration(fmt):
                                  {family: 8}, {family: 8}, ())
 
 
-@pytest.mark.parametrize("currency,expected", [(joint.JOINT_CURRENCY, 1.25), ("served_kl", 0.75)])
+@pytest.mark.parametrize("currency,expected", [(joint_aura_rows.JOINT_CURRENCY, 1.25), ("served_kl", 0.75)])
 def test_body_chord_keeps_its_quantity_without_another_transfer(monkeypatch, currency, expected):
     owner = owner_for_rows(monkeypatch)
     fmt = f"{FAMILY}_R896"
@@ -206,7 +207,7 @@ def test_missing_actual_probe_objective_cannot_be_hidden_by_scope(monkeypatch):
     with pytest.raises(ValueError, match="objective"):
         owner.chord_cost(f"{FAMILY}_R896", unit="u", costs=rows)
 
-@pytest.mark.parametrize("currency,expected", [(joint.JOINT_CURRENCY, 1.75), ("served_kl", 1.25)])
+@pytest.mark.parametrize("currency,expected", [(joint_aura_rows.JOINT_CURRENCY, 1.75), ("served_kl", 1.25)])
 def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch, currency, expected):
     from types import SimpleNamespace
     from prismaquant import allocator_solver
@@ -308,7 +309,7 @@ def test_canonical_densify_does_not_publish_anchor_stderr_as_fractional_uncertai
         tessera_pareto_frontier(built, uncertainty_z=1.96)
 
 
-@pytest.fixture(params=[joint.JOINT_CURRENCY, "served_kl"])
+@pytest.fixture(params=[joint_aura_rows.JOINT_CURRENCY, "served_kl"])
 def canonical_chord_candidate(monkeypatch, request):
     from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
     base_owner = owner_for_rows(monkeypatch)
@@ -330,7 +331,7 @@ def canonical_chord_candidate(monkeypatch, request):
             operator["source_weight"]["logical_bytes"] = 2 * 64 * 256
             operator["rendered_weight"]["shape"] = [64, 256]
             operator["rendered_weight"]["logical_bytes"] = 4 * 64 * 256
-            row["joint_operator_identity_sha256"] = joint.identity_sha256(operator)
+            row["joint_operator_identity_sha256"] = joint_aura_rows.joint_identity_sha256(operator)
             from canonical_quality_fixtures import scope_for as rebuild_scope
             row["quality_scope"] = rebuild_scope(row)
         else:

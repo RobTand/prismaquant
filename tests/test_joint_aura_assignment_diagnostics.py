@@ -4,6 +4,7 @@ Synthetic complete rows exercise identity admission and paired arithmetic;
 these tests make no model-quality or serving-runtime claim.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import copy
 import math
@@ -51,7 +52,7 @@ def _row(name, signed, *, fmt="FP8_E4M3"):
     source_model = {
         "schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic",
         "resolved_commit": None, **source_content,
-        "content_sha256": joint.identity_sha256(source_content),
+        "content_sha256": joint_aura_rows.joint_identity_sha256(source_content),
     }
     arithmetic = joint.arithmetic_identity(torch.float32)
     probe = {
@@ -63,19 +64,19 @@ def _row(name, signed, *, fmt="FP8_E4M3"):
     }
     operator = {
         "schema": "prismaquant.joint_aura.operator.v2", "qname": name,
-        "format": fmt, "probe_identity_sha256": joint.identity_sha256(probe),
+        "format": fmt, "probe_identity_sha256": joint_aura_rows.joint_identity_sha256(probe),
         "source_weight": {
-            "content_sha256": joint.identity_sha256({"source": name}),
+            "content_sha256": joint_aura_rows.joint_identity_sha256({"source": name}),
             "shape": [2, 2], "dtype": "torch.float32", "logical_bytes": 16,
         },
         "rendered_weight": {
-            "content_sha256": joint.identity_sha256({"render": name, "format": fmt}),
+            "content_sha256": joint_aura_rows.joint_identity_sha256({"render": name, "format": fmt}),
             "shape": [2, 2], "dtype": "torch.float32", "logical_bytes": 16,
         },
         "activation": joint.activation_identity(fr.get_format(fmt), {}, name),
         "arithmetic": arithmetic,
     }
-    return joint.make_joint_aura_entry(
+    return joint_aura_rows.make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,
         signed_components=[dict(weight=float(x), activation=0.0, mixed=0.0,
                                 total=float(x)) for x in signed],
@@ -90,9 +91,9 @@ def _rebuild(row, *, operator_change=None, probe_change=None):
         operator_change(operator)
     if probe_change:
         probe_change(probe)
-    operator["probe_identity_sha256"] = joint.identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_aura_rows.joint_identity_sha256(probe)
     operator["arithmetic"] = copy.deepcopy(probe["arithmetic"])
-    return joint.make_joint_aura_entry(
+    return joint_aura_rows.make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,
         signed_components=copy.deepcopy(row["signed_components_per_probe"]),
     )
@@ -208,7 +209,7 @@ def test_rehashed_unchanged_format_identity_changes_are_refused(mutation):
         else:
             operator["source_weight" if mutation == "source" else "rendered_weight"]["content_sha256"] = "e" * 64
     b = _rebuild(a, operator_change=change)
-    assert joint.validate_joint_aura_entry(b)
+    assert joint_aura_rows.validate_joint_aura_entry(b)
     with pytest.raises(ValueError):
         joint.paired_assignment_difference({UNIT_A: a}, {UNIT_A: b})
 
@@ -217,7 +218,7 @@ def test_changed_format_does_not_allow_different_source_weight():
     a = _row(UNIT_A, [1, 2, 3])
     b = _rebuild(_row(UNIT_A, [3, 2, 1], fmt="FP8_E5M2"),
                  operator_change=lambda op: op["source_weight"].update(content_sha256="e" * 64))
-    assert joint.validate_joint_aura_entry(b)
+    assert joint_aura_rows.validate_joint_aura_entry(b)
     with pytest.raises(ValueError):
         joint.paired_assignment_difference({UNIT_A: a}, {UNIT_A: b})
 
@@ -234,11 +235,11 @@ def test_rehashed_probe_contract_mismatches_fail_within_and_between_assignments(
         else:
             model = probe["source_model"]
             model["config"]["revision"] = "different"
-            model["content_sha256"] = joint.identity_sha256(
+            model["content_sha256"] = joint_aura_rows.joint_identity_sha256(
                 {key: model[key] for key in ("config", "weight_map", "shards")})
     a = _row(UNIT_A, [1, 2, 3])
     b = _rebuild(_row(UNIT_B, [4, 5, 6]), probe_change=change)
-    assert joint.validate_joint_aura_entry(b)
+    assert joint_aura_rows.validate_joint_aura_entry(b)
     with pytest.raises(ValueError):
         joint.assignment_probe_summary({UNIT_A: a, UNIT_B: b})
     changed_a = _rebuild(_row(UNIT_A, [3, 2, 1], fmt="FP8_E5M2"), probe_change=change)
@@ -303,7 +304,7 @@ def test_probe_pairing_requires_canonical_identity_not_python_numeric_equality(c
                  probe_change=lambda probe: probe.update(temperature=True))
     # JSON true and 1.0 are distinct recorded identities, although Python's
     # nested equality treats them as equal. Both rows pass local validation.
-    assert joint.validate_joint_aura_entry(b)
+    assert joint_aura_rows.validate_joint_aura_entry(b)
     assert a["probe_identity"] == b["probe_identity"]
     assert a["probe_identity_sha256"] != b["probe_identity_sha256"]
     with pytest.raises(ValueError):
@@ -319,8 +320,8 @@ def test_same_candidate_requires_canonical_operator_identity():
     a = _rebuild(_row(UNIT_A, [1, 2, 3]), operator_change=lambda op:
                  op["activation"].update(clip_enabled=True))
     b = _rebuild(a, operator_change=lambda op: op["activation"].update(clip_enabled=1))
-    assert joint.validate_joint_aura_entry(a)
-    assert joint.validate_joint_aura_entry(b)
+    assert joint_aura_rows.validate_joint_aura_entry(a)
+    assert joint_aura_rows.validate_joint_aura_entry(b)
     assert a["probe_identity_sha256"] == b["probe_identity_sha256"]
     assert a["joint_operator_identity"] == b["joint_operator_identity"]
     assert a["joint_operator_identity_sha256"] != b["joint_operator_identity_sha256"]
