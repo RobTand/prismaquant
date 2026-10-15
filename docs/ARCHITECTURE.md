@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-15: dispatcher rows classify bounded capture with the campaign
+parser only when their declared module is `prismaquant.tessera_campaign`.
+Selected-wire materialization retains its own `run` subcommand grammar and
+existing census-derived memory, GPU demand, class placement and container gates.
+Campaign bounded-environment admission and malformed-option refusals remain active.
+
 Re-stamped 2026-10-15: `joint_aura_rows` owns scalar row publication and
 validation, immutable probe-identity custody, coordinate binding and sequence
 attribution reconstruction. `joint_projection_contract` owns the packaged

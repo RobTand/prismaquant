@@ -112,14 +112,19 @@ def _plan(selection, monkeypatch):
     return selection.workspace / 'plan.json', result, calls
 
 
-def test_plan_uses_census_quanta_and_pb_row_sizing(selection, monkeypatch):
-    path, result, calls = _plan(selection, monkeypatch)
-    assert len(result['groups']) == len(calls) == 1
+def test_plan_uses_census_quanta_and_pb_row_sizing(selection):
+    s = selection
+    result = tm.plan(s.request, s.census, s.workspace, s.spec, anchor_batch_size=2)
+    rows = json.loads((s.workspace / 'manifest.json').read_text())
+    assert len(result['groups']) == len(rows) == 1
     assert result['groups'][0]['assignment'] == {n:FMT for n in _units()}
-    assert calls[0][1]['module'] == 'prismaquant.tessera_materialization'
-    assert calls[0][1]['mem_gb'] >= 3
-    assert (selection.workspace / 'manifest.json').is_file()
-    assert not selection.output.exists()
+    assert rows[0]['argv'] == [
+        'python', '-u', '-m', 'prismaquant.tessera_materialization', 'run',
+        '--plan', str(s.workspace / 'plan.json'), '--group', '0',
+        '--anchor-batch-size', '2']
+    assert rows[0]['demand']['gpu'] == rows[0]['demand']['cpu'] == 1
+    assert rows[0]['demand']['mem_gb'] >= 3
+    assert not s.output.exists()
 
 
 def test_plan_refuses_different_calibration(selection, monkeypatch):

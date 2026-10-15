@@ -193,6 +193,34 @@ def test_host_rows_remain_direct():
         "python3", "-u", "-m", "prismaquant.tessera_campaign"]
 
 
+@pytest.mark.parametrize('container', [False, True])
+def test_materialization_row_preserves_its_subcommand_and_resource_demand(container):
+    data = spec()
+    data['env']['MIMALLOC_PURGE_DELAY'] = '10'
+    data['cpus'] = 2
+    data['tags'] = ['gb10']
+    if not container:
+        del data['container']
+    arguments = ['run', '--plan', '/mnt/shared/plan.json', '--group', '0',
+                 '--anchor-batch-size', '2']
+    row = dispatch._row(data, arguments, module='prismaquant.tessera_materialization',
+                        mem_gb=48, timeout_s=600)
+    command = ['python3', '-u', '-m', 'prismaquant.tessera_materialization', *arguments]
+    if container:
+        assert row['argv'][:4] == [
+            'python3', '-m', 'tools.tessera_campaign_container', '--spec']
+        assert json.loads(row['argv'][4]) == {
+            'container': data['container'], 'env': data['env']}
+        assert row['argv'][5:] == ['--', *command]
+    else:
+        assert row['argv'] == command
+    assert row['demand'] == {'gpu': 1, 'cpu': 2, 'mem_gb': 48}
+    assert row['env'] == data['env']
+    assert row['tags'] == ['gb10']
+    assert row['timeout_s'] == 600
+    assert row['retry_safe'] is True
+
+
 def test_actual_image_content_cannot_be_overridden_and_cpu_mode_requests_no_gpu():
     runner = importlib.import_module('tools.tessera_campaign_container')
     data = spec()

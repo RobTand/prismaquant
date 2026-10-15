@@ -1091,7 +1091,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
                 f"argv names {named}; those bytes depend on a Hessian this "
                 "class may not have measured or adopted")
     env = dict(resolved['env'])
-    bounded = _row_is_bounded(argv)
+    bounded = (module == "prismaquant.tessera_campaign" and _row_is_bounded(argv))
     if bounded:
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}
