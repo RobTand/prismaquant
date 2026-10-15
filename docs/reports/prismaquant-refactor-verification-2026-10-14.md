@@ -308,3 +308,37 @@ four failures. This does not relabel that first action as passing.
 The cold table row-contract extraction, wire/cell/request units, one obsolete
 menu-test import expectation and additional public producer APIs remain under
 work. No final whole-branch qualification is claimed.
+
+
+All 45 failures in that earlier broad snapshot now have targeted passing
+follow-ups. The last obsolete contract test is repaired in `111207ac95`.
+PB `fc70910ae59b89a7b534564edf43475e85fd415e55b78a1cf286db16e2c767bf`
+passes 93 cases without skips. Its actual isolated interpreter blocks serving,
+Torch, Transformers, Triton and vLLM imports while reading the exact installed
+code/contract pin and all 22 published cell IDs through the public metadata API.
+Result is `31daadbc3a15a6a1916aa4108238869f95a62ee2aaaf65d2b69e0f7526f76b1c`;
+receipt is `a4ea45f234017d426f845dfbca5e27d5cb4f67b2907000bf5961fd8ea9c206ec`.
+The failure ledger records the actual follow-up for each original node.
+
+The cold scalar row-contract repair is integrated in `60e749c5dc`; its independent
+review and unchanged-operation evidence are in `joint-row-contract-2026-10-15.md`.
+Wire custody is integrated in `fa84d81d32`, and `6dc41ff8c9` repairs readset
+producer provenance. Four actual copied dependency mutations previously left
+that digest unchanged; each now changes it. The latter binds the shared filename
+owner and three actual phase/replay owners, preserving digest framing and schemas.
+
+The integrated source at `60e749c5dc` passed the 12-file owner/custody/guard check
+in PB `fed2c0f3714cb1f6716fa74cb42889fae52f70b4fb19e995dda7af26a5d7db18`.
+Actual outcome is 157 passed, three explicit CUDA skips, zero failures; all
+`prismaquant`, `tools` and `experiments` Python sources compiled. Result is
+`f5d756ea51b54ac73907c9b88bb44d45a28909c99654449a504087413953ccae`;
+receipt is `7122f0c49e6d92d3c2529658a9ec97ca4a2b53b56de84c23905915c4e8822fc3`.
+Both result blobs above were independently read and checked by SHA-256 and size.
+The compile and guard check grant no CUDA or private direct-I/O qualification.
+Typed requests, remaining cell measurement and the additional producer APIs
+still require completion before final branch verification.
+
+A further GitHub read-only refresh found the same 36 open PRs and unchanged
+heads. No remote PR disposition was executed. The additional API handoff was
+resent as mailbox message `1792036048215-f730d08d` with its shared context path;
+no producer acknowledgement had arrived at this checkpoint.
