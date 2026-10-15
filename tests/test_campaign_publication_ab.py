@@ -121,6 +121,24 @@ def test_memory_sampler_records_a_continuous_series_with_peaks(monkeypatch, tmp_
     assert record['peak'] == dict(vmrss_bytes=20, vmhwm_bytes=25, mem_available_bytes=70)
 
 
+def test_memory_sampler_converts_proc_kibibytes_to_bytes(monkeypatch):
+    from types import SimpleNamespace
+    import torch
+    from experiments import campaign_publication_ab as publication
+
+    proc = {
+        '/proc/self/status': 'Name:\tfixture\nVmRSS:\t64 kB\nVmHWM:\t80 kB\n',
+        '/proc/meminfo': 'MemTotal:\t256 kB\nMemAvailable:\t128 kB\n',
+    }
+    monkeypatch.setattr(publication, 'Path', lambda path: SimpleNamespace(
+        read_text=lambda: proc[str(path)]))
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    actual = MemorySampler.read()
+    assert actual['vmrss_bytes'] == 65536
+    assert actual['vmhwm_bytes'] == 81920
+    assert actual['mem_available_bytes'] == 131072
+
+
 def test_with_headroom_replaces_the_floor_and_refuses_a_recipe_without_one():
     from experiments.campaign_publication_ab import with_headroom
     recipe = ['python3', '-m', 'prismaquant.tessera_campaign', '--streaming',
