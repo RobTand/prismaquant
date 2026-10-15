@@ -11,7 +11,6 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
-from prismaquant import cost_streaming
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.digests import canonical_json_sha256

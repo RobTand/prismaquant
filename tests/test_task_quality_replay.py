@@ -80,7 +80,6 @@ def test_default_dev_replay_retains_metrics_without_checkpoint_rehash(replay_cas
     config, result, _ = replay_case
     replace_task_fixture(config, kind)
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE")
-    import prismaquant.cost_streaming as source_owner
     from prismaquant import streamed_model_identity as source_owner_identity
     def refuse_rehash(*args, **kwargs):
         raise AssertionError("dev replay must not rehash checkpoint data")

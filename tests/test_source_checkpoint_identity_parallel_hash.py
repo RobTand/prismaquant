@@ -17,7 +17,6 @@ import pytest
 
 pytest.importorskip("torch")
 
-from prismaquant import cost_streaming
 from prismaquant import streamed_model_identity as cost_streaming_identity  # noqa: E402
 from prismaquant.streamed_model_identity import build_source_checkpoint_identity  # noqa: E402
 

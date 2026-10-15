@@ -125,7 +125,6 @@ def _torn_second_stat(monkeypatch, method, target):
 @pytest.mark.parametrize('fence', ['metadata_owner', 'proof_digests', 'validate_cached'])
 def test_torn_during_read_fences_refuse_in_both_modes(
         monkeypatch, mode, fence, capture, checkpoint):
-    from prismaquant import cost_streaming as cs
     from prismaquant import streamed_model_identity as cs_identity
     from test_source_identity_validate_derivation import _build_cache, _llama_config_dict
 

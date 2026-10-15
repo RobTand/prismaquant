@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant import cost_streaming, layer_streaming, staged_whole_file
+from prismaquant import layer_streaming, staged_whole_file
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import (

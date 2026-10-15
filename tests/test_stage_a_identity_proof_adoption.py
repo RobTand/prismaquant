@@ -83,7 +83,6 @@ def test_a_shard_restamped_after_the_proof_refuses_adoption_and_hashes_fresh(
     the same input adopts and hashes nothing. That is what shows the refusal
     comes from the fingerprint check and not from something else in the row.
     """
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
 
     campaign, argv, state = selected_source_fixture(monkeypatch, tmp_path)
@@ -116,7 +115,6 @@ def test_a_proof_file_that_differs_from_its_declared_digest_is_not_adopted(
 
 def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_path, capsys):
     """A proof whose shard rows lack ``path`` refuses; it never stops the row."""
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
 
     campaign, argv, state = selected_source_fixture(monkeypatch, tmp_path)

@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from prismaquant import cost_streaming, staged_whole_file
+from prismaquant import staged_whole_file
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.staged_tier_policy import TierPolicyRefused
 from test_streamed_metadata_staged_reads import (

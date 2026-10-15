@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 transformers = pytest.importorskip("transformers")
 
-from prismaquant import cost_streaming as cs
 from prismaquant import streamed_model_identity as cs_identity
 
 

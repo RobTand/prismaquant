@@ -13,7 +13,7 @@ import pickle
 import pytest
 
 import prismaquant.aura_cost as aura
-from prismaquant import cost_streaming, joint_aura
+from prismaquant import joint_aura
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core

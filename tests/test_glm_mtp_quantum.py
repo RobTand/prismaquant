@@ -365,7 +365,6 @@ def test_the_source_model_identity_is_validated_once_not_per_row(env, monkeypatc
     source identity once per row, about 4 GPU-idle minutes for GLM-5.3's
     1734 rows. The count must not grow with the rows.
     """
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
 
     original = cost_streaming_identity.validate_streamed_model_identity

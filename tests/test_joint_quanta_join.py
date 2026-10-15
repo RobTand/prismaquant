@@ -853,7 +853,6 @@ def test_join_validates_each_payloads_probe_identity_once(
     GLM-5.3 that identity is 8.9 MB of model weight map. The join validated
     it once per ROW (119 ms each, about 14 h for 45 layers); it validates it
     once per PAYLOAD, and the joined bytes still carry the plain probe."""
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
     calls = []
     validate = cost_streaming_identity.validate_streamed_model_identity

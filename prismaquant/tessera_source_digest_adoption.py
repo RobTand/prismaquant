@@ -19,7 +19,6 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
     Tessera's default. A shard changed more recently than that is refused by
     ``adopt`` exactly as a fresh read would not be recorded.
     """
-    from . import cost_streaming as owner
     from prismaquant import streamed_model_identity as owner_identity
     from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
     from .cost_stage_checkpoint import publish_new_bytes

@@ -25,7 +25,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant import cost_streaming as cs
 from prismaquant import streamed_model_identity as cs_identity
 
 REFUSAL = r"would hash 196608 bytes across 2 shard.*CPU-only quantum upstream"

@@ -8,7 +8,6 @@ set is visible; /proc/self/io read_bytes and wall clock are recorded per run.
 """
 import json, os, subprocess, time
 from pathlib import Path
-from prismaquant import cost_streaming as cs
 from prismaquant import streamed_model_identity as cs_identity
 
 root = Path("/mnt/shared/models/GLM-5.3-Flash-BF16")

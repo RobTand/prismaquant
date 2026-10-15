@@ -15,7 +15,6 @@ from safetensors.torch import save_file
 import torch
 from transformers import AutoConfig
 
-import prismaquant.cost_streaming as cost_streaming
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.model_profiles import detect_profile
 from prismaquant.prismasnap import PRISMASNAP_ALGORITHM, PrismaSnapSearchConfig

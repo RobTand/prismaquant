@@ -1,7 +1,6 @@
 """Real metadata-only adoption/readback, with any weight hash trapped."""
 import json
 from pathlib import Path
-from prismaquant import cost_streaming
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.tessera_source_digest_adoption import adopt_source_digests
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX

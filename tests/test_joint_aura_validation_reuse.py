@@ -14,7 +14,6 @@ def _prepare(row):
 
 
 def test_shared_identity_validated_once_and_detached(monkeypatch):
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
     row = _row(UNIT_A, [1, 2, 3])
     original = row["probe_identity"]

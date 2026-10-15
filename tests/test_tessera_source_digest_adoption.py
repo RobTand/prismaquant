@@ -2,7 +2,6 @@
 import functools,hashlib,json
 from pathlib import Path
 import pytest
-from prismaquant import cost_streaming as cs
 from prismaquant import streamed_model_identity as cs_identity
 from prismaquant.tessera_source_digest_adoption import adopt_source_digests, main
 from test_source_identity_validate_derivation import checkpoint,_build_cache,_llama_config_dict
