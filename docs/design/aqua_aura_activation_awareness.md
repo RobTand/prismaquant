@@ -304,8 +304,9 @@ would repeat the mistake the platform already rejects (principle 1).
 
 ### 5a. Implementation status — the SELECTOR half landed 2026-08-14
 
-`prismaquant/speed_quality_frontier.py` implements the *selection* half of the
-above. The λ-sweep **candidate generator** is deliberately **not** implemented;
+The selection prototype described below was removed on 2026-10-14. Its
+implementation remains in Git history. It implemented the *selection* half
+of the proposal. The λ-sweep **candidate generator** is deliberately **not** implemented;
 it is a modified unary cost fed to the existing DP, and it should be written
 when there is a measured `time(ℓ,f)` table to sweep against.
 
