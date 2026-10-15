@@ -114,8 +114,10 @@ Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_wire` owns canonical wire destinations, cache-owned coordinate
 reservation, seed adoption and producer byte receipts. Campaign pricing,
 selected-wire materialization and joint readers use that owner directly.
-Whole-assignment reservation precedes reuse or publication. Rendered-cache
-filenames use `render_cache_paths`; wire filename spelling remains unchanged.
+Selected-wire materialization reserves its whole group before iteration.
+Ordinary campaign resume and seed paths reserve each admitted state before
+reading its wires; publication checks the accumulated coordinate set.
+Rendered-cache filenames use `render_cache_paths`; wire spelling is unchanged.
 Producer capability refusal, exact byte verification and optional source-seal
 classification retain their existing meaning. Historical receipt operations,
 schemas and explicit migration proofs retain their spelling and requirements.

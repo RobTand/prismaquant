@@ -1,7 +1,9 @@
 """Campaign wire names, coordinate custody, producer receipts and seed adoption.
 
-The existing rendered cache owns its wire coordinate set. Every caller reserves
-its complete assignment before reuse or publication. Wire spellings, producer
+The existing rendered cache owns its wire coordinate set. Selected-wire
+materialization reserves the whole group before iteration; ordinary campaign
+resume and seed paths reserve each admitted state before reading its wires.
+Publication checks the accumulated coordinate set. Wire spellings, producer
 byte checks, optional source-seal policy and copy/link behavior are unchanged.
 """
 from __future__ import annotations
