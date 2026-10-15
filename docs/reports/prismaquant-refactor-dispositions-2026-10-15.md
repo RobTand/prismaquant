@@ -104,3 +104,38 @@ verdict or fleet complete-set barriers. Joint already provides Gateway and
 FakeGateway; pbwait_table already owns row parsing and done statuses. The
 application-side policy moves simplify callers without adding another client.
 Detailed source grounding is in the local `reports/fleet-port-design.md`.
+
+
+## Integration update, 2026-10-15 04:03 UTC
+
+The table above records the earlier review checkpoint. Readset ownership is now
+implemented in `b86a87a8f1`, with its actual path/phase source closure repaired in
+`6dc41ff8c9`. Cold scalar Joint row validation is implemented in `60e749c5dc`.
+T1's remaining repository-boundary work depends on the additional public producer
+APIs; eleven runtime imports remain in `tessera_campaign`, `tessera_lane` and
+`tessera_route_receipt`. Public producer planning APIs named `serving_plan` and
+`serving_parts` are separate from the forbidden serving-runtime package.
+
+T3 capture and wire custody are implemented in `7ecd85752b` and `fa84d81d32`.
+Selected-wire recipe/cell ownership still depends on those producer APIs; no
+serving implementation was copied or moved into a new PrismaQuant owner.
+
+T2's actual argument schema and distinct typed prep/join requests are implemented
+in `d83314d6a4`. The cold menu prerequisite removes two unused solver reexports
+and one identity-only test while retaining three DP behavior tests in
+`ea5b9f4dc7`. Census, capture and pricing requests remain under implementation.
+The separately reproduced argv disagreement must be fixed after this structural
+unit; `campaign-argv-precedence-2026-10-15.md` records its actual evidence.
+
+All 45 failures from the earlier broad source capsule have targeted passing
+follow-ups. This is distinct from a final composed branch pass, which remains
+pending. The latest integrated owner/custody/guard check passes 157 cases with
+three explicit CUDA skips, and all package/tool/experiment Python code compiles.
+The restored historical activation-reader tests and corrected ship fixtures keep
+real mutation, custody, complete-recipe and same-size byte-tampering refusals.
+
+The read-only PR refresh still finds the same 36 open heads. The disposition
+plan remains unchanged: one locally incorporated change, 22 independent changes,
+seven unrelated changes, two blocked changes and four conditional retirements.
+PR #2669 remains open and is linked to this thread; no remote disposition was
+executed.
