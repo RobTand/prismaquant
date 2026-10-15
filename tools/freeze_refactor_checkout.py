@@ -12,6 +12,10 @@ import subprocess
 def freeze_refactor_checkout(workspace: Path, target: Path) -> dict:
     workspace = workspace.resolve()
     target = target.resolve()
+    conflicts = subprocess.check_output(
+        ["git", "ls-files", "--unmerged", "-z"], cwd=workspace)
+    if conflicts:
+        raise ValueError("cannot freeze source with unresolved merge conflicts")
     patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=workspace)
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=workspace, text=True).strip()
     untracked = subprocess.check_output(
