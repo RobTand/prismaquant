@@ -18,6 +18,8 @@ committed by a first run; the second run resumes at window 1.
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import os
 import shutil
 import sys
@@ -151,7 +153,7 @@ def test_a_resumed_quantum_runs_only_the_units_its_phases_price(
     n_probes = manifest["annotations"]["n_probes"]
     priced = {}
     for name, phase in plan.items():
-        for term in dispatch.compute_phase_work(
+        for term in quantum_row.compute_phase_work(
                 name, replay_mode="spill",
                 entries=len(phase["entry_indices"]), n_probes=n_probes,
                 capture_batch=1) or ():

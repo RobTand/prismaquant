@@ -1,4 +1,6 @@
 """CPU prerequisite checks; context doubles do not qualify staged lifetimes/GPU."""
+
+from prismaquant import joint_quantum_row as quantum_row
 from contextlib import contextmanager
 import copy
 import hashlib
@@ -191,7 +193,7 @@ def test_runtime_requires_authenticated_context(tmp_path, monkeypatch, case):
 
 
 def test_dispatch_compute_counts_exclude_incoming_rows():
-    from tools.dispatch_joint_quanta import phase_work_entries
+    from prismaquant.joint_quantum_row import (phase_work_entries)
     annotations = {"checkpoint_incoming": {"streamed_incoming": {"chain-003-bound": 6, "spill-p0": 3}}}
     assert phase_work_entries("chain-003-bound", {"entries": 9}, annotations) == 3
     assert phase_work_entries("spill-p0", {"entries": 6}, annotations) == 3
@@ -277,7 +279,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     monkeypatch.setattr(runtime, "_authenticate_checkpoint_incoming_readset", context_double)
     events, manifest, candidate, _ = drive(MODE)
     if record["adjoint"]["chain_layers"]:
-        phase = quanta.executable_bound_phase_name(record["adjoint"]["chain_layers"][0])
+        phase = quantum_row.executable_bound_phase_name(record["adjoint"]["chain_layers"][0])
         current, seen, opened = None, set(), []
         for event in events:
             if event[0] == "report":
@@ -313,7 +315,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     assert partial["costs"] == baseline["costs"]
     assert captured[-1] == baseline_plane
     assert {p.name: p.read_bytes() for p in checkpoint_dir.glob("*.pkl")} == baseline_journal
-    assert [p["name"] for p in manifest["read_plan"]["phases"]] == list(quanta.quantum_executable_phase_names(
+    assert [p["name"] for p in manifest["read_plan"]["phases"]] == list(quantum_row.quantum_executable_phase_names(
         record["adjoint"]["chain_layers"], layer, n_probes=setup["n_probes"],
         replay_windows=len(record["windows"]), render_phases=True, replay_mode="spill"))
 

@@ -82,7 +82,7 @@ from .joint_adjoint_checkpoints import (
     write_adjoint_checkpoint,
     write_adjoint_receipt,
 )
-from .joint_layer_quanta import (
+from prismaquant.joint_quantum_row import (
     ADJOINT_TAIL_PHASE,
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,

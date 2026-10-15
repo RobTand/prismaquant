@@ -30,8 +30,8 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 import test_band_serial_dispatch as band  # noqa: E402
-from prismaquant.joint_quantum_handoff import (  # noqa: E402
-    HANDOFF_LOAD_PHASE, handoff_root)
+from prismaquant.joint_quantum_handoff import (handoff_root)
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 from prismaquant.readset_coverage import load_manifest  # noqa: E402
 
 BAND = ("--band-serial", "--handoff-tier", band.TIER)

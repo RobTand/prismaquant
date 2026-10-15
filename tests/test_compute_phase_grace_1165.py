@@ -20,6 +20,8 @@ dispatcher prices.
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import json
 import math
 import os
@@ -275,7 +277,7 @@ def test_a_malformed_ceiling_refuses(edit, why):
 def test_phase_work_follows_the_runtime_order():
     import dispatch_joint_quanta as dispatch
 
-    work = dispatch.compute_phase_work
+    work = quantum_row.compute_phase_work
     common = {"entries": 512, "n_probes": 4, "capture_batch": 4}
     (roll,) = work("chain-044-bound", replay_mode="spill", **common)
     assert (roll["kind"], roll["units"]) == ("chain-roll", 2048)
@@ -315,7 +317,7 @@ V7_CONTEXT = {
 def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
     import dispatch_joint_quanta as dispatch
 
-    work = dispatch.compute_phase_work(
+    work = quantum_row.compute_phase_work(
         name, replay_mode="spill", entries=entries, n_probes=4, capture_batch=4)
     return dispatch.compute_phase_grace(
         name, work=work, phase_bytes=phase_bytes, staged_wait_s=300.0,
@@ -421,7 +423,7 @@ def test_the_quantum_commits_nothing_inside_a_pass_and_runs_the_priced_units(
             ran.setdefault((event[1], event[2]), []).append(event)
     priced = {}
     for name, phase in plan.items():
-        for term in dispatch.compute_phase_work(
+        for term in quantum_row.compute_phase_work(
                 name, replay_mode="spill",
                 entries=len(phase["entry_indices"]), n_probes=n_probes,
                 capture_batch=1) or ():

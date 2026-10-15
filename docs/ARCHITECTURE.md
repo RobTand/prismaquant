@@ -200,6 +200,14 @@ Persistence and durable acknowledgement remain separate for asynchronous
 publication; full-run completion still follows every write in its target group.
 The existing retained replay engine and incoming cotangent adapters retain
 reverse arithmetic, scratch/residency admission and GPU resource lifetime.
+`joint_quantum_row` owns quantum phase spelling, consumption order, typed
+phase coordinates and compute work. Producers, runtime reporters, coverage
+readers, handoff derivation and the dispatcher use that owner directly.
+Readset and handoff schemas retain their current owners. The dispatcher
+retains raw-file authentication, measured grace/admission evidence,
+prepared-render and cotangent resource gates, container wrapping and PB
+submission. Phase ownership changes no wire spelling, order, resource
+reservation, numerical operation or durability boundary.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.

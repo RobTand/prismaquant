@@ -33,9 +33,8 @@ from prismaquant import joint_layer_quanta as jl  # noqa: E402
 from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     exact_entry_record, write_adjoint_checkpoint)
-from prismaquant.joint_quantum_handoff import (  # noqa: E402
+from prismaquant.joint_quantum_handoff import (
     BAND_SERIAL_READSET_SCHEMA,
-    HANDOFF_LOAD_PHASE,
     HandoffEmitter,
     QuantumHandoffRefused,
     band_serial_manifest,
@@ -44,6 +43,7 @@ from prismaquant.joint_quantum_handoff import (  # noqa: E402
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
 from test_quantum_executable_readset import (  # noqa: E402

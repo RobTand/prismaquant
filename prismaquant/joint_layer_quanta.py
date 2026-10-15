@@ -45,11 +45,14 @@ D5. The joiner is NOT colocated here. The contract (§4.1/§7) sketched
     module's parallel joiner rather than adapting it -- two joiners that
     refuse each other's bytes is the failure #787 closed. The campaign ledger
     owns the record schema, identity, roster digest and
-    quantum ID. The producer retains manifest phase and qname-layer geometry,
-    which the joiner imports for coverage.
+    quantum ID. The producer retains manifest ranges and qname-layer geometry,
+    which the joiner imports for coverage. Joint phase names and consumption
+    order belong to joint_quantum_row.
 """
 
 from __future__ import annotations
+
+from prismaquant import joint_quantum_row as quantum_row
 
 import gzip
 import json
@@ -81,48 +84,6 @@ MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
 HEAD_SOURCE_SCHEMA = "prismaquant.joint_layer_quanta.head_source.v1"
 PREPARED_INPUT_SCHEMA = "prismaquant.joint_layer_quanta.prepared_input.v1"
-
-#: The tail leg's telemetry name. It is NOT a read-plan phase: published
-#: ``manifest_phase_ranges`` drops cumulative==previous phases, so a
-#: zero-byte tail would be absent from the sealed residency plan -- and
-#: reporting a name the plan does not carry resets ``remaining`` to start.
-#: The tail checkpoint work commits durable units under forward-last
-#: instead; this string survives only for explicit runtime log lines.
-ADJOINT_TAIL_PHASE = "tail"
-
-
-def adjoint_forward_phase_name(layer: int) -> str:
-    """The read-plan phase staging layer ``layer``'s source extents for the
-    forward capture walk (ascending)."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a forward phase needs a nonnegative layer, not {layer!r}")
-    return f"forward-{layer:03d}"
-
-
-def adjoint_chain_phase_name(layer: int) -> str:
-    """The read-plan phase staging layer ``layer``'s source extents for the
-    reverse chain walk (descending). One spelling shared by the builder, the
-    capture's progress reports, and the tests -- two spellings of the chain
-    convention is how a consumer ends up committing a name the window cannot
-    match."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a chain phase needs a nonnegative layer, not {layer!r}")
-    return f"chain-{layer:03d}"
-
-
-def adjoint_read_plan_phase_names(num_layers: int) -> tuple[str, ...]:
-    """The frozen Stage A consumption order (PQ #837): head, forward
-    ascending, reverse descending. The builder seals the manifest in this
-    order, the capture reports in this order, and the dispatch lane
-    declares progress in this order -- the published v2 linear-progress
-    rule refuses anything else. There is deliberately no tail phase (see
-    ``ADJOINT_TAIL_PHASE``)."""
-    if type(num_layers) is not int or isinstance(num_layers, bool) or num_layers < 1:
-        raise ValueError(f"a read plan needs a positive layer count, not {num_layers!r}")
-    return (("head",)
-            + tuple(adjoint_forward_phase_name(layer) for layer in range(num_layers))
-            + tuple(adjoint_chain_phase_name(layer)
-                    for layer in reversed(range(num_layers))))
 
 SLICE_ENTRY_POINT = "prismaquant.joint_cost_quantum"
 ADJOINT_ENTRY_POINT = "prismaquant.joint_adjoint_capture"
@@ -1031,11 +992,11 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
 
     _seal_phase("head", list(range(len(head_entries))))
     for layer, run in zip(layers, layer_index_runs):
-        _seal_phase(adjoint_forward_phase_name(layer), run)
+        _seal_phase(quantum_row.adjoint_forward_phase_name(layer), run)
     for layer, run in zip(reversed(layers), reversed(layer_index_runs)):
-        _seal_phase(adjoint_chain_phase_name(layer), run)
+        _seal_phase(quantum_row.adjoint_chain_phase_name(layer), run)
     names = [phase["name"] for phase in read_phases]
-    if names != list(adjoint_read_plan_phase_names(len(layers))):
+    if names != list(quantum_row.adjoint_read_plan_phase_names(len(layers))):
         raise ValueError(
             "the adjoint read plan is not the frozen consumption order")
     if layer_source_spans is not None:
@@ -1857,165 +1818,6 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
 
 
 #: The executable-manifest phase staging the whole checkpoint plane load.
-CHECKPOINT_LOAD_PHASE = "checkpoint-load"
-
-
-def quantum_source_layer_order(chain_layers: Sequence[int],
-                               layer: int) -> tuple[int, ...]:
-    """The source layers one quantum installs, in install order (PQ #1095).
-
-    Its chain, descending from the checkpoint boundary, then its own layer.
-    The quantum installs and prefetches exactly these layers
-    (``joint_cost_quantum._install_with_settlement`` with
-    ``source_read_plan.chain_prefetch_window``), and the executable readset
-    declares one source phase for each, in this order. A band-serial
-    consumer walks no chain, so its order is its own layer alone.
-    """
-    return tuple(int(c) for c in chain_layers) + (int(layer),)
-
-
-def executable_source_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging one chain layer's source."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a source phase needs a layer, not {layer!r}")
-    return f"chain-{layer:03d}-source"
-
-
-def executable_bound_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging one chain layer's boundary."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a bound phase needs a layer, not {layer!r}")
-    return f"chain-{layer:03d}-bound"
-
-
-def executable_own_source_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging the quantum's own source."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"an own-source phase needs a layer, not {layer!r}")
-    return f"own-{layer:03d}-source"
-
-
-def executable_replay_phase_name(window_index: int | None, probe: int) -> str:
-    """The executable-manifest phase for one replay probe pass.
-
-    ``None`` names window zero: the zero-pending resume path still reads
-    the own boundary once per probe with no window loop running, and those
-    reads stage under the window-zero phases by this convention.
-    """
-    window = 0 if window_index is None else int(window_index)
-    if window < 0 or type(probe) is not int or isinstance(probe, bool) \
-            or probe < 0:
-        raise ValueError(
-            f"a replay phase needs a window and probe, not "
-            f"{window_index!r}/{probe!r}")
-    return f"replay-{window:02d}-p{probe}"
-
-
-#: The replay modes an executable read plan is sealed for (PQ #1011).
-#: ``windowed`` re-reads the own boundary run once per (window, probe);
-#: ``spill`` reads it once per probe, into the one-pass replay spill.
-REPLAY_MODES = ("windowed", "spill")
-
-
-def normalize_replay_mode(value) -> str:
-    """``windowed`` (the default, also for ``None``) or ``spill``."""
-    mode = "windowed" if value is None else value
-    if mode not in REPLAY_MODES:
-        raise ValueError(f"replay mode must be one of {REPLAY_MODES}, "
-                         f"not {value!r}")
-    return mode
-
-
-def executable_spill_phase_name(probe: int) -> str:
-    """The executable-manifest phase for one probe's spill capture.
-
-    Under the one-pass spill (PQ #994/#1011) each probe reads the own
-    boundary run once, during its capture; the window replays read nothing.
-    """
-    if type(probe) is not int or isinstance(probe, bool) or probe < 0:
-        raise ValueError(f"a spill phase needs a probe, not {probe!r}")
-    return f"spill-p{probe}"
-
-
-def executable_render_phase_name(window_index: int) -> str:
-    """The executable-manifest phase staging one retained window's prepared renders.
-
-    One per already-defined retained window, sealed immediately before that
-    window's replay phases and entered in before_window before the PWC
-    retained load (PQ #917). Source phases stay source-only; rendered inputs
-    get their own consumption phases.
-    """
-    if type(window_index) is not int or isinstance(window_index, bool) \
-            or window_index < 0:
-        raise ValueError(f"a render phase needs a window, not {window_index!r}")
-    return f"render-{window_index:02d}"
-
-
-def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
-                                    *, n_probes: int,
-                                    replay_windows: int,
-                                    render_phases: bool = False,
-                                    replay_mode: str | None = None) -> tuple[str, ...]:
-    """The frozen executable staging order (PQ #862): calibration head,
-    the checkpoint plane once, then per chain layer descending its source
-    extents and its boundary entries, the quantum's own source extents,
-    then per retained window and probe the replay boundary reads.
-
-    With ``render_phases`` (PQ #917), each retained window additionally
-    stages one ``render-{window:02d}`` phase immediately before that
-    window's replay phases: the window's selected prepared renders get
-    their own consumption phases while source phases stay source-only.
-    Without it the historical sequencing-only order reproduces unchanged.
-
-    ``replay_mode="spill"`` (PQ #1011) seals the one-pass spill's real
-    consumption order instead: each probe's capture reads the own boundary
-    run once, inside the first window's retained lifetime, and every window
-    replay reads nothing. After the own source come ``render-00`` (with
-    ``render_phases``), one ``spill-p{probe}`` phase per probe, then the
-    remaining windows' render phases. The windowed default is unchanged.
-
-    Every name is reported by the runtime through the existing semantic
-    reporter as its bytes are consumed -- a staging contract declares
-    exactly this list. Chunk names are deliberately not staging phases:
-    durable units keep their existing currency and commit under the read
-    phase in effect when the journal lands.
-    """
-    chain = [int(c) for c in chain_layers]
-    if any(type(c) is not int or isinstance(c, bool) for c in chain_layers):
-        raise ValueError("chain layers must be integers, "
-                         f"not {list(chain_layers)!r}")
-    if len(set(chain)) != len(chain):
-        raise ValueError("chain layers repeat: refusing")
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"an executable readset needs a layer, not {layer!r}")
-    for label, value in (("probe count", n_probes),
-                         ("replay windows", replay_windows)):
-        if type(value) is not int or isinstance(value, bool) or value < 1:
-            raise ValueError(f"{label} must be positive, not {value!r}")
-    if type(render_phases) is not bool:
-        raise ValueError(f"render phases must be a flag, not {render_phases!r}")
-    replay_mode = normalize_replay_mode(replay_mode)
-    names = ["head", CHECKPOINT_LOAD_PHASE]
-    for boundary in chain:
-        names.append(executable_source_phase_name(boundary))
-        names.append(executable_bound_phase_name(boundary))
-    names.append(executable_own_source_phase_name(layer))
-    if replay_mode == "spill":
-        for window_index in range(replay_windows):
-            if render_phases:
-                names.append(executable_render_phase_name(window_index))
-            if window_index == 0:
-                names.extend(executable_spill_phase_name(probe)
-                             for probe in range(n_probes))
-        return tuple(names)
-    for window_index in range(replay_windows):
-        if render_phases:
-            names.append(executable_render_phase_name(window_index))
-        for probe in range(n_probes):
-            names.append(executable_replay_phase_name(window_index, probe))
-    return tuple(names)
-
-
 def check_prepared_input_windows(prepared: Mapping, *,
                                window_indices: Sequence[int],
                                where: str = "prepared inputs") -> list[dict]:
@@ -2391,9 +2193,9 @@ def _checkpoint_incoming_phases(record, adjoint_slice, *, n_probes, bulk):
                     if index not in seen:
                         seen.add(index)
                         run.append(index)
-        return {executable_bound_phase_name(chain[0]): run}
+        return {quantum_row.executable_bound_phase_name(chain[0]): run}
     boundary = bulk["boundary_runs"][record["layer"]]
-    return {executable_spill_phase_name(probe): boundary + rows
+    return {quantum_row.executable_spill_phase_name(probe): boundary + rows
             for probe, rows in enumerate(probes)}
 
 
@@ -2416,14 +2218,14 @@ def check_checkpoint_incoming_readset(record, manifest, adjoint_slice):
     if type(n_probes) is not int or n_probes < 1:
         raise ValueError("checkpoint incoming readset seals no probe count")
     chain = record["adjoint"]["chain_layers"]
-    if not chain and normalize_replay_mode(block.get("replay_mode")) != "spill":
+    if not chain and quantum_row.normalize_replay_mode(block.get("replay_mode")) != "spill":
         raise ValueError("checkpoint incoming chain-empty consumer requires spill")
     bulk = _collect_quantum_bulk_entries(
         adjoint_slice=adjoint_slice,
         checkpoint_boundary=record["adjoint"]["checkpoint_boundary"],
         needed=sorted(set(chain) | {record["layer"]}))
     expected = _checkpoint_incoming_phases(record, adjoint_slice, n_probes=n_probes, bulk=bulk)
-    expected[CHECKPOINT_LOAD_PHASE] = bulk["checkpoint_auxiliary_indices"]
+    expected[quantum_row.CHECKPOINT_LOAD_PHASE] = bulk["checkpoint_auxiliary_indices"]
     entries = manifest["entries"]
     phases = manifest["read_plan"]["phases"]
     if block.get("phases") != [phase["name"] for phase in phases]:
@@ -2443,7 +2245,7 @@ def check_checkpoint_incoming_readset(record, manifest, adjoint_slice):
         wanted = [bulk["entries"][i] for i in indices]
         if actual != wanted:
             raise ValueError(f"checkpoint incoming phase {name} differs from consuming read order")
-        if name != CHECKPOINT_LOAD_PHASE:
+        if name != quantum_row.CHECKPOINT_LOAD_PHASE:
             moved[name] = sum(row["path"] in activation_paths for row in wanted)
     for phase in phases:
         if phase["name"] not in moved and any(entries[i]["path"] in activation_paths
@@ -2558,7 +2360,7 @@ def build_quantum_executable_manifest(
     """
     from .joint_adjoint_slices import chain_layers_for
 
-    replay_mode = normalize_replay_mode(replay_mode)
+    replay_mode = quantum_row.normalize_replay_mode(replay_mode)
     checkpoint_incoming_mode = normalize_checkpoint_incoming_mode(checkpoint_incoming_mode)
     _require_stage_a_input(receipt)
     if not isinstance(record, dict):
@@ -2813,33 +2615,33 @@ def build_quantum_executable_manifest(
 
     activation_indices = set(bulk["checkpoint_activation_indices"])
     _seal_phase("head", head_indices)
-    _seal_phase(CHECKPOINT_LOAD_PHASE,
+    _seal_phase(quantum_row.CHECKPOINT_LOAD_PHASE,
                 [index_of[i] for i in bulk["checkpoint_auxiliary_indices"]]
                 if checkpoint_incoming_mode else checkpoint_indices)
     for boundary in chain:
-        _seal_phase(executable_source_phase_name(boundary),
+        _seal_phase(quantum_row.executable_source_phase_name(boundary),
                     source_runs[boundary])
-        _seal_phase(executable_bound_phase_name(boundary),
-                    [index_of[i] for i in incoming_phases[executable_bound_phase_name(boundary)]]
-                    if executable_bound_phase_name(boundary) in incoming_phases
+        _seal_phase(quantum_row.executable_bound_phase_name(boundary),
+                    [index_of[i] for i in incoming_phases[quantum_row.executable_bound_phase_name(boundary)]]
+                    if quantum_row.executable_bound_phase_name(boundary) in incoming_phases
                     else boundary_runs[boundary])
-    _seal_phase(executable_own_source_phase_name(layer), source_runs[layer])
+    _seal_phase(quantum_row.executable_own_source_phase_name(layer), source_runs[layer])
     for window_index in range(len(replay_windows)):
         if prepared_windows:
-            _seal_phase(executable_render_phase_name(window_index),
+            _seal_phase(quantum_row.executable_render_phase_name(window_index),
                         render_runs[window_index])
         if replay_mode == "spill":
             if window_index == 0:
                 for probe in range(n_probes):
-                    name = executable_spill_phase_name(probe)
+                    name = quantum_row.executable_spill_phase_name(probe)
                     _seal_phase(name, [index_of[i] for i in incoming_phases[name]]
                                 if name in incoming_phases else boundary_runs[layer])
             continue
         for probe in range(n_probes):
-            _seal_phase(executable_replay_phase_name(window_index, probe),
+            _seal_phase(quantum_row.executable_replay_phase_name(window_index, probe),
                         boundary_runs[layer])
     names = [phase["name"] for phase in read_phases]
-    if names != list(quantum_executable_phase_names(
+    if names != list(quantum_row.quantum_executable_phase_names(
             chain, layer, n_probes=n_probes,
             replay_windows=len(replay_windows),
             render_phases=bool(prepared_windows),

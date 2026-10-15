@@ -31,22 +31,24 @@ for _entry in (ROOT, ROOT / "tools"):
 from prismaquant.joint_adjoint_checkpoints import exact_entry_record  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     write_adjoint_checkpoint, write_adjoint_receipt)
-from prismaquant.joint_layer_quanta import (  # noqa: E402
+from prismaquant.joint_layer_quanta import (
     ADJOINT_CAPTURE_SCHEMA,
-    CHECKPOINT_LOAD_PHASE,
     MANIFEST_SCHEMA_V2,
     adjoint_binding_fields,
     bind_adjoint_slice,
     bind_quantum_executable,
     build_quantum_executable_manifest,
     emit_quantum_executable_readsets,
+    layer_quanta,
+    seal_manifest_bytes,
+)
+from prismaquant.joint_quantum_row import (
+    CHECKPOINT_LOAD_PHASE,
     executable_bound_phase_name,
     executable_own_source_phase_name,
     executable_replay_phase_name,
     executable_source_phase_name,
-    layer_quanta,
     quantum_executable_phase_names,
-    seal_manifest_bytes,
 )
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)

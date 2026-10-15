@@ -71,7 +71,7 @@ if __package__:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
-    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
@@ -86,7 +86,9 @@ else:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
-    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
+
+from prismaquant import joint_quantum_row as quantum_row
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
@@ -239,11 +241,6 @@ COMPUTE_KINDS = {
         "measured_by": "counters.json io_spans: the payload and teardown "
                        "spans' wall_s, summed (PQ #1187)"},
 }
-#: The tail's one term (PQ #1190), which :func:`compute_phase_work` appends to
-#: the last declared phase's work.
-TAIL_WORK = {"kind": "tail", "units": 1,
-             "work": ("the quantum's tail after its last window, which "
-                      "declares no phase and commits no unit")}
 #: The per-row entry that carries the bound and the ceiling documents once,
 #: so each compute stamp names its ceiling by kind and the payload stays
 #: small.
@@ -1388,90 +1385,6 @@ def compute_ceilings(documents: Sequence[Mapping] = ()) -> dict:
     return by_kind
 
 
-_CHAIN_BOUND_PHASE = re.compile(r"chain-(\d{3,})-bound")
-_SPILL_PHASE = re.compile(r"spill-p(\d+)")
-_RENDER_PHASE = re.compile(r"render-(\d{2,})")
-_REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
-
-
-def phase_work_entries(name: str, fact: Mapping, annotations: Mapping):
-    """The entries a phase's pass counts its work by, from its read-plan facts.
-
-    A phase's entry count, less incoming plane entries moved into it by
-    ``band_serial.streamed_incoming`` or ``checkpoint_incoming.streamed_incoming``:
-    those add read bytes, rather than capture groups or chain batches.
-    ``None`` when the plan does not count the phase's entries.
-    """
-    entries = fact.get("entries") if isinstance(fact, Mapping) else None
-    if type(entries) is not int:
-        return entries
-    moved = 0
-    for key in ("band_serial", "checkpoint_incoming"):
-        owner = annotations.get(key) if isinstance(annotations, Mapping) else None
-        streamed = owner.get("streamed_incoming") if isinstance(owner, Mapping) else None
-        count = streamed.get(name, 0) if isinstance(streamed, Mapping) else 0
-        if type(count) is not int or not 0 <= count <= entries:
-            return None
-        moved += count
-    return entries - moved if moved <= entries else None
-
-
-def compute_phase_work(name: str, *, replay_mode: str, entries,
-                       n_probes, capture_batch,
-                       runs_tail: bool = False) -> list[dict] | None:
-    """The compute one phase's pass runs, or ``None`` for a phase with none.
-
-    Each term is ``{"kind", "units", "work"}``; ``units`` is ``None`` when
-    the read plan or the row does not count them. The order follows
-    ``joint_statistics_replay.observe_and_project_retained_windows``: a spill
-    row captures each probe under ``spill-pP`` and replays the first window
-    for that probe under the same phase, and replays every later window under
-    its ``render-NN`` phase. A resume that has committed window 0 still
-    captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
-    replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
-    spill row, and every ``render-NN`` of a windowed row, only read.
-
-    ``runs_tail`` marks the row's last declared phase: the quantum's tail
-    after its last window runs on its clock (PQ #1187), so :data:`TAIL_WORK`
-    is its last term, with or without a pass of its own (PQ #1190).
-    """
-    def counted(*values):
-        return all(type(value) is int and value > 0 for value in values)
-
-    tail = [dict(TAIL_WORK)] if runs_tail else []
-    match = _CHAIN_BOUND_PHASE.fullmatch(name)
-    if match:
-        return [{"kind": "chain-roll",
-                 "units": entries * n_probes if counted(entries, n_probes) else None,
-                 "work": (f"chain layer {int(match.group(1))}'s backward roll: "
-                          "one row per probe and stored batch")}, *tail]
-    match = _SPILL_PHASE.fullmatch(name)
-    if match and replay_mode == "spill":
-        probe = int(match.group(1))
-        return [{"kind": "spill-capture",
-                 "units": (-(-entries // capture_batch)
-                           if counted(entries, capture_batch) else None),
-                 "work": (f"probe {probe}'s spill capture: one group per "
-                          "capture_batch stored batches")},
-                {"kind": "spill-replay", "units": 1,
-                 "work": f"the first window's spill replay for probe {probe}"},
-                *tail]
-    match = _RENDER_PHASE.fullmatch(name)
-    if match and replay_mode == "spill" and int(match.group(1)) >= 1:
-        return [{"kind": "spill-replay",
-                 "units": n_probes if counted(n_probes) else None,
-                 "work": (f"window {int(match.group(1))}'s spill replay for "
-                          "each probe")}, *tail]
-    match = _REPLAY_PHASE.fullmatch(name)
-    if match and replay_mode == "windowed":
-        return [{"kind": "windowed-replay",
-                 "units": entries if counted(entries) else None,
-                 "work": (f"window {int(match.group(1))}'s replay for probe "
-                          f"{int(match.group(2))}: one backward per stored "
-                          "batch")}, *tail]
-    return tail or None
-
-
 def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
     """Why a row is outside a measurement's scope; empty when it is inside."""
     misses = []
@@ -2266,7 +2179,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                   and declared_phases else None)
 
     def compute_grace(name, fact, annotations):
-        from prismaquant.joint_layer_quanta import normalize_replay_mode
+        from prismaquant.joint_quantum_row import (normalize_replay_mode)
 
         if "context" not in row_context:
             row_context["context"] = _row_compute_context(
@@ -2274,10 +2187,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                 annotations=annotations,
                 emits_handoff=emit_template is not None)
         context = row_context["context"]
-        work = compute_phase_work(
+        work = quantum_row.compute_phase_work(
             name, replay_mode=normalize_replay_mode(
                 (executable or {}).get("replay_mode")),
-            entries=phase_work_entries(name, fact, annotations),
+            entries=quantum_row.phase_work_entries(name, fact, annotations),
             n_probes=context.get("n_probes"),
             capture_batch=context.get("replay_regime.capture_batch"),
             runs_tail=name == tail_phase)

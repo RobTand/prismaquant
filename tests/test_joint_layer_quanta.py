@@ -383,7 +383,7 @@ def test_real_plan_slice_manifests_are_standalone_v1():
 
 @real_plan
 def test_real_plan_adjoint_manifest():
-    from prismaquant.joint_layer_quanta import adjoint_read_plan_phase_names
+    from prismaquant.joint_quantum_row import (adjoint_read_plan_phase_names)
     built = _build_real()
     manifest = built["adjoint_manifest"]
     assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v2"

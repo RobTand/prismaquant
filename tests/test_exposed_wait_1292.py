@@ -349,7 +349,7 @@ def test_counters_carry_the_exposed_wait_block_per_phase(tmp_path):
 
 
 def test_counters_read_spans_as_wait_kinds(tmp_path):
-    from prismaquant.joint_layer_quanta import CHECKPOINT_LOAD_PHASE
+    from prismaquant.joint_quantum_row import (CHECKPOINT_LOAD_PHASE)
     counters = _counters(tmp_path, _FakeSampler([], []))
     counters.open()
     counters.enter_phase()

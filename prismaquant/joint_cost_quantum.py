@@ -71,17 +71,19 @@ from .joint_adjoint_slices import (
     verify_adjoint_slice,
 )
 from .joint_layer_quanta import (
-    CHECKPOINT_LOAD_PHASE,
     PREPARED_INPUT_SCHEMA,
     check_adjoint_run_identity,
     check_prepared_windows_against_resolved,
+    qname_layer,
+)
+from prismaquant.joint_quantum_row import (
+    CHECKPOINT_LOAD_PHASE,
     executable_bound_phase_name,
     executable_own_source_phase_name,
     executable_render_phase_name,
     executable_replay_phase_name,
     executable_spill_phase_name,
     executable_source_phase_name,
-    qname_layer,
     quantum_source_layer_order,
 )
 from .source_read_plan import chain_prefetch_window
@@ -91,7 +93,6 @@ from .joint_checkpoint_publication import (
     publication_budget, publication_geometry, publication_job_limit, check_construction,
 )
 from .joint_quantum_handoff import (
-    HANDOFF_LOAD_PHASE,
     HANDOFF_TEE_GROUPS,
     HandoffEmitter,
     HandoffIncoming,
@@ -101,6 +102,7 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 from .tessera_joint_aura import restores_activation_scale_env
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
@@ -576,7 +578,7 @@ class QuantumProgress:
             index = self._phases.index(str(name))
         except ValueError:
             # Chunk names are not staging phases on an executable row
-            # (joint_layer_quanta.quantum_executable_phase_names), so this
+            # (joint_quantum_row.quantum_executable_phase_names), so this
             # fires once per chunk there. commit() keeps reporting under the
             # phase already entered; say that, once per name (PQ #1187).
             if str(name) not in self._undeclared:
@@ -934,7 +936,7 @@ def _install_with_settlement(runner, layer: int, *, operator_windows,
     """Install one layer of the quantum's own walk, then prefetch its next.
 
     ``order`` is the quantum's install order
-    (``joint_layer_quanta.quantum_source_layer_order``), and the executable
+    (``joint_quantum_row.quantum_source_layer_order``), and the executable
     readset declares a source phase for each of its layers (PQ #1095).
 
     The layer is asked for first. ``install(require_prefetched=True)``
@@ -1960,7 +1962,7 @@ def run_layer_quantum_core(
     sealed_spill = False
     sealed_block = record.get("executable_readset")
     if isinstance(sealed_block, dict):
-        from .joint_layer_quanta import normalize_replay_mode
+        from prismaquant.joint_quantum_row import (normalize_replay_mode)
         try:
             sealed_mode = normalize_replay_mode(sealed_block.get("replay_mode"))
         except ValueError as exc:
@@ -2140,7 +2142,11 @@ def run_layer_quantum_core(
                 f"{_render_proof_sides(value, source, side='skeleton')}")
         joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
     pilot_panel = execution.get("joint_eval")
-    from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    from .joint_eval_observation import (
+        new_observation_counts,
+        observe_probe,
+        stamp_observations,
+    )
     observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
     joint_run_identity = {
         "schema": "prismaquant.joint_aura.run.v2",

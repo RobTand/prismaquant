@@ -14,6 +14,8 @@ materializes. These tests hold the fix:
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import hashlib
 import json
 from types import SimpleNamespace
@@ -158,7 +160,7 @@ def test_a_quantum_asks_for_its_first_layer_and_reads_nothing_past_its_walk():
     assert events[:2] == [("prefetch", 46), ("install", 46, False)]
     assert ("settle", ()) == events[-1]
     assert rc.quantum_prefetch_targets((46, 45, 44), 3) == {46, 45, 44}
-    assert jl.quantum_source_layer_order([46, 45], 44) == (46, 45, 44)
+    assert quantum_row.quantum_source_layer_order([46, 45], 44) == (46, 45, 44)
 
 
 def test_the_stage_a_schedule_stops_at_its_walk():

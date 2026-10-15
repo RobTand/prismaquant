@@ -11,6 +11,8 @@ refuses a launch in the other mode) is proved on the real quantum in
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import hashlib
 import json
 import sys
@@ -33,25 +35,25 @@ from test_stageb_prepared_render_inputs import (  # noqa: E402
 
 
 def test_spill_phase_names():
-    assert jl.executable_spill_phase_name(3) == "spill-p3"
+    assert quantum_row.executable_spill_phase_name(3) == "spill-p3"
     with pytest.raises(ValueError):
-        jl.executable_spill_phase_name(-1)
+        quantum_row.executable_spill_phase_name(-1)
     head = ["head", "checkpoint-load", "chain-003-source", "chain-003-bound",
             "own-002-source"]
-    assert list(jl.quantum_executable_phase_names(
+    assert list(quantum_row.quantum_executable_phase_names(
         [3], 2, n_probes=2, replay_windows=3, render_phases=True,
         replay_mode="spill")) == head + [
         "render-00", "spill-p0", "spill-p1", "render-01", "render-02"]
-    assert list(jl.quantum_executable_phase_names(
+    assert list(quantum_row.quantum_executable_phase_names(
         [3], 2, n_probes=2, replay_windows=3, replay_mode="spill")) == head + [
         "spill-p0", "spill-p1"]
-    assert jl.quantum_executable_phase_names(
+    assert quantum_row.quantum_executable_phase_names(
         [3], 2, n_probes=2, replay_windows=3, render_phases=True) == \
-        jl.quantum_executable_phase_names(
+        quantum_row.quantum_executable_phase_names(
             [3], 2, n_probes=2, replay_windows=3, render_phases=True,
             replay_mode="windowed")
     with pytest.raises(ValueError, match="replay mode"):
-        jl.quantum_executable_phase_names([3], 2, n_probes=2, replay_windows=1,
+        quantum_row.quantum_executable_phase_names([3], 2, n_probes=2, replay_windows=1,
                                           replay_mode="stream")
 
 
@@ -79,7 +81,7 @@ def test_spill_plan_reads_the_own_boundary_once_per_probe(tmp_path, prepared):
     windows = len(record["windows"])
     assert windows >= 2
     names = [phase["name"] for phase in spill["read_plan"]["phases"]]
-    assert names == list(jl.quantum_executable_phase_names(
+    assert names == list(quantum_row.quantum_executable_phase_names(
         [3], 2, n_probes=N_PROBES, replay_windows=windows,
         render_phases=prepared, replay_mode="spill"))
     assert spill["annotations"]["replay_mode"] == "spill"
