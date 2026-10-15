@@ -85,7 +85,6 @@ SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
 HEAD_SOURCE_SCHEMA = "prismaquant.joint_layer_quanta.head_source.v1"
 PREPARED_INPUT_SCHEMA = "prismaquant.joint_layer_quanta.prepared_input.v1"
 
-SLICE_ENTRY_POINT = "prismaquant.joint_cost_quantum"
 ADJOINT_ENTRY_POINT = "prismaquant.joint_adjoint_capture"
 
 GIB = 1024 ** 3
@@ -615,12 +614,11 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         manifest_path = f"{control_manifest_dir}/{qid}.data-manifest.json.gz"
         record_path = f"{control_record_dir}/{qid}.json"
         space = f"{quanta_root}/{qid}"
-        argv_sealed = ["python3", "-m", SLICE_ENTRY_POINT, "--quantum", record_path,
-                       "--output-root", output_root]
+        argv_sealed = quantum_row.QuantumManifestInvocation(record_path, output_root).argv()
         slice_manifest = {
             "schema": MANIFEST_SCHEMA_V1,
             "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
-                            "entry_point": SLICE_ENTRY_POINT,
+                            "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                             "plan": plan_path, "plan_sha256": plan_sha256},
             "mount_prefix": parent_manifest.get("mount_prefix", "/mnt/shared"),
             "entries": [dict(path=entry["path"], offset=entry["offset"],
@@ -629,7 +627,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
             "entry_count": len(layer_entries),
             "total_bytes": layer_bytes,
             "annotations": {
-                "entry_point": SLICE_ENTRY_POINT,
+                "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                 "quantum_id": qid,
                 "parent_manifest_sha256": parent_manifest_sha256,
                 "plan_sha256": plan_sha256,
@@ -787,7 +785,7 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
     return {
         "schema": MANIFEST_SCHEMA_V1,
         "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
-                        "entry_point": SLICE_ENTRY_POINT,
+                        "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                         "plan": plan_path, "plan_sha256": plan_sha256 or ""},
         "mount_prefix": parent_manifest.get("mount_prefix", "/mnt/shared"),
         "entries": [dict(path=entry["path"], offset=entry["offset"],
@@ -796,15 +794,14 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
         "entry_count": len(layer_entries),
         "total_bytes": layer_bytes,
         "annotations": {
-            "entry_point": SLICE_ENTRY_POINT,
+            "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
             "quantum_id": qid,
             "parent_manifest_sha256": parent_manifest_sha256,
             "plan_sha256": plan_sha256,
             "prepared_sha256": prepared_sha256,
             "campaign_scope": scope,
             "windows": windows,
-            "argv": ["python3", "-m", SLICE_ENTRY_POINT, "--quantum",
-                     record_path or "", "--output-root", output_root],
+            "argv": quantum_row.QuantumManifestInvocation(record_path or "", output_root).argv(),
             # No zero-byte head phase (PQ #849): PB's phase rule (#594)
             # voids a table whose cumulative falls outside the entries'
             # own prefix sums, and 0 is not one -- the whole slice then

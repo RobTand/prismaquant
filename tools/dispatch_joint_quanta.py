@@ -178,7 +178,6 @@ LOAD_PHASE_FLOOR_ONE_READER = {
 #: The payload flag that carries a row's grace stamps (load phases and
 #: compute phases) into the quantum, which copies them into results.json and
 #: counters.json.
-PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
 
 #: Stage B's compute phases (PQ #1165). A chain layer's backward roll
 #: (``chain-NNN-bound``), a probe's spill capture (``spill-pP``), a spill
@@ -1573,9 +1572,9 @@ def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
 
 def progress_grace_of(argv: Sequence[str]) -> list | None:
     """The grace stamps (load and compute phases) a row's payload carries, if any."""
-    if PROGRESS_GRACE_FLAG not in argv:
+    if quantum_row.PROGRESS_GRACE_FLAG not in argv:
         return None
-    return json.loads(argv[list(argv).index(PROGRESS_GRACE_FLAG) + 1])
+    return json.loads(argv[list(argv).index(quantum_row.PROGRESS_GRACE_FLAG) + 1])
 
 
 def require_staged_wait_below_grace(spec: Mapping,
@@ -2335,75 +2334,38 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         except (ValueError, KeyError, TypeError) as exc:
             raise DispatchRefused(
                 f"quantum {quantum_id!r} cotangent plane: {exc}") from exc
-    band_payload: list[str] = []
-    if handoff is not None:
-        band_payload += ["--adjoint-handoff", str(handoff["path"]),
-                         "--adjoint-handoff-sha256", str(handoff["sha256"])]
+    handoff_binding = (None if handoff is None else quantum_row.QuantumFileBinding(
+        str(handoff["path"]), str(handoff["sha256"])))
     handoff_chain_batch_size = None
     if emit_template is not None:
-        band_payload.append("--emit-adjoint-handoff")
         handoff_chain_batch_size = _slice_chain_batch_size(record)
-    if grace_stamps:
-        band_payload += [PROGRESS_GRACE_FLAG,
-                         json.dumps(grace_stamps, sort_keys=True,
-                                    separators=(",", ":"), allow_nan=False)]
-    wrapped, container_image = _container_wrap(SPEC_PATH, [
-        "python3", "-m", "prismaquant.joint_cost_quantum",
-        "--quantum", str(record_path),
-        "--quantum-sha256", record_sha256,
-        "--plan", str(campaign["plan_path"]),
-        "--plan-sha256", plan_sha256,
-        "--prepared", str(campaign["prepared_path"]),
-        "--prepared-sha256", prepared_sha256,
-        "--adjoint-slice", str(slice_path),
-        "--adjoint-slice-sha256", slice_sha256,
-        "--data-manifest-sha256", staged_sha256,
-        "--allowed-tiers", STAGED_ALLOWED_TIERS,
-        "--resume",
-        "--output-root", str(output_root), *band_payload], progress=progress,
-        resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record),
-        spec=spec_parse.get("spec"),
+    grace_wire = (None if not grace_stamps else json.dumps(
+        grace_stamps, sort_keys=True, separators=(",", ":"), allow_nan=False))
+    band_arguments = quantum_row.QuantumBandArguments(
+        handoff_binding, emit_template is not None, grace_wire)
+    inputs = quantum_row.QuantumRunInputs(
+        quantum_row.QuantumFileBinding(str(record_path), record_sha256),
+        quantum_row.QuantumFileBinding(str(campaign["plan_path"]), plan_sha256),
+        quantum_row.QuantumFileBinding(str(campaign["prepared_path"]), prepared_sha256),
+        quantum_row.QuantumFileBinding(str(slice_path), slice_sha256),
+        staged_sha256, str(output_root))
+    wrapped, container_image = _container_wrap(
+        SPEC_PATH, inputs.argv(allowed_tiers=STAGED_ALLOWED_TIERS, band=band_arguments),
+        progress=progress, resource_policy=resource_policy,
+        spill_bound=_sealed_spill_bound(record), spec=spec_parse.get("spec"),
         handoff_chain_batch_size=handoff_chain_batch_size)
-    argv = [sys.executable, str(PBRUN)]
-    for tag in consumer_tags:
-        argv += ["--tag", str(tag)]
-    argv += ["--data-manifest", str(manifest),
-             "--residency", "stage", "--residency-ram", "auto"]
-    for name, grace in progress:
-        argv += ["--progress-phase", f"{name}={grace}"]
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    mem_gib, gpu_gib, cpus = "104", "80", 10
-    if resource_policy is not None:
-        limits = resource_policy["limits"]
-        mem_gib, gpu_gib = (f"{limits[key] / 1024 ** 3:g}" for key in ("physical_bytes", "gpu_bytes"))
-        cpus = max(int(sealed_spec.get("env", {}).get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
-                   int(plan["source_prefetch"]["prefetch_workers"]) + 1,
-                   int(plan["execution"]["operator_windows"]["prefetch_workers"]) + 1)
-    argv += ["--priority", str(priority),
-             "--demand", f"gpu=1,mem_gb={mem_gib}", "--gpu-memory-gb", gpu_gib,
-             "--cpus", str(cpus)]
-    if emit_template is not None:
-        # An envelope option, as for stage A: pbrun seals the declaration
-        # into the request and derives the window's tier demand from it.
-        argv += ["--produced-output-template", str(emit_template)]
-    if container_image is not None:
-        # A pbrun option, so it precedes the separator like the manifest: PB
-        # must admit the row only where this image is already present, or
-        # leave it ready for a box that has it (RobTand/prismabuild#714).
-        argv += [CONTAINER_IMAGE_FLAG, container_image]
-    # Every bounded-local scratch pair and PrismaBuild's list of them (PB
-    # #911), so pbrun charges each ceiling to the executing box's disk
-    # budget at claim. Nothing declared, nothing added.
-    for name, value in local_scratch_environment(
-            sealed_spec, sealed_spec.get("env", {})).items():
-        argv += ["--env", f"{name}={value}"]
-    # A spec that declares the produced spool seals it into the request too:
-    # the container refuses a declared spool the action does not carry, and
-    # a band-serial producer writes its handoff group through it (#1015).
-    for name, value in produced_spool_row_environment(sealed_spec).items():
-        argv += ["--env", f"{name}={value}"]
-    argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
-    return argv
+    demand = quantum_row.QuantumRowDemand.from_policy(
+        resource_policy, environment=sealed_spec.get("env", {}),
+        source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
+        operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
+    environment = [*local_scratch_environment(sealed_spec, sealed_spec.get("env", {})).items(),
+                   *produced_spool_row_environment(sealed_spec).items()]
+    return quantum_row.QuantumPBEnvelope(
+        str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
+        produced_output_template=emit_template, container_image=container_image).argv(
+            python=sys.executable, pbrun=str(PBRUN), container_image_flag=CONTAINER_IMAGE_FLAG,
+            dev_mode_assignment=DEV_MODE_ENV)
 
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,

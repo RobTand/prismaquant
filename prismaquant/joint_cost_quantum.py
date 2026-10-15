@@ -102,7 +102,7 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
-from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
@@ -4346,7 +4346,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "handoff.json; replaces the checkpoint load and "
                              "the render-free chain")
     parser.add_argument("--adjoint-handoff-sha256", default=None)
-    parser.add_argument("--progress-grace-derivation", default=None,
+    parser.add_argument(PROGRESS_GRACE_FLAG, default=None,
                         help="the dispatcher's load-phase grace stamps (JSON "
                              "list): copied into results.json and "
                              "counters.json, never read as a setting")

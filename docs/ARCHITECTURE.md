@@ -224,6 +224,12 @@ retains raw-file authentication, measured grace/admission evidence,
 prepared-render and cotangent resource gates, container wrapping and PB
 submission. Phase ownership changes no wire spelling, order, resource
 reservation, numerical operation or durability boundary.
+The same row owner now constructs the producer's unbound manifest invocation,
+the consumer's sealed file-pair argv, optional handoff/grace arguments, the
+existing policy-derived CPU/host/GPU demand and the ordered PB envelope.
+These values contain admitted bindings, not readers or runtime callbacks.
+The dispatcher still performs every file/readset/projection/scratch admission
+before building the row and retains the container/gateway adapters.
 
 Re-stamped 2026-10-14 (architecture refactor, base `138069b7993`):
 `cost_streaming` owns streamed causal-LM forwards and their model adapter.
