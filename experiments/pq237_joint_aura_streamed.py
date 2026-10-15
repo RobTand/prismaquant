@@ -190,12 +190,13 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
                 or stats.get("in_features") != shape[1] or stats.get("out_features") != shape[0]):
             raise ValueError("persisted joint stats differ from the bound dense source shape")
     masks, menu = [], {}
-    candidates = build_candidates(
+    candidate_build = build_candidates(
         payload["stats"], costs,
         [fr.get_format(fmt) for fmt in sorted({fmt for _, fmt in coordinates})],
         mask_records=masks, tessera_menu_report=menu,
         preserve_runtime_frontier=True,
     )
+    candidates = candidate_build.candidates
     admitted = {(name, candidate.fmt) for name, rows in candidates.items() for candidate in rows}
     if admitted != coordinates:
         raise ValueError(f"production candidate coordinate scope differs: masks={masks}, "
