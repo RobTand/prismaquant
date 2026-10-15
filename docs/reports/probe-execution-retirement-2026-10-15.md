@@ -195,3 +195,14 @@ wraps identical CLI help literals and corrects comments naming retired owners.
 Both changed Python modules have identical complete executable ASTs after excluding
 only docstrings. No additional tests were dispatched for this comment/format-only
 unit; the source invariant is retained in `reports/p4-cosmetic-ast-invariants.json`.
+
+### Historical activation-reader coverage restored after independent review
+
+Two archived cases exercised the retained ActivationIndex consumer rather than
+the retired producer. Their original test names now live in
+tests/test_retained_activation_reader.py. A fixed plain tensor/identity fixture
+replaces the former merge-bundle producer setup. The cases retain post-validation
+replacement refusal and pinned-directory prefetch custody across pathname
+replacement, including a later corrupted tensor. The disposition ledger records
+these two corrections. No producer, merger or manual CLI is restored, and no
+production implementation or admission policy changes in this test-only unit.
