@@ -31,7 +31,7 @@ def main():
         if not path.is_relative_to(root) or not path.exists():
             parser.error(f'check source path does not exist inside the checkout: {value}')
     frozen = freeze_refactor_checkout(root, args.output)
-    command = ['python3', str(PBRUN), '--cwd', frozen['checkout'],
+    command = ['python3', str(PBRUN), '--anywhere', '--cwd', frozen['checkout'],
                '--cpus', str(args.workers), '--demand', f'mem_gb={args.memory_gb}',
                '--timeout-s', str(args.timeout_s), '--detach']
     for value in ['OMP_NUM_THREADS=1', 'MKL_NUM_THREADS=1', 'OPENBLAS_NUM_THREADS=1', *args.env]:
