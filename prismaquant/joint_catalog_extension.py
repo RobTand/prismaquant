@@ -38,7 +38,7 @@ SCHEMA_V1 = "prismaquant.joint_catalog_extension.v1"
 #: bound run header seals ``campaign_scope: null`` (R13 ran without a
 #: forward-recovery capsule under a plan that declares no scope). The scope is
 #: derived once, at creation, from the original plan by the one scope builder
-#: (``tools.dispatch_tessera_campaign.joint_campaign_scope``, which re-hashes
+#: (``prismaquant.tessera_campaign_table.joint_campaign_scope``, which re-hashes
 #: every artifact the plan binds) against the frozen campaign identity file.
 #: A header that seals its scope keeps producing v2 bytes: the sealed scope
 #: rules, and nothing is embedded over it.

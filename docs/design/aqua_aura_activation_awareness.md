@@ -438,7 +438,8 @@ blindness already documented in [[aura_expert_routeflip_floor_confirmed]].
   the global maximum back in), and `CostComponents.quantizes_activations` is
   carried as data so a consumer can tell "this format leaves activations alone,
   `None` is correct" from "this format quantizes them and we failed to price it,
-  `None` is a hole" — `speed_quality_frontier` counts and prints the latter.
+  `None` is a hole". The retired `speed_quality_frontier` prototype counted
+  and printed the latter; current consumers must keep that distinction.
   **Still research-tier**: the measured plugin variance remains preferred and
   takes precedence, and none of this changes a default or a shipped artifact.
 - **The remaining modelling gap is the grid *shape*, not the grid *scale*.**

@@ -2712,8 +2712,9 @@ def load_tessera_contract() -> "TesseraContract | None":
                 f"{TESSERA_DEV_PIN_CONTRACT_SHA256}); {path} hashes to {sha} and "
                 "publishes a different answer:\n" + "\n".join(drift) + "\n"
                 "This is not a corruption warning. Read what moved, decide whether "
-                "PrismaQuant should admit it, and update TESSERA_DEV_PIN_ANSWER "
-                "(with the commit and sha) in the same commit -- that diff is the "
+                "PrismaQuant should admit it, and update TESSERA_DEV_PIN_ANSWER in "
+                "tessera_runtime/reviewed_answer.json together with the commit and "
+                "sha in the same commit -- that diff is the "
                 "review."
             )
         # The middle link of the §7.4 chain, checked wherever both objects are in
