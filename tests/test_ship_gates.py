@@ -39,7 +39,6 @@ def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     save_file({"model.embed_tokens.weight": torch.zeros((8, 4), dtype=torch.bfloat16)},
               str(model / "model.safetensors"))
     card = shipcard.open_shipcard(model, build={})
-    shipcard.write_shipcard(model / "shipcard.json", card)
     teacher = root / "teacher.pt"
     torch.save({"calib_ids": torch.tensor([[1, 2, 3, 1]], dtype=torch.long),
                 "teacher_logprobs": torch.log_softmax(torch.zeros((1, 8)), dim=-1),
