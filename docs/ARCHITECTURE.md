@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: completed source-move tools and their codemod-only tests
+are archived byte-for-byte at `archive/refactor_2026-10-16/`. Source freezing and
+the loaded-campaign/calibration boundary checks keep their live tool and test
+owners because current qualification uses them. This removes migration-only
+maintenance surface without removing a production policy or changing a stage.
+
 Re-stamped 2026-10-16: the Claude review corrections update current body
 references to the captured Tessera snapshot, typed admission verdict, boundary
 and source owners, pricing helpers and shared streamed initialization. Historical
