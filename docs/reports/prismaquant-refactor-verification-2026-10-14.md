@@ -1167,3 +1167,40 @@ retrospective retained-artifact inventory or measurement campaign runs under
 this task. No shipped artifact has been identified as affected, and no
 quality or serving impact has been established. This decision is recorded in
 [the issue comment](https://github.com/RobTand/prismaquant/issues/2697#issuecomment-6226062928).
+
+
+## Profiler attribution qualified by actual call counts, 2026-10-16
+
+C-PRF-01 is fixed in `56e021c7c7`: the Stage A profile rows name
+`streamed_boundary_artifacts.py`, their current owner. The regression now
+refuses to publish zero owner counts for a chain that exercises those methods.
+The same frozen test with the old filename mapping failed at
+`profile missed owner.write`; all five owner rows had zero calls. With the
+corrected mapping, the admitted CPU regression passed and recorded:
+
+| Row | Before calls | Corrected calls |
+| --- | ---: | ---: |
+| owner.write | 0 | 128 |
+| owner.prefetch | 0 | 65 |
+| owner.retire | 0 | 128 |
+| owner.progress | 0 | 160 |
+| owner.flush_unlinks | 0 | 256 |
+
+The written-reference manifest, final payload digests and entry-file digests
+were equal across the two runs. This acceptance concerns actual in-process
+cProfile attribution and call counts only. All timing and throughput values
+are excluded; it makes no speed or resource-efficiency claim.
+
+The original two isolated measurement actions were denied while other work
+prevented isolation. Both controller waits expired twice without a test result.
+The actions were withdrawn through PrismaBuild at zero attempts, and the same
+frozen before/after source was submitted under ordinary CPU test admission.
+The negative baseline action is
+`d0e909b41a764d189d5921bd2c6572401b15dd72f0023f69e98cb41444c40df3`;
+the corrected passing action is
+`e995cf23d256a498c2bf1cc89f3c7a35c6813e80f37d9e49829903769347871b`.
+The parent verified the failed terminal and logs, the successful CAS
+receipt/result/log hashes, the raw profile artifacts and the manifest equality.
+Evidence is `/home/rob/tmp/pq-claude-review-20261016/profile-owner-counts-acceptance.json`
+and the adjacent receipt and withdrawal audits. The baseline remains a failed
+negative action; it is not counted as a test pass.
