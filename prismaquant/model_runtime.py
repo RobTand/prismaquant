@@ -4,7 +4,10 @@ from __future__ import annotations
 import contextlib as _contextlib
 from contextvars import ContextVar as _ContextVar
 from threading import Lock
-from .streaming_initialization import _INITIALIZATION_CONTRACT_ATTRIBUTE
+from .streaming_initialization import (
+    clear_pretrained_initialization_contract,
+    record_pretrained_initialization,
+)
 
 _checkpoint_initializing = _ContextVar("prismaquant_checkpoint_initializing", default=False)
 _genuine_initializing = _ContextVar("prismaquant_genuine_initializing", default=False)
@@ -114,19 +117,15 @@ def _polyfill_transformers() -> None:
                 import transformers
                 # An unsuccessful repeated finalization must not retain an
                 # earlier completion descriptor.
-                self.__dict__.pop(_INITIALIZATION_CONTRACT_ATTRIBUTE, None)
+                clear_pretrained_initialization_contract(self)
                 _mark_fully_loaded_modules(self)
                 token = _checkpoint_initializing.set(True)
                 try:
                     result = real_missing(self, *args, **kwargs)
                 finally:
                     _checkpoint_initializing.reset(token)
-                setattr(self, _INITIALIZATION_CONTRACT_ATTRIBUTE, {
-                    "schema": "prismaquant.pretrained_initialization.v1",
-                    "scope": "checkpoint_missing_state",
-                    "status": "completed",
-                    "transformers_version": transformers.__version__,
-                })
+                record_pretrained_initialization(
+                    self, transformers_version=transformers.__version__)
                 return result
 
             model_class._initialize_weights = _initialize_for_checkpoint

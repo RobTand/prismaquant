@@ -246,6 +246,22 @@ def merge_streaming_selected_initialization_witnesses(
 _INITIALIZATION_CONTRACT_ATTRIBUTE = "_prismaquant_pretrained_initialization_contract"
 _MTP_LAYER_INITIALIZATION_SCHEMA = "prismaquant.mtp_layer_initialization.v1"
 
+
+def clear_pretrained_initialization_contract(model):
+    """Retire an earlier completion before checkpoint finalization starts."""
+    model.__dict__.pop(_INITIALIZATION_CONTRACT_ATTRIBUTE, None)
+
+
+def record_pretrained_initialization(model, *, transformers_version):
+    """Record successful missing-state initialization on the loaded model."""
+    setattr(model, _INITIALIZATION_CONTRACT_ATTRIBUTE, {
+        "schema": "prismaquant.pretrained_initialization.v1",
+        "scope": "checkpoint_missing_state",
+        "status": "completed",
+        "transformers_version": transformers_version,
+    })
+
+
 def validate_pretrained_initialization_contract(value):
     """Validate and copy a checkpoint initialization provenance descriptor."""
     if not isinstance(value, dict) or set(value) != {

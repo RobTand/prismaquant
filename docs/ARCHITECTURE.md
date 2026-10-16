@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: `streaming_initialization` owns both reads and writes
+of the pretrained initialization descriptor. `model_runtime` clears an earlier
+completion before finalization and records the same descriptor only after the
+missing-state initializer succeeds. The runtime no longer imports the owner's
+private attribute name; the descriptor schema and bytes are unchanged.
+
 Re-stamped 2026-10-16: the codec names other modules call are public
 (`quantize_2d`, `canonical_export_format`, the GPTQ, scale-sweep and NVFP4
 scale primitives, the input-global-scale helpers), and do-no-harm counts are
