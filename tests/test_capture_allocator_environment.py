@@ -80,5 +80,24 @@ def test_invalid_class_argv_names_the_spec_and_class(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(RuntimeError) as refused:
         campaign_rows.load_spec(path)
-    assert str(refused.value).startswith(f"{path}: row class 'capture': ")
-    assert '--streaming-capture-policy: expected one argument' in str(refused.value)
+    assert str(refused.value).startswith(f"{path}: row class 'capture' declares ")
+    assert "declares ['argv']" in str(refused.value)
+
+
+def test_invalid_row_argv_names_its_class():
+    data = spec()
+    data['classes'] = {'capture': {'cpus': 1}}
+    with pytest.raises(RuntimeError, match="row class 'capture': argument --streaming-capture-policy: expected one argument"):
+        campaign_rows.prismabuild_row(
+            data, ['--streaming-capture-policy'], mem_gb=104, timeout_s=60,
+            row_class_name='capture')
+
+
+def test_class_container_validation_uses_shared_capture_argv(tmp_path):
+    data = spec()
+    data['campaign_argv'] = ['--streaming-capture-policy', 'shared-inputs-bounded-v1']
+    data['classes'] = {'capture': {'env': {'MIMALLOC_PURGE_DELAY': '10'}}}
+    path = tmp_path / 'campaign.json'
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError, match='MIMALLOC_PURGE_DELAY'):
+        campaign_rows.load_spec(path)

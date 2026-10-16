@@ -315,16 +315,18 @@ def load_spec(path: Path) -> dict:
     if "container" in spec:
         validate_container(spec)
     for name in sorted(spec.get("classes") or {}):
-        resolved = row_class(spec, name)
+        try:
+            resolved = row_class(spec, name)
+        except RowClassRefused as exc:
+            raise RowClassRefused(f"{path}: {exc}") from exc
         if "container" in resolved:
             # The bounded-capture environment contract is stated by the row
-            # that is actually bounded: a class whose argv asks for the
-            # bounded policy has it here, and a legacy class that declares its
-            # own purge delay is not refused for a rule it does not fall under.
+            # through shared campaign argv. Classes may override environment,
+            # but do not own argv. Legacy rows keep their own purge delay.
             validate_container({"container": resolved["container"],
                                 "env": resolved["env"]},
                                bounded=row_is_bounded(
-                                   resolved.get("argv") or [],
+                                   spec["campaign_argv"],
                                    where=f"{path}: row class {name!r}"))
     validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
