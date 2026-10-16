@@ -210,8 +210,6 @@ def _replay_slot(stage: dict, context: dict, output: Path, *, produced: bool) ->
     identity = stage["id"]
     if produced and identity in GOLD_TOOLS:
         payload = _read_gate_document(output)
-        if payload.get("spec_decode_detected") is not False:
-            raise ValueError(f"{identity}: gold fill requires a measured no-spec serve")
         draft = make_gold_record(
             payload, slot=identity, model_sha=compute_model_sha(artifact),
             record_path=output, model_dir=artifact, tool=GOLD_TOOLS[identity])

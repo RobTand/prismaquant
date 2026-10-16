@@ -1159,6 +1159,10 @@ def make_record(*, slot, **fields):
     return ship_slot(slot).make(**fields)
 
 
+class GoldSpecDecodeRefusal(ValueError):
+    """A gold number whose serve did not report ``spec_decode_detected: false``."""
+
+
 @dataclass(frozen=True)
 class GoldRecordDraft:
     record: dict
@@ -1168,9 +1172,21 @@ class GoldRecordDraft:
 
 
 def make_gold_record(payload, *, slot, model_sha, record_path, model_dir=None,
-                     tool=None, detail=None, passed=None):
-    """Prepare a gold payload for CLI or configured-gate attachment."""
-    from pathlib import Path
+                     tool=None, detail=None, passed=None, allow_spec_decode=False):
+    """Prepare a gold payload for CLI or configured-gate attachment.
+
+    Under ``--speculative-config`` vLLM routes echo+logprobs through the draft
+    model, so a gold number is the artifact's only when its serve reported
+    ``spec_decode_detected: false`` (§7.5). True, unknown or malformed is
+    refused here unless the caller explicitly records it anyway
+    (``allow_spec_decode``); publication replay still refuses such a record.
+    """
+    spec = payload.get("spec_decode_detected")
+    if spec is not False and not allow_spec_decode:
+        raise GoldSpecDecodeRefusal(
+            f"{slot}: {record_path} reports spec_decode_detected={spec!r}. A gold "
+            "number measured against a spec-decode serve is the DRAFT model's "
+            "NLL, not the artifact's (§7.5). Re-measure on a no-spec serve.")
 
     def finite(value):
         try:

@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16 (review STD-018, gold fill): the no-spec rule for a gold
+number is enforced once, in `shipcard_slots.make_gold_record`. A payload whose
+`spec_decode_detected` is not `false` raises `GoldSpecDecodeRefusal` (a `ValueError`)
+for the `shipcard_cli fill` command and the configured `ship_gates` replay alike;
+only an explicit `allow_spec_decode` (CLI `--allow-spec-decode`) records it, and
+publication replay still refuses that record. Tests:
+`tests/test_shipcard_slot_contract.py`, `tests/test_shipcard.py`.
+
 Re-stamped 2026-10-16 (review STD-018, slot ownership): `shipcard_slots` now holds
 every core slot's constructor and replay, including `uniform_control`
 (`make_uniform_control_record`, `_verify_uniform_control_record` and its byte-match,
@@ -28440,7 +28448,9 @@ artifact plus released three-stage DSpark overlay, resident extensions,
 deterministic endpoint smoke, raw serve-manifest digest, and positive
 graph-log/capture evidence for the graph arm. Unknown or duplicate launch
 arguments fail rather than hiding behind a required-flag subset.
-Both `gold.*` records must report `spec_decode_detected: false`. `show` prints the remaining
+Both `gold.*` records must report `spec_decode_detected: false`; the gold constructor
+(`shipcard_slots.make_gold_record`) refuses any other value for the CLI and configured
+gates alike, and `--allow-spec-decode` records it for `verify` to refuse. `show` prints the remaining
 unfilled slots. Validators fill their own structured slots via `--shipcard`; the generic `fill`
 command is restricted to `gold.kl` / `gold.ppl` measurement JSONs. This turns "the numeric ship
 gate was never run" (the row above)

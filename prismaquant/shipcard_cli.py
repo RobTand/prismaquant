@@ -42,6 +42,7 @@ from prismaquant.shipcard import (
 from prismaquant.shipcard_slots import (
     CARRIED_METRIC_KEYS,
     GOLD_SLOTS,
+    GoldSpecDecodeRefusal,
     OPTIONAL_SLOTS,
     ROUTE_SWEEP_SLOT,
     UNIFORM_CONTROL_METRIC_KEYS,
@@ -138,24 +139,18 @@ def _cmd_fill(args: argparse.Namespace) -> int:
         return 2
     model_sha = compute_model_sha(model_dir)
 
-    spec = payload.get("spec_decode_detected")
-    if args.slot in GOLD_SLOTS and spec is not False:
-        if not args.allow_spec_decode:
-            print(
-                f"[shipcard] REFUSED: {args.record} reports "
-                f"spec_decode_detected={spec!r}. A gold number measured "
-                "against a spec-decode serve is the DRAFT model's NLL, not "
-                "the artifact's (§7.5). Re-measure on a no-spec serve, or "
-                "pass --allow-spec-decode to record it anyway (verify will "
-                "still refuse).",
-                file=sys.stderr)
-            return 2
+    try:
+        draft = make_gold_record(
+            payload, slot=args.slot, model_sha=model_sha, record_path=args.record,
+            model_dir=model_dir, tool=args.tool, detail=args.detail, passed=args.passed,
+            allow_spec_decode=args.allow_spec_decode)
+    except GoldSpecDecodeRefusal as refusal:
+        print(f"[shipcard] REFUSED: {refusal} Pass --allow-spec-decode to record "
+              "it anyway (verify will still refuse).", file=sys.stderr)
+        return 2
+    if payload.get("spec_decode_detected") is not False:
         print("[shipcard] WARN recording a spec-decode-tainted gold number on "
               "the card; verify will refuse it", file=sys.stderr)
-
-    draft = make_gold_record(
-        payload, slot=args.slot, model_sha=model_sha, record_path=args.record,
-        model_dir=model_dir, tool=args.tool, detail=args.detail, passed=args.passed)
     structurally_valid = draft.structurally_valid
     slot_primary = draft.primary
     if args.passed is True and not structurally_valid:

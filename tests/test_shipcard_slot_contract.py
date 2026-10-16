@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import shipcard, shipcard_slots
-from prismaquant.shipcard import open_shipcard, verify, write_shipcard
+from prismaquant.shipcard import load_shipcard, open_shipcard, verify, write_shipcard
 from prismaquant.shipcard_slots import make_gold_record, ship_slot
 
 
@@ -57,6 +57,41 @@ def test_configured_gate_fills_gold_without_the_cli(artifact, monkeypatch):
     record = _replay_slot({"id": "gold.kl"}, {"artifact": str(artifact)}, output, produced=True)
     assert record["passed"] is True
     assert record["metrics"]["kl_mean"] == 0.1
+
+
+def _gold_payload(artifact, **overrides):
+    payload = {"model": str(artifact), "spec_decode_detected": False,
+               "serve_fingerprint": "f" * 64, "git_commit": "a" * 40,
+               "kl_mean": 0.1, "n_positions": 16, "score_positions": "all"}
+    payload.update(overrides)
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+@pytest.mark.parametrize("spec", [True, None, "false"])
+def test_gold_constructor_refuses_a_number_not_measured_on_a_no_spec_serve(artifact, spec):
+    card = open_shipcard(artifact)
+    payload = _gold_payload(artifact, spec_decode_detected=spec)
+    with pytest.raises(shipcard_slots.GoldSpecDecodeRefusal, match="DRAFT model"):
+        make_gold_record(payload, slot="gold.kl", model_sha=card["model_sha"],
+                         record_path=artifact / "m.json", model_dir=artifact)
+    # An explicit acknowledgement records it; publication replay still refuses.
+    draft = make_gold_record(payload, slot="gold.kl", model_sha=card["model_sha"],
+                             record_path=artifact / "m.json", model_dir=artifact,
+                             allow_spec_decode=True)
+    card["slots"]["gold.kl"] = draft.record
+    assert any("spec_decode_detected" in problem
+               for problem in verify(card, model_dir=artifact, required=["gold.kl"]))
+
+
+def test_configured_gate_refuses_spec_decode_through_the_slot_constructor(artifact):
+    from prismaquant.ship_gates import _replay_slot
+
+    write_shipcard(artifact / "shipcard.json", open_shipcard(artifact))
+    output = artifact.parent / "gold.json"
+    output.write_text(json.dumps(_gold_payload(artifact, spec_decode_detected=True)))
+    with pytest.raises(shipcard_slots.GoldSpecDecodeRefusal, match="DRAFT model"):
+        _replay_slot({"id": "gold.kl"}, {"artifact": str(artifact)}, output, produced=True)
+    assert load_shipcard(artifact / "shipcard.json")["slots"]["gold.kl"] is None
 
 
 def _imports(tree):
