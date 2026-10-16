@@ -665,6 +665,7 @@ def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
 ):
     from prismaquant.production_weight_cache import (
         NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+        nvfp4_joint_global_witness_section,
         nvfp4_joint_global_witnesses,
     )
 
@@ -675,42 +676,54 @@ def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
                   "mtp.self_attn.v_proj"):
         _write_activation(
             activation_dir, qname, torch.randn(8, 16, generator=generator))
-    # A body entry no witness-recording fill rendered.
-    body = ("model.layers.0.self_attn.q_proj", "NVFP4")
+    # One body entry its fill witnessed, and one no witness-recording fill
+    # rendered. The MTP append owns neither.
+    witnessed_body = ("model.layers.0.self_attn.q_proj", "NVFP4")
+    unwitnessed_body = ("model.layers.0.self_attn.k_proj", "NVFP4")
+    body_witnesses = {witnessed_body: 0.25}
     cache = ProductionWeightCache(
-        weights={body: torch.zeros((16, 16))},
+        weights={witnessed_body: torch.zeros((16, 16)),
+                 unwitnessed_body: torch.zeros((16, 16))},
         levers=NativeRenderLevers.resolve({
             "gptq": True, "static_act_order": True, "joint_scale_opt": True,
         }).record(),
         activation_max_abs={},
         failed={},
         metadata={
-            "requested_entries": 1,
+            "requested_entries": 2,
             "render_scores": {
                 "schema": "prismaquant.production_render_scores.v1",
-                "entries": 1,
-                "records": {"model.layers.0.self_attn.q_proj|NVFP4": {}},
+                "entries": 2,
+                "records": {"model.layers.0.self_attn.q_proj|NVFP4": {},
+                            "model.layers.0.self_attn.k_proj|NVFP4": {}},
             },
+            NVFP4_JOINT_GLOBAL_WITNESS_KEY: (
+                nvfp4_joint_global_witness_section(body_witnesses)),
         },
     )
     kwargs = dict(
         profile=_FusedMtpProfile(), activation_cache_dir=activation_dir,
         formats=("NVFP4",), device="cpu", dtype=torch.float32, progress=False,
     )
+    mtp_fused = {
+        (f"mtp.self_attn.{leaf}", "NVFP4")
+        for leaf in ("q_proj", "k_proj", "v_proj")
+    }
 
     fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs)
 
     witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
     # The fused siblings it rendered share one witnessed global; the body
-    # entry and the unfused mtp.fc stay unwitnessed.
-    assert set(witnesses) == {
-        (f"mtp.self_attn.{leaf}", "NVFP4")
-        for leaf in ("q_proj", "k_proj", "v_proj")
-    }
-    assert len(set(witnesses.values())) == 1
+    # witness survives unchanged, and the unwitnessed body entry and the
+    # unfused mtp.fc stay unwitnessed.
+    assert set(witnesses) == mtp_fused | set(body_witnesses)
+    assert len({witnesses[key] for key in mtp_fused}) == 1
+    assert {key: witnesses[key] for key in body_witnesses} == body_witnesses
 
-    # The append owns its scope: a narrower append leaves no stale witness.
+    # The append owns its scope: a narrower append leaves no stale MTP
+    # witness and still keeps the body's.
     fill_profile_mtp_production_cache(
         cache, "/fake/model", include_qnames=("mtp.fc",), **kwargs)
     assert cache.resolve_key("mtp.self_attn.q_proj", "NVFP4") is None
-    assert NVFP4_JOINT_GLOBAL_WITNESS_KEY not in cache.metadata
+    assert nvfp4_joint_global_witnesses(
+        cache.metadata, where="test") == body_witnesses
