@@ -1245,9 +1245,14 @@ def _production_cache_prefetch_assignment(
 
 
 
+def _exporter_render_levers() -> NativeRenderLevers:
+    """This export run's own recipe: its CLI levers, else the environment."""
+    return _RENDER_LEVERS or NativeRenderLevers.resolve()
+
+
 def _export_render_options(cache=None) -> NativeRenderLevers:
     """Use the recorded numerical recipe for a cached native re-pack."""
-    options = _RENDER_LEVERS or NativeRenderLevers.resolve()
+    options = _exporter_render_levers()
     if cache is None:
         cache = _PRODUCTION_WEIGHT_CACHE
     if cache is not None:
@@ -1550,7 +1555,7 @@ def _packed_expert_export_provenance() -> dict[str, object]:
 
 def _inline_expert_render_levers() -> dict[str, object]:
     """The complete immutable options used by the dense inline renderer."""
-    return (_RENDER_LEVERS or NativeRenderLevers.resolve()).record()
+    return _exporter_render_levers().record()
 
 
 
