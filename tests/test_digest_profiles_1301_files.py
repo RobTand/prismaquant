@@ -4,8 +4,12 @@ Each site below hashed a file, a byte string or a text with its own copy of
 one recipe. Each now binds or calls its owner in ``prismaquant.digests``. The
 outcomes of the pre-move code on every input here (the returned digest, or the
 exception type, ``str()`` and chained cause) are frozen in
-``fixtures/digest_profiles_1301_files.json`` (``tests/golden_table.py``), and
-every call goes through the old site's name.
+``fixtures/digest_profiles_1301_files.json`` (``tests/golden_table.py``). Each
+call goes through the site's live name: ``streamed_model_identity._file_sha256``
+is ``cost_streaming._file_sha256`` after its move, and two retired aliases of
+the owner are called as ``digests.file_sha256hex`` with the arguments each one
+bound: ``lane_eligibility._sha256`` with the default block size, and
+``sample_parallel_probe._sha256_file`` with 1 MiB.
 
 File inputs straddle each block size a site reads with (1, 4, 8 and 16 MiB,
 and ``hashlib.file_digest``'s 256 KiB buffer). ``str`` paths are checked only

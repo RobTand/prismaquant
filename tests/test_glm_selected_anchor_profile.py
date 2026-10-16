@@ -344,7 +344,7 @@ def test_cuda_only_activity_keeps_native_event_requirement(tmp_path, controlled,
     assert obs.result['profile_activities'] == ['cuda']
 
 
-def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
+def test_entrypoint_wraps_only_the_batch_entry_and_restores_it_after_campaign_error(
         tmp_path, controlled, monkeypatch):
     from prismaquant import tessera_campaign as campaign
     scalar, batch = cell_measurement.measure_cell, cell_measurement.measure_cells
