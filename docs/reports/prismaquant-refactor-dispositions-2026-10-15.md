@@ -392,3 +392,30 @@ original verification commands above remain historical execution records. The
 archive README identifies the original complete tool set and the three reusable
 checks that retain live callers, including the source-freezing check now used
 for Claude-fix PrismaBuild submissions.
+
+
+## Claude checkpoint and slot corrections, 2026-10-16
+
+Claude findings STD-011/R1S-F02 now check all four AURA checkpoint producer
+owners, and STD-015 keeps surrogate-versus-KL ranks within one recorded basis.
+Historical and current mixed-basis rows remain measurements but do not share
+a rank statistic. The recorded row estimate and the chosen frontier are unchanged.
+
+STD-018 gives core uniform-control and route-sweep policies to `shipcard_slots`,
+removes the private import cycle, puts gold-fill refusal in the shared constructor,
+and constructs a lane card once. The 19 moved definitions were checked against
+their original bytes. Build and lane claims now resolve before an artifact write.
+
+Three additional defects found while making those changes are fixed separately.
+The registered route-sweep replay now forwards the artifact directory to its
+existing config comparison. Gold-slot and uniform-control replay require the
+explicit JSON boolean false, including when an operator recorded malformed
+evidence through the recording override. Paired boundary producer fingerprints
+now include `shipcard_slots.py`, the current schema and threshold owner; old
+measurement fingerprints are not rewritten. These repairs enforce the existing
+evidence contracts. No format, pin, lane or qualification scope is added.
+
+The gold verifier also drops two unused context parameters and migrates its
+callers. The initial failed regressions, the child qualification and the composed
+follow-up remain distinct evidence in the verification report. Full combined
+Claude re-review and final branch qualification are still required.

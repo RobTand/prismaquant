@@ -91,9 +91,9 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 #: every unit checkpoint to ``aura_provenance.checkpoint_git_commit()``, which
 #: resolves the commit with git unless this variable names it. Inside the
 #: container the variable also skips that function's own exactness check
-#: (``git diff`` of ``aura_cost.py`` against HEAD), so the launcher performs
-#: the check here instead, over the whole ``prismaquant/`` package, and
-#: refuses a checkout whose tracked package bytes differ from HEAD.
+#: (``git diff`` of the declared AURA checkpoint owners against HEAD), so the
+#: launcher checks the whole ``prismaquant/`` package here instead, refusing
+#: a checkout whose tracked package bytes differ from HEAD.
 CHECKOUT_COMMIT_ENV = "PRISMAQUANT_IDENTITY_GIT_COMMIT"
 
 

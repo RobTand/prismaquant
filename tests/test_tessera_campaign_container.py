@@ -256,9 +256,9 @@ def _git_checkout(root):
 def test_checkout_commit_is_read_on_the_host_and_refuses_changed_package_bytes(tmp_path):
     """The container has no git; the launcher reads HEAD and performs the exactness check.
 
-    ``PRISMAQUANT_IDENTITY_GIT_COMMIT`` also disables ``aura_cost``'s own
-    ``git diff`` check inside the container, so a checkout whose tracked
-    package bytes differ from HEAD must be refused here, before a commit the
+    ``PRISMAQUANT_IDENTITY_GIT_COMMIT`` also disables ``aura_provenance``'s
+    checkpoint-owner ``git diff`` check inside the container, so a checkout
+    whose tracked package bytes differ from HEAD must be refused here, before a commit the
     bytes do not match is stamped on a checkpoint.
     """
     runner = _runner()

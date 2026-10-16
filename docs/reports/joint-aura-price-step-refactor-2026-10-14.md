@@ -37,3 +37,14 @@ Affinity action `779dca0e26f04161f78b730aec35128b9258daaac2bfb90b4e84ce21943f02d
 Full commands, file lists, outputs, capsule identities, failure logs, latest node counts and receipts are under `/home/rob/tmp/pq-refactor-20261014/reports/joint-j2-step-*`. First migration verification failed on one deleted payload local plus stale policy/fsync hooks. The next broader verification exposed a moved certified-mode hook and obsolete inventory membership. Their actual failed records remain; they have not been counted as success.
 
 The rerunnable source migration recipes are `migrate_joint_price_step.py`, `migrate_price_callers.py`, `migrate_journal_writers.py`, `migrate_price_tests.py` and `rename_aura_provenance.py` in that reports directory. Apply their sequence to the documented pre-unit checkout; they are a migration recipe, not runtime compatibility. `joint-j2-step-final-inventory.json` records the final imports and confirms zero production private journal reaches.
+
+
+## Checkpoint provenance correction, 2026-10-16
+
+The earlier unit retained the single-file Git exactness check. Claude review
+STD-011/R1S-F02 found that it omitted the new journal and price-step owners.
+The separate correction `bad08c3e6a` checks `aura_cost.py`,
+`aura_checkpoint_journal.py`, `joint_price_step.py` and `aura_provenance.py`
+and names each changed owner. Certified refusal, development warnings, Git
+error refusal and the explicit identity override retain their contracts. The
+whole-package digest continues to bind every other package module.
