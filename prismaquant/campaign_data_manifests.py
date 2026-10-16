@@ -458,9 +458,11 @@ def _producer_commit(tree: str) -> str:
         return "unknown"
 
 
-#: The source files whose code derives a row's read set: this module's
-#: ``build_campaign_row_manifest``, the ``Campaign`` expansion it walks, and the
-#: shared path/phase rules it executes. Relative to the repository root.
+#: Explicit source inventory for ``deterministic_provenance``'s campaign-row
+#: seal, relative to the repository root. It conservatively includes the shared
+#: cache and joint-policy owners alongside the row builder and campaign helpers.
+#: Post-campaign pass manifests use ``deterministic_entry_provenance``'s Git
+#: commit record; their builders' complete import graph is a separate scope.
 PRODUCER_SOURCES = ("prismaquant/campaign_data_manifests.py",
                     "prismaquant/tessera_campaign_cli.py",
                     "prismaquant/tessera_campaign_selection.py",
@@ -474,7 +476,7 @@ PRODUCER_SOURCES = ("prismaquant/campaign_data_manifests.py",
 
 
 def producer_source_sha256() -> str:
-    """One digest over the producer's source, the same on every box.
+    """One digest over the explicit campaign-row source inventory on every box.
 
     Each file contributes its path and length before its bytes, so moving
     code from one file to the other is a different digest.

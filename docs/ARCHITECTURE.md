@@ -390,12 +390,13 @@ The two unused DP reduction reexports are removed; exact dominance and bin
 collapse stay at `allocator_solver`, with their behavioral tests there.
 CLI metadata keeps the existing menu-mode authority and unchanged vocabularies.
 
-Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): campaign
-readset producer provenance also binds its shared rendered-cache filename and
-joint phase/replay owners. Their actual bytes derive declared paths and read
-order. The existing producer-source digest keeps its exact path/length/NUL
-framing; its source inventory now includes these four executed dependencies.
-Readset schema, operation labels and admission policy remain unchanged.
+Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`): the
+campaign-row producer's explicit source inventory includes the shared
+rendered-cache filename and joint phase/replay owners conservatively. The
+digest uses path/length/NUL framing over that inventory. Campaign rows carry
+this source digest; post-campaign pass manifests carry the Git-commit record
+from `deterministic_entry_provenance`. The inventory describes its listed
+files rather than a complete dependency closure for the COST pass builders.
 
 Re-stamped 2026-10-15 (`sol/refactor-tessera-boundary-20261014`):
 `tessera_campaign_wire` owns canonical wire destinations, cache-owned coordinate

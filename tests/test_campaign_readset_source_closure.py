@@ -1,4 +1,4 @@
-"""Readset producer provenance binds the code that derives paths and phases."""
+"""Campaign-row provenance binds every source in its declared inventory."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,7 +14,7 @@ import pytest
     'joint_replay_frontier.py',
     'joint_run_progress.py',
 ])
-def test_readset_source_digest_changes_with_its_actual_dependency_bytes(tmp_path, dependency):
+def test_readset_source_digest_changes_with_declared_inventory_bytes(tmp_path, dependency):
     source = Path(__file__).resolve().parents[1] / 'prismaquant'
     package = tmp_path / 'prismaquant'
     shutil.copytree(source, package, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
