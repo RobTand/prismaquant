@@ -250,3 +250,56 @@ four conditional retirements. No push, issue creation, PR publication, merge or
 closure occurred. PR #2669 remains linked to this thread. Remote delivery still
 requires the repository's issue/PR process and the specific replacement proofs
 in the open-PR plan.
+
+## T1 and T3 implementation completion, 2026-10-16
+
+The remaining public producer boundary and selected-wire measurement work is
+implemented. The API delivery at exact
+`aaa417003f0ee690e8ace138acd18df7f9531369` supplies the public fused-ownership,
+image-declaration and projection APIs. PrismaQuant's code and JSON pins agree on
+that commit. The packaged v60 contract retains SHA-256
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`,
+its 22-cell scope and the reviewed eligibility answer. Schema v2 binds contract
+bytes; installed Git provenance is qualified separately.
+
+T1 now consumes public metadata directly for fused ownership and scoped image
+receipt replay. The existing campaign table/payload, census union, reseal and
+source-readset owners remain authoritative. Static inspection finds no
+`tessera.serving` imports in `prismaquant/`; cold subprocess cases also refuse
+serving, Torch, Transformers, Triton and vLLM imports while replaying metadata.
+
+T3 adds `tessera_cell_measurement`. Its frozen `CellRecipe` owns resolved served
+wire, encoder inputs and activation admission. Campaign and selected-wire
+materialization share scalar/batch measurement, per-plane memoization, scoring,
+publication and resume checks. Callers retain resident prefetch and publication
+lifetime. Indexer a32/FP32 and MLA a16/BF16 cache values and single-matrix charges
+are preserved. The obsolete APIs and encode adapter are removed, including
+profiler callers. The reseal driver binds its declared source tree before
+importing that tree's measurement owner.
+
+The composed checks exposed remaining test migrations. They now use complete
+anchors, explicit numerical-runtime initialization, the live codec/digest owners,
+and clocks at both measurement and row owners. Historical byte oracles remain
+unchanged. The private-import allowlist shrank by the removed MTP capture import.
+The refreshed October 16 pre-dispatch packet records the new API pin while
+retaining the October 9 packet and its historical price/estimate evidence.
+
+Three encountered corrections are separate commits: the PR template now permits
+an open parent reference; the pin docstring distinguishes contract binding from
+installed Git provenance; the provisioner reads the packaged contract from the
+Tessera package root without initializing `tessera.serving`.
+
+The [original review](../reviews/prismaquant-architecture-review-20261014.html)
+is preserved byte-for-byte, SHA-256
+`df542280ade842f6f61d0349664ab22fe0410591a89fb532989d06a189ba3ca5`.
+All earlier rejected facade/framework proposals and independent PR dispositions
+remain in force. A read-only refresh at 13:44 UTC found all 36 existing PRs open
+at unchanged heads, main still at `138069b7993`, and parent #1295 open. The final
+verification report records the qualification and delivery evidence separately.
+
+The Tessera producer's selected integration remains failed on its two recorded
+baseline controls. Its API delivery carries CPU evidence. Later architecture
+implementation `53bcd17e3a88c93237465bd7be740f98cd2abc47` and archival head
+`c70188a791402843ec6be7e50d426e784d5e1f74` have separate ownership and evidence;
+they are not substituted for the v60 API pin. PrismaQuant's consumer CUDA checks
+do not promote producer cells or establish serving throughput or quality.
