@@ -118,6 +118,43 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     assert result['independent_selected_assignment_validation']['required_for_production_promotion']
 
 
+def test_both_aggregators_read_the_rows_the_candidate_builder_admitted(monkeypatch):
+    """Packed and fused aggregation price one table, the builder's cost rows.
+
+    Synthesized and canonical rows exist only in that table; an aggregator
+    given the raw payload would see a member without them and drop the
+    group's option instead of pricing it.
+    """
+    from prismaquant import tessera_sampled_stack_proposal as mod
+    joint, *_tail, names = pilot_fixture()
+    _research_menu(monkeypatch)
+    tables = {}
+    real_build = mod.build_candidates
+
+    def build(*args, **kwargs):
+        result = real_build(*args, **kwargs)
+        tables['admitted'] = result.cost_rows
+        return result
+
+    def reading(stage, real):
+        def aggregate(stats, costs, *args, **kwargs):
+            tables[stage] = costs
+            return real(stats, costs, *args, **kwargs)
+        return aggregate
+
+    monkeypatch.setattr(mod, 'build_candidates', build)
+    monkeypatch.setattr(mod, 'aggregate_packed_serving_groups',
+                        reading('packed', mod.aggregate_packed_serving_groups))
+    monkeypatch.setattr(mod, 'aggregate_fused_siblings',
+                        reading('fused', mod.aggregate_fused_siblings))
+    propose_bound_payload(joint, profile=AtomicProfile(),
+        mutable_budget_bytes=600000, immutable_bytes=101, reserve_bytes=11,
+        full_legal_families=PRIMARY)
+    assert tables['packed'] is tables['admitted']
+    assert tables['fused'] is tables['admitted']
+    assert tables['admitted'] is not joint['costs']
+
+
 def test_stack_members_reach_aggregation_with_whole_menus(monkeypatch):
     # Per-member reduction before aggregation can empty a stack's name
     # intersection; test_allocator_packed_group_menu_reduction has the case.

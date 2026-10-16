@@ -191,9 +191,11 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     _require(all(name not in grouped for name in unknown),
              'unobserved member escaped as an independent allocator choice')
     # The fused aggregator's licensed per-member Tessera composites remain the
-    # one existing path for dense gate/up and QKV groups.
+    # one existing path for dense gate/up and QKV groups. Like allocator.main,
+    # aggregation reads the rows the candidate builder admitted, not the raw
+    # payload: synthesized and canonical rows exist only there.
     final_stats, _, final_candidates = aggregate_fused_siblings(
-        grouped_stats, payload['costs'], specs, grouped, profile)
+        grouped_stats, costs, specs, grouped, profile)
     _require(set(final_stats) == set(final_candidates) and all(final_candidates.values()),
              'fused aggregation lost a measured decision unit')
     total_params = sum(int(s['n_params']) for s in final_stats.values())
