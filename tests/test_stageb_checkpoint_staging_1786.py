@@ -154,6 +154,30 @@ def test_snapshot_graph_refuses_unbounded_or_custom_reducers():
         snapshot_bound(graph, limit=16 << 20)
 
 
+def test_ledger_refuses_tensor_state_before_deferred_publication(tmp_path):
+    import torch
+    from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
+
+    source = {"tensor": torch.arange(8, dtype=torch.float32)}
+    completed = set()
+    ledger = CheckpointPublicationLedger(
+        checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, "a" * 64),
+        windows=[{"names": ["unit"]}], completed=completed,
+        acknowledge=lambda: None, window_done=lambda index: None,
+        budget_bytes=16 << 20)
+    try:
+        ledger.start_window(0, ["unit"])
+        with pytest.raises(ValueError, match="tensor-free"):
+            ledger.submit("unit", lambda limit: source)
+        source["tensor"].fill_(999)
+        ledger.flush()
+        assert completed == set()
+        assert ledger.stats()["charged_bytes"] == 0
+        assert not cost_stage_checkpoint.unit_path(tmp_path, "unit").exists()
+    finally:
+        ledger.close()
+
+
 def test_construction_bound_refuses_large_shape_before_copying():
     from prismaquant.joint_checkpoint_publication import check_construction
 
