@@ -8,7 +8,7 @@ The override lives in three places the body never touches:
      entries (the enumerable visual Linears).
   3. export_native_compressed._apply_visual_recipe_quant — rewrites
      passthrough-loaded visual `.weight` tensors through
-     `_quantize_2d` when the recipe assigns non-BF16.
+     `quantize_2d` when the recipe assigns non-BF16.
 
 Complete measured multimodal Fisher rows use per-Linear allocator decisions.
 These tests cover the explicit uniform/text-only control and source census;
@@ -231,7 +231,7 @@ class TestDiscoverVisualLinearsFromSource(unittest.TestCase):
 
 class TestApplyVisualRecipeQuant(unittest.TestCase):
     """_apply_visual_recipe_quant rewrites visual `.weight` entries
-    through _quantize_2d when the assignment says non-BF16."""
+    through quantize_2d when the assignment says non-BF16."""
 
     def test_nvfp4_assignment_replaces_weight_with_compressed_tensors(self):
         # Group size 16 → shape must be divisible by 16 on the in dim.
@@ -309,7 +309,7 @@ class TestApplyVisualRecipeQuant(unittest.TestCase):
         name = "model.visual.blocks.0.attn.qkv"
         src_extra = {f"{name}.weight": torch.randn(48, 32, dtype=torch.bfloat16)}
         with patch(
-            'prismaquant.native_render_codec._quantize_2d',
+            'prismaquant.native_render_codec.quantize_2d',
             side_effect=ValueError("shape mismatch"),
         ):
             with self.assertRaisesRegex(RuntimeError, "visual quant failed"):

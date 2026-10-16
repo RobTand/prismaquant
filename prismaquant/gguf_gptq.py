@@ -9,7 +9,7 @@ element, propagating each column's quantization error through the
 activation Hessian's Cholesky inverse. This strictly generalizes the
 diagonal imatrix weighting llama.cpp uses (the Hessian's diagonal IS the
 imatrix; GPTQ adds the off-diagonal error compensation), and mirrors the
-NVFP4 lane's static-scale GPTQ (`_gptq_obs_rounding_nvfp4`), whose
+NVFP4 lane's static-scale GPTQ (`gptq_obs_rounding_nvfp4`), whose
 Hessian preparation and damp conventions are reused verbatim:
 ``H = X^T X`` with per-token activation clipping, dead activation
 channels excluded from the damp reference and NOT zeroed (serving-safe),
@@ -71,14 +71,14 @@ def _hessian_inverse(
     """Upper-triangular Cholesky of H^-1, with the NVFP4 lane's activation
     clipping, dead-channel, and damp conventions."""
     from prismaquant.native_render_codec import (
-        _activation_matrix_for_gptq,
-        _resolve_gptq_fixed_damp,
+        activation_matrix_for_gptq,
+        resolve_gptq_fixed_damp,
     )
 
     if damp is None:
-        damp = _resolve_gptq_fixed_damp(levers=levers)
+        damp = resolve_gptq_fixed_damp(levers=levers)
     cols = weight.shape[1]
-    X = _activation_matrix_for_gptq(
+    X = activation_matrix_for_gptq(
         activations, cols, device=weight.device, levers=levers)
     H = (X.t() @ X).to(torch.float32)
     diag0 = torch.diagonal(H)

@@ -44,11 +44,11 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
     monkeypatch.delenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", raising=False)
 
     default_recipe = NativeRenderLevers()
-    legacy = _native_render_codec._rtn_dequant_nvfp4(
+    legacy = _native_render_codec.rtn_dequant_nvfp4(
         weight, group_size=16, levers=default_recipe)
     explicit_before = _native_render_codec.render_nvfp4_dequant(weight)
     grouped = weight.reshape(7, 2, 16)
-    _legacy_scale, legacy_global = _native_render_codec._select_nvfp4_pack_scales_and_global(
+    _legacy_scale, legacy_global = _native_render_codec.select_nvfp4_pack_scales_and_global(
         grouped, levers=default_recipe
     )
     explicit_global_before = _native_render_codec.nvfp4_global_real(weight)

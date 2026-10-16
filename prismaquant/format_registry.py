@@ -867,7 +867,7 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     pad = (-in_features) % 16
     if pad:
         flat = torch.nn.functional.pad(flat, (0, pad))
-    out = _native_render_codec._rtn_dequant_nvfp4(
+    out = _native_render_codec.rtn_dequant_nvfp4(
         flat, group_size=16, levers=registry_rtn_levers())
     if pad:
         out = out[:, :in_features]

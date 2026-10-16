@@ -2575,7 +2575,7 @@ class PerturbedActivationCache:
         # the export's act-clip behavior.  See production_weight_cache.py
         # for the convention note (we store max_abs directly; the export's
         # vLLM-facing metadata is derived via
-        # export_native_compressed._nvfp4_input_global_scale_from_max_abs).
+        # native_render_codec.nvfp4_input_global_scale_from_max_abs).
         if production_weight_cache is not None and (
             production_weight_cache.activation_max_abs
             or production_weight_cache.activation_scales

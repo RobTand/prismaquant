@@ -49,13 +49,13 @@ def test_joint_mse_rule_uses_the_configured_levels(monkeypatch):
     # group of 16 whose magnitudes favor clipping to 4 over 6 is hard to force;
     # instead assert the JOINT default matches FourOverSix exactly.
     g = torch.randn(4, 8, 16, generator=torch.Generator().manual_seed(7))
-    joint = enc._select_nvfp4_group_scales(g, levers=m, scale_rule="joint_mse")
-    f46 = enc._select_nvfp4_group_scales(g, levers=m, scale_rule="four_over_six_mse")
+    joint = enc.select_nvfp4_group_scales(g, levers=m, scale_rule="joint_mse")
+    f46 = enc.select_nvfp4_group_scales(g, levers=m, scale_rule="four_over_six_mse")
     assert torch.allclose(joint, f46), "JOINT_MSE default must equal FourOverSix"
     # with the full grid restored, JOINT can pick scales FourOverSix cannot
     mf = _resolve(monkeypatch, "6,4,3,2,1.5,1,0.5")
-    joint_full = enc._select_nvfp4_group_scales(g, levers=mf, scale_rule="joint_mse")
-    f46_full = enc._select_nvfp4_group_scales(g, levers=mf, scale_rule="four_over_six_mse")
+    joint_full = enc.select_nvfp4_group_scales(g, levers=mf, scale_rule="joint_mse")
+    f46_full = enc.select_nvfp4_group_scales(g, levers=mf, scale_rule="four_over_six_mse")
     # joint_full searches a superset, so its per-group MSE is <= FourOverSix's
     max_abs = g.abs().amax(-1).clamp_min(1e-12)
     def mse(scale):

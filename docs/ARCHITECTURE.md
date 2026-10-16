@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the codec names other modules call are public
+(`quantize_2d`, `canonical_export_format`, the GPTQ, scale-sweep and NVFP4
+scale primitives, the input-global-scale helpers), and do-no-harm counts are
+read through `do_no_harm_stats()` / `reset_do_no_harm_stats()`. No production
+module reaches a private `native_render_codec` name. Bytes are unchanged.
+
 Re-stamped 2026-10-16: the streamed dense fill derives fused-sibling NVFP4 joint
 globals from the cache's recorded recipe, like the resident fill and both
 export pre-passes; the AURA anchor renderer and the MTP fill share that code.
@@ -26373,13 +26379,13 @@ NVFP4 scale rules live in the *exporter*, not the registry
   `PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS`.
 - `static_6` is the `PRISMAQUANT_NVFP4_SCALE_RULE` env default, governing non-JSO RTN renders
   only; `four_over_six_mse` is a separate, non-JSO rule. Do not conflate the three. Single
-  selection point for RTN / GPTQ / scale-sweep / packed / export: `_select_nvfp4_group_scales`
-  (`:316-349`).
+  selection point for RTN / GPTQ / scale-sweep / packed / export:
+  `native_render_codec.select_nvfp4_group_scales`.
 
 ### 5.3 GPTQ damp
 
 Sweep **OFF** since 2026-06-12 (`gptq_damp_sweep_enabled` `export_native_compressed.py:2550`,
-env default `"0"` at `:2555`), fixed damp **1.0** (`_resolve_gptq_fixed_damp :2558-2577`). The
+env default `"0"` at `:2555`), fixed damp **1.0** (`native_render_codec.resolve_gptq_fixed_damp`). The
 sweep's evaluator was in-sample; the V1 served A/B had fixed damp winning every gold-lane
 readout across calibration draws at ~4.4× less render time.
 `PRISMAQUANT_GPTQ_DAMP_SWEEP=1` reproduces historical artifacts, `PRISMAQUANT_GPTQ_DAMP`
@@ -27051,7 +27057,7 @@ refs are that file.
 
 ### 6.1 Codec map
 
-`_quantize_2d` `:4740-5225`, dispatching on `_canonical_export_format` `:676-680`.
+`native_render_codec.quantize_2d`, dispatching on `canonical_export_format`.
 
 | Format | codec | emitted tensors |
 |---|---|---|
@@ -27063,10 +27069,10 @@ refs are that file.
 | FP8_SOURCE | verbatim copy (§6.3) | source `weight` + `weight_scale_inv` |
 | 3-D packed experts | `_quantize_3d_packed` `:5228` + `_split_packed_expert_tensor` `:4540` | per-expert per-projection tensors |
 
-Activation-aware passes compose inside `_quantize_2d` (`:4818-4832`): `gptq`, `scale_sweep`,
+Activation-aware passes compose inside `quantize_2d`: `gptq`, `scale_sweep`,
 `static_act_order`, `joint_scale_opt`, the latter two forced to require `gptq`
 (`:4830-4831`). `input_global_scale` follows the compressed-tensors `generate_gparam`
-convention `FP8_MAX·FP4_MAX/max_abs` (`_nvfp4_input_global_scale_from_max_abs :895-910`).
+convention `FP8_MAX·FP4_MAX/max_abs` (`nvfp4_input_global_scale_from_max_abs`).
 
 **Export refuses what it cannot emit** (#27, `29f3cff`). `EXPORTABLE_FORMATS` `:7517` is
 *derived* from `FORMAT_SCHEME` plus the container passthrough, never hand-listed, and the vLLM

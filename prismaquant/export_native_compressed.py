@@ -292,7 +292,7 @@ def _production_cache_expected_keys(
     missing: list[tuple[str, str]] = []
     for qname, fmt in assignment.items():
         cache_fmt = str(fmt).upper()
-        canonical = _native_render_codec._canonical_export_format(cache_fmt)
+        canonical = _native_render_codec.canonical_export_format(cache_fmt)
         if canonical in PASSTHROUGH_SOURCE_REQUIREMENTS:
             continue
         key = _production_cache_lookup_key(qname, cache_fmt)
@@ -369,7 +369,7 @@ def _production_cache_fingerprint(
 def _production_cache_scales(cache, *, profile=None) -> dict[str, float]:
     activation_max_abs = getattr(cache, "activation_max_abs", None) or {}
     scales = {
-        name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(max_abs), levers=_export_render_options())
+        name: _native_render_codec.nvfp4_input_global_scale_from_max_abs(float(max_abs), levers=_export_render_options())
         for name, max_abs in activation_max_abs.items()
         if max_abs and float(max_abs) > 0.0
     }
@@ -605,7 +605,7 @@ def _coerce_runtime_legal_assignment(
     # qname -> (shape, from_fmt, reason, detail)
     illegal: dict[str, tuple[list[int], str, str, str]] = {}
     for qname, fmt in assignment.items():
-        fmt_canonical = _native_render_codec._canonical_export_format(fmt)
+        fmt_canonical = _native_render_codec.canonical_export_format(fmt)
         out[qname] = fmt_canonical
         if fmt_canonical == "BF16":
             continue
@@ -731,10 +731,10 @@ def _coerce_runtime_legal_assignment(
             delta
             for delta in (
                 _bf16_coercion_delta_bytes(
-                    shapes.get(member), _native_render_codec._canonical_export_format(out[member])
+                    shapes.get(member), _native_render_codec.canonical_export_format(out[member])
                 )
                 for member in members
-                if _native_render_codec._canonical_export_format(out[member]) != "BF16"
+                if _native_render_codec.canonical_export_format(out[member]) != "BF16"
             )
             if delta is not None
         )
@@ -760,7 +760,7 @@ def _coerce_runtime_legal_assignment(
         # what a shape-aware allocator must pick, so take it for the WHOLE
         # unit. Never one member — that is the mixed-scheme artifact.
         for member in members:
-            member_fmt = _native_render_codec._canonical_export_format(out[member])
+            member_fmt = _native_render_codec.canonical_export_format(out[member])
             if member_fmt == "BF16":
                 continue
             member_shape = shapes.get(member)
@@ -1045,7 +1045,7 @@ def _bf16_passthrough_for_assignment(
     mode = str(meta.get("lm_head_mode") or "")
     fmt = str(meta.get("lm_head_format") or "BF16")
     lift_head = mode == "dp" or (
-        mode == "fixed" and _native_render_codec._canonical_export_format(fmt) != "BF16"
+        mode == "fixed" and _native_render_codec.canonical_export_format(fmt) != "BF16"
     )
     return set(remaining_profile_pins(
         profile,
@@ -1095,7 +1095,7 @@ def _bf16_upgrade_audit(
     counts: dict[str, int] = {}
 
     for qname, fmt in sorted(assignment.items()):
-        if _native_render_codec._canonical_export_format(fmt) != "BF16":
+        if _native_render_codec.canonical_export_format(fmt) != "BF16":
             continue
         coerced_entry = coerced.get(qname)
         shape = (
@@ -1213,7 +1213,7 @@ def _production_cache_prefetch_assignment(
         if prefix is not None and not (qname == prefix or qname.startswith(prefix + ".")):
             continue
         cache_fmt = str(fmt).upper()
-        if _native_render_codec._canonical_export_format(cache_fmt) == "BF16":
+        if _native_render_codec.canonical_export_format(cache_fmt) == "BF16":
             continue
         quantized += 1
         key = _production_cache_lookup_key(qname, cache_fmt)
@@ -1275,7 +1275,7 @@ def _pack_production_cached_2d(
     if cache is None:
         return None
     cache_fmt = str(fmt).upper()
-    fmt = _native_render_codec._canonical_export_format(cache_fmt)
+    fmt = _native_render_codec.canonical_export_format(cache_fmt)
     key = _production_cache_lookup_key(linear_name, cache_fmt)
     if key is None:
         return None
@@ -1291,7 +1291,7 @@ def _pack_production_cached_2d(
             global_real_override=nvfp4_global_real_override,
             levers=_export_render_options(cache),
         )
-        input_scale = _native_render_codec._resolve_nvfp4_input_global_scale(target=linear_name, calibrated_scales=_INPUT_GLOBAL_SCALES)
+        input_scale = _native_render_codec.resolve_nvfp4_input_global_scale(target=linear_name, calibrated_scales=_INPUT_GLOBAL_SCALES)
         return {
             "weight_packed": wp,
             "weight_scale": ws,
@@ -1306,7 +1306,7 @@ def _pack_production_cached_2d(
         # The production cache stores dequantized weights for KL/polish, not
         # the uint8 scale tensor. Repacking a dequantized tensor can legally
         # choose a different E8M0 scale, so when the activation cache is
-        # available we recompute from source weights through `_quantize_2d`.
+        # available we recompute from source weights through `quantize_2d`.
         cache_levers = getattr(cache, "levers", {}) or {}
         if (
             (
@@ -1318,7 +1318,7 @@ def _pack_production_cached_2d(
         ):
             return None
         w_work = w.to(device=target_device, dtype=torch.float32)
-        dtype, max_value = _native_render_codec._fp8_element_dtype_and_max(fmt)
+        dtype, max_value = _native_render_codec.fp8_element_dtype_and_max(fmt)
         q, qs = _native_render_codec.quantize_dequantize_mxfp8(
             w_work,
             group_size=32,
@@ -1410,7 +1410,7 @@ def _packed_expert_input_global_scale(
     mx = max_abs_map.get(experts_param_name)
     if mx is None or float(mx) <= 0:
         return None
-    return _native_render_codec._nvfp4_input_global_scale_from_max_abs(float(mx), levers=_export_render_options())
+    return _native_render_codec.nvfp4_input_global_scale_from_max_abs(float(mx), levers=_export_render_options())
 
 
 def _packed_expert_stage_attestation(
@@ -1478,7 +1478,7 @@ def _packed_expert_stage_attestation(
     policy = _nvfp4_activation_contract.resolve_input_global_scale_policy()
     return _nvfp4_activation_contract.build_routed_moe_stage_attestation(
         {
-            name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(value, levers=_export_render_options())
+            name: _native_render_codec.nvfp4_input_global_scale_from_max_abs(value, levers=_export_render_options())
             for name, value in max_abs_by_target.items()
         },
         policy=policy,
@@ -1494,7 +1494,7 @@ def _packed_expert_stage_attestation(
 
 
 # Module-level flag bundle that controls which activation-aware
-# passes run when `_quantize_2d` is invoked from main()'s streaming
+# passes run when `quantize_2d` is invoked from main()'s streaming
 # loop. Kept as module-level state (mirroring _INPUT_GLOBAL_SCALES)
 # so we don't have to thread 3 boolean kwargs through every call
 # site — unit tests pass the flags directly via kwargs.
@@ -1963,7 +1963,7 @@ def _compute_nvfp4_joint_global(
                 recipe_qname = qname
         else:
             recipe_qname = qname
-        if _native_render_codec._canonical_export_format(assignment.get(recipe_qname, "BF16")) != "NVFP4":
+        if _native_render_codec.canonical_export_format(assignment.get(recipe_qname, "BF16")) != "NVFP4":
             continue
         g = fused_sibling_group_key(recipe_qname, profile=profile)
         if g is None:
@@ -2072,7 +2072,7 @@ def _compute_layer_joint_nvfp4(layer_mod: nn.Module,
         for full, recipe_key, mod in members:
             fmt = assignment.get(recipe_key)
             fqn_fmt.append((full, recipe_key, fmt, mod))
-        fmts = {_native_render_codec._canonical_export_format(f) for _, _, f, _ in fqn_fmt}
+        fmts = {_native_render_codec.canonical_export_format(f) for _, _, f, _ in fqn_fmt}
         if fmts != {"NVFP4"}:
             continue
         candidates = [
@@ -2363,7 +2363,7 @@ def _fp8_source_config_overlay(
             continue
         recipe_fmt = config_assignment.get(recipe_key)
         fmt = (
-            _native_render_codec._canonical_export_format(recipe_fmt)
+            _native_render_codec.canonical_export_format(recipe_fmt)
             if recipe_fmt is not None
             else None
         )
@@ -2537,7 +2537,7 @@ def materialize_tensors_streaming(
     # every `_read_layer_to_device` / `_materialize` call so fp8 source
     # weights land on the module as TRUE dequanted bf16 — not raw fp8
     # codes (range ±448) cast to bf16. Every downstream pass
-    # (_quantize_2d for non-passthrough formats, probe Fisher, cost
+    # (quantize_2d for non-passthrough formats, probe Fisher, cost
     # RTN) then operates on the real weight values instead of scaled-
     # by-hidden-factor codes. Empty dict for BF16-native checkpoints.
     fp8_scale_inv_map = _build_fp8_scale_inv_map(model_path)
@@ -2598,7 +2598,7 @@ def materialize_tensors_streaming(
         if recipe_key in bf16_passthrough:
             fmt = "BF16"
         if fmt is not None:
-            fmt = _native_render_codec._canonical_export_format(fmt)
+            fmt = _native_render_codec.canonical_export_format(fmt)
         if fmt == "FP8_SOURCE":
             raise NotImplementedError(
                 f"[export-stream] FP8_SOURCE not wired for head params "
@@ -2616,11 +2616,11 @@ def materialize_tensors_streaming(
                 device=device,
             )
             if compressed is None:
-                compressed = _native_render_codec._quantize_2d(
+                compressed = _native_render_codec.quantize_2d(
                     param.detach().float(), fmt,
                     nvfp4_global_real_override=joint,
                     linear_name=recipe_key,
-                 cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
+                 cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
             for suffix, t in compressed.items():
                 base_name = (full_qname[:-len(".weight")]
                              if full_qname.endswith(".weight")
@@ -2760,7 +2760,7 @@ def materialize_tensors_streaming(
         # Batch same-shape NVFP4 Linears when act-aware passes
         # (GPTQ / scale_sweep) are on. Default ON; set
         # PRISMAQUANT_BATCHED_NVFP4_EXPORT=0 to force the slower
-        # per-Linear `_quantize_2d` path for bit-exact A/Bs.
+        # per-Linear `quantize_2d` path for bit-exact A/Bs.
         grouped_nvfp4_batched: dict[
             tuple[int, int],
             list[tuple[str, str, str, nn.Linear]]
@@ -2782,7 +2782,7 @@ def materialize_tensors_streaming(
 
             recipe_key = profile.live_to_recipe_name(full)
             recipe_fmt = assignment.get(recipe_key)
-            fmt = _native_render_codec._canonical_export_format(recipe_fmt) if recipe_fmt is not None else None
+            fmt = _native_render_codec.canonical_export_format(recipe_fmt) if recipe_fmt is not None else None
             source_weight_key = f"{full}.weight"
             source_weight_dtype = source_dtype_by_name.get(source_weight_key)
             source_is_fp8_scaled = (
@@ -2906,11 +2906,11 @@ def materialize_tensors_streaming(
                     (full, emit_full, recipe_key, mod))
                 continue
 
-            compressed = _native_render_codec._quantize_2d(
+            compressed = _native_render_codec.quantize_2d(
                 mod.weight.detach().float(), fmt,
                 nvfp4_global_real_override=override,
                 linear_name=recipe_key,
-             cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
+             cached_activations=(_CACHED_ACTIVATIONS.get(recipe_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=recipe_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
             for suffix, t in compressed.items():
                 out[f"{emit_full}.{suffix}"] = t.cpu()
             if mod.bias is not None:
@@ -2932,7 +2932,7 @@ def materialize_tensors_streaming(
                     [mod.weight.detach().to(torch.float32) for _, _, _, mod in chunk],
                     dim=0,
                 )
-                compressed_batch = _native_render_codec._quantize_2d_group_same_shape(stacked, fmt)
+                compressed_batch = _native_render_codec.quantize_2d_group_same_shape(stacked, fmt)
                 del stacked
                 for i, (full, emit_full, _recipe_key, mod) in enumerate(chunk):
                     for suffix, tensor in compressed_batch.items():
@@ -2959,7 +2959,7 @@ def materialize_tensors_streaming(
                     shape, len(items), export_dev)
                 for start in range(0, len(items), chunk_len):
                     chunk = items[start:start + chunk_len]
-                    compressed_per_linear = _native_render_codec._quantize_2d_nvfp4_group_batched(
+                    compressed_per_linear = _native_render_codec.quantize_2d_nvfp4_group_batched(
                         chunk, joint_globals, export_dev,
                         expert_chunk=chunk_len,
                      activations=_CACHED_ACTIVATIONS, input_global_scales=_INPUT_GLOBAL_SCALES, levers=_export_render_options())
@@ -2992,7 +2992,7 @@ def materialize_tensors_streaming(
                 recipe_key = profile.live_to_recipe_name(full)
                 fmt = assignment.get(recipe_key)
                 if fmt is not None:
-                    fmt = _native_render_codec._canonical_export_format(fmt)
+                    fmt = _native_render_codec.canonical_export_format(fmt)
                 if fmt is None:
                     unmapped_keys.append(full)
                     continue
@@ -3179,7 +3179,7 @@ def materialize_tensors_streaming(
                                 if cached_sub is not None
                                 else sub_packed[orig_e]
                             )
-                            compressed = _native_render_codec._quantize_2d(
+                            compressed = _native_render_codec.quantize_2d(
                                 expert_2d, fmt,
                                 nvfp4_global_real_override=(
                                     per_expert_joint[orig_e]),
@@ -3373,7 +3373,7 @@ def _materialize_tensors_inmemory(
         fmt_key = remap(qname)
         fmt = assignment.get(fmt_key)
         if fmt is not None:
-            fmt = _native_render_codec._canonical_export_format(fmt)
+            fmt = _native_render_codec.canonical_export_format(fmt)
         if fmt is None:
             continue
         if fmt == "BF16" or fmt_key in bf16_passthrough:
@@ -3402,11 +3402,11 @@ def _materialize_tensors_inmemory(
             )
         cache_hit = compressed is not None
         if compressed is None:
-            compressed = _native_render_codec._quantize_2d(
+            compressed = _native_render_codec.quantize_2d(
                 mod.weight.detach().float(), fmt,
                 nvfp4_global_real_override=joint,
                 linear_name=fmt_key,
-             cached_activations=(_CACHED_ACTIVATIONS.get(fmt_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=fmt_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
+             cached_activations=(_CACHED_ACTIVATIONS.get(fmt_key) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=fmt_key, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
         for suffix, tensor in compressed.items():
             out[f"{qname}.{suffix}"] = tensor.cpu()
         if mod.bias is not None:
@@ -3426,7 +3426,7 @@ def _materialize_tensors_inmemory(
             recipe_key = remap(full_name)
             fmt = assignment.get(recipe_key)
             if fmt is not None:
-                fmt = _native_render_codec._canonical_export_format(fmt)
+                fmt = _native_render_codec.canonical_export_format(fmt)
             if fmt is None:
                 continue
             packed_param_src = getattr(mod, pn).detach()
@@ -3551,7 +3551,7 @@ def _materialize_tensors_inmemory(
                             cached_sub[e] if cached_sub is not None
                             else sub_packed[e]
                         )
-                        compressed = _native_render_codec._quantize_2d(
+                        compressed = _native_render_codec.quantize_2d(
                             expert_2d, fmt,
                             nvfp4_global_real_override=per_expert_joint[e],
                             input_global_scale_override=expert_input_scale,
@@ -3657,7 +3657,7 @@ MXFP4_SCHEME = {
 # Compressed-tensors' `weight_scale` (forward-direction dequant scale:
 # `w_bf16 = w_fp8 * weight_scale`) is semantically identical to
 # MiniMax's `weight_scale_inv`; the tensor bytes are copied verbatim
-# and only the suffix is renamed on export. No _quantize_2d pass runs.
+# and only the suffix is renamed on export. No quantize_2d pass runs.
 FP8_SOURCE_SCHEME = {
     "format": "float-quantized",
     "weights": {
@@ -3852,7 +3852,7 @@ FORMAT_SCHEME = {
 # cannot appear in `FORMAT_SCHEME` by construction. BF16 is written as a
 # plain safetensors bf16 tensor and named on the checkpoint's `ignore`
 # list. (FP8_SOURCE is *also* a verbatim-copy passthrough — no
-# `_quantize_2d` pass runs for it — but it still describes itself to vLLM
+# `quantize_2d` pass runs for it — but it still describes itself to vLLM
 # through `FP8_SOURCE_SCHEME`, so `FORMAT_SCHEME` already covers it.)
 CONTAINER_PASSTHROUGH_FORMATS = frozenset({"BF16"})
 
@@ -3861,7 +3861,7 @@ CONTAINER_PASSTHROUGH_FORMATS = frozenset({"BF16"})
 # passthroughs. Derived, never hand-listed, so a new scheme becomes
 # exportable in the same commit that adds it.
 #
-# It is deliberately NOT derived from the `_quantize_2d` byte-packer
+# It is deliberately NOT derived from the `quantize_2d` byte-packer
 # branches, which do not agree with what is shippable: `FP8_E5M2` has a
 # packer branch but no scheme (it raises "research-only", and bytes with
 # no metadata are bytes vLLM cannot dispatch — CLAUDE.md gate #9), while
@@ -3872,7 +3872,7 @@ CONTAINER_PASSTHROUGH_FORMATS = frozenset({"BF16"})
 # containing a rung export would have to rewrite (issue #22 part 2).
 # `_coerce_runtime_legal_assignment` hard-fails on anything outside it.
 EXPORTABLE_FORMATS = frozenset(
-    {_native_render_codec._canonical_export_format(name) for name in FORMAT_SCHEME}
+    {_native_render_codec.canonical_export_format(name) for name in FORMAT_SCHEME}
     | CONTAINER_PASSTHROUGH_FORMATS
 )
 
@@ -3893,7 +3893,7 @@ def derive_executed_activation_formats() -> frozenset[str]:
     A-side price.
     """
     return frozenset(
-        _native_render_codec._canonical_export_format(fmt)
+        _native_render_codec.canonical_export_format(fmt)
         for fmt, scheme in FORMAT_SCHEME.items()
         if "input_activations" in scheme
     )
@@ -3921,7 +3921,7 @@ def executed_activation_formats_in_quantization_config(qc: Mapping) -> frozenset
             continue
         stripped = {k: v for k, v in group.items() if k != "targets"}
         matched = {
-            _native_render_codec._canonical_export_format(fmt)
+            _native_render_codec.canonical_export_format(fmt)
             for fmt, scheme in FORMAT_SCHEME.items()
             if scheme == stripped
         }
@@ -4073,7 +4073,7 @@ def build_quantization_config(
     for n in extra_ignore:
         ignore.append(profile.to_vllm_internal_name(n))
     for name, fmt in sorted(assignment.items()):
-        fmt = _native_render_codec._canonical_export_format(fmt)
+        fmt = _native_render_codec.canonical_export_format(fmt)
         vllm_name = profile.to_vllm_internal_name(name)
         if fmt == "FP8_SOURCE" and profile.runtime_loads_source_fp8(name):
             # The pinned runtime dequantizes these modules itself at load
@@ -4120,7 +4120,7 @@ def build_quantization_config(
         # siblings under names that match known fused patterns.
         bf16_name_set = set(ignore)
         for name, fmt in list(assignment.items()):
-            fmt = _native_render_codec._canonical_export_format(fmt)
+            fmt = _native_render_codec.canonical_export_format(fmt)
             if fmt != "BF16":
                 continue
             leaf = name.rsplit(".", 1)[-1]
@@ -4964,7 +4964,7 @@ def _main_impl(argv: Sequence[str] | None = None):
     _PRODUCTION_WEIGHT_CACHE = None
     _PRODUCTION_CACHE_FINGERPRINT = None
     _RENDER_LEVERS = NativeRenderLevers.resolve()
-    _native_render_codec._DO_NO_HARM_STATS.clear()
+    _native_render_codec.reset_do_no_harm_stats()
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True,
@@ -4992,7 +4992,7 @@ def _main_impl(argv: Sequence[str] | None = None):
     ap.add_argument("--device", default="cuda",
                     help="CUDA device for quantization arithmetic. Layer "
                          "weights are read into this device; "
-                         "_quantize_2d / _quantize_3d_packed run here; "
+                         "quantize_2d / _quantize_3d_packed run here; "
                          "outputs are moved to CPU before storage. CPU is "
                          "rejected for production quantization.")
     ap.add_argument("--offload-folder", default=None,
@@ -5265,7 +5265,7 @@ def _main_impl(argv: Sequence[str] | None = None):
           flush=True)
 
     # Populate the module-level input-global-scale cache (used by
-    # `_quantize_2d` for NVFP4 linears) from cached activations.
+    # `quantize_2d` for NVFP4 linears) from cached activations.
     # Same cache is reused to populate _CACHED_ACTIVATIONS when any
     # act-aware pass is enabled.
     if args.activation_cache_dir and _PRODUCTION_WEIGHT_CACHE is not None:
@@ -5467,7 +5467,7 @@ def _main_impl(argv: Sequence[str] | None = None):
 
         # Phase 1 visual-encoder quant: when the allocator's recipe
         # assigns a non-BF16 format to a visual Linear, run its 2D
-        # weight through `_quantize_2d` before emit. BF16 entries and
+        # weight through `quantize_2d` before emit. BF16 entries and
         # non-Linear tensors (norms, conv1d, biases, buffers) pass
         # through unchanged. See allocator's `--visual-format` docstring
         # for why this is a uniform override rather than a per-Linear
@@ -5541,7 +5541,7 @@ def _main_impl(argv: Sequence[str] | None = None):
                 runtime_coerced,
                 profile,
             ),
-            "do_no_harm": dict(_native_render_codec._DO_NO_HARM_STATS),
+            "do_no_harm": _native_render_codec.do_no_harm_stats(),
             "packed_expert_export": _packed_expert_export_provenance(),
             "ignore": sorted(config_bf16_passthrough),
         }, f, indent=2)
@@ -5999,7 +5999,7 @@ def _apply_visual_recipe_quant(
     with a uniform format (`BF16` | `NVFP4` | `MXFP8_E4M3`). For BF16 we do
     nothing — the passthrough tensor is already in the right dtype
     (typically bf16 in the source). For NVFP4 / MXFP8_E4M3 we route the
-    rank-2 weight through `_quantize_2d` and replace the single
+    rank-2 weight through `quantize_2d` and replace the single
     `<name>.weight` key with the compressed-tensors tensor set
     (`<name>.weight_packed`, `<name>.weight_scale`,
     `<name>.weight_global_scale`, `<name>.input_global_scale` for NVFP4;
@@ -6028,7 +6028,7 @@ def _apply_visual_recipe_quant(
         base = key[:-len(".weight")]
         fmt = assignment.get(base)
         if fmt is not None:
-            fmt = _native_render_codec._canonical_export_format(fmt)
+            fmt = _native_render_codec.canonical_export_format(fmt)
         if fmt is None or fmt == "BF16":
             out[key] = tensor
             continue
@@ -6038,11 +6038,11 @@ def _apply_visual_recipe_quant(
             continue
         weight = tensor.to(device=device, dtype=torch.float32)
         try:
-            compressed = _native_render_codec._quantize_2d(
+            compressed = _native_render_codec.quantize_2d(
                 weight, fmt,
                 nvfp4_global_real_override=None,
                 linear_name=base,
-             cached_activations=(_CACHED_ACTIVATIONS.get(base) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=base, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
+             cached_activations=(_CACHED_ACTIVATIONS.get(base) if _CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=base, calibrated_scales=_INPUT_GLOBAL_SCALES), levers=_export_render_options())
         except Exception as e:
             raise RuntimeError(
                 f"[export-stream] visual quant failed for {base} ({fmt}); "

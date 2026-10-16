@@ -264,9 +264,9 @@ def _render_dense_layer(
         export_scale = None
         if max_abs is not None and max_abs > 0:
             from prismaquant.native_render_codec import (
-                _nvfp4_input_global_scale_from_max_abs,
+                nvfp4_input_global_scale_from_max_abs,
             )
-            export_scale = _nvfp4_input_global_scale_from_max_abs(
+            export_scale = nvfp4_input_global_scale_from_max_abs(
                 float(max_abs), policy=stream_score_policy, levers=render_options)
         row_weights = (
             fisher_rows.get(qname)

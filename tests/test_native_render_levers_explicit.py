@@ -120,7 +120,7 @@ def test_every_live_call_site_names_the_recipe():
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in required:
                     defined_elsewhere.add(node.name)
     names = set(required) - defined_elsewhere
-    assert {"_quantize_2d", "quantize_dequantize_nvfp4", "gptq_fields",
+    assert {"quantize_2d", "quantize_dequantize_nvfp4", "gptq_fields",
             "_compute_nvfp4_joint_global"} <= names
 
     offenders = []

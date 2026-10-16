@@ -255,14 +255,14 @@ class RegistryFormatPlugin:
             for lo in range(0, int(w.shape[0]), rows_scan):
                 blk = w[lo:lo + rows_scan].float()
                 grouped = blk.reshape(blk.shape[0], in_f // group, group)
-                s = _native_render_codec._select_nvfp4_group_scales(
+                s = _native_render_codec.select_nvfp4_group_scales(
                     grouped, levers=levers)
                 gmax = torch.maximum(gmax, s.amax())
                 del blk, grouped, s
             global_real = (gmax / _native_render_codec.FP8_E4M3_MAX).clamp_min(1e-12)
 
             def _qdq(blk):
-                out = _native_render_codec._rtn_dequant_nvfp4(
+                out = _native_render_codec.rtn_dequant_nvfp4(
                     blk.float(), group_size=group,
                     global_real_override=global_real, levers=levers)
                 return out.to(blk.dtype)

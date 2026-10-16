@@ -452,7 +452,7 @@ def test_lane_bound_survives_a_widened_policy_rule(profile_id):
 def test_vllm_lane_denies_the_a16_rungs_with_a_structural_reason():
     """The concrete regression: A16 rungs were legal for dense Linears on
     the vLLM lane (the dense rule denies only MXFP4/MXFP8_E5M2/FP8_E5M2)
-    while `_quantize_2d` has no branch for them — and the bit-exact
+    while `quantize_2d` has no branch for them — and the bit-exact
     re-encode short-circuit prices a weight-lossless A16 rung at dloss
     0.0, the unbeatable global minimum."""
     for fmt in ("NVFP4A16", "MXFP8A16", "INT8_W8A16", "INT4_W4A16_g128",
@@ -488,7 +488,7 @@ def test_gguf_lane_admits_every_ggml_type_and_nothing_else():
 
 
 def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
-    """Anti-drift pin. Adding a `_quantize_2d` branch without a
+    """Anti-drift pin. Adding a `quantize_2d` branch without a
     FORMAT_SCHEME entry (or vice versa) breaks this, so the derived menu
     can never silently diverge from what the exporter really does."""
     import torch
@@ -511,7 +511,7 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
 
     # Canonical names only: `layer_config.canonicalize_format` resolves the
     # FP8/FP8_DYNAMIC/MXFP8 aliases before an assignment reaches the
-    # exporter, so `_quantize_2d` is only ever handed a canonical name.
+    # exporter, so `quantize_2d` is only ever handed a canonical name.
     w = torch.randn(64, 256, dtype=torch.bfloat16)
     for fmt in sorted(fr.REGISTRY):
         if fmt in PASSTHROUGH_SOURCE_REQUIREMENTS:
@@ -543,13 +543,13 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
             # a passthrough is NEVER quantized by the weight codec.
             if fmt not in emittable:
                 with pytest.raises(ValueError):
-                    _native_render_codec._quantize_2d(w, fmt, levers=recipe)
+                    _native_render_codec.quantize_2d(w, fmt, levers=recipe)
             continue
         if fmt in emittable:
-            assert _native_render_codec._quantize_2d(w, fmt, levers=recipe), fmt
+            assert _native_render_codec.quantize_2d(w, fmt, levers=recipe), fmt
         else:
             with pytest.raises(ValueError):
-                _native_render_codec._quantize_2d(w, fmt, levers=recipe)
+                _native_render_codec.quantize_2d(w, fmt, levers=recipe)
 
 
 def test_gguf_lane_declaration_matches_the_exporters_own_gate():

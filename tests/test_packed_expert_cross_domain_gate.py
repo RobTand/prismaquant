@@ -191,7 +191,7 @@ def test_cross_domain_gate_reverts_to_rtn_when_gate_prefers_it(monkeypatch):
     monkeypatch.setattr(pwc, "score_render_error", rigged_score)
 
     from prismaquant.native_render_codec import (
-        _rtn_dequant_nvfp4,
+        rtn_dequant_nvfp4,
         compute_nvfp4_global_real,
     )
     from prismaquant.export_native_compressed import (
@@ -219,7 +219,7 @@ def test_cross_domain_gate_reverts_to_rtn_when_gate_prefers_it(monkeypatch):
                 for _, sp in _split_packed_expert_tensor(src, pn, None)
             ]
             g = torch.stack(cands).max() if len(cands) > 1 else cands[0]
-            expected = _rtn_dequant_nvfp4(
+            expected = rtn_dequant_nvfp4(
                 src[e], group_size=16, global_real_override=g, levers=recipe)
             assert torch.allclose(
                 got[e], expected.to(got.dtype), atol=2e-2, rtol=2e-2), (

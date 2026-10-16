@@ -326,7 +326,7 @@ class ProductionWeightCache:
     PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE=0).  We store ``max_abs``
     directly here because that's the value the act-clip path needs;
     consumers convert via
-    ``native_render_codec._nvfp4_input_global_scale_from_max_abs``.
+    ``native_render_codec.nvfp4_input_global_scale_from_max_abs``.
     """
     weights: dict[tuple[str, str], object]  # tensor OR str(path)
     levers: dict[str, object]
@@ -2136,7 +2136,7 @@ def _render_score_for_gate(
     capture: mixing clipped optimization with unclipped gates biases
     accept-vs-RTN decisions near ties by the outlier rows — the exact
     mismatch export's shared-matrix contract
-    (``_activation_matrix_for_gptq``) exists to prevent.
+    (``activation_matrix_for_gptq``) exists to prevent.
     """
     if (
         activations is not None
@@ -2175,7 +2175,7 @@ def _gate_activation_matrix(
     """Return the clip-consistent activation matrix for progressive gates.
 
     Gates must score candidates under the objective GPTQ optimized: export's
-    ``_activation_matrix_for_gptq`` applies the quantile/threshold clip and
+    ``activation_matrix_for_gptq`` applies the quantile/threshold clip and
     the Fisher row weighting before the Hessian build ("intentionally shared
     by the Hessian build, damping sweep evaluator, and do-no-harm gate"), so
     the cache-fill gate reuses it with identical settings instead of scoring
@@ -2184,7 +2184,7 @@ def _gate_activation_matrix(
     if acts_for_render is None:
         return None
 
-    return _native_render_codec._activation_matrix_for_gptq(
+    return _native_render_codec.activation_matrix_for_gptq(
         acts_for_render,
         int(cols),
         device=device,
@@ -3144,7 +3144,7 @@ def _render_nvfp4_progressive_candidate(
 ) -> torch.Tensor:
 
     render_options = replace(NativeRenderLevers.resolve(levers, gptq_default=True), nvfp4_scale_rule=scale_rule)
-    current = _native_render_codec._rtn_dequant_nvfp4(
+    current = _native_render_codec.rtn_dequant_nvfp4(
         weight_scaled,
         group_size=16,
         global_real_override=joint_global_real,
@@ -3154,7 +3154,7 @@ def _render_nvfp4_progressive_candidate(
         return current
     if include_gptq:
         if render_options.gptq_damp_sweep:
-            current = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
+            current = _native_render_codec.gptq_obs_rounding_nvfp4_swept(
                 weight_scaled,
                 activations_scaled,
                 group_size=16,
@@ -3171,11 +3171,11 @@ def _render_nvfp4_progressive_candidate(
                 levers=render_options,
             )
         else:
-            current = _native_render_codec._gptq_obs_rounding_nvfp4(
+            current = _native_render_codec.gptq_obs_rounding_nvfp4(
                 weight_scaled,
                 activations_scaled,
                 group_size=16,
-                damp=_native_render_codec._resolve_gptq_damp_for_role(qname, levers=render_options),
+                damp=_native_render_codec.resolve_gptq_damp_for_role(qname, levers=render_options),
                 global_real_override=joint_global_real,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
@@ -3189,7 +3189,7 @@ def _render_nvfp4_progressive_candidate(
                 levers=render_options,
             )
     if include_scale_sweep:
-        current = _native_render_codec._scale_sweep_nvfp4(
+        current = _native_render_codec.scale_sweep_nvfp4(
             current,
             activations_scaled,
             group_size=16,
@@ -3253,7 +3253,7 @@ def _render_nvfp4_progressively(
     # Score gate candidates on the same clipped/weighted matrix the GPTQ
     # loop optimizes under (audit 2026-07-02 §3.9): the loop passes
     # act_clip_threshold/act_clip_rescale/fisher_row_weights into
-    # _activation_matrix_for_gptq, so the gate must too.
+    # activation_matrix_for_gptq, so the gate must too.
     acts_for_gate = _gate_activation_matrix(
         render_options, acts_for_render,
         int(weight.shape[1]),
@@ -3791,7 +3791,7 @@ def render_production_weight(
                 )))
                 if fmt == "MXFP4":
                     if use_damp_sweep:
-                        _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4_swept(
+                        _q, _s, candidate = _native_render_codec.gptq_obs_rounding_mxfp4_swept(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3802,7 +3802,7 @@ def render_production_weight(
                             levers=render_options,
                         )
                     else:
-                        _q, _s, candidate = _native_render_codec._gptq_obs_rounding_mxfp4(
+                        _q, _s, candidate = _native_render_codec.gptq_obs_rounding_mxfp4(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3813,7 +3813,7 @@ def render_production_weight(
                             levers=render_options,
                         )
                 elif use_damp_sweep:
-                    _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like_swept(
+                    _q, _s, candidate = _native_render_codec.gptq_obs_rounding_fp8_like_swept(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3826,7 +3826,7 @@ def render_production_weight(
                         levers=render_options,
                     )
                 else:
-                    _q, _s, candidate = _native_render_codec._gptq_obs_rounding_fp8_like(
+                    _q, _s, candidate = _native_render_codec.gptq_obs_rounding_fp8_like(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3860,10 +3860,10 @@ def render_production_weight(
         ):
             if fmt == "MXFP8_E4M3":
                 from prismaquant.native_render_codec import (
-                    _mxfp8_scale_sweep_quantize,
+                    mxfp8_scale_sweep_quantize,
                 )
 
-                _, _, w_dq = _mxfp8_scale_sweep_quantize(
+                _, _, w_dq = mxfp8_scale_sweep_quantize(
                     current.weight.detach().to(torch.float32),
                     acts_for_render,
                     group_size=32,
@@ -3874,10 +3874,10 @@ def render_production_weight(
                 )
             else:
                 from prismaquant.native_render_codec import (
-                    _fp8_dynamic_scale_sweep_quantize,
+                    fp8_dynamic_scale_sweep_quantize,
                 )
 
-                _, _, w_dq = _fp8_dynamic_scale_sweep_quantize(
+                _, _, w_dq = fp8_dynamic_scale_sweep_quantize(
                     current.weight.detach().to(torch.float32),
                     acts_for_render,
                     clip_threshold=act_clip_threshold,
@@ -3901,13 +3901,13 @@ def render_production_weight(
         return current.weight.contiguous()
 
     from prismaquant.native_render_codec import (
-        _quantize_2d,
+        quantize_2d,
     )
 
     render_activations = activations.get(qname)
     if render_activations is None and qname.endswith(".weight"):
         render_activations = activations.get(qname[:-7])
-    result = _quantize_2d(
+    result = quantize_2d(
         weight.detach().clone(),
         cached_activations=render_activations,
         fmt="NVFP4",
@@ -6143,17 +6143,17 @@ def fill_production_weight_cache(
             and fisher_rows is not None
             else None
         )
-        # _quantize_2d's input_global_scale_override expects the export
+        # quantize_2d's input_global_scale_override expects the export
         # convention.  It only affects emitted metadata in compute_only
         # mode (not the dequantized weight values), but we pass the
         # correct convention so the metadata is honest in case future
         # code consumes it.  Routed through the export helper so it
         # tracks PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE (audit C1).
         from prismaquant.native_render_codec import (
-            _nvfp4_input_global_scale_from_max_abs,
+            nvfp4_input_global_scale_from_max_abs,
         )
         export_scale = (
-            _nvfp4_input_global_scale_from_max_abs(
+            nvfp4_input_global_scale_from_max_abs(
                 float(max_abs), policy=render_score_policy, levers=render_options)
             if (max_abs is not None and max_abs > 0)
             else None
@@ -6253,7 +6253,7 @@ def fill_production_weight_cache(
                     )
                 continue
             # MEM: store as the model's native dtype (bf16 by default)
-            # rather than fp32 — _quantize_2d's compute_only path returns
+            # rather than fp32 — quantize_2d's compute_only path returns
             # fp32 but we always re-cast at install time, so storing fp32
             # is wasteful (2× memory).  On 27B this drops the cache from
             # ~25 GB to ~12 GB.
@@ -7780,7 +7780,7 @@ def fill_packed_expert_cache_entries(
                 gptq_obs_rounding_nvfp4_batched,
             )
             from prismaquant.native_render_codec import (
-                _rtn_dequant_nvfp4,
+                rtn_dequant_nvfp4,
             )
             src = packed_param.to(device=device, dtype=torch.float32)
             hidden_in = packed_param.shape[2]
@@ -7871,7 +7871,7 @@ def fill_packed_expert_cache_entries(
                 levers=render_options,
             )  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
             for e in range(E):
-                w_rtn = _rtn_dequant_nvfp4(
+                w_rtn = rtn_dequant_nvfp4(
                     src[e], group_size=16, global_real_override=overrides[e],
                     levers=render_options,
                 )

@@ -12,7 +12,7 @@ GPTQ/scale-sweep/AR treatment at export. Covers:
   4. incremental_measure_quant_cost._run_visual_cost_shard — measures
      cost entries for a tiny visual-style nn.Module stub.
   5. allocator --visual-sensitivity={fisher, uniform} mode selection.
-  6. export_native_compressed._quantize_2d picks up visual activations
+  6. native_render_codec.quantize_2d picks up visual activations
      from _CACHED_ACTIVATIONS when the multimodal probe populates them.
 """
 from __future__ import annotations
@@ -514,7 +514,7 @@ class TestAllocatorVisualSensitivityModes(unittest.TestCase):
 
 
 class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
-    """The NVFP4 path in _quantize_2d consults `_CACHED_ACTIVATIONS`
+    """The NVFP4 path in quantize_2d consults `_CACHED_ACTIVATIONS`
     by recipe name. When the multimodal probe populates visual Linear
     activations under matching names, GPTQ / AR rounding apply."""
 
@@ -530,11 +530,11 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
         prev_cache = _test_exporter._CACHED_ACTIVATIONS
         try:
             _test_exporter._CACHED_ACTIVATIONS = {visual_name: fake_acts}
-            out = _native_render_codec._quantize_2d(
+            out = _native_render_codec.quantize_2d(
                 W, "NVFP4",
                 linear_name=visual_name,
                 gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
         finally:
             _test_exporter._CACHED_ACTIVATIONS = prev_cache
         # NVFP4 path emits the full triple; we just confirm the call returned
@@ -557,11 +557,11 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
             # Set cache but without this key.
             _test_exporter._CACHED_ACTIVATIONS = {"some.other.linear":
                                        torch.randn(4, 32)}
-            out = _native_render_codec._quantize_2d(
+            out = _native_render_codec.quantize_2d(
                 W, "NVFP4",
                 linear_name=visual_name,
                 gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
         finally:
             _test_exporter._CACHED_ACTIVATIONS = prev_cache
         self.assertIn("weight_packed", out)
@@ -582,14 +582,14 @@ class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
                 "model.visual.blocks.0.mlp.fc1": acts,
                 "model.layers.0.mlp.gate_proj": acts,
             }
-            visual = _native_render_codec._quantize_2d(
+            visual = _native_render_codec.quantize_2d(
                 W, "NVFP4", linear_name="model.visual.blocks.0.mlp.fc1",
                 gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.visual.blocks.0.mlp.fc1") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target="model.visual.blocks.0.mlp.fc1", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-            body = _native_render_codec._quantize_2d(
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.visual.blocks.0.mlp.fc1") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="model.visual.blocks.0.mlp.fc1", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+            body = _native_render_codec.quantize_2d(
                 W, "NVFP4", linear_name="model.layers.0.mlp.gate_proj",
                 gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.layers.0.mlp.gate_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target="model.layers.0.mlp.gate_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.layers.0.mlp.gate_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="model.layers.0.mlp.gate_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
         finally:
             _test_exporter._CACHED_ACTIVATIONS = prev
         self.assertEqual(visual["weight_packed"].shape,

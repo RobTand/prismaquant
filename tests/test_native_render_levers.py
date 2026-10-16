@@ -18,7 +18,7 @@ def test_explicit_all_false_preserves_rtn_when_render_options_enable_gptq(monkey
     options = NativeRenderLevers.resolve({"gptq": True})
     wp, ws, wg = codec.quantize_dequantize_nvfp4(weight, levers=options)
     expected = {"weight_packed": wp, "weight_scale": ws, "weight_global_scale": wg}
-    actual = codec._quantize_2d(
+    actual = codec.quantize_2d(
         weight, "NVFP4", cached_activations=acts, levers=options,
         gptq_enabled=False, scale_sweep_enabled=False,
         static_act_order_enabled=False, joint_scale_opt_enabled=False,
@@ -35,10 +35,10 @@ def test_resolved_options_freeze_levels_and_damp_roles(monkeypatch):
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_ROLES", "gate_up=1,down=1")
     groups = torch.randn(3, 4, 16, generator=torch.Generator().manual_seed(3))
     expected = codec._nvfp4_best_max_to_level_scale(groups, (6.0, 3.0, 1.0))
-    actual = codec._select_nvfp4_group_scales(groups, levers=options)
+    actual = codec.select_nvfp4_group_scales(groups, levers=options)
     assert torch.equal(actual, expected)
-    assert codec._resolve_gptq_damp_for_role("model.layers.0.mlp.gate_proj", levers=options) == 0.3
-    assert codec._resolve_gptq_damp_for_role("model.layers.0.mlp.down_proj", levers=options) == 3.0
+    assert codec.resolve_gptq_damp_for_role("model.layers.0.mlp.gate_proj", levers=options) == 0.3
+    assert codec.resolve_gptq_damp_for_role("model.layers.0.mlp.down_proj", levers=options) == 3.0
     with pytest.raises(FrozenInstanceError):
         options.gptq = True
 
@@ -129,7 +129,7 @@ def test_completed_recipe_preserves_supported_disabled_controls():
     parsed = NativeRenderLevers.from_record(options.record())
     assert parsed == options
     acts = torch.tensor([[100.0, -5.0], [1.0, 2.0]])
-    assert torch.equal(codec._activation_matrix_for_gptq(acts, 2, levers=parsed), acts)
+    assert torch.equal(codec.activation_matrix_for_gptq(acts, 2, levers=parsed), acts)
 
 
 def test_explicit_activation_rows_preserve_existing_weight_name_alias():

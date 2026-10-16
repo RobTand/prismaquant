@@ -53,7 +53,7 @@ def test_scheme_table_derivation_equals_the_lane_spec():
     )
 
     expected = {
-        _native_render_codec._canonical_export_format(fmt)
+        _native_render_codec.canonical_export_format(fmt)
         for fmt, scheme in enc.FORMAT_SCHEME.items()
         if "input_activations" in scheme
     }

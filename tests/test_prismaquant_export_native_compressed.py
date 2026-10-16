@@ -45,7 +45,7 @@ from prismaquant.native_render_codec import (
     DEFAULT_INPUT_GLOBAL_SCALE,
     FP8_E4M3_MAX,
     NVFP4_MAX,
-    _quantize_2d,
+    quantize_2d,
     _quantize_3d_packed,
     _round_to_codebook,
     compute_nvfp4_global_real,
@@ -633,16 +633,16 @@ class TestNativeExportOutputSafety(unittest.TestCase):
 class TestGroupedExportQuantization(unittest.TestCase):
     def test_grouped_rtn_formats_match_scalar_export(self):
         from prismaquant.native_render_codec import (
-            _quantize_2d,
-            _quantize_2d_group_same_shape,
+            quantize_2d,
+            quantize_2d_group_same_shape,
         )
 
         torch.manual_seed(0)
         weights = torch.randn(3, 4, 32)
         for fmt in ("MXFP8",):
-            grouped = _quantize_2d_group_same_shape(weights, fmt)
+            grouped = quantize_2d_group_same_shape(weights, fmt)
             for i in range(weights.shape[0]):
-                scalar = _quantize_2d(weights[i], fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                scalar = quantize_2d(weights[i], fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                 for key, scalar_tensor in scalar.items():
                     grouped_tensor = grouped[key][i]
                     if key == "weight_global_scale":
@@ -668,8 +668,8 @@ class TestGroupedExportQuantization(unittest.TestCase):
 
     def test_low_bit_custom_kernel_formats_are_rejected(self):
         from prismaquant.native_render_codec import (
-            _quantize_2d,
-            _quantize_2d_group_same_shape,
+            quantize_2d,
+            quantize_2d_group_same_shape,
         )
         from prismaquant.export_native_compressed import (
             canonicalize_format,
@@ -681,9 +681,9 @@ class TestGroupedExportQuantization(unittest.TestCase):
         with self.assertRaises(ValueError):
             canonicalize_format({"data_type": "int", "bits": 3})
         with self.assertRaises(ValueError):
-            _quantize_2d(weights[0], "NOT_A_REAL_FORMAT", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            quantize_2d(weights[0], "NOT_A_REAL_FORMAT", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         with self.assertRaises(ValueError):
-            _quantize_2d_group_same_shape(weights, "INT3")
+            quantize_2d_group_same_shape(weights, "INT3")
 
 
 class _TinyQwenPackedExperts(nn.Module):
@@ -1053,7 +1053,7 @@ class TestRoundTrip(unittest.TestCase):
             _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), nvfp4_scale_rule=_native_render_codec.NVFP4_SCALE_RULE_STATIC_6)
             wp, ws, wg = quantize_dequantize_nvfp4(W, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
             packed_dequant = _nvfp4_dequantize(wp, ws, wg)
-            helper_dequant = _native_render_codec._rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            helper_dequant = _native_render_codec.rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         finally:
             _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), nvfp4_scale_rule=prev)
 
@@ -1131,12 +1131,12 @@ class TestRoundTrip(unittest.TestCase):
                     if fmt in {"NVFP4", "NVFP4A16"}:
                         wp, ws, wg = quantize_dequantize_nvfp4(W, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                         served = _nvfp4_dequantize(wp, ws, wg)
-                        rendered = _native_render_codec._rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                        rendered = _native_render_codec.rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                         torch.testing.assert_close(rendered, served)
                         continue
 
                     if fmt == "MXFP4":
-                        out = _quantize_2d(W, "MXFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                        out = quantize_2d(W, "MXFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                         served = _mxfp4_served_dequantize(
                             out["weight_packed"],
                             out["weight_scale"],
@@ -1164,7 +1164,7 @@ class TestRoundTrip(unittest.TestCase):
 
                     if fmt in {"MXFP8_E4M3", "MXFP8_E5M2", "MXFP8A16"}:
                         codec_fmt = "MXFP8_E4M3" if fmt == "MXFP8A16" else fmt
-                        dtype, max_value = _native_render_codec._fp8_element_dtype_and_max(codec_fmt)
+                        dtype, max_value = _native_render_codec.fp8_element_dtype_and_max(codec_fmt)
                         q, s = quantize_dequantize_mxfp8(
                             W,
                             element_dtype=dtype,
@@ -1180,7 +1180,7 @@ class TestRoundTrip(unittest.TestCase):
                         continue
 
                     if fmt in {"FP8_E4M3", "FP8_E5M2"}:
-                        dtype, max_value = _native_render_codec._fp8_element_dtype_and_max(fmt)
+                        dtype, max_value = _native_render_codec.fp8_element_dtype_and_max(fmt)
                         q, s = quantize_dequantize_fp8_dynamic(
                             W,
                             element_dtype=dtype,
@@ -1196,7 +1196,7 @@ class TestRoundTrip(unittest.TestCase):
                         continue
 
                     if fmt == "BF16":
-                        out = _quantize_2d(W, "BF16", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                        out = quantize_2d(W, "BF16", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                         torch.testing.assert_close(
                             out["weight"].float(),
                             W.bfloat16().float(),
@@ -1295,12 +1295,12 @@ class TestRoundTrip(unittest.TestCase):
         scale_6 = max_abs / 6.0
         scale_4 = max_abs / 4.0
 
-        real_scale = _native_render_codec._select_nvfp4_group_scales(
+        real_scale = _native_render_codec.select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
         )
-        snapped_scale = _native_render_codec._select_nvfp4_group_scales(
+        snapped_scale = _native_render_codec.select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
             global_real=global_real,
@@ -1321,7 +1321,7 @@ class TestRoundTrip(unittest.TestCase):
         self.assertFalse(torch.equal(real_scale, snapped_scale))
         torch.testing.assert_close(snapped_scale, expected)
 
-        pack_scale, pack_global = _native_render_codec._select_nvfp4_pack_scales_and_global(
+        pack_scale, pack_global = _native_render_codec.select_nvfp4_pack_scales_and_global(
             grouped,
             global_real_override=global_real,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
@@ -1429,7 +1429,7 @@ class TestRoundTrip(unittest.TestCase):
         torch.manual_seed(0)
         W = torch.randn(4, 32) * 0.1
         X = torch.randn(12, 32)
-        q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+        q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
             W,
             X,
             fmt="FP8_E4M3",
@@ -1446,7 +1446,7 @@ class TestRoundTrip(unittest.TestCase):
         torch.manual_seed(0)
         W = torch.randn(4, 32) * 0.1
         X = torch.randn(12, 32)
-        q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+        q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
             W,
             X,
             fmt="MXFP8_E5M2",
@@ -1454,7 +1454,7 @@ class TestRoundTrip(unittest.TestCase):
             joint_scale_opt=True,
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
         )
-        q_ref, s_ref, dq_ref = _native_render_codec._gptq_obs_rounding_fp8_like(
+        q_ref, s_ref, dq_ref = _native_render_codec.gptq_obs_rounding_fp8_like(
             W,
             X,
             fmt="MXFP8_E5M2",
@@ -1480,19 +1480,19 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work, U = _fpquant_gptq_factors_for_test(W, X_gptq, damp=damp)
         grouped = W_work.reshape(W.shape[0], W.shape[1] // group_size, group_size)
-        s_g_real = _native_render_codec._select_nvfp4_group_scales(grouped, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        s_g_real = _native_render_codec.select_nvfp4_group_scales(grouped, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         global_real = (s_g_real.amax() / _native_render_codec.FP8_E4M3_MAX).clamp_min(1e-12)
-        scale_by_col = _native_render_codec._nvfp4_effective_scale_from_real(
+        scale_by_col = _native_render_codec.nvfp4_effective_scale_from_real(
             s_g_real,
             global_real,
             quantize_fp8=True,
         ).repeat_interleave(group_size, dim=1)
 
         def quantize_column(col, col_idx):
-            _idx, dq = _native_render_codec._nvfp4_quantize_dequantize_with_eff_scale(
+            _idx, dq = _native_render_codec.nvfp4_quantize_dequantize_with_eff_scale(
                 col.unsqueeze(1),
                 scale_by_col[:, col_idx:col_idx + 1],
             )
@@ -1505,7 +1505,7 @@ class TestRoundTrip(unittest.TestCase):
             quantize_column=quantize_column,
         )
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            actual = _native_render_codec._gptq_obs_rounding_nvfp4(
+            actual = _native_render_codec.gptq_obs_rounding_nvfp4(
                 W,
                 X,
                 group_size=group_size,
@@ -1523,7 +1523,7 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work, U = _fpquant_gptq_factors_for_test(W, X_gptq, damp=damp)
         scale = _native_render_codec._fp8_dynamic_codec(W).scale
         q_ref = torch.empty_like(W, dtype=torch.float8_e4m3fn)
@@ -1545,7 +1545,7 @@ class TestRoundTrip(unittest.TestCase):
             quantize_column=quantize_column,
         )
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="FP8_E4M3",
@@ -1564,7 +1564,7 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work, U = _fpquant_gptq_factors_for_test(W, X_gptq, damp=damp)
         scale = torch.empty((W.shape[0], W.shape[1] // group_size), dtype=torch.uint8)
         for group_idx, block_start in enumerate(range(0, W.shape[1], group_size)):
@@ -1601,7 +1601,7 @@ class TestRoundTrip(unittest.TestCase):
         )
         expected_dq = _native_render_codec._mxfp8_dequantize_2d(q_ref, scale, group_size=group_size)
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="MXFP8_E4M3",
@@ -1624,7 +1624,7 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work = W.to(torch.float32).clone()
         H = X_gptq.to(torch.float32).t() @ X_gptq.to(torch.float32)
         diag_mean = torch.diagonal(H).mean().clamp_min(1e-12)
@@ -1685,7 +1685,7 @@ class TestRoundTrip(unittest.TestCase):
             group_size=group_size,
         )
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="MXFP8_E4M3",
@@ -1706,7 +1706,7 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work, U = _fpquant_gptq_factors_for_test(W, X_gptq, damp=damp)
         scale = torch.empty((W.shape[0], W.shape[1] // group_size), dtype=torch.uint8)
         for group_idx, block_start in enumerate(range(0, W.shape[1], group_size)):
@@ -1721,7 +1721,7 @@ class TestRoundTrip(unittest.TestCase):
         idx_ref = torch.empty_like(W, dtype=torch.uint8)
 
         def quantize_column(col, col_idx):
-            idx_col, dq = _native_render_codec._nvfp4_quantize_dequantize_with_eff_scale(
+            idx_col, dq = _native_render_codec.nvfp4_quantize_dequantize_with_eff_scale(
                 col.unsqueeze(1),
                 scale_by_col[:, col_idx:col_idx + 1],
             )
@@ -1741,7 +1741,7 @@ class TestRoundTrip(unittest.TestCase):
             group_size=group_size,
         )
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            q, s, dq = _native_render_codec._gptq_obs_rounding_mxfp4(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_mxfp4(
                 W,
                 X,
                 group_size=group_size,
@@ -1761,7 +1761,7 @@ class TestRoundTrip(unittest.TestCase):
         damp = 0.01
         block_size = 7
 
-        X_gptq = _native_render_codec._activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        X_gptq = _native_render_codec.activation_matrix_for_gptq(X, W.shape[1], device=W.device, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         W_work = W.to(torch.float32).clone()
         H = X_gptq.to(torch.float32).t() @ X_gptq.to(torch.float32)
         diag_mean = torch.diagonal(H).mean().clamp_min(1e-12)
@@ -1795,7 +1795,7 @@ class TestRoundTrip(unittest.TestCase):
         idx_perm = torch.empty_like(W, dtype=torch.uint8)
 
         def quantize_column(col, col_idx):
-            idx_col, dq = _native_render_codec._nvfp4_quantize_dequantize_with_eff_scale(
+            idx_col, dq = _native_render_codec.nvfp4_quantize_dequantize_with_eff_scale(
                 col.unsqueeze(1),
                 scale_by_perm_col[:, col_idx:col_idx + 1],
             )
@@ -1817,7 +1817,7 @@ class TestRoundTrip(unittest.TestCase):
         )
         expected_w = _expected_perm_w.index_select(1, inverse_perm).contiguous()
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": str(block_size)}):
-            q, s, dq = _native_render_codec._gptq_obs_rounding_mxfp4(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_mxfp4(
                 W,
                 X,
                 group_size=group_size,
@@ -1835,14 +1835,14 @@ class TestRoundTrip(unittest.TestCase):
         W = torch.randn(3, 16) * 0.1
         X = torch.randn(20, 16)
         with patch.dict("os.environ", {"PRISMAQUANT_GPTQ_BLOCK_SIZE": "7"}):
-            q_ref, s_ref, dq_ref = _native_render_codec._gptq_obs_rounding_fp8_like(
+            q_ref, s_ref, dq_ref = _native_render_codec.gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="FP8_E4M3",
                 static_act_order=False,
                 levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
             )
-            q, s, dq = _native_render_codec._gptq_obs_rounding_fp8_like(
+            q, s, dq = _native_render_codec.gptq_obs_rounding_fp8_like(
                 W,
                 X,
                 fmt="FP8_E4M3",
@@ -2427,7 +2427,7 @@ class TestQuantize2DDispatch(unittest.TestCase):
         the param defaults to zeros and vLLM produces 1/0 = inf →
         degenerate output. Make sure we always emit it."""
         W = torch.randn(8, 16) * 0.1
-        out = _quantize_2d(W, "NVFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        out = quantize_2d(W, "NVFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertIn("weight_packed", out)
         self.assertIn("weight_scale", out)
         self.assertIn("weight_global_scale", out)
@@ -2439,7 +2439,7 @@ class TestQuantize2DDispatch(unittest.TestCase):
 
     def test_mxfp8_emits_grouped_dense(self):
         W = torch.randn(8, 32) * 0.1
-        out = _quantize_2d(W, "MXFP8", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        out = quantize_2d(W, "MXFP8", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertIn("weight", out)
         self.assertEqual(out["weight"].dtype, torch.float8_e4m3fn)
         self.assertEqual(out["weight_scale"].dtype, torch.uint8)
@@ -2447,7 +2447,7 @@ class TestQuantize2DDispatch(unittest.TestCase):
 
     def test_mxfp4_emits_packed_grouped_dense(self):
         W = torch.randn(8, 32) * 0.1
-        out = _quantize_2d(W, "MXFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        out = quantize_2d(W, "MXFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertIn("weight_packed", out)
         self.assertEqual(out["weight_packed"].dtype, torch.uint8)
         self.assertEqual(tuple(out["weight_packed"].shape), (8, 16))
@@ -2481,12 +2481,12 @@ class TestQuantize2DDispatch(unittest.TestCase):
             dq = weight.to(torch.float32) + (1.0 if use_static else 0.0)
             return q, s, dq
 
-        saved = _native_render_codec._gptq_obs_rounding_fp8_like
+        saved = _native_render_codec.gptq_obs_rounding_fp8_like
         saved_sweep = os.environ.get("PRISMAQUANT_GPTQ_DAMP_SWEEP")
         try:
             os.environ["PRISMAQUANT_GPTQ_DAMP_SWEEP"] = "0"
-            _native_render_codec._gptq_obs_rounding_fp8_like = fake_gptq
-            out = _native_render_codec._quantize_2d(
+            _native_render_codec.gptq_obs_rounding_fp8_like = fake_gptq
+            out = _native_render_codec.quantize_2d(
                 W,
                 "MXFP8_E4M3",
                 gptq_enabled=True,
@@ -2495,7 +2495,7 @@ class TestQuantize2DDispatch(unittest.TestCase):
                 levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
             )
         finally:
-            _native_render_codec._gptq_obs_rounding_fp8_like = saved
+            _native_render_codec.gptq_obs_rounding_fp8_like = saved
             if saved_sweep is None:
                 os.environ.pop("PRISMAQUANT_GPTQ_DAMP_SWEEP", None)
             else:
@@ -2529,14 +2529,14 @@ class TestQuantize2DDispatch(unittest.TestCase):
             )
             return q, s, weight.to(torch.float32) + 100.0
 
-        saved = _native_render_codec._gptq_obs_rounding_fp8_like
+        saved = _native_render_codec.gptq_obs_rounding_fp8_like
         saved_sweep = os.environ.get("PRISMAQUANT_GPTQ_DAMP_SWEEP")
         saved_dnh = os.environ.get("PRISMAQUANT_DO_NO_HARM")
         try:
             os.environ["PRISMAQUANT_GPTQ_DAMP_SWEEP"] = "0"
             os.environ["PRISMAQUANT_DO_NO_HARM"] = "1"
-            _native_render_codec._gptq_obs_rounding_fp8_like = fake_gptq
-            out = _native_render_codec._quantize_2d(
+            _native_render_codec.gptq_obs_rounding_fp8_like = fake_gptq
+            out = _native_render_codec.quantize_2d(
                 W,
                 "MXFP8_E4M3",
                 gptq_enabled=True,
@@ -2544,7 +2544,7 @@ class TestQuantize2DDispatch(unittest.TestCase):
                 levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
             )
         finally:
-            _native_render_codec._gptq_obs_rounding_fp8_like = saved
+            _native_render_codec.gptq_obs_rounding_fp8_like = saved
             if saved_sweep is None:
                 os.environ.pop("PRISMAQUANT_GPTQ_DAMP_SWEEP", None)
             else:
@@ -3080,12 +3080,12 @@ class TestExportableFormats(unittest.TestCase):
     def test_declared_set_matches_what_the_export_path_accepts(self):
         """Behavioural cross-check. For every registered format: if the
         exporter declares it emittable, some emit path takes it; if not,
-        `_quantize_2d` refuses it.
+        `quantize_2d` refuses it.
 
         The two passthroughs are the reason this cannot be derived from the
         packer branches, so they are checked against their real emit path
         instead: BF16 through the plain-bf16 branch, FP8_SOURCE through the
-        verbatim source copy (which has no `_quantize_2d` branch at all).
+        verbatim source copy (which has no `quantize_2d` branch at all).
         """
         w = torch.randn(64, 256, dtype=torch.bfloat16)
         for fmt in sorted(fr.REGISTRY):
@@ -3096,18 +3096,18 @@ class TestExportableFormats(unittest.TestCase):
                     # refuses it while the exporter still ships it.
                     self.assertTrue(emittable)
                     with self.assertRaises(ValueError):
-                        _quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                        quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
                     continue
                 if fmt == "BF16":
                     self.assertTrue(emittable)
                     self.assertEqual(
-                        _quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))["weight"].dtype, torch.bfloat16)
+                        quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))["weight"].dtype, torch.bfloat16)
                     continue
                 if emittable:
-                    self.assertTrue(_quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
+                    self.assertTrue(quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())))
                 else:
                     with self.assertRaises(ValueError):
-                        _quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+                        quantize_2d(w, fmt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
     def test_every_declared_format_has_config_groups_metadata(self):
         """Gate #9's first clause: emittable means vLLM can dispatch it, so
@@ -3245,7 +3245,7 @@ class TestRuntimeLegalAssignment(unittest.TestCase):
         EXPORTABLE_FORMATS, so reaching here is a regression in that bound
         and must be loud (CLAUDE.md §4.1: no post-allocator rewrites).
 
-        FP8_E5M2 is the sharp case: it HAS a `_quantize_2d` byte-packer
+        FP8_E5M2 is the sharp case: it HAS a `quantize_2d` byte-packer
         branch, so "has a packer" is not the same question as "is
         emittable"."""
         with tempfile.TemporaryDirectory() as td:
@@ -4337,7 +4337,7 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
         ):
             options = NativeRenderLevers(nvfp4_input_global_scale_policy=policy)
             for maximum, expected in zip((3.0, 0.125, 0.0, -1.0), (*positive, 1.0, 1.0)):
-                self.assertEqual(_native_render_codec._nvfp4_input_global_scale_from_max_abs(
+                self.assertEqual(_native_render_codec.nvfp4_input_global_scale_from_max_abs(
                     maximum, levers=options), expected)
 
     def test_legacy_default_resolution_delegates_with_explicit_opt_in(self):
@@ -4351,7 +4351,7 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
                 return_value=2.5,
             ) as resolve:
                 self.assertEqual(
-                    _native_render_codec._resolve_nvfp4_input_global_scale(
+                    _native_render_codec.resolve_nvfp4_input_global_scale(
                         2.0,
                         target="layer.q_proj",
                      calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES),
@@ -4369,10 +4369,10 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
     def test_quantize_2d_reads_override(self):
         import torch
         from prismaquant.native_render_codec import (
-            _quantize_2d,
+            quantize_2d,
         )
         weight = torch.randn(32, 32)
-        out = _quantize_2d(weight, "NVFP4",
+        out = quantize_2d(weight, "NVFP4",
                            input_global_scale_override=2.5, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertAlmostEqual(
             float(out["input_global_scale"].item()), 2.5, places=4)
@@ -4385,9 +4385,9 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
         saved = _test_exporter._INPUT_GLOBAL_SCALES
         try:
             _test_exporter._INPUT_GLOBAL_SCALES = {"foo.bar.q_proj": 3.14}
-            out = _quantize_2d = _native_render_codec._quantize_2d(
+            out = quantize_2d = _native_render_codec.quantize_2d(
                 weight, "NVFP4", linear_name="foo.bar.q_proj"
-            , levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("foo.bar.q_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target="foo.bar.q_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+            , levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("foo.bar.q_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="foo.bar.q_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
             self.assertAlmostEqual(
                 float(out["input_global_scale"].item()), 3.14, places=4)
         finally:
@@ -4398,7 +4398,7 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
         saved = _test_exporter._INPUT_GLOBAL_SCALES
         try:
             _test_exporter._INPUT_GLOBAL_SCALES = {"foo.bar.q_proj": 3.14}
-            out = _native_render_codec._quantize_2d(
+            out = _native_render_codec.quantize_2d(
                 weight,
                 "NVFP4",
                 linear_name="foo.bar.q_proj",
@@ -4418,7 +4418,7 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
 class TestActivationAwarePasses(unittest.TestCase):
     """GPTQ OBS, scale sweep, and activation-weighted rounding are the
     calibration-aware passes wired into
-    `_quantize_2d`'s NVFP4 path. Each has a per-pass unit test plus a
+    `quantize_2d`'s NVFP4 path. Each has a per-pass unit test plus a
     composed integration test on a synthetic [out, in] linear with a
     heavily imbalanced activation distribution."""
 
@@ -4435,7 +4435,7 @@ class TestActivationAwarePasses(unittest.TestCase):
         os.environ["PRISMAQUANT_ACT_CLIP_QUANTILE"] = "0.5"
         try:
             x = torch.tensor([[1.0, -2.0, 100.0, -100.0]])
-            out = _native_render_codec._activation_matrix_for_gptq(
+            out = _native_render_codec.activation_matrix_for_gptq(
                 x,
                 4,
                 clip_threshold=10.0,
@@ -4455,7 +4455,7 @@ class TestActivationAwarePasses(unittest.TestCase):
         import prismaquant.export_native_compressed as m
 
         x = torch.ones(2, 2)
-        out = _native_render_codec._activation_matrix_for_gptq(
+        out = _native_render_codec.activation_matrix_for_gptq(
             x,
             2,
             clip_quantile=0.0,
@@ -4481,10 +4481,10 @@ class TestActivationAwarePasses(unittest.TestCase):
         ).reshape_as(W)
         saved = os.environ.pop("PRISMAQUANT_MXFP8_SCALE_SWEEP_SHIFTS", None)
         try:
-            _, _, default = _native_render_codec._mxfp8_scale_sweep_quantize(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            _, _, default = _native_render_codec.mxfp8_scale_sweep_quantize(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
             self.assertTrue(torch.equal(default, baseline))
             os.environ["PRISMAQUANT_MXFP8_SCALE_SWEEP_SHIFTS"] = "-2,-1,0,1,2"
-            _, _, swept = _native_render_codec._mxfp8_scale_sweep_quantize(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            _, _, swept = _native_render_codec.mxfp8_scale_sweep_quantize(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         finally:
             if saved is None:
                 os.environ.pop("PRISMAQUANT_MXFP8_SCALE_SWEEP_SHIFTS", None)
@@ -4505,7 +4505,7 @@ class TestActivationAwarePasses(unittest.TestCase):
         X = torch.randn(32, 64)
         q, s = _native_render_codec.quantize_dequantize_fp8_dynamic(W)
         baseline = q.to(torch.float32) * s.to(torch.float32)
-        _, _, swept = _native_render_codec._fp8_dynamic_scale_sweep_quantize(W, X, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        _, _, swept = _native_render_codec.fp8_dynamic_scale_sweep_quantize(W, X, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
         imp = X.pow(2).mean(dim=0).reshape(1, 64)
         base_err = ((W - baseline).pow(2) * imp).sum()
@@ -4537,12 +4537,12 @@ class TestActivationAwarePasses(unittest.TestCase):
         by more than one grid step (allowing for global-scale adjustments)."""
         import torch
         from prismaquant.native_render_codec import (
-            _gptq_obs_rounding_nvfp4,
+            gptq_obs_rounding_nvfp4,
             quantize_dequantize_nvfp4,
         )
         W = torch.randn(16, 32) * 0.2
         X = torch.randn(200, 32) * 0.5
-        W_gptq = _gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        W_gptq = gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertEqual(W_gptq.shape, W.shape)
         # Re-pack the GPTQ output — it should round-trip (each weight
         # already sits on the grid, so quant+dequant is approximately
@@ -4560,12 +4560,12 @@ class TestActivationAwarePasses(unittest.TestCase):
 
         torch.manual_seed(23)
         grouped = torch.randn(8, 4, 16, dtype=torch.float32) * 0.3
-        scale_f6 = _native_render_codec._select_nvfp4_group_scales(
+        scale_f6 = _native_render_codec.select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
         )
-        scale_joint = _native_render_codec._select_nvfp4_group_scales(
+        scale_joint = _native_render_codec.select_nvfp4_group_scales(
             grouped,
             scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE,
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
@@ -4586,7 +4586,7 @@ class TestActivationAwarePasses(unittest.TestCase):
         prev = (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).nvfp4_scale_rule
         try:
             _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), nvfp4_scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE)
-            W_gptq = _native_render_codec._gptq_obs_rounding_nvfp4(
+            W_gptq = _native_render_codec.gptq_obs_rounding_nvfp4(
                 W,
                 X,
                 group_size=16,
@@ -4611,18 +4611,18 @@ class TestActivationAwarePasses(unittest.TestCase):
         import torch
         from unittest import mock
         from prismaquant.native_render_codec import (
-            _gptq_obs_rounding_nvfp4,
-            _gptq_obs_rounding_nvfp4_swept,
-            _rtn_dequant_nvfp4,
+            gptq_obs_rounding_nvfp4,
+            gptq_obs_rounding_nvfp4_swept,
+            rtn_dequant_nvfp4,
         )
 
         torch.manual_seed(911)
         W = torch.randn(16, 32) * 0.3
         X = torch.randn(24, 32)
-        W_rtn = _rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        W_rtn = rtn_dequant_nvfp4(W, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         with mock.patch("torch.linalg.cholesky", side_effect=RuntimeError("boom")):
-            W_failed = _gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
-            W_swept = _gptq_obs_rounding_nvfp4_swept(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            W_failed = gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            W_swept = gptq_obs_rounding_nvfp4_swept(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
         torch.testing.assert_close(W_failed, W_rtn)
         torch.testing.assert_close(W_swept, W_rtn)
@@ -4637,12 +4637,12 @@ class TestActivationAwarePasses(unittest.TestCase):
         torch.manual_seed(912)
         W = torch.randn(8, 16) * 0.3
         X = torch.randn(16, 16)
-        saved_stats = _native_render_codec._DO_NO_HARM_STATS.copy()
+        saved_stats = _native_render_codec.do_no_harm_stats()
         saved_dnh = os.environ.get("PRISMAQUANT_DO_NO_HARM")
         saved_sweep = os.environ.get("PRISMAQUANT_GPTQ_DAMP_SWEEP")
         failure_count = None
         try:
-            _native_render_codec._DO_NO_HARM_STATS.clear()
+            _native_render_codec.reset_do_no_harm_stats()
             os.environ["PRISMAQUANT_DO_NO_HARM"] = "1"
             os.environ["PRISMAQUANT_GPTQ_DAMP_SWEEP"] = "0"
             with (
@@ -4653,7 +4653,7 @@ class TestActivationAwarePasses(unittest.TestCase):
                 ),
                 mock.patch("builtins.print") as printed,
             ):
-                out = _native_render_codec._quantize_2d(
+                out = _native_render_codec.quantize_2d(
                     W,
                     "NVFP4",
                     gptq_enabled=True,
@@ -4661,9 +4661,9 @@ class TestActivationAwarePasses(unittest.TestCase):
                     linear_name="demo.linear",
                     levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
                 )
-                failure_count = _native_render_codec._DO_NO_HARM_STATS["NVFP4_failures"]
+                failure_count = _native_render_codec.do_no_harm_stats()["NVFP4_failures"]
         finally:
-            _native_render_codec._DO_NO_HARM_STATS.clear()
+            _native_render_codec.reset_do_no_harm_stats()
             _native_render_codec._DO_NO_HARM_STATS.update(saved_stats)
             if saved_dnh is None:
                 os.environ.pop("PRISMAQUANT_DO_NO_HARM", None)
@@ -4683,11 +4683,11 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def test_composed_passes_reduce_output_space_error_vs_rtn(self):
         """Integration test: synthetic linear + imbalanced activations.
-        Running `_quantize_2d` with GPTQ enabled should give no worse
+        Running `quantize_2d` with GPTQ enabled should give no worse
         activation-weighted output-space MSE than pure RTN."""
         import torch
         from prismaquant.native_render_codec import (
-            _quantize_2d,
+            quantize_2d,
         )
         torch.manual_seed(7)
         out_f, in_f = 64, 128
@@ -4702,13 +4702,13 @@ class TestActivationAwarePasses(unittest.TestCase):
         ref = (W @ X.t()).float()
 
         # Pure RTN.
-        out_rtn = _quantize_2d(W, "NVFP4", linear_name=None, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(None) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target=None, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+        out_rtn = quantize_2d(W, "NVFP4", linear_name=None, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(None) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=None, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
         W_rtn = self._decode_nvfp4(
             out_rtn["weight_packed"], out_rtn["weight_scale"],
             out_rtn["weight_global_scale"],
         )
         # GPTQ on, activations passed explicitly.
-        out_aa = _quantize_2d(
+        out_aa = quantize_2d(
             W, "NVFP4",
             gptq_enabled=True,
             cached_activations=X,
@@ -4732,7 +4732,7 @@ class TestActivationAwarePasses(unittest.TestCase):
     def test_default_native_render_packs_rtn(self):
         weight = torch.randn(8, 16, generator=torch.Generator().manual_seed(18))
         expected = _native_render_codec.quantize_dequantize_nvfp4(weight, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
-        actual = _native_render_codec._quantize_2d(weight, "NVFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        actual = _native_render_codec.quantize_2d(weight, "NVFP4", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         for key, tensor in zip(("weight_packed", "weight_scale", "weight_global_scale"), expected):
             self.assertTrue(torch.equal(actual[key], tensor))
 
@@ -4763,16 +4763,16 @@ class TestActivationAwarePasses(unittest.TestCase):
                 "static_act_order": False, "joint_scale_opt": False,
             })
             _test_exporter._CACHED_ACTIVATIONS = {"demo.linear": X}
-            out_with = _native_render_codec._quantize_2d(
+            out_with = _native_render_codec.quantize_2d(
                 W, "NVFP4", linear_name="demo.linear",
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("demo.linear") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target="demo.linear", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("demo.linear") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="demo.linear", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
             _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{
                 "gptq": False,
                 "static_act_order": False, "joint_scale_opt": False,
             })
-            out_without = _native_render_codec._quantize_2d(
+            out_without = _native_render_codec.quantize_2d(
                 W, "NVFP4", linear_name="demo.linear",
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("demo.linear") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec._resolve_nvfp4_input_global_scale(target="demo.linear", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
+             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("demo.linear") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="demo.linear", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
         finally:
             _test_exporter._RENDER_LEVERS = NativeRenderLevers.resolve()
             _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **saved_flags)
@@ -4797,11 +4797,11 @@ class TestActivationAwarePasses(unittest.TestCase):
             "gptq": True, "gptq_damp_sweep": True,
             "static_act_order": True, "joint_scale_opt": True,
             "nvfp4_scale_rule": "joint_mse", "do_no_harm": False})
-        expected = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
+        expected = _native_render_codec.gptq_obs_rounding_nvfp4_swept(
             weight, acts, static_act_order=True, joint_scale_opt=True,
             levers=options,
         )
-        actual = _native_render_codec._quantize_2d(
+        actual = _native_render_codec.quantize_2d(
             weight, "NVFP4", cached_activations=acts, compute_only=True,
             levers=options,
         )["_w_dq"]
@@ -4814,11 +4814,11 @@ class TestActivationAwarePasses(unittest.TestCase):
         options = NativeRenderLevers.resolve({
             "gptq": True, "gptq_damp_sweep": True,
             "scale_sweep": True, "do_no_harm": False})
-        gptq = _native_render_codec._gptq_obs_rounding_nvfp4_swept(
+        gptq = _native_render_codec.gptq_obs_rounding_nvfp4_swept(
             weight, acts, levers=options)
-        expected = _native_render_codec._scale_sweep_nvfp4(
+        expected = _native_render_codec.scale_sweep_nvfp4(
             gptq, acts, reference_weight=weight, levers=options)
-        actual = _native_render_codec._quantize_2d(
+        actual = _native_render_codec.quantize_2d(
             weight, "NVFP4", linear_name="model.layers.0.mlp.down_proj",
             cached_activations=acts, compute_only=True, levers=options)["_w_dq"]
         self.assertTrue(torch.equal(actual, expected))
@@ -4860,11 +4860,11 @@ class TestPerRoleGptqDamp(unittest.TestCase):
     def test_unset_is_exact_noop(self):
         # No env => per-role resolver == the global fixed default (1.0), so the
         # production render is preserved bit-for-bit.
-        self.assertEqual(self.m._resolve_gptq_fixed_damp(levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
+        self.assertEqual(self.m.resolve_gptq_fixed_damp(levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
         for q in ("model.layers.1.mlp.gate_proj",
                   "model.layers.1.mlp.down_proj",
                   "model.layers.1.self_attn.q_proj"):
-            self.assertEqual(self.m._resolve_gptq_damp_for_role(q, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
+            self.assertEqual(self.m.resolve_gptq_damp_for_role(q, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve())), 1.0)
 
     def test_role_table_applied_with_fallback(self):
         import os
@@ -4873,7 +4873,7 @@ class TestPerRoleGptqDamp(unittest.TestCase):
         levers = NativeRenderLevers.resolve()
 
         def r(qname):
-            return self.m._resolve_gptq_damp_for_role(qname, levers=levers)
+            return self.m.resolve_gptq_damp_for_role(qname, levers=levers)
         self.assertEqual(r("model.layers.2.mlp.gate_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.up_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.down_proj"), 3.0)
@@ -4890,7 +4890,7 @@ class TestPerRoleGptqDamp(unittest.TestCase):
         levers = NativeRenderLevers.resolve()
 
         def r(qname):
-            return self.m._resolve_gptq_damp_for_role(qname, levers=levers)
+            return self.m.resolve_gptq_damp_for_role(qname, levers=levers)
         self.assertEqual(r("model.layers.2.mlp.gate_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.down_proj"), 0.5)
         self.assertEqual(r("model.layers.2.self_attn.q_proj"), 0.5)
@@ -5075,32 +5075,32 @@ class TestGptqDeadColumnHandling(unittest.TestCase):
 
     def test_dead_activation_column_survives_nvfp4_gptq(self):
         from prismaquant.native_render_codec import (
-            _gptq_obs_rounding_nvfp4,
+            gptq_obs_rounding_nvfp4,
         )
         torch.manual_seed(21)
         W = torch.randn(16, 32) * 0.3
         X = torch.randn(64, 32)
         dead_col = 7
         X[:, dead_col] = 0.0
-        out = _gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        out = gptq_obs_rounding_nvfp4(W, X, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         # The unexercised column is quantized, not destroyed.
         self.assertGreater(float(out[:, dead_col].abs().max()), 0.0)
         self.assertTrue(torch.isfinite(out).all())
 
     def test_dead_activation_column_survives_fp8_and_mxfp4_gptq(self):
         from prismaquant.native_render_codec import (
-            _gptq_obs_rounding_fp8_like,
-            _gptq_obs_rounding_mxfp4,
+            gptq_obs_rounding_fp8_like,
+            gptq_obs_rounding_mxfp4,
         )
         torch.manual_seed(22)
         W = torch.randn(16, 64) * 0.3
         X = torch.randn(96, 64)
         dead_col = 11
         X[:, dead_col] = 0.0
-        _q, _s, dq_fp8 = _gptq_obs_rounding_fp8_like(
+        _q, _s, dq_fp8 = gptq_obs_rounding_fp8_like(
             W, X, fmt="FP8_E4M3", levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertGreater(float(dq_fp8[:, dead_col].abs().max()), 0.0)
-        _q4, _s4, dq_mx4 = _gptq_obs_rounding_mxfp4(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+        _q4, _s4, dq_mx4 = gptq_obs_rounding_mxfp4(W, X, group_size=32, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertGreater(float(dq_mx4[:, dead_col].abs().max()), 0.0)
 
 
@@ -5116,20 +5116,20 @@ class TestCholeskyFallbackKeepsJointGlobal(unittest.TestCase):
         X = torch.randn(48, 32)
 
         # Expected: replicate the pre-Cholesky global computation of
-        # _gptq_obs_rounding_nvfp4 under joint_scale_opt.
+        # gptq_obs_rounding_nvfp4 under joint_scale_opt.
         W32 = W.to(torch.float32)
         grouped = W32.reshape(16, 32 // 16, 16)
-        s_g = _native_render_codec._select_nvfp4_group_scales(
+        s_g = _native_render_codec.select_nvfp4_group_scales(
             grouped, scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         base = (s_g.amax() / _native_render_codec.FP8_E4M3_MAX).clamp_min(1e-12)
         opt = _native_render_codec._optimize_nvfp4_joint_global_real(
             W32, group_size=16, base_global_real=base, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
-        expected = _native_render_codec._rtn_dequant_nvfp4(
+        expected = _native_render_codec.rtn_dequant_nvfp4(
             W, group_size=16, global_real_override=opt, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
         with mock.patch(
                 "torch.linalg.cholesky", side_effect=RuntimeError("boom")):
-            got = _native_render_codec._gptq_obs_rounding_nvfp4(
+            got = _native_render_codec.gptq_obs_rounding_nvfp4(
                 W, X, group_size=16, joint_scale_opt=True, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
         torch.testing.assert_close(got, expected)

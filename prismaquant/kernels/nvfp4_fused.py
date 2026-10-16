@@ -84,15 +84,15 @@ def nvfp4_pack_weight(
     # codes*scales reproduces the export dequant exactly.
     w_float = weight.detach().float()
     grouped = w_float.reshape(rows, cols // _NVFP4_GROUP_SIZE, _NVFP4_GROUP_SIZE)
-    scale_real, global_real = _native_render_codec._select_nvfp4_pack_scales_and_global(
+    scale_real, global_real = _native_render_codec.select_nvfp4_pack_scales_and_global(
         grouped, levers=levers)
-    codec = _native_render_codec._nvfp4_quantize_grouped_codec(
+    codec = _native_render_codec.nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=scale_real,
         levers=levers,
     )
-    eff_scale = _native_render_codec._nvfp4_effective_scale_from_fp8(
+    eff_scale = _native_render_codec.nvfp4_effective_scale_from_fp8(
         codec.scale, global_real,
     )
     fp4_indices = codec.indices.reshape(rows, cols)

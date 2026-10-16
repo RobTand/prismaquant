@@ -24,7 +24,7 @@ import torch
 from prismaquant import format_registry as fr
 from prismaquant.native_render_codec import (
     _mxfp8_dequantize_2d,
-    _rtn_dequant_nvfp4,
+    rtn_dequant_nvfp4,
     quantize_dequantize_fp8_dynamic,
     quantize_dequantize_mxfp8,
 )
@@ -220,7 +220,7 @@ def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
 
         for w in cases:
             registry = fr.get_format("NVFP4").quantize_dequantize(w)
-            export = _rtn_dequant_nvfp4(w, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            export = rtn_dequant_nvfp4(w, group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
 
             assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
     finally:
@@ -237,7 +237,7 @@ def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
         torch.manual_seed(23)
         x = torch.randn(2, 5, 32, dtype=torch.float32) * 2.0
         registry = fr.get_format("NVFP4").quantize_dequantize(x)
-        export = _rtn_dequant_nvfp4(
+        export = rtn_dequant_nvfp4(
             x.reshape(-1, x.shape[-1]),
             group_size=16,
             levers=_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve(),
