@@ -63,6 +63,21 @@ def test_scoped_encode_and_render_match_the_served_wire_and_byte_price():
     assert 0 <= price["total_bytes"] - len(fused) <= 64
 
 
+def test_scoped_planned_facts_equal_the_producers_byte_derived_facts():
+    """The routed plan against the producer's byte-side reader, where its
+    serving package is installed beside the tests; ``structure`` is a plan
+    fact the bytes do not carry."""
+    scheme = pytest.importorskip("tessera.serving.scheme")
+    unit, _ = render._encode_planned_unit(_weight(), NAME, structure=STRUCTURE)
+    on_bytes = scheme.wire_facts_of_parsed(
+        SimpleNamespace(unit=unit, grid=render._grid_for(FAMILY)))
+    planned = render.planned_wire_facts(FAMILY, RUNG, structure=STRUCTURE)
+    assert set(planned) - {"structure"} == set(on_bytes)
+    assert set(planned["rates"]) == set(on_bytes["rates"])
+    for key in set(on_bytes) - {"rates"}:
+        assert planned[key] == on_bytes[key], key
+
+
 def test_synthesis_prices_and_renders_the_contexts_served_recipe(monkeypatch):
     monkeypatch.setattr(render, "_producer_eligible", lambda *_a, **_kw: True)
     context = ServingContext("sm_121", STRUCTURE, "resident",

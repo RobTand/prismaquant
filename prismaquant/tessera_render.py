@@ -444,7 +444,7 @@ def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dic
     (``tessera_served_wire_recipe``, the producer's structure-aware resolver)
     and the decoration
     constants above.  ``lane_eligibility.cell_lane_admits`` hands this dict
-    to ``tessera.serving.scheme.decide_lane_requirements``, so a lane's
+    to ``tessera.metadata.decide_lane_requirements``, so a lane's
     published predicate is decided over what this producer plans rather than
     over the attested stamp the contract's cells were derived from; the test
     that pins this function against ``wire_facts_of_parsed`` on a real

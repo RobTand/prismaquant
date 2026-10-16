@@ -400,6 +400,28 @@ def test_planned_wire_facts_are_the_facts_the_encoded_bytes_carry(name, family, 
         .to(dtype=weight.dtype))
 
 
+@pytest.mark.parametrize("name, family, rate", [
+    (E4M3_NAME, E4M3, E4M3_RATE),
+    (BF16_NAME, BF16, BF16_RATE),
+])
+def test_planned_wire_facts_equal_the_producers_byte_derived_facts(name, family, rate):
+    """Principle 14: the producer's own byte-side reader, where its serving
+    package is installed beside the tests, derives exactly the planned facts
+    from a unit the render path encoded."""
+    scheme = pytest.importorskip("tessera.serving.scheme")
+    torch.manual_seed(0)
+    weight = torch.randn(4, 512, dtype=torch.bfloat16)
+    unit, _forests = render._encode_planned_unit(weight, name)
+    spec, _rung = render.parse_tessera_format_name(name)
+    on_bytes = scheme.wire_facts_of_parsed(
+        SimpleNamespace(unit=unit, grid=render._grid_for(spec)))
+    planned = render.planned_wire_facts(family, rate)
+    assert set(planned) == set(on_bytes)
+    assert set(on_bytes["rates"]) == set(planned["rates"])
+    for key in set(planned) - {"rates"}:
+        assert planned[key] == on_bytes[key], key
+
+
 def test_the_planned_facts_speak_the_decision_cores_whole_vocabulary(payload):
     """Every published requirement is decided on a fact this producer
     supplies: an 'was not read' refusal would mean the plan is silent on a
