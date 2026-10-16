@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the streamed production-cache fill claims its
+`--cache-dir` through `render_identity.json` (#146, §5.4). It never resumes,
+so it refuses a directory that already holds a render identity, a
+fused-witness sidecar or a rendered shard, and records a `streamed_fill`
+section that the resident fill refuses. A streamed build can no longer
+overwrite a resident directory's shards, and a resident resume can no longer
+adopt a streamed build's. Re-running a streamed build needs a fresh
+`--cache-dir`. Rendered bytes are unchanged.
+
 Re-stamped 2026-10-16: each fused NVFP4 joint-global witness now names the
 shard its producer published, by manifest name and
 `file_identity.file_stat_signature` (schema v2). A resume adopts a witness
@@ -26629,7 +26638,15 @@ by `render_identity.json` (#146): the base fill and packed append writers compar
 respective identity sections before admitting file-presence reuse. A changed hook scope
 refuses and requires a fresh cache directory. A pre-guard directory can still be admitted
 on trust, but its existing shard names and count are recorded as `pre_guard_admission`;
-that history is not evidence that those old shards had a verified render identity.
+that history is not evidence that those old shards had a verified render identity. The
+streamed fill never resumes and overwrites every shard in its scope, so it claims only a
+directory no rendering has claimed (`claim_streamed_cache_directory`): it refuses one that
+holds a `render_identity.json`, a fused-witness sidecar or a rendered shard, and publishes a
+`streamed_fill` section without replacing a sidecar another writer published first. The
+resident fill refuses a directory carrying that section, and the same streamed build's MTP
+and packed appends add their sections beside it. Re-running a streamed build, after a crash
+too, needs a fresh `--cache-dir`. Directories streamed builds wrote before this claim carry
+no section, so a resident fill still admits them on trust as pre-guard directories.
 
 Render mechanisms are a registry with declared ordering semantics, not a lever string parsed in
 spelling order (`render_score.py:188-260`): each `RenderMechanismSpec` declares `operation`,

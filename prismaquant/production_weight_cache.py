@@ -94,7 +94,9 @@ import torch.nn as nn
 
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
-from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
+from prismaquant.cost_stage_checkpoint import (
+    atomic_write_bytes, publish_new_bytes, unique_temp_suffix,
+)
 from prismaquant.digests import (
     DIRECT_ASCII_INDENT2_LAX,
     DIRECT_UTF8_STRICT,
@@ -143,6 +145,11 @@ MTP_APPEND_SIDECAR_KEY = "mtp_append"
 PACKED_APPEND_SIDECAR_KEY = "packed_expert_append"
 PACKED_STREAMING_APPEND_SIDECAR_KEY = "packed_expert_streaming_append"
 PRE_GUARD_ADMISSION_SIDECAR_KEY = "pre_guard_admission"
+#: The streamed fill's claim on its directory (``claim_streamed_cache_directory``).
+STREAMED_FILL_SIDECAR_KEY = "streamed_fill"
+STREAMED_FILL_IDENTITY_SCHEMA = (
+    "prismaquant.production_weight_cache.streamed_fill_identity.v1"
+)
 #: Per-entry witness of the fused-sibling NVFP4 joint global.  Export
 #: re-derives a fused sibling's codes and FP8 block scales from the cached
 #: dequant under the joint global it recomputes, which reproduces the validated
@@ -5560,7 +5567,9 @@ def _check_and_record_append_identity(
     A ``pre_guard_admission`` record (#146), when present, is carried
     forward untouched by the section merge and by that later adoption; an
     append running first in a pre-guard directory records it the same way
-    the base fill does.
+    the base fill does. A streamed fill's ``streamed_fill`` claim is carried
+    forward the same way, so the appends of a streamed build join its
+    directory.
     """
     if section_key == MTP_APPEND_SIDECAR_KEY:
         current = validate_mtp_append_identity(
@@ -5640,6 +5649,7 @@ def _check_and_record_append_identity(
         and MTP_APPEND_SIDECAR_KEY not in stored_raw
         and PACKED_APPEND_SIDECAR_KEY not in stored_raw
         and PACKED_STREAMING_APPEND_SIDECAR_KEY not in stored_raw
+        and STREAMED_FILL_SIDECAR_KEY not in stored_raw
     ):
         raise ValueError(
             f"production cache directory {cache_dir} has an unrecognized "
@@ -5748,6 +5758,9 @@ def _check_production_cache_render_identity(
     than render input, so it is carried forward by the adoption instead of
     compared: a guarded directory carrying it still resumes cleanly against
     a caller identity computed without it.
+
+    A directory a streamed fill claimed (``claim_streamed_cache_directory``)
+    refuses: its shards were never this fill's to resume.
     """
     current_identity = validate_production_cache_render_identity(
         _canonical_json_value(dict(current), where="production cache render identity"),
@@ -5807,6 +5820,14 @@ def _check_production_cache_render_identity(
             "instead of mixing renders"
         )
     stored_raw = dict(stored_raw)
+    if STREAMED_FILL_SIDECAR_KEY in stored_raw:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} holds a streamed "
+            f"fill's renders ({RENDER_IDENTITY_SIDECAR_FILENAME} section "
+            f"{STREAMED_FILL_SIDECAR_KEY!r}); the resident fill neither resumes "
+            "nor adopts them — rebuild this directory (fresh --cache-dir) "
+            "instead of mixing renders"
+        )
     base_fields = set(current_identity)
     stored_base_raw = {
         key: stored_raw[key] for key in base_fields if key in stored_raw
@@ -5901,6 +5922,74 @@ def _check_production_cache_render_identity(
             f"({len(current_identity['rendered_pairs'])} pairs); "
             "reusing on-disk shards",
             flush=True,
+        )
+
+
+def claim_streamed_cache_directory(
+    cache_dir_path: Path,
+    *,
+    render_scope: str,
+    requested_formats: Sequence[str],
+    levers: Mapping[str, object],
+    calib_hash: str | None,
+    render_formats_by_qname: Mapping[str, Sequence[str]],
+    max_act_rows: int,
+) -> None:
+    """Claim a directory for one streamed fill, or refuse (#146).
+
+    The streamed fill never resumes: it renders every pair in its scope and
+    writes each shard over whatever has that name. So it renders only into a
+    directory no rendering has claimed -- no ``render_identity.json``, no
+    fused-witness sidecar and no rendered shard -- and claims it by
+    publishing a ``streamed_fill`` section there without replacing a sidecar
+    another writer published first. The resident fill refuses a directory
+    carrying that section (``_check_production_cache_render_identity``), so
+    neither fill adopts the other's shards, and the same build's MTP and
+    packed appends add their own sections beside it. Re-running a streamed
+    build, after a crash too, needs a fresh ``--cache-dir``. The section
+    records what was rendered; nothing compares it.
+    """
+    cache_dir_path.mkdir(parents=True, exist_ok=True)
+    held = [
+        name
+        for name in (
+            RENDER_IDENTITY_SIDECAR_FILENAME,
+            NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME,
+        )
+        if (cache_dir_path / name).exists()
+    ]
+    shards = _pre_guard_trusted_shards(cache_dir_path)
+    if shards:
+        held.append(f"{len(shards)} rendered shards, e.g. {shards[0]}")
+    claim = {
+        STREAMED_FILL_SIDECAR_KEY: {
+            "schema": STREAMED_FILL_IDENTITY_SCHEMA,
+            "render_scope": str(render_scope),
+            "requested_formats": sorted({
+                str(fmt).strip().upper()
+                for fmt in requested_formats
+                if str(fmt).strip()
+            }),
+            "levers": _canonical_json_value(
+                dict(levers), where="streamed fill render levers"),
+            "calib_hash": None if calib_hash is None else str(calib_hash),
+            "rendered_pairs": sorted({
+                f"{qname}|{str(fmt).strip().upper()}"
+                for qname, fmts in render_formats_by_qname.items()
+                for fmt in fmts
+            }),
+            "max_act_rows": int(max_act_rows),
+        },
+    }
+    if held or not publish_new_bytes(
+        cache_dir_path / RENDER_IDENTITY_SIDECAR_FILENAME,
+        DIRECT_ASCII_INDENT2_LAX.encoded(claim),
+    ):
+        raise ValueError(
+            f"production cache directory {cache_dir_path} already holds a "
+            f"rendering ({'; '.join(held) or RENDER_IDENTITY_SIDECAR_FILENAME}); "
+            "the streamed fill never resumes and would write its shards over "
+            "it — render into a fresh --cache-dir"
         )
 
 

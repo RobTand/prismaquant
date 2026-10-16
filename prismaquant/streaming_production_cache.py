@@ -58,6 +58,7 @@ from prismaquant.production_weight_cache import (
     _store_rendered_weight_entry,
     _production_cache_git_commit,
     _production_cache_source_sha256,
+    claim_streamed_cache_directory,
     fill_packed_expert_cache_entries,
     render_production_weight,
 )
@@ -1066,6 +1067,18 @@ def run_streaming_render(
         ),
         where="streaming production cache",
     )
+    if cache_dir_path is not None:
+        # #146: this fill never resumes and overwrites every shard in its
+        # scope, so it renders only into a directory no rendering claimed.
+        claim_streamed_cache_directory(
+            cache_dir_path,
+            render_scope=render_scope,
+            requested_formats=requested_formats,
+            levers=levers,
+            calib_hash=calibration_hash,
+            render_formats_by_qname=render_formats_by_qname,
+            max_act_rows=max_act_rows,
+        )
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)
     for qname, mod in dense_modules.items():
         per_layer_dense[_layer_index_of(qname, layers_prefix)][qname] = mod

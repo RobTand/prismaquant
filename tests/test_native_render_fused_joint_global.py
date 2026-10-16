@@ -27,6 +27,7 @@ moved and copied directories, and the cases a refusal must leave alone.
 from __future__ import annotations
 
 import copy
+import json
 import math
 import os
 import pickle
@@ -42,17 +43,24 @@ import torch.nn.functional as F
 
 import prismaquant.export_native_compressed as enc
 import prismaquant.native_render_codec as codec
+import prismaquant.streaming_production_cache as streaming
 from prismaquant.measure_quant_cost import ActivationIndex
 from prismaquant.model_profiles import DefaultProfile
 from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 from prismaquant.file_identity import file_stat_signature
 from prismaquant.production_weight_cache import (
+    MTP_APPEND_SIDECAR_KEY,
     NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME,
+    RENDER_IDENTITY_SIDECAR_FILENAME,
+    STREAMED_FILL_IDENTITY_SCHEMA,
+    STREAMED_FILL_SIDECAR_KEY,
     NVFP4JointGlobalWitness,
     PublishedShard,
+    _check_and_record_append_identity,
     _LinearActivationCollector,
+    build_mtp_append_identity,
     fill_production_weight_cache,
     nvfp4_joint_global_witness_problem,
     nvfp4_joint_global_witness_section,
@@ -415,9 +423,18 @@ def _streamed_fill(rendered, cache_dir, *, levers=JSO, include_qnames=None):
     )
 
 
-def _overwrite_with_streamed(rendered, cache_dir, **kwargs):
-    """A streamed build that writes into an existing cache directory."""
-    return _streamed_fill(rendered, cache_dir, **kwargs)
+def _overwrite_with_streamed(rendered, cache_dir, monkeypatch, **kwargs):
+    """A streamed build writing into an existing cache directory.
+
+    The streamed fill's directory claim refuses this now; a build from before
+    the claim, or any other writer, still can. Bypassing the claim keeps the
+    shard binding under test on its own.
+    """
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            streaming, "claim_streamed_cache_directory",
+            lambda *_args, **_kwargs: None)
+        return _streamed_fill(rendered, cache_dir, **kwargs)
 
 
 def _replace_by_copy(path: Path) -> None:
@@ -622,7 +639,10 @@ def test_resident_resume_adopts_no_witness_for_shards_another_build_overwrote(
 ):
     """Review N3-01, inverted: a streamed build overwrote fused shards of a
     resident directory, under another recipe or a narrower scope, and the
-    resident fill then resumed the directory with its original settings."""
+    resident fill then resumed the directory with its original settings.
+    The streamed fill's own directory claim now refuses that overwrite
+    (``test_streamed_fill_refuses_a_directory_another_rendering_holds``);
+    here it is bypassed so the shard binding is shown on its own."""
     monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
     cache_dir = tmp_path / "pwc"
     first = _resident_fill(rendered, cache_dir)
@@ -631,13 +651,13 @@ def test_resident_resume_adopts_no_witness_for_shards_another_build_overwrote(
         # static_6 joint global.
         overwritten = set(FUSED)
         streamed = _overwrite_with_streamed(
-            rendered, cache_dir, levers={"gptq": True})
+            rendered, cache_dir, monkeypatch, levers={"gptq": True})
     else:
         # The same JSO recipe narrowed to k_proj: its joint global spans k_proj
         # alone.
         overwritten = {f"{LAYER}.self_attn.k_proj"}
         streamed = _overwrite_with_streamed(
-            rendered, cache_dir, include_qnames=sorted(overwritten))
+            rendered, cache_dir, monkeypatch, include_qnames=sorted(overwritten))
     first_witnesses = nvfp4_joint_global_witnesses(first.metadata, where="first")
     streamed_witnesses = nvfp4_joint_global_witnesses(
         streamed.metadata, where="streamed")
@@ -742,3 +762,95 @@ def test_witnesses_follow_a_moved_cache_directory_but_not_a_copy(
     for name in sorted(FUSED):
         with pytest.raises(RuntimeError, match=UNWITNESSED):
             _pack_fused(name, layer[name])
+
+
+def _file_identities(directory: Path) -> dict[str, tuple]:
+    return {
+        path.name: file_stat_signature(path.lstat())
+        for path in sorted(directory.iterdir())
+    }
+
+
+@pytest.mark.parametrize(
+    "holder", ["resident", "streamed", "pre_claim_shards", "witness_sidecar"])
+def test_streamed_fill_refuses_a_directory_another_rendering_holds(
+    rendered, holder, tmp_path, monkeypatch,
+):
+    """#146 for the streamed fill: it never resumes and overwrites every shard
+    in its scope, so it claims only a directory no rendering holds. The
+    ``resident`` case is review N3-01's step 2."""
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    if holder == "resident":
+        _resident_fill(rendered, cache_dir)
+    elif holder == "streamed":
+        _streamed_fill(rendered, cache_dir)
+    elif holder == "pre_claim_shards":
+        # Shards with no sidecar: a streamed build from before the claim.
+        cache_dir.mkdir()
+        _overwrite_with_streamed(rendered, cache_dir, monkeypatch)
+        assert not (cache_dir / RENDER_IDENTITY_SIDECAR_FILENAME).exists()
+    else:
+        cache_dir.mkdir()
+        (cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME).write_text("{}")
+    before = _file_identities(cache_dir)
+
+    with pytest.raises(
+        ValueError, match="already holds a rendering.*fresh --cache-dir"):
+        _streamed_fill(rendered, cache_dir, levers={"gptq": True})
+
+    assert _file_identities(cache_dir) == before
+
+
+def test_resident_fill_refuses_a_directory_a_streamed_fill_claimed(
+    rendered, tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    _streamed_fill(rendered, cache_dir)
+    before = _file_identities(cache_dir)
+
+    with pytest.raises(
+        ValueError, match="holds a streamed fill's renders.*fresh --cache-dir"):
+        _resident_fill(rendered, cache_dir)
+
+    assert _file_identities(cache_dir) == before
+
+
+def test_streamed_fill_claims_an_unclaimed_directory_for_its_appends(
+    rendered, tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    # fill_production_weight_cache_streaming creates its offload folder here
+    # before the render starts; that is not a rendering.
+    (cache_dir / "streaming_offload").mkdir(parents=True)
+    _streamed_fill(rendered, cache_dir)
+
+    sidecar = cache_dir / RENDER_IDENTITY_SIDECAR_FILENAME
+    claim = json.loads(sidecar.read_text())
+    assert set(claim) == {STREAMED_FILL_SIDECAR_KEY}
+    section = claim[STREAMED_FILL_SIDECAR_KEY]
+    assert section["schema"] == STREAMED_FILL_IDENTITY_SCHEMA
+    assert section["rendered_pairs"] == sorted(
+        f"{name}|NVFP4" for name in rendered["qnames"])
+    assert section["levers"]["joint_scale_opt"] is True
+    assert section["max_act_rows"] == 4096
+
+    # An append of the same streamed build joins the claimed directory.
+    _check_and_record_append_identity(
+        cache_dir,
+        MTP_APPEND_SIDECAR_KEY,
+        build_mtp_append_identity(
+            max_act_rows=4096,
+            activation_source_hash="0" * 64,
+            activation_rows={"mtp.fc": 8},
+            source_prefix="mtp.",
+            source_tensor_count=1,
+            profile_name="test",
+        ),
+        progress=False,
+    )
+    joined = json.loads(sidecar.read_text())
+    assert set(joined) == {STREAMED_FILL_SIDECAR_KEY, MTP_APPEND_SIDECAR_KEY}
+    assert joined[STREAMED_FILL_SIDECAR_KEY] == section
