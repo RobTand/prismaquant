@@ -19,7 +19,7 @@ from .fp8_dynamic import fp8_dynamic_weight_qdq
 from .mx_formats import e8m0_to_scale, mxfp8_e4m3_qdq
 from .layer_config import canonicalize_format
 from .native_render_levers import NativeRenderLevers
-from .render_score import normalize_clipped_fisher_row_weights, resolve_fisher_row_weight_clip
+from .render_score import normalize_clipped_fisher_row_weights
 
 # `compressed_tensors.compressors.nvfp4.helpers.pack_fp4_to_uint8` and is
 # verified byte-identical in tests. We pack indices directly rather than call
@@ -100,7 +100,7 @@ def _nvfp4_codebook(device, dtype=torch.float32) -> torch.Tensor:
     return cb
 
 
-def resolve_nvfp4_scale_rule(raw: str | None = None) -> str:
+def resolve_nvfp4_scale_rule(raw: str) -> str:
     """Canonicalize the NVFP4 block-scale rule.
 
     ``static_6`` is the compressed-tensors/llm-compressor default: every
@@ -110,8 +110,6 @@ def resolve_nvfp4_scale_rule(raw: str | None = None) -> str:
     ``joint_mse`` extends that packer-compatible candidate set to every
     positive NVFP4 codebook level, making FourOverSix a strict subset.
     """
-    if raw is None:
-        raw = os.environ.get(NVFP4_SCALE_RULE_ENV, NVFP4_SCALE_RULE_STATIC_6)
     key = str(raw).strip().lower().replace("-", "_")
     try:
         return _NVFP4_SCALE_RULE_ALIASES[key]
@@ -125,15 +123,6 @@ def resolve_nvfp4_scale_rule(raw: str | None = None) -> str:
             f"unsupported {NVFP4_SCALE_RULE_ENV}={raw!r}; "
             f"expected one of: {allowed}"
         ) from exc
-
-
-def _nvfp4_scale_rule_from_env(
-    *,
-    levers: NativeRenderLevers | None = None,
-) -> str:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
-    return levers.nvfp4_scale_rule
 
 
 def _decode_nvfp4_indices(
@@ -217,7 +206,7 @@ def _select_nvfp4_group_scales(
     scale_rule: str | None = None,
     global_real: torch.Tensor | None = None,
     joint_scale_levels: tuple[float, ...] | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Return per-block real NVFP4 scales for ``grouped[..., group_size]``.
 
@@ -225,10 +214,8 @@ def _select_nvfp4_group_scales(
     the single scale-selection point used by RTN, GPTQ block quantization,
     scale-sweep initialization, packed experts, and final export packing.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     rule = (
-        _nvfp4_scale_rule_from_env(levers=levers)
+        levers.nvfp4_scale_rule
         if scale_rule is None
         else resolve_nvfp4_scale_rule(scale_rule)
     )
@@ -257,7 +244,7 @@ def _select_nvfp4_group_scales(
 
 def _nvfp4_snapped_scale_scoring_enabled(
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> bool:
     """Score NVFP4 scale candidates under the FP8-SNAPPED effective scale.
 
@@ -268,8 +255,6 @@ def _nvfp4_snapped_scale_scoring_enabled(
     gold-metric A/B (QC finding on review-batch M21). Promote per the
     ladder: served KL+PPL at matched bpp on 4B, then a 27B confirmation.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return levers.nvfp4_snapped_scale_scoring
 
 
@@ -280,10 +265,8 @@ def _select_nvfp4_pack_scales_and_global(
     scale_rule: str | None = None,
     snapped_scale_scoring: bool | None = None,
     joint_scale_levels: tuple[float, ...] | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     score_snapped = (
         _nvfp4_snapped_scale_scoring_enabled(levers=levers)
         if snapped_scale_scoring is None
@@ -412,10 +395,8 @@ def _nvfp4_quantize_grouped_codec(
     global_real: torch.Tensor,
     scale_real: torch.Tensor | None = None,
     scale_rule: str | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> _NVFP4CodecResult:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     grouped_f = grouped.to(torch.float32)
     if scale_real is None:
         scale_real = _select_nvfp4_group_scales(
@@ -449,7 +430,7 @@ def _select_nvfp4_joint_gptq_eff_scale(
     global_real: torch.Tensor,
     *,
     col_importance: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Return GPTQ-time effective scales for Lift-style joint scale search.
 
@@ -458,8 +439,6 @@ def _select_nvfp4_joint_gptq_eff_scale(
     representable by the same NVFP4 compressed-tensors metadata when the
     final packer uses ``joint_mse``.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
 
     max_abs = grouped.abs().amax(dim=-1).clamp_min(1e-12)
     weight = None
@@ -499,7 +478,7 @@ def _optimize_nvfp4_joint_global_real(
     *,
     group_size: int,
     base_global_real: torch.Tensor,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Choose a tensor global scale jointly with group-scale candidates.
 
@@ -507,8 +486,6 @@ def _optimize_nvfp4_joint_global_real(
     globals after FP8 realization of group scales, chunking rows so large
     Linears do not materialize a candidate dimension over the full weight.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
 
     grid = levers.nvfp4_joint_scale_global_grid
     if grid <= 1:
@@ -603,11 +580,9 @@ def _canonical_export_format(fmt: str) -> str:
 
 def _resolve_act_clip_quantile(default: str = "0.999",
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float | None:
     """Return the effective activation-clip quantile for GPTQ scoring."""
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return levers.act_clip_quantile
 
 
@@ -642,7 +617,7 @@ def _activation_matrix_for_gptq(
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Flatten activations and apply the same optional clipping used by GPTQ.
 
@@ -651,8 +626,6 @@ def _activation_matrix_for_gptq(
     unclipped local gates caused the full quality-win stack to undo part
     of the activation-clipping gain.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     X = activations.detach().to(torch.float32)
     if device is not None:
         X = X.to(device)
@@ -683,7 +656,7 @@ def _normalize_fisher_row_weights(
     n_rows: int,
     device: torch.device,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor | None:
     """Return non-negative Fisher row weights normalized to mean 1.
 
@@ -695,8 +668,6 @@ def _normalize_fisher_row_weights(
     lives in render_score.normalize_clipped_fisher_row_weights so the cost
     paths cannot drift (issue #159).
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     if row_weights is None or n_rows <= 0:
         return None
     try:
@@ -720,10 +691,8 @@ def _activation_col_importance_for_gptq(
     clip_quantile: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     X = _activation_matrix_for_gptq(
         activations,
         cols,
@@ -747,7 +716,7 @@ def _activation_weighted_weight_error(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     row_weights: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float:
     """Score a rendered weight with the same cheap local gate as NVFP4.
 
@@ -755,8 +724,6 @@ def _activation_weighted_weight_error(
     activation energy matter more. It is intentionally used only as a local
     do-no-harm gate; the production cache still uses the shared output scorer.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     ref = reference_weight.to(torch.float32)
     cand = rendered_weight.to(device=ref.device, dtype=torch.float32)
     a2 = _activation_col_importance_for_gptq(
@@ -793,37 +760,9 @@ _FP4_E2M1_MAX = _nvfp4_activation_contract.FP4_E2M1_MAX
 _FP8_E4M3_MAX = _nvfp4_activation_contract.FP8_E4M3_MAX
 
 
-def _nvfp4_input_gscale_fp8_range_enabled(
-    *,
-    levers: NativeRenderLevers | None = None,
-) -> bool:
-    """Whether input_global_scale uses the compressed-tensors/vLLM
-    convention ``FP8_MAX * FP4_MAX / amax`` (generate_gparam) instead of
-    the legacy ``FP4_MAX / amax``.
-
-    Default OFF (legacy bytes). The convention places serve-time
-    FP8-stored activation block scales in (0, 448] instead of (0, 1] —
-    rescuing blocks >64x below calibration amax from FP8 subnormals at
-    the cost of CLIPPING any serve block whose amax exceeds calibration
-    amax. Served A/Bs 2026-07-02 (weights byte-identical, only
-    input_global_scale x448): Qwen3.6-35B-A3B MoE frontier -14.1% KL
-    (WIN), LFM2.5 thin-calib smoke +5.8% (loss), Qwen3.6-27B regen dense
-    +37.5% (LOSS). Strongly artifact-dependent, so the default stays
-    backwards-compatible; set ``PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE=1``
-    only behind a per-artifact served A/B (the scale is a free
-    post-export knob: patch input_global_scale in place, re-measure).
-    """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
-    return (
-        levers.nvfp4_input_global_scale_policy
-        == _nvfp4_activation_contract.FULL_E4M3_INPUT_GLOBAL_SCALE_POLICY
-    )
-
-
 def _nvfp4_input_global_scale_from_max_abs(
     max_abs: float, *, policy: str | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float:
     """input_global_scale for a calibrated activation ``max_abs``.
 
@@ -831,14 +770,12 @@ def _nvfp4_input_global_scale_from_max_abs(
     or the explicit compressed-tensors ``448 * 6 / amax`` opt-in.  This
     compatibility wrapper never defines a second formula.
 
-    ``policy`` is optional and resolves live when omitted, as every historical
-    caller expects.  A caller that has already resolved ONE policy for a whole
-    operation -- the production cache fill, whose render levers stamp it --
-    passes it, so the G that reaches the renderer and the G its score records
-    are priced at cannot come from two different resolutions (#227).
+    ``policy`` defaults to the policy ``levers`` carries.  A caller that has
+    already resolved ONE policy for a whole operation -- the production cache
+    fill, whose render levers stamp it -- passes it, so the G that reaches the
+    renderer and the G its score records are priced at cannot come from two
+    different resolutions (#227).
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return _nvfp4_activation_contract.input_global_scale_from_max_abs(
         max_abs,
         policy=(
@@ -853,7 +790,7 @@ def _nvfp4_input_global_scale_from_max_abs(
 
 def compute_nvfp4_input_global_scale(activations: torch.Tensor,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float:
     """Per-tensor input_global_scale from cached activations.
 
@@ -861,8 +798,6 @@ def compute_nvfp4_input_global_scale(activations: torch.Tensor,
     converts their maximum absolute value and preserves the legacy all-zero
     fallback required for byte-compatible native export.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     max_abs = float(activations.detach().abs().max().item())
     return _nvfp4_input_global_scale_from_max_abs(max_abs, levers=levers)
 
@@ -894,10 +829,8 @@ def _resolve_nvfp4_input_global_scale(
 # during Hessian + per-channel stats). None means "not loaded".
 def _gptq_column_block_size(cols: int,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> int:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return max(1, min(int(cols), levers.gptq_block_size))
 
 
@@ -945,7 +878,7 @@ def _gptq_columnwise_update(
 
 def gptq_damp_sweep_enabled(
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> bool:
     """Whether GPTQ runs the legacy 5-candidate in-sample damp sweep.
 
@@ -958,14 +891,12 @@ def gptq_damp_sweep_enabled(
     §8 V1). Set PRISMAQUANT_GPTQ_DAMP_SWEEP=1 to reproduce historical
     sweep-rendered artifacts.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve(gptq_default=True)
     return levers.gptq_damp_sweep
 
 
 def _resolve_gptq_fixed_damp(
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float:
     """Fixed GPTQ damp used when the damp sweep is disabled.
 
@@ -978,8 +909,6 @@ def _resolve_gptq_fixed_damp(
     derive the per-Linear optimum from weights/activations alone
     (docs/unified_render_theory.md §9.7 — two closed forms refuted so far).
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return levers.gptq_fixed_damp
 
 
@@ -1013,7 +942,7 @@ def _gptq_role_of(qname: str) -> str:
 
 def _resolve_gptq_damp_for_role(qname: str,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> float:
     """Per-role GPTQ damp (research lever); falls back to the fixed default.
 
@@ -1021,8 +950,6 @@ def _resolve_gptq_damp_for_role(qname: str,
     ``PRISMAQUANT_GPTQ_DAMP_ROLES`` is unset or the role is unlisted, so the
     production default (global fixed 1.0) is preserved bit-for-bit.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return dict(levers.gptq_damp_roles).get(_gptq_role_of(qname), levers.gptq_fixed_damp)
 
 
@@ -1036,7 +963,7 @@ def _gptq_obs_rounding_nvfp4(
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """GPTQ one-shot OBS rounding for NVFP4 weights.
 
@@ -1064,8 +991,6 @@ def _gptq_obs_rounding_nvfp4(
     max-to-codebook-level scale choices used by GPTQ. Its candidate set
     contains max-to-6 and max-to-4, so FourOverSix is a strict subset.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     if damp is None:
         damp = _resolve_gptq_fixed_damp(levers=levers)
     W = weight.to(torch.float32).clone()
@@ -1233,7 +1158,7 @@ def _gptq_obs_rounding_nvfp4_swept(
     joint_scale_opt: bool = False,
     linear_name: str | None = None,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Per-Linear GPTQ damping sweep.
 
@@ -1255,8 +1180,6 @@ def _gptq_obs_rounding_nvfp4_swept(
     Cholesky fallback fires (degenerate H), we return the best
     successful pass; if all fail, we return the unswept fallback.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     W_orig = weight.to(torch.float32)
     X = _activation_matrix_for_gptq(
         activations,
@@ -1410,7 +1333,7 @@ def _scale_sweep_nvfp4(
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Per-group joint (scale, rounding) closed-form polish.
 
@@ -1439,8 +1362,6 @@ def _scale_sweep_nvfp4(
     second legal max-to-4 representation when max-to-6 would lose a swept
     scale choice.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     W_in = weight.to(torch.float32).contiguous()
     W_ref = (reference_weight if reference_weight is not None else W_in
              ).to(torch.float32).contiguous()
@@ -1541,14 +1462,12 @@ def _scale_sweep_nvfp4(
 def compute_nvfp4_global_real(weight: torch.Tensor, group_size: int = 16
                               ,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Return the per-tensor `global_real` that NVFP4 packing would
     pick for `weight` alone. Useful for fused-sibling pre-pass: caller
     takes the max across siblings and passes the joint value back into
     `quantize_dequantize_nvfp4(global_real_override=...)`."""
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     rows, cols = weight.shape
     grouped = weight.float().reshape(rows, cols // group_size, group_size)
     _s_g_real, global_real = _select_nvfp4_pack_scales_and_global(grouped, levers=levers)
@@ -1559,7 +1478,7 @@ def quantize_dequantize_nvfp4(
     weight: torch.Tensor, group_size: int = 16,
     global_real_override: torch.Tensor | None = None,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Apply NVFP4 RTN to a 2D `[rows, cols]` weight and return the
     on-disk triple `(weight_packed, weight_scale, weight_global_scale)`
@@ -1582,8 +1501,6 @@ def quantize_dequantize_nvfp4(
     to share one global_scale slot. Pass the max across the sibling
     group's natural global_real values.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     rows, cols = weight.shape
     if cols % group_size != 0:
         raise ValueError(f"NVFP4 group_size={group_size} ∤ {cols}")
@@ -1613,14 +1530,12 @@ def _rtn_dequant_nvfp4(
     weight: torch.Tensor, group_size: int = 16,
     global_real_override: torch.Tensor | None = None,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """RTN to NVFP4 grid, returning FP32 dequantized weights (no GPTQ
     error propagation, no scale sweep). Used by the do-no-harm gate
     (#do-no-harm) to compare against post-GPTQ/sweep state and revert
     if a Linear locally regressed."""
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     rows, cols = weight.shape
     if cols % group_size != 0:
         raise ValueError(f"NVFP4 group_size={group_size} ∤ {cols}")
@@ -1641,6 +1556,19 @@ def _rtn_dequant_nvfp4(
     return codec.dequant.reshape(rows, cols)
 
 
+def _explicit_nvfp4_recipe(
+    scale_rule: str,
+    snapped_scale_scoring: bool,
+    joint_scale_levels: tuple[float, ...],
+) -> NativeRenderLevers:
+    """The complete NVFP4 recipe named by explicit scale-plane arguments."""
+    return NativeRenderLevers(
+        nvfp4_scale_rule=resolve_nvfp4_scale_rule(scale_rule),
+        nvfp4_snapped_scale_scoring=bool(snapped_scale_scoring),
+        nvfp4_joint_scale_levels=tuple(joint_scale_levels),
+    )
+
+
 def render_nvfp4_dequant(
     weight: torch.Tensor,
     *,
@@ -1649,7 +1577,6 @@ def render_nvfp4_dequant(
     scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
     snapped_scale_scoring: bool = False,
     joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-    levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Render a 2-D weight through the exact production NVFP4 codec.
 
@@ -1657,11 +1584,11 @@ def render_nvfp4_dequant(
     explicit argument.  Offline selectors such as PrismaSnap must be
     reproducible from their receipt and therefore cannot inherit either
     ``PRISMAQUANT_NVFP4_SCALE_RULE`` or the research-only snapped-scale
-    scoring switch from the process environment.  Existing exporter call
-    sites continue to use their unchanged environment/default behavior.
+    scoring switch from the process environment.  Callers holding a complete
+    recorded recipe pass that ``NativeRenderLevers`` to the codec instead.
     """
-    if levers is None:
-        levers = NativeRenderLevers()
+    recipe = _explicit_nvfp4_recipe(
+        scale_rule, snapped_scale_scoring, joint_scale_levels)
     if weight.ndim != 2:
         raise ValueError(
             "production NVFP4 dequant render requires a rank-2 weight; "
@@ -1676,17 +1603,13 @@ def render_nvfp4_dequant(
     scale_real, global_real = _select_nvfp4_pack_scales_and_global(
         grouped,
         global_real_override=global_real_override,
-        scale_rule=resolve_nvfp4_scale_rule(scale_rule),
-        snapped_scale_scoring=snapped_scale_scoring,
-        joint_scale_levels=joint_scale_levels,
-        levers=levers,
+        levers=recipe,
     )
     codec = _nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=scale_real,
-        scale_rule=resolve_nvfp4_scale_rule(scale_rule),
-        levers=levers,
+        levers=recipe,
     )
     return codec.dequant.reshape(rows, cols)
 
@@ -1698,7 +1621,6 @@ def nvfp4_global_real(
     scale_rule: str = NVFP4_SCALE_RULE_STATIC_6,
     snapped_scale_scoring: bool = False,
     joint_scale_levels: tuple[float, ...] = (6.0, 4.0),
-    levers: NativeRenderLevers | None = None,
 ) -> torch.Tensor:
     """Return the explicit production-codec global multiplier for a weight.
 
@@ -1706,8 +1628,8 @@ def nvfp4_global_real(
     fuses sibling projections into one runtime parameter and therefore makes
     them share the maximum of their natural globals.
     """
-    if levers is None:
-        levers = NativeRenderLevers()
+    recipe = _explicit_nvfp4_recipe(
+        scale_rule, snapped_scale_scoring, joint_scale_levels)
     if weight.ndim != 2:
         raise ValueError(
             "production NVFP4 global calculation requires a rank-2 weight; "
@@ -1721,10 +1643,7 @@ def nvfp4_global_real(
     )
     _scale_real, global_real = _select_nvfp4_pack_scales_and_global(
         grouped,
-        scale_rule=resolve_nvfp4_scale_rule(scale_rule),
-        snapped_scale_scoring=snapped_scale_scoring,
-        joint_scale_levels=joint_scale_levels,
-        levers=levers,
+        levers=recipe,
     )
     return global_real
 
@@ -1732,15 +1651,13 @@ def nvfp4_global_real(
 def quantize_dequantize_nvfp4_packed(
     packed: torch.Tensor, group_size: int = 16,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Per-expert NVFP4 packing for a 3D `[E, M, N]` packed tensor.
     Each expert gets its own `global_real` (so the weight_global_scale
     output has shape `[E]`); the on-disk values are divisors (1/scale)
     matching the compressed-tensors convention.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     E, M, N = packed.shape
     if N % group_size != 0:
         raise ValueError(f"NVFP4 group_size={group_size} ∤ {N}")
@@ -2096,7 +2013,7 @@ def _mxfp8_scale_sweep_quantize(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted E8M0 scale search for MXFP8_E4M3.
 
@@ -2106,8 +2023,6 @@ def _mxfp8_scale_sweep_quantize(
     exponents per row/group is cheap, vLLM-compatible, and preserves the exact
     compressed-tensors MXFP8_E4M3 representation.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     rows, cols = weight.shape
     if cols % group_size != 0:
         raise ValueError(f"MXFP8_E4M3 scale sweep requires group_size={group_size} ∤ {cols}")
@@ -2252,15 +2167,13 @@ def _rtn_dequant_mxfp8(
 
 def _mxfp8_joint_scale_shifts(
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[int, ...]:
     # {-1, 0}: ceil-log2 (the canonical NVIDIA recipe, never saturates) plus
     # ceil-1 (lets the block trade one ULP of saturation on the amax for
     # one bit more precision on the rest). The synthetic-LLM oracle search
     # picks -1 for ~5% of blocks and 0 for the rest; deeper negative shifts
     # over-saturate and never win on unweighted MSE.
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return levers.mxfp8_joint_scale_shifts
 
 
@@ -2287,7 +2200,7 @@ def _mxfp8_quantize_dequantize_block(
     joint_scale_opt: bool,
     element_dtype: torch.dtype,
     element_max: float,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return MXFP8_E4M3/MXFP8_E5M2 q/scale/dequant for one `[rows, group_size]` block.
 
@@ -2297,8 +2210,6 @@ def _mxfp8_quantize_dequantize_block(
     h_trace * weight_mse cost surrogate. `col_importance` is accepted for
     interface compatibility but no longer consulted.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     del col_importance  # unused after switch to unweighted block-MSE
     base_e = _mxfp8_base_exponent(block, element_max=element_max)
     if joint_scale_opt:
@@ -2344,7 +2255,7 @@ def _gptq_obs_rounding_mxfp4(
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """GPTQ one-shot OBS rounding for MXFP4 weights.
 
@@ -2353,8 +2264,6 @@ def _gptq_obs_rounding_mxfp4(
     tuple is directly exportable: packed FP4 bytes, E8M0 block scales, and
     the served dequantized weight.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     W = weight.to(torch.float32).clone()
     rows, cols = W.shape
     if cols % group_size != 0:
@@ -2461,10 +2370,8 @@ def _gptq_obs_rounding_mxfp4_swept(
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
     static_act_order: bool = False,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     W_orig = weight.to(torch.float32)
     X = _activation_matrix_for_gptq(
         activations,
@@ -2525,7 +2432,7 @@ def _gptq_obs_rounding_fp8_like(
     fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """GPTQ one-shot OBS rounding for FP8_E4M3/E5M2 and MXFP8_E4M3/E5M2 weights.
 
@@ -2533,8 +2440,6 @@ def _gptq_obs_rounding_fp8_like(
     the export path can serialize. Plain FP8 uses one fp32 scale per output
     row; MXFP8_E4M3/MXFP8_E5M2 use one uint8 E8M0 scale per row/group.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     fmt_u = _canonical_export_format(fmt)
     is_mx = fmt_u in MXFP8_EXPLICIT_FORMATS
     is_plain = fmt_u in {"FP8_E4M3", "FP8_E5M2"}
@@ -2687,10 +2592,8 @@ def _gptq_obs_rounding_fp8_like_swept(
     fisher_row_weights: torch.Tensor | None = None,
     joint_scale_opt: bool = False,
     static_act_order: bool = False,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     W_orig = weight.to(torch.float32)
     X = _activation_matrix_for_gptq(
         activations,
@@ -2745,10 +2648,8 @@ def _gptq_obs_rounding_fp8_like_swept(
 
 def _fp8_scale_sweep_factors(
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[float, ...]:
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     return levers.fp8_scale_sweep_factors
 
 
@@ -2759,11 +2660,9 @@ def _fp8_dynamic_scale_sweep_quantize(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     fisher_row_weights: torch.Tensor | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Activation-weighted per-row scale search for vLLM FP8 E4M3."""
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     if weight.dim() != 2:
         raise ValueError("FP8 scale sweep expects a 2D Linear weight")
     rows, cols = weight.shape
@@ -2857,7 +2756,7 @@ def _quantize_2d(
     cached_activations: torch.Tensor | None = None,
     compute_only: bool = False,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, torch.Tensor]:
     """Compress a 2D Linear weight under format `fmt`.
 
@@ -2887,7 +2786,7 @@ def _quantize_2d(
 
     `act_clip_threshold`: optional scalar clamp for the render-time
     activation-aware NVFP4/MXFP4/MXFP8_E4M3/MXFP8_E5M2 passes.  When None, legacy behavior is
-    preserved: GPTQ/do-no-harm honor PRISMAQUANT_ACT_CLIP_QUANTILE,
+    preserved: GPTQ/do-no-harm honor ``levers.act_clip_quantile``,
     while scale_sweep uses raw cached activations.
 
     `fisher_row_weights`: optional per-token gradient² weights aligned to
@@ -2898,11 +2797,6 @@ def _quantize_2d(
     uint8 per-group scales (group_size=32). A bare `MXFP8` input is accepted
     only as a legacy alias for `MXFP8_E4M3`.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve({
-            "gptq": bool(gptq_enabled), "scale_sweep": bool(scale_sweep_enabled),
-            "static_act_order": bool(static_act_order_enabled),
-            "joint_scale_opt": bool(joint_scale_opt_enabled)})
     fmt = _canonical_export_format(fmt)
 
     acts = cached_activations
@@ -3344,7 +3238,7 @@ def _quantize_2d(
 
 def _quantize_3d_packed(packed: torch.Tensor, fmt: str,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, torch.Tensor]:
     """Compress a 3D packed-expert tensor `[E, M, N]` as a single
     batched op (per-expert independent scales).
@@ -3354,8 +3248,6 @@ def _quantize_3d_packed(packed: torch.Tensor, fmt: str,
     (uint8 packed weights, fp8/uint8 per-group scales, per-expert
     global scales for NVFP4).
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     fmt = _canonical_export_format(fmt)
     if fmt == "BF16":
         return {"weight": packed.to(torch.bfloat16)}
@@ -3424,7 +3316,7 @@ def _quantize_2d_nvfp4_group_batched(
     device: torch.device,
     expert_chunk: int = 32,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
     activations: object | None = None,
     input_global_scales: Mapping[str, float] | None = None,
 ) -> list[dict]:
@@ -3445,8 +3337,6 @@ def _quantize_2d_nvfp4_group_batched(
     The reference weight passed to scale_sweep is the same original weight
     used by the per-Linear path's `weight.to(float32)` argument.
     """
-    if levers is None:
-        levers = NativeRenderLevers.resolve()
     from .export_batched_gptq import (
         gptq_obs_rounding_nvfp4_batched,
         scale_sweep_nvfp4_batched,

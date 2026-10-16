@@ -201,10 +201,15 @@ def main():
             {name: fmt for name in selected}, require=True, max_workers=1,
             max_resident_bytes=512 * 1024**2) for fmt in formats}
         exporter._PRODUCTION_WEIGHT_CACHE = cache
+        from prismaquant.native_render_levers import NativeRenderLevers
+        environment_levers = NativeRenderLevers.resolve()
         exporter._INPUT_GLOBAL_SCALES = exporter._unify_input_global_scales_across_fused_siblings(
-            {name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(value)
+            {name: _native_render_codec._nvfp4_input_global_scale_from_max_abs(
+                value, levers=environment_levers)
              for name, value in cache.activation_max_abs.items()}, profile=profile)
-        joint = exporter._compute_nvfp4_joint_global(model, assignment, profile=profile)
+        joint = exporter._compute_nvfp4_joint_global(
+            model, assignment, profile=profile,
+            levers=exporter._export_render_options())
         tensors, wire = {}, {}
         for name in selected:
             for fmt in formats:

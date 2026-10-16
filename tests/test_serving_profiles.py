@@ -493,9 +493,11 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
     can never silently diverge from what the exporter really does."""
     import torch
 
+    from prismaquant.native_render_levers import NativeRenderLevers
     from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
     import prismaquant.export_native_compressed as enc
 
+    recipe = NativeRenderLevers()
     emittable = lane_emittable_formats(VLLM_PROFILE)
     # Every scheme the exporter can describe is either a codec format or a
     # declared passthrough; nothing else is in the menu. Spelled out rather
@@ -541,13 +543,13 @@ def test_compressed_tensors_lane_declaration_matches_exporter_behaviour():
             # a passthrough is NEVER quantized by the weight codec.
             if fmt not in emittable:
                 with pytest.raises(ValueError):
-                    _native_render_codec._quantize_2d(w, fmt)
+                    _native_render_codec._quantize_2d(w, fmt, levers=recipe)
             continue
         if fmt in emittable:
-            assert _native_render_codec._quantize_2d(w, fmt), fmt
+            assert _native_render_codec._quantize_2d(w, fmt, levers=recipe), fmt
         else:
             with pytest.raises(ValueError):
-                _native_render_codec._quantize_2d(w, fmt)
+                _native_render_codec._quantize_2d(w, fmt, levers=recipe)
 
 
 def test_gguf_lane_declaration_matches_the_exporters_own_gate():

@@ -829,6 +829,20 @@ def _plain_fp8_autoround(elt="fp8_e4m3", act_bits=8):
     )
 
 
+def registry_rtn_levers():
+    """The native recipe the registry's NVFP4 RTN adapters render under.
+
+    Registry quantize/dequantize is the format-menu screen, not a recorded
+    production render: it honours the process numerical controls (for example
+    ``PRISMAQUANT_NVFP4_SCALE_RULE``), resolved once per adapter call.  Every
+    registry adapter that renders through the native codec uses this one
+    resolution so their bytes cannot diverge.
+    """
+    from .native_render_levers import NativeRenderLevers
+
+    return NativeRenderLevers.resolve()
+
+
 def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     """NVFP4 WEIGHT RTN matching the export/compressed-tensors convention.
 
@@ -853,7 +867,8 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     pad = (-in_features) % 16
     if pad:
         flat = torch.nn.functional.pad(flat, (0, pad))
-    out = _native_render_codec._rtn_dequant_nvfp4(flat, group_size=16)
+    out = _native_render_codec._rtn_dequant_nvfp4(
+        flat, group_size=16, levers=registry_rtn_levers())
     if pad:
         out = out[:, :in_features]
     return out.reshape(orig_shape).to(x.dtype)

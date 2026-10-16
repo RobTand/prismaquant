@@ -3222,6 +3222,7 @@ class PerturbedActivationCache:
         packed = self._fused_nvfp4_weight_cache.get(cache_key)
         if packed is None:
             from prismaquant.kernels.nvfp4_fused import nvfp4_pack_weight
+            from prismaquant.native_render_levers import NativeRenderLevers
 
             enforce_gpu_memory_budget(
                 [self],
@@ -3254,7 +3255,10 @@ class PerturbedActivationCache:
                         f"PRISMAQUANT_STRICT_PRODUCTION_CACHE=0 to allow "
                         f"raw-weight fallback or rebuild the cache."
                     )
-            packed = nvfp4_pack_weight(source)
+            # The opt-in fused fast path packs under the process's native
+            # numerical controls, as it always has; it is not an export.
+            packed = nvfp4_pack_weight(
+                source, levers=NativeRenderLevers.resolve())
             self._fused_nvfp4_weight_cache[cache_key] = packed
             self._fused_nvfp4_weight_cache.move_to_end(cache_key)
             enforce_gpu_memory_budget(

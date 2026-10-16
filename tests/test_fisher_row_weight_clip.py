@@ -44,8 +44,10 @@ def _export_path(row_weights: torch.Tensor, n_rows: int) -> torch.Tensor | None:
     from prismaquant.native_render_codec import (
         _normalize_fisher_row_weights,
     )
+    from prismaquant.native_render_levers import NativeRenderLevers
 
-    return _normalize_fisher_row_weights(row_weights, n_rows, _CPU)
+    return _normalize_fisher_row_weights(
+        row_weights, n_rows, _CPU, levers=NativeRenderLevers.resolve())
 
 
 def _all_paths(

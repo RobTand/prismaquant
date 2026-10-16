@@ -2865,7 +2865,8 @@ class TestFusedSiblingJointGlobalScale(unittest.TestCase):
             "model.layers.0.self_attn.k_proj": "NVFP4",
             "model.layers.0.self_attn.v_proj": "NVFP4",
         }
-        joint = _compute_nvfp4_joint_global(m, assignment)
+        joint = _compute_nvfp4_joint_global(
+            m, assignment, levers=_test_exporter._export_render_options())
         self.assertEqual(len(joint), 3)
         joint_value = next(iter(joint.values())).item()
         # All three must point to the SAME scalar.
@@ -2910,6 +2911,7 @@ class TestFusedSiblingJointGlobalScale(unittest.TestCase):
             m,
             assignment,
             profile=CustomProfile(),
+            levers=_test_exporter._export_render_options(),
         )
 
         self.assertEqual(set(joint), set(assignment))
@@ -4048,7 +4050,8 @@ class TestDeltaNetFusedSiblingJointScale(unittest.TestCase):
             "model.layers.0.linear_attn.in_proj_z": "NVFP4",
         }
         joint = _compute_layer_joint_nvfp4(
-            layer, "model.layers.0", assignment, _IdentityProfile())
+            layer, "model.layers.0", assignment, _IdentityProfile(),
+            levers=_test_exporter._export_render_options())
 
         # Both siblings must map to NVFP4 and share ONE scale tensor.
         self.assertEqual(
@@ -4089,7 +4092,8 @@ class TestDeltaNetFusedSiblingJointScale(unittest.TestCase):
             "model.layers.0.linear_attn.in_proj_z": "MXFP8",
         }
         joint = _compute_layer_joint_nvfp4(
-            layer, "model.layers.0", assignment, _IdentityProfile())
+            layer, "model.layers.0", assignment, _IdentityProfile(),
+            levers=_test_exporter._export_render_options())
         self.assertEqual(joint, {},
                          "mixed-format sibling group must not emit a joint scale")
 
@@ -4866,7 +4870,10 @@ class TestPerRoleGptqDamp(unittest.TestCase):
         import os
         os.environ["PRISMAQUANT_GPTQ_DAMP_ROLES"] = \
             "qkv=1.0,o_proj=1.0,gate_up=0.3,down=3.0"
-        r = self.m._resolve_gptq_damp_for_role
+        levers = NativeRenderLevers.resolve()
+
+        def r(qname):
+            return self.m._resolve_gptq_damp_for_role(qname, levers=levers)
         self.assertEqual(r("model.layers.2.mlp.gate_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.up_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.down_proj"), 3.0)
@@ -4880,7 +4887,10 @@ class TestPerRoleGptqDamp(unittest.TestCase):
         import os
         os.environ["PRISMAQUANT_GPTQ_DAMP"] = "0.5"
         os.environ["PRISMAQUANT_GPTQ_DAMP_ROLES"] = "gate_up=0.3"
-        r = self.m._resolve_gptq_damp_for_role
+        levers = NativeRenderLevers.resolve()
+
+        def r(qname):
+            return self.m._resolve_gptq_damp_for_role(qname, levers=levers)
         self.assertEqual(r("model.layers.2.mlp.gate_proj"), 0.3)
         self.assertEqual(r("model.layers.2.mlp.down_proj"), 0.5)
         self.assertEqual(r("model.layers.2.self_attn.q_proj"), 0.5)

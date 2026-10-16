@@ -15,6 +15,7 @@ from prismaquant.native_render_codec import (
     _resolve_gptq_fixed_damp,
     gptq_damp_sweep_enabled,
 )
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.production_weight_cache import _resolve_production_render_levers
 from prismaquant.build_production_cache import (
     validate_render_assignment_cache_coverage,
@@ -411,12 +412,14 @@ def test_production_cache_records_damp_sweep_lever(monkeypatch):
     assert off["gptq_damp_sweep"] is False
     # Sweep-off renders must record WHICH fixed damp they used, or two
     # fixed-damp caches are metadata-indistinguishable.
-    assert off["gptq_fixed_damp"] == _resolve_gptq_fixed_damp()
+    assert off["gptq_fixed_damp"] == _resolve_gptq_fixed_damp(
+        levers=NativeRenderLevers.resolve())
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "1")
     on = _normalized_production_cache_levers("gptq,scale_sweep")
     assert on["gptq_damp_sweep"] is True
-    assert on["gptq_fixed_damp"] == _resolve_gptq_fixed_damp()
+    assert on["gptq_fixed_damp"] == _resolve_gptq_fixed_damp(
+        levers=NativeRenderLevers.resolve())
     # The complete recipe retains both fixed and swept choices.
 
     # The probe's provenance must follow the production policy default
@@ -425,7 +428,8 @@ def test_production_cache_records_damp_sweep_lever(monkeypatch):
     monkeypatch.delenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", raising=False)
     assert _normalized_production_cache_levers(
         "gptq,scale_sweep"
-    )["gptq_damp_sweep"] is gptq_damp_sweep_enabled() is False
+    )["gptq_damp_sweep"] is gptq_damp_sweep_enabled(
+        levers=NativeRenderLevers.resolve(gptq_default=True)) is False
 
 
 def test_production_cache_none_lever_disables_defaults(monkeypatch):
@@ -513,7 +517,7 @@ def test_render_score_clips_nvfp4_but_not_dynamic_mxfp8(monkeypatch):
         reference_weight=reference,
         rendered_weight=rendered,
         activations=activations,
-        activation_max_abs=0.5,
+        activation_max_abs=0.5, levers=NativeRenderLevers.resolve(gptq_default=True),
     )
     mxfp8 = _render_score_record(
         qname="layer",
@@ -522,7 +526,7 @@ def test_render_score_clips_nvfp4_but_not_dynamic_mxfp8(monkeypatch):
         reference_weight=reference,
         rendered_weight=rendered,
         activations=activations,
-        activation_max_abs=0.5,
+        activation_max_abs=0.5, levers=NativeRenderLevers.resolve(gptq_default=True),
     )
 
     assert nvfp4["activation_clipped"] is True
@@ -1275,7 +1279,7 @@ def test_render_score_record_raises_on_activation_score_failure(monkeypatch):
             reference_weight=torch.eye(4),
             rendered_weight=torch.eye(4),
             activations=torch.randn(2, 4),
-            activation_max_abs=None,
+            activation_max_abs=None, levers=NativeRenderLevers.resolve(gptq_default=True),
         )
 
 
@@ -1589,11 +1593,11 @@ def test_render_gate_scores_on_gptq_clipped_activations():
 
     X = _native_render_codec._activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
+        levers=NativeRenderLevers.resolve({"gptq": True}),
     )
 
     # Baseline candidate = static_6 RTN; its recorded gate score must be the
     # shared scorer evaluated on the CLIPPED matrix, not on raw acts.
-    from prismaquant.native_render_levers import NativeRenderLevers
     baseline = _native_render_codec._rtn_dequant_nvfp4(
         weight.float(), group_size=16, levers=NativeRenderLevers())
     expected_clipped = score_render_error(weight.float(), baseline, X)
@@ -1642,6 +1646,7 @@ def test_non_nv_render_gate_scores_on_gptq_clipped_activations():
 
     X = _native_render_codec._activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
+        levers=NativeRenderLevers.resolve({"gptq": True}),
     )
     baseline = fr.get_format("FP8_E4M3").quantize_dequantize(
         weight.detach().clone()

@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: every native numerical function takes
+`NativeRenderLevers` as a required keyword. `native_render_codec`, batched
+GPTQ, GGUF GPTQ fields and the fused-kernel packer resolve no recipe and read
+no numerical environment. Named boundaries supply it: cache fills parse their
+recorded recipe, export passes `_export_render_options()`, registry RTN
+adapters share `format_registry.registry_rtn_levers()`, the GGUF lane and the
+opt-in perturbed-X fused pack resolve the environment once, and PrismaSnap
+builds its recipe from explicit arguments. Rendered bytes are unchanged;
+`tests/test_native_render_levers_explicit.py` holds the rule.
+
 Re-stamped 2026-10-16: `campaign_data_manifests` reads the paths a manifest
 declares and refuses with `ReadsetRefused` (a `RuntimeError`); the dispatcher's
 and the experiment entry points' `main` turn it into their exit status. The

@@ -55,7 +55,7 @@ def _build_H_stack(
     clip_rescale: str | None = None,
     row_weights_list: list[torch.Tensor | None] | None = None,
     *,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Build a stacked activation covariance tensor across E Linears.
 
@@ -77,7 +77,6 @@ def _build_H_stack(
     `X.T @ X` itself because per-Linear `X` shapes vary in row count
     (routed-token-count differs per expert).
     """
-    levers = levers or NativeRenderLevers.resolve(gptq_default=True)
     if damp is None:
         from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
@@ -157,7 +156,7 @@ def gptq_obs_rounding_nvfp4_batched(
     expert_chunk: int = 32,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Batched NVFP4 GPTQ across E same-shape Linears.
 
@@ -185,7 +184,6 @@ def gptq_obs_rounding_nvfp4_batched(
       ``[E, out, in]`` float32 stack of dequantized error-propagated
       weights, ready for the standard NVFP4 packer.
     """
-    levers = levers or NativeRenderLevers.resolve(gptq_default=True)
     if damp is None:
         from prismaquant.native_render_codec import (
             _resolve_gptq_fixed_damp,
@@ -407,7 +405,7 @@ def scale_sweep_nvfp4_batched(
     grid: int = 32,
     span: tuple[float, float] = (0.5, 1.5),
     expert_chunk: int = 32,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Batched NVFP4 scale sweep across E same-shape Linears.
 
@@ -427,7 +425,6 @@ def scale_sweep_nvfp4_batched(
       global_real_overrides / expert_chunk: same semantics as the GPTQ
         batched path.
     """
-    levers = levers or NativeRenderLevers.resolve(gptq_default=True)
     if weights.shape != reference_weights.shape:
         raise ValueError(
             f"scale-sweep batched: weights {tuple(weights.shape)} ≠ "

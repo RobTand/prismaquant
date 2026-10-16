@@ -142,7 +142,10 @@ def _render_dense_layer(
     ``_store_rendered_weight_entry``.
     """
     from prismaquant.decision_units import fused_group_key
-    from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
+    from prismaquant.export_native_compressed import (
+        _compute_nvfp4_joint_global,
+        _export_render_options,
+    )
     from prismaquant.production_weight_cache import (
         _render_levers_input_global_scale_policy,
     )
@@ -189,6 +192,7 @@ def _render_dense_layer(
             model,
             {q: "NVFP4" for q in joint_scope},
             profile=profile,
+            levers=_export_render_options(),
         )
 
     # Per-Linear calibrated max_abs, unified (max) across fused sibling groups

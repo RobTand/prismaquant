@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 import prismaquant.export_native_compressed as native
+from prismaquant.native_render_levers import NativeRenderLevers
 import prismaquant.prismasnap as snap
 import prismaquant.prismasnap_checkpoint as checkpoint
 from prismaquant.prismasnap_contract import refuse_prismasnap_for_unvalidated_lane
@@ -42,11 +43,13 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
     monkeypatch.delenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, raising=False)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", raising=False)
 
-    legacy = _native_render_codec._rtn_dequant_nvfp4(weight, group_size=16)
+    default_recipe = NativeRenderLevers()
+    legacy = _native_render_codec._rtn_dequant_nvfp4(
+        weight, group_size=16, levers=default_recipe)
     explicit_before = _native_render_codec.render_nvfp4_dequant(weight)
     grouped = weight.reshape(7, 2, 16)
     _legacy_scale, legacy_global = _native_render_codec._select_nvfp4_pack_scales_and_global(
-        grouped
+        grouped, levers=default_recipe
     )
     explicit_global_before = _native_render_codec.nvfp4_global_real(weight)
     explicit_joint_before = _native_render_codec.render_nvfp4_dequant(

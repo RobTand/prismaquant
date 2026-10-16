@@ -7,6 +7,7 @@ import torch
 
 from prismaquant.allocator_solver import promote_serving_units
 import prismaquant.export_native_compressed as exporter
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.model_profiles.default import DefaultProfile
 from prismaquant.model_profiles import vllm_registry
 from prismaquant.production_weight_cache import _fused_sibling_leaf_mapping_from_profile
@@ -26,7 +27,8 @@ class FailedProfile(DefaultProfile):
 
 @pytest.mark.parametrize("consumer", [
     lambda profile: exporter._compute_nvfp4_joint_global(
-        torch.nn.Sequential(torch.nn.Linear(16, 16, bias=False)), {"0": "NVFP4"}, profile=profile),
+        torch.nn.Sequential(torch.nn.Linear(16, 16, bias=False)), {"0": "NVFP4"}, profile=profile,
+        levers=NativeRenderLevers()),
     lambda profile: exporter._unify_input_global_scales_across_fused_siblings(
         {"model.layers.0.self_attn.q_proj": 1.0}, profile=profile),
     lambda profile: _fused_sibling_leaf_mapping_from_profile(profile),

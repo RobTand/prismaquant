@@ -2226,9 +2226,8 @@ def _render_score_record(
     activations: torch.Tensor | None,
     activation_max_abs: float | None,
     input_global_scale_policy: str | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, object]:
-    levers = levers or NativeRenderLevers.resolve(gptq_default=True)
     raw_score, raw_metric = _render_score_for_gate(
         reference_weight.detach().to(torch.float32),
         rendered_weight,
@@ -6724,7 +6723,7 @@ def _packed_expert_render_score_record(
     device: torch.device,
     score_rows_source: str,
     input_global_scale_policy: str | None = None,
-    levers: NativeRenderLevers | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, object]:
     """Score one packed 3-D expert cache entry honestly.
 

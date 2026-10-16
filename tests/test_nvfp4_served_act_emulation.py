@@ -93,5 +93,7 @@ def test_hook_lever_default_off_and_on(monkeypatch):
     from prismaquant.native_render_codec import (
         _nvfp4_input_global_scale_from_max_abs,
     )
-    g = _nvfp4_input_global_scale_from_max_abs(scales["m.q_proj"])
+    from prismaquant.native_render_levers import NativeRenderLevers
+    g = _nvfp4_input_global_scale_from_max_abs(
+        scales["m.q_proj"], levers=NativeRenderLevers.resolve())
     torch.testing.assert_close(served, nvfp4_activation_qdq_served(x, g))

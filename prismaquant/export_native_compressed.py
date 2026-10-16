@@ -1937,12 +1937,15 @@ def _compute_nvfp4_joint_global(
     assignment: dict[str, str],
     *,
     profile=None,
-levers: NativeRenderLevers | None = None, ) -> dict[str, torch.Tensor]:
+    levers: NativeRenderLevers,
+) -> dict[str, torch.Tensor]:
     """Pre-pass over the model: for each fused-sibling group whose
     members are all assigned to NVFP4, compute the joint global_real
     (max across siblings). Return a dict mapping each sibling's qname
-    to the shared global_real tensor."""
-    levers = levers or _export_render_options()
+    to the shared global_real tensor.
+
+    ``levers`` is the recipe the siblings render under; every caller
+    names it explicitly."""
     # Bucket siblings by (parent_prefix, kind). Missing siblings are
     # OK — vLLM's loader handles partial fusion fine.
     groups: dict[str, list[tuple[str, nn.Linear]]] = {}
@@ -2039,14 +2042,13 @@ def _compute_layer_joint_nvfp4(layer_mod: nn.Module,
                                layer_qname: str,
                                assignment: dict[str, str],
                                profile,
-                               *, levers: NativeRenderLevers | None = None, ) -> dict[str, torch.Tensor]:
+                               *, levers: NativeRenderLevers) -> dict[str, torch.Tensor]:
     """Return {recipe_key -> joint global scale} for NVFP4 fused-sibling
     groups inside this decoder layer. Only keys assigned NVFP4 get an
     override entry; the rest compute per-Linear scales at quantize time.
 
     Semantically equivalent to a scoped `_compute_nvfp4_joint_global`
     across just this layer's modules."""
-    levers = levers or _export_render_options()
     groups: dict[str, list[tuple[str, str, nn.Linear]]] = defaultdict(list)
     for sub_name, mod in layer_mod.named_modules():
         if not isinstance(mod, nn.Linear):

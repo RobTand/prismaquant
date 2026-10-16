@@ -16,7 +16,7 @@ def test_explicit_all_false_preserves_rtn_when_render_options_enable_gptq(monkey
     acts = torch.randn(64, 16, generator=generator)
     monkeypatch.setenv("PRISMAQUANT_DO_NO_HARM", "0")
     options = NativeRenderLevers.resolve({"gptq": True})
-    wp, ws, wg = codec.quantize_dequantize_nvfp4(weight)
+    wp, ws, wg = codec.quantize_dequantize_nvfp4(weight, levers=options)
     expected = {"weight_packed": wp, "weight_scale": ws, "weight_global_scale": wg}
     actual = codec._quantize_2d(
         weight, "NVFP4", cached_activations=acts, levers=options,

@@ -228,7 +228,10 @@ class NativeRenderLevers:
         values.setdefault("gptq_block_size", max(1, _int_value(os.environ.get("PRISMAQUANT_GPTQ_BLOCK_SIZE", os.environ.get("PRISMAQUANT_FP8_GPTQ_BLOCK_SIZE", "128")), 128)))
         if values["joint_scale_opt"] and "nvfp4_scale_rule" not in values and "PRISMAQUANT_NVFP4_SCALE_RULE" not in os.environ:
             values["nvfp4_scale_rule"] = "joint_mse"
-        values["nvfp4_scale_rule"] = resolve_nvfp4_scale_rule(values.get("nvfp4_scale_rule"))
+        rule = values.get("nvfp4_scale_rule")
+        if rule is None:
+            rule = os.environ.get("PRISMAQUANT_NVFP4_SCALE_RULE", "static_6")
+        values["nvfp4_scale_rule"] = resolve_nvfp4_scale_rule(rule)
         raw_levels = os.environ.get("PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS")
         try:
             levels = tuple(float(x) for x in raw_levels.replace(",", " ").split()) if raw_levels else ()

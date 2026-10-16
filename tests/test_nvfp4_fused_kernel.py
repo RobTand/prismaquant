@@ -8,6 +8,7 @@ import torch
 pytest.importorskip("triton")
 
 from prismaquant import format_registry as fr
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 from prismaquant.kernels.nvfp4_fused import (
     nvfp4_dequantize_weight,
@@ -50,7 +51,8 @@ def test_nvfp4_pack_weight_matches_format_registry_reference():
     torch.manual_seed(0)
     weight = (torch.randn(17, 64) * 0.2).to(torch.bfloat16)
 
-    w_packed, w_scales, w_global_scale = nvfp4_pack_weight(weight)
+    w_packed, w_scales, w_global_scale = nvfp4_pack_weight(
+        weight, levers=fr.registry_rtn_levers())
     dequant = nvfp4_dequantize_weight(
         w_packed,
         w_scales,
@@ -80,7 +82,8 @@ def test_nvfp4_fused_matches_unfused_path(M, N, K):
     x = (torch.randn(M, K, device=device) * 0.05).to(torch.bfloat16)
     weight = (torch.randn(N, K, device=device) * 0.05).to(torch.bfloat16)
 
-    w_packed, w_scales, w_global_scale = nvfp4_pack_weight(weight)
+    w_packed, w_scales, w_global_scale = nvfp4_pack_weight(
+        weight, levers=NativeRenderLevers())
     out_fused = nvfp4_fused_aw_matmul(x, w_packed, w_scales, w_global_scale)
     out_reference = _nvfp4_quant_then_matmul(x, weight)
     max_abs = (out_fused.float() - out_reference.float()).abs().max().item()
@@ -178,7 +181,7 @@ def test_fused_activation_quant_ties_round_half_toward_zero():
 
     from prismaquant.kernels.nvfp4_fused import nvfp4_pack_weight
     w_packed, w_scales, w_gs = nvfp4_pack_weight(
-        W.to(device=device, dtype=torch.bfloat16))
+        W.to(device=device, dtype=torch.bfloat16), levers=NativeRenderLevers())
 
     expected_codes = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0]  # half toward zero
     for sign in (1.0, -1.0):

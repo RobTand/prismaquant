@@ -281,7 +281,13 @@ def export_gguf(
         gguf_fmt_map.setdefault("output.weight", output_format)
 
     hf_by_gguf: dict[str, str] = {}
+    gptq_levers = None
     if gptq_act_dir is not None:
+        from prismaquant.native_render_levers import NativeRenderLevers
+
+        # The GGUF lane borrows the native GPTQ damp and activation-clip
+        # controls from the process environment, resolved once per export.
+        gptq_levers = NativeRenderLevers.resolve()
         nm = _tensor_name_map(arch_name, n_layers)
         for hf_qname in assignment:
             gname = nm.get_name(hf_qname)
@@ -349,6 +355,7 @@ def export_gguf(
 
                 fields = gptq_fields(
                     w, fmt, acts.to(w.device), col_weights=qw,
+                    levers=gptq_levers,
                 )
                 packed = gguf_pack_fields(fields, fmt, tuple(w.shape))
                 counts["gptq"] += 1

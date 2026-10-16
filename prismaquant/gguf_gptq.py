@@ -66,6 +66,7 @@ def _per_element_scales(
 
 def _hessian_inverse(
     weight: torch.Tensor, activations: torch.Tensor, damp: float | None,
+    *, levers,
 ) -> torch.Tensor:
     """Upper-triangular Cholesky of H^-1, with the NVFP4 lane's activation
     clipping, dead-channel, and damp conventions."""
@@ -75,9 +76,10 @@ def _hessian_inverse(
     )
 
     if damp is None:
-        damp = _resolve_gptq_fixed_damp()
+        damp = _resolve_gptq_fixed_damp(levers=levers)
     cols = weight.shape[1]
-    X = _activation_matrix_for_gptq(activations, cols, device=weight.device)
+    X = _activation_matrix_for_gptq(
+        activations, cols, device=weight.device, levers=levers)
     H = (X.t() @ X).to(torch.float32)
     diag0 = torch.diagonal(H)
     dead = diag0 <= 0
@@ -100,8 +102,14 @@ def gptq_fields(
     col_weights: torch.Tensor | None = None,
     damp: float | None = None,
     block_cols: int = 128,
+    *,
+    levers,
 ) -> dict[str, torch.Tensor]:
-    """GPTQ-rounded fields for a 2-D weight under frozen k-quant scales."""
+    """GPTQ-rounded fields for a 2-D weight under frozen k-quant scales.
+
+    ``levers`` is the ``NativeRenderLevers`` whose damp and activation-clip
+    controls the Hessian borrows from the native NVFP4 lane.
+    """
     if w.ndim != 2:
         raise ValueError(f"gptq_fields expects a 2-D weight, got {w.shape}")
     sub, qmin, qmax, asym = _GRID[fmt]
@@ -114,7 +122,7 @@ def gptq_fields(
     dl_safe = torch.where(dl != 0, dl, torch.ones_like(dl))
     live = dl != 0
 
-    Hinv = _hessian_inverse(W, activations, damp)
+    Hinv = _hessian_inverse(W, activations, damp, levers=levers)
     Q = torch.zeros(rows, cols, dtype=torch.float32, device=device)
 
     for i1 in range(0, cols, block_cols):
