@@ -992,3 +992,14 @@ Commands, immutable checkout paths and raw results are in `checkpoint.json`,
 under `/home/rob/tmp/pq-claude-review-20261016/`. These overlapping child and
 parent runs are not added into a unique total. The full combined Claude
 re-review and final official branch qualification remain pending.
+
+
+The corrected inventory file passes all seven cases, without skips, at
+`e80396a921fec664a4ff8b9642f23e2547d62bc5`. Action
+`9e9cc8ccea3368eea08c76e2da068dd72452a8a5cd6c23138fa07748255f9840`
+executes 0; its terminal, result, receipt and both logs are independently
+verified in `custody-baseline-receipt.json`. This qualifies the complete failed
+file after its one-entry inventory correction. It does not relabel the original
+67-file run or qualify later source changes. All 67 selected file/case populations
+now have passing evidence across those named revisions; final branch checks
+remain pending.
