@@ -949,3 +949,46 @@ job. It reserves CPU1/RAM4 GiB and native threads1 through PrismaBuild.
 Publication records, the original CI fetch failure, probe command and verified
 receipt are archived in
 `/mnt/shared/prismaquant-refactor-evidence/20261016/ci-followup/`.
+
+
+## Claude checkpoint and slot corrections, 2026-10-16
+
+Claude's custody worktree at `3c5bc40ae7` fixed STD-011/R1S-F02,
+STD-015 and STD-018. Parent integration is `bad08c3e6a` through `d5260967e9`.
+The 19 moved verifier definitions were independently checked against their
+original bytes. The child CPU run completed 2,091 cases over 67 files,
+with 1,951 passes, 139 skips and one existing expected failure. Its three
+successful action keys and compile action, terminal records, CAS results,
+receipts and both logs were independently verified in
+`/home/rob/tmp/pq-claude-review-20261016/fix-custody/parent-verified-receipts.json`.
+The original 19 failed regressions and intermediate failed checks remain in
+that directory's report and evidence log; they are not counted as passing runs.
+
+The parent also repaired the registered route-sweep config binding, malformed
+falsy no-spec replay for gold and uniform-control arms, and the paired boundary
+producer's missing slot-policy source owner. The explicit existing evidence
+contracts govern these repairs; they add no format or serving qualification.
+The initial seven-case run failed all seven tests. Five expose accepted
+malformed evidence or missing artifact context; two fail because the new
+source-fingerprint helper is absent on the old code, so those two are API red
+checks rather than a recorded pre-fix endpoint measurement. Four additional
+uniform-control cases demonstrate the same malformed evidence acceptance.
+Their actual failed terminals and log hashes are independently verified in
+`custody-red-terminal-proofs.json` under the same review root.
+
+At exact source `5d51ccd6f42fcb9cc375f55c79cae4eb0cd2d37f`, the composed
+67-file CPU run completes all 2,102 collected cases: 1,961 pass, one fails,
+139 skip and one has the existing expected failure. The only failure is
+`test_primitive_digest_sites_only_shrink`, because the removed inline boundary
+hash call remains in the historical duplication inventory. Commit `e80396a921`
+removes exactly that obsolete entry; a complete inventory-file rerun is being
+qualified separately. The composed run remains recorded as failed. The new
+behavioral regressions pass, and compilation passes at that source.
+Two successful shards and compile are independently verified in
+`custody-composed-receipts.json`; the failed shard's terminal and both logs
+are verified in `custody-composed-failed-terminal-proof.json`.
+Commands, immutable checkout paths and raw results are in `checkpoint.json`,
+`custody-followup-{red,green}.json`, `custody-control-red.json` and their logs
+under `/home/rob/tmp/pq-claude-review-20261016/`. These overlapping child and
+parent runs are not added into a unique total. The full combined Claude
+re-review and final official branch qualification remain pending.
