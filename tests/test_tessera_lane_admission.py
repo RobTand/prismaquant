@@ -483,7 +483,7 @@ def test_the_rungs_a_cell_names_are_the_whole_admitted_set(tmp_path,
         "TESSERA_E2M1_K2_R896", table=table, formats=formats,
         serving_context=context)
     from prismaquant.tessera_runtime_contract import read_runtime_snapshot
-    verdict = tr._rung_admission(
+    verdict = tr.snapshot_rung_admission(
         "TESSERA_E2M1_K2_R896", read_runtime_snapshot(tmp_path / "narrow.json"),
         serving_context=context)
     admitted, reason = verdict.admitted, verdict.reason

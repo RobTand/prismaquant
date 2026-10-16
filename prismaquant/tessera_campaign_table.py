@@ -2005,7 +2005,7 @@ def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool
         raise ScopeRefused(str(error)) from error
 
 
-def _bound_joint_cells(costs: dict, *, label: str) -> set:
+def bound_joint_cells(costs: dict, *, label: str) -> set:
     """The ``(unit, format)`` cells whose own joint A-side is bound to them.
 
     One walk, one answer, for both readers of "this artifact already carries an
@@ -2094,7 +2094,7 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
     # One walk, before anything is counted: every joint row has to be its own
     # cell. A row that is not raises here, so no later reader sees a set with a
     # row whose coordinate this function never checked.
-    bound_joints = _bound_joint_cells(costs, label=f"{label} cost artifact")
+    bound_joints = bound_joint_cells(costs, label=f"{label} cost artifact")
     # The unit roster is checked on BOTH tables against the plan's bound census.
     # A unit the plan priced and the artifact lacks would leave the campaign
     # short an A-side while reading as complete; a unit the artifact carries
@@ -2215,7 +2215,7 @@ def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
     return record, frozenset(cells)
 
 
-def _require_equal(field: str, values: dict) -> object:
+def require_equal(field: str, values: dict) -> object:
     distinct = {DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text(value) for value in values.values()}
     if len(distinct) != 1:
         detail = ", ".join(f"{row}={DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text(value)[:160]}"
@@ -2224,13 +2224,13 @@ def _require_equal(field: str, values: dict) -> object:
     return next(iter(values.values()))
 
 
-def _hessian_identities(payload: dict) -> list[dict]:
+def hessian_identities(payload: dict) -> list[dict]:
     return [row["hessian_identity"]
             for rows in payload["costs"].values() for row in rows.values()
             if "hessian_identity" in row]
 
 
-def _check_acquisition_identity(actual, expected, *, where):
+def check_acquisition_identity(actual, expected, *, where):
     """Authenticate control comparability before stamping only raw request provenance."""
     from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_comparable_identity
     from prismaquant.dev_mode import seal_check
@@ -2247,7 +2247,7 @@ def _check_acquisition_identity(actual, expected, *, where):
         refusal=lambda: MergeRefused(f"{where}: acquisition request byte identity differs"))
 
 
-def _merge_acquisition_rows(records, *, acquisition, scope_groups):
+def merge_acquisition_rows(records, *, acquisition, scope_groups):
     """Strict disjoint complete requested-work union; no exemption for settings.
 
     Original intake authenticates raw joint rows. This compares their global
@@ -2297,7 +2297,7 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
         if (not isinstance(origin, dict) or set(origin) != set(common) | {
                 "expanded_actual_work_count", "deferred_domain"}):
             raise MergeRefused(f"{row_id}: acquisition global request/cost/run/probe/regime identity differs")
-        _check_acquisition_identity({key: origin[key] for key in common}, common, where=row_id)
+        check_acquisition_identity({key: origin[key] for key in common}, common, where=row_id)
         count = sum(len(qs) for families in expected_schedule.values() for qs in families.values())
         domain = origin["deferred_domain"]
         if type(origin["expanded_actual_work_count"]) is not int or origin["expanded_actual_work_count"] != count:
@@ -2345,7 +2345,7 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
             "schedule": dict(sorted(schedule.items())), "sources": dict(sorted(sources.items()))}
 
 
-def _payload_acquisition_records(payloads, *, unit_identities):
+def payload_acquisition_records(payloads, *, unit_identities):
     """Join payload rows to the existing authenticated checkpoint menu owner."""
     if not isinstance(unit_identities, dict):
         raise MergeRefused("acquisition payload merge requires bound checkpoint unit identities")
@@ -2401,10 +2401,10 @@ def _merge_acquisition_settings(identities, states_by_row, *, acquisition, scope
             "sources": {name: unit.get("acquisition_source_weight") for name, unit in identity["units"].items()},
             "cells": {name: [anchor["format_name"] for anchor in state["anchors"]]
                       for name, state in states_by_row[row].items()}}
-    merged = _merge_acquisition_rows(records, acquisition=acquisition, scope_groups=scope_groups)
+    merged = merge_acquisition_rows(records, acquisition=acquisition, scope_groups=scope_groups)
     if merged is None:
         return None
-    common = _require_equal("checkpoint settings outside exact acquisition scope", {
+    common = require_equal("checkpoint settings outside exact acquisition scope", {
         row: {key: value for key, value in identity["settings"].items()
               if key not in {"acquisition_origin", "acquisition_schedule"}}
         for row, identity in identities.items()})
@@ -2484,7 +2484,7 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     acquisition_union = None
     if acquisition is not None or any(any(key in prov for key in (
             "acquisition", "acquisition_schedule", "acquisition_source_weights")) for prov in provenances.values()):
-        acquisition_union = _merge_acquisition_rows(_payload_acquisition_records(
+        acquisition_union = merge_acquisition_rows(payload_acquisition_records(
             row_payloads, unit_identities=acquisition_unit_identities),
             acquisition=acquisition, scope_groups=census.get("anchor_groups"))
     for row_id, provenance in provenances.items():
@@ -2554,19 +2554,19 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
                 raise MergeRefused(f"{row_id}: family restriction contradicts projected expert {name}")
             restricted_structures[name] = structure
         family_policies[row_id] = policy
-    family_policy = _require_equal("provenance.family_restriction.policy", family_policies)
+    family_policy = require_equal("provenance.family_restriction.policy", family_policies)
     for field in SHARED_PROVENANCE:
-        _require_equal(f"provenance.{field}",
+        require_equal(f"provenance.{field}",
                        {row: prov.get(field) for row, prov in provenances.items()})
-    _require_equal("provenance.hessian.calibration_identity",
+    require_equal("provenance.hessian.calibration_identity",
                    {row: prov["hessian"]["calibration_identity"]
                     for row, prov in provenances.items()})
-    _require_equal("provenance.activation_static_scales.policy",
+    require_equal("provenance.activation_static_scales.policy",
                    {row: prov["activation_static_scales"]["policy"]
                     for row, prov in provenances.items()})
-    _require_equal("currency", {row: payload["currency"]
+    require_equal("currency", {row: payload["currency"]
                                 for row, payload in row_payloads.items()})
-    scope = _require_equal(
+    scope = require_equal(
         "provenance.campaign_scope",
         {row: {key: value for key, value in prov["campaign_scope"].items()}
          for row, prov in provenances.items()})
@@ -2575,16 +2575,16 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     # capture digest the merge is about to replace.
     for row_id, payload in row_payloads.items():
         for field in SHARED_HESSIAN:
-            _require_equal(
+            require_equal(
                 f"hessian_identity.{field}",
                 {f"{row_id}:{index}": identity.get(field)
-                 for index, identity in enumerate(_hessian_identities(payload))}
+                 for index, identity in enumerate(hessian_identities(payload))}
                 or {row_id: None})
     for field in SHARED_HESSIAN:
-        _require_equal(
+        require_equal(
             f"hessian_identity.{field} across rows",
-            {row: (_hessian_identities(payload)[0].get(field)
-                   if _hessian_identities(payload) else None)
+            {row: (hessian_identities(payload)[0].get(field)
+                   if hessian_identities(payload) else None)
              for row, payload in row_payloads.items()})
 
     # Coverage: every expected group priced exactly once.  The expectation is

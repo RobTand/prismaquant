@@ -654,7 +654,7 @@ def _route_admission(
     with their geometry owners.
     """
     from .tessera_render import (
-        _rung_admission, tessera_rung_is_serialisable,
+        snapshot_rung_admission, tessera_rung_is_serialisable,
     )
 
     parsed = parse_tessera_format_name(name)
@@ -732,7 +732,7 @@ def _route_admission(
         source = _packaged_attestation_source(runtime)
         readable = _rate_is_readable(rung, runtime.reader_rate_range(family.name))
         requires_context = runtime.requires_serving_context
-        verdict = _rung_admission(name, runtime, serving_context=serving_context)
+        verdict = snapshot_rung_admission(name, runtime, serving_context=serving_context)
         attesting = verdict.cells
         if verdict.admitted:
             status, flags = _attested_cell_conditions(name, attesting)

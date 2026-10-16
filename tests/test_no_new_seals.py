@@ -298,7 +298,7 @@ ALLOWLIST = {
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
     ("prismaquant/tessera_campaign_table.py", "_merge_acquisition_settings"): (
         1, WALL, "each acquisition wire record names the checkpoint unit weight that produced it"),
-    ("prismaquant/tessera_campaign_table.py", "_check_acquisition_identity"): (
+    ("prismaquant/tessera_campaign_table.py", "check_acquisition_identity"): (
         1, WALL, "authenticated locator-independent controls, cost/run/probe and current regime "
         "agree across real rows and plan; only raw request provenance uses seal_check"),
     # Opt-in #1986 namespace ownership only; no general source/calibration gate.

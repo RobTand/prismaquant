@@ -90,22 +90,22 @@ class ForbiddenRuntime:
         if name in {'prismaquant.joint_aura', 'prismaquant.allocator_candidates'} or name.split('.')[0] in {'torch', 'numpy', 'transformers', 'triton', 'vllm', 'tools'} or name == 'tessera.serving' or name.startswith('tessera.serving.'):
             raise AssertionError('numerical dependency in table coverage: ' + name)
 sys.meta_path.insert(0, ForbiddenRuntime())
-from prismaquant.tessera_campaign_table import _bound_joint_cells, ScopeRefused
+from prismaquant.tessera_campaign_table import bound_joint_cells, ScopeRefused
 if case == 'ordinary':
-    assert _bound_joint_cells({name: {'BF16': {}}}, label='cold table') == set()
+    assert bound_joint_cells({name: {'BF16': {}}}, label='cold table') == set()
 elif case == 'joint':
-    assert _bound_joint_cells({name: {'FP8_E4M3': row}}, label='cold table') == {(name, 'FP8_E4M3')}
+    assert bound_joint_cells({name: {'FP8_E4M3': row}}, label='cold table') == {(name, 'FP8_E4M3')}
 elif case == 'malformed':
     row['predicted_dloss'] += 1
     try:
-        _bound_joint_cells({name: {'FP8_E4M3': row}}, label='cold table')
+        bound_joint_cells({name: {'FP8_E4M3': row}}, label='cold table')
     except ScopeRefused as error:
         assert 'predicted loss differs' in str(error)
     else:
         raise AssertionError('malformed samples admitted')
 else:
     try:
-        _bound_joint_cells({name + '.donated': {'FP8_E4M3': row}}, label='cold table')
+        bound_joint_cells({name + '.donated': {'FP8_E4M3': row}}, label='cold table')
     except ScopeRefused as error:
         assert 'produced for' in str(error)
     else:

@@ -321,13 +321,13 @@ def test_semantic_merge_refuses_wrong_global_identity_source_and_row_work(handof
     else:
         rows[first]["origin"]["deferred_domain"][name].remove(DEFERRED)
     with pytest.raises(campaign_table.MergeRefused):
-        campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+        campaign_table.merge_acquisition_rows(rows, acquisition=handoff.acquisition,
             scope_groups=handoff.census["anchor_groups"])
 
 
 def test_exact_deferred_domain_keeps_real_unrequested_menu_families(handoff):
     rows = records(handoff)
-    merged = campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    merged = campaign_table.merge_acquisition_rows(rows, acquisition=handoff.acquisition,
         scope_groups=handoff.census["anchor_groups"])
     for record in rows.values():
         for name, deferred in record["origin"]["deferred_domain"].items():
@@ -343,7 +343,7 @@ def test_known_unrequested_family_outside_actual_restricted_menu_refuses(handoff
     rows = records(handoff, menu_families=[get_tessera_family(FAMILY)])
     first = next(iter(rows))
     name = next(iter(rows[first]["schedule"]))
-    actual = campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+    actual = campaign_table.merge_acquisition_rows(rows, acquisition=handoff.acquisition,
         scope_groups=handoff.census["anchor_groups"])
     assert actual["origin"]["deferred_domain"][name] == [DEFERRED]
     excluded = next(family for family in full[first]["origin"]["deferred_domain"][name]
@@ -351,7 +351,7 @@ def test_known_unrequested_family_outside_actual_restricted_menu_refuses(handoff
     rows[first]["origin"]["deferred_domain"][name].append(excluded)
     rows[first]["origin"]["deferred_domain"][name].sort()
     with pytest.raises(campaign_table.MergeRefused, match="exact deferred families"):
-        campaign_table._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+        campaign_table.merge_acquisition_rows(rows, acquisition=handoff.acquisition,
             scope_groups=handoff.census["anchor_groups"])
 
 

@@ -118,12 +118,12 @@ from prismaquant.tessera_campaign_table import (
     CAMPAIGN_SCOPE_KINDS,
     MergeRefused,
     PLAN_SCHEMA,
-    _bound_joint_cells,
-    _check_acquisition_identity,
-    _hessian_identities,
-    _merge_acquisition_rows,
-    _payload_acquisition_records,
-    _require_equal,
+    bound_joint_cells,
+    check_acquisition_identity,
+    hessian_identities,
+    merge_acquisition_rows,
+    payload_acquisition_records,
+    require_equal,
     require_campaign_receipts,
     aqua_requested_cells,
     merge_checkpoint,
@@ -2019,7 +2019,7 @@ def cmd_submit_aqua(args) -> int:
     # The fulfilled-artifact shortcut reads the same bound set the roster above
     # validated, so a joint row that names another cell can neither short-circuit
     # this submission nor be reported as one of the campaign's priced cells.
-    joint_cells = _bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
+    joint_cells = bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
     summary = {
         "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
         "plan": str(plan_path),
@@ -2325,7 +2325,7 @@ def _plan_acquisition(plan, census):
         return None
     from prismaquant.tessera_full_domain_acquisition import load_joint_campaign_acquisition
     acquisition = load_joint_campaign_acquisition(declared["binding"])
-    _check_acquisition_identity(acquisition["identity"], declared.get("identity"), where="plan acquisition")
+    check_acquisition_identity(acquisition["identity"], declared.get("identity"), where="plan acquisition")
     _acquisition_plan_coverage(plan, census, acquisition)
     return acquisition
 
@@ -2443,7 +2443,7 @@ def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
                     raise MergeRefused(f'{row_id}: reference does not bind the row canonical capture')
                 if provenance['hessian'].get('reference_binding') != owner.binding():
                     raise MergeRefused(f'{row_id}: reference binding differs from the row provenance')
-                identities = _hessian_identities(payload)
+                identities = hessian_identities(payload)
                 if (not identities or any(row.get('capture_sha256') != descriptor['capture_sha256'] or
                         row.get('reference_binding') != owner.binding() for row in identities)):
                     raise MergeRefused(f'{row_id}: reference commitments do not bind the exact priced row seals')
@@ -2577,14 +2577,14 @@ def cmd_merge(args) -> int:
     if acquisition is not None:
         acquisition_manifest = merge_checkpoint(row_dirs, Path(args.out).with_suffix(".anchors.json"),
             acquisition=acquisition, scope_groups=census["anchor_groups"])
-        _merge_acquisition_rows(_payload_acquisition_records(payloads,
+        merge_acquisition_rows(payload_acquisition_records(payloads,
             unit_identities=acquisition_manifest["identity"]["units"]),
             acquisition=acquisition, scope_groups=census["anchor_groups"])
     reference = payloads[sorted(payloads)[0]]["provenance"]
     # Under a census every row calibrated the SCOPE's static scales, so this is
     # an equality check and not a union: two rows that disagree here priced two
     # different A-side contracts for one fused module.
-    static_scales = _require_equal(
+    static_scales = require_equal(
         "provenance.activation_static_scales.units",
         {row: payload["provenance"]["activation_static_scales"]["units"]
          for row, payload in payloads.items()})

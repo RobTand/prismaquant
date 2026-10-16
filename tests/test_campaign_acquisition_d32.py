@@ -42,7 +42,7 @@ def test_loader_stamps_only_recorded_producer_identity(handoff, monkeypatch, cap
     assert acquired["source_weights"] == handoff.acquisition["source_weights"]
     assert "[DEV-MODE]" in capsys.readouterr().out
     handoff.acquisition = acquired
-    merged = campaign_table._merge_acquisition_rows(records(handoff),
+    merged = campaign_table.merge_acquisition_rows(records(handoff),
         acquisition=acquired, scope_groups=handoff.census["anchor_groups"])
     assert merged["origin"]["request_sha256"] == binding["sha256"]
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")

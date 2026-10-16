@@ -183,7 +183,13 @@ def tessera_attesting_cells(
         ignore_evidence=ignore_evidence)
 
 
-def _rung_admission(name: str, snapshot, *, serving_context=None):
+def snapshot_rung_admission(name: str, snapshot, *, serving_context=None):
+    """One native-rung verdict over ``snapshot``, a captured runtime contract.
+
+    Cells are selected first and the exact serving pin is then required of
+    THESE captured bytes, so a caller that already holds a snapshot (the menu)
+    and :func:`tessera_lane_admission` decide on one read.
+    """
     from .lane_eligibility import NativeRungVerdict
     from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
 
@@ -213,7 +219,7 @@ def tessera_lane_admission(
     """
     from .tessera_runtime_contract import installed_runtime_snapshot
 
-    return _rung_admission(
+    return snapshot_rung_admission(
         name, installed_runtime_snapshot(), serving_context=serving_context)
 
 

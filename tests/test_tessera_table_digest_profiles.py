@@ -5,7 +5,7 @@ import math
 import pytest
 
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX_DEFAULT_STR
-from prismaquant.tessera_campaign_table import MergeRefused, _keystream, _require_equal
+from prismaquant.tessera_campaign_table import MergeRefused, _keystream, require_equal
 
 
 def test_comparison_profile_keeps_spaces_unicode_nonfinite_and_fallback():
@@ -16,9 +16,9 @@ def test_comparison_profile_keeps_spaces_unicode_nonfinite_and_fallback():
     value = {'z': float('nan'), 'a': Label(), 'n': {10: 1, 2: 3}}
     assert DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text(value) == (
         '{"a": "h\\u00e9llo", "n": {"2": 3, "10": 1}, "z": NaN}')
-    assert _require_equal('metadata', {'a': value, 'b': value}) is value
+    assert require_equal('metadata', {'a': value, 'b': value}) is value
     with pytest.raises(MergeRefused, match=r'rows disagree on metadata: a=.*b='):
-        _require_equal('metadata', {'a': value, 'b': {'z': 0}})
+        require_equal('metadata', {'a': value, 'b': {'z': 0}})
 
 
 def test_sampling_stream_keeps_sha256_counter_word_order():
