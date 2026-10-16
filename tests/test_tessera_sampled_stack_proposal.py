@@ -77,14 +77,15 @@ def pilot_fixture():
     return joint, data, prepared, metadata, kwargs, names
 
 
-def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
-    # The full domain test checks the producer range separately; keep the
-    # allocation fixture small while exercising real rows and real candidate
-    # construction/aggregation/solver/serialization.
+def _research_menu(monkeypatch):
+    """Admit only the research menu mode; return the modes admission was asked.
+
+    The full domain test checks the producer range separately, so the domain
+    is stubbed and the allocation fixture stays small.
+    """
     from prismaquant import tessera_sampled_stack_proposal as mod
     from prismaquant import tessera_menu
     from prismaquant import allocator_candidates
-    joint, *_tail, names = pilot_fixture()
     monkeypatch.setattr(mod, '_domain', lambda *args, **kwargs: {'fixture': 'producer-tested-separately'})
     admitted_modes = []
     def admits(mode):
@@ -95,6 +96,13 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
                                                                  admits=admits))
     monkeypatch.setattr(allocator_candidates, 'serving_lane_route',
                         lambda *args, **kwargs: None)
+    return admitted_modes
+
+
+def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
+    # Real rows and real candidate construction/aggregation/solver/serialization.
+    joint, *_tail, names = pilot_fixture()
+    admitted_modes = _research_menu(monkeypatch)
     result = propose_bound_payload(joint, profile=AtomicProfile(),
         mutable_budget_bytes=600000, immutable_bytes=101, reserve_bytes=11,
         full_legal_families=PRIMARY)
