@@ -22,3 +22,9 @@ Three reusable checks retain live owners in `tools/`:
 
 Current pin provisioning belongs to `tools/provision_tessera_pin.py`, not the
 archived migration-specific environment helper.
+
+The native-render comparison driver moved here after the codec review fixes.
+Its archived bytes are from `dfad64a185`; that version uses the explicit lever
+and public codec interfaces. The original pre-review driver remains available
+at `5af6092384`. Permanent native-render tests now cover the codec boundary,
+recorded fused globals and exported-cache parity directly.

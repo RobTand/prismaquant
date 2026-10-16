@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the completed native-render comparison driver joins
+`archive/refactor_2026-10-16/`, with its bytes preserved from `dfad64a185`.
+Permanent tests exercise the public codec, explicit levers, recorded fused
+NVFP4 globals and cached-render export parity. The three reusable source and
+campaign checks remain in `tools/`; no production contract changes.
+
 Re-stamped 2026-10-16: `streaming_initialization` owns both reads and writes
 of the pretrained initialization descriptor. `model_runtime` clears an earlier
 completion before finalization and records the same descriptor only after the
