@@ -1976,7 +1976,7 @@ def verify_gold_producer_record(
     measured = record.get("measured_model")
     if not isinstance(measured, str) or Path(measured).resolve() != Path(model_dir).resolve():
         problems.append("gold producer record measured_model differs from the control path")
-    problems.extend(verify_gold_record(slot, record, model_dir=model_dir))
+    problems.extend(verify_gold_record(slot, record))
     return problems
 
 

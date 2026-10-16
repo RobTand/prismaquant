@@ -56,9 +56,6 @@ GOLD_PRIMARY_METRICS = {"gold.kl": ("kl_confident_mean", "kl_mean"),
 def verify_gold_record(
     slot: str,
     record: Mapping[str, Any],
-    *,
-    model_dir: str | os.PathLike | None = None,
-    require_current_artifact_path: bool = True,
 ) -> list[str]:
     """Require a slot-specific finite gold metric plus measurement identity."""
     problems: list[str] = []
@@ -637,9 +634,7 @@ def _replay_control_arms(
         ]
     problems.extend(
         f"{slot}: control arm: {item.split(': ', 1)[-1]}"
-        for item in verify_gold_record(
-            "gold.kl", arm, model_dir=None, require_current_artifact_path=False,
-        )
+        for item in verify_gold_record("gold.kl", arm)
     )
     problems.extend(_no_spec_decode_problems(f"{slot}: control arm", arm))
 
@@ -1063,8 +1058,7 @@ def _verify_route_sweep_record(
 
 
 def _gold_replay(slot, record, *, card=None, model_dir=None):
-    problems = verify_gold_record(slot, record, model_dir=model_dir,
-                                  require_current_artifact_path=False)
+    problems = verify_gold_record(slot, record)
     problems.extend(_no_spec_decode_problems(slot, record))
     return problems
 
@@ -1213,8 +1207,7 @@ def make_gold_record(payload, *, slot, model_sha, record_path, model_dir=None,
         serve_fingerprint=fingerprint, git_commit=commit,
         extra={"record_path": str(Path(record_path).resolve()),
                "measured_model": payload.get("model")})
-    problems = verify_gold_record(slot, record, model_dir=model_dir,
-                                  require_current_artifact_path=True) if valid else []
+    problems = verify_gold_record(slot, record) if valid else []
     return GoldRecordDraft(record, primary, valid, tuple(problems))
 
 
