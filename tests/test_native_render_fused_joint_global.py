@@ -298,3 +298,17 @@ def test_streamed_and_resident_fused_renders_are_bit_identical(rendered):
         resident = rendered["resident"].get(name, "NVFP4")
         streamed = rendered["streamed"].get(name, "NVFP4")
         assert torch.equal(resident, streamed), name
+
+
+def test_export_refuses_legacy_streamed_joint_mse_caches(rendered, monkeypatch):
+    cache = rendered["streamed"]
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
+    metadata = dict(cache.metadata)
+    assert metadata["streaming"] is True
+    metadata.pop("dense_nvfp4_joint_global_recipe", None)
+    monkeypatch.setattr(cache, "metadata", metadata)
+    name = sorted(FUSED)[0]
+    with pytest.raises(RuntimeError, match="streamed NVFP4.*re-render"):
+        enc._pack_production_cached_2d(
+            name, "NVFP4", nvfp4_global_real_override=globals_by_name[name],
+            device=torch.device("cpu"))
