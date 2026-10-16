@@ -6,8 +6,10 @@ so it refuses a directory that already holds a render identity, a
 fused-witness sidecar or a rendered shard, and records a `streamed_fill`
 section that the resident fill refuses. A streamed build can no longer
 overwrite a resident directory's shards, and a resident resume can no longer
-adopt a streamed build's. Re-running a streamed build needs a fresh
-`--cache-dir`. Rendered bytes are unchanged.
+adopt the shards of a streamed build made from now on; older streamed
+directories carry no claim and are still admitted on trust as pre-guard
+directories. Re-running a streamed build needs a fresh `--cache-dir`.
+Rendered bytes are unchanged.
 
 Re-stamped 2026-10-16: each fused NVFP4 joint-global witness now names the
 shard its producer published, by manifest name and
