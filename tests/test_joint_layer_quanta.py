@@ -560,6 +560,19 @@ def test_canonical_identity_matches_cost_stage_checkpoint():
             headless, where="quantum record") == record["identity_sha256"]
 
 
+def test_canonical_helpers_delegate_to_the_shared_implementation():
+    """#787 B5: the producer no longer carries a second canonical-JSON
+    spelling; the wrappers are the shared cost_stage_checkpoint bytes."""
+    from prismaquant import cost_stage_checkpoint
+    value = {"b": [1, 2.5, None], "a": "ü", "nested": {"k": [True]}}
+    assert jl.canonical_bytes(value) == cost_stage_checkpoint.canonical_json_bytes(
+        value, where="delegation check")
+    assert jl.canonical_sha256(value) == \
+        cost_stage_checkpoint.canonical_json_sha256(value, where="delegation")
+    with pytest.raises(ValueError):
+        jl.canonical_bytes({"bad": float("nan")})
+
+
 def test_qname_layer_reads_the_layer_grammar():
     """#787 D5: one spelling of the roster's layer grammar, shared with the
     joiner (gap unit naming)."""

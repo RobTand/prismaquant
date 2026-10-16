@@ -130,7 +130,7 @@ def _qname_census(
         "activation_qname_manifest": activation,
         "terminal_qname_manifest": terminal,
     }
-    return ({
+    return validate_qname_census({
         **body,
         "identity_sha256": _digest(
             body, where="test qname census"

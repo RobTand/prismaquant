@@ -187,7 +187,12 @@ def test_joint_aura_keeps_the_validated_identity_short_circuit():
 
 @pytest.mark.parametrize("name", ROUND_TRIP_NAMES)
 def test_round_trip_keeps_its_bytes(name):
-    """The byte owner keeps its actual value and malformed-input behavior."""
+    """The byte owner keeps its actual value and malformed-input behavior.
+
+    ``cost_stage_checkpoint`` still re-exports these names for its many import
+    sites; that path must hand out the owner's function, not a second copy.
+    """
+    assert getattr(cost_stage_checkpoint, name) is getattr(digests, name)
     inputs = GENERIC_INPUTS + ({"k": "v", "n": [1, 2.5, None]},)
     _check_inputs(getattr(digests, name), inputs, _WHERE)
 
@@ -214,6 +219,10 @@ def test_binding_is_the_profile_method(module_name, name, profile, method):
     bound = getattr(importlib.import_module(module_name), name)
     assert bound.__self__ is profile
     assert bound.__func__ is getattr(JsonProfile, method)
+
+
+def test_aura_round_trip_binding_is_the_owner():
+    assert aura_checkpoint_journal._canonical_json is digests.canonical_json
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +297,8 @@ def test_round_trip_and_direct_order_integer_keys_differently():
 
 def test_profile_names_are_unique():
     profiles = [value for value in vars(digests).values() if isinstance(value, JsonProfile)]
+    # A digest profile is a byte identity: adding one updates this count.
+    assert len(profiles) == 11
     assert len({profile.name for profile in profiles}) == len(profiles)
 
 
