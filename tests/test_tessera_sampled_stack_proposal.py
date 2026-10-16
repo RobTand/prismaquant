@@ -1,5 +1,6 @@
 """A pilot zero is observable only inside a complete atomic serving stack."""
 import copy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -115,7 +116,14 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     assert result['observations'][names[3]]['full_population_price'] is None
     assert result['observations'][names[3]]['observed_panel_contribution'] == 0.0
     assert result['exact_bytes']['total'] <= result['exact_bytes']['total_budget']
-    assert result['independent_selected_assignment_validation']['required_for_production_promotion']
+    validation = result['independent_selected_assignment_validation']
+    assert validation['required_for_production_promotion'] and validation['status'] == 'pending'
+    # The schema the proposal requires has an implementation it names: the
+    # archived helper, which is not live code.
+    helper = Path(__file__).resolve().parents[1] / validation['validation_helper_archive']
+    assert helper.parts[-4] == 'archive' and helper.is_file()
+    assert (f"SAMPLED_PROPOSAL_VALIDATION_SCHEMA = \"{validation['validation_helper_schema']}\""
+            in helper.read_text(encoding='utf-8'))
 
 
 def test_both_aggregators_read_the_rows_the_candidate_builder_admitted(monkeypatch):

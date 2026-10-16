@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the sampled whole-stack proposal's pending
+independent validation names its retired helper,
+`archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py`,
+in `validation_helper_archive`. The helper's last live bytes are archived
+unchanged. No live gate performs the validation, the proposal stays
+`pending`, and nothing is promoted.
+
 Re-stamped 2026-10-16: each production-cache fill witnesses, per entry, the
 exact float32 joint global it rendered a fused NVFP4 sibling on
 (`metadata.nvfp4_joint_global_witness`). The resident fill persists it beside
@@ -13827,7 +13834,10 @@ to obtain validation bytes. The separate producer research export must receive t
 JSON at planning and encoding. Neither route claims production authority.
 The independent selected-assignment validation
 is pending, and the retained teacher panel cannot be called held-out until
-the fit-overlap audit verifies disjointness. Gates:
+the fit-overlap audit verifies disjointness. Its only helper was retired on
+2026-10-14 and is archived at `archive/proposal_validation_2026-10-14/`, which
+the proposal names in `validation_helper_archive`; no live code performs the
+validation. Gates:
 `tests/test_tessera_sampled_stack_proposal.py`,
 `tests/test_tessera_joint_allocation.py`,
 `tests/test_tessera_joint_eval_panel.py`.
@@ -28030,9 +28040,14 @@ replays that record and the current source bytes. The ordinary build/serve bound
 physical, so its contract is a **record**, not CI.
 
 **Sampled whole-stack proposal validation is deliberately narrower than an
-artifact gate.** The adapter supplies complete per-sequence held-out losses
+artifact gate, and it is not live.** Its helper,
+`proposal_validation.validate_sampled_proposal`, was retired with the
+test-only prototypes on 2026-10-14 (`d91ed9c5dd`) and is archived at
+`archive/proposal_validation_2026-10-14/`. The sampled-stack proposal still
+requires it and names the archive. The rest of this paragraph describes the
+archived helper. The adapter supplies complete per-sequence held-out losses
 from the existing full-sequence quality path (`kl_measurement.sequence_token_nll`), one row
-for the candidate selected assignment and one for the incumbent. The reusable
+for the candidate selected assignment and one for the incumbent. The
 CPU helper refuses unequal sequence-ID sets or scored-token counts, binds the
 source, teacher, tokenizer, held-out population, **candidate and incumbent
 selected-assignment**, pilot training/evaluation, and **held-out/training

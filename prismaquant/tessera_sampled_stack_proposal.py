@@ -318,6 +318,10 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
                 'fit_overlap_status': 'unverified',
                 'retained_panel_label': 'retained_validation_panel_not_heldout_until_overlap_audit',
                 'validation_helper_schema': 'prismaquant.sampled_proposal_validation.v1',
+                # Retired with the test-only prototypes on 2026-10-14; no live
+                # code performs this validation, so the proposal stays pending.
+                'validation_helper_archive':
+                    'archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py',
                 'validation_helper_required_bindings': [
                     'selected_assignment_sha256', 'incumbent_assignment_sha256',
                     'metric_schema', 'metric_support', 'metric_identity_artifact_sha256',
