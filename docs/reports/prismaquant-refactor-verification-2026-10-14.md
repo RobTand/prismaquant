@@ -1122,3 +1122,48 @@ the tested and committed file bytes, and `depth-c-import-receipt-audit.json`
 verifies the terminal record, CAS result, receipt and both logs. These artifacts
 are under the review evidence root above. The uncollected Stage A profiler
 check is a separate pending submission; this pass does not qualify that check.
+
+
+## Supplementary resumed-B assertions and historical scope, 2026-10-16
+
+The resumed independent depth-B review identified assertions that had been
+lost during owner moves. The parent restored the positive sensitivity-card
+marginal identity check and extended encoder-seal ordering coverage to actual
+main runs on both row heads. The load-all run with an identity budget also
+observes metadata planning and bound-identity construction after the join.
+The serving-import AST guard now examines every Python file in the production
+package, rather than only the two admission readers. These changes address
+R2B-04 and R2B-06; the ValueError inheritance assertion was restored with R3B-07.
+
+PrismaBuild action
+`c13144306a05e347f5ca1c770fa5645783dceed05eb6e010fca6d101294126bb`
+ran the five complete test modules with 71 passes and no skips. A separate
+mutant snapshot inserted a lazy serving import in `tessera_route_receipt.py`
+and removed the producer-seal join. Action
+`d46924007a1c37b34d616cbeb80247da83707714464135080254d927de0182fc`
+failed at exactly the four intended assertions: the package import guard and
+the three main-run variants. This is negative evidence, not a passing action.
+The parent verified the successful receipt/result/log hashes and the failed
+terminal/log hashes. Commands and audits are under
+`/home/rob/tmp/pq-claude-review-20261016/resumed-b-parent-*`.
+
+The inline-expert test fixture now resolves its recipe once, restores the
+whole previous immutable recipe and keeps imports and fixture setup together.
+Its actual GPU body at this test revision is not covered by the CPU cohort;
+composed GPU qualification remains pending. The visual codec boundary part
+of R2B-03 was fixed and qualified with R3B-05.
+
+Independent native re-review found N3-01, a demonstrated P0 stale-shard witness
+path. It reopens NATIVE-LEGACY-01 despite the earlier targeted qualification.
+A new native implementation pass is assigned. The branch is not release-ready
+and PR #2696 remains draft. Two profiler-row measurement controllers expired
+while waiting for admission, with no test result; the exact frozen actions
+were retained and attached again. They are not accepted as passes.
+
+For historical N3-02, Rob explicitly chose to record the warning and leave
+[P2 issue #2697](https://github.com/RobTand/prismaquant/issues/2697) open.
+The current code and historical documentation will be corrected; no
+retrospective retained-artifact inventory or measurement campaign runs under
+this task. No shipped artifact has been identified as affected, and no
+quality or serving impact has been established. This decision is recorded in
+[the issue comment](https://github.com/RobTand/prismaquant/issues/2697#issuecomment-6226062928).
