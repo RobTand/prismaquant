@@ -23,7 +23,7 @@ RECORD_SCHEMA = 'prismaquant.identity_migration.v1'
 JOURNAL_SCHEMA = 'prismaquant.reseal_row_journal.v1'
 MANIFEST_SCHEMA = 'prismaquant.cost_stage_checkpoint.manifest.v1'
 UNIT_SCHEMA = 'prismaquant.cost_stage_checkpoint.unit.v1'
-from .tessera_campaign_table import STAGE
+from .tessera_campaign_table import COST_NAME, MANIFEST_NAME, PARTS_NAME, STAGE
 from .digests import (
     DIRECT_UTF8_STRICT, DIRECT_UTF8_INDENT2_STRICT,
     DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR, LengthFramedSourceSha256,
@@ -481,7 +481,7 @@ def discover_rows(row_paths=(), *, workspace=None, checkpoint_audit=None, allow_
     if workspace:
         if not checkpoint_audit:
             raise Refused('--workspace walks every row; pass --checkpoint-audit so partial journals are selected by state, not by which files exist')
-        rows += sorted(p for p in (Path(workspace)/'rows').iterdir() if p.is_dir() and (p/'cost.anchors.json').is_file())
+        rows += sorted(p for p in (Path(workspace)/'rows').iterdir() if p.is_dir() and (p/MANIFEST_NAME).is_file())
     if not rows:
         raise Refused('no rows: pass --row DIR and/or --workspace WS')
     for row in rows:
@@ -514,7 +514,7 @@ def require_coverage(rows, pins, bundle):
     covered = bundle['covered']
     checked, uncovered = {}, []
     for row in rows:
-        identity = json.loads((Path(row)/'cost.anchors.json').read_bytes()).get('identity') or {}
+        identity = json.loads((Path(row)/MANIFEST_NAME).read_bytes()).get('identity') or {}
         if classify_pins(identity, pins)[0] == 'migrated':
             continue
         strata = identity_strata(identity, where=row)
@@ -561,9 +561,9 @@ def row_kind(row, cost_path, audit_states):
 def plan_row(row, pins, *, run_id, audit_states=None):
     """Everything the rewrite would do to one row, computed without writing."""
     row = Path(row)
-    manifest_path = row/'cost.anchors.json'
-    parts = row/'cost.anchors.json.parts'
-    cost_path = row/'cost.pkl'
+    manifest_path = row/MANIFEST_NAME
+    parts = row/PARTS_NAME
+    cost_path = row/COST_NAME
     manifest_raw = manifest_path.read_bytes()
     manifest = json.loads(manifest_raw)
     if manifest.get('schema') != MANIFEST_SCHEMA or manifest.get('stage') != STAGE:
@@ -716,10 +716,10 @@ def migrate_row(row, plan, work, record, *, keep_previous):
     manifest['identity_sha256'] = work['new_sha']
     manifest['identity_migration'] = list(manifest.get('identity_migration') or []) + [record]
     new_manifest_raw = manifest_bytes(manifest)
-    atomic_write_bytes(stage/'cost.anchors.json', new_manifest_raw)
+    atomic_write_bytes(stage/MANIFEST_NAME, new_manifest_raw)
     written = len(new_manifest_raw)
     for shard in work['shards']:
-        atomic_write_bytes(stage/'cost.anchors.json.parts'/'units'/shard['path'].name, shard['new_raw'])
+        atomic_write_bytes(stage/PARTS_NAME/'units'/shard['path'].name, shard['new_raw'])
         written += len(shard['new_raw'])
     cost_raw_new = None
     if work['cost']:
@@ -727,7 +727,7 @@ def migrate_row(row, plan, work, record, *, keep_previous):
         cost['provenance'] = dict(cost['provenance'])
         cost['provenance']['identity_migration'] = list(cost['provenance'].get('identity_migration') or []) + [record]
         cost_raw_new = dumps_like(cost, work['cost']['raw'])
-        atomic_write_bytes(stage/'cost.pkl', cost_raw_new)
+        atomic_write_bytes(stage/COST_NAME, cost_raw_new)
         written += len(cost_raw_new)
     # verify the staged row exactly as a consumer would read it
     check = verify_row(stage, pins={'new': record['new_pins'], 'drop_settings': tuple(record.get('dropped_settings') or ())},
@@ -742,16 +742,16 @@ def migrate_row(row, plan, work, record, *, keep_previous):
     entry.update(phase='swapping', staged_unix=time.time(), bytes_written=written)
     write_json(journal, entry)
     previous.mkdir()
-    os.rename(row/'cost.anchors.json', previous/'cost.anchors.json')
-    os.rename(row/'cost.anchors.json.parts', previous/'cost.anchors.json.parts')
+    os.rename(row/MANIFEST_NAME, previous/MANIFEST_NAME)
+    os.rename(row/PARTS_NAME, previous/PARTS_NAME)
     if work['cost']:
-        os.rename(row/'cost.pkl', previous/'cost.pkl')
+        os.rename(row/COST_NAME, previous/COST_NAME)
     # the staged parts dir holds only the shards this row has; the previous
     # parts dir may hold nothing else (units/ only), which the plan checked
-    os.rename(stage/'cost.anchors.json', row/'cost.anchors.json')
-    os.rename(stage/'cost.anchors.json.parts', row/'cost.anchors.json.parts')
+    os.rename(stage/MANIFEST_NAME, row/MANIFEST_NAME)
+    os.rename(stage/PARTS_NAME, row/PARTS_NAME)
     if work['cost']:
-        os.rename(stage/'cost.pkl', row/'cost.pkl')
+        os.rename(stage/COST_NAME, row/COST_NAME)
     stage.rmdir()
     entry.update(phase='swapped', swapped_unix=time.time(), previous=str(previous))
     write_json(journal, entry)
@@ -786,7 +786,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
     wire_root = Path(wire_root) if wire_root else row
     result = dict(row=str(row), failures=[], shards=0, missing_shards=0, wires=0, wire_bytes_checked=0, partial=partial)
     fail = result['failures'].append
-    manifest = json.loads((row/'cost.anchors.json').read_text())
+    manifest = json.loads((row/MANIFEST_NAME).read_text())
     identity = manifest.get('identity', {})
     sha = identity_sha256(identity)
     if sha != manifest.get('identity_sha256'):
@@ -800,7 +800,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
     records = manifest.get('identity_migration') or []
     if expect_record is not None and (not records or records[-1] != expect_record):
         fail(dict(what='migration_record', detail='manifest lacks the expected identity_migration record'))
-    parts = row/'cost.anchors.json.parts'
+    parts = row/PARTS_NAME
     for entry in manifest['units']:
         path = parts/entry['file']
         if not path.is_file():
@@ -839,7 +839,7 @@ def verify_row(row, *, pins, wire_root=None, wire_bytes=True, expect_record=None
         anchors = {a['format_name'] for a in state.get('anchors', [])}
         if anchors != set(state.get('wire_records') or {}) and not state.get('unservable'):
             fail(dict(what='anchor_receipt_coverage', unit=entry['qname']))
-    cost_path = row/'cost.pkl'
+    cost_path = row/COST_NAME
     if cost_path.is_file():
         cost = loads(cost_path.read_bytes())
         prov = cost.get('provenance', {})
@@ -862,7 +862,7 @@ def consumer_merge(rows, out_dir):
     from prismaquant.tessera_campaign_table import (merge_checkpoint)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    manifest = merge_checkpoint({Path(r).name: Path(r) for r in rows}, out/'cost.anchors.json')
+    manifest = merge_checkpoint({Path(r).name: Path(r) for r in rows}, out/MANIFEST_NAME)
     return dict(merged_identity_sha256=manifest['identity_sha256'], units=len(manifest['units']),
                 identity_migration_carried=('identity_migration' in manifest))
 
@@ -938,7 +938,7 @@ def verify_rows(pins_path, *, row_paths=(), workspace=None, allow_live=False, ch
     ok = True
     for row in rows:
         started = time.time()
-        partial = None if audit_states is None else (row_kind(row, row/'cost.pkl', audit_states) == 'partial')
+        partial = None if audit_states is None else (row_kind(row, row/COST_NAME, audit_states) == 'partial')
         result = verify_row(row, pins=pins, wire_root=wire_root or row, wire_bytes=wire_bytes, partial=partial)
         result['seconds'] = time.time()-started
         ok &= result['ok']

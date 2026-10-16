@@ -77,6 +77,7 @@ from prismaquant.tessera_campaign_table import (
     CampaignAnchor,
     ExpertPopulation,
     SCHEMA,
+    STAGE,
     StackSampleError,
     campaign_population_block,
     campaign_cost_payload,
@@ -1721,7 +1722,7 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
             if (field not in seed_unit or field not in current_unit or
                     seed_unit[field] != current_unit[field]):
                 raise RuntimeError(f'seed checkpoint scoring identity mismatch at units.{name}.{field}')
-        state = _load_unit(path, stage='Tessera campaign', qname=name,
+        state = _load_unit(path, stage=STAGE, qname=name,
                            identity_sha256=seed_identity)
         if validate_state is not None:
             validate_state(name, state)
@@ -5239,7 +5240,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     def open_journal(identity):
         return prepare_journal(
             checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
-            stage="Tessera campaign", resume=True, identity=identity,
+            stage=STAGE, resume=True, identity=identity,
             qnames=targets, seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
         )
 
@@ -5770,7 +5771,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
 
         def write():
             for name, state in states:
-                write_unit(journal, stage="Tessera campaign", qname=name,
+                write_unit(journal, stage=STAGE, qname=name,
                            identity_sha256=identity_sha256, state=state)
             # After the shards are on disk, never before.  This is what tells
             # PrismaBuild the row is working rather than merely running, and

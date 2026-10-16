@@ -2839,11 +2839,11 @@ def merge_checkpoint(row_dirs: dict, out_manifest: Path, *, acquisition=None, sc
     states_by_row = {}
     stage = STAGE
     for row_id in sorted(row_dirs):
-        manifest_path = Path(row_dirs[row_id]) / "cost.anchors.json"
+        manifest_path = Path(row_dirs[row_id]) / MANIFEST_NAME
         manifest = json.loads(manifest_path.read_text())
         identities[row_id] = manifest["identity"]
         migrations[row_id] = manifest.get("identity_migration")
-        parts = manifest_path.with_name(manifest_path.name + ".parts")
+        parts = manifest_path.with_name(PARTS_NAME)
         listed: list[str] = []
         for entry in manifest["units"]:
             qname = entry["qname"]

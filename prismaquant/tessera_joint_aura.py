@@ -82,7 +82,7 @@ HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS = frozenset(
     {"encoder_source_sha256", "reason", "evidence", "recorded_unix", "recorded_by"})
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
-STAGE = "Tessera campaign"
+STAGE = campaign_table.STAGE
 # The head walk's own durable journal (#754). Every restart re-paid the whole
 # roster walk -- the withdrawn campaign night paid it three times -- so the
 # walk banks each verified unit under the checkpoint machinery every other
