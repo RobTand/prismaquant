@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the Tessera menu-mode vocabulary (`MENU_*`,
+`MENU_MODE_ENV`) is owned by `tessera_menu_modes`, which imports nothing.
+`tessera_campaign_cli` reads it there, so the campaign parser, the dispatcher
+and the data-manifest producer import on a coordinator interpreter with no
+`tessera` package; `tessera_menu` keeps `menu_mode()` and menu construction.
+Mode spellings, refusals, defaults and every gate are unchanged.
+
 Re-stamped 2026-10-16: with the development answer pin unset, the TP
 loader-axis leg reads `tensor_parallel.units[].loader_axes` from the exact
 installed serving contract, through the same captured bytes and pin check as

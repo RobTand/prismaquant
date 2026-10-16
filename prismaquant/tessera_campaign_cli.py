@@ -10,7 +10,7 @@ import json
 from collections.abc import Sequence
 
 from .tessera_campaign_table import parse_family_restriction
-from .tessera_menu import MENU_MODES
+from .tessera_menu_modes import MENU_MODES
 from .tessera_row_stream import ROW_HEAD_STREAM, ROW_HEADS
 from .tessera_serving_scope import add_serving_scope_arguments
 

@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, ROOT)
 class NoNumericalRuntime:
     def find_spec(self, name, path=None, target=None):
-        if name.startswith('tessera.serving') or name in {'prismaquant.allocator_solver', 'prismaquant.format_registry'} or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm'}:
+        if name in {'prismaquant.allocator_solver', 'prismaquant.format_registry'} or name.split('.')[0] in {'tessera', 'torch', 'transformers', 'triton', 'vllm'}:
             raise AssertionError('CLI imported numerical runtime: ' + name)
 sys.meta_path.insert(0, NoNumericalRuntime())
 from prismaquant.tessera_campaign_cli import campaign_argument_parser, parse_campaign_arguments
@@ -32,6 +32,7 @@ assert '--capture-chain' in parser.format_help()
 args = parse_campaign_arguments(['--model', 'm', '--out', 'o', '--cache-dir', 'c'])
 assert (args.anchors, args.menu_mode, args.row_head, args.hessian) == (3, None, 'stream', 'require')
 assert (args.nsamples, args.seqlen, args.seed, args.pinned_roster_only) == (8, 512, 0, False)
+assert parse_campaign_arguments(['--model', 'm', '--out', 'o', '--cache-dir', 'c', '--menu-mode', 'research']).menu_mode == 'research'
 request = loaded_campaign_request(args, mode='research', selected_source=False, streaming_head=False, wire_dir=Path('c/wire'), checkpoint=Path('anchors.json'), identity_threads=1)
 assert isinstance(request.source, ResidentCampaignWeights)
 args.census_out, args.calibration_input_receipt = 'census.json', None

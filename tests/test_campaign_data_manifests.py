@@ -12,7 +12,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, ROOT + '/tests')
 class ForbiddenRuntime:
     def find_spec(self, name, path=None, target=None):
-        if name.startswith('tessera.serving') or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm', 'tools', 'experiments'}:
+        if name.split('.')[0] in {'tessera', 'torch', 'transformers', 'triton', 'vllm', 'tools', 'experiments'}:
             raise AssertionError('readset dependency: ' + name)
 sys.meta_path.insert(0, ForbiddenRuntime())
 from pathlib import Path

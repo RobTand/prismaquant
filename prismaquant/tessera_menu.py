@@ -120,6 +120,13 @@ from .tessera_formats import (
     tessera_wire_recipe,
     Q256_UNIT,
 )
+from .tessera_menu_modes import (
+    MENU_ATTESTED,
+    MENU_MODES,
+    MENU_MODE_ENV,
+    MENU_READABLE,
+    MENU_RESEARCH,
+)
 
 __all__ = [
     "MENU_ATTESTED",
@@ -163,25 +170,6 @@ class TesseraMenuError(ValueError):
 #: differ per unit (E4M3's per-unit planes make its rate a function of the
 #: shape, so even the byte cost is not knowable until a Linear is named).
 MENU_TOKEN = "TESSERA"
-
-#: Only rungs the pinned serving release attests.  The production default.
-MENU_ATTESTED = "attested"
-#: Every writable, shape-legal rung, each stamped ``unattested``.  Opt-in, and
-#: refused by the export gate exactly as any other unattested unit is.
-MENU_RESEARCH = "research"
-#: Only rungs the pinned contract's own decoder accepts: the family is
-#: published and the rate lies inside its ``reader_rate_range_q256``.  Opt-in,
-#: still stamped ``unattested``, and refused by the export gate exactly as any
-#: other unattested unit is -- it narrows what a CAMPAIGN pays to encode, not
-#: what an artifact may ship.
-MENU_READABLE = "readable"
-MENU_MODES = frozenset({MENU_ATTESTED, MENU_READABLE, MENU_RESEARCH})
-
-#: The lever that selects the mode.  ONE name, read in ONE place
-#: (:func:`menu_mode`), stamped into every allocation's provenance.  Unset is
-#: the production default, so a run that never mentions it cannot silently
-#: allocate onto rungs no runtime attests.
-MENU_MODE_ENV = "PRISMAQUANT_TESSERA_MENU"
 
 
 def menu_mode(value: "str | None" = None) -> str:
