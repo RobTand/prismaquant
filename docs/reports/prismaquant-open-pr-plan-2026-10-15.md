@@ -73,3 +73,19 @@ The rerunnable read-only collector and exact-head inventory are retained at
 `/home/rob/tmp/pq-refactor-resume-20261016/pr-audit/inventory.json`.
 This refresh does not grant a composed pass to an independent PR, transfer an
 issuegraph or merge-train owner, or close any PR.
+
+
+## Delivery refresh, 2026-10-16 14:14 UTC
+
+The final read-only inventory retains all 36 original PRs open at unchanged
+heads. Main remains `138069b799323435fb5f0b3cec3ee339f6264a62`, and parent #1295
+remains open. No original disposition or acceptance condition changed. The new
+refactor delivery references that parent with `Refs #1295`; it does not close
+the parent's broader streaming-performance work or any independent PR.
+
+The source and check inventory, open parent evidence and rerunnable collector
+are archived under
+`/mnt/shared/prismaquant-refactor-evidence/20261016/final/pr-delivery-audit/`.
+T1/T3 consumer implementation is complete. Its explicit verification matrix and
+remaining qualification limits are in the refactor verification report and
+`docs/results/prismaquant-refactor-qualification-2026-10-16.json`.

@@ -303,3 +303,35 @@ implementation `53bcd17e3a88c93237465bd7be740f98cd2abc47` and archival head
 `c70188a791402843ec6be7e50d426e784d5e1f74` have separate ownership and evidence;
 they are not substituted for the v60 API pin. PrismaQuant's consumer CUDA checks
 do not promote producer cells or establish serving throughput or quality.
+
+
+## Final consumer qualification, 2026-10-16
+
+The T1/T3 implementation remainder is complete at `9baa795565`. The accepted
+revision matrix records 19,940 CPU passes, 520 skip records, one expected failure
+and 114 passing subtests across 1,149 files. All six original failed file/case
+populations were rerun completely. The original run remains failed with 47
+failures. No failing cases were removed. The source revision matrix, three
+collection skips and all per-case limits are in the verification report.
+
+The focused cell/campaign lane passed 744 CPU cases with ten recorded skips.
+Six encoder/memo cases and both actual native CUDA observer cases passed on GB10.
+An initial observer action also ran an ordinary argument guard; it is recorded
+separately from native CUDA evidence. Final guards passed 140 cases without
+skips, the explicit task companion passed 76 and the declared GLM data lane
+passed one. Compilation passed. All 465 surviving changed test files have
+selected-file evidence. All 28 accepted action receipts, result bytes and both
+logs were verified. These overlapping lanes are not added into one unique total.
+
+The full CLI batch/resume case still requires its frozen x86 CUDA producer
+environment; five unchanged fleet-data files remain outside the hermetic run.
+Device, private-scratch and missing-dependency skips retain their actual reasons.
+Those limits do not stand for new serving, quality or performance qualification.
+The separate Tessera architecture delivery and v69 contract remain outside the
+API-only v60 adoption.
+
+Delivery uses `sol/refactor-simplify-20261014` and `Refs #1295`. The parent issue's
+broader streaming-performance acceptance remains open. The final read-only
+14:14 UTC inventory retains all 36 prior PRs at their original heads and main
+at `138069b799323435fb5f0b3cec3ee339f6264a62`. Their dispositions and ownership
+remain as recorded. No independent PR is closed or merged by this refactor.

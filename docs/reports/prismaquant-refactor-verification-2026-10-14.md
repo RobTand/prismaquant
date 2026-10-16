@@ -772,3 +772,146 @@ The API-dependent T1/T3 remainder stays open. These checks do not extend the
 reviewed v60/22-cell roster, serving/export gates, quality qualification or
 performance claims. Historical failed runs and historical measurements above
 retain their original status and source.
+
+
+## T1/T3 completion verification, 2026-10-16
+
+The accepted refactor is implemented through `9baa795565`. T1 consumes the public
+Tessera metadata, projection and image receipt APIs. T3 owns resolved cell recipes,
+measurement, batching, memoization, scoring, publication and resume checks in
+`tessera_cell_measurement`. All live callers moved and the old APIs were deleted.
+Static AST inspection of `prismaquant/` finds zero `tessera.serving` imports.
+The [disposition report](prismaquant-refactor-dispositions-2026-10-15.md#t1-and-t3-implementation-completion-2026-10-16)
+records the implementation and separately rejected proposals. The
+[original review](../reviews/prismaquant-architecture-review-20261014.html)
+is preserved byte-for-byte.
+
+The new API-only pin is exact Tessera
+`aaa417003f0ee690e8ace138acd18df7f9531369`. Code, JSON and development pin agree.
+The packaged v60 contract remains
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`, with 22 cells.
+The separately provisioned CPU environment uses Python 3.14.4, Torch 2.11.0+cpu
+and Transformers 5.17.0. PB verifies the installed Git commit, RECORD bytes and
+absence of import shadows before pytest. Schema-v2 runtime admission binds the
+reviewed contract bytes; the environment proof supplies installed Git provenance.
+The delivered wheel hashes to
+`5823979dbba0404b5e926dccacab9a2acd4ab15f32ace7db79022f541c32fae5`.
+No active production installation was changed.
+
+The accepted broad CPU matrix selects 1,149 files and records
+19,940 passed, 520 skipped, 1 xfailed, 114 subtests passed. All collected nodes and selected files reconcile after replacing
+each failed shard's complete file and case population. The original run retains
+19,893 passes and
+47 failures. It remains failed.
+Two test names changed with their owners; their explicit one-to-one mappings
+are recorded by `reconcile_final.py`. No failing cases were dropped.
+The 20,458 collected cases exclude three collection-time skip
+records included in the skip total: two missing Triton imports and one GLM
+derivative check requiring its pinned Transformers 5.16.1 modeling source.
+
+This is an explicit source revision matrix. It is not one full-suite pass on
+one final SHA. Overlapping focused, companion and GPU counts are not summed.
+
+| Source | Scope | Verified outcome |
+| --- | --- | --- |
+| `86a937ea4a` | Original sixteen-shard CPU population | Original failed run retained; complete replacements below supply accepted results. |
+| `968b6aacda` | Original 72-file anchor shard | 1,021 passed, seven skipped, 13 passing subtests; complete typed anchor fixtures. |
+| `88089d0ba5` | Original 72-file runtime/packet shard | 1,370 passed, 32 skipped; explicit runtime initialization and new dated packet. |
+| `49409f2729` | Original two caller shards, 144 files | 2,593 passed, 164 skipped, 73 passing subtests; source binding before import, live owner tests and unchanged numerical goldens. |
+| `785cbb74e7` | Original 72-file legal-domain/receipt shard | 1193 passed, 10 skipped, 61 warnings in 747.64s (0:12:27) |
+| `9baa795565` | Original 71-file checkpoint-settings shard | 1207 passed, 6 skipped, 211 warnings in 330.33s (0:05:30); current source seals checked separately from the frozen identity oracle. |
+| `86a937ea4a` | Focused 32-file cell/campaign/profiler CPU lane | 744 passed, 10 skipped. |
+| Recorded data capsule | Declared GLM fleet-data lane | 1 passed, 0 skipped; two files and 1,454,802,228 declared bytes. |
+| Recorded companion capsule | Explicit four-file task-suite lane | 76 passed, 0 skipped. |
+| `785cbb74e7` | Final eight-file docs, boundary, pin, domain, receipt and provisioner guards | 140 passed, 0 skipped. |
+| `785cbb74e7` | All-source compile | `prismaquant`, `tools`, `experiments` and `tests` compile successfully. |
+| `968b6aacda` plus sealed qualification helpers | GB10 real encoder and memo parity | Six passed, no skips. |
+| Same GPU capsule | Native-batch CUDA events and CUDA-only argument guard | Two passed, no skips; one native CUDA case and one ordinary guard. |
+| Same GPU capsule, corrected selection | Real timed CUDA window excludes later kernels | One passed, no skips. |
+
+Only two code files differ after the primary CPU source. The reseal proof driver
+now binds its declared source tree before importing its measurement owner.
+The legal-domain audit updates its paired code-commit literals to the API pin.
+Its contract, export and grammar fingerprints, source-state match and historical
+rate counts remain unchanged. Full replacement populations cover both changes.
+The GPU-qualified campaign, materialization and measurement sources are unchanged
+at the final implementation head. Later report additions change documentation only.
+
+The CPU environment deliberately hides GPUs. Its skip records are retained in
+`cpu-skips.json`; each record includes the actual node and reason. They include
+device/dependency checks, private Stage B scratch, unavailable checkpoints and
+separate task-suite cases. The declared-data and explicit task-suite lanes above
+supply their own evidence. Five unchanged fleet-data files remain outside this
+hermetic run. All 465 surviving changed test files have
+selected-file coverage across the recorded lanes. A selected file does not mean
+every skipped case in it executed.
+
+Of the focused lane's ten CPU skips, six real encoder cases and two profiler
+cases passed separately on the admitted GB10 worker. One deliberate pre-seal
+API-unavailable control remains skipped. The full CLI batch/resume parity case
+requires the frozen x86 producer interpreter and hashes in
+`tests/projection_producer_environment.json`; that exact producer environment
+cannot execute in the ARM GB10 container. It remains unqualified. No fixture,
+hash or admission requirement was weakened to make it run.
+
+GPU actions used the known image content
+`ac918444aa2d16d1d19771510963d138981fdd468db44a2bf10f9d627b3af12a`
+on sparklina with CUDA 13 and Torch 2.13.0+cu130. The exact delivered wheel was
+verified and unpacked into an ephemeral overlay, preserving the image's CUDA
+Torch installation. The six cases exercise actual wire encoding, scalar/batch
+prices, weights-only behavior and bounded memo byte/price parity. The profiler
+cases exercise CUDA event attribution and the timed window with the existing
+Netdata/Python monitors. They establish behavior, not speed, work per joule,
+served KL or new cell admission. No full model campaign or serving promotion ran.
+The first observer action selected the ordinary CUDA-only argument guard beside
+the native batch case. The real timed-window node was subsequently run in its
+own admitted action. Its source is `test_native_timed_cuda_window_excludes_later_work`;
+the earlier argument guard is not counted as native GPU evidence.
+
+The initial source failures and disk failures remain recorded. The composed
+checks caught duplicate memo scope, batch structure attribution, split clocks,
+callback mutation of profiler identity, incomplete anchor fixtures and premature
+proof-driver import. Each was fixed at its owner or stale caller. The subsequent
+clean focused run passed all 744 cases. A local root-filesystem exhaustion caused
+ENOSPC in an earlier retry. Only this task's inactive historical scratch capsules
+were relocated to the shared evidence mount, preserving their original paths as
+symlinks. `scratch-relocations.jsonl` records that repair. `t3-fixed.json` and
+`compile.log` retain the disk-error observations. A retried action can replace its
+canonical terminal record, so the captured observations are the historical record.
+
+All execution used the published PrismaBuild client at
+`/mnt/shared/prismabuild-fleet/repo/tools/`. Main CPU shards reserved aggregate
+CPU4/RAM16 GiB, four pytest workers and one native thread each. The final guards
+reserved CPU1/RAM4 GiB and compilation CPU1/RAM3 GiB. Work used portable placement,
+preserved PB affinity and self-validation priority -10. The exact interpreter path
+and container content were declared dependencies. `pbtest` owned partitioning.
+
+The rerunnable evidence directory is
+`/mnt/shared/prismaquant-refactor-evidence/20261016/final/`.
+`reconcile_final.py` checks the frozen selection, complete case populations,
+replacement mappings and changed-file coverage. `verify_pb_receipts.py` checks
+actual successful terminal records, CAS action identity, result hash/size,
+embedded receipt identity and both captured log hashes/sizes. All
+28 accepted action receipts passed those checks. The machine-readable
+`verification-summary.json`, `verified-receipts.json`, `final-composed-source.json`,
+`commands.json`, original/replacement result files and per-lane skip records are
+retained there. Raw overlapping counts remain separate. The original broad result
+is 20,249,692 bytes with SHA-256
+`30867a349a97e7dc8a89e58f53b703cc5b101372a6ea9a4ae9cdbaf78fec7e33`.
+
+The API producer's selected integration still has its two known baseline
+failures and CPU-only delivery evidence. Later Tessera architecture source
+`53bcd17e3a88c93237465bd7be740f98cd2abc47`, archival head `c70188a791`, v69 contract
+and review status remain separate. This consumer refactor does not adopt that
+contract or establish a producer-wide pass.
+
+Three encountered corrections are separate commits: the PR template accepts an
+open parent reference, the pin docstring distinguishes contract binding from
+installed Git provenance, and the provisioner reads contract resources without
+initializing serving. The accepted implementation removes a net
+21,693 live Python lines across `prismaquant`,
+`tools` and `experiments` relative to the recorded main base. This is a source-size
+observation, not a performance result. Historical artifacts and dated measurements
+retain their original provenance. Incomplete native recipes require re-rendering.
+
+The committed [qualification manifest](../results/prismaquant-refactor-qualification-2026-10-16.json) records the accepted actions, result digests, replacement revisions and limits.
