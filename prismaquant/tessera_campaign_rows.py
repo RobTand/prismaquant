@@ -294,7 +294,10 @@ def load_spec(path: Path) -> dict:
                  "--seed-wire-dir", "--capture-calibration-out",
                  "--calibration-cache", "--calibration-cache-sha256",
                  "--source-identity-cache", "--source-identity-cache-sha256"}
-    options = explicit_campaign_options(spec["campaign_argv"])
+    try:
+        options = explicit_campaign_options(spec["campaign_argv"])
+    except ValueError as exc:
+        raise RuntimeError(f"{path}: campaign_argv: {exc}") from exc
     named = {flag for flag in forbidden if flag[2:].replace('-', '_') in options}
     if named:
         raise RuntimeError(
@@ -320,7 +323,9 @@ def load_spec(path: Path) -> dict:
             # own purge delay is not refused for a rule it does not fall under.
             validate_container({"container": resolved["container"],
                                 "env": resolved["env"]},
-                               bounded=row_is_bounded(resolved.get("argv") or []))
+                               bounded=row_is_bounded(
+                                   resolved.get("argv") or [],
+                                   where=f"{path}: row class {name!r}"))
     validate_row_classes(spec, where=str(path))
     _process_baseline_bytes(spec, where=str(path))
     return spec
@@ -578,7 +583,7 @@ def row_head_dependency(argv):
 CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
 
 
-def row_is_bounded(argv: list[str]) -> bool:
+def row_is_bounded(argv: list[str], *, where: str = "campaign row") -> bool:
     """Whether this row runs the bounded capture path.
 
     One predicate, two readers: the row builder that merges the bounded
@@ -586,7 +591,10 @@ def row_is_bounded(argv: list[str]) -> bool:
     SAME environment. A legacy row that declares its own purge delay is not a
     bounded row and is not refused for a contract it does not fall under.
     """
-    options = explicit_campaign_options(argv)
+    try:
+        options = explicit_campaign_options(argv)
+    except ValueError as exc:
+        raise RuntimeError(f"{where}: {exc}") from exc
     return (options.get('streaming_capture_policy') == 'shared-inputs-bounded-v1'
             or all(options.get(field) for field in (
                 'streaming', 'units', 'calibration_cache', 'calibration_cache_sha256')))
@@ -628,7 +636,8 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
                 f"argv names {named}; those bytes depend on a Hessian this "
                 "class may not have measured or adopted")
     env = dict(resolved['env'])
-    bounded = (module == "prismaquant.tessera_campaign" and row_is_bounded(argv))
+    bounded = (module == "prismaquant.tessera_campaign" and row_is_bounded(
+        argv, where=f"row class {row_class_name!r}"))
     if bounded:
         from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
         env = {**BOUNDED_CAPTURE_ENV, **env}

@@ -51,15 +51,34 @@ def test_legacy_manifest_keeps_explicit_allocator_environment():
     assert row['env'] == data['env']
 
 
-def test_a_capture_policy_flag_with_no_value_refuses_before_publication(capsys):
-    """The real CLI refuses missing values before a legacy row can be sealed."""
+def test_a_capture_policy_flag_with_no_value_refuses_before_publication():
+    """Planning keeps its row context when execution syntax refuses argv."""
     data = spec()
     data['env']['MIMALLOC_PURGE_DELAY'] = '10'
-    with pytest.raises(SystemExit) as classified:
+    with pytest.raises(RuntimeError, match='campaign row: argument --streaming-capture-policy: expected one argument'):
         campaign_rows.row_is_bounded(['--streaming-capture-policy'])
-    assert classified.value.code == 2
-    with pytest.raises(SystemExit) as published:
+    with pytest.raises(RuntimeError, match="row class 'default': argument --streaming-capture-policy: expected one argument"):
         campaign_rows.prismabuild_row(data, ['--streaming-capture-policy'], mem_gb=104, timeout_s=60)
-    assert published.value.code == 2
-    assert 'argument --streaming-capture-policy: expected one argument' in capsys.readouterr().err
     assert data['env']['MIMALLOC_PURGE_DELAY'] == '10'
+
+
+def test_invalid_shared_argv_names_the_spec(tmp_path):
+    data = spec()
+    data['campaign_argv'] = ['--streaming-capture-policy']
+    path = tmp_path / 'campaign.json'
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError) as refused:
+        campaign_rows.load_spec(path)
+    assert str(refused.value).startswith(f'{path}: campaign_argv: ')
+    assert '--streaming-capture-policy: expected one argument' in str(refused.value)
+
+
+def test_invalid_class_argv_names_the_spec_and_class(tmp_path):
+    data = spec()
+    data['classes'] = {'capture': {'argv': ['--streaming-capture-policy']}}
+    path = tmp_path / 'campaign.json'
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError) as refused:
+        campaign_rows.load_spec(path)
+    assert str(refused.value).startswith(f"{path}: row class 'capture': ")
+    assert '--streaming-capture-policy: expected one argument' in str(refused.value)

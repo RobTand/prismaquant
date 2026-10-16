@@ -18,9 +18,16 @@ from .tessera_serving_scope import add_serving_scope_arguments
 ROUND_ONE_ANCHORS = 3
 
 
-def campaign_argument_parser(*, description: str | None = None) -> argparse.ArgumentParser:
+class _PlanningParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError(message)
+
+
+def campaign_argument_parser(*, description: str | None = None,
+                             planning: bool = False) -> argparse.ArgumentParser:
     """Build the exact execution parser without initializing model runtimes."""
-    ap = argparse.ArgumentParser(description=description)
+    parser_class = _PlanningParser if planning else argparse.ArgumentParser
+    ap = parser_class(description=description)
     add_serving_scope_arguments(ap)
     ap.add_argument("--model", required=True)
     ap.add_argument("--out", required=True, help="cost payload (.pkl)")
@@ -244,7 +251,7 @@ def explicit_campaign_options(argv: Sequence[str]) -> dict[str, object]:
     The planner supplies model/output/cache paths outside shared campaign argv;
     only those execution-only requirements are relaxed here.
     """
-    parser = campaign_argument_parser()
+    parser = campaign_argument_parser(planning=True)
     for action in parser._actions:
         if action.dest in {'model', 'out', 'cache_dir'}:
             action.required = False
