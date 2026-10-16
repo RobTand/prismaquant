@@ -79,6 +79,14 @@ def _provenance() -> CardProvenance:
 # ----------------------------------------------------------------- invariants
 
 
+def test_marginal_identity_holds():
+    """The row and column marginals both sum to the unnormalized trace."""
+    unit = _synthetic_unit()
+    assert np.isclose(unit.fisher_row.sum(), unit.h_trace_raw)
+    assert np.isclose(unit.fisher_col.sum(), unit.h_trace_raw)
+    unit.validate()
+
+
 def test_validate_rejects_inconsistent_marginals():
     u = _synthetic_unit()
     bad = SensitivityUnit(**{**u.__dict__, "fisher_row": u.fisher_row * 2.0})
