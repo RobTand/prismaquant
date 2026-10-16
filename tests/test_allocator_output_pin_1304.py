@@ -1,15 +1,10 @@
-"""Real allocator decisions and stable companion bytes after codebook retirement.
+"""Allocator decisions and historical output bytes with explicit pin inputs.
 
-Layer files contain live pin provenance and solver diagnostics. Assert their
-assignments, format metadata, independently derived prices/bytes and actual
-code/JSON pin authorities directly. Historical Pareto, applicability, knee and
-seed goldens remain unchanged. No timing or live pin is blessed by a hash.
-
-The old layer hashes already fail before this refactor's priced-cell policy:
-PB327e2388. Captured policy outputs PB2af84be9/c240c704 differ only in solver
-seconds. Historical PBf05313ee proves a prior normalized Tessera hash, but its
-raw temporary layer files are no longer retained; no new field-level historical
-comparison is claimed here.
+Stock allocation clears the optional Tessera development pin. Tessera allocation
+uses the test-owned v5 contract and clears the requested override too. Layer
+hashes retain every field except solver wall time and the historical Tessera
+contract-version/reviewed-digest normalization. Explicit accounting, assignment
+and installed-pin checks accompany the complete file digests.
 """
 from __future__ import annotations
 
@@ -23,6 +18,7 @@ import sys
 import pytest
 
 STOCK_DIGESTS = {
+    "layer_config.json": "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469",
     "format_applicability.json": (
         "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
     ),
@@ -49,6 +45,7 @@ STOCK_DIGESTS = {
     ),
 }
 TESSERA_DIGESTS = {
+    "layer.json": "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9",
     "format_applicability.json": (
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
@@ -73,14 +70,25 @@ def _without_wall_time(value):
     return value
 
 
+def _canonical_tessera_layer(text):
+    payload = _without_wall_time(json.loads(text))
+    identity = payload["__prismaquant__"]["tessera_dev_pin"]
+    for field in ("contract_version", "reviewed_contract_sha256"):
+        del identity[field]
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode()
+
+
 def _digests(root):
     out = {}
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         rel = path.relative_to(root).as_posix()
-        if rel.endswith((".pkl",)) or rel.startswith("model/") or rel in {"layer_config.json", "layer.json"}:
+        if rel.endswith((".pkl",)) or rel.startswith("model/"):
             continue
         text = path.read_bytes().replace(str(root).encode(), b"<TMP>")
-        if rel.endswith(".json"):
+        if rel == "layer.json":
+            text = _canonical_tessera_layer(text)
+        elif rel.endswith(".json"):
             text = json.dumps(_without_wall_time(json.loads(text))).encode()
         out[rel] = hashlib.sha256(text).hexdigest()
     return out
@@ -207,8 +215,7 @@ def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeyp
     from prismaquant import allocator
     from prismaquant.layer_config import load_assignment
 
-    from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_COMMIT
-    monkeypatch.setenv("PRISMAQUANT_TESSERA_DEV_PIN", TESSERA_DEV_PIN_COMMIT)
+    monkeypatch.delenv("PRISMAQUANT_TESSERA_DEV_PIN", raising=False)
     _v5_contract(monkeypatch)
     argv = _allocator_inputs(tmp_path, "TESSERA_E2M1_K2_R896")
     monkeypatch.setattr(sys, "argv", [
@@ -227,7 +234,7 @@ def test_tessera_menu_keeps_allocation_and_nonidentity_outputs(tmp_path, monkeyp
     serving_pin = pin.load_tessera_serving_runtime_pin()
     assert serving_pin.commit == pin.TESSERA_SERVING_RUNTIME_PINNED_COMMIT == runtime.TESSERA_DEV_PIN_COMMIT
     assert serving_pin.contract_sha256 == hashlib.sha256(raw).hexdigest() == runtime.TESSERA_DEV_PIN_CONTRACT_SHA256
-    assert identity["requested"] == runtime.TESSERA_DEV_PIN_COMMIT
+    assert identity["requested"] == ""
     assert identity["commit"] == identity["contract_sha256"] == identity["contract_path"] == "fixture"
     assert identity["bytes_are_the_reviewed_bytes"] is False
     assert identity["contract_version"] == installed["contract_version"]
