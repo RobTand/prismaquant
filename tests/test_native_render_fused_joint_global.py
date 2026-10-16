@@ -25,6 +25,7 @@ resident resume and the cases a refusal must leave alone.
 from __future__ import annotations
 
 import copy
+import math
 import pickle
 import re
 from pathlib import Path
@@ -125,14 +126,25 @@ def _make_model() -> _Model:
     model = _Model()
     with torch.no_grad():
         # One group per fused group whose largest magnitudes sit on the
-        # max-to-4 codebook levels: max-to-4 renders it exactly and wins the
-        # joint_mse choice, so the joint_mse global is 1.5x the static_6 one.
+        # max-to-4 codebook levels: max-to-4 renders it almost exactly and
+        # wins the joint_mse choice, so the joint_mse global is 1.5x the
+        # static_6 one. The two planted peaks differ by a factor that is not
+        # a power of two: the FP8 block scales absorb a power-of-two change of
+        # global exactly, so only distinct, non-power-of-two globals make a
+        # group mix-up or a stale global visible in the re-packed bytes.
         pattern = torch.tensor([1.0, 0.75, 0.5, 0.25] * 4)
-        for linear in (model.model.layers[0].self_attn.q_proj,
-                       model.model.layers[0].mlp.gate_proj):
-            peak = 2.0 * float(linear.weight.abs().max())
+        for linear, multiple in (
+            (model.model.layers[0].self_attn.q_proj, 2.6),
+            (model.model.layers[0].mlp.gate_proj, 2.0),
+        ):
+            peak = multiple * float(linear.weight.abs().max())
             linear.weight[0, :16] = pattern * peak
     return model.to(torch.bfloat16).eval()
+
+
+def _power_of_two_apart(a: float, b: float) -> bool:
+    exponent = math.log2(a / b)
+    return abs(exponent - round(exponent)) < 1e-6
 
 
 def _dense_qnames(model) -> list[str]:
@@ -263,6 +275,19 @@ def test_fixture_separates_the_joint_mse_and_static_6_globals(rendered):
         weight, levers=NativeRenderLevers(nvfp4_scale_rule="joint_mse"))
     assert float(joint) > float(static)
     assert rendered["resident"].levers["nvfp4_scale_rule"] == "joint_mse"
+
+
+def test_fixture_separates_the_two_fused_groups(rendered, monkeypatch):
+    # Each group shares one joint global, and the two differ by a factor that
+    # is not a power of two, so a witness keyed or valued from the other group
+    # is a different value and re-packs to different bytes.
+    _options, layer, _whole = _export_globals(
+        rendered, rendered["resident"], monkeypatch)
+    attention = {float(layer[f"{LAYER}.self_attn.{leaf}"])
+                 for leaf in ("q_proj", "k_proj", "v_proj")}
+    mlp = {float(layer[f"{LAYER}.mlp.{leaf}"]) for leaf in ("gate_proj", "up_proj")}
+    assert len(attention) == 1 and len(mlp) == 1
+    assert not _power_of_two_apart(attention.pop(), mlp.pop())
 
 
 @pytest.mark.parametrize("builder", ["resident", "streamed"])
