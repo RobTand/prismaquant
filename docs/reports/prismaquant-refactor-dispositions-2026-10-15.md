@@ -351,3 +351,44 @@ repository changes no source files, main branch or existing producer refs.
 The additional PrismaBuild package-import/allocator-help probe passed with its
 actual terminal, result, receipt and both logs verified. The implementation and
 accepted numerical matrix remain unchanged.
+
+
+## Claude review scope corrections, 2026-10-16
+
+The A1 row describes the delivered snapshot and reviewed-answer ownership, not
+every proposed simplification. The "re-pin edits one file" and "one pin check"
+sub-items are rejected. Development reviewed-answer qualification and exact
+serving admission answer different questions. The independent serving reader
+constants must continue to agree with the tracked pin and the installed contract
+digest, as required by `AGENTS.md`. Deriving those guard constants from the pin
+JSON would defeat that independent comparison. A re-pin therefore still updates
+the reviewed values and their fixtures together. `tessera_legal_domain.FROZEN_PINS`
+records the pins under which its historical inventory was audited; its separate
+live-pin comparison detects drift. Replacing that historical record with today's
+pin would erase the provenance it checks. No pin values change in this correction.
+
+S2 is partial. The shared walk owns ordinary forward, capture and expert-format
+fork lifetimes. The remaining AURA reverse, Stage A, Joint quantum, Tessera, MTP,
+selected-layer and export walks retain their distinct source phases, tapes,
+settlement, trim accounting and authenticated installation policies. The caller
+inventory and reasons are in
+[`streamed-block-walk-refactor-2026-10-15.md`](streamed-block-walk-refactor-2026-10-15.md).
+That report's following unit is not included in this delivery. This branch
+rejects a universal walk that would hide those obligations; it does not claim
+that every traversal now uses `walk_layers`.
+
+P3's selected-document packing correction changes calibration draws when a
+long-document pass supplies fewer than the requested windows and packing fills
+the remainder. The same dataset, seed, sample count and sequence length can then
+produce different tokens than the old implementation, which reused the selected
+documents. Long-document-only draws retain their window selection. Calibration
+content hashes keep the differing draws from sharing a cache identity. This is
+an intentional sampling correction, not a served-quality comparison; an older
+recipe's settings alone do not reproduce its old mixed-corpus draw.
+
+The completed source movers, migration-only environment helper and codemod tests
+are archived under `archive/refactor_2026-10-16/` with unchanged file bytes. The
+original verification commands above remain historical execution records. The
+archive README identifies the original complete tool set and the three reusable
+checks that retain live callers, including the source-freezing check now used
+for Claude-fix PrismaBuild submissions.

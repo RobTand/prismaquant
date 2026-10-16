@@ -457,8 +457,9 @@ def load_calibration(tokenizer, source: str, n_samples: int,
     #      EOS) to reach seqlen. This makes SFT/chat datasets with short
     #      turns (tulu-3, glaive) usable without lowering seqlen.
     # calib_seed controls (a) which subset of dataset texts is tried (shuffle)
-    # and (b) where within each text the seqlen window starts. Default 42 is
-    # the historical value and is byte-stable.
+    # and (b) where within each text the seqlen window starts. Default 42
+    # preserves historical long-document selection and window offsets.
+    # Packing excludes those documents, so a mixed-corpus draw can differ.
     if calib_seed != 42:
         rng_shuffle = random.Random(calib_seed)
         rng_shuffle.shuffle(texts)
