@@ -987,11 +987,11 @@ def require_exact_tessera_runtime_pin(
        nothing.  Since v3 the producer commit and the serving code digest are
        compared too; under v2 they are the one commit and ``None``, so the
        comparison is the one it always was.
-    3. The INSTALLED contract hashes to the pinned digest.  This is the
-       enforced binding, and the reason a stray Tessera checkout on
-       ``PYTHONPATH`` is refused: the commit is a claim about another
-       repository that this process cannot check, but the bytes it is about to
-       read are right here.
+    3. The INSTALLED contract hashes to the pinned digest. A checkout on
+       ``PYTHONPATH`` with different contract bytes is refused. Under v2,
+       matching contract bytes do not verify the installed code's commit.
+       Exact installed Git provenance and package bytes need separate
+       qualification.
 
     ``version_is_release`` is deliberately absent from all three.  Rob retired
     the tag requirement; a gate that still demanded the flag would re-impose
