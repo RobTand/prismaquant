@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16 (review STD-011/R1S-F02): AURA checkpoint Git exactness
+covers the producer owners the journal and price-step split created.
+`aura_provenance.checkpoint_git_commit` diffs `aura_cost.py`,
+`aura_checkpoint_journal.py`, `joint_price_step.py` and `aura_provenance.py`
+against the resolved commit (`CHECKPOINT_PRODUCER_SOURCES`) and names each
+drifted owner. Certified mode refuses; development mode prints `[DEV-MODE]` and
+returns the commit. Git errors, timeouts and unresolved commits still refuse in
+both modes; an explicit `PRISMAQUANT_IDENTITY_GIT_COMMIT` still skips the diff.
+The whole-package digest still binds resume identity. Tests:
+`tests/test_aura_checkpoint_resume_identity.py`.
+
 Re-stamped 2026-10-16: completed source-move tools and their codemod-only tests
 are archived byte-for-byte at `archive/refactor_2026-10-16/`. Source freezing and
 the loaded-campaign/calibration boundary checks keep their live tool and test

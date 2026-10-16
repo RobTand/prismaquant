@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, aura_provenance
+from prismaquant import aura_checkpoint_journal, aura_provenance, joint_price_step
 
 import json
+import re
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -61,22 +63,30 @@ def test_aura_git_override_rejects_non_object_id_lengths(monkeypatch, length):
         aura_provenance.producer_git_commit()
 
 
+#: Every module whose code builds, encodes, restores or stamps an AURA
+#: checkpoint: the cost driver, the journal, the price step and the provenance
+#: recipe itself.
+CHECKPOINT_OWNERS = ("aura_cost.py", "aura_checkpoint_journal.py",
+                     "joint_price_step.py", "aura_provenance.py")
+
+
 @pytest.fixture
 def producer_git(tmp_path, monkeypatch):
     root = tmp_path / "producer"
-    source = root / "prismaquant" / "aura_cost.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("# recorded producer\n", encoding="utf-8")
+    package = root / "prismaquant"
+    package.mkdir(parents=True)
+    for name in CHECKPOINT_OWNERS + ("unrelated.py",):
+        (package / name).write_text(f"# recorded {name}\n", encoding="utf-8")
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
-    subprocess.run(["git", "add", "prismaquant/aura_cost.py"], cwd=root, check=True)
+    subprocess.run(["git", "add", "prismaquant"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.name=AURA test", "-c",
                     "user.email=aura@example.invalid", "commit", "--quiet",
                     "-m", "Record the producer"], cwd=root, check=True)
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
                             check=True, capture_output=True, text=True).stdout.strip()
-    monkeypatch.setattr(aura_provenance, "__file__", str(source))
+    monkeypatch.setattr(aura_provenance, "__file__", str(package / "aura_provenance.py"))
     monkeypatch.delenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", raising=False)
-    return root, source, commit
+    return root, package / "aura_cost.py", commit
 
 
 def test_dirty_producer_dev_mode_publishes_and_reuses_checkpoint(
@@ -161,13 +171,73 @@ def test_missing_git_refuses_in_both_modes(monkeypatch, capsys, producer_git, mo
     assert "[DEV-MODE]" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("owner", CHECKPOINT_OWNERS)
 @pytest.mark.parametrize("mode", ["1", "0"])
 def test_dirty_producer_keeps_explicit_git_override(
-    monkeypatch, capsys, producer_git, mode
+    monkeypatch, capsys, producer_git, mode, owner
 ):
-    _root, source, _commit = producer_git
-    source.write_text("# changed producer\n", encoding="utf-8")
+    root, _source, _commit = producer_git
+    (root / "prismaquant" / owner).write_text("# changed producer\n", encoding="utf-8")
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "a" * 40)
     assert aura_provenance.checkpoint_git_commit() == "a" * 40
     assert "[DEV-MODE]" not in capsys.readouterr().out
+
+
+def test_checkpoint_owner_set_is_the_live_producer_modules():
+    # A pathspec naming a file that no longer exists matches nothing, so a
+    # renamed owner would silently drop out of the exactness check.
+    root = Path(aura_provenance.__file__).resolve().parents[1]
+    live = {Path(module.__file__).resolve().relative_to(root).as_posix()
+            for module in (aura, aura_checkpoint_journal, joint_price_step,
+                           aura_provenance)}
+    assert set(aura_provenance.CHECKPOINT_PRODUCER_SOURCES) == live
+    assert live == {f"prismaquant/{name}" for name in CHECKPOINT_OWNERS}
+
+
+@pytest.mark.parametrize("owner", CHECKPOINT_OWNERS)
+def test_certified_mode_refuses_drift_in_every_checkpoint_owner(
+    monkeypatch, capsys, producer_git, owner
+):
+    root, _source, commit = producer_git
+    (root / "prismaquant" / owner).write_text("# changed producer\n", encoding="utf-8")
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    with pytest.raises(RuntimeError, match=(
+            rf"AURA checkpoint git identity is not exact: {re.escape(owner)} "
+            rf"differs from commit {commit}; commit it before checkpoint/resume")):
+        aura_provenance.checkpoint_git_commit()
+    assert "[DEV-MODE]" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("owner", CHECKPOINT_OWNERS)
+def test_dev_mode_stamps_drift_in_every_checkpoint_owner(
+    monkeypatch, capsys, producer_git, owner
+):
+    root, _source, commit = producer_git
+    (root / "prismaquant" / owner).write_text("# changed producer\n", encoding="utf-8")
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    assert aura_provenance.checkpoint_git_commit() == commit
+    stamp = capsys.readouterr().out
+    assert "[DEV-MODE]" in stamp
+    assert commit in stamp
+    assert f"(prismaquant/{owner})" in stamp
+
+
+def test_owner_refusal_names_each_drifted_owner_and_staged_edits(
+    monkeypatch, producer_git
+):
+    root, _source, commit = producer_git
+    package = root / "prismaquant"
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    # The whole-package digest binds every other module; this commit label
+    # certifies the checkpoint owners.
+    (package / "unrelated.py").write_text("# changed\n", encoding="utf-8")
+    assert aura_provenance.checkpoint_git_commit() == commit
+    for name in ("joint_price_step.py", "aura_checkpoint_journal.py"):
+        (package / name).write_text("# changed producer\n", encoding="utf-8")
+    # A staged edit is still not the recorded commit.
+    subprocess.run(["git", "add", "prismaquant/joint_price_step.py"], cwd=root, check=True)
+    with pytest.raises(RuntimeError, match=(
+            "not exact: aura_checkpoint_journal.py, joint_price_step.py differ "
+            f"from commit {commit};")):
+        aura_provenance.checkpoint_git_commit()

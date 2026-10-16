@@ -37,6 +37,18 @@ def producer_git_head_commit() -> str | None:
         return None
 
 
+#: The sources whose bytes an AURA checkpoint's commit certifies: the cost
+#: passes, the journal (identity, manifest and unit codecs, resume admission),
+#: the price step (unit restore and capture, joint row completion) and this
+#: recipe. The whole-package digest below binds every other module.
+CHECKPOINT_PRODUCER_SOURCES = (
+    "prismaquant/aura_cost.py",
+    "prismaquant/aura_checkpoint_journal.py",
+    "prismaquant/joint_price_step.py",
+    "prismaquant/aura_provenance.py",
+)
+
+
 def checkpoint_git_commit() -> str:
     commit = producer_git_commit()
     if commit is None:
@@ -45,15 +57,22 @@ def checkpoint_git_commit() -> str:
         return commit
     repo_root = Path(__file__).resolve().parents[1]
     clean = subprocess.run(
-        ["git", "diff", "--quiet", commit, "--", "prismaquant/aura_cost.py"],
+        ["git", "diff", "--name-only", "--exit-code", commit, "--",
+         *CHECKPOINT_PRODUCER_SOURCES],
         cwd=repo_root,
+        stdout=subprocess.PIPE,
+        text=True,
         check=False,
         timeout=10,
     )
     if clean.returncode != 0:
+        drifted = (clean.stdout.split() if clean.returncode == 1 else []) or list(
+            CHECKPOINT_PRODUCER_SOURCES)
+        names = ", ".join(Path(path).name for path in drifted)
         refusal = RuntimeError(
-            "AURA checkpoint git identity is not exact: aura_cost.py differs "
-            f"from commit {commit}; commit it before checkpoint/resume"
+            f"AURA checkpoint git identity is not exact: {names} "
+            f"{'differs' if len(drifted) == 1 else 'differ'} from commit "
+            f"{commit}; commit it before checkpoint/resume"
         )
         if clean.returncode != 1:
             raise refusal
@@ -62,7 +81,7 @@ def checkpoint_git_commit() -> str:
 
         seal_check(
             "AURA checkpoint producer source", commit, "changed working tree",
-            where="prismaquant/aura_cost.py", refusal=refusal,
+            where=", ".join(drifted), refusal=refusal,
         )
     return commit
 
