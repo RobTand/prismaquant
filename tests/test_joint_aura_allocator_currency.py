@@ -1,11 +1,11 @@
 """Exercise allocator admission using actual streamed joint measurement rows."""
-from prismaquant import joint_aura_rows
-from prismaquant import priced_cell
 import copy
 import math
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as ac
 from prismaquant.activation_fair_pricing import (
     ActivationFairPricing, FamilyCalibration, _family_of)

@@ -1,14 +1,13 @@
 """Write opens must refuse colliding coordinates before publishing any bytes."""
 
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant.render_cache_paths import cache_weight_filename
-from prismaquant import tessera_campaign_wire as campaign_wire
 from types import SimpleNamespace
 
 import pytest
 import torch
-from torch import nn
 
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant.render_cache_paths import cache_weight_filename
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import production_weight_cache as pwc
 from prismaquant import tessera_render
 from test_packed_expert_cross_domain_gate import TinyLM
@@ -185,8 +184,6 @@ def test_campaign_admits_cross_format_name_aliases(anchor_inputs, tmp_path):
         f"layer__a__{FORMAT}.tessera", f"layer_a__{OTHER_FORMAT}.tessera",
     }
     assert all(path.read_bytes() == b"wire" for path in wire_dir.iterdir())
-
-
 
 
 def test_packed_append_checks_dense_manifest_before_sidecar(tmp_path, monkeypatch):

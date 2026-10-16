@@ -8,16 +8,14 @@ production collector and the checkpoint resume boundary. No model-quality,
 estimator or serving claim is made; probe-sampling scope is unchanged.
 """
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
-from prismaquant import aura_provenance
-
 import copy
 import math
 
 import pytest
 import torch
 
+from prismaquant import joint_aura_rows
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 from prismaquant import joint_aura as joint
 

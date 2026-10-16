@@ -1,9 +1,5 @@
 """Packed probe -> persisted draw -> packed campaign prices -> scoped allocator."""
 
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
-from prismaquant import tessera_campaign as campaign
 import copy
 import json
 import pickle
@@ -12,6 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
+from prismaquant import tessera_campaign as campaign
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from test_tessera_stack_sample_cost import _profile, _packed_probe_row, _anchor, _sample, _payload, STEM

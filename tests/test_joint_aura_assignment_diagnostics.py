@@ -4,14 +4,13 @@ Synthetic complete rows exercise identity admission and paired arithmetic;
 these tests make no model-quality or serving-runtime claim.
 """
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
 import copy
 import math
 
 import pytest
 import torch
 
+from prismaquant import joint_aura_rows
 from prismaquant import format_registry as fr
 from prismaquant import joint_aura as joint
 from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA

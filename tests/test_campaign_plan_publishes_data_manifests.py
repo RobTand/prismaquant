@@ -21,13 +21,14 @@ dubious.
 Nothing here touches the shared mount: each test treats its own ``tmp_path``
 as the mount the manifest declares.
 """
-from prismaquant.campaign_data_manifests import ReadsetRefused
 import json
 import sys
 import types
 from pathlib import Path
 
 import pytest
+
+from prismaquant.campaign_data_manifests import ReadsetRefused
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # noqa: E402

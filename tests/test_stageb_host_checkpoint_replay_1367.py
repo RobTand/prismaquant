@@ -1,14 +1,12 @@
 """Host replay contract, distinct from funded production profiling acceptance."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
-
 import json
 
 import pytest
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 from experiments.stageb_checkpoint_host_replay import replay
-from prismaquant import aura_cost
 
 
 def _source(tmp_path, *, cyclic=False):

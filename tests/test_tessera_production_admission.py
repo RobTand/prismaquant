@@ -1,12 +1,10 @@
 """Production pin admission preserves the conditions its cells attest."""
 import json
-from tests.tessera_metadata_fixture import install_metadata
-
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-
 
 import pytest
 
+from tests.tessera_metadata_fixture import install_metadata
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 from prismaquant import tessera_menu as menu, tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
 from prismaquant.lane_eligibility import ServingContext

@@ -1,8 +1,6 @@
 """Exercise the sealed read schedule inside real streamed retained COST."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
-
 import gzip
 import hashlib
 import json
@@ -10,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 import prismaquant.aura_cost as aura
 from prismaquant import io_engine
 from prismaquant import format_registry as fr

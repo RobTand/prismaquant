@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import prismaquant.native_render_codec as _native_render_codec
-
 import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
 
-import prismaquant.export_native_compressed as native
+import prismaquant.native_render_codec as _native_render_codec
 from prismaquant.native_render_levers import NativeRenderLevers
 import prismaquant.prismasnap as snap
 import prismaquant.prismasnap_checkpoint as checkpoint

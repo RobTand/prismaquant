@@ -1,12 +1,13 @@
 """Real planner and merge coverage for opt-in unsampled expert partitions."""
-from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from pathlib import Path
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_campaign_table as campaign_table
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]

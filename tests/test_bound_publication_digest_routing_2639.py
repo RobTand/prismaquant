@@ -90,7 +90,6 @@ def test_seed_for_selection_routes_through_owner(monkeypatch, tmp_path):
     assert seen == [(rowdir / "cost.anchors.json").read_bytes()]
 
 
-
 def test_routed_values_match_hashlib(tmp_path):
     blob = b"abc" * 1000
     target = tmp_path / "r.bin"

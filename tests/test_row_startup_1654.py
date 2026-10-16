@@ -17,7 +17,6 @@ Two of the causes are PrismaQuant's, and these tests pin their fixes:
 """
 from __future__ import annotations
 
-from prismaquant import tessera_cell_measurement as cell_measurement
 import json
 import pathlib
 import sys
@@ -25,6 +24,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import tessera_cell_measurement as cell_measurement
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 
@@ -432,8 +433,6 @@ def test_the_reader_reserves_a_placeholders_source_bytes(monkeypatch, tmp_path):
 
 
 def test_placeholders_batch_as_the_host_weights_they_stand_for():
-    from prismaquant import tessera_campaign as campaign
-
     pending = [(name, "TESSERA_E4M3_K1", rung) for name in UNITS for rung in (1024, 2048)]
     host = {name: REAL[name] for name in UNITS}
     meta = _placeholders(set(UNITS))

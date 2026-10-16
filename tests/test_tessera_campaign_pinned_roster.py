@@ -6,16 +6,15 @@ allocator's grammar), ``--pinned-roster-only`` keeps only what it lifts, and the
 records the lift so a run under another lift refuses it. Unset, nothing changes.
 """
 
-from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
 import argparse
 import json
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign as tc
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 

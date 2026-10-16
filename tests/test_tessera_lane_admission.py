@@ -23,15 +23,13 @@ move and the shape must not:
 """
 from __future__ import annotations
 
-from tests.tessera_metadata_fixture import install_metadata
-
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-from prismaquant.lane_eligibility import native_rung_verdict
-
 import json
 
 import pytest
 
+from tests.tessera_metadata_fixture import install_metadata
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+from prismaquant.lane_eligibility import native_rung_verdict
 from prismaquant import tessera_render as tr
 from prismaquant.lane_eligibility import (
     EVIDENCE_SMOKE_REFUSALS,

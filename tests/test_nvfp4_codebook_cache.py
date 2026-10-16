@@ -13,9 +13,9 @@ Linear is identical, and the cache cannot serve a tensor from the wrong device.
 """
 from __future__ import annotations
 
-import prismaquant.native_render_codec as _native_render_codec
-
 import pytest
+
+import prismaquant.native_render_codec as _native_render_codec
 
 torch = pytest.importorskip("torch")
 

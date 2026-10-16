@@ -1,13 +1,13 @@
 """An explicit pricing restriction cannot become routed support or seed leakage."""
 
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign, tessera_menu as menu
 
 
@@ -197,7 +197,7 @@ def _restricted_payloads():
 
 
 def test_fanout_merge_preserves_the_complete_structure_restriction():
-    from prismaquant.tessera_campaign_table import (merge_payloads)
+    from prismaquant.tessera_campaign_table import merge_payloads
     merged = merge_payloads(_restricted_payloads(), census={"counts": {"a": 16384, "b": 16384}},
                             capture_sha256="merged-digest")
     assert merged["provenance"]["family_restriction"] == {
@@ -213,7 +213,7 @@ def test_fanout_merge_unions_a_dense_row_and_a_routed_row():
     whole-restriction equality check would make any census that mixes dense
     and routed rows unmergeable (RobTand/prismaquant#487).
     """
-    from prismaquant.tessera_campaign_table import (merge_payloads)
+    from prismaquant.tessera_campaign_table import merge_payloads
     payloads = _restricted_payloads()
     payloads["row-0001"]["provenance"]["family_restriction"]["structure_by_unit"] = {
         "b": "routed_moe"}

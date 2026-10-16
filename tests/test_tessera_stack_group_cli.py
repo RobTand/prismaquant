@@ -15,11 +15,6 @@ checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
 
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_selection as campaign_selection
 import json
 import os
 import pickle
@@ -30,6 +25,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 

@@ -18,8 +18,6 @@ sample group with one backward per probe on the retained graph
 """
 from __future__ import annotations
 
-from prismaquant import aura_provenance
-
 import hashlib
 import json
 from types import SimpleNamespace
@@ -30,11 +28,15 @@ import pytest
 import torch
 from torch import nn
 
+from prismaquant import aura_provenance
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
-from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, StreamedForwardBoundaries
+from prismaquant.streamed_boundary_artifacts import (
+    StreamedBoundaryArtifacts,
+    StreamedForwardBoundaries,
+    fused_window_size,
+)
 from prismaquant.cost_streaming import StreamedCausalLM
-from prismaquant.streamed_boundary_artifacts import fused_window_size
 from prismaquant.joint_adjoint_band import (
     BandRefused,
     build_band_receipt,
@@ -473,8 +475,6 @@ def test_the_quantum_chain_runs_the_slice_regime_bitwise(tmp_path, monkeypatch):
     from prismaquant import joint_adjoint_checkpoints as checkpoints_mod
     from prismaquant.joint_cost_quantum import QuantumIdentityRefused
     from test_joint_cost_quantum_runtime import _run_quantum, _single_run
-
-    import prismaquant.aura_cost as aura
 
     single_root = tmp_path / "single"
     single = _single_run(single_root, monkeypatch, checkpoint=single_root / "checkpoints")

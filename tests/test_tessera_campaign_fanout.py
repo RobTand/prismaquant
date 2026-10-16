@@ -14,16 +14,17 @@ Three properties make the split honest, and these tests pin them:
   or a unit priced twice.
 """
 
-from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 import pathlib
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 
@@ -77,7 +78,7 @@ def _selection(*groups):
 
 
 def test_selection_is_checked_against_the_run_s_own_grouping():
-    from prismaquant.tessera_campaign_table import (select_anchor_groups)
+    from prismaquant.tessera_campaign_table import select_anchor_groups
 
     resolved = {"g:attn": ["q", "k", "v"], "u:down": ["down"]}
     assert select_anchor_groups(
@@ -125,7 +126,6 @@ def test_group_key_puts_fused_siblings_and_a_whole_stack_together():
 
 def test_the_checkpoint_identity_covers_only_the_selected_units(monkeypatch):
     """Disjoint selections are disjoint identities, so they cannot contend."""
-    import argparse
 
     from prismaquant import tessera_campaign as tc
 
@@ -402,8 +402,6 @@ def _payloads():
 
 
 def test_merge_reproduces_a_whole_scope_table():
-    import dispatch_tessera_campaign as dispatch
-
     merged = campaign_table.merge_payloads(
         _payloads(), census={"counts": {"a": 16384, "b": 16384}},
         capture_sha256="merged-digest")
@@ -432,8 +430,6 @@ def test_merge_reproduces_a_whole_scope_table():
 
 
 def test_merge_refuses_a_mixed_hessian_identity():
-    import dispatch_tessera_campaign as dispatch
-
     payloads = _payloads()
     row = payloads["row-0001"]["costs"]["b"]["E4M3_R512"]
     row["hessian_identity"] = {**row["hessian_identity"], "fit_ids_sha256": "other"}
@@ -443,8 +439,6 @@ def test_merge_refuses_a_mixed_hessian_identity():
 
 
 def test_merge_refuses_a_gap_and_a_double_price():
-    import dispatch_tessera_campaign as dispatch
-
     payloads = _payloads()
     del payloads["row-0001"]
     with pytest.raises(campaign_table.MergeRefused, match="do not cover"):
@@ -460,8 +454,6 @@ def test_merge_refuses_a_gap_and_a_double_price():
 
 
 def test_merge_refuses_rows_from_two_calibrations():
-    import dispatch_tessera_campaign as dispatch
-
     payloads = _payloads()
     payloads["row-0001"]["provenance"]["nsamples"] = 64
     with pytest.raises(campaign_table.MergeRefused, match="provenance.nsamples"):
@@ -470,8 +462,6 @@ def test_merge_refuses_rows_from_two_calibrations():
 
 
 def test_a_row_may_not_carry_the_round_loop_s_own_deadline(tmp_path):
-    import dispatch_tessera_campaign as dispatch
-
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({
         "model": "m", "cwd": "/tmp", "python": "py", "env": {},
@@ -487,7 +477,6 @@ def test_merge_refuses_a_journal_that_names_a_shard_it_does_not_have(tmp_path):
     an entry whose file is absent loses exactly the rows a seeded run adopts
     and never re-encodes, and loses them without a word.
     """
-    import dispatch_tessera_campaign as dispatch
 
     row = tmp_path / "row-0000"
     (row / "cost.anchors.json.parts").mkdir(parents=True)
@@ -531,7 +520,6 @@ def test_receipts_accept_a_memoized_row_and_refuse_a_failed_campaign(tmp_path):
     back memoized with ``rc`` unset.  Those are done.  What is not done is a
     campaign whose own verdict was non-zero.
     """
-    import dispatch_tessera_campaign as dispatch
 
     (tmp_path / "receipts.json").write_text(json.dumps({
         "returncode": 0,
@@ -561,8 +549,6 @@ def _unservable_row(fmt="TESSERA_E2M1_K1_R512"):
 
 
 def test_merge_unions_the_unservable_evidence_rather_than_copying_one_row_s():
-    import dispatch_tessera_campaign as dispatch
-
     payloads = _payloads()
     payloads["row-0000"]["provenance"]["unservable"] = {
         "a": {"TESSERA_E2M1_K1_R512": _unservable_row()}}
@@ -587,8 +573,6 @@ def test_merge_unions_the_unservable_evidence_rather_than_copying_one_row_s():
 
 
 def test_merge_refuses_two_rows_that_disagree_about_one_unservable_row():
-    import dispatch_tessera_campaign as dispatch
-
     payloads = _payloads()
     mine = _unservable_row()
     theirs = copy.deepcopy(mine)
@@ -923,7 +907,7 @@ def _sizes(*values):
 
 
 def test_the_draw_is_fixed_size_and_deterministic_from_its_seed():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     sizes = _sizes(*[1.0 + index for index in range(32)])
     first = draw_stack_sample(sizes, 8, seed=0, stack="s:x|w1")
@@ -940,7 +924,7 @@ def test_the_draw_is_fixed_size_and_deterministic_from_its_seed():
 
 
 def test_inclusion_probabilities_sum_to_the_sample_size():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     # No unit dominates, so nothing lands in the certainty stratum and every
     # pi is strictly interior.  sum(pi) == n is the identity that makes the
@@ -956,7 +940,7 @@ def test_inclusion_probabilities_sum_to_the_sample_size():
 
 
 def test_a_dominant_unit_is_taken_with_certainty_not_clipped():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     # One expert holding most of the stack's h_trace would want pi > 1 under a
     # plain proportional rule.  Clipping it to 1 and leaving the others alone
@@ -972,7 +956,7 @@ def test_a_dominant_unit_is_taken_with_certainty_not_clipped():
 
 
 def test_asking_for_the_whole_frame_is_a_census_not_a_sample():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     sizes = _sizes(1.0, 2.0, 3.0)
     draw = draw_stack_sample(sizes, 8, seed=0, stack="s:z|w1")
@@ -982,7 +966,7 @@ def test_asking_for_the_whole_frame_is_a_census_not_a_sample():
 
 
 def test_a_zero_importance_expert_gets_probability_zero_and_is_never_drawn():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     # Zero h_trace is exact, not small: under the campaign's Fisher convention
     # a token never routed to an expert contributes zero gradient, so that
@@ -998,7 +982,7 @@ def test_a_zero_importance_expert_gets_probability_zero_and_is_never_drawn():
 
 
 def test_a_single_random_draw_is_refused_because_it_has_no_error_bar():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     # One random draw admits no variance estimate. Stamping 0.0 for it would
     # read downstream as "measured exactly", so the refusal happens here --
@@ -1009,7 +993,7 @@ def test_a_single_random_draw_is_refused_because_it_has_no_error_bar():
 
 
 def test_the_draw_stamps_what_a_variance_estimate_will_need():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
 
     # The permutation and the systematic start re-derive the sample
     # arithmetically, so a reader checks the draw rather than trusting a PRNG
@@ -1028,7 +1012,7 @@ def test_the_draw_stamps_what_a_variance_estimate_will_need():
 
 
 def test_the_audit_subsample_is_a_subset_that_cannot_move_the_estimate():
-    from prismaquant.tessera_campaign_table import (draw_stack_sample)
+    from prismaquant.tessera_campaign_table import draw_stack_sample
     from prismaquant.tessera_campaign_table import audit_subsample
 
     sizes = _sizes(*[1.0 + index for index in range(32)])
@@ -1074,7 +1058,7 @@ def test_a_sample_without_inclusion_probabilities_is_refused(tmp_path):
 
 
 def test_the_sample_narrows_what_is_priced_but_not_what_the_group_is(tmp_path):
-    from prismaquant.tessera_campaign_table import (select_anchor_groups)
+    from prismaquant.tessera_campaign_table import select_anchor_groups
     from prismaquant.tessera_campaign_selection import load_unit_selection, selection_priced_units
 
     path = tmp_path / "units.json"

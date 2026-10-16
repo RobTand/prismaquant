@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, aura_provenance
-
 import hashlib
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -11,6 +9,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant import aura_checkpoint_journal, aura_provenance
 import prismaquant.aura_cost as aura
 import prismaquant.expert_empirical_cost as expert_cost
 from prismaquant.cost_streaming import StreamedCausalLM

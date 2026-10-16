@@ -1,15 +1,15 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
 
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant.tessera_campaign_requests import anchor_placement
-
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant.tessera_campaign_requests import anchor_placement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 
 torch = pytest.importorskip("torch")
 

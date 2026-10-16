@@ -10,8 +10,6 @@ on the boxes, against the real arms.
 
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant import tessera_cell_measurement as cell_measurement
 import os
 import threading
 import time
@@ -19,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.tessera_publication import (
     BoundedPublisher, PublicationError, PublicationJob,
 )
@@ -626,7 +626,6 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     runs a campaign holding bytes nobody reserved.
     """
     from prismaquant import autoscale
-    from tools import dispatch_tessera_campaign as dispatch
 
     seen: dict = {}
 

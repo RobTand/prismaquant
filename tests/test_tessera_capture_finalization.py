@@ -1,8 +1,9 @@
 """The collector must release obsolete capture buffers during finalization."""
 
-from prismaquant import tessera_calibration_forward as calibration_forward
 import weakref
 import torch
+
+from prismaquant import tessera_calibration_forward as calibration_forward
 
 
 def test_scoring_chunks_are_released_between_units(monkeypatch):

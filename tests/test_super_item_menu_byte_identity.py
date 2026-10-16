@@ -67,8 +67,6 @@ stamps it into the fixture beside the digest::
         PYTHONPATH=. python tests/test_super_item_menu_byte_identity.py --regen
 """
 from __future__ import annotations
-from prismaquant import priced_cell
-
 import hashlib
 import json
 import os
@@ -78,6 +76,7 @@ from unittest import mock
 
 import pytest
 
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as alloc_cand
 from prismaquant import format_registry as fr
 from prismaquant.activation_fair_pricing import (

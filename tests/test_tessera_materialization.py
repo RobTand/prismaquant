@@ -1,12 +1,5 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
 
-from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_render
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import hashlib
 import json
@@ -17,6 +10,12 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_materialization as tm
 from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep

@@ -1,12 +1,10 @@
 """Recorded artifacts retain their refusal, source, row and resume contracts."""
 from __future__ import annotations
-import copy
 import hashlib
 import json
 import pickle
 import subprocess
 import sys
-from pathlib import Path
 import numpy as np
 import pytest
 import torch

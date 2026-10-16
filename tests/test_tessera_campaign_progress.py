@@ -1,11 +1,5 @@
 """Adaptive scheduler progress and durable resume, with controlled producer calls."""
 
-from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_table as campaign_table
 from collections import Counter
 import copy
 import json
@@ -14,6 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_table as campaign_table
 from test_tessera_campaign_resume import _main_fixture, UNIT
 
 

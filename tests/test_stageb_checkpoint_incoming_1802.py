@@ -1,13 +1,12 @@
 """CPU research incoming-checkpoint behavior; no timing qualification."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal
-
 from contextlib import contextmanager
 
 import pytest
 import torch
 
+from prismaquant import aura_checkpoint_journal
 import prismaquant.joint_adjoint_checkpoints as checkpoints
 import prismaquant.joint_cost_quantum as quantum
 import test_stageb_one_pass_spill as spill_fixture
@@ -176,7 +175,6 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     spill_fixture._clear_output(campaign, layer)
     # A real partial durable journal still consumes the whole original incoming
     # plane on its final pass, rather than treating already-priced units as finality.
-    import prismaquant.aura_cost as aura
     from pathlib import Path
     atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []

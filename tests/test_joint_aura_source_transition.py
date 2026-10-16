@@ -1,8 +1,6 @@
 """CPU gates for explicit adoption; no mutation of external checkpoints."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
-
 import copy
 import hashlib
 import json
@@ -11,7 +9,7 @@ import pickle
 
 import pytest
 
-from prismaquant import aura_cost as aura
+from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
 from prismaquant import joint_aura_source_transition as transition
 from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from test_joint_aura_streamed import _fixture, _run

@@ -20,13 +20,13 @@ Two things are pinned:
   draw it carries.
 """
 from __future__ import annotations
-from prismaquant import tessera_campaign_table as campaign
-
 import json
 import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant import tessera_campaign_table as campaign
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 

@@ -17,8 +17,6 @@ this path at capture batch 1 and 4 and compare it with chain mode.
 """
 from __future__ import annotations
 
-from prismaquant import joint_quantum_row as quantum_row
-
 import gzip
 import hashlib
 import json
@@ -28,6 +26,8 @@ from pathlib import Path
 
 import pytest
 import torch
+
+from prismaquant import joint_quantum_row as quantum_row
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
@@ -42,7 +42,7 @@ from prismaquant.joint_quantum_handoff import (
     handoff_read_entries,
     load_quantum_handoff,
 )
-from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
+from prismaquant.joint_quantum_row import HANDOFF_LOAD_PHASE
 from test_quantum_executable_readset import N_BATCHES, N_PROBES  # noqa: E402
 
 _offline_tier_policy = dispatch_tests._offline_tier_policy

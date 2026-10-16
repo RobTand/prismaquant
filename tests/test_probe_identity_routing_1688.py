@@ -9,14 +9,14 @@ int keys (numeric sort) and non-ASCII (escaped).
 """
 
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
 import hashlib
 from pathlib import Path
 import sys
 import types
 
 import pytest
+
+from prismaquant import joint_aura_rows
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY / "src"))

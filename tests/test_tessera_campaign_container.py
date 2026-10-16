@@ -1,5 +1,4 @@
 """The fanout must execute the sealed source in its declared Docker runtime."""
-from prismaquant import tessera_campaign_rows as campaign_rows
 import importlib
 import json
 import re
@@ -9,6 +8,8 @@ import subprocess
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch

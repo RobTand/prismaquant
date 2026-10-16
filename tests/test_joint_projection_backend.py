@@ -1,6 +1,4 @@
 """Fail-closed projection selection, prewarm and serialized arithmetic policy."""
-from prismaquant import joint_projection_contract
-from prismaquant import aura_provenance
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -10,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import joint_projection_contract
+from prismaquant import aura_provenance
 from prismaquant import joint_projection_backend as backend
 from prismaquant import format_registry as fr
 from prismaquant.joint_aura import SignedJointProjectionLease, arithmetic_identity

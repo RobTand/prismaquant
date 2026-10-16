@@ -1,13 +1,11 @@
 """Full measured-wire census rows cannot invent unencoded stack rungs."""
-from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
 
+from prismaquant import tessera_campaign_table as campaign_table
 from test_tessera_stack_sample_cost import STEM, _anchor, _packed_probe_row, _sample
 
 
 def test_wire_backed_census_keeps_only_encoded_rungs_but_sample_still_estimates():
-    from prismaquant import tessera_campaign as campaign
-
     family = "TESSERA_E2M1_K2"
     fmt = lambda rate: f"{family}_R{rate}"
     census = _sample(_packed_probe_row(2, [1.0, 3.0]))

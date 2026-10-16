@@ -1,7 +1,5 @@
 """Selected capture reuse authenticates consumed source objects, once per row."""
 
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_selection as campaign_selection
 import hashlib
 import importlib.metadata
 import json
@@ -10,6 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 
 def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
@@ -24,7 +25,6 @@ def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
     import prismaquant
     from safetensors.torch import save_file
     from prismaquant import autoscale, cost_streaming, layer_streaming
-    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
     from test_tessera_campaign_resume import _main_fixture, UNIT
 
@@ -246,7 +246,6 @@ def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
 ):
     """A cached SHA is usable only for the exact held source object."""
     from safetensors import safe_open
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
 
@@ -306,7 +305,6 @@ def test_the_owner_adopts_the_proof_its_pass_just_wrote(complete_source, monkeyp
     once to write the identity cache and again in the owner's completion
     gate. The owner now adopts the cache the pass wrote, once, and the
     completion gate reads no payload bytes."""
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.tessera_joint_aura import _adopt_built_source_identity
@@ -349,7 +347,6 @@ def test_adoption_admits_another_nfs_mount_and_refuses_another_object(
     """PQ #1363: a proof written on one host's mount of the pool is adoptable
     on another, whose st_dev differs, in certified mode. Any other field
     difference is refused. The owner uses the identity cache's own predicate."""
-    from prismaquant import cost_streaming
     from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
 

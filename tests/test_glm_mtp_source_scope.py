@@ -12,9 +12,6 @@ body plus its MTP layer, captured through the real CLI phases.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_selection as campaign_selection
-
 import hashlib
 import json
 import pickle
@@ -22,6 +19,9 @@ import re
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 torch = pytest.importorskip("torch")
 pytest.importorskip(

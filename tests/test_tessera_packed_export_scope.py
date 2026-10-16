@@ -1,9 +1,7 @@
 """Packed decisions use the same source receipts and scope gates as a census."""
-from prismaquant import tessera_campaign_table as campaign_table
-
 import pytest
 
-from prismaquant import tessera_campaign as campaign
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_export_lane as export
 from prismaquant import tessera_expert_projection as tep
 from prismaquant import nvfp4_activation_contract as nac

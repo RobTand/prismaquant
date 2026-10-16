@@ -1,21 +1,18 @@
 """Synthetic regressions for complete scientific coordinates and one quantity."""
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-from prismaquant import priced_cell
-
 import copy
 import math
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as candidates, format_registry as registry
-from prismaquant import joint_aura as joint
 from prismaquant.activation_fair_pricing import ActivationFairPricing, FamilyCalibration, _family_of
 from prismaquant.rung_allowability import RungAllowabilityError, qualified_cost_scope
 from test_canonical_consumer_join import FAMILY, _cost_owner, _mutated
 from test_glm_mtp_selection import _row
 from canonical_quality_fixtures import complete_probe, scope_for
-
 
 
 def anchor_rows(*, currency=joint_aura_rows.JOINT_CURRENCY, producer="d", upper_seed=7000):

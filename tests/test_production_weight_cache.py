@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from prismaquant.render_cache_paths import cache_weight_filename
-
-import prismaquant.native_render_codec as _native_render_codec
-
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +7,8 @@ import torch
 import torch.nn as nn
 import pytest
 
+from prismaquant.render_cache_paths import cache_weight_filename
+import prismaquant.native_render_codec as _native_render_codec
 from prismaquant.native_render_codec import (
     resolve_gptq_fixed_damp,
     gptq_damp_sweep_enabled,
@@ -324,7 +322,6 @@ def test_cache_fill_refuses_a_retired_codebook_rung(tmp_path):
     # existing shard without rendering. A retired codebook rung (archived
     # 2026-09-25, #1304) must refuse before either, even with a stale shard
     # for it already on disk.
-    import prismaquant.production_weight_cache as pwc
     from prismaquant import format_registry as fr
 
     model = _TinyL1()
@@ -814,8 +811,6 @@ def test_fisher_row_cache_uses_configured_fused_sibling_mapping(tmp_path):
 
 
 def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -854,8 +849,6 @@ def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
 
 
 def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -892,8 +885,6 @@ def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
 
 
 def test_production_cache_fp8_e4m3_uses_gptq(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -944,7 +935,6 @@ def test_format_gate_disables_joint_scale_opt_for_mxfp8():
 
 
 def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -1000,8 +990,6 @@ def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch)
 
 
 def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -1045,7 +1033,6 @@ def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
 
 
 def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -1096,7 +1083,6 @@ def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
 
 
 def test_production_cache_mxfp4_static_act_order_do_no_harm(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -1227,8 +1213,6 @@ def test_production_cache_records_render_scores(monkeypatch, tmp_path):
 
 
 def test_resume_collects_activations_when_render_scores_missing(tmp_path):
-    import prismaquant.production_weight_cache as pwc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     torch.save(
@@ -1304,7 +1288,6 @@ class _TinyChain(nn.Module):
 
 def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):
     import json
-    import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
     torch.save(
@@ -1335,7 +1318,6 @@ def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):
 
 def test_resume_loads_existing_activation_max_abs_sidecar(tmp_path):
     import json
-    import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
     torch.save(
@@ -1570,7 +1552,6 @@ def test_render_gate_scores_on_gptq_clipped_activations():
     capture — otherwise accept-vs-RTN decisions near ties are biased by the
     outlier rows."""
     import prismaquant.production_weight_cache as pwc
-    from prismaquant import export_native_compressed as enc
     from prismaquant.render_score import score_render_error
 
     torch.manual_seed(0)
@@ -1623,7 +1604,6 @@ def test_render_gate_scores_on_gptq_clipped_activations():
 def test_non_nv_render_gate_scores_on_gptq_clipped_activations():
     """Same clip-consistency contract for the non-NVFP4 (FP8) gate path."""
     import prismaquant.production_weight_cache as pwc
-    from prismaquant import export_native_compressed as enc
     from prismaquant import format_registry as fr
     from prismaquant.render_score import score_render_error
 

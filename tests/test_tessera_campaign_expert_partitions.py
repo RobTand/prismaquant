@@ -1,11 +1,11 @@
 """Fixed-rate partitions keep a full group contract, not a new sample."""
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
 import json
 from typing import cast
 
 import pytest
 
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign
 
 V3 = "prismaquant.tessera_campaign_units.v3"

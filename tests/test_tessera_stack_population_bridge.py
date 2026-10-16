@@ -1,7 +1,5 @@
 """Packed campaign decisions retain honest source coverage and priced receipts."""
 from __future__ import annotations
-from prismaquant import tessera_campaign_table as campaign_table
-
 import copy
 import json
 import pickle
@@ -9,7 +7,7 @@ import sys
 
 import pytest
 
-from prismaquant import tessera_campaign as campaign
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from test_allocator_expert_projection import (

@@ -20,8 +20,6 @@ dispatcher prices.
 """
 from __future__ import annotations
 
-from prismaquant import joint_quantum_row as quantum_row
-
 import json
 import math
 import os
@@ -30,6 +28,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant import joint_quantum_row as quantum_row
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tests", ROOT / "tools"):
@@ -275,8 +275,6 @@ def test_a_malformed_ceiling_refuses(edit, why):
 
 
 def test_phase_work_follows_the_runtime_order():
-    import dispatch_joint_quanta as dispatch
-
     work = quantum_row.compute_phase_work
     common = {"entries": 512, "n_probes": 4, "capture_batch": 4}
     (roll,) = work("chain-044-bound", replay_mode="spill", **common)
@@ -360,7 +358,6 @@ def test_the_quantum_commits_nothing_inside_a_pass_and_runs_the_priced_units(
     """The real quantum, spill mode, one chain layer: no report lands between
     the first and last unit of a chain roll or a spill capture, and the units
     it runs under each phase are the units the dispatcher prices for it."""
-    import dispatch_joint_quanta as dispatch
     import test_quantum_executable_readset as phases
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.joint_adjoint_checkpoints as checkpoints

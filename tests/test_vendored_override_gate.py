@@ -589,8 +589,6 @@ def test_rotary_init_does_not_swallow_the_refusal(monkeypatch):
         _init_rotary_inplace(base, "cpu", None)
 
 
-
-
 # --- the rule itself, pinned once over the whole tree (issue #202) ----------
 
 

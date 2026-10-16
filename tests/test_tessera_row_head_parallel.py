@@ -7,8 +7,6 @@ byte for byte what the serial head stamped, and refuses where it refused.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_wire as campaign_wire
-
 import json
 import threading
 from types import SimpleNamespace
@@ -16,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_wire as campaign_wire
 from test_tessera_hessian_reference_handoff import POLICY, handoff  # noqa: F401  (fixture)
 
 

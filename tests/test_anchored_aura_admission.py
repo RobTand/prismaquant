@@ -10,13 +10,12 @@ importantly, the four things the admission must NOT do:
   * it must not be described as making AURA activation-quantization-aware;
   * it must not let the currency contract exist in two spellings.
 """
-from prismaquant import priced_cell
-from prismaquant import source_format_contracts
-
 import pathlib
 
 import pytest
 
+from prismaquant import priced_cell
+from prismaquant import source_format_contracts
 from prismaquant import allocator_candidates as candidates
 from prismaquant import anchored_cost
 from prismaquant import format_registry as fr

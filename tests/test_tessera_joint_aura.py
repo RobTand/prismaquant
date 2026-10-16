@@ -1,9 +1,6 @@
 """Checked full-campaign intake; inert fixture wires are not GPU qualification."""
 from __future__ import annotations
 
-from prismaquant import aura_provenance
-from prismaquant import tessera_campaign_wire as campaign_wire
-
 import hashlib
 import json
 import pickle
@@ -11,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import aura_provenance
+from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant.cost_stage_checkpoint import (
     MANIFEST_SCHEMA, canonical_json_sha256, unit_path, write_unit,
 )
@@ -490,7 +489,7 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
 
 @pytest.mark.parametrize('changed', ['schema', 'plan_sha256', 'implementation_sha256'])
 def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monkeypatch, changed):
-    from prismaquant import aura_cost, gpu_guard, tessera_joint_aura as bridge
+    from prismaquant import gpu_guard, tessera_joint_aura as bridge
 
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_args: None)
     _stub_device_envelope(monkeypatch, bridge)

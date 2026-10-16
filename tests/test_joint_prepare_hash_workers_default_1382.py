@@ -8,14 +8,13 @@ PB-assigned affinity, and an explicit plan value must still win.
 """
 from __future__ import annotations
 
-from prismaquant import aura_provenance
-
 import inspect
 import os
 from pathlib import Path
 
 import pytest
 
+from prismaquant import aura_provenance
 import prismaquant.tessera_joint_aura as bridge
 from prismaquant.tessera_joint_aura import (
     default_file_load_workers,
@@ -65,7 +64,6 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
     import sys
     from types import SimpleNamespace
 
-    import prismaquant.aura_cost as aura
     import prismaquant.joint_stage_b_head as head_module
     root = Path(__file__).resolve().parents[1]
     if str(root / "tools") not in sys.path:

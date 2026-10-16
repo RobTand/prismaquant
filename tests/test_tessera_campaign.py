@@ -15,15 +15,16 @@ These tests pin the three properties that make that honest:
 * a rung outside the measured envelope is **omitted**, not extrapolated;
 * the render that was priced IS the decoded wire, and the wire is stored.
 """
-from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_render
 import math
 import os
 import pathlib
 from functools import lru_cache
 
 import pytest
+
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
 
 torch = pytest.importorskip("torch")
 
@@ -60,7 +61,7 @@ def test_next_anchor_splits_the_worst_predicted_interval():
 # ---------------------------------------------------------------------------
 
 def _anchor(qname, family, rung, dloss, *, bytes_=1000):
-    from prismaquant.tessera_campaign_table import (CampaignAnchor)
+    from prismaquant.tessera_campaign_table import CampaignAnchor
     from prismaquant.format_registry import get_format
 
     return CampaignAnchor(
@@ -116,7 +117,7 @@ def test_an_interpolated_row_is_priced_in_output_space():
         cost_entry_activation_pricing_branch,
         cost_entry_predicted_dloss,
     )
-    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -135,7 +136,7 @@ def test_an_interpolated_row_is_priced_in_output_space():
 
 
 def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
-    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -150,7 +151,7 @@ def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
 
 
 def test_non_monotone_anchors_are_recorded_not_laundered():
-    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -308,8 +309,6 @@ def _anchor_harness(monkeypatch, tmp_path):
     """
     from types import SimpleNamespace
 
-    from prismaquant import tessera_campaign as campaign
-
     monkeypatch.setattr(tessera_render, "encode_tessera_unit", lambda w, name, **kw: (w, b""))
     cache = SimpleNamespace(weights={}, cache_dir=None)
     return lambda **kw: cell_measurement.measure_cell(
@@ -365,7 +364,6 @@ def test_a_w4a4_anchor_with_no_static_scale_refuses_before_encoding(
     cost an encode, and the campaign loop must not absorb it as one failed
     anchor.
     """
-    from prismaquant import tessera_campaign as campaign
 
     def _must_not_encode(*a, **k):
         raise AssertionError("the refusal must precede the encode")
@@ -406,7 +404,7 @@ def test_the_priced_scale_travels_into_the_cost_rows(monkeypatch, tmp_path):
     """
     import dataclasses
 
-    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     scale = 448.0 * 6.0 / 37.5
@@ -1046,7 +1044,7 @@ def test_every_cost_row_carries_the_captures_digest():
     """``campaign_cost_payload`` copies the capture digest the campaign wrote
     into each row's ``hessian_identity`` (measured and interpolated), which
     is how it reaches the allocator's stamp and then the export gate."""
-    from prismaquant.tessera_campaign_table import (campaign_cost_payload)
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d)
@@ -1408,8 +1406,6 @@ def test_the_weights_only_lever_forms_no_hessian_at_all():
         assert "ldl" in seen and "refit_metric" in seen, sorted(seen)
     finally:
         monkey.undo()
-
-
 
 
 def test_the_aura_dw_fallback_refuses_tessera():

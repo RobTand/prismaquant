@@ -20,8 +20,6 @@ selects the fused kernel:
   run on the reference arithmetic and the shapes themselves, and publishes.
 """
 from __future__ import annotations
-from prismaquant import joint_projection_contract
-
 import hashlib
 import json
 import struct
@@ -30,6 +28,8 @@ from pathlib import Path
 
 import pytest
 import torch
+
+from prismaquant import joint_projection_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):

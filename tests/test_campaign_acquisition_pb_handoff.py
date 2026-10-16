@@ -2,14 +2,6 @@
 
 from __future__ import annotations
 
-from prismaquant.campaign_data_manifests import ReadsetRefused
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant.tessera_campaign_requests import anchor_placement
-
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_selection as campaign_selection
-from prismaquant import tessera_campaign_table as campaign_table
-
 import copy
 import hashlib
 import json
@@ -19,6 +11,13 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant.tessera_campaign_requests import anchor_placement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 
 torch = pytest.importorskip("torch")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))

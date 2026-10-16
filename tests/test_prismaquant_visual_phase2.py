@@ -18,10 +18,10 @@ GPTQ/scale-sweep/AR treatment at export. Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 import prismaquant.export_native_compressed as _test_exporter
 from prismaquant.native_render_levers import NativeRenderLevers
-from dataclasses import replace
-import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_export_inputs():

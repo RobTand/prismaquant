@@ -1,13 +1,13 @@
 """Fanout retains the draw and every row's refusal/identity evidence."""
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import sys
 from pathlib import Path
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-import dispatch_tessera_campaign as dispatch
 from test_tessera_campaign_fanout import _payloads
 
 
@@ -34,7 +34,6 @@ def test_merge_refuses_different_rate_bands():
 def test_merge_preserves_packed_draw_and_population(tmp_path, monkeypatch):
     from test_tessera_stack_driver_integration import _plan
     from test_tessera_stack_sample_cost import _profile
-    from prismaquant import tessera_campaign as campaign
     from prismaquant.tessera_expert_projection import POPULATION_KEY
     selection, stats = _plan(tmp_path, monkeypatch)
     samples = campaign_table.selection_stack_samples(selection, _profile())

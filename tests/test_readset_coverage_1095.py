@@ -14,14 +14,13 @@ materializes. These tests hold the fix:
 """
 from __future__ import annotations
 
-from prismaquant import joint_quantum_row as quantum_row
-
 import hashlib
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import joint_quantum_row as quantum_row
 from prismaquant import joint_layer_quanta as jl
 from prismaquant import readset_coverage as rc
 from prismaquant import source_read_plan as srp

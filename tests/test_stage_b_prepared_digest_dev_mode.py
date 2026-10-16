@@ -16,13 +16,12 @@ mode refuses at both, dev mode records at both.
 CPU-only.
 """
 from __future__ import annotations
-from prismaquant import joint_projection_contract
-
 import ast
 from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_projection_contract
 from prismaquant import dev_mode
 from prismaquant import tessera_joint_aura as bridge
 
@@ -97,7 +96,6 @@ def test_stage_b_post_intake_check_uses_the_shared_reader():
 def test_prepared_backend_change_is_one_seal_at_completion_and_cache(
         monkeypatch, capsys, site, certified):
     from copy import deepcopy
-    from prismaquant import joint_projection_backend as backend
     from prismaquant.production_weight_cache import ProductionWeightCache
 
     qualification, digest = joint_projection_contract.projection_qualification()

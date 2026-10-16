@@ -11,14 +11,13 @@ returned value, or the same exception type, text and chained cause.
 """
 
 from __future__ import annotations
-from prismaquant import tessera_campaign_table as campaign_table
-
 from collections.abc import Mapping
 import re
 from types import MappingProxyType
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import (
     artifact_collection,
     artifact_collection_legacy,
@@ -40,7 +39,6 @@ from prismaquant import (
     runtime_provenance,
     schemas,
     tessera_anchored_surface,
-    tessera_campaign,
     tessera_joint_aura,
     tessera_sampled_stack_proposal,
 )

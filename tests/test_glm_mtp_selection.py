@@ -11,13 +11,13 @@ Rows here are synthetic but complete joint-AURA entries; these tests make no
 serving-quality claim.
 """
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
 import json
 import pickle
 import sys
 
 import pytest
+
+from prismaquant import joint_aura_rows
 
 torch = pytest.importorskip("torch")
 

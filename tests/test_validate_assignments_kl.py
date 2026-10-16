@@ -1,10 +1,10 @@
-from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 from types import SimpleNamespace
 
 import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.validate_assignments_kl import (
     _assert_calibration_disjoint,
@@ -196,7 +196,6 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         calls["seed"] = seed
         return torch.zeros(n, seqlen, dtype=torch.long)
 
-    import prismaquant.validate_assignments_kl as mod
     from prismaquant import calibration_data
     original = calibration_data.load_wikitext_calibration_windowed
     calibration_data.load_wikitext_calibration_windowed = _fake_loader

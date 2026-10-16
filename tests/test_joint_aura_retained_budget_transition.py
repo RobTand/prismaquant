@@ -1,8 +1,6 @@
 """CPU gates for the retained-budget run transition; no external checkpoint is touched."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
-
 import copy
 import json
 import os
@@ -10,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant import aura_cost as aura
+from prismaquant import aura_checkpoint_journal, aura_provenance, cost_stage_checkpoint
 from prismaquant import joint_aura_retained_budget_transition as transition
 from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from prismaquant import joint_aura_run_transition as run_transition

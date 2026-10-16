@@ -1,12 +1,12 @@
 """CPU contracts for scoped Tessera row-stream wait observations."""
 from __future__ import annotations
 
-from prismaquant import tessera_cell_measurement as cell_measurement
 import json
 from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import io_spans, tessera_row_stream
 from test_stage_a_source_wait_1663 import _Delivery
 

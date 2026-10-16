@@ -1,10 +1,10 @@
 """Opt-in routed allocation policy, exercised before any stack aggregation."""
-from prismaquant import source_format_contracts
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import source_format_contracts
 from prismaquant import allocator_candidates as ac
 from prismaquant import format_registry as fr
 from prismaquant import serving_profiles as sp

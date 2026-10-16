@@ -1,10 +1,10 @@
 """Deterministic common-probe rate trades; no serving or quality claim."""
-from prismaquant import priced_cell
 import copy
 import math
 
 import pytest
 
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as ac
 from prismaquant.model_profiles import DefaultProfile
 from test_joint_aura_assignment_diagnostics import _row, _rebuild

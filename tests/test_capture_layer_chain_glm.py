@@ -4,7 +4,6 @@ Needs transformers' ``glm5_next`` (the ``-tf516`` venv) and, for the campaign
 CLI, the pinned Tessera producer.
 """
 
-from prismaquant import tessera_calibration_forward as calibration_forward
 import json
 import os
 import re
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from prismaquant import tessera_calibration_forward as calibration_forward
 from test_glm_campaign_streaming import glm_checkpoint, write_original_layout_checkpoint  # noqa: F401
 from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile

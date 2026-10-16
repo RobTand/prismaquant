@@ -10,8 +10,6 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-
-
 def test_runtime_flags_doc_owns_policy_without_mirroring_plugin_flags():
     """Renamed from `..._without_mirroring_gridbook_flags` on 2026-09-02.
 

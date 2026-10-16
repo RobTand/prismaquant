@@ -1,6 +1,5 @@
 """CPU prerequisite checks; context doubles do not qualify staged lifetimes/GPU."""
 
-from prismaquant import joint_quantum_row as quantum_row
 from contextlib import contextmanager
 import copy
 import hashlib
@@ -10,6 +9,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from prismaquant import joint_quantum_row as quantum_row
 import test_quantum_executable_readset as fixture
 from test_quantum_executable_readset import (CALIB, N_PROBES, RENDER_PREREQ, STRIDED,
                                            _tiny_records, _tiny_receipt)
@@ -193,7 +193,7 @@ def test_runtime_requires_authenticated_context(tmp_path, monkeypatch, case):
 
 
 def test_dispatch_compute_counts_exclude_incoming_rows():
-    from prismaquant.joint_quantum_row import (phase_work_entries)
+    from prismaquant.joint_quantum_row import phase_work_entries
     annotations = {"checkpoint_incoming": {"streamed_incoming": {"chain-003-bound": 6, "spill-p0": 3}}}
     assert phase_work_entries("chain-003-bound", {"entries": 9}, annotations) == 3
     assert phase_work_entries("spill-p0", {"entries": 6}, annotations) == 3
@@ -297,7 +297,6 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     # final batches even for a grouped capture seal; compare like resumes.
     assert captured[-1] == baseline_resume_plane
     shutil.rmtree(record["output_space"]["root"])
-    import prismaquant.aura_cost as aura
     atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []
     def fail_second(path, body):

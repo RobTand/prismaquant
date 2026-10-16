@@ -8,8 +8,6 @@ and output spaces) and chunk-table sums. Nothing here submits anything.
 
 from __future__ import annotations
 
-from prismaquant import joint_campaign_ledger as ledger
-
 import copy
 import gzip
 import hashlib
@@ -383,7 +381,7 @@ def test_real_plan_slice_manifests_are_standalone_v1():
 
 @real_plan
 def test_real_plan_adjoint_manifest():
-    from prismaquant.joint_quantum_row import (adjoint_read_plan_phase_names)
+    from prismaquant.joint_quantum_row import adjoint_read_plan_phase_names
     built = _build_real()
     manifest = built["adjoint_manifest"]
     assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v2"
@@ -476,8 +474,6 @@ def test_schema_every_record_real_plan():
         assert jl.canonical_sha256(headless) == record["identity_sha256"]
 
 
-
-
 def test_chunk_target_derivation_pinned():
     assert jl.derive_chunk_target_bytes(160, 2) == 40 * GIB
     assert jl.derive_chunk_target_bytes(512, 2) == 64 * GIB  # clamped
@@ -562,7 +558,6 @@ def test_canonical_identity_matches_cost_stage_checkpoint():
         headless = {k: v for k, v in record.items() if k != "identity_sha256"}
         assert cost_stage_checkpoint.canonical_json_sha256(
             headless, where="quantum record") == record["identity_sha256"]
-
 
 
 def test_qname_layer_reads_the_layer_grammar():

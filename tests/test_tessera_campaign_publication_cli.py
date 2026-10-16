@@ -13,12 +13,6 @@ failure stops the action instead of being absorbed by it.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_render
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
-
 import hashlib
 import pickle
 import time
@@ -26,6 +20,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
 
 torch = pytest.importorskip("torch")
 

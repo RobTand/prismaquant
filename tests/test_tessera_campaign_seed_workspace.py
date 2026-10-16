@@ -1,5 +1,4 @@
 """Workspace migration preserves the row ownership and ordinary seed gates."""
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
 from pathlib import Path
@@ -7,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign_rows as campaign_rows
 
 

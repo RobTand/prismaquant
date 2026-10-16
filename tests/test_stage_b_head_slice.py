@@ -74,7 +74,7 @@ def _campaign(tmp_path):
     """The fixture campaign, prepared: plan, completion, PWC and calibration."""
     from test_tessera_joint_aura import fixture
 
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256 as _aura_source_sha256
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.tessera_joint_aura import load_measured_anchor_input
@@ -130,7 +130,7 @@ def _campaign(tmp_path):
 
 
 def _produce(campaign, *, layers=(0,)):
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256 as _aura_source_sha256
     from prismaquant.joint_layer_quanta import qname_layer
 
     slices = build_head_slices(
@@ -156,7 +156,7 @@ def _record(layer, binding):
 
 
 def _consume(campaign, record, *, progress_phase=None):
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256 as _aura_source_sha256
 
     head_slice, _, files = read_quantum_head_slice(
         campaign["config"], record=record, prepared=campaign["prepared"],
@@ -254,7 +254,7 @@ def test_refuses_a_slice_bound_to_another_plan(tmp_path):
 
 def test_refuses_a_slice_produced_by_another_implementation(tmp_path, monkeypatch):
     """The producer re-derived the policies under its own package."""
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256 as _aura_source_sha256
 
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     campaign = _campaign(tmp_path)

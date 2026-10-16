@@ -17,7 +17,6 @@ This fixture shares no KV state, so its owner states are all empty. A
 separate round trip gives each ``(probe, sample)`` its own accumulator and
 checks that the consumer reads each one back at its own coordinate.
 """
-from prismaquant import aura_provenance
 from pathlib import Path
 import hashlib
 import json
@@ -27,7 +26,7 @@ import shutil
 import pytest
 import torch
 
-import prismaquant.aura_cost as aura
+from prismaquant import aura_provenance
 # The core imports the roll from its owner at call time: patch it there.
 import prismaquant.joint_adjoint_checkpoints as quantum_module
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes

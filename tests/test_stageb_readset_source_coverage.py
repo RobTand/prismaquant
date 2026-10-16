@@ -6,8 +6,6 @@ neither a neighbouring phase nor a union of staged files covers one tensor.
 """
 from __future__ import annotations
 
-from prismaquant import joint_quantum_row as quantum_row
-
 import copy
 import gzip
 import hashlib
@@ -16,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_quantum_row as quantum_row
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan
 from test_quantum_executable_readset import (

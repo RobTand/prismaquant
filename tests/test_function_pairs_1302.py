@@ -23,8 +23,6 @@ rows.
 """
 from __future__ import annotations
 
-from prismaquant import aura_provenance
-
 import importlib
 import os
 from pathlib import Path
@@ -35,6 +33,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant import aura_provenance
 from tests.golden_table import GoldenTable
 
 GOLDEN = GoldenTable("function_pairs_1302", every_row_used=True)
@@ -95,7 +94,6 @@ def test_git_commit(monkeypatch, ref, index):
 
 
 def test_aura_git_commit_keeps_its_override(monkeypatch):
-    from prismaquant import aura_cost
     calls = []
     monkeypatch.setattr(subprocess, "run", _fake_run("f" * 40 + "\n", calls))
     monkeypatch.delenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", raising=False)

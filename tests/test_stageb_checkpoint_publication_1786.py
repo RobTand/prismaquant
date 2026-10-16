@@ -1,8 +1,6 @@
 """Real retained-window publication barriers; CPU correctness, not timing."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal
-
 import pickle
 import shutil
 import threading
@@ -10,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import prismaquant.aura_cost as aura
+from prismaquant import aura_checkpoint_journal
 import prismaquant.joint_cost_quantum as quantum
 import prismaquant.joint_statistics_replay as replay_module
 from test_stageb_one_pass_spill import campaign, _quantum

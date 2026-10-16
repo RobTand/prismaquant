@@ -1,5 +1,4 @@
 """Retained execution joins the real streamed probe and existing source owners."""
-from prismaquant import aura_provenance, cost_stage_checkpoint
 from pathlib import Path
 import hashlib
 import threading
@@ -8,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import aura_provenance, cost_stage_checkpoint
 import prismaquant.aura_cost as aura
 from prismaquant import io_engine
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts

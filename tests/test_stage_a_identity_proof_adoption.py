@@ -7,7 +7,6 @@ through ``CaptureSourceAuthentication.adopt_streamed_identity_cache``, the
 same check the joint pass uses (#1374), and a proof that refuses leaves every
 read to hash fresh.
 """
-from prismaquant import tessera_campaign_rows as campaign_rows
 import hashlib
 import json
 import os
@@ -18,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from test_selected_source_authentication import selected_source_fixture
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))

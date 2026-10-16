@@ -1,7 +1,5 @@
 """COST's V2 manifest describes forward/reverse reads and stable resume windows."""
 
-from prismaquant.campaign_data_manifests import ReadsetRefused
-from prismaquant.render_cache_paths import cache_weight_filename
 import copy
 from dataclasses import replace
 import hashlib
@@ -10,6 +8,8 @@ import json
 import pytest
 import torch
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import campaign_data_manifests as producer
 from prismaquant import format_registry as fr
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget

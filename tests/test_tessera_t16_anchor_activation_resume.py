@@ -1,5 +1,4 @@
 """A genuine T-16 wire cannot authenticate incompatible scoring metadata (#2109)."""
-from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
 import json
 import pickle
 import shutil
@@ -7,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
 from test_tessera_campaign_resume import (
     UNIT, _forbid_reencode, _main_fixture, _priced_file_digests,
 )

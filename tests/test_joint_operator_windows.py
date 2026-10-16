@@ -1,11 +1,11 @@
 """Integrated target replay preserves probes while bounding matrix/cache owners."""
-from prismaquant import aura_provenance
 import os
 from functools import partial
 
 import pytest
 import torch
 
+from prismaquant import aura_provenance
 from prismaquant.joint_statistics_replay import SCHEMA, normalize_operator_windows
 import prismaquant.aura_cost as aura
 from test_joint_aura_streamed import _fixture, _run

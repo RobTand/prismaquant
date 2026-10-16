@@ -1,14 +1,13 @@
 """Reject ambiguous legacy render destinations before cache resume/write."""
 from __future__ import annotations
 
-from prismaquant.render_cache_paths import cache_weight_filename
-
 from types import SimpleNamespace
 
 import pytest
 import torch
 from torch import nn
 
+from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import production_weight_cache as pwc
 
 

@@ -26,13 +26,14 @@ assertion here is a real regression rather than a pin.
 """
 from __future__ import annotations
 
-from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_render
 import dataclasses
 import json
 
 import pytest
+
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
 
 torch = pytest.importorskip("torch")
 
@@ -212,8 +213,6 @@ def test_the_campaign_refuses_a_second_contract_without_its_scale(
     """
     from types import SimpleNamespace
 
-    from prismaquant import tessera_campaign as campaign
-
     def _must_not_encode(*a, **k):
         raise AssertionError("the refusal must precede the encode")
 
@@ -232,7 +231,7 @@ def test_the_campaign_refuses_a_second_contract_without_its_scale(
 
 def test_the_resume_guard_follows_the_contract(fp8_gains_a_static_contract):
     """A resumed row of a second-contract rung is a pre-contract price too."""
-    from prismaquant.tessera_campaign_table import (CampaignAnchor)
+    from prismaquant.tessera_campaign_table import CampaignAnchor
     from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
     from prismaquant.tessera_cell_measurement import require_resumable_cell
 

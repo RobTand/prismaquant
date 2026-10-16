@@ -8,13 +8,6 @@ encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_rows as campaign_rows
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_selection as campaign_selection
-
 import gc
 import importlib.metadata
 import json
@@ -28,6 +21,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 from test_tessera_hessian_reference_handoff import POLICY as REFERENCE_POLICY, handoff  # noqa: F401
 
 UNITS = ["model.layers.0.a", "model.layers.0.b", "model.layers.1.c"]
@@ -825,7 +823,6 @@ def test_the_stream_plan_charges_a_window_not_the_population(monkeypatch):
 
 def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
     from prismaquant import autoscale
-    from tools import dispatch_tessera_campaign as dispatch
     seen = []
 
     def selected(_model, **kwargs):
@@ -854,7 +851,6 @@ def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
 
 def test_dispatcher_head_and_publication_reservation_follow_effective_cli(monkeypatch):
     from prismaquant import autoscale
-    from tools import dispatch_tessera_campaign as dispatch
     seen = []
     def resource_plan(_model, **kwargs):
         seen.append(kwargs)

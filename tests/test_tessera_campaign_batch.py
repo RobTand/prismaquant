@@ -1,11 +1,11 @@
 """Batch admission preserves per-unit inputs, prices, wire bytes and retries."""
-from prismaquant import tessera_cell_measurement as cell_measurement
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_render as render
 

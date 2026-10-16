@@ -1,8 +1,6 @@
 """Explicit CLI targets reach Tessera admission with each unit's topology."""
 from __future__ import annotations
 
-from prismaquant import tessera_calibration_forward as calibration_forward
-
 import argparse
 import json
 import pickle
@@ -10,6 +8,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from prismaquant import tessera_calibration_forward as calibration_forward
 from conftest import (
     down_convert_lane_table, lane_cells_on_one_image,
     project_lane_cells_onto_structures)
@@ -161,7 +160,7 @@ def test_campaign_main_passes_live_model_topology_to_real_menu_boundary(tmp_path
 
 def _allocator_inputs(tmp_path, fmt="BF16"):
     from prismaquant.cost_currency import RENDER_SCORE_COST_MODE
-    from prismaquant.tessera_campaign_table import (CURRENCY)
+    from prismaquant.tessera_campaign_table import CURRENCY
     from prismaquant.tessera_formats import SUPERBLOCK_WEIGHTS
     model_dir = tmp_path / "model"
     model_dir.mkdir()

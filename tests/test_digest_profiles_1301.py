@@ -9,10 +9,6 @@ type, ``str()`` and chained cause. Those outcomes are frozen in
 against them.
 """
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
-from prismaquant import aura_checkpoint_journal
-
 import ast
 import hashlib
 import importlib
@@ -23,6 +19,8 @@ import sys
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import aura_checkpoint_journal
 from prismaquant import cost_stage_checkpoint, digests
 from prismaquant.digests import (
     DIRECT_ASCII_LAX,

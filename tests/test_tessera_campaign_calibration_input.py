@@ -1,9 +1,6 @@
 """Immutable campaign draw intake (PQ #1827), using real tiny safetensors."""
 from __future__ import annotations
 
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_calibration_forward as calibration_forward
-
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 from safetensors.torch import save_file
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_calibration_forward as calibration_forward
 from test_tessera_campaign_resume import UNIT, _main_fixture
 
 from prismaquant import digests

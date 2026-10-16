@@ -1,11 +1,12 @@
 """Opt-in CPU planner checks; synthetic timings are not performance evidence."""
-from prismaquant import tessera_campaign_rows as campaign_rows
 import hashlib
 import json
 from pathlib import Path
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]

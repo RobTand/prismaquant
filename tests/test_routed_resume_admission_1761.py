@@ -6,11 +6,11 @@ No tensors, model files or GPU are allocated by this 864-unit geometry fixture.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import autoscale
 from prismaquant.tessera_row_stream import (
     MEMORY_PLANS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM,

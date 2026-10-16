@@ -7,8 +7,6 @@ recipes and are deliberately not part of this table.
 """
 from __future__ import annotations
 
-from prismaquant import joint_campaign_ledger as ledger
-
 import copy
 import hashlib
 import json
@@ -17,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from prismaquant import joint_campaign_ledger as ledger
 from prismaquant import digests
 from prismaquant import joint_head_walk_quanta as head
 from tests.golden_table import GoldenTable, outcome

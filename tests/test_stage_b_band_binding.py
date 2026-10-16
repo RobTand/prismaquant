@@ -15,13 +15,12 @@ binding it fails on the refusal itself, not on an import.
 """
 from __future__ import annotations
 
-from prismaquant import joint_campaign_ledger as ledger
-
 import copy
 import hashlib
 
 import pytest
 
+from prismaquant import joint_campaign_ledger as ledger
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 

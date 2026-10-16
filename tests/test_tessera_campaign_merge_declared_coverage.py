@@ -7,12 +7,13 @@ The expectation is read from the plan alone -- the union of its remaining
 rows' groups -- never from which rows happen to exist, and the merged table
 records what it left unpriced and why.
 """
-from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant import tessera_campaign_table as campaign_table
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch

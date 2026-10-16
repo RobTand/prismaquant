@@ -1,12 +1,11 @@
 """Whole authenticated requests project onto explicit row units, not new rates."""
 from __future__ import annotations
-from prismaquant import tessera_campaign_table as campaign_table
-
 import copy
 import pickle
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_campaign as campaign
 from prismaquant.cost_currency import CostCurrencyError
 from prismaquant.joint_aura_rows import make_joint_aura_entry

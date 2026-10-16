@@ -1,7 +1,8 @@
 """Selected anchors reuse canonical inputs without loading the whole source."""
+import pytest
+
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
-import pytest
 
 
 @pytest.mark.parametrize('extra', [[], ['--calibration-cache', '/capture'],
@@ -575,7 +576,6 @@ def test_a_malformed_process_baseline_reservation_refuses_before_any_row(
     would silently reserve one byte.
     """
     import json
-    from tools import dispatch_tessera_campaign as dispatch
     spec = dict(model='/source', campaign_argv=['--streaming'], cwd=str(tmp_path),
                 python='python3', env={}, cpus=1, process_baseline_bytes=value)
     (tmp_path/'spec.json').write_text(json.dumps(spec))
@@ -624,7 +624,6 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
     process floor and the guard's margin -- are charged on both branches.
     """
     import math
-    from tools import dispatch_tessera_campaign as dispatch
     from prismaquant.memory_management import CaptureMemoryGuard
     gib = 1024 ** 3
     margin = CaptureMemoryGuard.MARGIN_BYTES

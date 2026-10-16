@@ -1,5 +1,4 @@
 """CPU state/ownership checks; native CUDA trace coverage needs the real row."""
-from prismaquant import tessera_cell_measurement as cell_measurement
 import json
 import threading
 from pathlib import Path
@@ -8,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from experiments import glm_full_capture_profile as observe
 
 

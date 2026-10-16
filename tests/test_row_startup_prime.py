@@ -1,6 +1,5 @@
 """Verified, reserved reads before admit stay inside the existing window (#1743)."""
 
-from prismaquant.tessera_campaign_requests import AnchorPlacement
 from collections import Counter
 import threading
 from types import SimpleNamespace
@@ -8,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant.tessera_campaign_requests import AnchorPlacement
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.tessera_row_stream import RowStream
 from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, OUTPUT_FEATURES,

@@ -1,7 +1,5 @@
 """Campaign source qualification uses the real GLM skeleton and shard loader."""
 
-from prismaquant import tessera_calibration_forward as calibration_forward
-from prismaquant import tessera_campaign_selection as campaign_selection
 import os
 import subprocess
 import sys
@@ -10,6 +8,8 @@ import xml.etree.ElementTree as ElementTree
 import pytest
 import torch
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 from test_glm5_next_streamed_forward_parity import (
     _build_tiny_model, _torch_only_causal_conv1d,
 )

@@ -1,5 +1,4 @@
 """Packed source views produce the same per-Linear joint residual as an oracle."""
-from prismaquant import aura_provenance
 import copy
 from types import SimpleNamespace
 
@@ -8,6 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 import prismaquant.format_registry as fr
 from prismaquant.cost_streaming import StreamedCausalLM

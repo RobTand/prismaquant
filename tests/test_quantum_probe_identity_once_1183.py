@@ -7,14 +7,12 @@ row. These tests count those serializations inside the quantum, which must
 not grow with the number of rows, and check that the rows the quantum
 returns stay ordinary JSON data carrying the identity that was validated.
 """
-from prismaquant import joint_aura_rows
-from prismaquant import aura_provenance
 import pickle
 
 import pytest
 
-import prismaquant.aura_cost as aura
-from prismaquant import joint_aura
+from prismaquant import joint_aura_rows
+from prismaquant import aura_provenance
 from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core

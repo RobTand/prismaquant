@@ -1,5 +1,4 @@
 """Selected reuse keeps canonical identity while authenticating one buffer."""
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from test_tessera_calibration_cache import capture
 from test_verified_capture_load import policy
 
@@ -66,7 +66,6 @@ def test_selected_admission_prices_private_buffer_source_pages_and_scratch(monke
 
 
 def test_dispatch_seals_same_selected_load_demand(monkeypatch):
-    from tools import dispatch_tessera_campaign as dispatch
     from prismaquant import autoscale
     seen = {}
     def selected(model, **kwargs):

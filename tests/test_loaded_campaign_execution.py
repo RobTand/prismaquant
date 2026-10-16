@@ -1,9 +1,9 @@
 """Loaded phases bind policy separately from raw wire and source custody."""
-from prismaquant import tessera_cell_measurement as cell_measurement
 from pathlib import Path
 
 import pytest
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign as campaign
 from prismaquant.tessera_campaign_cli import parse_campaign_arguments
 from prismaquant.tessera_campaign_requests import (
@@ -58,7 +58,6 @@ def test_selected_request_carries_resolved_head_and_actual_capture_contract(stre
         assert request.seed is None
     else:
         assert request.seed.checkpoint == 'seed.json' and request.seed.wire_dir == 'seed-wires'
-
 
 
 @pytest.mark.parametrize('hessian', ['require', 'off'])

@@ -1,9 +1,5 @@
 """A campaign must account for the live packed expert population."""
 
-from prismaquant import tessera_render
-from prismaquant import tessera_cell_measurement as cell_measurement
-from prismaquant import tessera_campaign_wire as campaign_wire
-from prismaquant import tessera_campaign_table as campaign_table
 from types import ModuleType, SimpleNamespace
 import json
 import os
@@ -12,6 +8,11 @@ import pickle
 import sys
 
 import pytest
+
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_table as campaign_table
 
 torch = pytest.importorskip("torch")
 
