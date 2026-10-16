@@ -1003,3 +1003,73 @@ file after its one-entry inventory correction. It does not relabel the original
 67-file run or qualify later source changes. All 67 selected file/case populations
 now have passing evidence across those named revisions; final branch checks
 remain pending.
+
+
+### Claude review fixes and deeper test review, 2026-10-16
+
+Custody and Tessera fixes are integrated. The three committed native-render
+fixes were recovered from the child checkout when Claude reached its session
+limit. Depth review A completed all 162 assigned entries. B read 8 of 163
+entries and C read none before the same limit, so those reviews are incomplete.
+The PR remains draft; the prior official green checks at `5af6092384` do not
+qualify the current fixes.
+
+The parent independently audited the worker terminal, result, CAS receipt and
+actual log hashes. Evidence root:
+`/home/rob/tmp/pq-claude-review-20261016/`.
+
+| Source and scope | Actual result | Evidence |
+| --- | --- | --- |
+| `7ef4171c50`, 105 affected CPU files | 2,133 passed, 16 skipped, 59 passing subtests, 2 failures in new test changes | `composed-depth-a-tests.json` |
+| `a4cdcbc477`, 33 complete corrected/loaded-campaign files | 686 passed, 6 skipped | `depth-a-corrections-tests.json` |
+| `7ef4171c50`, package/tools/experiments/tests compile | exit 0 | action `b00f826ca1e7` |
+| Base `138069b799`, enhanced allocator oracle under its fca4c6ce Git environment | 2 passed, both original layer digests retained | action `8c0ccd84fba1` |
+| Current allocator oracle, in the composed CPU run | complete file passed with the same historical digests | action `9c234bb38bcb` |
+| Two deliberate oracle mutations | all 9 selected cases fail as intended | action `4ab09074fdbc` |
+| `6da8790036`, known CUDA image on GB10 | 89 pytest cases plus resident/streamed and inline-expert fresh-process bodies passed; no skips | action `4e7fa5eb2774` |
+
+The CPU failures were an invalid class fixture and a stale test helper reference.
+Both were corrected and their complete affected modules passed in the 33-file
+follow-up. The original composed run remains failed; overlapping populations
+are not added together. The follow-up also qualifies the loaded runner's removal
+of 19 stable scope aliases. Three genuinely rebound temporaries remain local.
+`loaded-scope-alias-proof.json` records the normalized AST comparison.
+
+The allocator checks restore the full historical stock `layer_config.json` and
+canonical Tessera `layer.json` hashes, plus all companion file hashes and the
+newer field-level assertions. The inputs explicitly clear the optional answer
+pin. The two revisions use their respective required installed Tessera Git pins.
+An initial base submission correctly refused a mismatched installed pin before
+pytest. Two subsequent attempts stopped at an incorrect new assertion that an
+unset request was `None`; its actual value is an empty string. Those failed
+records are retained. No historical digest was changed.
+
+The GPU image lacked GGUF for two unchanged imatrix consumers in the worker's
+first expanded run. The parent overlaid the pinned `gguf==0.19.0` wheel into a
+temporary directory inside the admitted action, alongside the unchanged
+aaa417 Tessera API wheel. The GGUF wheel SHA-256 is
+`70bcd10edfe697fb2dad6e40af2234b9d8ece9a41a99761405121ebda1c3c1cd`.
+No active installation changed. The final GPU action passed all 89 selected
+cases and both fresh-process bodies. The existing body adapters replace only
+the two tests' host-specific temporary roots; their actual assertions run.
+The old resident/streamed body fails before the native fix in action
+`a8fca7c6d67f`; the post-fix bodies pass. This is tiny-fixture correctness
+evidence, with no serving or performance promotion and no full CLI batch/resume
+qualification.
+
+`depth-a-parent-receipts.json` audits the 10 successful parent actions.
+`depth-a-parent-failed-terminal-proofs.json` audits seven failed records, including
+the intended mutation failures and the new cache regression below. The original
+native worker qualification has nine separately audited successful receipts in
+`fix-native/parent-verified-receipts.json`. Initial node-selection and external
+helper-path submissions were refused before publication; their diagnostics are
+retained and corrected submissions used supported selection and sealed helper
+bytes.
+
+A further cache correctness gap remains open at this checkpoint. Existing
+streamed JSO caches record the intended recipe but do not prove the fused global
+actually used it. The exporter currently accepts such an ambiguous legacy cache.
+The new test at `fa4646a631` reproduces the missing refusal through PrismaBuild: 6
+cases pass and the new case fails with `DID NOT RAISE` in action `09f6e00e98cd`.
+Producer and consumer need a shared witness or equivalent parity proof before
+this branch can pass its final gate. The PR is not release-ready.

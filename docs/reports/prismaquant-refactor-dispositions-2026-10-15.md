@@ -445,3 +445,16 @@ graphs. The depth review's requested deferred tensor snapshot therefore becomes
 a refusal test at that boundary. Direct unit encoding still accepts tensors;
 its byte and mutation tests now compare the actual encoder with an independent
 pickle-envelope oracle, rather than comparing the file writer with itself.
+
+
+Further T2 context correction, 2026-10-16: classes own environment and fleet
+properties, not argv. Invalid class definitions now name both their spec path
+and class. Shared campaign argv refusals name the spec; a constructed row's
+argv refusal names its class. The class container check now reads those actual
+shared flags, replacing an inert lookup for a class-owned argv field. Later row
+publication already enforced the bounded environment; this closes its earlier
+validation gap too.
+
+The loaded operation also now reads 19 stable scope fields directly, retaining
+only the three context/structure temporaries that are rebound. Census and
+pricing keep one synchronous source, memo and publication lifetime.
