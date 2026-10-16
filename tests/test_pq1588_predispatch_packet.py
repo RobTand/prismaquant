@@ -15,8 +15,8 @@ from pathlib import Path
 from prismaquant import schemas
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PACKET_PATH = REPO_ROOT / "docs/results/pq1588_predispatch_2026-10-09.json"
-DOC_PATH = REPO_ROOT / "docs/results/pq1588_predispatch_2026-10-09.md"
+PACKET_PATH = REPO_ROOT / "docs/results/pq1588_predispatch_2026-10-16.json"
+DOC_PATH = REPO_ROOT / "docs/results/pq1588_predispatch_2026-10-16.md"
 
 CLASS_STRUCTURE = {"routed": "routed_moe", "dense": "dense"}
 SHA_RE = re.compile(r"[0-9a-f]{40}")
