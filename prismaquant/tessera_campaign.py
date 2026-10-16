@@ -4535,33 +4535,12 @@ def _main(argv, *, source_scope, waits) -> int:
         mode=mode, device=device, serving_target=serving_target,
         selected_capture_census=selected_capture_census,
         capture_unit_names=capture_unit_names, acquisition=acquisition)
-    population = scope.population
-    roster = scope.roster
-    pinned_roster = scope.pinned_roster
-    dense_targets = scope.dense_targets
-    expert_targets = scope.expert_targets
-    expert_members = scope.expert_members
-    census_dense_targets = scope.census_dense_targets
-    census_expert_targets = scope.census_expert_targets
-    scope_groups = scope.scope_groups
-    census = scope.census
-    census_only = scope.census_only
-    selection = scope.selection
-    stack_samples = scope.stack_samples
-    exact_member_scope = scope.exact_member_scope
-    partition_menu_targets = scope.partition_menu_targets
-    partition_unit_records = scope.partition_unit_records
-    selected_groups = scope.selected_groups
-    audit_units = scope.audit_units
-    inclusion_probability = scope.inclusion_probability
-    context_by_unit = scope.context_by_unit
-    structure_by_unit = scope.structure_by_unit
-    encode_structure = scope.encode_structure
-    acquisition = scope.acquisition
-    all_dense = list(roster.dense)
-    pinned = list(roster.pinned)
+    # The scope stays one record: the census, the priced targets and the
+    # census-only flag are read throughout, every other field at its use.
+    census, census_only = scope.census, scope.census_only
+    dense_targets, expert_targets = scope.dense_targets, scope.expert_targets
     targets = [*dense_targets, *expert_targets]
-    census_targets = [*census_dense_targets, *census_expert_targets]
+    census_targets = [*scope.census_dense_targets, *scope.census_expert_targets]
 
     if saved_calibration is None:
         tokens, corpus_text = _calibration_tokens(
@@ -4576,12 +4555,12 @@ def _main(argv, *, source_scope, waits) -> int:
     if census is not None:
         # Validate the whole scope before a selected unit's artifact is read.
         if (set(census["counts"]) != set(census_targets) or
-                census["anchor_groups"] != scope_groups):
+                census["anchor_groups"] != scope.scope_groups):
             raise RuntimeError("calibration census scope differs from the loaded model")
         scope_shapes = {name: list(dict(model.named_modules())[name].weight.shape)
-                        for name in census_dense_targets}
+                        for name in scope.census_dense_targets}
         scope_shapes.update({member.qname: list(member.weight.shape)
-                             for member in population.members})
+                             for member in scope.population.members})
         if census["unit_shapes"] != scope_shapes:
             raise RuntimeError("calibration census geometry differs from the loaded model")
     completed_capture_reuse = bool(args.capture_calibration_out and args.capture_chain is None
@@ -4593,12 +4572,12 @@ def _main(argv, *, source_scope, waits) -> int:
         runner = None
     if runner is not None and not selected_source and not completed_capture_reuse:
         try:
-            return run_streamed_calibration(streamed_calibration_request(args), runner, profile, mode=mode, population=population,
+            return run_streamed_calibration(streamed_calibration_request(args), runner, profile, mode=mode, population=scope.population,
                 dense_targets=dense_targets, expert_targets=expert_targets,
-                scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
-                context_by_unit=context_by_unit, attention_implementation=attention_implementation,
-                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,
-                pinned_roster=pinned_roster, capture_guard=capture_guard)
+                scope_groups=scope.scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
+                context_by_unit=scope.context_by_unit, attention_implementation=attention_implementation,
+                capture_runtime=capture_runtime, structure_by_unit=scope.structure_by_unit,
+                pinned_roster=scope.pinned_roster, capture_guard=capture_guard)
         finally:
             runner.shutdown()
     if selected_source:
@@ -4845,7 +4824,7 @@ def _main(argv, *, source_scope, waits) -> int:
     else:
         weights = {name: dict(model.named_modules())[name].weight.detach()
                    for name in dense_targets}
-        for name, member in expert_members.items():
+        for name, member in scope.expert_members.items():
             weights[name] = member.weight.detach()
         del model
     torch.cuda.empty_cache()
