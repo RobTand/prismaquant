@@ -84,7 +84,6 @@
   "hashlib:tools/inspect_t4_binding.py::main",
   "hashlib:tools/joint_prepare_startup_probe.py::main",
   "hashlib:tools/materialize_wikitext_corpus.py::main",
-  "hashlib:tools/measure_boundary_control.py::main",
   "hashlib:tools/measure_served_gold.py::_calibration_contract",
   "hashlib:tools/measure_served_gold.py::_canonical_sha256",
   "hashlib:tools/measure_served_gold.py::_sha256_file",
