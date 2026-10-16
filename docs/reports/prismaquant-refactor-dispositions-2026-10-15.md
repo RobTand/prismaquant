@@ -484,3 +484,122 @@ transition still requires its own acceptance.
 The verification report records the passing CPU/GPU checks, intended mutation
 failures and the worker's local compile-policy deviation. The full CLI parity
 qualification and final combined review remain pending.
+
+## Claude depth-B round 3 dispositions, 2026-10-16
+
+The depth-B review of base `138069b799`..`5af6092384` reported ten P3
+findings, R3B-01 to R3B-10, all still present at `b20d0d8639`. Each is fixed
+in its own commit. None of them changes a format, default, pin, gate, serving
+lane or artifact byte, and none adds a performance or serving claim. Evidence
+paths below are under `/home/rob/tmp/pq-claude-review-20261016/fix-depth-b-r3/`.
+
+**R3B-01, fixed.** The lane reader still resolves Tessera's smoke rules per
+call, but its delegation tests had become agreement checks on the shipped
+fixture, which a local copy of the rule would also pass. The restored tests
+change the producer and require the reader to follow. They make
+`derive_smoke_status` and `derive_smoke_attribution` contradict an unchanged
+published value, and the reader must refuse. They make
+`smoke_status_is_derived` answer False, which must stop the comparison. They
+widen the interface and record-member vocabularies, which must be accepted.
+They narrow the form vocabulary or raise from `parse_smoke_record` itself,
+which must refuse. Differential grammar cases run against the public record
+validator and, where `tessera.serving` is installed beside the tests, against
+`validate_serving_contract` (`pytest.importorskip`, tests only). The 0741
+instance is also fixed: the typed runtime-image record comes from one helper,
+and a test runs Tessera's resolver and launcher export on the same image.
+
+**R3B-02, fixed.** The joint-row trap patched `_activation_penalty`, which the
+scalar path no longer calls. The test now passes a real
+`ActivationFairPricing` with a 1000x FP8 penalty and first proves the trap is
+armed on a weight-only row of the same value.
+
+**R3B-03, fixed by archive.** `prismaquant/proposal_validation.py`, the only
+implementation of `prismaquant.sampled_proposal_validation.v1`, and its test
+are archived byte for byte at `archive/proposal_validation_2026-10-14/` (blobs
+equal to the refactor base). The proposal's pending validation block keeps
+`required_for_production_promotion` and `status: pending` and adds
+`validation_helper_archive`. Nothing is promoted and no live module imports
+the helper. ARCHITECTURE is re-stamped, and its paragraph that still described
+the helper as live code is corrected.
+
+**R3B-04, fixed by archive; the archives needed more than the finding
+named.** `layer_state_cache.py`, `weight_session.py` and their tests are
+archived byte for byte at `archive/state_prototypes_2026-10-14/`. A static AST
+check of every `prismaquant` import in the L3 and polish walls
+(`tools/archive_imports.py`, `analysis/archive_imports_*.json`) found that the
+refactor also moved five cost-entry helpers from `allocator_candidates` to
+`priced_cell` and `load_calibration` to `calibration_data`. The archived
+`weight_session.py` imports `production_weight_cache._cache_weight_leaf`,
+which `2379886723` renamed. Some L3 and polish gaps predate the refactor
+(`08612a4a46`). Every README now lists each gap, where the name lives now and
+which change introduced it. No archived source was edited and no
+compatibility alias was added. `tests/test_tessera_core_boundary.py` no longer
+names the retired `weight_session` module.
+
+**R3B-05, fixed.** The visual roundtrip class now drives
+`export_native_compressed._apply_visual_recipe_quant`, the exporter's visual
+boundary, with a codec spy that records the activation tensor passed and a
+decoy under the weight key. The other three exporter call sites with the same
+lookup serve body and auxiliary Linears; this class does not cover them.
+
+**R3B-06, fixed with runtime oracles.** Using the existing tiny manifest
+fixtures, the joint run, export and AQUA read-set builders run with
+`joint_run_progress.layer_phase_name` replaced by a sentinel spelling and must
+declare the sentinel. The reporter's own spelling, `layer-7`, is pinned.
+
+**R3B-07, fixed.** The three dropped invariants are asserted again against
+their current owners.
+
+**R3B-08, prose fixed.** The function-pairs docstring names the owners the
+calls now go through. It states that `dae261bad6` deliberately re-recorded the
+12 failing-profile `probe_inventory` rows, and that the other 36 equal both
+old-site rows (static fixture comparison, `analysis/function_pairs_*.json`).
+
+**R3B-09, fixed, with no numeric effect today.** The sampled-stack proposal
+passes the candidate builder's `cost_rows` to the fused aggregator too.
+Today it requires BF16 sources and passes no `rung_allowability`, so both
+tables are equal by value. The finding's suggested case, a synthesized
+passthrough member in a fused group, cannot reach this caller through its
+public API; a spy test requires both aggregators to receive the builder's
+table instead. `65407f0018` also lets `allocator.main`'s fused aggregation see
+the synthesized zero-cost passthrough rows (`FP8_BLOCK_UE8M0_SOURCE`,
+`MXFP4_SOURCE`) that base never offered fused groups. That change is recorded
+in its ARCHITECTURE stamp; it makes fused groups consistent with singletons.
+
+**R3B-10, fixed.** The 46 orphan rows move verbatim into
+`archive/sample_parallel_probe_2026-10-15/tests/fixtures/`
+(`analysis/orphan-row-move-proof.json`). `GoldenTable(name,
+every_row_used=True)` opts a table in. At module teardown, the check fails a
+module whose rows a passing call did not use, which catches orphan rows and
+early returns. It runs only when one process ran the whole module, so
+`file::test` selection, `-k`, `-m`, `--deselect`, a pytest-xdist split or an
+early stop disables it. `pbtest --workers-per-shard 1` runs it. Three tables
+opt in: `digest_profiles_1301`, `contract_checks_1300` and
+`function_pairs_1302`.
+
+Evidence, all through PrismaBuild with the pinned interpreter: on a frozen
+snapshot of the last code commit, the 38 touched and neighboring test files
+ran in six single-process shards with 1,775 passed, 12 CUDA-only cases
+skipped on CPU and none failed. Every action has a verified CAS receipt and
+logs. A `-k` run (483 passed, 75 deselected) and a two-worker pytest-xdist run
+(558 passed) of the three opted-in golden modules raised no false unused-row
+report. Mutation runs on separate frozen snapshots made each new oracle fail
+for its own reason:
+
+- R3B-01: the four delegation tests fail under local restatements that agree
+  with the published fixture, while the agreement-only tests still pass. The
+  launch-record cross-check fails when the typed record drifts.
+- R3B-02: a joint row is priced 1000x by a transfer that keeps its
+  `joint_aura` label.
+- R3B-03: a proposal names a missing archive path.
+- R3B-05: an exporter lookup under the weight key passes the decoy.
+- R3B-06: builders that type `layer-<L>` themselves fail the run, export and
+  AQUA checks.
+- R3B-07: second copies and a rebased error class fail the three assertions.
+- R3B-09: the fused aggregator reading the raw payload fails the spy test.
+- R3B-10: restoring the orphan rows fails the digest-profile (33 rows) and
+  contract-check (13 rows) modules, and one dropped call fails function-pairs.
+
+The first mutation run had a faulty R3B-01 mutant that masked lane-table
+users, so those groups were re-run. A compile check passed for all 24 changed
+Python files. No GPU, serving or performance run was needed or made.
