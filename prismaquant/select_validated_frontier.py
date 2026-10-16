@@ -465,6 +465,22 @@ def _artifact_bytes_for_row(row: Mapping) -> int | None:
         return None
 
 
+def _row_surrogate(row: Mapping) -> dict:
+    """A row's surrogate value and the basis that names what it measures.
+
+    Validation's local row estimate is not a recorded DP objective, and it is
+    comparable only under its own ``mse.predicted_dloss_basis``: a row written
+    before that label existed carries the allocator's recorded sum under the
+    same ``mse.predicted_dloss_sum`` key. Historical rows may carry an explicit
+    top-level ``surrogate_loss``, which takes precedence and names no basis.
+    """
+    if row.get("surrogate_loss") is not None:
+        return {"surrogate_loss": row["surrogate_loss"], "surrogate_basis": None}
+    mse = row.get("mse") or {}
+    return {"surrogate_loss": mse.get("predicted_dloss_sum"),
+            "surrogate_basis": mse.get("predicted_dloss_basis")}
+
+
 def measured_rows(
     results: Sequence[Mapping],
     *,
@@ -493,14 +509,7 @@ def measured_rows(
             "assignment_hash": row.get("assignment_hash"),
             "assignment_sha256": row.get("assignment_sha256"),
             "mse": dict(row.get("mse", {}) or {}),
-            # Validation's local row estimate is not a recorded DP objective.
-            # Historical rows may carry an explicit top-level surrogate_loss,
-            # which takes precedence over the nested validation diagnostic.
-            "surrogate_loss": (
-                row.get("surrogate_loss")
-                if row.get("surrogate_loss") is not None
-                else (row.get("mse") or {}).get("predicted_dloss_sum")
-            ),
+            **_row_surrogate(row),
             # Conservative whole-artifact selection bound. Final exact
             # recursive bytes are enforced by the exporter.
             "artifact_bytes": _artifact_bytes_for_row(row),
@@ -681,14 +690,45 @@ def _rank(values: Sequence[float]) -> list[float]:
     return ranks
 
 
+def _surrogate_pairs(
+    rows: Sequence[Mapping],
+) -> tuple[list[tuple[int, float, float]], dict]:
+    """``(index, surrogate, kl)`` pairs on one surrogate basis, and a report.
+
+    Values on different bases are different quantities -- the validation row
+    estimate, a pre-label row's recorded sum, an unlabeled historical value --
+    so rows on more than one basis are not ranked together. Every row stays a
+    measurement either way; the report says what was paired and what was not.
+    """
+    usable: list[tuple[int, float, float]] = []
+    counts: dict = {}
+    for index, row in enumerate(rows):
+        value = row.get("surrogate_loss")
+        if (value is None or not math.isfinite(float(value))
+                or not math.isfinite(float(row["kl"]))):
+            continue
+        basis = row.get("surrogate_basis")
+        counts[basis] = counts.get(basis, 0) + 1
+        usable.append((index, float(value), float(row["kl"])))
+    pooled = len(counts) == 1
+    report = {
+        "pooled": pooled,
+        "basis": next(iter(counts)) if pooled else None,
+        "bases": [{"basis": basis, "rows": counts[basis]}
+                  for basis in sorted(counts, key=lambda b: (b is not None, str(b)))],
+        "n_paired": len(usable) if pooled else 0,
+        "n_without_surrogate": len(rows) - len(usable),
+    }
+    return (usable if pooled else []), report
+
+
+def surrogate_pairing(rows: Sequence[Mapping]) -> dict:
+    """Which rows the surrogate-vs-KL diagnostics ranked together, and why."""
+    return _surrogate_pairs(rows)[1]
+
+
 def spearman_rank_correlation(rows: Sequence[Mapping]) -> float | None:
-    paired = [
-        (float(row["surrogate_loss"]), float(row["kl"]))
-        for row in rows
-        if row.get("surrogate_loss") is not None
-        and math.isfinite(float(row["surrogate_loss"]))
-        and math.isfinite(float(row["kl"]))
-    ]
+    paired = [(surrogate, kl) for _index, surrogate, kl in _surrogate_pairs(rows)[0]]
     if len(paired) < 3:
         return None
     xs = _rank([item[0] for item in paired])
@@ -706,24 +746,22 @@ def spearman_rank_correlation(rows: Sequence[Mapping]) -> float | None:
 def worst_rank_inversion(rows: Sequence[Mapping]) -> dict | None:
     """Surface the single most-misranked pair of measured rows.
 
-    Uses the same (surrogate_loss, kl) pairing as ``spearman_rank_correlation``
-    so the two agree on which rows count. Returns the pair whose surrogate-rank
-    ordering disagrees most strongly with the measured-KL-rank ordering, i.e.
-    the pair maximizing ``rank_kl_gap`` among discordant pairs. This checks
+    Uses the same single-basis pairing as ``spearman_rank_correlation``
+    (``_surrogate_pairs``), so the two agree on which rows count. Returns the
+    pair whose surrogate-rank ordering disagrees most strongly with the
+    measured-KL-rank ordering, i.e. the pair maximizing ``rank_kl_gap`` among
+    discordant pairs. This checks
     surrogate-vs-KL fidelity only; it says nothing about held-out PPL, which is
     measured post-export and is not joined here. Returns ``None`` when fewer than
     three usable pairs exist (same guard as the Spearman).
     """
     paired = [
         {
-            "label": str(row.get("label") or row.get("path") or f"point[{idx}]"),
-            "surrogate_loss": float(row["surrogate_loss"]),
-            "kl": float(row["kl"]),
+            "label": str(rows[idx].get("label") or rows[idx].get("path") or f"point[{idx}]"),
+            "surrogate_loss": surrogate,
+            "kl": kl,
         }
-        for idx, row in enumerate(rows)
-        if row.get("surrogate_loss") is not None
-        and math.isfinite(float(row["surrogate_loss"]))
-        and math.isfinite(float(row["kl"]))
+        for idx, surrogate, kl in _surrogate_pairs(rows)[0]
     ]
     if len(paired) < 3:
         return None
@@ -1152,6 +1190,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     rank_corr = spearman_rank_correlation(diagnostic_rows)
     worst_inversion = worst_rank_inversion(diagnostic_rows)
+    pairing = surrogate_pairing(diagnostic_rows)
     # What the veto actually did, recorded rather than inferred: whether it
     # could bind at all on this input, and — under 'auto' — the slack each
     # admitted incumbent contributed.
@@ -1312,6 +1351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "saturation": saturation,
         "surrogate_spearman": rank_corr,
         "surrogate_worst_rank_inversion": worst_inversion,
+        "surrogate_pairing": pairing,
         "kl_noise_floor": float(args.kl_noise_floor),
         "tail_veto": {
             "column": tail_veto,
@@ -1426,7 +1466,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if rank_corr is not None:
         print(
             "[frontier-select] surrogate-vs-KL fidelity: "
-            f"spearman={rank_corr:.4f} (1.0=perfect, surrogate-vs-KL only)",
+            f"spearman={rank_corr:.4f} (1.0=perfect, surrogate-vs-KL only; "
+            f"{pairing['n_paired']} rows on basis {pairing['basis'] or 'unlabeled'}, "
+            f"{pairing['n_without_surrogate']} without a surrogate)",
             flush=True,
         )
         if worst_inversion is not None:
@@ -1434,6 +1476,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"[frontier-select] worst rank-inversion: {worst_inversion['verdict']}",
                 flush=True,
             )
+    elif len(pairing["bases"]) > 1:
+        print(
+            "[frontier-select] surrogate-vs-KL fidelity: unavailable "
+            "(surrogate bases differ: " + ", ".join(
+                f"{entry['basis'] or 'unlabeled'} x{entry['rows']}"
+                for entry in pairing["bases"])
+            + "; rows on different bases are not ranked together)",
+            flush=True,
+        )
     else:
         print(
             "[frontier-select] surrogate-vs-KL fidelity: unavailable "

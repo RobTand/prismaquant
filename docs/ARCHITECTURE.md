@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16 (review STD-015): the validated-frontier selector ranks
+surrogate against KL only within one surrogate basis. Each measured row carries
+`surrogate_basis` (validation's `mse.predicted_dloss_basis`; none for pre-label
+rows and explicit top-level `surrogate_loss`). Rows on different bases are not
+pooled: Spearman and the worst inversion are unavailable and the summary's
+`surrogate_pairing` names each basis and its row count, plus rows without a
+surrogate. Every row stays a KL/bpp measurement; selection is unchanged.
+Tests: `tests/test_select_validated_frontier.py`.
+
 Re-stamped 2026-10-16 (review STD-011/R1S-F02): AURA checkpoint Git exactness
 covers the producer owners the journal and price-step split created.
 `aura_provenance.checkpoint_git_commit` diffs `aura_cost.py`,
@@ -23656,8 +23665,9 @@ slot.
 point enters only if it beats the running best by more than `--kl-noise-floor`
 (`_frontier_from_rows`). Picks: `kneedle` (default without a card), `budget` (**the default
 under `TARGET_DISK_GB`**), `best-kl`, `lowest-bpp`, `practical-knee`, `saturation`.
-Diagnostics emitted with the pick: surrogate-vs-KL Spearman, `worst_rank_inversion`,
-leave-one-out kneedle stability.
+Diagnostics emitted with the pick: surrogate-vs-KL Spearman and `worst_rank_inversion`,
+ranked only within one surrogate basis (`surrogate_pairing` records the bases and the
+rows without a surrogate), and leave-one-out kneedle stability.
 
 **Tail veto** (D1, 2026-07-30) — **DEFAULT-ON, contract statistic `kl_max`** (ruled by Robert
 2026-07-30). §2.3 rule: KL is a *screening* metric and a lower mean can hide a heavier tail —
