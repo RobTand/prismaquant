@@ -685,3 +685,108 @@ receipt/result/log hashes, the raw profile artifacts and the manifest equality.
 Evidence is `/home/rob/tmp/pq-claude-review-20261016/profile-owner-counts-acceptance.json`
 and the adjacent receipt and withdrawal audits. The baseline remains a failed
 negative action; it is not counted as a test pass.
+
+## Claude depth-C round 3 dispositions, 2026-10-16
+
+The depth-C review of base `138069b799`..`5af6092384` reported one P2 and
+seven P3 findings. C-PRF-01 (P2, the Stage A profiler's owner rows) was fixed
+by `56e021c7c7`; its profile before/after qualification belongs to the parent
+and is not repeated here. The seven P3 findings, and R2B-07's overlapping test
+residue, are fixed below from `8b041119e1`, one kind of change per commit. No
+format, default, pin, gate, serving lane or artifact byte changes, and nothing
+here adds a performance, serving or quality claim. Evidence paths are under
+`/home/rob/tmp/pq-claude-review-20261016/fix-depth-c-r3/`.
+
+**C-PRF-02, fixed.** When cell measurement moved to `tessera_cell_measurement`,
+the row-head profile summary replaced its `_measure_anchor_batch` and
+`_encode_and_render` needles, so a historical arm read zero for both. Both
+names are back beside `measure_cells` and `encode_tessera_unit`, and the
+docstring says the new names are wider spans, not renames. The publication A/B
+had replaced the per-unit `_finish_anchor` span with the per-batch
+`measure_cells`. It now records each under its own name: the per-unit
+successor is `_score_and_publish`, which differs from `_finish_anchor` only in
+that the direct-consumer contract lookup now runs in `CellRecipe.prepare`.
+Neither span takes the historical label. The moved encoder memo is the same
+function, so its counters keep the key
+`tessera_campaign._activation_kwargs_memo.cache_info`. A dated note beside
+`steady-summary.json`, whose bytes are unchanged, records the mapping. Old
+stacks taken verbatim from a recorded arm and new stacks on the current call
+chain pin the counts.
+
+**C-MIG-01, fixed.** `experiments/glm_probe_reduction_regret.py` imports the
+sampling owner, `tessera_campaign_table`, and records it as
+`SAMPLING_SOURCE`. Before, `draw()` and `ht_total()` raised AttributeError
+outside the import fallback. No re-export or new sampler is added. Tiny inputs
+pin the draw to the owner's, the total to one call of its Horvitz-Thompson
+estimator, and the one-random-draw refusal's widening to n + 1.
+
+**C-TST-01, fixed.** Each subject still exists, so each oracle is restored
+against its current owner with unchanged golden values:
+`cost_stage_checkpoint`'s four canonical-JSON re-exports and
+`aura_checkpoint_journal._canonical_json` are the `digests` functions;
+`digests` has exactly eleven JSON profiles (nine at base, plus the two this
+branch added); the scorer, the quant-cost probe and the native render codec
+each make one call to the shared Fisher row-weight helper, with policies
+(64, lenient), (64, strict) and (64, strict); `joint_layer_quanta`'s canonical
+wrappers keep the shared bytes and the NaN refusal; and the sample-parallel
+census fixture passes through the retained reader's `validate_qname_census`.
+This supersedes the removal rationales in
+`joint-aura-journal-refactor-2026-10-14.md` and
+`joint-campaign-ledger-refactor-2026-10-14.md`.
+
+**C-TST-02, fixed, with a second defect in the same oracle.** Two a32 indexer
+heads and two a16 `kv_b_proj` units go through `compatible_batches`, which
+splits the contracts by shape, and the real multi-unit producer on CPU. Each
+unit keeps its retained dtype, an unquantized FP32 activation, one
+direct-consumer decode, one resident-matrix charge and unmutated inputs, and
+equals the scalar path apart from wall time and batch size. The existing
+no-serving check installed its import blocker in the test process after the
+module's imports. Python returns a module already in `sys.modules` without
+asking a finder, so after another test imported `tessera.serving`, as
+`test_tessera_lane_v9.py`'s optional producer checks do, a forbidden lazy
+import passed unseen. Its `startswith("tessera.serving")` also matched the
+public `tessera.serving_parts`, which `tessera.export` imports lazily, so in a
+process that had not yet imported that module the check failed spuriously.
+The check now runs in a fresh interpreter that installs an exact
+package-and-submodule blocker before importing anything else. It runs real
+scalar and batched measurements, records attempts the code might swallow, and
+asserts nothing was preloaded, attempted or loaded. This is CPU contract
+evidence only: no serving, CLI batch/resume or performance claim.
+
+**C-DOC-01, prose fixed.** The file-digest table docstring names the moved
+site and the two retired aliases now called through their owner. The GLM
+parity docstring credits `initialize_model_runtime()`, not the package
+import, with the initialization no-op. The selected-anchor observer test's name
+says it wraps only the batch entry.
+
+**C-PRV-01, fixed under the 2026-10-15 contract.** `PRODUCER_SOURCES` binds the
+readset producer's executed path and phase dependencies, and it omitted the
+four COST window planners that `_cost_layer_windows` and
+`build_joint_cost_v2_manifest` import at call time. They are added, and the
+existing copied-package mutation test covers each one. Recorded for review:
+the only producer of this digest is `deterministic_provenance`, the campaign
+row manifests' `produced_by`. Pass manifests carry the git commit, and
+`build_joint_cost_v2_manifest` has no production caller. Binding these planners,
+like the four joint and cache owners bound on 2026-10-15, protects no manifest
+today, and an edit to one of them now refuses a previously planned row at
+submit. If Rob prefers a contract limited to the row read set, removing those
+eight entries is the narrowing.
+
+**C-RES-01 and R2B-07, fixed.** A scripted, AST-checked cleanup covers 107 test
+files: the C-RES-01 entry files, the files R2B-07 names, and every reviewed
+subset-B or subset-C test file whose leading import block the branch left out
+of order. It moves 99 misplaced owner imports to their own group, removes 70
+introduced unused bindings, unparenthesizes 32 one-line single-name imports,
+collapses 9 blank-line runs and merges the one statement pair R2B-07 named.
+Never removed: a pre-existing unused import, a `noqa` line, a pytest fixture
+name, a binding another module imports (`dispatch` from
+`test_tessera_campaign_container`), or the three imports C-TST-01 consumes.
+Alias-back imports stay, because removing them would rename non-import code.
+Per file, the non-import AST is unchanged and the imported-binding multiset
+equals the original minus the listed removals. The ship-gate fixture's
+repeated `write_shipcard` call is removed in its own commit with an exact AST
+proof. Files other work owns are excluded. Introduced residue outside this
+scope is listed in `analysis/residue-remaining-after.json` and left unchanged.
+
+**Fixed on sight.** ARCHITECTURE section 4.10 still named the removed
+`_encode_and_render` as the owner of the rendering-identity rule.

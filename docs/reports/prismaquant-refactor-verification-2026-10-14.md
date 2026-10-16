@@ -1204,3 +1204,48 @@ receipt/result/log hashes, the raw profile artifacts and the manifest equality.
 Evidence is `/home/rob/tmp/pq-claude-review-20261016/profile-owner-counts-acceptance.json`
 and the adjacent receipt and withdrawal audits. The baseline remains a failed
 negative action; it is not counted as a test pass.
+
+### Claude depth-C fix qualification, 2026-10-16
+
+All runs below went through PrismaBuild on dl380g10 with the pinned CPU
+interpreter `pq-pin-aaa41700-pb20261016-git`, single-process shards
+(`--workers-per-shard 1`) and two BLAS threads per shard unless stated. Each
+snapshot was frozen with `tools/freeze_refactor_checkout.py`. Commands, pbtest
+JSON, logs, failure reasons and receipt checks are under
+`/home/rob/tmp/pq-claude-review-20261016/fix-depth-c-r3/`.
+
+- Import cleanup (frozen at `bd80f94c2f`): the 108 changed test files and the
+  110 test modules that import one of them, 12 shards, 4,650 passed, 131
+  skipped by existing environment gates (CUDA, Triton, private Stage B
+  scratch, the task-suite gate, direct-I/O scratch, container cgroup
+  membership) and 1 failed. The failure,
+  `test_joint_prepare_hash_workers_default_1382.py::test_explicit_plan_value_still_wins[3]`,
+  needs at least three PB-assigned CPUs: the unmodified base `8b041119e1`
+  fails it identically with two (`ff499fa95a80…`), and the cleanup snapshot
+  passes the file 12/12 with four (`1320f87335be…`). Eleven receipts and all
+  logs verify; the failed shard has logs and, as expected, no receipt.
+- Fix commits (frozen at `a830487f5d`): the 36 changed, consuming and
+  structural-guard test files, 8 shards, 853 passed, 3 CUDA-only skips, none
+  failed, with eight verified receipts. Every new or restored test is in the
+  collected and completed sets.
+- Before each fix, its new test fails for the stated reason on a frozen
+  snapshot that has the test alone: the regret study's AttributeError (3), the
+  missing historical profile key and phase label (3), and the unchanged
+  producer digest for the four planners (4).
+- Mutation snapshots fail only the intended oracle. Set A (a second copy of a
+  re-export, a wrapper for the journal binding, a twelfth JSON profile, a
+  local Fisher-weight rule, a NaN-accepting canonical wrapper and a second
+  batched decode) fails exactly six tests while 114 others in those files
+  pass. Set B (a forbidden lazy `tessera.serving` import, batched-only
+  activation rounding and a divergent census fixture digest) fails the cold
+  check, the batched contract check and 19 census-fixture consumers.
+- The old in-process no-serving check, with the lazy import added: in a fresh
+  process it failed on `tessera.serving_parts`, a spurious failure; after a
+  real encode it caught the import; after `test_tessera_lane_v9.py` and a real
+  encode it passed (140 passed), the false pass. The new cold check fails on
+  the import after the same two files.
+
+No GPU, serving, model-quality or performance run was needed or made, and
+none of these small fixtures qualifies full CLI batch/resume parity. The
+final compile check and documentation-guard run of the last commit are
+recorded in `fix-depth-c-r3/report.md`.
