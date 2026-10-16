@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: with the development answer pin unset, the TP
+loader-axis leg reads `tensor_parallel.units[].loader_axes` from the exact
+installed serving contract, through the same captured bytes and pin check as
+the world-size ceiling. `expand_tessera_menu` captures both facts once beside
+its route admissions; direct `tessera_tp_legal`, `tessera_tp_axis_legal` and
+`tessera_loader_axes` calls capture once per query. Unpinned or unavailable
+bytes publish no axis fact, so that leg passes through while the attested
+world leg refuses. The pinned v60 contract publishes every axis `sharded`, so
+no admitted rung changes; no pin, cell or contract bytes change.
+
 Re-stamped 2026-10-16: paired boundary measurements bind `shipcard_slots.py`
 in their producer source fingerprint, alongside the original measurement,
 validation, card, launcher and pin files. The schema and threshold owner can
@@ -24745,7 +24755,10 @@ Tessera against the `ROUTE_TP_AXES` its routes gate on — and
 `tessera_menu.tessera_tp_axis_legal` asks it before the geometry leg, because
 a `refused` axis is refused on every rank: no world size and no shape makes it legal, so naming a
 granularity there would name the wrong obstacle. It does not depend on
-`require_attested_world`. Through contract v25 it refused `TESSERA_E2M1_K2`
+`require_attested_world`. Both contract legs read one captured runtime: the
+development answer pin, or else the exact installed serving contract, whose
+bytes must pass the pin before either the ceiling or an axis status is read.
+Through contract v25 it refused `TESSERA_E2M1_K2`
 on `row`, the axis a **column**-parallel Linear cuts; since v26 every family
 publishes both axes `sharded`, so today the leg refuses nothing on the pinned
 table and stays live for a table that refuses an axis. The *geometry* leg is below,

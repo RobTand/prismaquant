@@ -397,10 +397,18 @@ def test_with_no_contract_pinned_the_axis_leg_adds_no_refusal(monkeypatch):
     With no pinned table there is no loader fact to read, and refusing here
     would make the TP gate a second route gate that turns Tessera off on the
     research menu -- whose whole purpose is to price what nothing attests.
+    Neither the development pin nor an installed serving contract answers.
     """
+    rung = _first_rung(E2M1)
+
+    def no_installed_contract():
+        raise OSError("no installed Tessera runtime contract")
+
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: None)
+    monkeypatch.setattr(trc, "installed_runtime_snapshot", no_installed_contract)
+    assert tm.tessera_loader_axes() is None
     legal, reason = tm.tessera_tp_legal(
-        E2M1, _first_rung(E2M1), SHAPE, tp_degree=2,
+        E2M1, rung, SHAPE, tp_degree=2,
         parallel_kind=tm.PARALLEL_COLUMN)
     assert legal, reason
 

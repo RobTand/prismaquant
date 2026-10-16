@@ -390,21 +390,59 @@ def fused_module_licence():
     return None if contract is None else contract.fused_module
 
 
+@dataclass(frozen=True, slots=True)
+class _TensorParallelFacts:
+    """Both ``tensor_parallel`` facts from ONE captured runtime, or why none.
+
+    ``limits`` is the closed-world attestation ceiling and ``loader_axes`` the
+    per-axis loader status; the contract publishes them on the same unit rows,
+    so they are read from the same verified bytes.  Both are ``None`` when no
+    exact contract is available, and ``refusal`` then says why.
+    """
+
+    limits: "Mapping[str, int] | None"
+    loader_axes: "Mapping[str, Mapping[str, str]] | None"
+    refusal: str = ""
+
+
+def _tensor_parallel_facts(runtime=None) -> _TensorParallelFacts:
+    """Read both TP facts from ``runtime``, capturing it once when not given.
+
+    The development answer pin supplies its parsed maps.  A serving snapshot
+    supplies them only after its own captured bytes pass the exact pin, so a
+    ceiling and a loader axis can never come from two different reads.
+    """
+    from .tessera_runtime_contract import RuntimeContractSnapshot
+    from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
+
+    try:
+        if runtime is None:
+            runtime = _admission_runtime()
+        if isinstance(runtime, RuntimeContractSnapshot):
+            runtime.require_exact_pin()
+            limits, axes = runtime.tensor_parallel
+        else:
+            limits, axes = runtime.max_world_size, runtime.loader_axes
+    except (TesseraServingRuntimePinError, ImportError, OSError) as exc:
+        return _TensorParallelFacts(
+            None, None, f"no exact Tessera serving contract is pinned: {exc}")
+    return _TensorParallelFacts(limits, axes)
+
+
 def tessera_loader_axes() -> "Mapping[str, Mapping[str, str]] | None":
     """What the pinned contract says this build's loader does with each axis.
 
-    ``family -> axis -> status`` from ``tensor_parallel.units[].loader_axes``,
-    or ``None`` when no contract is pinned.  Routed through
-    :func:`tessera_runtime_contract` -- this module's declared one read -- so
-    the axis fact and the route admission cannot come from two different
+    ``family -> axis -> status`` from ``tensor_parallel.units[].loader_axes``
+    of the development answer pin or, without it, of the exact installed
+    serving contract -- the same captured read the attestation leg uses, so
+    the axis fact and the world-size fact cannot come from two different
     Tessera builds inside one run.
 
-    ``None`` is the absence of a table, not a permissive default, and the leg
-    that reads it subtracts on a published status rather than inventing a
-    refusal from silence: see :func:`tessera_tp_axis_legal`.
+    ``None`` is the absence of a verified table, not a permissive default, and
+    the leg that reads it subtracts on a published status rather than
+    inventing a refusal from silence: see :func:`tessera_tp_axis_legal`.
     """
-    contract = tessera_runtime_contract()
-    return None if contract is None else contract.loader_axes
+    return _tensor_parallel_facts().loader_axes
 
 
 def tessera_tp_axis_legal(
@@ -432,7 +470,7 @@ def tessera_tp_axis_legal(
     menu prices unattested rungs on purpose, and a cut the loader will not
     load is not an unattested rung, it is an unloadable one.
 
-    Two absences are pass-throughs, both deliberate. With no pinned contract
+    Two absences are pass-throughs, both deliberate. With no verified contract
     there is no loader fact to read, and refusing here would turn the TP gate
     into a second route gate that empties the research menu. With a contract
     that does not list the family, the closed world lives on
@@ -488,31 +526,14 @@ def tessera_tp_world_attested(
         # whenever no contract is pinned -- including on the research menu,
         # whose entire purpose is to price rungs nothing attests.
         return True, ""
-    from .tessera_runtime_contract import installed_runtime_snapshot
-    contract = tessera_runtime_contract()
-    try:
-        runtime = contract if contract is not None else installed_runtime_snapshot()
-    except (ImportError, OSError) as exc:
-        return False, f"tp_unattested: no exact Tessera serving contract is pinned: {exc}"
-    return _tp_world_from_runtime(spec, tp, runtime)
+    return _tp_world(spec, tp, _tensor_parallel_facts())
 
 
-def _tp_world_from_runtime(family, tp_degree, runtime) -> tuple[bool, str]:
-    from .tessera_runtime_contract import RuntimeContractSnapshot
-    from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
-
-    spec, tp = get_tessera_family(family), int(tp_degree)
-    if tp <= 1:
-        return True, ""
-    if isinstance(runtime, RuntimeContractSnapshot):
-        try:
-            runtime.require_exact_pin()
-            limits = runtime.tensor_parallel[0]
-        except (TesseraServingRuntimePinError, ImportError, OSError) as exc:
-            return False, f"tp_unattested: no exact Tessera serving contract is pinned: {exc}"
-    else:
-        limits = runtime.max_world_size
-    declared = limits.get(spec.name)
+def _tp_world(spec: TesseraFamily, tp: int,
+              facts: _TensorParallelFacts) -> tuple[bool, str]:
+    if facts.limits is None:
+        return False, f"tp_unattested: {facts.refusal}"
+    declared = facts.limits.get(spec.name)
     if declared is None:
         return False, (
             f"tp_unattested: the pinned contract's closed-world tensor_parallel "
@@ -1171,7 +1192,7 @@ def _tp_legal(
     require_attested_world: bool = False,
     unit: "str | None" = None,
     structure: "str | None" = None,
-    runtime=None,
+    tp_facts: "_TensorParallelFacts | None" = None,
 ) -> tuple[bool, str]:
     """Is this rung legal on every rank at ``tp_degree``?  ``(legal, reason)``.
 
@@ -1212,23 +1233,27 @@ def _tp_legal(
     ``parallel_kind`` is the unit's, from the caller's serving profile;
     ``PARALLEL_NONE`` (a packed expert under expert parallelism, a replicated
     head) shards nothing and answers the shape question alone.
+
+    Both contract legs read ``tp_facts``, captured once by the caller (the
+    menu captures it beside its route admissions) or here.
     """
     spec = get_tessera_family(family)
     tp = int(tp_degree)
     if tp < 1:
         raise TesseraMenuError(f"tp_degree must be >= 1, got {tp_degree}")
-    if require_attested_world:
-        attested, why = (tessera_tp_world_attested(spec, tp) if runtime is None
-                         else _tp_world_from_runtime(spec, tp, runtime))
-        if not attested:
+    if tp > 1:
+        facts = _tensor_parallel_facts() if tp_facts is None else tp_facts
+        if require_attested_world:
+            attested, why = _tp_world(spec, tp, facts)
+            if not attested:
+                return False, why
+        # An empty table is "no verified loader fact": the axis leg passes
+        # through rather than reading a second, possibly different, contract.
+        loads, why = tessera_tp_axis_legal(
+            spec, tp_degree=tp, parallel_kind=parallel_kind, unit=unit,
+            loader_axes=facts.loader_axes or {})
+        if not loads:
             return False, why
-    from .tessera_runtime_contract import RuntimeContractSnapshot
-    axes = (None if runtime is None else
-            {} if isinstance(runtime, RuntimeContractSnapshot) else runtime.loader_axes)
-    loads, why = tessera_tp_axis_legal(
-        spec, tp_degree=tp, parallel_kind=parallel_kind, unit=unit, loader_axes=axes)
-    if not loads:
-        return False, why
     try:
         sharded = shard_shape(shape, tp, parallel_kind)
     except TesseraMenuError as exc:
@@ -1464,6 +1489,7 @@ def expand_tessera_menu(
     for d in dims:
         n_params *= d
     runtime = _admission_runtime()
+    tp_facts = _tensor_parallel_facts(runtime) if int(tp_degree) > 1 else None
     out: list[MenuRung] = []
     for spec in specs:
         lo, hi = spec.mathematical_q256_bounds
@@ -1479,7 +1505,7 @@ def expand_tessera_menu(
                 spec, rung, dims,
                 tp_degree=tp_degree, parallel_kind=parallel_kind,
                 require_attested_world=(mode == MENU_ATTESTED),
-                structure=structure, runtime=runtime,
+                structure=structure, tp_facts=tp_facts,
             )
             if not legal:
                 continue
