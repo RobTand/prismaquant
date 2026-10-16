@@ -6,25 +6,7 @@ that has to stay in sync with vLLM's compressed-tensors loader.
 """
 from __future__ import annotations
 
-import prismaquant.export_native_compressed as _test_exporter
-from prismaquant.native_render_levers import NativeRenderLevers
 from dataclasses import replace
-import pytest
-
-@pytest.fixture(autouse=True)
-def _isolate_export_inputs():
-    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
-             _test_exporter._INPUT_GLOBAL_SCALES)
-    _test_exporter._RENDER_LEVERS = None
-    _test_exporter._CACHED_ACTIVATIONS = None
-    _test_exporter._INPUT_GLOBAL_SCALES = None
-    yield
-    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
-     _test_exporter._INPUT_GLOBAL_SCALES) = saved
-
-
-import prismaquant.native_render_codec as _native_render_codec
-
 import io
 import json
 import sys
@@ -34,12 +16,16 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
-from prismaquant.mx_formats import e8m0_to_scale
 import torch.nn as nn
+
+import prismaquant.export_native_compressed as _test_exporter
+from prismaquant.native_render_levers import NativeRenderLevers
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.mx_formats import e8m0_to_scale
 import prismaquant.export_native_compressed as enc
 from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
-
 from prismaquant.allocator import promote_fused
 from prismaquant.native_render_codec import (
     DEFAULT_INPUT_GLOBAL_SCALE,
@@ -76,6 +62,18 @@ from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
 from prismaquant.model_profiles.gemma4 import Gemma4Profile
 from prismaquant import format_registry as fr
 from prismaquant.layer_streaming import _dequant_fp8_block_weight
+
+
+@pytest.fixture(autouse=True)
+def _isolate_export_inputs():
+    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+             _test_exporter._INPUT_GLOBAL_SCALES)
+    _test_exporter._RENDER_LEVERS = None
+    _test_exporter._CACHED_ACTIVATIONS = None
+    _test_exporter._INPUT_GLOBAL_SCALES = None
+    yield
+    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+     _test_exporter._INPUT_GLOBAL_SCALES) = saved
 
 
 def _fpquant_gptq_factors_for_test(
@@ -309,9 +307,7 @@ class TestPerturbedXExportInputs(unittest.TestCase):
 
 class TestIncrementalSafetensorsWriter(unittest.TestCase):
     def test_rejects_symlink_output_directory(self):
-        from prismaquant.export_native_compressed import (
-            IncrementalSafetensorsWriter,
-        )
+        from prismaquant.export_native_compressed import IncrementalSafetensorsWriter
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -327,9 +323,7 @@ class TestIncrementalSafetensorsWriter(unittest.TestCase):
             self.assertEqual(list(target.iterdir()), [])
 
     def test_rejects_preexisting_high_index_temp_shard(self):
-        from prismaquant.export_native_compressed import (
-            IncrementalSafetensorsWriter,
-        )
+        from prismaquant.export_native_compressed import IncrementalSafetensorsWriter
 
         with tempfile.TemporaryDirectory() as td:
             out_dir = Path(td)
@@ -347,9 +341,7 @@ class TestIncrementalSafetensorsWriter(unittest.TestCase):
     def test_finalizes_multi_shard_index_without_temp_files(self):
         from safetensors.torch import load_file
 
-        from prismaquant.export_native_compressed import (
-            IncrementalSafetensorsWriter,
-        )
+        from prismaquant.export_native_compressed import IncrementalSafetensorsWriter
 
         with tempfile.TemporaryDirectory() as td:
             out_dir = Path(td)
@@ -398,9 +390,7 @@ class TestIncrementalSafetensorsWriter(unittest.TestCase):
             ))
 
     def test_single_shard_replaces_stale_shards_and_index_only(self):
-        from prismaquant.export_native_compressed import (
-            IncrementalSafetensorsWriter,
-        )
+        from prismaquant.export_native_compressed import IncrementalSafetensorsWriter
 
         with tempfile.TemporaryDirectory() as td:
             out_dir = Path(td)
@@ -671,9 +661,7 @@ class TestGroupedExportQuantization(unittest.TestCase):
             quantize_2d,
             quantize_2d_group_same_shape,
         )
-        from prismaquant.export_native_compressed import (
-            canonicalize_format,
-        )
+        from prismaquant.export_native_compressed import canonicalize_format
 
         weights = torch.randn(2, 4, 16)
         with self.assertRaises(ValueError):
@@ -1045,7 +1033,6 @@ class TestRoundTrip(unittest.TestCase):
         )
 
     def test_nvfp4_rtn_dequant_matches_exported_scale_metadata(self):
-        from prismaquant import export_native_compressed as enc
 
         W = torch.randn(16, 64) * 2.0
         prev = (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).nvfp4_scale_rule
@@ -2826,12 +2813,8 @@ class TestFusedSiblingJointGlobalScale(unittest.TestCase):
             self.assertEqual(set(g[1]), {"in_proj_qkv", "in_proj_z"})
 
     def test_compute_nvfp4_joint_global_picks_max(self):
-        from prismaquant.native_render_codec import (
-            compute_nvfp4_global_real,
-        )
-        from prismaquant.export_native_compressed import (
-            _compute_nvfp4_joint_global,
-        )
+        from prismaquant.native_render_codec import compute_nvfp4_global_real
+        from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
 
         # Build a tiny model with two fused-sibling Linears (different
         # max-abs values). The joint scale must be the max of their
@@ -4069,9 +4052,7 @@ class TestDeltaNetFusedSiblingJointScale(unittest.TestCase):
 
         # The shared scale must equal the max of the per-sibling
         # natural scales (commit e2e0091 regression).
-        from prismaquant.native_render_codec import (
-            compute_nvfp4_global_real,
-        )
+        from prismaquant.native_render_codec import compute_nvfp4_global_real
         nat_qkv = compute_nvfp4_global_real(
             layer.linear_attn.in_proj_qkv.weight.float(), group_size=16, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         nat_z = compute_nvfp4_global_real(
@@ -4294,9 +4275,7 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
             from compressed_tensors.quantization.utils import generate_gparam
         except Exception as e:  # pragma: no cover - env without the lib
             self.skipTest(f"compressed_tensors not importable: {e}")
-        from prismaquant.native_render_codec import (
-            compute_nvfp4_input_global_scale,
-        )
+        from prismaquant.native_render_codec import compute_nvfp4_input_global_scale
         import os
         torch.manual_seed(0)
         acts = torch.randn(64, 128) * 3.7
@@ -4368,51 +4347,39 @@ class TestNvfp4InputGlobalScale(unittest.TestCase):
 
     def test_quantize_2d_reads_override(self):
         import torch
-        from prismaquant.native_render_codec import (
-            quantize_2d,
-        )
+        from prismaquant.native_render_codec import quantize_2d
         weight = torch.randn(32, 32)
         out = quantize_2d(weight, "NVFP4",
                            input_global_scale_override=2.5, levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
         self.assertAlmostEqual(
             float(out["input_global_scale"].item()), 2.5, places=4)
 
-    def test_quantize_2d_uses_global_cache_when_named(self):
-        import torch
-        import prismaquant.export_native_compressed as m
-        weight = torch.randn(32, 32)
-        # Save/restore the module-level cache
-        saved = _test_exporter._INPUT_GLOBAL_SCALES
-        try:
-            _test_exporter._INPUT_GLOBAL_SCALES = {"foo.bar.q_proj": 3.14}
-            out = quantize_2d = _native_render_codec.quantize_2d(
-                weight, "NVFP4", linear_name="foo.bar.q_proj"
-            , levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("foo.bar.q_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="foo.bar.q_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-            self.assertAlmostEqual(
-                float(out["input_global_scale"].item()), 3.14, places=4)
-        finally:
-            _test_exporter._INPUT_GLOBAL_SCALES = saved
+    def test_inmemory_export_uses_calibration_for_dense_nvfp4(self):
+        name = "foo.bar.q_proj"
+        model = nn.Module()
+        model.foo = nn.Module()
+        model.foo.bar = nn.Module()
+        model.foo.bar.q_proj = nn.Linear(32, 32, bias=False)
+        scales = {name: 3.14, name + ".weight": 9.0}
+        with patch.object(enc, "_INPUT_GLOBAL_SCALES", scales), \
+                patch.object(enc, "_PRODUCTION_WEIGHT_CACHE", None), \
+                patch.object(enc, "_RENDER_LEVERS", NativeRenderLevers()):
+            tensors, _ = enc._materialize_tensors_inmemory(
+                model, {name: "NVFP4"}, bf16_passthrough=set())
+        expected = torch.tensor([3.14], dtype=torch.float32)
+        self.assertTrue(torch.equal(tensors[name + ".input_global_scale"], expected))
+        self.assertIn(name + ".weight_packed", tensors)
 
     def test_override_precedence_preserves_serialized_f32_value(self):
-        weight = torch.randn(32, 32)
-        saved = _test_exporter._INPUT_GLOBAL_SCALES
-        try:
-            _test_exporter._INPUT_GLOBAL_SCALES = {"foo.bar.q_proj": 3.14}
-            out = _native_render_codec.quantize_2d(
-                weight,
-                "NVFP4",
-                linear_name="foo.bar.q_proj",
-                input_global_scale_override=2.5,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("foo.bar.q_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None))
-        finally:
-            _test_exporter._INPUT_GLOBAL_SCALES = saved
-
+        override = _native_render_codec.resolve_nvfp4_input_global_scale(
+            2.5, target="foo.bar.q_proj", calibrated_scales={"foo.bar.q_proj": 3.14})
+        out = _native_render_codec.quantize_2d(
+            torch.randn(32, 32), "NVFP4", input_global_scale_override=override,
+            levers=NativeRenderLevers())
         expected = torch.tensor([2.5], dtype=torch.float32)
         self.assertTrue(torch.equal(out["input_global_scale"], expected))
         self.assertTrue(torch.equal(
-            out["input_global_scale"].view(torch.uint8),
-            expected.view(torch.uint8),
-        ))
+            out["input_global_scale"].view(torch.uint8), expected.view(torch.uint8)))
 
 
 class TestActivationAwarePasses(unittest.TestCase):
@@ -4686,9 +4653,7 @@ class TestActivationAwarePasses(unittest.TestCase):
         Running `quantize_2d` with GPTQ enabled should give no worse
         activation-weighted output-space MSE than pure RTN."""
         import torch
-        from prismaquant.native_render_codec import (
-            quantize_2d,
-        )
+        from prismaquant.native_render_codec import quantize_2d
         torch.manual_seed(7)
         out_f, in_f = 64, 128
         # Weight with some high-magnitude rows to stress quantization.
@@ -5074,9 +5039,7 @@ class TestGptqDeadColumnHandling(unittest.TestCase):
     reference GPTQ)."""
 
     def test_dead_activation_column_survives_nvfp4_gptq(self):
-        from prismaquant.native_render_codec import (
-            gptq_obs_rounding_nvfp4,
-        )
+        from prismaquant.native_render_codec import gptq_obs_rounding_nvfp4
         torch.manual_seed(21)
         W = torch.randn(16, 32) * 0.3
         X = torch.randn(64, 32)
