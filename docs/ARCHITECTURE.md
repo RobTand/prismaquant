@@ -27199,11 +27199,11 @@ under the exporter's own recipe and is not gated; export resume binds
 `_pack_production_cached_2d` re-packs only — no re-run of GPTQ/scale-sweep, which would
 measure a different artifact.
 
-**Block-output match** (`prismaquant/block_output_match.py`), `PRISMAQUANT_BLOCK_OUTPUT_MATCH`
-**default `"1"` = ON** (`:6168-6169`, `:6321`, `:6467`): for NVFP4 dense block Linears
-(q/k/v/o, gate/up/down) it defers the pack, greedily refines per-Linear group scales against an
-FP16 block-reference forward, then finalises (`:6555+`). Its own ~0.05–0.10 PPL estimate
-predates JSO and has never been re-measured on the gold lane (§12).
+**Block-output match** (quality lever #12, formerly `prismaquant/block_output_match.py`) was
+archived on 2026-07-30 (`archive/block_output_match_2026-07-30/`, re-vet R25). It never ran on
+the shipping recipe, because the production-cache pack returns first. Setting
+`PRISMAQUANT_BLOCK_OUTPUT_MATCH` truthy now stops the exporter
+(`_refuse_archived_block_output_match`); §11 and debt D16 record why.
 
 ### 6.2 `config_groups` / `ignore` / packed-MoE emission
 
