@@ -2,7 +2,8 @@
 
 `prismaquant/cost_stage_checkpoint.py::atomic_write_bytes` is the owner of
 "stage bytes beside the target, fsync, replace, fsync the directory".
-`prismaquant/aura_cost.py` carried its own copy and now shares the owner.
+`prismaquant/aura_cost.py` carried its own copy; the AURA checkpoint writer
+now lives in `prismaquant/aura_checkpoint_journal.py` and shares the owner.
 The reseal package owner must rewrite plain checkpoint data without numerical
 or CLI dependencies. Its actual import and payload behavior is exercised in a
 fresh child interpreter. The durable publication ordering is:
@@ -22,6 +23,11 @@ import pytest
 
 from prismaquant import cost_stage_checkpoint as csc
 
+
+def test_aura_checkpoint_journal_uses_the_owner_recipe() -> None:
+    from prismaquant import aura_checkpoint_journal
+
+    assert aura_checkpoint_journal.atomic_write_bytes is csc.atomic_write_bytes
 
 
 def test_reseal_package_rewrites_plain_data_without_numerical_or_tool_imports(tmp_path):

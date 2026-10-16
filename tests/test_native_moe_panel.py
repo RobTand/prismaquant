@@ -1198,7 +1198,7 @@ def test_original_source_execution_cannot_inherit_derivative_or_different_dispat
 
 
 def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy():
-    from prismaquant import joint_aura
+    from prismaquant import joint_aura, native_moe_panel
 
     class Selector(str):
         pass
@@ -1207,6 +1207,8 @@ def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy
         '': {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         Selector('u'): {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         'extra': {'attention': {2: 'café', 'z': '\ud800'}}}}
+    # One owner: the panel imports joint_aura's reader rather than keeping a copy.
+    assert native_moe_panel.require_native_source_execution is joint_aura.require_native_source_execution
     assert joint_aura.require_native_source_execution(value, unit='u') is value
     # Mixed leaf keys retain the native reader's unsorted JSON acceptance; an
     # Original control separately refuses this selector's non-string leaf key.

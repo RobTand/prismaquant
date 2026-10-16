@@ -99,6 +99,8 @@ def test_a_joint_row_is_only_its_own_cell(measured_payload):
         joint_aura_rows.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
     with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
         joint_aura_rows.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
+    # Callers that catch ValueError around this predicate still see the mismatch.
+    assert issubclass(joint_aura_rows.JointCellCoordinateError, ValueError)
 
 
 def test_a_row_that_is_not_joint_is_not_this_predicate(measured_payload):
