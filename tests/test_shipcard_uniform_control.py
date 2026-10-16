@@ -639,6 +639,14 @@ def test_a_spec_decode_tainted_control_arm_refuses(tmp_path):
     assert any("spec_decode_detected is TRUE" in p for p in problems), problems
 
 
+@pytest.mark.parametrize("spec", [0, "", [], {}])
+def test_a_falsy_non_boolean_control_arm_refuses(tmp_path, spec):
+    model_dir, path = _built(
+        tmp_path, candidate=0.1500, arm=_control_arm(spec_decode_detected=spec))
+    problems = _problems(model_dir, path)
+    assert any("control arm: spec_decode_detected" in p for p in problems), problems
+
+
 def test_a_verdict_that_disagrees_with_its_own_two_kls_refuses(tmp_path):
     block = _block(candidate=0.1500)
     block["verdict"]["candidate_over_control"] = 0.5

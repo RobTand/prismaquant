@@ -94,6 +94,19 @@ def test_configured_gate_refuses_spec_decode_through_the_slot_constructor(artifa
     assert load_shipcard(artifact / "shipcard.json")["slots"]["gold.kl"] is None
 
 
+@pytest.mark.parametrize("spec", [0, "", [], {}])
+def test_publication_rejects_falsy_non_boolean_no_spec_evidence(artifact, spec):
+    card = open_shipcard(artifact)
+    draft = make_gold_record(
+        _gold_payload(artifact, spec_decode_detected=spec),
+        slot="gold.kl", model_sha=card["model_sha"],
+        record_path=artifact / "m.json", model_dir=artifact,
+        allow_spec_decode=True)
+    card["slots"]["gold.kl"] = draft.record
+    assert any("spec_decode_detected" in problem
+               for problem in verify(card, model_dir=artifact, required=["gold.kl"]))
+
+
 def _imports(tree):
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):

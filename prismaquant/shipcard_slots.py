@@ -123,6 +123,24 @@ def verify_gold_record(
     return problems
 
 
+def _no_spec_decode_problems(slot, record):
+    """Gold evidence must carry the explicit JSON boolean false."""
+    spec = record.get("spec_decode_detected")
+    if spec is False:
+        return []
+    if spec is None:
+        state = "is unknown"
+    elif spec is True:
+        state = "is TRUE"
+    else:
+        state = f"={spec!r} is not the boolean false"
+    return [
+        f"{slot}: spec_decode_detected {state}. A gold number must be measured "
+        "on a no-spec serve; spec decoding can report the DRAFT model's NLL "
+        "instead of the measured artifact's (§7.5). Re-measure on a no-spec serve."
+    ]
+
+
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
@@ -623,18 +641,7 @@ def _replay_control_arms(
             "gold.kl", arm, model_dir=None, require_current_artifact_path=False,
         )
     )
-    spec = arm.get("spec_decode_detected")
-    if spec is None:
-        problems.append(
-            f"{slot}: control arm: spec_decode_detected is unknown — a gold "
-            "number measured against a spec-decode serve is the draft model's "
-            "NLL (§7.5)"
-        )
-    elif spec:
-        problems.append(
-            f"{slot}: control arm: spec_decode_detected is TRUE — that is "
-            "draft-model NLL, not the control's"
-        )
+    problems.extend(_no_spec_decode_problems(f"{slot}: control arm", arm))
 
     arm_metrics = arm.get("metrics")
     arm_metrics = arm_metrics if isinstance(arm_metrics, Mapping) else {}
@@ -1058,14 +1065,7 @@ def _verify_route_sweep_record(
 def _gold_replay(slot, record, *, card=None, model_dir=None):
     problems = verify_gold_record(slot, record, model_dir=model_dir,
                                   require_current_artifact_path=False)
-    spec = record.get("spec_decode_detected")
-    if spec is None:
-        problems.append(f"{slot}: spec_decode_detected is unknown — a gold number "
-                        "measured against a spec-decode serve is the draft model's "
-                        "NLL, so 'unknown' is not acceptable (§7.5)")
-    elif spec:
-        problems.append(f"{slot}: spec_decode_detected is TRUE — this is draft-model "
-                        "NLL, not the artifact's; re-measure on a no-spec serve")
+    problems.extend(_no_spec_decode_problems(slot, record))
     return problems
 
 
@@ -1177,12 +1177,9 @@ def make_gold_record(payload, *, slot, model_sha, record_path, model_dir=None,
     refused here unless the caller explicitly records it anyway
     (``allow_spec_decode``); publication replay still refuses such a record.
     """
-    spec = payload.get("spec_decode_detected")
-    if spec is not False and not allow_spec_decode:
-        raise GoldSpecDecodeRefusal(
-            f"{slot}: {record_path} reports spec_decode_detected={spec!r}. A gold "
-            "number measured against a spec-decode serve is the DRAFT model's "
-            "NLL, not the artifact's (§7.5). Re-measure on a no-spec serve.")
+    spec_problems = _no_spec_decode_problems(f"{slot}: {record_path}", payload)
+    if spec_problems and not allow_spec_decode:
+        raise GoldSpecDecodeRefusal(spec_problems[0])
 
     def finite(value):
         try:

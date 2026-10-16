@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: gold construction and publication replay share the
+slot owner's explicit-boolean no-spec policy. Gold slots and uniform-control
+arms refuse malformed falsy values such as `0`, `""`, `[]` and `{}`; only
+the JSON boolean `false` establishes a no-spec serve. An explicit CLI recording
+override still cannot make that evidence pass publication replay. Tests:
+`tests/test_shipcard_slot_contract.py`, `tests/test_shipcard_uniform_control.py`.
+
 Re-stamped 2026-10-16: the registered `route.sweep` slot passes the artifact
 directory to its existing verifier. Publication now compares the carried
 price config with that artifact's `config.json`, including when the card and
