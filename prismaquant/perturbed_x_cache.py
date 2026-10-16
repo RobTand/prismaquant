@@ -2731,6 +2731,14 @@ class PerturbedActivationCache:
                         f"PRISMAQUANT_STRICT_PRODUCTION_CACHE=0 to fall back "
                         f"to RTN, or rebuild the cache to cover this Linear."
                     )
+                if fr.requires_production_render(fmt):
+                    raise RuntimeError(
+                        f"production_weight_cache is required for "
+                        f"{fr.format_owner_label(fmt)} "
+                        f"({param_plan.name!r}, {fmt!r}); the registry "
+                        "render is a weights-only reconstruction, not the "
+                        "decoded wire and not the H-aware encode that ships"
+                    )
                 original = param.data.detach().clone()
                 q = spec.quantize_dequantize(original).to(
                     device=param.device,

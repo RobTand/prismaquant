@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: frozen-weight cache fills apply the same
+`requires_production_render` refusal as ordinary activation-cache replay before
+using registry RTN. Tessera requires a production-rendered cache entry even with
+`PRISMAQUANT_STRICT_PRODUCTION_CACHE=0`, for both an absent cache and a miss.
+The escape retains its existing behavior for formats that support registry RTN.
+This closes the frozen-cache path's missing refusal without changing the Tessera
+pin, wire, format menu or serving admission scope.
+
 Re-stamped 2026-10-16: the obsolete Gridbook fresh-text LDLQ harness is archived
 with its corpus, manifests and original report at
 `archive/ldlq_fresh_2026-10-16/`. Its eight tracked files retain their original
