@@ -1262,6 +1262,48 @@ def _export_render_options(cache=None) -> NativeRenderLevers:
     return options
 
 
+def _require_cached_fused_render_global(
+    cache, key: tuple[str, str], joint_global: torch.Tensor,
+) -> None:
+    """Refuse a fused NVFP4 re-pack on a global the cached render did not use.
+
+    The re-pack re-derives a fused sibling's codes and FP8 block scales from
+    the cached dequant under ``joint_global``. That is the validated render
+    only when the fill rendered this entry on the same global, which the
+    fill's own witness records (``NVFP4_JOINT_GLOBAL_WITNESS_KEY``).
+    """
+    from .production_weight_cache import nvfp4_joint_global_witnesses
+
+    metadata = getattr(cache, "metadata", None)
+    shipped = float(joint_global.detach().to(torch.float32).reshape(()).item())
+    witnessed = nvfp4_joint_global_witnesses(
+        metadata, where="[export] production cache").get(tuple(key))
+    entry = f"{key[0]}@{key[1]}"
+    if witnessed is None:
+        fill = (
+            "streamed" if (metadata or {}).get("streaming") is True
+            else "resident"
+        )
+        raise RuntimeError(
+            f"[export] production cache entry {entry} carries no fused-sibling "
+            f"joint-global witness: the {fill} NVFP4 fill that rendered it did "
+            "not record the joint global it used, so its cached dequant cannot "
+            f"be shown to re-pack under the joint global {shipped!r} this "
+            "export ships. Streamed fills before 2026-10-16 rendered fused "
+            "siblings on the builder's ambient recipe; re-render the "
+            "production cache with the current build_production_cache into a "
+            "fresh --cache-dir."
+        )
+    if witnessed != shipped:
+        raise RuntimeError(
+            f"[export] production cache entry {entry} was rendered on fused "
+            f"joint global {witnessed!r}, but this export re-packs it under "
+            f"{shipped!r}: the shipped codes and FP8 block scales would not be "
+            "the validated render. Re-render the production cache from the "
+            "source checkpoint, assignment and recipe this export uses."
+        )
+
+
 def _pack_production_cached_2d(
     linear_name: str,
     fmt: str,
@@ -1275,6 +1317,11 @@ def _pack_production_cached_2d(
     numerical passes. For export we only need to re-pack those weights into the
     native compressed-tensors layout; running GPTQ/scale-sweep again would
     measure a different artifact.
+
+    A fused NVFP4 sibling re-packed on ``nvfp4_global_real_override`` must
+    carry the render's witness of that same global, unless the export opted
+    out of matching the render (``PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE=0``
+    re-derives under the exporter's own recipe by design).
     """
     cache = _PRODUCTION_WEIGHT_CACHE
     if cache is None:
@@ -1284,6 +1331,13 @@ def _pack_production_cached_2d(
     key = _production_cache_lookup_key(linear_name, cache_fmt)
     if key is None:
         return None
+    if (
+        fmt == "NVFP4"
+        and nvfp4_global_real_override is not None
+        and _exporter_render_levers().nvfp4_export_match_render_scale
+    ):
+        _require_cached_fused_render_global(
+            cache, key, nvfp4_global_real_override)
     w = cache.get(key[0], key[1])
     if w is None:
         return None
@@ -4725,6 +4779,9 @@ def _render_lever_provenance() -> dict:
     """The actual resolved render recipe shared by resume and ship evidence."""
     return {
         "persistent_buffer_read_policy": "model_declared_v1",
+        # Layer payloads packed before fused NVFP4 re-packs required the
+        # render's joint-global witness must not replay past that gate.
+        "fused_nvfp4_global_admission": "render_witness_v1",
         "native_render_levers": _export_render_options().record(),
         "PRISMAQUANT_BLOCK_OUTPUT_MATCH": "archived_2026-07-30",
         "activation_cache_fingerprint": _ACTIVATION_CACHE_FINGERPRINT,

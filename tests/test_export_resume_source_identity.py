@@ -181,6 +181,27 @@ def test_manifest_without_source_identity_is_refused(tmp_path, monkeypatch):
     assert "source_identity" in json.loads(manifest.read_text())
 
 
+def test_manifest_from_before_the_fused_witness_gate_is_refused(
+    tmp_path, monkeypatch,
+):
+    """Layers packed before fused NVFP4 re-packs required the render's
+    joint-global witness were never checked against it; replaying them would
+    ship a legacy cache's re-pack past the gate."""
+    run, source = _exporter(tmp_path, monkeypatch)
+    cache = tmp_path / "resume"
+    _fill_cache(run, source, cache, weight=_WEIGHT_A, bias=_BIAS_A)
+
+    manifest = cache / "manifest.json"
+    legacy = json.loads(manifest.read_text())
+    assert legacy.pop("fused_nvfp4_global_admission") == "render_witness_v1"
+    manifest.write_text(json.dumps(legacy))
+
+    replays: list = []
+    run(cache, replay_log=replays)
+    assert replays == [], "a pre-witness manifest admitted replay"
+    assert json.loads(manifest.read_text())["fused_nvfp4_global_admission"]
+
+
 # --------------------------------------------------------------------------
 # The identical-source resume must keep working, byte for byte.
 # --------------------------------------------------------------------------

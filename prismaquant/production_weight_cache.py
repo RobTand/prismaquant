@@ -142,6 +142,20 @@ MTP_APPEND_SIDECAR_KEY = "mtp_append"
 PACKED_APPEND_SIDECAR_KEY = "packed_expert_append"
 PACKED_STREAMING_APPEND_SIDECAR_KEY = "packed_expert_streaming_append"
 PRE_GUARD_ADMISSION_SIDECAR_KEY = "pre_guard_admission"
+#: Per-entry witness of the fused-sibling NVFP4 joint global.  Export
+#: re-derives a fused sibling's codes and FP8 block scales from the cached
+#: dequant under the joint global it recomputes, which reproduces the validated
+#: render only if the render used that same global.  The fill that renders an
+#: entry on a joint global records the exact float32 value here, keyed
+#: ``qname|FMT``; nothing else writes one, so loading, resuming or appending to
+#: a cache never witnesses an entry another producer rendered.  Streamed fills
+#: before 2026-10-16 used the builder's ambient recipe for that global and
+#: recorded no witness (NATIVE-LEGACY-01).
+NVFP4_JOINT_GLOBAL_WITNESS_KEY = "nvfp4_joint_global_witness"
+NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA = (
+    "prismaquant.production_weight_cache.nvfp4_joint_global_witness.v1"
+)
+NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME = "nvfp4_joint_global_witness.json"
 
 
 # Formats whose WEIGHT PLANE is the same artifact and must therefore get the
@@ -1751,6 +1765,27 @@ class ProductionWeightCache:
                 f"sample={samples}"
             )
 
+    def witness_nvfp4_joint_global(
+        self, qname: str, fmt: str, joint_global: torch.Tensor,
+    ) -> None:
+        """Record the joint global this producer just rendered an entry on.
+
+        Only the code that rendered ``(qname, fmt)`` may call this; see
+        ``NVFP4_JOINT_GLOBAL_WITNESS_KEY``.
+        """
+        from prismaquant import format_registry as fr
+
+        key = (str(qname), fr.canonical_format_name(str(fmt).strip().upper()))
+        if self.metadata is None:
+            self.metadata = {}
+        witnesses = nvfp4_joint_global_witnesses(
+            self.metadata, where="ProductionWeightCache")
+        witnesses[key] = _nvfp4_joint_global_value(
+            joint_global, where=f"{key[0]}@{key[1]}")
+        self.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+            nvfp4_joint_global_witness_section(witnesses)
+        )
+
 class _LinearActivationCollector:
     """Hook every quantizable nn.Linear's input on a forward pass.
 
@@ -2540,6 +2575,102 @@ def _write_render_score_sidecar(
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload))
     os.replace(tmp, path)
+
+
+def nvfp4_joint_global_witnesses(
+    metadata: Mapping[str, object] | None,
+    *,
+    where: str,
+) -> dict[tuple[str, str], float]:
+    """``(qname, fmt)`` -> the fused NVFP4 joint global that entry rendered on.
+
+    Metadata without the section witnesses nothing. A present section is read
+    exactly: an unknown schema, a malformed key or a value that is not a
+    positive finite number refuses instead of witnessing nothing.
+    """
+    section = (
+        None if metadata is None
+        else metadata.get(NVFP4_JOINT_GLOBAL_WITNESS_KEY)
+    )
+    if section is None:
+        return {}
+    records = section.get("records") if isinstance(section, Mapping) else None
+    if (
+        not isinstance(records, Mapping)
+        or set(section) != {"schema", "records"}
+        or section["schema"] != NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA
+    ):
+        raise ValueError(f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY}")
+    witnesses: dict[tuple[str, str], float] = {}
+    for raw_key, value in records.items():
+        qname, separator, fmt = str(raw_key).rpartition("|")
+        if (
+            not isinstance(raw_key, str) or not separator or not qname
+            or not fmt or fmt != fmt.upper()
+            or isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value <= 0.0
+        ):
+            raise ValueError(
+                f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY} record "
+                f"{raw_key!r}: {value!r}"
+            )
+        witnesses[(qname, fmt)] = float(value)
+    return witnesses
+
+
+def nvfp4_joint_global_witness_section(
+    witnesses: Mapping[tuple[str, str], float],
+) -> dict[str, object]:
+    """The metadata and sidecar form of ``witnesses``."""
+    return {
+        "schema": NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA,
+        "records": {
+            _render_score_record_key(qname, fmt): float(value)
+            for (qname, fmt), value in sorted(witnesses.items())
+        },
+    }
+
+
+def _nvfp4_joint_global_value(joint_global: torch.Tensor, *, where: str) -> float:
+    """The exact float32 joint global a fused NVFP4 render was given."""
+    value = float(joint_global.detach().to(torch.float32).reshape(()).item())
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError(
+            f"{where}: fused NVFP4 joint global {value!r} is not positive and "
+            "finite"
+        )
+    return value
+
+
+def _load_nvfp4_joint_global_witness_sidecar(
+    path: Path | None,
+) -> dict[tuple[str, str], float]:
+    """Witnesses an earlier run of the resident fill wrote for its own shards."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        section = json.loads(path.read_bytes().decode("utf-8"))
+        return nvfp4_joint_global_witnesses(
+            {NVFP4_JOINT_GLOBAL_WITNESS_KEY: section}, where=str(path),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"unreadable fused NVFP4 joint-global witness sidecar {path}: "
+            f"{exc}; refusing resume"
+        ) from exc
+
+
+def _write_nvfp4_joint_global_witness_sidecar(
+    path: Path | None,
+    witnesses: Mapping[tuple[str, str], float],
+) -> None:
+    if path is not None:
+        atomic_write_bytes(
+            path,
+            DIRECT_UTF8_STRICT.encoded(
+                nvfp4_joint_global_witness_section(witnesses)
+            ),
+        )
 
 
 def _render_score_record_priced_scale(
@@ -5820,6 +5951,17 @@ def fill_production_weight_cache(
             "render-score entries from sidecar",
             flush=True,
         )
+    # Witnesses earlier runs of this fill published beside their fused NVFP4
+    # shards. A resumed shard keeps one only if its producer wrote it; any
+    # other resumed shard stays unwitnessed and export refuses to re-pack it.
+    joint_global_witness_sidecar_path: Path | None = (
+        cache_dir_path / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME
+        if cache_dir_path is not None else None
+    )
+    resumed_joint_global_witnesses = _load_nvfp4_joint_global_witness_sidecar(
+        joint_global_witness_sidecar_path
+    )
+    joint_global_witnesses: dict[tuple[str, str], float] = {}
 
     fmt_set = {
         fmt
@@ -6179,6 +6321,10 @@ def fill_production_weight_cache(
                 if disk_path.is_file():
                     weights[(qname, fmt_key)] = fname
                     skipped_resumed += 1
+                    if key in resumed_joint_global_witnesses:
+                        joint_global_witnesses[key] = (
+                            resumed_joint_global_witnesses[key]
+                        )
                     score_key = _render_score_record_key(qname, fmt_key)
                     if score_key not in render_score_records:
                         try:
@@ -6265,6 +6411,15 @@ def fill_production_weight_cache(
                 tensor=w_dq,
                 weight_dtype=weight.dtype,
             )
+            if joint is not None and render_fmt == "NVFP4":
+                joint_global_witnesses[key] = _nvfp4_joint_global_value(
+                    joint, where=f"{qname}@{fmt_key}")
+                # Published after its shard, so no witness names a shard
+                # this run did not publish.
+                _write_nvfp4_joint_global_witness_sidecar(
+                    joint_global_witness_sidecar_path,
+                    {**resumed_joint_global_witnesses, **joint_global_witnesses},
+                )
             done += 1
             del w_dq
             if progress and done % 25 == 0:
@@ -6379,6 +6534,12 @@ def fill_production_weight_cache(
             },
             "requested_formats": list(requested_formats),
             "requested_entries": int(n),
+            **(
+                {NVFP4_JOINT_GLOBAL_WITNESS_KEY: (
+                    nvfp4_joint_global_witness_section(joint_global_witnesses)
+                )}
+                if joint_global_witnesses else {}
+            ),
         },
     )
     if recache_pass:

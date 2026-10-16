@@ -14,9 +14,18 @@ recipe (``gptq + static_act_order + joint_scale_opt`` records
 exporter pre-passes and the exporter's cached re-pack.  The fixture makes the
 ``joint_mse`` and ``static_6`` globals differ, so a builder on the wrong recipe
 cannot pass by coincidence.
+
+A cache's recipe record cannot show which global its fused siblings actually
+used: streamed caches built before the fix record the same ``joint_mse``
+levers.  Each fill therefore witnesses, per entry, the exact joint global it
+rendered on, and export refuses a fused re-pack whose global the entry's own
+producer did not witness.  The witness cases cover legacy refusal, the pickle,
+resident resume and the cases a refusal must leave alone.
 """
 from __future__ import annotations
 
+import copy
+import pickle
 import re
 from pathlib import Path
 
@@ -32,9 +41,14 @@ from prismaquant.model_profiles import DefaultProfile
 from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 from prismaquant.production_weight_cache import (
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+    NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME,
     _LinearActivationCollector,
     fill_production_weight_cache,
+    nvfp4_joint_global_witness_section,
+    nvfp4_joint_global_witnesses,
 )
+from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant.streaming_production_cache import run_streaming_render
 
 HIDDEN = 32
@@ -215,6 +229,8 @@ def rendered(tmp_path_factory):
         "model": model,
         "profile": profile,
         "assignment": assignment,
+        "calib_ids": calib_ids,
+        "qnames": qnames,
         "resident": resident,
         "streamed": streamed,
         "resident_globals": resident_globals,
@@ -300,15 +316,156 @@ def test_streamed_and_resident_fused_renders_are_bit_identical(rendered):
         assert torch.equal(resident, streamed), name
 
 
+def _without_witness(cache):
+    """The same cache as a fill before the witness existed would leave it.
+
+    Its recipe record, render scores and bytes are unchanged; only the
+    per-entry joint-global witness is absent.
+    """
+    legacy = copy.copy(cache)
+    legacy.metadata = {
+        key: value for key, value in cache.metadata.items()
+        if key != NVFP4_JOINT_GLOBAL_WITNESS_KEY
+    }
+    assert legacy.levers["nvfp4_scale_rule"] == "joint_mse"
+    return legacy
+
+
+def _pack_fused(name, joint_global):
+    return enc._pack_production_cached_2d(
+        name, "NVFP4", nvfp4_global_real_override=joint_global,
+        device=torch.device("cpu"))
+
+
+def _resident_fill(rendered, cache_dir):
+    return fill_production_weight_cache(
+        rendered["model"], rendered["calib_ids"], rendered["qnames"],
+        formats=["NVFP4"], render_assignment=rendered["assignment"],
+        levers=dict(JSO), max_act_rows=4096,
+        recache_profile=rendered["profile"], progress=False,
+        cache_dir=cache_dir,
+    )
+
+
+@pytest.mark.parametrize("builder", ["resident", "streamed"])
+def test_each_fill_witnesses_exactly_its_fused_nvfp4_globals(
+    rendered, builder, monkeypatch,
+):
+    cache = rendered[builder]
+    _options, layer, _whole = _export_globals(rendered, cache, monkeypatch)
+    witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
+    # Unfused NVFP4 entries (o_proj, down_proj) render on their own global
+    # and carry no witness.
+    assert witnesses == {(name, "NVFP4"): float(layer[name]) for name in FUSED}
+
+
 def test_export_refuses_legacy_streamed_joint_mse_caches(rendered, monkeypatch):
-    cache = rendered["streamed"]
+    cache = _without_witness(rendered["streamed"])
     _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
-    metadata = dict(cache.metadata)
-    assert metadata["streaming"] is True
-    metadata.pop("dense_nvfp4_joint_global_recipe", None)
-    monkeypatch.setattr(cache, "metadata", metadata)
+    assert cache.metadata["streaming"] is True
+    for name in sorted(FUSED):
+        with pytest.raises(RuntimeError, match="streamed NVFP4.*re-render"):
+            _pack_fused(name, globals_by_name[name])
+
+
+def test_export_refuses_legacy_resident_joint_mse_caches(rendered, monkeypatch):
+    # The original resident fill also derived these globals from the ambient
+    # recipe; its caches carry no recipe record this exporter accepts, and a
+    # resident record alone does not show which producer rendered an entry.
+    cache = _without_witness(rendered["resident"])
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
     name = sorted(FUSED)[0]
-    with pytest.raises(RuntimeError, match="streamed NVFP4.*re-render"):
-        enc._pack_production_cached_2d(
-            name, "NVFP4", nvfp4_global_real_override=globals_by_name[name],
-            device=torch.device("cpu"))
+    with pytest.raises(RuntimeError, match="resident NVFP4.*re-render"):
+        _pack_fused(name, globals_by_name[name])
+
+
+def test_export_refuses_a_witness_of_another_global(rendered, monkeypatch):
+    cache = copy.copy(rendered["streamed"])
+    witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
+    name = sorted(FUSED)[0]
+    witnesses[(name, "NVFP4")] *= 1.5
+    cache.metadata = {
+        **cache.metadata,
+        NVFP4_JOINT_GLOBAL_WITNESS_KEY: (
+            nvfp4_joint_global_witness_section(witnesses)
+        ),
+    }
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
+    with pytest.raises(RuntimeError, match="rendered on fused joint global"):
+        _pack_fused(name, globals_by_name[name])
+
+
+def test_legacy_caches_still_pack_unfused_entries(rendered, monkeypatch):
+    cache = _without_witness(rendered["streamed"])
+    _export_globals(rendered, cache, monkeypatch)
+    for name in (f"{LAYER}.self_attn.o_proj", f"{LAYER}.mlp.down_proj"):
+        packed = enc._pack_production_cached_2d(
+            name, "NVFP4", device=torch.device("cpu"))
+        assert set(packed) >= {"weight_packed", "weight_scale",
+                               "weight_global_scale"}
+
+
+def test_match_render_scale_opt_out_does_not_consult_the_witness(
+    rendered, monkeypatch,
+):
+    # PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE=0 re-derives under the
+    # exporter's own recipe by design and claims no render parity.
+    cache = _without_witness(rendered["streamed"])
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
+    monkeypatch.setattr(
+        enc, "_RENDER_LEVERS",
+        NativeRenderLevers(nvfp4_export_match_render_scale=False))
+    name = sorted(FUSED)[0]
+    assert _pack_fused(name, globals_by_name[name]) is not None
+
+
+@pytest.mark.parametrize("builder", ["resident", "streamed"])
+def test_witness_survives_the_cache_pickle(rendered, builder, monkeypatch):
+    cache = pickle.loads(pickle.dumps(rendered[builder]))
+    _options, layer, _whole = _export_globals(rendered, cache, monkeypatch)
+    for name in sorted(FUSED):
+        cached = cache.get(name, "NVFP4")
+        packed = _pack_fused(name, layer[name])
+        assert torch.equal(_decode(packed, layer[name]).to(cached.dtype), cached)
+    legacy = pickle.loads(pickle.dumps(_without_witness(rendered[builder])))
+    _export_globals(rendered, legacy, monkeypatch)
+    with pytest.raises(RuntimeError, match="no fused-sibling joint-global witness"):
+        _pack_fused(sorted(FUSED)[0], layer[sorted(FUSED)[0]])
+
+
+def test_resident_resume_keeps_the_witnesses_its_fill_published(
+    rendered, tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    first = _resident_fill(rendered, cache_dir)
+    assert (cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME).is_file()
+    resumed = pickle.loads(pickle.dumps(_resident_fill(rendered, cache_dir)))
+    witnesses = nvfp4_joint_global_witnesses(resumed.metadata, where="test")
+    assert witnesses == nvfp4_joint_global_witnesses(first.metadata, where="test")
+    assert set(witnesses) == {(name, "NVFP4") for name in FUSED}
+    _options, layer, _whole = _export_globals(rendered, resumed, monkeypatch)
+    for name in sorted(FUSED):
+        cached = resumed.get(name, "NVFP4")
+        packed = _pack_fused(name, layer[name])
+        assert torch.equal(_decode(packed, layer[name]).to(cached.dtype), cached)
+
+
+def test_resident_resume_witnesses_only_the_shard_it_renders(
+    rendered, tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    _resident_fill(rendered, cache_dir)
+    # A directory a pre-witness fill left: the same shards, no witnesses.
+    (cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME).unlink()
+    renewed = sorted(FUSED)[0]
+    (cache_dir / cache_weight_filename(renewed, "NVFP4")).unlink()
+    resumed = _resident_fill(rendered, cache_dir)
+    assert set(nvfp4_joint_global_witnesses(resumed.metadata, where="test")) == {
+        (renewed, "NVFP4")}
+    _options, layer, _whole = _export_globals(rendered, resumed, monkeypatch)
+    assert _pack_fused(renewed, layer[renewed]) is not None
+    for name in sorted(FUSED - {renewed}):
+        with pytest.raises(RuntimeError, match="resident NVFP4.*re-render"):
+            _pack_fused(name, layer[name])

@@ -617,3 +617,100 @@ def test_mtp_append_admits_a_cross_format_alias_pair(
     assert cache.resolve_key("mtp.a_b", "NVFP4") is not None
     assert (weight_dir / "mtp_a_b__FP8_E4M3.pt").is_file()
     assert (weight_dir / "mtp_a_b__NVFP4.pt").is_file()
+
+
+class _FusedMtpAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q_proj = nn.Linear(16, 16, bias=False)
+        self.k_proj = nn.Linear(16, 16, bias=False)
+        self.v_proj = nn.Linear(16, 16, bias=False)
+
+
+class _FusedMtp(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(16, 16, bias=False)
+        self.self_attn = _FusedMtpAttention()
+
+
+class _FusedMtpProfile(_TinyMtpProfile):
+    name = "fused_mtp"
+
+    def __init__(self):
+        super().__init__()
+        generator = torch.Generator().manual_seed(11)
+        self.source = {
+            f"{name}.weight": torch.randn(16, 16, generator=generator) * scale
+            for name, scale in (
+                ("fc", 0.1),
+                ("self_attn.q_proj", 0.2),
+                ("self_attn.k_proj", 0.05),
+                ("self_attn.v_proj", 0.1),
+            )
+        }
+
+    def build_mtp_module(self, _text_config):
+        return _FusedMtp()
+
+    @staticmethod
+    def fused_sibling_group(name):
+        if name.endswith((".q_proj", ".k_proj", ".v_proj")):
+            return name.rsplit(".", 1)[0] + ".qkv_proj"
+        return None
+
+
+def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
+    tmp_path, monkeypatch,
+):
+    from prismaquant.production_weight_cache import (
+        NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+        nvfp4_joint_global_witnesses,
+    )
+
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    generator = torch.Generator().manual_seed(5)
+    for qname in ("mtp.fc", "mtp.self_attn.q_proj", "mtp.self_attn.k_proj",
+                  "mtp.self_attn.v_proj"):
+        _write_activation(
+            activation_dir, qname, torch.randn(8, 16, generator=generator))
+    # A body entry no witness-recording fill rendered.
+    body = ("model.layers.0.self_attn.q_proj", "NVFP4")
+    cache = ProductionWeightCache(
+        weights={body: torch.zeros((16, 16))},
+        levers=NativeRenderLevers.resolve({
+            "gptq": True, "static_act_order": True, "joint_scale_opt": True,
+        }).record(),
+        activation_max_abs={},
+        failed={},
+        metadata={
+            "requested_entries": 1,
+            "render_scores": {
+                "schema": "prismaquant.production_render_scores.v1",
+                "entries": 1,
+                "records": {"model.layers.0.self_attn.q_proj|NVFP4": {}},
+            },
+        },
+    )
+    kwargs = dict(
+        profile=_FusedMtpProfile(), activation_cache_dir=activation_dir,
+        formats=("NVFP4",), device="cpu", dtype=torch.float32, progress=False,
+    )
+
+    fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs)
+
+    witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
+    # The fused siblings it rendered share one witnessed global; the body
+    # entry and the unfused mtp.fc stay unwitnessed.
+    assert set(witnesses) == {
+        (f"mtp.self_attn.{leaf}", "NVFP4")
+        for leaf in ("q_proj", "k_proj", "v_proj")
+    }
+    assert len(set(witnesses.values())) == 1
+
+    # The append owns its scope: a narrower append leaves no stale witness.
+    fill_profile_mtp_production_cache(
+        cache, "/fake/model", include_qnames=("mtp.fc",), **kwargs)
+    assert cache.resolve_key("mtp.self_attn.q_proj", "NVFP4") is None
+    assert NVFP4_JOINT_GLOBAL_WITNESS_KEY not in cache.metadata

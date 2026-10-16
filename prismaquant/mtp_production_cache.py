@@ -28,6 +28,7 @@ from prismaquant.measure_quant_cost import (
 )
 from prismaquant.production_weight_cache import (
     MTP_APPEND_SIDECAR_KEY,
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     ProductionWeightCache,
     _FisherRowWeightCache,
     _check_and_record_append_identity,
@@ -35,6 +36,8 @@ from prismaquant.production_weight_cache import (
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
+    nvfp4_joint_global_witness_section,
+    nvfp4_joint_global_witnesses,
 )
 from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_production_cache import _render_dense_layer
@@ -499,6 +502,20 @@ def fill_profile_mtp_production_cache(
         for qname in list(cache.activation_max_abs):
             if qname.startswith("mtp.") and qname not in selected_linears:
                 cache.activation_max_abs.pop(qname)
+        # The fused joint-global witnesses are part of that scope: every pair
+        # rendered below records its own, and no earlier one survives.
+        witnesses = {
+            key: value
+            for key, value in nvfp4_joint_global_witnesses(
+                cache.metadata, where="MTP production cache append",
+            ).items()
+            if not key[0].startswith("mtp.")
+        }
+        cache.metadata.pop(NVFP4_JOINT_GLOBAL_WITNESS_KEY, None)
+        if witnesses:
+            cache.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+                nvfp4_joint_global_witness_section(witnesses)
+            )
         score_meta, render_score_records = _existing_render_score_records(cache)
 
         fused_mapping = _fused_sibling_leaf_mapping_from_profile(profile)

@@ -645,3 +645,64 @@ def test_format_menu_cli_uses_verified_stripe_plan(tmp_path, capsys):
     assert [row["coverage_mode"] for row in summaries] == [
         "format-menu", "format-menu"
     ]
+
+
+def _witness_metadata(qname: str, value: float) -> dict:
+    from prismaquant.production_weight_cache import (
+        NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+        nvfp4_joint_global_witness_section,
+    )
+
+    return {
+        NVFP4_JOINT_GLOBAL_WITNESS_KEY: nvfp4_joint_global_witness_section(
+            {(qname, "NVFP4"): value}),
+    }
+
+
+def test_union_merges_each_shards_own_joint_global_witnesses(tmp_path):
+    from prismaquant.production_weight_cache import nvfp4_joint_global_witnesses
+
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    shard_a = _make_shard(
+        tmp_path, shard_id="a",
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        assignment=assignment,
+        extra_metadata=_witness_metadata("model.a", 0.25),
+    )
+    shard_c = _make_shard(
+        tmp_path, shard_id="c",
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        assignment=assignment,
+        extra_metadata=_witness_metadata("model.c", 0.5),
+    )
+
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        [shard_a, shard_c], assignment=assignment, output_bundle=output)
+    _payload, cache = union.verify_union_manifest(
+        output / "union_manifest.json", assignment=assignment)
+
+    assert nvfp4_joint_global_witnesses(cache.metadata, where="test") == {
+        ("model.a", "NVFP4"): 0.25,
+        ("model.c", "NVFP4"): 0.5,
+    }
+
+
+def test_union_refuses_a_shard_witnessing_another_shards_entry(tmp_path):
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    legacy = _make_shard(
+        tmp_path, shard_id="legacy",
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        assignment=assignment,
+    )
+    lender = _make_shard(
+        tmp_path, shard_id="lender",
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        assignment=assignment,
+        extra_metadata=_witness_metadata("model.a", 0.25),
+    )
+
+    with pytest.raises(ValueError, match="entries it does not hold"):
+        union.union_shard_manifests(
+            [legacy, lender], assignment=assignment,
+            output_bundle=tmp_path / "union")

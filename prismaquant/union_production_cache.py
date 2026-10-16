@@ -45,12 +45,15 @@ from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_KEY,
     ACTIVATION_HOOK_SCOPE_SCHEMA,
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
     ProductionWeightCache,
     _production_cache_git_commit,
     _production_cache_source_sha256,
     first_identity_difference,
     identity_value_for_error,
+    nvfp4_joint_global_witness_section,
+    nvfp4_joint_global_witnesses,
     packed_activation_hook_scope_of,
     validate_activation_hook_scope,
 )
@@ -118,6 +121,7 @@ _MERGED_METADATA_KEYS = frozenset({
     "render_gates",
     "four_over_six",
     "fisher_weighted_gptq",
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
 })
 
@@ -1309,6 +1313,7 @@ def _merge_cache_metadata(
         reference[key] = copy.deepcopy(value)
 
     render_records: dict[str, object] = {}
+    joint_global_witnesses: dict[tuple[str, str], float] = {}
     render_common = None
     for index, (cache, item) in enumerate(zip(caches, metadata, strict=True)):
         scores = _validate_render_scores(
@@ -1333,6 +1338,21 @@ def _merge_cache_metadata(
         failures = item.get("render_failures")
         if failures not in (None, {}):
             raise ValueError(f"cache shard {index} records render failures")
+        # A shard may witness only the fused joint globals of entries it
+        # rendered; a union never lends one shard's witness to another's.
+        shard_witnesses = nvfp4_joint_global_witnesses(
+            item, where=f"cache shard {index}")
+        foreign = sorted(set(shard_witnesses) - set(cache.weights))
+        if foreign:
+            raise ValueError(
+                f"cache shard {index} witnesses fused NVFP4 joint globals "
+                f"for entries it does not hold; sample={foreign[:8]}"
+            )
+        _merge_disjoint_mapping(
+            joint_global_witnesses,
+            shard_witnesses,
+            where="fused NVFP4 joint-global witnesses",
+        )
 
     expert_coverage: dict[str, object] = {}
     for index, item in enumerate(metadata):
@@ -1447,6 +1467,10 @@ def _merge_cache_metadata(
         "entries": len(render_records),
         "records": dict(sorted(render_records.items())),
     }
+    if joint_global_witnesses:
+        reference[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+            nvfp4_joint_global_witness_section(joint_global_witnesses)
+        )
     if expert_coverage:
         reference["packed_expert_coverage"] = dict(sorted(expert_coverage.items()))
     mtp_render = _merge_mtp_render(caches)

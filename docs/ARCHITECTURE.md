@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: each production-cache fill witnesses, per entry, the
+exact float32 joint global it rendered a fused NVFP4 sibling on
+(`metadata.nvfp4_joint_global_witness`). The resident fill persists it beside
+each published shard for resume, the MTP append replaces its own scope and the
+exact union merges each shard's own. Export refuses a fused re-pack whose
+global the entry's producer did not witness, so streamed JSO caches built
+before the joint-global fix, and resumed or appended entries rendered by other
+producers, must be re-rendered. Export resume layers packed before this gate
+do not replay. Rendered bytes and the match-render-scale opt-out are unchanged.
+
 Re-stamped 2026-10-16: the loaded campaign operation reads its resolved
 scope directly. Nineteen stable aliases are removed; only the three context
 and structure temporaries that are actually rebound remain local. Census and
@@ -27117,7 +27127,14 @@ making the re-quant of the cache's bf16 dequant near-idempotent;
 `PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE` **defaults ON**. Packed experts re-derive under
 the same recorded recipe — without it, joint_mse-rendered experts re-derived under `static_6`
 flipped 43% of packed bytes. The fused-sibling joint global is derived from that record by
-the resident fill, the streamed fill and both export pre-passes (2026-10-16).
+the resident fill, the streamed fill and both export pre-passes (2026-10-16). A recipe record
+cannot show which global a cached fused sibling actually used, so the fill that renders one
+records that exact global in `metadata.nvfp4_joint_global_witness` (resident resume sidecar
+`nvfp4_joint_global_witness.json`), and `_pack_production_cached_2d` refuses a fused re-pack
+whose override differs from, or lacks, that witness. Loading, resuming, appending or a union
+never creates a witness for an entry its producer did not render. The opt-out re-derives
+under the exporter's own recipe and is not gated; export resume binds
+`fused_nvfp4_global_admission` so earlier layer payloads re-pack.
 `_pack_production_cached_2d` `:2180-2279` re-packs only — no re-run of GPTQ/scale-sweep, which
 would measure a different artifact.
 
