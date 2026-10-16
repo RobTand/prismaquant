@@ -208,7 +208,6 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     """Execute inside one admitted action; never submit recursively."""
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
-    import functools
     from dataclasses import asdict
     import torch
     from transformers import AutoModelForCausalLM
@@ -284,9 +283,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     if device == 'cuda':
         torch.cuda.empty_cache()
     activation = th.activation_source(hessians, calibration) if want_h else None
-    @functools.lru_cache(maxsize=None)
-    def kwargs(name, plane):
-        return th.encoder_kwargs(activation, name, weights[name].shape[1], device, scale_plane=plane)
+    kwargs = cell_measurement.encoder_kwargs_memo(activation, weights, device)
     wire_dir = root / 'wire'
     wire_dir.mkdir(exist_ok=True)
     cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
@@ -337,7 +334,8 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         anchors = cell_measurement.measure_cells(qnames=batch_names,
             weights=[weights[name].to(device) for name in batch_names],
             activations=[acts[name].to(device) for name in batch_names],
-            static_input_scales=scales, structures=structures, **common)
+            static_input_scales=scales,
+            structures={name: structures[name] for name in batch_names}, **common)
         for anchor in anchors:
             name = anchor.qname
             record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])

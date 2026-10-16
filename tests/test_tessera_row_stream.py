@@ -198,10 +198,7 @@ def test_the_stream_head_writes_the_load_all_heads_bytes(monkeypatch, tmp_path, 
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.tessera_row_stream import EXECUTION_FILENAME
-    # Encode durations and the wall clock are the only run-varying values
-    # these files carry; pin them so the comparison is of bytes.
-    monkeypatch.setattr(campaign, "time", SimpleNamespace(
-        time=lambda: 1789500000.0, monotonic=time.monotonic, perf_counter=time.perf_counter))
+    _pin_clock(campaign, monkeypatch)
     prefetches = []
     original_prefetch = cc.prefetch_capture
 
@@ -327,8 +324,10 @@ class _Killed(BaseException):
 def _pin_clock(campaign, monkeypatch):
     # Encode durations and the wall clock are the only run-varying values the
     # outputs carry; pinned, a relaunch can be compared byte for byte.
-    monkeypatch.setattr(campaign, "time", SimpleNamespace(
-        time=lambda: 1789500000.0, monotonic=time.monotonic, perf_counter=time.perf_counter))
+    clock = SimpleNamespace(time=lambda: 1789500000.0,
+                            monotonic=time.monotonic, perf_counter=time.perf_counter)
+    monkeypatch.setattr(campaign, "time", clock)
+    monkeypatch.setattr(cell_measurement, "time", clock)
 
 
 def _kill_at(campaign, monkeypatch, call):
