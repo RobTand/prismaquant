@@ -17,6 +17,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# Historical receipt identity, retained across the move from measure_quant_cost.
+# This is an operation identifier rather than a Python import path.
+PACKED_EXPERTS_FORWARD_OPERATION_ID = (
+    "prismaquant.measure_quant_cost._packed_experts_forward_with_weights"
+)
+
+
 def enumerate_packed_experts(model: nn.Module, target_names: set[str],
                               profile=None,
                               ) -> list[tuple[str, nn.Parameter, str, nn.Module]]:

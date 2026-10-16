@@ -1142,6 +1142,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     from . import format_registry as fr
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity
+    from .routed_experts import PACKED_EXPERTS_FORWARD_OPERATION_ID
     _no_preclip()
     format_name = owner_format(shape, format_name)
     shape = {**shape, "format": format_name}
@@ -1313,7 +1314,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             "probe_scope": probe_scope, "routing_capture": routing_capture,
             "routing_capture_sha256": joint_identity_sha256(routing_capture),
             "numerics": dict(numerics), "runtime_image": runtime_image, "serving_config_sha256": serving_config_sha256, "probe_request": probe_request,
-            "reference": {"operation": "prismaquant.measure_quant_cost._packed_experts_forward_with_weights",
+            "reference": {"operation": PACKED_EXPERTS_FORWARD_OPERATION_ID,
                           "module_class": f"{type(experts_module).__module__}.{type(experts_module).__qualname__}",
                           "module_source_sha256": bytes_sha256hex(reference_file.read_bytes()),
                           "profile": profile.name, "temporary_pack_bytes": packed_bytes,
