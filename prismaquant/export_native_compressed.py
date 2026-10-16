@@ -1272,12 +1272,10 @@ def _require_cached_fused_render_global(
     only when the fill rendered this entry on the same global, which the
     fill's own witness records (``NVFP4_JOINT_GLOBAL_WITNESS_KEY``).
     """
-    from .production_weight_cache import nvfp4_joint_global_witnesses
-
     metadata = getattr(cache, "metadata", None)
     shipped = float(joint_global.detach().to(torch.float32).reshape(()).item())
-    witnessed = nvfp4_joint_global_witnesses(
-        metadata, where="[export] production cache").get(tuple(key))
+    witnessed = cache.nvfp4_joint_global_witness(
+        key[0], key[1], where="[export] production cache")
     entry = f"{key[0]}@{key[1]}"
     if witnessed is None:
         fill = (

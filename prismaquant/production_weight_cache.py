@@ -103,6 +103,7 @@ from prismaquant.digests import (
     canonical_json,
     text_sha256hex,
 )
+from prismaquant.file_identity import file_stat_signature
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -1300,7 +1301,6 @@ class ProductionWeightCache:
 
     @staticmethod
     def _file_signature(value):
-        from .file_identity import file_stat_signature
         return file_stat_signature(value)
 
     @staticmethod
@@ -1786,6 +1786,16 @@ class ProductionWeightCache:
             nvfp4_joint_global_witness_section(witnesses)
         )
 
+    def nvfp4_joint_global_witness(
+        self, name: str, fmt: str, *, where: str,
+    ) -> float | None:
+        """The fused NVFP4 joint global this entry's producer witnessed, if any."""
+        key = self.resolve_key(name, fmt)
+        if key is None:
+            return None
+        return nvfp4_joint_global_witnesses(self.metadata, where=where).get(key)
+
+
 class _LinearActivationCollector:
     """Hook every quantizable nn.Linear's input on a forward pass.
 
@@ -2076,6 +2086,20 @@ def _env_float(name: str, default: float, *, lo: float, hi: float) -> float:
 
 
 
+class PublishedShard(NamedTuple):
+    """One rendered shard as its producer published it in a cache directory.
+
+    ``name`` is the value the cache manifest stores for the entry (resolved
+    against ``cache_dir``). ``stat`` is ``file_identity.file_stat_signature``
+    of the published file object, read through the descriptor the publisher
+    holds across its rename, so it names the inode that producer wrote even
+    when another writer replaces the path immediately afterwards.
+    """
+
+    name: str
+    stat: tuple[int, int, int, int, int]
+
+
 def _store_rendered_weight_entry(
     *,
     weights: dict[tuple[str, str], object],
@@ -2086,7 +2110,8 @@ def _store_rendered_weight_entry(
     weight_dtype: torch.dtype,
     durable: bool = False,
     preserve_fp32: bool = False,
-) -> None:
+) -> PublishedShard | None:
+    """Store one rendered entry; return the shard published, or ``None`` in memory."""
     from prismaquant import format_registry as fr
 
     fmt = fr.canonical_format_name(str(fmt).strip().upper())
@@ -2095,32 +2120,34 @@ def _store_rendered_weight_entry(
         weight_dtype=weight_dtype,
         preserve_fp32=preserve_fp32,
     )
-    if cache_dir_path is not None:
-        fname = cache_weight_filename(qname, fmt)
-        final_path = cache_dir_path / fname
-        # Per-process staging: a fan-out that re-renders a cell another writer
-        # is publishing must not share its inode. The suffix adds exactly one
-        # dot so torch's archive name -- and the published bytes -- are the
-        # same as the legacy ``<fname>.tmp`` save (``unique_temp_suffix``).
-        tmp_path = cache_dir_path / (fname + unique_temp_suffix())
-        torch.save(stored, tmp_path)
-        if durable:
-            fd = os.open(tmp_path, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        os.replace(tmp_path, final_path)
-        if durable:
-            directory_fd = os.open(cache_dir_path, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        weights[(qname, fmt)] = fname
-        del stored
-    else:
+    if cache_dir_path is None:
         weights[(qname, fmt)] = stored
+        return None
+    fname = cache_weight_filename(qname, fmt)
+    final_path = cache_dir_path / fname
+    # Per-process staging: a fan-out that re-renders a cell another writer
+    # is publishing must not share its inode. The suffix adds exactly one
+    # dot so torch's archive name -- and the published bytes -- are the
+    # same as the legacy ``<fname>.tmp`` save (``unique_temp_suffix``).
+    tmp_path = cache_dir_path / (fname + unique_temp_suffix())
+    torch.save(stored, tmp_path)
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        if durable:
+            os.fsync(fd)
+        os.replace(tmp_path, final_path)
+        published = PublishedShard(fname, file_stat_signature(os.fstat(fd)))
+    finally:
+        os.close(fd)
+    if durable:
+        directory_fd = os.open(cache_dir_path, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    weights[(qname, fmt)] = fname
+    del stored
+    return published
 
 
 def _canonical_rendered_weight_tensor(
