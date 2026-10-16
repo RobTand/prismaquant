@@ -213,14 +213,13 @@ print('PUBLIC-CONSUMER-OK')
     assert result.stdout.strip() == 'PUBLIC-CONSUMER-OK'
 
 
-def test_metadata_readers_keep_the_serving_runtime_outside_the_dependency_boundary():
-    """The migrated admission boundary cannot reacquire serving dependencies."""
+def test_package_keeps_the_serving_runtime_outside_the_dependency_boundary():
+    """Production modules consume metadata without importing Tessera serving."""
     import ast
 
     root = Path(__file__).resolve().parents[1]
     violations = []
-    for name in ('lane_eligibility.py', 'tessera_runtime_contract.py'):
-        path = root / 'prismaquant' / name
+    for path in sorted((root / 'prismaquant').rglob('*.py')):
         for node in ast.walk(ast.parse(path.read_text())):
             imported = []
             if isinstance(node, ast.Import):
