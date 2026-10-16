@@ -379,26 +379,27 @@ def allocation_shape_price_scope(serving_target, *, tensor_parallel):
     """What a PACT shape-time table must equal, and what admits its launches.
 
     Returns ``(ShapeTableScope, eligibility table, published formats)``. The
-    scope is the TRACKED serving pin, after the live gate has checked the
-    installed contract's bytes against it (``require_pinned_tessera_runtime``),
+    scope is the TRACKED serving pin, after the exact pin has checked one
+    captured installed contract (``RuntimeContractSnapshot.require_exact_pin``),
     plus the serving target the flags name and the world size the caller
-    declares; the eligibility table and the format rows are the installed
-    contract's own (``tessera_runtime_contract.installed_runtime_snapshot``). The table's
-    ``tessera_commit`` is the commit the serve installs, so it is compared with
-    the pin's ``serving_commit``.
+    declares; the eligibility table and the format rows are read from those
+    same captured bytes, so the facts priced are the facts the pin verified.
+    The table's ``tessera_commit`` is the commit the serve installs, so it is
+    compared with the pin's ``serving_commit``.
     """
-    from . import tessera_render, tessera_serving_runtime_pin as pins
     from .shape_runtime_prices import ShapeTableScope
+    from .tessera_runtime_contract import installed_runtime_snapshot
 
     if serving_target is None:
         raise LookupError("a shape-time table is admitted only under an explicit serving "
                           "target: pass --tessera-platform, --tessera-runtime-image, "
                           "--tessera-execution-mode and --tessera-residency")
-    pin = pins.load_tessera_serving_runtime_pin()
-    pins.require_pinned_tessera_runtime(pin)
-    from .tessera_runtime_contract import installed_runtime_snapshot
-
-    snapshot = installed_runtime_snapshot()
+    try:
+        snapshot = installed_runtime_snapshot()
+    except (ImportError, OSError) as exc:
+        raise LookupError("no installed Tessera runtime contract can admit a shape-time "
+                          f"table: {exc}") from exc
+    pin = snapshot.require_exact_pin()
     eligibility, published = snapshot.eligibility, snapshot.published_formats
     scope = ShapeTableScope(
         contract_sha256=pin.contract_sha256, tessera_commit=pin.serving_commit,
