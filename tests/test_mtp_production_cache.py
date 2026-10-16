@@ -665,6 +665,7 @@ def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
 ):
     from prismaquant.production_weight_cache import (
         NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+        NVFP4JointGlobalWitness,
         nvfp4_joint_global_witness_section,
         nvfp4_joint_global_witnesses,
     )
@@ -680,7 +681,7 @@ def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
     # rendered. The MTP append owns neither.
     witnessed_body = ("model.layers.0.self_attn.q_proj", "NVFP4")
     unwitnessed_body = ("model.layers.0.self_attn.k_proj", "NVFP4")
-    body_witnesses = {witnessed_body: 0.25}
+    body_witnesses = {witnessed_body: NVFP4JointGlobalWitness(0.25, None)}
     cache = ProductionWeightCache(
         weights={witnessed_body: torch.zeros((16, 16)),
                  unwitnessed_body: torch.zeros((16, 16))},
@@ -717,7 +718,7 @@ def test_mtp_append_witnesses_only_the_fused_pairs_it_renders(
     # witness survives unchanged, and the unwitnessed body entry and the
     # unfused mtp.fc stay unwitnessed.
     assert set(witnesses) == mtp_fused | set(body_witnesses)
-    assert len({witnesses[key] for key in mtp_fused}) == 1
+    assert len({witnesses[key].joint_global for key in mtp_fused}) == 1
     assert {key: witnesses[key] for key in body_witnesses} == body_witnesses
 
     # The append owns its scope: a narrower append leaves no stale MTP

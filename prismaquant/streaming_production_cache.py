@@ -140,7 +140,7 @@ def _render_dense_layer(
     fused-group-unified calibrated max_abs, then
     ``render_production_weight`` per (qname, fmt) stored via the shared
     ``_store_rendered_weight_entry``, each stored fused NVFP4 entry witnessing
-    its joint global on ``cache``.
+    its joint global, and the shard it was published as, on ``cache``.
     """
     from prismaquant.decision_units import fused_group_key
     from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
@@ -323,7 +323,7 @@ def _render_dense_layer(
                         f"{qname}@{fmt}, got {type(result).__name__}"
                     )
             else:
-                _store_rendered_weight_entry(
+                shard = _store_rendered_weight_entry(
                     weights=cache.weights,
                     cache_dir_path=cache_dir_path,
                     qname=qname,
@@ -332,7 +332,7 @@ def _render_dense_layer(
                     weight_dtype=weight.dtype,
                 )
                 if joint is not None and render_fmt == "NVFP4":
-                    cache.witness_nvfp4_joint_global(qname, fmt, joint)
+                    cache.witness_nvfp4_joint_global(qname, fmt, joint, shard)
             rendered += 1
             del w_dq
         del X

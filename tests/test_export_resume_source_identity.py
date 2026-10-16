@@ -181,25 +181,30 @@ def test_manifest_without_source_identity_is_refused(tmp_path, monkeypatch):
     assert "source_identity" in json.loads(manifest.read_text())
 
 
-def test_manifest_from_before_the_fused_witness_gate_is_refused(
-    tmp_path, monkeypatch,
+@pytest.mark.parametrize("admission", [None, "render_witness_v1"])
+def test_manifest_from_before_the_shard_bound_witness_gate_is_refused(
+    tmp_path, monkeypatch, admission,
 ):
     """Layers packed before fused NVFP4 re-packs required the render's
-    joint-global witness were never checked against it; replaying them would
-    ship a legacy cache's re-pack past the gate."""
+    joint-global witness (no stamp), or required one that named no shard
+    (v1), were never checked against the shard they read; replaying them
+    would ship a legacy or overwritten cache's re-pack past the gate."""
     run, source = _exporter(tmp_path, monkeypatch)
     cache = tmp_path / "resume"
     _fill_cache(run, source, cache, weight=_WEIGHT_A, bias=_BIAS_A)
 
     manifest = cache / "manifest.json"
     legacy = json.loads(manifest.read_text())
-    assert legacy.pop("fused_nvfp4_global_admission") == "render_witness_v1"
+    assert legacy.pop("fused_nvfp4_global_admission") == "render_witness_v2"
+    if admission is not None:
+        legacy["fused_nvfp4_global_admission"] = admission
     manifest.write_text(json.dumps(legacy))
 
     replays: list = []
     run(cache, replay_log=replays)
-    assert replays == [], "a pre-witness manifest admitted replay"
-    assert json.loads(manifest.read_text())["fused_nvfp4_global_admission"]
+    assert replays == [], f"a {admission or 'pre-witness'} manifest admitted replay"
+    assert json.loads(manifest.read_text())["fused_nvfp4_global_admission"] == (
+        "render_witness_v2")
 
 
 # --------------------------------------------------------------------------

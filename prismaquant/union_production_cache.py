@@ -42,16 +42,20 @@ from prismaquant.streamed_model_identity import validate_streamed_model_identity
 from prismaquant.layer_config import load_assignment
 from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.schemas import refuse_retired_codebook_format
+from prismaquant.file_identity import file_stat_signature
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_KEY,
     ACTIVATION_HOOK_SCOPE_SCHEMA,
     NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
+    NVFP4JointGlobalWitness,
     ProductionWeightCache,
+    PublishedShard,
     _production_cache_git_commit,
     _production_cache_source_sha256,
     first_identity_difference,
     identity_value_for_error,
+    nvfp4_joint_global_witness_problem,
     nvfp4_joint_global_witness_section,
     nvfp4_joint_global_witnesses,
     packed_activation_hook_scope_of,
@@ -774,6 +778,36 @@ def _backing_records(
     return records
 
 
+def _require_witnesses_bind_hashed_files(
+    cache: ProductionWeightCache, *, cache_dir: Path,
+) -> None:
+    """Refuse a shard whose fused witnesses do not bind the files it hashed.
+
+    Runs after ``_backing_records`` hashed every backing file. A witness that
+    still binds its shard then shows the hashed bytes are its producer's
+    render, so the manifest's SHA-256 carries the witness to every verified
+    copy (``union_shard_manifests`` re-binds it to its own). Witnesses for
+    entries the shard does not hold are the union merge's to refuse.
+    """
+    for key, witness in nvfp4_joint_global_witnesses(
+        cache.metadata, where="cache shard"
+    ).items():
+        value = cache.weights.get(key)
+        if value is None:
+            continue
+        served = None if isinstance(value, torch.Tensor) else str(value)
+        problem = nvfp4_joint_global_witness_problem(
+            witness,
+            served=served,
+            path=None if served is None else cache_dir / served,
+        )
+        if problem is not None:
+            raise ValueError(
+                f"cache shard entry {key[0]}@{key[1]}: {problem}; re-render "
+                "the shard into a fresh --cache-dir before manifesting it"
+            )
+
+
 def _manifest_envelope(
     *, schema: str, payload: Mapping[str, object], where: str
 ) -> dict[str, object]:
@@ -820,6 +854,7 @@ def create_shard_manifest(
     cache.relocate(cache_dir)
     _expected_keys_for_coverage(cache, expected, require_complete=False)
     records = _backing_records(cache, cache_dir=cache_dir)
+    _require_witnesses_bind_hashed_files(cache, cache_dir=cache_dir)
     campaign = build_campaign_identity(
         cache,
         source_model_identity=source_model_identity,
@@ -1517,7 +1552,10 @@ def _merge_cache_metadata(
     return dict(sorted(reference.items()))
 
 
-def _copy_verified(source: Path, destination: Path, *, expected_sha256: str) -> None:
+def _copy_verified(
+    source: Path, destination: Path, *, expected_sha256: str,
+) -> tuple[int, int, int, int, int]:
+    """Copy one shard, verify its SHA-256 and return the copy's file identity."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     with source.open("rb") as src, destination.open("xb") as dst:
         shutil.copyfileobj(src, dst, length=8 * 1024 * 1024)
@@ -1528,6 +1566,42 @@ def _copy_verified(source: Path, destination: Path, *, expected_sha256: str) -> 
         raise ValueError(
             f"copied cache shard SHA-256 mismatch for {destination.name}"
         )
+    # The copy lives in this union's private staging directory; nothing else
+    # writes it between the hash and this stat.
+    return file_stat_signature(destination.lstat())
+
+
+def _rebind_witnesses_to_copies(
+    union_cache: ProductionWeightCache,
+    source_by_key: Mapping[tuple[str, str], tuple[Path, Mapping[str, object]]],
+    copy_identities: Mapping[str, tuple[int, int, int, int, int]],
+) -> None:
+    """Bind each merged fused witness to the union's copy of its shard.
+
+    Each shard manifest hashed a witness's shard while the witness bound it
+    (``_require_witnesses_bind_hashed_files``), and the copy matched that
+    hash, so the witnessed render is the copy's bytes. A witness that names
+    another file than the one its shard manifested refuses.
+    """
+    witnesses = nvfp4_joint_global_witnesses(
+        union_cache.metadata, where="union cache")
+    if not witnesses:
+        return
+    rebound: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
+    for key, witness in witnesses.items():
+        _source, record = source_by_key[key]
+        named = None if witness.shard is None else witness.shard.name
+        if named != record["path"]:
+            raise ValueError(
+                f"cache shard witness for {key[0]}@{key[1]} names "
+                f"{named!r}, not its manifested backing file {record['path']!r}"
+            )
+        copy = str(union_cache.weights[key])
+        rebound[key] = NVFP4JointGlobalWitness(
+            witness.joint_global, PublishedShard(copy, copy_identities[copy]))
+    union_cache.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+        nvfp4_joint_global_witness_section(rebound)
+    )
 
 
 def _union_weight_filename(key: tuple[str, str], content_sha256: str) -> str:
@@ -1655,6 +1729,7 @@ def union_shard_manifests(
         weights_dir = temporary_root / "weights"
         weights_dir.mkdir()
         copied: dict[str, str] = {}
+        copy_identities: dict[str, tuple[int, int, int, int, int]] = {}
         for key in sorted(source_by_key):
             source, record = source_by_key[key]
             digest = _require_sha256(
@@ -1664,10 +1739,12 @@ def union_shard_manifests(
             destination = weights_dir / filename
             prior = copied.get(filename)
             if prior is None:
-                _copy_verified(source, destination, expected_sha256=digest)
+                copy_identities[filename] = _copy_verified(
+                    source, destination, expected_sha256=digest)
                 copied[filename] = digest
             elif prior != digest:
                 raise ValueError(f"content-addressed filename collision: {filename}")
+        _rebind_witnesses_to_copies(union_cache, source_by_key, copy_identities)
 
         cache_bytes = pickle.dumps(union_cache, protocol=pickle.HIGHEST_PROTOCOL)
         cache_path = temporary_root / "production_weight_cache.pkl"

@@ -146,14 +146,20 @@ PRE_GUARD_ADMISSION_SIDECAR_KEY = "pre_guard_admission"
 #: Per-entry witness of the fused-sibling NVFP4 joint global.  Export
 #: re-derives a fused sibling's codes and FP8 block scales from the cached
 #: dequant under the joint global it recomputes, which reproduces the validated
-#: render only if the render used that same global.  The fill that renders an
-#: entry on a joint global records the exact float32 value here, keyed
-#: ``qname|FMT``; nothing else writes one, so loading, resuming or appending to
-#: a cache never witnesses an entry another producer rendered.  Streamed fills
-#: before 2026-10-16 used the builder's ambient recipe for that global and
-#: recorded no witness (NATIVE-LEGACY-01).
+#: render only if the render used that same global.  The producer that renders
+#: an entry on a joint global records the exact float32 value here, keyed
+#: ``qname|FMT``, with the shard it published for the entry (its manifest name
+#: and file identity), or no shard for a render it held in memory.  A witness
+#: certifies only the bytes the cache serves while they are that shard
+#: (``nvfp4_joint_global_witness_problem``).  Streamed fills before 2026-10-16
+#: used the builder's ambient recipe for that global and recorded no witness
+#: (NATIVE-LEGACY-01); v1 witnesses named no shard, so a resume could attach
+#: one to bytes another producer wrote over its shard (N3-01).  Both refuse.
 NVFP4_JOINT_GLOBAL_WITNESS_KEY = "nvfp4_joint_global_witness"
 NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA = (
+    "prismaquant.production_weight_cache.nvfp4_joint_global_witness.v2"
+)
+_NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA_V1 = (
     "prismaquant.production_weight_cache.nvfp4_joint_global_witness.v1"
 )
 NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME = "nvfp4_joint_global_witness.json"
@@ -1766,11 +1772,16 @@ class ProductionWeightCache:
             )
 
     def witness_nvfp4_joint_global(
-        self, qname: str, fmt: str, joint_global: torch.Tensor,
+        self,
+        qname: str,
+        fmt: str,
+        joint_global: torch.Tensor,
+        shard: PublishedShard | None,
     ) -> None:
         """Record the joint global this producer just rendered an entry on.
 
-        Only the code that rendered ``(qname, fmt)`` may call this; see
+        Only the code that rendered ``(qname, fmt)`` may call this, with the
+        shard ``_store_rendered_weight_entry`` returned for that render; see
         ``NVFP4_JOINT_GLOBAL_WITNESS_KEY``.
         """
         from prismaquant import format_registry as fr
@@ -1780,20 +1791,60 @@ class ProductionWeightCache:
             self.metadata = {}
         witnesses = nvfp4_joint_global_witnesses(
             self.metadata, where="ProductionWeightCache")
-        witnesses[key] = _nvfp4_joint_global_value(
-            joint_global, where=f"{key[0]}@{key[1]}")
+        witnesses[key] = NVFP4JointGlobalWitness(
+            _nvfp4_joint_global_value(joint_global, where=f"{key[0]}@{key[1]}"),
+            shard,
+        )
         self.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
             nvfp4_joint_global_witness_section(witnesses)
         )
 
-    def nvfp4_joint_global_witness(
+    def witnessed_nvfp4_joint_global(
         self, name: str, fmt: str, *, where: str,
-    ) -> float | None:
-        """The fused NVFP4 joint global this entry's producer witnessed, if any."""
+    ) -> float:
+        """The joint global the producer of the bytes this cache serves witnessed.
+
+        Call it after reading the entry: a witness that still binds the entry
+        then shows the bytes read are its producer's render
+        (``nvfp4_joint_global_witness_problem``). Refuses an entry with no
+        witness, or with a witness those bytes do not satisfy.
+        """
         key = self.resolve_key(name, fmt)
-        if key is None:
-            return None
-        return nvfp4_joint_global_witnesses(self.metadata, where=where).get(key)
+        entry = f"{name}@{fmt}" if key is None else f"{key[0]}@{key[1]}"
+        witness = (
+            None if key is None
+            else nvfp4_joint_global_witnesses(self.metadata, where=where).get(key)
+        )
+        if witness is None:
+            raise RuntimeError(
+                f"{where} entry {entry} carries no fused-sibling joint-global "
+                "witness: no producer recorded the joint global its cached "
+                "dequant was rendered on for the shard this cache holds. That "
+                "covers caches built before shard-bound witnesses, shards "
+                "resumed or appended without one, and witnesses a resume "
+                "could not bind to the shard on disk. Re-render the production "
+                "cache into a fresh --cache-dir; resuming the same directory "
+                "keeps the unwitnessed shard and refuses again."
+            )
+        value = self.weights[key]
+        served = (
+            (self._lru_paths or {}).get(key)
+            if isinstance(value, torch.Tensor) else str(value)
+        )
+        problem = nvfp4_joint_global_witness_problem(
+            witness,
+            served=served,
+            path=None if served is None else Path(self._path_for_value(served)),
+        )
+        if problem is not None:
+            raise RuntimeError(
+                f"{where} entry {entry}: {problem}. The bytes this cache "
+                "serves are not the render its producer witnessed. Re-render "
+                "the production cache into a fresh --cache-dir, or export from "
+                "the directory the fill wrote: a copy of a cache directory "
+                "carries no witness."
+            )
+        return witness.joint_global
 
 
 class _LinearActivationCollector:
@@ -2604,16 +2655,28 @@ def _write_render_score_sidecar(
     os.replace(tmp, path)
 
 
+class NVFP4JointGlobalWitness(NamedTuple):
+    """The joint global one producer rendered a fused NVFP4 entry on.
+
+    ``shard`` is the shard that producer published for the entry, or ``None``
+    for a render it stored in memory.
+    """
+
+    joint_global: float
+    shard: PublishedShard | None
+
+
 def nvfp4_joint_global_witnesses(
     metadata: Mapping[str, object] | None,
     *,
     where: str,
-) -> dict[tuple[str, str], float]:
-    """``(qname, fmt)`` -> the fused NVFP4 joint global that entry rendered on.
+) -> dict[tuple[str, str], NVFP4JointGlobalWitness]:
+    """``(qname, fmt)`` -> the witness of the joint global that entry rendered on.
 
     Metadata without the section witnesses nothing. A present section is read
-    exactly: an unknown schema, a malformed key or a value that is not a
-    positive finite number refuses instead of witnessing nothing.
+    exactly: an unknown schema, a malformed key, a joint global that is not a
+    positive finite number or a malformed shard refuses instead of witnessing
+    nothing. A v1 section, which named no shard, refuses by name.
     """
     section = (
         None if metadata is None
@@ -2621,6 +2684,15 @@ def nvfp4_joint_global_witnesses(
     )
     if section is None:
         return {}
+    if (
+        isinstance(section, Mapping)
+        and section.get("schema") == _NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA_V1
+    ):
+        raise ValueError(
+            f"{where}: {NVFP4_JOINT_GLOBAL_WITNESS_KEY} is schema v1, which "
+            "binds no witness to the shard its producer published; re-render "
+            "the production cache into a fresh --cache-dir"
+        )
     records = section.get("records") if isinstance(section, Mapping) else None
     if (
         not isinstance(records, Mapping)
@@ -2628,34 +2700,116 @@ def nvfp4_joint_global_witnesses(
         or section["schema"] != NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA
     ):
         raise ValueError(f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY}")
-    witnesses: dict[tuple[str, str], float] = {}
+    witnesses: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
     for raw_key, value in records.items():
         qname, separator, fmt = str(raw_key).rpartition("|")
+        record = value if isinstance(value, Mapping) else {}
+        joint_global = record.get("joint_global")
+        shard = record.get("shard")
+        shard_fields = shard if isinstance(shard, Mapping) else {}
+        name = shard_fields.get("name")
+        signature = shard_fields.get("stat")
         if (
             not isinstance(raw_key, str) or not separator or not qname
             or not fmt or fmt != fmt.upper()
-            or isinstance(value, bool) or not isinstance(value, (int, float))
-            or not math.isfinite(value) or value <= 0.0
+            or not isinstance(value, Mapping)
+            or set(value) != {"joint_global", "shard"}
+            or isinstance(joint_global, bool)
+            or not isinstance(joint_global, (int, float))
+            or not math.isfinite(joint_global) or joint_global <= 0.0
+            or (shard is not None and (
+                not isinstance(shard, Mapping)
+                or set(shard) != {"name", "stat"}
+                or not isinstance(name, str) or not name
+                or not isinstance(signature, list) or len(signature) != 5
+                or any(type(part) is not int for part in signature)
+            ))
         ):
             raise ValueError(
                 f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY} record "
                 f"{raw_key!r}: {value!r}"
             )
-        witnesses[(qname, fmt)] = float(value)
+        witnesses[(qname, fmt)] = NVFP4JointGlobalWitness(
+            float(joint_global),
+            None if shard is None else PublishedShard(name, tuple(signature)),
+        )
     return witnesses
 
 
 def nvfp4_joint_global_witness_section(
-    witnesses: Mapping[tuple[str, str], float],
+    witnesses: Mapping[tuple[str, str], NVFP4JointGlobalWitness],
 ) -> dict[str, object]:
     """The metadata and sidecar form of ``witnesses``."""
     return {
         "schema": NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA,
         "records": {
-            _render_score_record_key(qname, fmt): float(value)
-            for (qname, fmt), value in sorted(witnesses.items())
+            _render_score_record_key(qname, fmt): {
+                "joint_global": float(witness.joint_global),
+                "shard": (
+                    None if witness.shard is None
+                    else {
+                        "name": str(witness.shard.name),
+                        "stat": [int(part) for part in witness.shard.stat],
+                    }
+                ),
+            }
+            for (qname, fmt), witness in sorted(witnesses.items())
         },
     }
+
+
+def nvfp4_joint_global_witness_problem(
+    witness: NVFP4JointGlobalWitness,
+    *,
+    served: str | None,
+    path: Path | None,
+) -> str | None:
+    """Why ``witness`` does not certify the bytes served for its entry, or None.
+
+    ``served`` is the manifest value the cache serves the entry from (``None``
+    for an entry held in memory) and ``path`` its resolved file. A shard
+    witness holds while ``served`` names the shard its producer published and
+    that file still has the identity it was published with
+    (``file_identity.file_stat_signature``: device, inode, size, mtime and
+    ctime). Renaming, linking, unlinking, writing, truncating or changing the
+    attributes of a file updates its ctime on a local Linux filesystem, so an
+    unchanged identity means the published file has held the path, unmodified,
+    since its producer witnessed it: whatever read that path in between read
+    those bytes. It is not a content digest. A byte-identical copy is another
+    file and fails. Not seen: a change that bypasses the kernel's timestamp
+    update, a same-size rewrite or an inode reuse within one timestamp tick
+    of the publish, and a stale network-filesystem attribute cache.
+    """
+    shard = witness.shard
+    if shard is None:
+        if served is None:
+            return None
+        return (
+            "its witness names an in-memory render, but the cache serves it "
+            f"from {served}"
+        )
+    if served is None:
+        return (
+            f"its witness names shard {shard.name}, but the cache holds the "
+            "entry in memory"
+        )
+    if str(served) != shard.name:
+        return (
+            f"its witness names shard {shard.name}, but the cache serves it "
+            f"from {served}"
+        )
+    try:
+        observed = path.lstat()
+    except OSError as exc:
+        return f"its shard {path} cannot be checked ({exc.strerror})"
+    identity = file_stat_signature(observed)
+    if not stat.S_ISREG(observed.st_mode) or identity != shard.stat:
+        return (
+            f"its shard {path} is not the file its producer published (file "
+            f"identity {identity} != witnessed {shard.stat}): it was replaced, "
+            "modified or copied since"
+        )
+    return None
 
 
 def _nvfp4_joint_global_value(joint_global: torch.Tensor, *, where: str) -> float:
@@ -2671,7 +2825,7 @@ def _nvfp4_joint_global_value(joint_global: torch.Tensor, *, where: str) -> floa
 
 def _load_nvfp4_joint_global_witness_sidecar(
     path: Path | None,
-) -> dict[tuple[str, str], float]:
+) -> dict[tuple[str, str], NVFP4JointGlobalWitness]:
     """Witnesses an earlier run of the resident fill wrote for its own shards."""
     if path is None or not path.is_file():
         return {}
@@ -2689,7 +2843,7 @@ def _load_nvfp4_joint_global_witness_sidecar(
 
 def _write_nvfp4_joint_global_witness_sidecar(
     path: Path | None,
-    witnesses: Mapping[tuple[str, str], float],
+    witnesses: Mapping[tuple[str, str], NVFP4JointGlobalWitness],
 ) -> None:
     if path is not None:
         atomic_write_bytes(
@@ -5979,16 +6133,45 @@ def fill_production_weight_cache(
             flush=True,
         )
     # Witnesses earlier runs of this fill published beside their fused NVFP4
-    # shards. A resumed shard keeps one only if its producer wrote it; any
-    # other resumed shard stays unwitnessed and export refuses to re-pack it.
+    # shards. A resumed shard keeps one only if its producer wrote it AND the
+    # shard on disk is still the file that producer published; any other
+    # resumed shard stays unwitnessed and export refuses to re-pack it.
     joint_global_witness_sidecar_path: Path | None = (
         cache_dir_path / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME
         if cache_dir_path is not None else None
     )
-    resumed_joint_global_witnesses = _load_nvfp4_joint_global_witness_sidecar(
+    resumed_joint_global_witnesses: dict[
+        tuple[str, str], NVFP4JointGlobalWitness] = {}
+    unbound_resumed_witnesses: list[str] = []
+    rendered_keys = {
+        (qname, str(fmt).upper())
+        for qname, fmts in render_formats_by_qname.items()
+        for fmt in fmts
+    }
+    for key, witness in _load_nvfp4_joint_global_witness_sidecar(
         joint_global_witness_sidecar_path
-    )
-    joint_global_witnesses: dict[tuple[str, str], float] = {}
+    ).items():
+        fname = cache_weight_filename(*key)
+        if key not in rendered_keys or not (cache_dir_path / fname).is_file():
+            # Out of this render's scope, or missing: a missing shard is
+            # re-rendered below and witnessed by that render.
+            continue
+        problem = nvfp4_joint_global_witness_problem(
+            witness, served=fname, path=cache_dir_path / fname)
+        if problem is None:
+            resumed_joint_global_witnesses[key] = witness
+        else:
+            unbound_resumed_witnesses.append(f"{key[0]}@{key[1]}: {problem}")
+    if unbound_resumed_witnesses:
+        print(
+            "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
+            f"witness for {len(unbound_resumed_witnesses)} shards the fill "
+            "did not leave as published; export refuses them until they are "
+            "re-rendered into a fresh --cache-dir. "
+            f"sample={unbound_resumed_witnesses[:3]}",
+            flush=True,
+        )
+    joint_global_witnesses: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
 
     fmt_set = {
         fmt
@@ -6430,7 +6613,7 @@ def fill_production_weight_cache(
             # fp32 but we always re-cast at install time, so storing fp32
             # is wasteful (2× memory).  On 27B this drops the cache from
             # ~25 GB to ~12 GB.
-            _store_rendered_weight_entry(
+            shard = _store_rendered_weight_entry(
                 weights=weights,
                 cache_dir_path=cache_dir_path,
                 qname=qname,
@@ -6439,8 +6622,10 @@ def fill_production_weight_cache(
                 weight_dtype=weight.dtype,
             )
             if joint is not None and render_fmt == "NVFP4":
-                joint_global_witnesses[key] = _nvfp4_joint_global_value(
-                    joint, where=f"{qname}@{fmt_key}")
+                joint_global_witnesses[key] = NVFP4JointGlobalWitness(
+                    _nvfp4_joint_global_value(joint, where=f"{qname}@{fmt_key}"),
+                    shard,
+                )
                 # Published after its shard, so no witness names a shard
                 # this run did not publish.
                 _write_nvfp4_joint_global_witness_sidecar(

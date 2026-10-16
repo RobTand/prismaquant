@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: each fused NVFP4 joint-global witness now names the
+shard its producer published, by manifest name and
+`file_identity.file_stat_signature` (schema v2). A resume adopts a witness
+only while that shard is still the published file. A shard manifest refuses
+witnesses its hashed files break, and the exact union re-binds them to its
+verified copies. Export checks, after reading an entry, that the bytes it
+re-packs are the witnessed shard. This binds file identity, not content:
+replacing, rewriting or copying a shard voids its witness, while renaming
+the directory keeps it (§6.1 M19 states the limits). Every production cache
+built before this change refuses its fused NVFP4 re-packs under the default
+match-render-scale export, resident caches with correct bytes included. It
+must be re-rendered into a fresh `--cache-dir`; resuming the same directory
+keeps the unwitnessed shards and refuses again. Export resume layers packed
+before this change do not replay (`render_witness_v2`). Rendered bytes and
+the opt-out are unchanged.
+
 Re-stamped 2026-10-16: the sampled whole-stack proposal's pending
 independent validation names its retired helper,
 `archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py`,
@@ -27141,15 +27157,30 @@ making the re-quant of the cache's bf16 dequant near-idempotent;
 the same recorded recipe — without it, joint_mse-rendered experts re-derived under `static_6`
 flipped 43% of packed bytes. The fused-sibling joint global is derived from that record by
 the resident fill, the streamed fill and both export pre-passes (2026-10-16). A recipe record
-cannot show which global a cached fused sibling actually used, so the fill that renders one
-records that exact global in `metadata.nvfp4_joint_global_witness` (resident resume sidecar
-`nvfp4_joint_global_witness.json`), and `_pack_production_cached_2d` refuses a fused re-pack
-whose override differs from, or lacks, that witness. Loading, resuming, appending or a union
-never creates a witness for an entry its producer did not render. The opt-out re-derives
+cannot show which global a cached fused sibling actually used, so the producer that renders
+one records that exact global in `metadata.nvfp4_joint_global_witness`, with the shard it
+published for it (schema v2; resident resume sidecar `nvfp4_joint_global_witness.json`).
+The shard is named by its manifest value
+and its `file_identity.file_stat_signature` (device, inode, size, mtime, ctime), read through
+the descriptor the publisher holds across its rename. `_pack_production_cached_2d` reads the
+entry first, then refuses unless the bytes the cache served are still that shard
+(`ProductionWeightCache.witnessed_nvfp4_joint_global`) and the export's override equals the
+witnessed global. A resume adopts a sidecar witness only for a shard that is still the
+published file, the MTP append keeps the body's records, a shard manifest refuses a witness
+its hashed files break, and the exact union re-binds each shard's witnesses to its own
+SHA-256-verified copies. **Guarantee and limits.** An unchanged identity means the published
+file has held its path, unmodified, since it was witnessed, so every read of that path in
+between read those bytes; checking after the read leaves no window between check and load.
+It is a file-identity binding, not a content digest. A byte-identical copy is another file, so
+a copied, rsynced or transferred cache directory refuses its fused entries until they are
+re-rendered; renaming the directory within one filesystem keeps them. Not seen: a change that
+bypasses the kernel's timestamp update, a same-size rewrite or inode reuse within one timestamp
+tick of the publish, and a stale network-filesystem attribute cache. A shard replaced after its
+bytes were read refuses even when those bytes were the witnessed ones. The opt-out re-derives
 under the exporter's own recipe and is not gated; export resume binds
-`fused_nvfp4_global_admission` so earlier layer payloads re-pack.
-`_pack_production_cached_2d` `:2180-2279` re-packs only — no re-run of GPTQ/scale-sweep, which
-would measure a different artifact.
+`fused_nvfp4_global_admission` (`render_witness_v2`) so earlier layer payloads re-pack.
+`_pack_production_cached_2d` re-packs only — no re-run of GPTQ/scale-sweep, which would
+measure a different artifact.
 
 **Block-output match** (`prismaquant/block_output_match.py`), `PRISMAQUANT_BLOCK_OUTPUT_MATCH`
 **default `"1"` = ON** (`:6168-6169`, `:6321`, `:6467`): for NVFP4 dense block Linears
