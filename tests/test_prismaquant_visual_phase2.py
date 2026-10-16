@@ -12,8 +12,9 @@ GPTQ/scale-sweep/AR treatment at export. Covers:
   4. incremental_measure_quant_cost._run_visual_cost_shard — measures
      cost entries for a tiny visual-style nn.Module stub.
   5. allocator --visual-sensitivity={fisher, uniform} mode selection.
-  6. native_render_codec.quantize_2d picks up visual activations
-     from _CACHED_ACTIVATIONS when the multimodal probe populates them.
+  6. export_native_compressed._apply_visual_recipe_quant passes the
+     activations the multimodal probe cached under a visual Linear's recipe
+     name to native_render_codec.quantize_2d.
 """
 from __future__ import annotations
 
@@ -514,84 +515,69 @@ class TestAllocatorVisualSensitivityModes(unittest.TestCase):
 
 
 class TestQuantize2DVisualActivationsRoundtrip(unittest.TestCase):
-    """The NVFP4 path in quantize_2d consults `_CACHED_ACTIVATIONS`
-    by recipe name. When the multimodal probe populates visual Linear
-    activations under matching names, GPTQ / AR rounding apply."""
+    """The exporter hands a visual Linear's cached activations to the codec.
+
+    ``_apply_visual_recipe_quant`` is the exporter's visual boundary: it
+    looks up ``_CACHED_ACTIVATIONS`` by the recipe name (the weight key without
+    ``.weight``) and passes that tensor to ``native_render_codec.quantize_2d``,
+    which runs GPTQ / AR rounding on it. A spy on the codec records the tensor
+    the exporter passed, and a decoy under the weight key catches a lookup by
+    the wrong name."""
+
+    def _export_visual(self, name, weight, cached):
+        """Run the exporter's visual quant; return its output and the codec calls."""
+        real = _native_render_codec.quantize_2d
+        seen = []
+
+        def spy(*args, **kwargs):
+            seen.append((kwargs.get("linear_name"), kwargs.get("cached_activations")))
+            return real(*args, **kwargs)
+
+        with mock.patch.object(_test_exporter, "_CACHED_ACTIVATIONS", cached), \
+                mock.patch.object(_native_render_codec, "quantize_2d", spy):
+            out = _test_exporter._apply_visual_recipe_quant(
+                {f"{name}.weight": weight}, {name: "NVFP4"},
+                device=torch.device("cpu"))
+        return out, seen
 
     def test_gptq_enabled_reads_visual_activations_from_cache(self):
-        from prismaquant import export_native_compressed as exp
-
         visual_name = "model.visual.blocks.0.attn.qkv"
         # Rank-2 weight with in_features divisible by NVFP4 group_size=16.
         W = torch.randn(48, 32, dtype=torch.bfloat16)
-        # Cache a fake activation tensor keyed by recipe name.
         fake_acts = torch.randn(64, 32, dtype=torch.float32)
-
-        prev_cache = _test_exporter._CACHED_ACTIVATIONS
-        try:
-            _test_exporter._CACHED_ACTIVATIONS = {visual_name: fake_acts}
-            out = _native_render_codec.quantize_2d(
-                W, "NVFP4",
-                linear_name=visual_name,
-                gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-        finally:
-            _test_exporter._CACHED_ACTIVATIONS = prev_cache
-        # NVFP4 path emits the full triple; we just confirm the call returned
-        # a valid compressed tensor structure when activations come from the
-        # module-level cache.
+        decoy = torch.randn(64, 32, dtype=torch.float32)
+        out, seen = self._export_visual(
+            visual_name, W, {visual_name: fake_acts, f"{visual_name}.weight": decoy})
+        self.assertEqual([name for name, _ in seen], [visual_name])
+        self.assertIs(seen[0][1], fake_acts)
         for key in ("weight_packed", "weight_scale",
                     "weight_global_scale", "input_global_scale"):
-            self.assertIn(key, out)
+            self.assertIn(f"{visual_name}.{key}", out)
 
     def test_gptq_fallback_when_activation_cache_missing_key(self):
-        # If _CACHED_ACTIVATIONS doesn't have the visual key, the
-        # activation-aware pass is skipped and a valid NVFP4 triple is
-        # still produced.
-        from prismaquant import export_native_compressed as exp
-
+        # If _CACHED_ACTIVATIONS doesn't have the visual key, the codec gets no
+        # activations (the activation-aware pass is skipped) and a valid NVFP4
+        # triple is still produced.
         visual_name = "model.visual.merger.mlp.0"
         W = torch.randn(32, 32, dtype=torch.bfloat16)
-        prev_cache = _test_exporter._CACHED_ACTIVATIONS
-        try:
-            # Set cache but without this key.
-            _test_exporter._CACHED_ACTIVATIONS = {"some.other.linear":
-                                       torch.randn(4, 32)}
-            out = _native_render_codec.quantize_2d(
-                W, "NVFP4",
-                linear_name=visual_name,
-                gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get(visual_name) if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target=visual_name, calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-        finally:
-            _test_exporter._CACHED_ACTIVATIONS = prev_cache
-        self.assertIn("weight_packed", out)
+        out, seen = self._export_visual(
+            visual_name, W, {"some.other.linear": torch.randn(4, 32)})
+        self.assertEqual(seen, [(visual_name, None)])
+        self.assertIn(f"{visual_name}.weight_packed", out)
 
     def test_quantize_2d_multimodal_activation_reuse_body_path(self):
-        # A visual Linear name that matches an exp cache entry should
-        # produce the same-shape packed output as a body Linear of the
-        # same weight shape — sanity that the cache lookup is name-
-        # agnostic beyond the dictionary indexing.
-        from prismaquant import export_native_compressed as exp
-
+        # The codec's packed output for a visual Linear has the shape a body
+        # Linear of the same weight shape gets: the Linear's name selects only
+        # its activations, not its layout.
         W = torch.randn(32, 32, dtype=torch.bfloat16)
         acts = torch.randn(64, 32, dtype=torch.float32)
-
-        prev = _test_exporter._CACHED_ACTIVATIONS
-        try:
-            _test_exporter._CACHED_ACTIVATIONS = {
-                "model.visual.blocks.0.mlp.fc1": acts,
-                "model.layers.0.mlp.gate_proj": acts,
-            }
-            visual = _native_render_codec.quantize_2d(
-                W, "NVFP4", linear_name="model.visual.blocks.0.mlp.fc1",
-                gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.visual.blocks.0.mlp.fc1") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="model.visual.blocks.0.mlp.fc1", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-            body = _native_render_codec.quantize_2d(
-                W, "NVFP4", linear_name="model.layers.0.mlp.gate_proj",
-                gptq_enabled=True,
-             levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), cached_activations=(_test_exporter._CACHED_ACTIVATIONS.get("model.layers.0.mlp.gate_proj") if _test_exporter._CACHED_ACTIVATIONS is not None else None), input_global_scale_override=_native_render_codec.resolve_nvfp4_input_global_scale(target="model.layers.0.mlp.gate_proj", calibrated_scales=_test_exporter._INPUT_GLOBAL_SCALES))
-        finally:
-            _test_exporter._CACHED_ACTIVATIONS = prev
+        levers = NativeRenderLevers.resolve()
+        visual = _native_render_codec.quantize_2d(
+            W, "NVFP4", linear_name="model.visual.blocks.0.mlp.fc1",
+            gptq_enabled=True, cached_activations=acts, levers=levers)
+        body = _native_render_codec.quantize_2d(
+            W, "NVFP4", linear_name="model.layers.0.mlp.gate_proj",
+            gptq_enabled=True, cached_activations=acts, levers=levers)
         self.assertEqual(visual["weight_packed"].shape,
                          body["weight_packed"].shape)
 
