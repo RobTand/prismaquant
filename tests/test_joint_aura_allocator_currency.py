@@ -2,10 +2,13 @@
 from prismaquant import joint_aura_rows
 from prismaquant import priced_cell
 import copy
+import math
 
 import pytest
 
 from prismaquant import allocator_candidates as ac
+from prismaquant.activation_fair_pricing import (
+    ActivationFairPricing, FamilyCalibration, _family_of)
 from prismaquant.cost_currency import CostCurrencyError, require_run_currency
 from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from test_joint_aura_streamed import _fixture, _run
@@ -28,13 +31,33 @@ def test_actual_joint_table_admits_in_one_aura_currency(measured_payload):
     assert report["activation_quantization_included"] is True
 
 
+def _calibrated_transfer(fmt, penalty):
+    """A run calibration whose family penalty for ``fmt`` is ``penalty``."""
+    family = _family_of(fmt)
+    fit = FamilyCalibration(family, 8, penalty, math.log2(penalty), 0.0, 0.0, 0.0, 0.0,
+                            (fmt,), ((fmt, math.log2(penalty), 8),), 0.0, (), "f" * 64)
+    return ActivationFairPricing(True, "synthetic calibration", {family: fit},
+                                 {family: 8}, {family: 8}, ())
+
+
 def test_joint_cost_consumed_without_scalar_sensitivity_or_activation_transfer(measured_payload, monkeypatch):
     _, row = _first(measured_payload)
-    monkeypatch.setattr(priced_cell, "_activation_penalty", lambda *args: 1000.0)
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
+    pricing = _calibrated_transfer("FP8_E4M3", 1000.0)
+    stats = {"h_trace": 1e8}
+    # The trap is armed: under this calibration a weight-only row of the same
+    # format and value IS transferred, so a joint row routed past its branch
+    # would be priced 1000x.
+    assert row["predicted_dloss"] != 0.0, "a zero price cannot show a transfer"
+    weight_only = {"predicted_dloss": row["predicted_dloss"]}
     assert priced_cell.cost_entry_predicted_dloss(
-        {"h_trace": 1e8}, row, format_name="FP8_E4M3") == row["predicted_dloss"]
-    assert priced_cell.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3") == "joint_aura"
+        stats, weight_only, format_name="FP8_E4M3", activation_pricing=pricing
+    ) == pytest.approx(1000.0 * row["predicted_dloss"])
+    assert priced_cell.cost_entry_activation_pricing_branch(
+        {}, weight_only, "FP8_E4M3", pricing) != "joint_aura"
+    assert priced_cell.cost_entry_predicted_dloss(
+        stats, row, format_name="FP8_E4M3", activation_pricing=pricing) == row["predicted_dloss"]
+    assert priced_cell.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3", pricing) == "joint_aura"
 
 
 @pytest.mark.parametrize("gain", [0.5, 2.0, float("nan")])
