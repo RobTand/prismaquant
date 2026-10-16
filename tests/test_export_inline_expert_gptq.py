@@ -31,25 +31,6 @@ Runs in a FRESH subprocess with the cuBLAS workspace pinned from process start.
 """
 from __future__ import annotations
 
-import prismaquant.export_native_compressed as _test_exporter
-from prismaquant.native_render_levers import NativeRenderLevers
-from dataclasses import replace
-import pytest
-
-@pytest.fixture(autouse=True)
-def _isolate_export_inputs():
-    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
-             _test_exporter._INPUT_GLOBAL_SCALES)
-    _test_exporter._RENDER_LEVERS = None
-    _test_exporter._CACHED_ACTIVATIONS = None
-    _test_exporter._INPUT_GLOBAL_SCALES = None
-    yield
-    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
-     _test_exporter._INPUT_GLOBAL_SCALES) = saved
-
-
-import prismaquant.native_render_codec as _native_render_codec
-
 import os
 import re
 import subprocess
@@ -62,6 +43,10 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 import pytest
 import torch
 
+import prismaquant.export_native_compressed as _test_exporter
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.native_render_levers import NativeRenderLevers
+
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="inline packed-expert render is GPU-or-bust",
@@ -71,6 +56,18 @@ _SCRATCH_ROOT = "/home/rob/dq-runs"
 _REPO_ROOT = str(Path(__file__).resolve().parents[1])
 _STREAM_TEST = str(Path(__file__).resolve().parent
                    / "test_streaming_production_cache.py")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_export_inputs():
+    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+             _test_exporter._INPUT_GLOBAL_SCALES)
+    _test_exporter._RENDER_LEVERS = None
+    _test_exporter._CACHED_ACTIVATIONS = None
+    _test_exporter._INPUT_GLOBAL_SCALES = None
+    yield
+    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+     _test_exporter._INPUT_GLOBAL_SCALES) = saved
 
 
 def _load_toy_fixtures():
@@ -130,22 +127,20 @@ def _set_export_act_globals(enc, act_dir):
     """Populate the export module's activation globals from the act cache."""
     from prismaquant.measure_quant_cost import ActivationIndex
 
-    enc._RENDER_LEVERS = NativeRenderLevers.resolve({
+    levers = NativeRenderLevers.resolve({
         "gptq": True, "scale_sweep": False,
         "static_act_order": True, "joint_scale_opt": True})
+    enc._RENDER_LEVERS = levers
     idx = ActivationIndex(act_dir, [])
-    _test_exporter._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
+    enc._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
     scales: dict[str, float] = {}
     for name in idx.names():
         try:
-            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(idx.load(name), levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()))
+            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(
+                idx.load(name), levers=levers)
         except Exception:
             pass
-    _test_exporter._INPUT_GLOBAL_SCALES = scales
-    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"gptq": True})
-    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"scale_sweep": False})
-    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"static_act_order": True})
-    _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"joint_scale_opt": True})
+    enc._INPUT_GLOBAL_SCALES = scales
 
 
 def _packed_tensor_bytes(tensors):
@@ -211,8 +206,7 @@ def _inline_export_body(workdir: str) -> None:
     )
 
     saved = (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-             _test_exporter._CACHED_ACTIVATIONS, _test_exporter._INPUT_GLOBAL_SCALES,
-             dict({key: (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).record()[key] for key in ("gptq", "scale_sweep", "static_act_order", "joint_scale_opt")}))
+             enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES, enc._RENDER_LEVERS)
     try:
         enc._PRODUCTION_WEIGHT_CACHE = cache
         enc._INLINE_EXPERT_GPTQ = False
@@ -228,8 +222,7 @@ def _inline_export_body(workdir: str) -> None:
             model, assignment, bf16_passthrough=set(), profile=profile)
     finally:
         (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-         _test_exporter._CACHED_ACTIVATIONS, _test_exporter._INPUT_GLOBAL_SCALES) = saved[:4]
-        _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **saved[4])
+         enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES, enc._RENDER_LEVERS) = saved
 
     packed_a = _packed_tensor_bytes(tensors_a)
     packed_b = _packed_tensor_bytes(tensors_b)
