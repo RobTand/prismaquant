@@ -342,3 +342,12 @@ The authoring branch remains `sol/refactor-simplify-20261014`; its qualified
 implementation is delivered through `prismaquant-1295-refactor`. The first new
 PR #2695 is replaced for that branch-name correction alone. The 36 prior PRs
 and their dispositions are unaffected.
+
+
+The exact API commit is now published on Tessera's dedicated consumer ref
+`prismaquant-1295-api-aaa417`, resolving GitHub's initial checkout failure.
+Its SHA and v60 contract digest are unchanged. Publication from an isolated bare
+repository changes no source files, main branch or existing producer refs.
+The additional PrismaBuild package-import/allocator-help probe passed with its
+actual terminal, result, receipt and both logs verified. The implementation and
+accepted numerical matrix remain unchanged.

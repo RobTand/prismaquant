@@ -922,3 +922,30 @@ because `sol/refactor-simplify-20261014` does not follow its required branch
 spelling. Delivery uses `prismaquant-1295-refactor` from the same qualified
 implementation. The original authoring branch is retained. This correction
 changes report text and branch metadata only; no policy or source gate is relaxed.
+
+
+## CI dependency publication, 2026-10-16 14:42 UTC
+
+GitHub import CI initially stopped before imports because its checkout could not
+fetch the delivered API commit `aaa417003f0ee690e8ace138acd18df7f9531369`.
+The exact commit is now reachable in `RobTand/tessera` through
+`prismaquant-1295-api-aaa417`. Publication used an isolated bare repository built
+from the delivered API branch. The remote branch and GitHub commit API both
+return the exact SHA, and the source contract retains its pinned digest. No
+source file, existing producer branch, main branch or architecture-wave ref
+changed. No Tessera PR or merge was performed.
+
+An additional admitted import probe checks installed Git provenance, imports
+`prismaquant`, and runs `python -m prismaquant.allocator --help`. It passed under
+the qualified CPU prefix. Action
+`8085ff7d35eac1908639cac215c9e914a2bb49dadb5ed5db693c539dde9cc08d`
+has result `3c713fd9b7e9606d55665323caea10e61f82ffbe18fc2d206e7dd67f4e1820f2`
+and receipt `ae0200462af2e52bcf08c1580739eb6dba669262f0ecda76c0580ee7bd58c119`.
+The terminal, result bytes, receipt identity and both logs were verified. This
+is one additional probe beyond the frozen 28-action qualification matrix, not
+another broad-suite execution or a replacement for GitHub's Python 3.12 import
+job. It reserves CPU1/RAM4 GiB and native threads1 through PrismaBuild.
+
+Publication records, the original CI fetch failure, probe command and verified
+receipt are archived in
+`/mnt/shared/prismaquant-refactor-evidence/20261016/ci-followup/`.
