@@ -1111,3 +1111,14 @@ all 163 patches and its ten P3 findings are assigned for correction; depth C is
 still in progress. The final combined review and official final-head checks
 remain pending. These small-fixture checks do not qualify full CLI batch/resume
 parity, serving, model quality or performance.
+
+
+The remaining six-file import cleanup at `748bb55fcb` passed all 126 affected
+tests without skips through PrismaBuild action
+`9a9f059f90e4d974a558334cc64e368605fcb00f92fb58aac02d3da14bc8836a`.
+`depth-c-import-cleanup-proof.json` verifies unchanged non-import ASTs and the
+three exact unused-import removals. `depth-c-import-source-proof.json` verifies
+the tested and committed file bytes, and `depth-c-import-receipt-audit.json`
+verifies the terminal record, CAS result, receipt and both logs. These artifacts
+are under the review evidence root above. The uncollected Stage A profiler
+check is a separate pending submission; this pass does not qualify that check.
