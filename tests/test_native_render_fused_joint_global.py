@@ -57,6 +57,7 @@ from prismaquant.production_weight_cache import (
     STREAMED_FILL_IDENTITY_SCHEMA,
     STREAMED_FILL_SIDECAR_KEY,
     NVFP4JointGlobalWitness,
+    ProductionWeightCache,
     PublishedShard,
     _check_and_record_append_identity,
     _LinearActivationCollector,
@@ -728,6 +729,33 @@ def test_export_checks_the_witness_after_reading_the_entry(
         _pack_fused(name, layer[name])
 
 
+def test_export_refuses_a_shard_replaced_between_check_and_load(
+    rendered, tmp_path, monkeypatch,
+):
+    """Another writer replaces the shard just before the cache reads it. A
+    check before the read would pass on the witnessed file and then re-pack
+    the replacement; the check after the read sees the replacement."""
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    cache = pickle.loads(pickle.dumps(_resident_fill(rendered, cache_dir)))
+    name = f"{LAYER}.mlp.gate_proj"
+    shard = cache_dir / cache_weight_filename(name, "NVFP4")
+    real_load = ProductionWeightCache._load_file_tensor
+
+    def replaced_just_before_the_read(self, value, key=None):
+        if key == (name, "NVFP4"):
+            staged = shard.with_name(shard.name + ".other")
+            torch.save(torch.zeros((INTER, HIDDEN), dtype=torch.bfloat16), staged)
+            os.replace(staged, shard)
+        return real_load(self, value, key)
+
+    _options, layer, _whole = _export_globals(rendered, cache, monkeypatch)
+    monkeypatch.setattr(
+        ProductionWeightCache, "_load_file_tensor", replaced_just_before_the_read)
+    with pytest.raises(RuntimeError, match=UNBOUND):
+        _pack_fused(name, layer[name])
+
+
 def test_witnesses_follow_a_moved_cache_directory_but_not_a_copy(
     rendered, tmp_path, monkeypatch, capsys,
 ):
@@ -854,3 +882,90 @@ def test_streamed_fill_claims_an_unclaimed_directory_for_its_appends(
     joined = json.loads(sidecar.read_text())
     assert set(joined) == {STREAMED_FILL_SIDECAR_KEY, MTP_APPEND_SIDECAR_KEY}
     assert joined[STREAMED_FILL_SIDECAR_KEY] == section
+
+
+def _streaming_export(rendered, source: Path, device: str, monkeypatch) -> dict:
+    """The production streaming exporter over ``source``: real source reads,
+    joint-global pre-pass, production cache, codec and witness gate. Only the
+    skeleton construction is replaced, as in the export-resume tests."""
+    from types import SimpleNamespace
+
+    from transformers import AutoConfig
+
+    import prismaquant.sensitivity_probe as sensitivity_probe
+    import prismaquant.streaming_model as streaming_model
+
+    class Skeleton:
+        @staticmethod
+        def _from_config(_config):
+            return _Model()
+
+    emitted: dict[str, torch.Tensor] = {}
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            AutoConfig, "from_pretrained", lambda *a, **kw: SimpleNamespace())
+        patch.setattr(sensitivity_probe, "stage_text_only", lambda path: path)
+        patch.setattr(
+            streaming_model, "_skeleton_config_and_class",
+            lambda config, **kw: (config, Skeleton))
+        patch.setattr(streaming_model, "_init_rotary_inplace", lambda *a: None)
+        enc.materialize_tensors_streaming(
+            str(source), dict(rendered["assignment"]),
+            profile=rendered["profile"], bf16_passthrough=set(),
+            device=torch.device(device), tensor_sink=emitted.update)
+    return emitted
+
+
+@pytest.mark.parametrize("device", [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(
+        not torch.cuda.is_available(),
+        reason="the CUDA leg runs on a GPU worker")),
+])
+def test_streaming_exporter_ships_witnessed_fused_renders_and_refuses_a_replaced_one(
+    rendered, device, tmp_path, monkeypatch,
+):
+    """A resident fill and the streaming exporter on one device: every fused
+    entry ships its cached render exactly, under the witnessed global, and a
+    shard replaced after the fill refuses on the same path."""
+    from safetensors.torch import save_file
+
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    source = tmp_path / "source"
+    source.mkdir()
+    save_file(
+        {name: tensor.contiguous()
+         for name, tensor in rendered["model"].state_dict().items()},
+        str(source / "model.safetensors"),
+    )
+    cache_dir = tmp_path / "pwc"
+    pickled = pickle.dumps(fill_production_weight_cache(
+        copy.deepcopy(rendered["model"]).to(device), rendered["calib_ids"],
+        rendered["qnames"], formats=["NVFP4"],
+        render_assignment=rendered["assignment"], levers=dict(JSO),
+        max_act_rows=4096, recache_profile=rendered["profile"],
+        progress=False, cache_dir=cache_dir,
+    ))
+    monkeypatch.setattr(enc, "_RENDER_LEVERS", NativeRenderLevers())
+    monkeypatch.setattr(enc, "_INPUT_GLOBAL_SCALES", None)
+
+    cache = pickle.loads(pickled)
+    monkeypatch.setattr(enc, "_PRODUCTION_WEIGHT_CACHE", cache)
+    emitted = _streaming_export(rendered, source, device, monkeypatch)
+    witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
+    for name in sorted(FUSED):
+        joint_global = torch.tensor(witnesses[(name, "NVFP4")].joint_global)
+        assert torch.equal(
+            emitted[f"{name}.weight_global_scale"],
+            (1.0 / joint_global).to(torch.float32).reshape(1))
+        cached = cache.get(name, "NVFP4").cpu()
+        shipped = _decode(
+            {"weight_packed": emitted[f"{name}.weight_packed"],
+             "weight_scale": emitted[f"{name}.weight_scale"]},
+            joint_global)
+        assert torch.equal(shipped.to(cached.dtype), cached), name
+
+    _replace_by_copy(cache_dir / cache_weight_filename(f"{LAYER}.mlp.up_proj", "NVFP4"))
+    monkeypatch.setattr(enc, "_PRODUCTION_WEIGHT_CACHE", pickle.loads(pickled))
+    with pytest.raises(RuntimeError, match=UNBOUND):
+        _streaming_export(rendered, source, device, monkeypatch)
