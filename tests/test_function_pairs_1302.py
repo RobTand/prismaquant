@@ -1,10 +1,25 @@
 """Each consolidated near-duplicate function pair keeps its outcomes (PQ #1302).
 
 The duplication baseline listed these pairs as one responsibility implemented
-twice. Each now has one owner, and each old site binds or calls it. Every call
-below goes through the old site's name. Its outcome, a return or a refusal, was
-frozen from the pre-consolidation code into
-``tests/fixtures/function_pairs_1302.json`` (``tests/golden_table.py``).
+twice. Each now has one owner. Where an old site still exists, it binds or
+calls that owner, and the call below goes through the old site's name. Three
+groups of calls go through the current owner instead. ``probe_inventory`` owns
+the packed-expert helpers: ``export_native_compressed`` and
+``measure_quant_cost`` import them under their old private names, and the
+``sensitivity_probe`` copies were removed. ``aura_provenance`` owns the AURA
+producer commit, formerly ``aura_cost._git_commit``. ``perturbed_x_cache``
+owns the first forward tensor, and the ``layer_state_cache`` site was retired.
+
+Each outcome, a return or a refusal, is a row in
+``tests/fixtures/function_pairs_1302.json`` (``tests/golden_table.py``). The
+rows were frozen from the pre-consolidation code, with one deliberate
+exception. Commit ``dae261bad6`` made a declared packed-profile failure
+propagate and re-recorded the 12 ``probe_inventory`` rows for
+``_NamesProfile(fail=True)``. Those rows record the profile's
+``RuntimeError``; the frozen code returned ``[]``, ``False`` or ``None``.
+The other 36 ``probe_inventory`` rows equal the rows frozen for both old
+sites. A passing run therefore shows unchanged outcomes except for those 12
+rows.
 """
 from __future__ import annotations
 
@@ -48,7 +63,7 @@ def test_canonical_json_value(index):
     GOLDEN.call(lambda: site(_JSON_VALUES[index], where="w"))
 
 
-# --- git HEAD commit (emu_forward_kl, fisher_col_weights -> aura_cost) ---------
+# --- git HEAD commit (emu_forward_kl, fisher_col_weights -> aura_provenance) ---
 
 _GIT_RESULTS = ["abc123\n", "", "  \n", OSError("no git"), subprocess.TimeoutExpired(["git"], 5)]
 
@@ -114,8 +129,8 @@ def test_profile_call(ref, accessor):
     GOLDEN.call(lambda: site(_Profile(), accessor, "a", 2))
 
 
-# --- packed-expert helpers (export_native_compressed, measure_quant_cost ->
-#     sensitivity_probe) -------------------------------------------------------
+# --- packed-expert helpers (owner probe_inventory; export_native_compressed and
+#     measure_quant_cost import it under the old names) ------------------------
 
 class _NamesProfile:
     def __init__(self, names=None, parent=None, fail=False):
@@ -192,7 +207,8 @@ def test_control_directory(ref, index):
     GOLDEN.call(lambda: site(output_root, metadata_root=metadata_root))
 
 
-# --- first tensor of a forward call (layer_state_cache -> perturbed_x_cache) ---
+# --- first tensor of a forward call (owner perturbed_x_cache; the
+#     layer_state_cache site was retired) --------------------------------------
 
 _T = torch.arange(3.0)
 _CALLS = [((), {}), ((1, _T), {}), ((), {"x": 1, "input": _T}),
