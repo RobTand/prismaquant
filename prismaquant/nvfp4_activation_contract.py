@@ -1643,9 +1643,8 @@ class ActivationScaleContractError(RuntimeError):
     Raised by name (the qname) so the refusal says which unit, and raised
     BEFORE anything is measured: an activation-KL hook or a cache score that
     silently fell back to the dynamic FP32-scale RTN would price an activation
-    tensor the runtime never executes (RobTand/prismaquant#194, #205).  The
-    campaign's own refusal (``tessera_campaign.ActivationScaleContractError``)
-    is this class under its historical name.
+    tensor the runtime never executes (RobTand/prismaquant#194, #205).
+    Cell measurement, activation-KL hooks and cache scoring raise this class.
     """
 
 

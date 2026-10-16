@@ -1,5 +1,7 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
 
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -336,15 +338,18 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
             body_rate_q256=1024, dloss=0.1, dloss_stderr=0.0, memory_bytes=128,
             bits_per_param=4, activation_contract='fixture', activation_quantized=True,
             wire_bytes=record['blob_bytes'], seconds=0.0)
-    monkeypatch.setattr(tc, '_measure_anchor', measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     batches = []
+    real_batch = cell_measurement.measure_cells
     def batch(**kwargs):
+        if len(kwargs['qnames']) == 1:
+            return real_batch(**kwargs)
         assert kwargs.get('structures') == {name: 'routed_moe' for name in kwargs['qnames']}
         batches.append(kwargs['qnames'])
         return [measure(qname=n, format_name=kwargs['format_name'], wire_dir=kwargs['wire_dir'],
                         structure=kwargs['structures'][n])
                 for n in kwargs['qnames']]
-    monkeypatch.setattr(tc, '_measure_anchor_batch', batch)
+    monkeypatch.setattr(cell_measurement, "measure_cells", batch)
     from prismaquant import tessera_render
     monkeypatch.setattr(tessera_render, 'require_tessera_batch_encoder', lambda:None)
     tm.run(path, 0, anchor_batch_size=batch_size)
@@ -401,12 +406,12 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     from prismaquant import tessera_hessian as th
     campaign, argv, model, encoded = _bridge_main_fixture(monkeypatch, tmp_path)
     measured_anchors = {}
-    real_measure = campaign._measure_anchor
+    real_measure = cell_measurement.measure_cell
     def remember(**kwargs):
         anchor = real_measure(**kwargs)
         measured_anchors.setdefault(anchor.qname, {}).setdefault(anchor.family, []).append(anchor)
         return anchor
-    monkeypatch.setattr(campaign, '_measure_anchor', remember)
+    monkeypatch.setattr(cell_measurement, "measure_cell", remember)
     assert campaign.main(argv) == 0
     census_path = tmp_path/'census.json'
     assert campaign.main([*argv, '--census-out', str(census_path)]) == 0
@@ -639,11 +644,11 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     spec = SimpleNamespace(bits_for_shape=lambda shape: 8 * shape[0] * shape[1],
                            memory_bytes_for_shape=lambda shape: shape[0] * shape[1],
                            act_dtype_name="a16")
-    monkeypatch.setattr(tc, "_prepare_anchor", lambda **_kwargs: dict(
-        spec=spec, family=family, rung=rung, wire="fixture",
-        activation_qdq=lambda value: value, input_scale=None,
+    monkeypatch.setattr(cell_measurement.CellRecipe, "prepare", lambda **_kwargs: cell_measurement.CellRecipe(
+        spec=spec, family=family, rung=rung, wire="fixture", structure="routed_moe",
+        activation_contract="a16", direct_consumer=None, activation_qdq=lambda value: value, input_scale=None,
         activation_kwargs=None, hessian_required=False))
-    monkeypatch.setattr(tc, "_encode_and_render",
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit",
                         lambda tensor, *_args, **_kwargs: (tensor * 0.75, b"fresh wire"))
     publications, links, reads = [], [], []
     store, link, verify = pwc._store_rendered_weight_entry, campaign_wire.link_seed_wire, api.verify_cached_unit

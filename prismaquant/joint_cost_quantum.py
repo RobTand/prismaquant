@@ -1617,7 +1617,7 @@ def bind_joint_served_quantizer(formats_by_qname, *,
     A16/dynamic-only rosters do not load the serving extension.
 
     This is the one owner of the rule. Stage B calls it, and so does the
-    Stage A campaign seam (``tessera_campaign._bind_served_quantizer``,
+    Stage A campaign seam (``tessera_cell_measurement._bind_served_quantizer``,
     RobTand/prismaquant#1481), naming its own ``context``.
     """
     from . import format_registry as fr

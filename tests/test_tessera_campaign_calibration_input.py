@@ -1,6 +1,7 @@
 """Immutable campaign draw intake (PQ #1827), using real tiny safetensors."""
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_calibration_forward as calibration_forward
 
 import json
@@ -73,7 +74,7 @@ def test_exact_draw_real_text_checkpoint_resume_and_receipt(monkeypatch, tmp_pat
     assert payload["provenance"]["hessian"]["calibration_identity"] == identity
     def no_encode(**kwargs):
         pytest.fail("same saved draw re-encoded on resume")
-    monkeypatch.setattr(tool, "_measure_anchor", no_encode)
+    monkeypatch.setattr(cell_measurement, "measure_cell", no_encode)
     assert tool.main([*argv, *options, "--seed", "19"]) == 0
     _path.rename(tmp_path / "renamed-draw.safetensors")
     _text.rename(tmp_path / "renamed-corpus.txt")

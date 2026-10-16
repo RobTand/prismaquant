@@ -15,6 +15,9 @@ These tests pin the three properties that make that honest:
 * a rung outside the measured envelope is **omitted**, not extrapolated;
 * the render that was priced IS the decoded wire, and the wire is stored.
 """
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
 import math
 import os
 import pathlib
@@ -210,16 +213,16 @@ def test_no_embedded_axis_on_the_wire():
     on the serialised wire costs its own encode, which is the fact that makes
     an anchor campaign necessary rather than merely convenient.
     """
-    from prismaquant.tessera_campaign import _encode_and_render
+    from prismaquant.tessera_render import encode_tessera_unit
 
     torch.manual_seed(0)
     W = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
     # Weights-only deliberately: this pins a property of the WIRE (that a
     # deeper encode is not a superset of a shallower one), and the encoder's
     # weights-only bytes are unchanged by the H-aware default.
-    _, lo = _encode_and_render(W, "TESSERA_E2M1_K2_R384",
+    _, lo = encode_tessera_unit(W, "TESSERA_E2M1_K2_R384",
                                hessian_required=False)
-    _, hi = _encode_and_render(W, "TESSERA_E2M1_K2_R512",
+    _, hi = encode_tessera_unit(W, "TESSERA_E2M1_K2_R512",
                                hessian_required=False)
     assert len(hi) > len(lo)
     assert not bytes(hi).startswith(bytes(lo))
@@ -229,7 +232,7 @@ def test_no_embedded_axis_on_the_wire():
 def test_the_priced_render_is_the_decoded_wire():
     """Principle 8, at the one place it could silently break.
 
-    ``_encode_and_render`` passes ``verify=False`` to the encoder because the
+    ``encode_tessera_unit`` passes ``verify=False`` to the encoder because the
     encoder's ``verify`` compares its in-memory reconstruction against the
     decoded artifact and this campaign only ever uses the latter. That is the
     right call only if the two agree, which nothing downstream re-checks --
@@ -267,7 +270,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
     """
     from prismaquant import format_registry as fr
     from prismaquant.production_weight_cache import _local_forward_render_score
-    from prismaquant.tessera_campaign import _encode_and_render
+    from prismaquant.tessera_render import encode_tessera_unit
 
     torch.manual_seed(0)
     W = torch.randn(256, 512, device="cuda", dtype=torch.bfloat16)
@@ -277,7 +280,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R896"):
         # Weights-only on both arms, so the A-leg ratio is the only thing
         # that differs between the routes -- an H would be a second variable.
-        render, _ = _encode_and_render(W, name, hessian_required=False)
+        render, _ = encode_tessera_unit(W, name, hessian_required=False)
         spec = fr.get_format(name)
         under_route = _local_forward_render_score(
             reference_weight=W.float(), rendered_weight=render.float(),
@@ -297,7 +300,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
 
 
 def _anchor_harness(monkeypatch, tmp_path):
-    """Run ``_measure_anchor`` with the encode stubbed to the identity.
+    """Run ``measure_cell`` with the encode stubbed to the identity.
 
     The activation-quantiser choice is the thing under test, not the trellis
     encode, and a CPU E2M1 encode is ~a minute; the stub returns the weight
@@ -307,10 +310,9 @@ def _anchor_harness(monkeypatch, tmp_path):
 
     from prismaquant import tessera_campaign as campaign
 
-    monkeypatch.setattr(
-        campaign, "_encode_and_render", lambda w, name, **kw: (w, b""))
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", lambda w, name, **kw: (w, b""))
     cache = SimpleNamespace(weights={}, cache_dir=None)
-    return lambda **kw: campaign._measure_anchor(
+    return lambda **kw: cell_measurement.measure_cell(
         cache=cache, wire_dir=tmp_path, hessian_required=False, **kw)
 
 
@@ -368,12 +370,12 @@ def test_a_w4a4_anchor_with_no_static_scale_refuses_before_encoding(
     def _must_not_encode(*a, **k):
         raise AssertionError("the refusal must precede the encode")
 
-    monkeypatch.setattr(campaign, "_encode_and_render", _must_not_encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", _must_not_encode)
     from types import SimpleNamespace
 
-    with pytest.raises(campaign.ActivationScaleContractError,
+    with pytest.raises(ActivationScaleContractError,
                        match="static activation contract"):
-        campaign._measure_anchor(
+        cell_measurement.measure_cell(
             qname="m.q_proj",
             weight=torch.randn(32, 256, dtype=torch.bfloat16),
             activations=torch.randn(8, 256),
@@ -429,29 +431,28 @@ def test_resume_refuses_w4a4_anchors_priced_under_another_contract():
     """
     import dataclasses
 
-    from prismaquant.tessera_campaign import (
-        ActivationScaleContractError, _checkpoint_anchor_identity,
-        _require_resumable_anchor,
-    )
+    from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+    from prismaquant.tessera_cell_measurement import require_resumable_cell
+    from prismaquant.tessera_campaign import _checkpoint_anchor_identity
 
     old = _anchor("m.q_proj", "TESSERA_E2M1_K2", 896, 1e-3)
     with pytest.raises(ActivationScaleContractError,
                        match="pre-served-.*contract"):
-        _require_resumable_anchor(old, {"m.q_proj": 71.68})
+        require_resumable_cell(old, {"m.q_proj": 71.68})
     other_draw = dataclasses.replace(old, input_global_scale=10.0)
     with pytest.raises(ActivationScaleContractError,
                        match="mixes two activation calibrations"):
-        _require_resumable_anchor(other_draw, {"m.q_proj": 71.68})
-    _require_resumable_anchor(
+        require_resumable_cell(other_draw, {"m.q_proj": 71.68})
+    require_resumable_cell(
         dataclasses.replace(old, input_global_scale=71.68),
         {"m.q_proj": 71.68})
     # A dynamic-route row never carried a scale and resumes untouched; one
     # that does carry a scale was stamped by no producer this campaign has.
     dynamic = _anchor("m.up", "TESSERA_E4M3_K1", 1024, 1e-3)
-    _require_resumable_anchor(dynamic, {})
+    require_resumable_cell(dynamic, {})
     with pytest.raises(ActivationScaleContractError,
                        match="dynamic activation quantiser"):
-        _require_resumable_anchor(
+        require_resumable_cell(
             dataclasses.replace(dynamic, input_global_scale=71.68), {})
 
     # The rule's one home on the resume path is the per-anchor identity
@@ -825,11 +826,11 @@ def test_a_missing_qname_in_the_hessian_map_is_a_hard_failure():
     nothing and produces a plausible tensor. The Hessian map is keyed the same
     way, so the miss is made loud here.
     """
-    from prismaquant.tessera_campaign import _measure_anchor
+    from prismaquant.tessera_cell_measurement import measure_cell
     from prismaquant.tessera_render import HessianContractError
 
     with pytest.raises(HessianContractError) as excinfo:
-        _measure_anchor(
+        measure_cell(
             qname="model.layers.0.self_attn.q_proj",
             weight=torch.randn(64, 256, dtype=torch.bfloat16),
             activations=torch.randn(8, 256),

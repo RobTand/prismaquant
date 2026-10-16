@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: `tessera_cell_measurement` owns selected served-wire
+recipes and output-MSE cell measurements. Its frozen `CellRecipe` retains the
+resolved wire, per-plane encoder inputs and activation contract. Direct-consumer
+ownership, route-family lookup, activation and resident-byte contracts come from
+`tessera.metadata`; exact direct-weight decoding comes from `tessera.projection`.
+Campaign and selected-wire materialization call `measure_cells`, which admits
+recipes before scalar or batch encoding, scoring and cache/wire publication.
+The same owner checks resumed wire, Hessian and activation contracts.
+
+Compatible batches retain unit-major order and their family, rung, structure,
+shape, dtype and device key. Campaign retains resident prefetch, source lifetime,
+adaptive scheduling and file-before-receipt-before-journal ordering. Materialization
+retains synchronous receipt and journal custody. Indexer `weights_proj` keeps a32,
+FP32 cache values and one FP32 matrix charge; MLA `kv_b_proj` keeps a16, BF16 values
+and one BF16 matrix charge. Old campaign measurement APIs and the encode adapter
+are removed, including profiler callers. Stage, cache, format and serving gates
+retain their existing behavior.
+Provenance: 2026-10-16 T3 owner extraction, parent
+`3867674f74529d1091dd31681557a76eae9aa9aa`, implementation `cdb768e832`;
+API-only producer `aaa417003f0ee690e8ace138acd18df7f9531369`, unchanged v60 contract.
+
 Re-stamped 2026-10-15: dispatcher rows classify bounded capture with the campaign
 parser only when their declared module is `prismaquant.tessera_campaign`.
 Selected-wire materialization retains its own `run` subcommand grammar and

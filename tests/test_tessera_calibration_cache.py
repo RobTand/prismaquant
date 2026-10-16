@@ -1,5 +1,6 @@
 """A reusable calibration keeps full-H/prefix-X bytes and refuses stale inputs."""
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
@@ -400,20 +401,15 @@ def test_completed_anchor_page_release_does_not_reread_the_entries(monkeypatch, 
                                   metadata={'release_completed_anchor_file_pages': True})
     weight = torch.arange(64, dtype=torch.float32).reshape(8, 8) / 64
     activations = torch.ones(4, 8)
-    spec = types.SimpleNamespace(
-        bits_for_shape=lambda shape: 4 * shape[0] * shape[1],
-        memory_bytes_for_shape=lambda shape: shape[0] * shape[1] // 2,
-        act_dtype_name=None)
-    prepared = dict(spec=spec, family=types.SimpleNamespace(name='fixture'),
-                    rung=1024, activation_qdq=lambda x: x, input_scale=None,
-                    activation_kwargs={})
-    anchor = campaign._finish_anchor(qname='layers.0.q_proj', weight=weight,
-        activations=activations, format_name='FIXTURE_R4', cache=cache,
-        wire_dir=wire_dir, prepared=prepared, render=weight.clone(),
-        blob=b'wire-bytes', elapsed=0.0)
-    rendered = cache.weights[('layers.0.q_proj', 'FIXTURE_R4')]
+    from prismaquant import tessera_render
+    monkeypatch.setattr(tessera_render, 'encode_tessera_unit',
+                        lambda *_args, **_kwargs: (weight.clone(), b'wire-bytes'))
+    anchor = cell_measurement.measure_cell(qname='layers.0.q_proj', weight=weight,
+        activations=activations, format_name='TESSERA_E4M3_K1_R1024', cache=cache,
+        wire_dir=wire_dir, hessian_required=False)
+    rendered = cache.weights[('layers.0.q_proj', 'TESSERA_E4M3_K1_R1024')]
     assert sorted(released) == sorted([Path(rendered).name,
-                                       'layers__0__q_proj__FIXTURE_R4.tessera'])
+                                       'layers__0__q_proj__TESSERA_E4M3_K1_R1024.tessera'])
     assert anchor.wire_bytes == len(b'wire-bytes')
 
 

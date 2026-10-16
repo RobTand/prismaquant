@@ -1,4 +1,5 @@
 """CPU state/ownership checks; native CUDA trace coverage needs the real row."""
+from prismaquant import tessera_cell_measurement as cell_measurement
 import json
 import threading
 from pathlib import Path
@@ -284,18 +285,18 @@ def test_selected_mode_refuses_changed_capture_or_invalid_batch_work(extra):
 
 def test_entrypoint_keeps_original_argv_and_restores_method(tmp_path, controlled, monkeypatch):
     from prismaquant import tessera_campaign as campaign
-    original = campaign._measure_anchor
+    original = cell_measurement.measure_cells
     command = selected()
     seen = []
     def main(args):
         seen.append(args)
-        assert campaign._measure_anchor is not original
+        assert cell_measurement.measure_cells is not original
         return 0  # A fully journaled retry has no new anchor to observe.
     monkeypatch.setattr(campaign, 'main', main)
     monkeypatch.setattr(observe.torch.cuda, 'is_available', lambda: True)
     assert observe.main(['--evidence-out', str(tmp_path), '--selected-anchors',
         '--anchor-profile-calls', '0,31', '--anchor-trace-max-bytes', '4096', '--', *command]) == 0
-    assert seen == [command] and campaign._measure_anchor is original
+    assert seen == [command] and cell_measurement.measure_cells is original
 
 
 @pytest.mark.parametrize('calls', [(), (1,), (0, 0), (0, -1), (0, 1, 2, 3, 4)])
@@ -346,13 +347,13 @@ def test_cuda_only_activity_keeps_native_event_requirement(tmp_path, controlled,
 def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
         tmp_path, controlled, monkeypatch):
     from prismaquant import tessera_campaign as campaign
-    scalar, batch = campaign._measure_anchor, campaign._measure_anchor_batch
+    scalar, batch = cell_measurement.measure_cell, cell_measurement.measure_cells
     command = selected()+['--anchor-batch-size', '8']
     error = RuntimeError('original campaign error')
     def main(args):
         assert args == command
-        assert campaign._measure_anchor is not scalar
-        assert campaign._measure_anchor_batch is not batch
+        assert cell_measurement.measure_cell is scalar
+        assert cell_measurement.measure_cells is not batch
         raise error
     monkeypatch.setattr(campaign, 'main', main)
     monkeypatch.setattr(observe.torch.cuda, 'is_available', lambda: True)
@@ -361,7 +362,7 @@ def test_entrypoint_wraps_batch_and_restores_both_after_campaign_error(
             '--anchor-profile-calls', '0', '--anchor-trace-max-bytes', '4096',
             '--anchor-cuda-only', '--', *command])
     assert caught.value is error
-    assert campaign._measure_anchor is scalar and campaign._measure_anchor_batch is batch
+    assert cell_measurement.measure_cell is scalar and cell_measurement.measure_cells is batch
 
 
 def test_native_cuda_only_batch_trace_has_actual_events(tmp_path, monkeypatch):

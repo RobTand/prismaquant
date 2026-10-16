@@ -2,7 +2,7 @@
 
 RobTand/prismaquant#389: every CLI test in this tree drives dense or fused
 anchor groups, so the completed-anchor page release in
-``tessera_campaign._finish_anchor`` had no end-to-end cover.  That branch is
+``tessera_cell_measurement.measure_cell`` had no end-to-end cover.  That branch is
 guarded by the production cache's ``release_completed_anchor_file_pages``
 metadata, which only a selected-source row sets. The branch requests page
 release for the render shard and the ``.tessera`` wire of each completed rung;
@@ -15,6 +15,7 @@ checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -217,7 +218,7 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
 
     # Two recorders that carry the reorder diagnostic and assert nothing.
     memo_holder: dict = {}
-    original_memo = campaign._activation_kwargs_memo
+    original_memo = cell_measurement.encoder_kwargs_memo
 
     def memo(*args, **kwargs):
         for_unit = original_memo(*args, **kwargs)
@@ -225,14 +226,14 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         return for_unit
 
     order: list = []
-    original_measure = campaign._measure_anchor
+    original_measure = cell_measurement.measure_cell
 
     def measure(*, qname, format_name, **kwargs):
         order.append((qname, format_name))
         return original_measure(qname=qname, format_name=format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, '_activation_kwargs_memo', memo)
-    monkeypatch.setattr(campaign, '_measure_anchor', measure)
+    monkeypatch.setattr(cell_measurement, "encoder_kwargs_memo", memo)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
 
     selected_out = tmp_path / 'selected-cost.pkl'
     assert campaign.main([*common, '--out', str(selected_out),

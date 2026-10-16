@@ -1,5 +1,6 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.tessera_campaign_requests import anchor_placement
 
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -158,7 +159,7 @@ def test_absent_empty_family_is_retained_deferred_without_extra_prime_work(domai
                for name in members for rate in actual[name][family]]
     assert len(pending) == 7
     assert {family for _name, family, _rate in pending} == {FAMILY}
-    batches = campaign._anchor_batches(pending, weights=domain.weights, batch_size=2)
+    batches = cell_measurement.compatible_batches(pending, weights=domain.weights, batch_size=2)
     assert primed == [[item[0] for item in batches[0]]]
 
 
@@ -225,7 +226,7 @@ def test_prime_and_round_one_use_the_same_exact_schedule(domain, tmp_path, monke
     pending = [(name, family, rate) for key, members in sorted(domain.groups.items())
                for family in sorted({f for name in members for f in round_one[name]})
                for name in members for rate in round_one[name][family]]
-    batches = campaign._anchor_batches(pending, weights=domain.weights, batch_size=2)
+    batches = cell_measurement.compatible_batches(pending, weights=domain.weights, batch_size=2)
     assert primed == [[item[0] for item in batches[0]]]
     assert len(pending) == 7
 
@@ -406,9 +407,9 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
         snap=None, requests=requests, rates_by_unit={name: {FAMILY: {q}, DEFERRED: {q}}})
     campaign._require_campaign_acquisition_source(name, weight, _cb_cache_tensor_identity(weight))
     cache = SimpleNamespace(weights={}, cache_dir=None)
-    anchor = campaign._measure_anchor(qname=name, weight=weight, activations=rows,
+    anchor = cell_measurement.measure_cell(qname=name, weight=weight, activations=rows,
         format_name=fmt, cache=cache, wire_dir=tmp_path, hessian_required=True,
-        activation_kwargs_for=campaign._activation_kwargs_memo(source, {name: weight}, "cpu"))
+        activation_kwargs_for=cell_measurement.encoder_kwargs_memo(source, {name: weight}, "cpu"))
     campaign_table.require_campaign_acquisition_anchor(anchor, actual)
     wire = campaign_wire.wire_path(tmp_path, name, fmt)
     assert wire.is_file() and anchor.wire_bytes == wire.stat().st_size

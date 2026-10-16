@@ -6,6 +6,7 @@ cache, calibration traversal, or fleet placement is implemented here.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 import argparse
 from contextlib import contextmanager
 import functools
@@ -256,9 +257,10 @@ def instrument(campaign, recorder, projection):
     wire_operations = {'_checkpoint_wire_record': 'checkpoint_wire_record'}
     targets = [
         (campaign_wire, wire_operations[name]) if name in wire_operations else (campaign, name)
-        for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor',
+        for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record',
                                       '_campaign_bound_identities', '_adopt_seed_checkpoint')
     ] + [
+        (cell_measurement, 'measure_cells'),
         # The per-anchor derivation off a sealed template.  Its thread name
         # in the record is the evidence of where the post-work ran.
         (campaign._BoundCheckpointUnitIdentity, 'derive'),
@@ -271,9 +273,9 @@ def instrument(campaign, recorder, projection):
     from prismaquant import tessera_hessian
     targets.append((tessera_hessian, 'encoder_kwargs'))
     originals = [(owner, name, getattr(owner, name)) for owner, name in targets]
-    batches = campaign._anchor_batches
+    batches = cell_measurement.compatible_batches
     close = BoundedPublisher.close
-    memo = campaign._activation_kwargs_memo
+    memo = cell_measurement.encoder_kwargs_memo
     memos = []
 
     def memo_with_record(*a, **kw):
@@ -304,19 +306,19 @@ def instrument(campaign, recorder, projection):
             setattr(owner, name, recorder.wrap(original, (campaign.__name__+'.'+next(
                 old for old, current in wire_operations.items() if current == name))
                 if owner is campaign_wire else owner.__name__+'.'+name))
-        campaign._anchor_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
-        campaign._activation_kwargs_memo = memo_with_record
+        cell_measurement.compatible_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
+        cell_measurement.encoder_kwargs_memo = memo_with_record
         BoundedPublisher.close = close_with_stats
         yield
     finally:
         BoundedPublisher.close = close
-        campaign._anchor_batches = batches
-        campaign._activation_kwargs_memo = memo
+        cell_measurement.compatible_batches = batches
+        cell_measurement.encoder_kwargs_memo = memo
         for owner, name, original in originals:
             setattr(owner, name, original)
         for built in memos:
             info = built.cache_info()
-            recorder.records.append(dict(phase='tessera_campaign._activation_kwargs_memo.cache_info',
+            recorder.records.append(dict(phase='tessera_cell_measurement.encoder_kwargs_memo.cache_info',
                 started_unix=time.time(), seconds=0.0, thread_cpu_seconds=0.0,
                 thread=threading.current_thread().name, qname=None, format_name=None,
                 cache_info=dict(hits=info.hits, misses=info.misses, maxsize=info.maxsize, currsize=info.currsize)))

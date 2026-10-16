@@ -1,4 +1,5 @@
 """A genuine T-16 wire cannot authenticate incompatible scoring metadata (#2109)."""
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
 import json
 import pickle
 import shutil
@@ -77,7 +78,7 @@ def test_t16_produced_wire_does_not_admit_incompatible_activation_metadata(
         assert campaign.main(argv) == 0
         assert pickle.loads(output.read_bytes())["costs"] == initial_costs
     else:
-        with pytest.raises(campaign.ActivationScaleContractError, match="activation (contract|observation)"):
+        with pytest.raises(ActivationScaleContractError, match="activation (contract|observation)"):
             campaign.main(argv)
         assert not output.exists()
         if seed:

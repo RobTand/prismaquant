@@ -1,5 +1,6 @@
 """Actual producer identities remain exact across a bounded immutable unit."""
 from __future__ import annotations
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
 from prismaquant import tessera_campaign_table as campaign_table
 
 from dataclasses import replace
@@ -94,7 +95,7 @@ def test_bound_unit_keeps_per_anchor_static_scale_and_hessian_gates():
             calibration_source=source, projected_unit=projection, static_scales=kwargs["static_scales"]) as bound:
         with pytest.raises(RuntimeError, match="Hessian applicability"):
             tc._checkpoint_anchor_identity(replace(anchors[0], hessian_applied=False), **kwargs, bound_unit=bound)
-        with pytest.raises(tc.ActivationScaleContractError):
+        with pytest.raises(ActivationScaleContractError):
             tc._checkpoint_anchor_identity(replace(anchors[-1], input_global_scale=0.25), **kwargs, bound_unit=bound)
 
 
@@ -114,7 +115,7 @@ def test_bound_unit_still_refuses_invalid_measured_activation_metadata(changes):
     with tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
             calibration_source=source, projected_unit=projection,
             static_scales=kwargs["static_scales"]) as bound:
-        with pytest.raises(tc.ActivationScaleContractError, match="activation (contract|observation)"):
+        with pytest.raises(ActivationScaleContractError, match="activation (contract|observation)"):
             tc._checkpoint_anchor_identity(replace(anchors[0], **changes), **kwargs, bound_unit=bound)
 
 

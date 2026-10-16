@@ -5,6 +5,7 @@ this entry point can run. It never treats a partial capture as canonical.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 import argparse
@@ -222,7 +223,7 @@ def main():
             raise ValueError('frozen full-census input scale policy differs')
         write_json(output/'input-scales.json', dict(policy=scale_policy, units=scales))
         calibration = th.activation_source(hessians, capture['identity']['calibration'])
-        memo = tc._activation_kwargs_memo(calibration, weights, 'cuda', max_entries=1,
+        memo = cell_measurement.encoder_kwargs_memo(calibration, weights, 'cuda', max_entries=1,
             resource_check=check, factor_scratch_bytes=resources['selected_anchor_resources'][
                 'phases']['resident_anchors']['factorization_scratch_bytes'])
         cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
@@ -249,7 +250,7 @@ def main():
                 active_candidate = next(row for row in result['candidates']
                                         if (row['qname'], row['format']) == (name, fmt))
                 active_candidate['status'] = 'encoding'
-                anchor = phase(f'unit-{unit_index}-encode-{index}', lambda: tc._measure_anchor(
+                anchor = phase(f'unit-{unit_index}-encode-{index}', lambda: cell_measurement.measure_cell(
                     qname=name, weight=weights[name], activations=acts[name], format_name=fmt,
                     cache=cache, wire_dir=wire_dir, activation_kwargs_for=memo,
                     hessian_required=True, static_input_scale=scales.get(name)))

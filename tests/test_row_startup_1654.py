@@ -17,6 +17,7 @@ Two of the causes are PrismaQuant's, and these tests pin their fixes:
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 import json
 import pathlib
 import sys
@@ -438,9 +439,9 @@ def test_placeholders_batch_as_the_host_weights_they_stand_for():
     meta = _placeholders(set(UNITS))
     mixed = _placeholders({UNITS[1]})
     for batch_size in (1, 2, 4):
-        expected = campaign._anchor_batches(pending, weights=host, batch_size=batch_size)
-        assert campaign._anchor_batches(pending, weights=meta, batch_size=batch_size) == expected
-        assert campaign._anchor_batches(pending, weights=mixed, batch_size=batch_size) == expected
+        expected = cell_measurement.compatible_batches(pending, weights=host, batch_size=batch_size)
+        assert cell_measurement.compatible_batches(pending, weights=meta, batch_size=batch_size) == expected
+        assert cell_measurement.compatible_batches(pending, weights=mixed, batch_size=batch_size) == expected
 
 
 def test_the_preflight_lstats_on_the_io_engine_and_fails_in_name_order(monkeypatch, tmp_path):

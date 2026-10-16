@@ -33,7 +33,7 @@ ENVELOPE_W = 140.0
 NAMED = ("_campaign_checkpoint_identity", "canonical_hessian_reference_descriptor",
          "_prefetch_seal_digests", "prefetch_capture", "_verified_capture_entry",
          "tensor_identity", "_stream_unit_identity", "finalize_row_stream", "RowStream",
-         "_read ", "admit ", "_measure_anchor_batch", "_encode_and_render",
+         "_read ", "admit ", "measure_cells", "encode_tessera_unit",
          "write_export_inputs", "snapshot_selected_weights", "_project_expert_population")
 NAMED_NEEDLES = {"_campaign_checkpoint_identity": "campaign_checkpoint_identity"}
 MILESTONES = (("row_head", "[campaign] row head:"),

@@ -23,6 +23,7 @@ assembles those into the proof bundle it requires before rewriting a row.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 import argparse
 import functools
 import hashlib
@@ -399,7 +400,7 @@ def shape_interleaved(batches, *, classes, per_class):
 
     Membership of every batch is preserved; only whole batches move.  The
     rates those batches carry follow the row's round-one rates, in the
-    unit-major order of ``_anchor_batches``: on a banded row the first batches
+    unit-major order of ``tessera_cell_measurement.compatible_batches``: on a banded row the first batches
     of a class move through the band ends, and on a single-rate row
     (``--rate-band 896,896``) they are successive member chunks at that one
     rate.  Whether a prefix reaches every class depends on the limit as well;
@@ -825,7 +826,7 @@ def run_gpu_arm(args, *, prefix):
         if prefix:
             run_prefix, PrefixComplete = helper.run_prefix, helper.PrefixComplete
             classes = args.shape_classes.split(',')
-            original = campaign._anchor_batches
+            original = cell_measurement.compatible_batches
             original_groups = campaign.resolve_anchor_groups
             original_loo = campaign._loo_for
             observer = _SilentObserver()
@@ -870,11 +871,11 @@ def run_gpu_arm(args, *, prefix):
                         require_prefix_classes(order, classes=classes, limit=args.limit_anchors)
                         checked.append(True)
                     return order
-                campaign._anchor_batches = interleaved
+                cell_measurement.compatible_batches = interleaved
             try:
                 run_prefix(campaign, command, observer, limit=args.limit_anchors, expected_source_units=args.expected_source_units)
             finally:
-                campaign._anchor_batches = original
+                cell_measurement.compatible_batches = original
                 campaign.resolve_anchor_groups = original_groups
                 campaign._loo_for = original_loo
             record['prefix'] = {k: v for k, v in observer.result.items() if k != 'resident_prefetch'}

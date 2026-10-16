@@ -1,5 +1,6 @@
 """Write opens must refuse colliding coordinates before publishing any bytes."""
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import tessera_campaign_wire as campaign_wire
 from types import SimpleNamespace
@@ -9,7 +10,6 @@ import torch
 from torch import nn
 
 from prismaquant import production_weight_cache as pwc
-from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_render
 from test_packed_expert_cross_domain_gate import TinyLM
 
@@ -22,23 +22,10 @@ OTHER_FORMAT = "TESSERA_E4M3_K1_R1280"
 def anchor_inputs(monkeypatch, tmp_path):
     # Only encoding is substituted. Scoring, both file writes and the cache
     # manifest updates still use their real campaign entry points.
-    spec = SimpleNamespace(
-        bits_for_shape=lambda shape: 8 * shape[0] * shape[1],
-        memory_bytes_for_shape=lambda shape: shape[0] * shape[1],
-        act_dtype_name="a16",
-    )
-
-    def prepare(**kwargs):
-        return dict(
-            spec=spec, family=SimpleNamespace(name="TESSERA_E4M3_K1"),
-            rung=int(kwargs["format_name"].rsplit("_R", 1)[1]), wire="recipe",
-            activation_qdq=lambda value: value, input_scale=None,
-            activation_kwargs=None, hessian_required=False,
-        )
-
-    monkeypatch.setattr(campaign, "_prepare_anchor", prepare)
-    monkeypatch.setattr(campaign, "_encode_and_render",
-                        lambda weight, *_args, **_kwargs: (weight * 0.75, b"wire"))
+    encoded = []
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit",
+                        lambda weight, *_args, **_kwargs:
+                        encoded.pop(0) if encoded else (weight * 0.75, b"wire"))
     monkeypatch.setattr(tessera_render, "encode_tessera_units",
                         lambda weights, *_args, **_kwargs:
                         [(weight * 0.75, b"wire") for weight in weights])
@@ -46,7 +33,7 @@ def anchor_inputs(monkeypatch, tmp_path):
     wire_dir.mkdir()
     cache = pwc.ProductionWeightCache(
         weights={}, levers={}, cache_dir=str(tmp_path), metadata={})
-    return cache, wire_dir, torch.ones(2, 2), prepare
+    return cache, wire_dir, torch.ones(2, 2), encoded
 
 
 def assert_refusal(error, first, second, filename):
@@ -66,7 +53,7 @@ def assert_no_files(tmp_path):
 ])
 def test_campaign_publication_checks_existing_manifest(
         anchor_inputs, tmp_path, monkeypatch, first, second, filename):
-    cache, wire_dir, weight, prepare = anchor_inputs
+    cache, wire_dir, weight, encoded = anchor_inputs
     cache.weights[(first, FORMAT)] = weight
     before = dict(cache.weights)
     existing_wire = None
@@ -77,10 +64,10 @@ def test_campaign_publication_checks_existing_manifest(
                         lambda **_kwargs: pytest.fail("collision reached the rendered write"))
 
     with pytest.raises(ValueError) as error:
-        campaign._finish_anchor(
+        encoded.append((weight * 0.75, b"wire"))
+        cell_measurement.measure_cell(
             qname=second, weight=weight, activations=weight, format_name=FORMAT,
-            cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-            render=weight * 0.75, blob=b"wire", elapsed=0.0,
+            cache=cache, wire_dir=wire_dir, hessian_required=False,
         )
 
     assert_refusal(error, first, second, filename)
@@ -93,7 +80,7 @@ def test_campaign_publication_checks_existing_manifest(
 
 
 def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path):
-    cache, wire_dir, weight, prepare = anchor_inputs
+    cache, wire_dir, weight, encoded = anchor_inputs
     dense, new = "layer.a", "layer__a"
     dense_filename = cache_weight_filename(dense, FORMAT)
     dense_path = tmp_path / dense_filename
@@ -102,10 +89,10 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     cache.weights[(dense, FORMAT)] = dense_filename
     assert not campaign_wire.wire_path(wire_dir, dense, FORMAT).exists()
 
-    campaign._finish_anchor(
+    encoded.append((weight * 0.75, b"new wire"))
+    cell_measurement.measure_cell(
         qname=new, weight=weight, activations=weight, format_name=FORMAT,
-        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-        render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+        cache=cache, wire_dir=wire_dir, hessian_required=False,
     )
 
     assert dense_path.read_bytes() == dense_bytes
@@ -121,10 +108,10 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     }
     # Once the alias's real wire exists, it must not retroactively turn the
     # dense-only coordinate into a wire owner on the next publication.
-    campaign._finish_anchor(
+    encoded.append((weight * 0.5, b"other wire"))
+    cell_measurement.measure_cell(
         qname="other", weight=weight, activations=weight, format_name=FORMAT,
-        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-        render=weight * 0.5, blob=b"other wire", elapsed=0.0,
+        cache=cache, wire_dir=wire_dir, hessian_required=False,
     )
     assert dense_path.read_bytes() == dense_bytes
     assert new_wire.read_bytes() == b"new wire"
@@ -135,7 +122,7 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
 @pytest.mark.parametrize("existing_wire", [False, True])
 def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
         anchor_inputs, tmp_path, monkeypatch, existing_wire):
-    cache, wire_dir, weight, prepare = anchor_inputs
+    cache, wire_dir, weight, encoded = anchor_inputs
     first, second = "layer.a", "layer__a"
     # Resume and seed adoption read priced wires, but do not reconstruct the
     # render manifest. Their explicit roster must survive that distinction.
@@ -147,10 +134,10 @@ def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
                         lambda **_kwargs: pytest.fail("wire collision reached a write"))
 
     with pytest.raises(ValueError) as error:
-        campaign._finish_anchor(
+        encoded.append((weight * 0.75, b"new wire"))
+        cell_measurement.measure_cell(
             qname=second, weight=weight, activations=weight, format_name=FORMAT,
-            cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-            render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+            cache=cache, wire_dir=wire_dir, hessian_required=False,
         )
 
     assert_refusal(error, first, second, first_wire.name)
@@ -171,7 +158,7 @@ def test_campaign_batch_refuses_before_first_publication(
     cache, wire_dir, weight, _prepare = anchor_inputs
 
     with pytest.raises(ValueError) as error:
-        campaign._measure_anchor_batch(
+        cell_measurement.measure_cells(
             qnames=[first, second], weights=[weight, weight],
             activations=[weight, weight], format_name=FORMAT, cache=cache,
             wire_dir=wire_dir, hessian_required=False,
@@ -185,7 +172,7 @@ def test_campaign_batch_refuses_before_first_publication(
 def test_campaign_admits_cross_format_name_aliases(anchor_inputs, tmp_path):
     cache, wire_dir, weight, _prepare = anchor_inputs
     for name, fmt in (("layer.a", FORMAT), ("layer_a", OTHER_FORMAT)):
-        campaign._measure_anchor(
+        cell_measurement.measure_cell(
             qname=name, weight=weight, activations=weight, format_name=fmt,
             cache=cache, wire_dir=wire_dir, hessian_required=False,
         )
@@ -239,7 +226,7 @@ def test_queued_campaign_collision_preserves_first_publication(
     from threading import Event
     from prismaquant.tessera_publication import BoundedPublisher, PublicationError
 
-    cache, wire_dir, weight, prepare = anchor_inputs
+    cache, wire_dir, weight, encoded = anchor_inputs
     first = "layer.a"
     first_entered = Event()
     release_first = Event()
@@ -260,17 +247,17 @@ def test_queued_campaign_collision_preserves_first_publication(
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry", hold_first_write)
     with BoundedPublisher(budget_bytes=64) as publisher:
         try:
-            campaign._finish_anchor(
+            encoded.append((weight * 0.75, b"first wire"))
+            cell_measurement.measure_cell(
                 qname=first, weight=weight, activations=weight, format_name=FORMAT,
-                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-                render=weight * 0.75, blob=b"first wire", elapsed=0.0, publisher=publisher,
+                cache=cache, wire_dir=wire_dir, publisher=publisher, hessian_required=False,
             )
             assert first_entered.wait(timeout=30), "writer did not reach the first publication"
             assert cache.weights == {}
-            campaign._finish_anchor(
+            encoded.append((weight * 0.5, b"second wire"))
+            cell_measurement.measure_cell(
                 qname=second, weight=weight, activations=weight, format_name=FORMAT,
-                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-                render=weight * 0.5, blob=b"second wire", elapsed=0.0, publisher=publisher,
+                cache=cache, wire_dir=wire_dir, publisher=publisher, hessian_required=False,
             )
             assert publisher.outstanding == 2
         finally:
@@ -300,7 +287,7 @@ def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
     from threading import Event, Thread, current_thread
     from prismaquant.tessera_publication import BoundedPublisher
 
-    cache, wire_dir, weight, prepare = anchor_inputs
+    cache, wire_dir, weight, encoded = anchor_inputs
     first, alias = "layer.a", "layer__a"
     cache.weights[(first, FORMAT)] = weight
     first_wire = campaign_wire.wire_path(wire_dir, first, FORMAT)
@@ -320,7 +307,7 @@ def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
 
     def produce():
         try:
-            campaign._measure_anchor_batch(
+            cell_measurement.measure_cells(
                 qnames=[alias, "other"], weights=[weight, weight],
                 activations=[weight, weight], format_name=FORMAT, cache=cache,
                 wire_dir=wire_dir, hessian_required=False)
@@ -334,11 +321,11 @@ def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
         producer.start()
         try:
             assert producer_paused.wait(timeout=30), "producer did not pause in bootstrap"
-            campaign._finish_anchor(
+            encoded.append((weight * 0.75, b"first wire"))
+            cell_measurement.measure_cell(
                 qname=first, weight=weight, activations=weight, format_name=FORMAT,
-                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
-                render=weight * 0.75, blob=b"first wire", elapsed=0.0,
-                publisher=publisher)
+                cache=cache, wire_dir=wire_dir, publisher=publisher, hessian_required=False,
+            )
             publisher.drain()
             assert first_wire.read_bytes() == b"first wire"
             assert cache._campaign_wire_coordinates == {(first, FORMAT)}

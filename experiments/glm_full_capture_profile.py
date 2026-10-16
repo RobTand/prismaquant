@@ -474,8 +474,9 @@ def main(argv=None):
     if not torch.cuda.is_available():
         raise RuntimeError('full capture profiler requires CUDA')
     from prismaquant import tessera_campaign as campaign
-    instrument_owner = campaign if args.selected_anchors else calibration_forward
-    methods = ('_measure_anchor', '_measure_anchor_batch') if args.selected_anchors else ('capture_activation_statistics',)
+    from prismaquant import tessera_cell_measurement
+    instrument_owner = tessera_cell_measurement if args.selected_anchors else calibration_forward
+    methods = ('measure_cells',) if args.selected_anchors else ('capture_activation_statistics',)
     originals = {method: getattr(instrument_owner, method) for method in methods}
     observer = (AnchorObserver(args.evidence_out, profile_calls=calls,
                               trace_max_bytes=args.anchor_trace_max_bytes, command=command,

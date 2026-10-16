@@ -5,7 +5,7 @@ property of the spec -- ``FormatSpec.static_activation_contract``, reached
 through the registry row that owns it -- and moved the assignment-KL hooks and
 the production cache scorer onto it.  Three call sites kept answering the same
 question by comparing the route's *source-format name* against ``"NVFP4"``:
-``tessera_campaign._measure_anchor``, ``tessera_campaign``'s own
+``cell_measurement.measure_cell``, ``tessera_campaign``'s own
 ``_format_executes_static_nvfp4``, and ``tessera_export_lane``'s
 ``--input-scales`` gate.
 
@@ -26,6 +26,9 @@ assertion here is a real regression rather than a pin.
 """
 from __future__ import annotations
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
 import dataclasses
 import json
 
@@ -164,8 +167,8 @@ def test_the_campaign_predicate_answers_every_rung_as_the_name_compare_did():
     resolve case-insensitively, that includes ``INT4_W4A16_g128``, the one
     mixed-case registered row, which must classify False rather than raise.
     """
-    from prismaquant.tessera_campaign import (
-        _format_executes_static_activation_contract as new,
+    from prismaquant.tessera_cell_measurement import (
+        executes_static_activation_contract as new,
     )
 
     def old(format_name):
@@ -188,8 +191,8 @@ def test_the_campaign_predicate_answers_every_rung_as_the_name_compare_did():
 
 def test_the_campaign_predicate_follows_the_contract_not_the_name(
         fp8_gains_a_static_contract):
-    from prismaquant.tessera_campaign import (
-        _format_executes_static_activation_contract as executes,
+    from prismaquant.tessera_cell_measurement import (
+        executes_static_activation_contract as executes,
     )
 
     assert executes(W4A4) is True
@@ -214,10 +217,10 @@ def test_the_campaign_refuses_a_second_contract_without_its_scale(
     def _must_not_encode(*a, **k):
         raise AssertionError("the refusal must precede the encode")
 
-    monkeypatch.setattr(campaign, "_encode_and_render", _must_not_encode)
-    with pytest.raises(campaign.ActivationScaleContractError,
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", _must_not_encode)
+    with pytest.raises(ActivationScaleContractError,
                        match="e4m3_per_tensor_static"):
-        campaign._measure_anchor(
+        cell_measurement.measure_cell(
             qname="m.q_proj",
             weight=torch.randn(32, 256, dtype=torch.bfloat16),
             activations=torch.randn(8, 256),
@@ -230,7 +233,8 @@ def test_the_campaign_refuses_a_second_contract_without_its_scale(
 def test_the_resume_guard_follows_the_contract(fp8_gains_a_static_contract):
     """A resumed row of a second-contract rung is a pre-contract price too."""
     from prismaquant.tessera_campaign_table import (CampaignAnchor)
-    from prismaquant.tessera_campaign import ActivationScaleContractError, _require_resumable_anchor
+    from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+    from prismaquant.tessera_cell_measurement import require_resumable_cell
 
     anchor = CampaignAnchor(
         qname="m.up", family="TESSERA_E4M3_K1", format_name=W8A8,
@@ -240,8 +244,8 @@ def test_the_resume_guard_follows_the_contract(fp8_gains_a_static_contract):
         activation_quantized=True, wire_bytes=1000, seconds=1.0)
     with pytest.raises(ActivationScaleContractError,
                        match="pre-served-.*contract"):
-        _require_resumable_anchor(anchor, {"m.up": 71.68})
-    _require_resumable_anchor(
+        require_resumable_cell(anchor, {"m.up": 71.68})
+    require_resumable_cell(
         dataclasses.replace(anchor, input_global_scale=71.68), {"m.up": 71.68})
 
 

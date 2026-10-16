@@ -1,4 +1,5 @@
 """Canonical H handoffs union commitments and authenticate only consumed H."""
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import sys
@@ -165,7 +166,7 @@ def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path
     """The source about to price must seal without another population scan."""
     from tessera import cached_unit
     sources = []
-    original_memo = campaign._activation_kwargs_memo
+    original_memo = cell_measurement.encoder_kwargs_memo
     original_write = campaign.write_export_inputs
     original_label = campaign.contract_source_label
     published = False
@@ -193,7 +194,7 @@ def test_selected_cli_reuses_published_hessian_commitments(monkeypatch, tmp_path
                 raise RuntimeError('injected post-binding failure')
         return original_label()
 
-    monkeypatch.setattr(campaign, '_activation_kwargs_memo', memo)
+    monkeypatch.setattr(cell_measurement, "encoder_kwargs_memo", memo)
     monkeypatch.setattr(campaign, 'write_export_inputs', write)
     monkeypatch.setattr(campaign, 'contract_source_label', label)
     if abort:

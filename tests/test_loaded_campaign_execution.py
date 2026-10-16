@@ -1,4 +1,5 @@
 """Loaded phases bind policy separately from raw wire and source custody."""
+from prismaquant import tessera_cell_measurement as cell_measurement
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,7 @@ def test_actual_loaded_census_keeps_shared_constructors_without_creating_h_sourc
     actual, argv, _model, _contract, _calls, output = fixture(monkeypatch, tmp_path)
     argv[argv.index('--hessian')+1] = hessian
     events = []
-    real_memo = actual._activation_kwargs_memo
+    real_memo = cell_measurement.encoder_kwargs_memo
     def memo(source, *args, **kwargs):
         assert source is None
         events.append('memo')
@@ -85,7 +86,7 @@ def test_actual_loaded_census_keeps_shared_constructors_without_creating_h_sourc
         return real_census(request, **kwargs)
     def unexpected_h_source(*args, **kwargs):
         pytest.fail('census created an H-aware producer source')
-    monkeypatch.setattr(actual, '_activation_kwargs_memo', memo)
+    monkeypatch.setattr(cell_measurement, "encoder_kwargs_memo", memo)
     monkeypatch.setattr(ProductionWeightCache, '__init__', initialize)
     monkeypatch.setattr(actual, 'run_census', publish)
     monkeypatch.setattr(actual.th, 'activation_source', unexpected_h_source)

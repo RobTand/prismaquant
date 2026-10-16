@@ -894,7 +894,7 @@ def synthesize_tessera_spec(
 class HessianContractError(RuntimeError):
     """The Hessian contract was not met, and the encode must not proceed.
 
-    Its own class because the campaign's anchor loop wraps ``_measure_anchor``
+    Its own class because the campaign's anchor loop wraps ``tessera_cell_measurement.measure_cell``
     in ``except Exception: continue`` -- an anchor that fails for its own
     reasons should not abort a multi-hour run -- and a contract refusal is
     exactly the thing that must *not* be absorbed by that. A refusal quietly

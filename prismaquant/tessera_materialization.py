@@ -8,6 +8,7 @@ packed allocation, after the ordinary receipt and priced-input gates pass.
 from __future__ import annotations
 
 from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_cell_measurement as cell_measurement
 
 from prismaquant import tessera_calibration_forward as calibration_forward
 
@@ -327,23 +328,16 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             continue
         write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
             state=dict(format=fmt, record=record, anchor=anchor))
-    for batch in tc._anchor_batches(missing, weights=weights,
+    for batch in cell_measurement.compatible_batches(missing, weights=weights,
                                     batch_size=anchor_batch_size, structures=structures):
         batch_names = [item[0] for item in batch]
         fmt = group['assignment'][batch_names[0]]
         common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
                       activation_kwargs_for=kwargs, hessian_required=want_h, profile=profile)
-        if len(batch) == 1:
-            name = batch_names[0]
-            anchors = [tc._measure_anchor(qname=name, weight=weights[name].to(device),
-                activations=acts[name].to(device), static_input_scale=scales.get(name),
-                structure=structures[name], **common)]
-        else:
-            anchors = tc._measure_anchor_batch(qnames=batch_names,
-                weights=[weights[name].to(device) for name in batch_names],
-                activations=[acts[name].to(device) for name in batch_names],
-                static_input_scales=scales,
-                structures={name: structures[name] for name in batch_names}, **common)
+        anchors = cell_measurement.measure_cells(qnames=batch_names,
+            weights=[weights[name].to(device) for name in batch_names],
+            activations=[acts[name].to(device) for name in batch_names],
+            static_input_scales=scales, structures=structures, **common)
         for anchor in anchors:
             name = anchor.qname
             record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])

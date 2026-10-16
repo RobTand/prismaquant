@@ -1,5 +1,7 @@
 """A campaign must account for the live packed expert population."""
 
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_table as campaign_table
 from types import ModuleType, SimpleNamespace
@@ -373,7 +375,7 @@ def _write_source_checkpoint(model, root, *, perturb=None):
 def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     """main() with a real capture, projection, encode and receipt; no route scoring.
 
-    ``_measure_anchor`` is replaced by the producer's real encode without its
+    ``measure_cell`` is replaced by the producer's real encode without its
     served-route admission: this fixture exercises the bridge on the campaign's
     selected device, while
     runtime-scoped GPU pricing requires its own measurement. Everything the
@@ -426,8 +428,8 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     def measure_without_route_admission(*, qname, weight, format_name, wire_dir, **_kwargs):
         # The producer's real encode and real bytes (so the cached-unit receipt
         # is a receipt for a Tessera artifact); only the served-route scoring
-        # of ``_measure_anchor`` is left out, for the reason in the docstring.
-        render, blob = tessera_campaign._encode_and_render(
+        # of ``measure_cell`` is left out, for the reason in the docstring.
+        render, blob = tessera_render.encode_tessera_unit(
             weight, format_name, hessian_required=False)
         path = campaign_wire.wire_path(wire_dir, qname, format_name)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -442,7 +444,7 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
             activation_quantized=True,
             wire_bytes=len(blob), seconds=0.01, hessian_applied=False)
 
-    monkeypatch.setattr(tessera_campaign, "_measure_anchor", measure_without_route_admission)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure_without_route_admission)
     argv = ["--model", str(source), "--out", str(tmp_path / "cost.pkl"),
             "--cache-dir", str(tmp_path / "cache"), "--hessian", "off",
             "--menu-mode", "research", "--max-rounds", "1",
@@ -544,14 +546,14 @@ def test_main_reports_unpriced_targets_without_claiming_coverage(monkeypatch, tm
 
         monkeypatch.setattr(campaign, "expand_menus_for_targets", menus)
     else:
-        measure = campaign._measure_anchor
+        measure = cell_measurement.measure_cell
 
         def failing_measure(**kwargs):
             if kwargs["qname"] == target:
                 raise RuntimeError("synthetic encode failure")
             return measure(**kwargs)
 
-        monkeypatch.setattr(campaign, "_measure_anchor", failing_measure)
+        monkeypatch.setattr(cell_measurement, "measure_cell", failing_measure)
         # A rung that fails to price fails the row, and no table claims the
         # rest (RobTand/prismaquant#1481). Before #1481 this row exited 0 and
         # reported the unit as ``no_successful_anchor``; the consumer then

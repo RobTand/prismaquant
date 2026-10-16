@@ -8,6 +8,7 @@ encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -256,7 +257,7 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
             waited[name] = encoding.wait(timeout=30)
         return original_entry(path, name, **kwargs)
 
-    original_measure = campaign._measure_anchor
+    original_measure = cell_measurement.measure_cell
 
     def measure(**kwargs):
         encodes.append(kwargs["qname"])
@@ -264,7 +265,7 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
         return original_measure(**kwargs)
 
     monkeypatch.setattr(cc, "_verified_capture_entry", delayed)
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     assert campaign.main(argv) == 0
     assert waited == dict.fromkeys(UNITS[1:], True)
     assert encodes == UNITS
@@ -332,7 +333,7 @@ def _pin_clock(campaign, monkeypatch):
 
 def _kill_at(campaign, monkeypatch, call):
     """Run the row until its ``call``-th encode, which dies; return the relaunch's encodes."""
-    original = campaign._measure_anchor
+    original = cell_measurement.measure_cell
     calls = []
 
     def measure(**kwargs):
@@ -341,7 +342,7 @@ def _kill_at(campaign, monkeypatch, call):
             raise _Killed()
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     return calls, original
 
 
@@ -381,7 +382,7 @@ def test_a_killed_stream_row_adopts_its_journalled_anchors_on_relaunch(
         relaunch.append(kwargs["qname"])
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     assert campaign.main(argv) == 0
     out = capsys.readouterr().out
     assert "[campaign] row head: stream (" in out
@@ -432,7 +433,7 @@ def _killed_run(monkeypatch, tmp_path):
     _calls, original = _kill_at(campaign, monkeypatch, 3)
     with pytest.raises(_Killed):
         campaign.main(argv)
-    monkeypatch.setattr(campaign, "_measure_anchor", original)
+    monkeypatch.setattr(cell_measurement, "measure_cell", original)
     return campaign, argv, state
 
 
@@ -557,7 +558,7 @@ def _killed_load_all_run(monkeypatch, tmp_path, fixture=None):
         relaunch.append(kwargs["qname"])
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     return campaign, argv, state, relaunch
 
 

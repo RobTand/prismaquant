@@ -1,4 +1,5 @@
 """Selected anchors reuse canonical inputs without loading the whole source."""
+from prismaquant import tessera_cell_measurement as cell_measurement
 import pytest
 
 
@@ -318,7 +319,7 @@ def test_bounded_encoder_memo_releases_evicted_factors_and_recomputes_identicall
     weights = {str(i): torch.empty(2, 4) for i in range(6)}
     results = []
     for capacity, expected_live in ((None, 12), (2, 2)):
-        memo = campaign._activation_kwargs_memo(None, weights, 'cpu', max_entries=capacity)
+        memo = cell_measurement.encoder_kwargs_memo(None, weights, 'cpu', max_entries=capacity)
         outputs = []
         for repeat in range(2):
             for plane in (1, 2):
@@ -364,7 +365,7 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
     outputs = []
     measurements = []
     for capacity in (None, 1):
-        memo = campaign._activation_kwargs_memo(source, weights, 'cuda', max_entries=capacity)
+        memo = cell_measurement.encoder_kwargs_memo(source, weights, 'cuda', max_entries=capacity)
         root = tmp_path/str(capacity)
         root.mkdir()
         cache = SimpleNamespace(weights={}, cache_dir=str(root))
@@ -372,7 +373,7 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
         peak_owned_bytes = 0
         for fmt in ('TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R1280'):
             for name, weight in weights.items():
-                anchor = campaign._measure_anchor(qname=name, weight=weight, activations=acts[name],
+                anchor = cell_measurement.measure_cell(qname=name, weight=weight, activations=acts[name],
                     format_name=fmt, cache=cache, wire_dir=root,
                     activation_kwargs_for=memo, hessian_required=True)
                 row = vars(anchor).copy()

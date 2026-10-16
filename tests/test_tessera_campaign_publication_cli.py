@@ -13,6 +13,8 @@ failure stops the action instead of being absorbed by it.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -94,17 +96,17 @@ def _payload(tmp_path):
 def _batched(monkeypatch, campaign, render, seen):
     """Force the batched adapter over two dense units.
 
-    Which units may share a batch is `_anchor_batches`' decision and
+    Which units may share a batch is `compatible_batches`' decision and
     `tests/test_tessera_campaign_batch.py` owns it. This test is about what
     the batched path does with a publisher, so the grouping is supplied.
     """
     monkeypatch.setattr(render, "require_tessera_batch_encoder", lambda: None)
-    monkeypatch.setattr(campaign, "_anchor_batches",
+    monkeypatch.setattr(cell_measurement, "compatible_batches",
                         lambda pending, **_kwargs: [list(pending)])
 
     def encode(weights, format_name, *, recipe, activation_kwargs, hessian_required):
         seen.append(len(weights))
-        return [campaign._encode_and_render(
+        return [tessera_render.encode_tessera_unit(
             weight, format_name, recipe=recipe, activation_kwargs=kwargs,
             hessian_required=hessian_required)
             for weight, kwargs in zip(weights, activation_kwargs)]
@@ -308,7 +310,7 @@ def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
             # Never applied, so everything is still staged at close.
             return 0
     monkeypatch.setattr(ledger_cls, "apply_completed", apply_completed)
-    real_encode = campaign._encode_and_render
+    real_encode = tessera_render.encode_tessera_unit
     calls = []
 
     def encode(weight, format_name, **kwargs):
@@ -317,7 +319,7 @@ def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
             raise HessianContractError("no Hessian for this Linear")
         return real_encode(weight, format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, "_encode_and_render", encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", encode)
     with pytest.raises(HessianContractError, match="no Hessian"):
         campaign.main([*_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)])
 
@@ -351,7 +353,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
     campaign, _render = _fixture(monkeypatch, tmp_path)
     next_encode_started = threading.Event()
     calls: list[str] = []
-    real_encode = campaign._encode_and_render
+    real_encode = tessera_render.encode_tessera_unit
 
     def encode(weight, format_name, **kwargs):
         calls.append(format_name)
@@ -359,7 +361,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
             next_encode_started.set()
         return real_encode(weight, format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, "_encode_and_render", encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", encode)
     held: list[dict] = []
     real_record = campaign_wire.checkpoint_wire_record
 

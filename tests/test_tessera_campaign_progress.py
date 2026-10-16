@@ -1,5 +1,7 @@
 """Adaptive scheduler progress and durable resume, with controlled producer calls."""
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -51,7 +53,7 @@ def fixture(monkeypatch, tmp_path):
             dloss_stderr=0., memory_bytes=32, bits_per_param=rate/256,
             activation_contract='fp8_e4m3', activation_quantized=True, wire_bytes=32,
             seconds=float(len(calls)), hessian_applied=False)
-    monkeypatch.setattr(campaign, '_measure_anchor', measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     # This test-only safety bound makes the unfixed loop finish and expose its
     # repeated successful member. Production remains governed by PB timeout.
     argv[argv.index('--max-rounds')+1] = '4'
@@ -114,7 +116,7 @@ def test_successful_refinement_is_unchanged(monkeypatch, tmp_path):
 def test_hard_contract_failures_remain_immediate(monkeypatch, tmp_path, kind):
     campaign, _checkpoint, argv, calls, controls = fixture(monkeypatch, tmp_path)
     from prismaquant.tessera_render import HessianContractError
-    error_type = HessianContractError if kind == 'HessianContractError' else campaign.ActivationScaleContractError
+    error_type = HessianContractError if kind == 'HessianContractError' else ActivationScaleContractError
     error = error_type('original hard refusal')
     controls['hard'] = error
     with pytest.raises(type(error), match='original hard refusal') as caught:

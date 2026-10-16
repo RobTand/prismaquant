@@ -1,5 +1,7 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
 from prismaquant import tessera_calibration_forward as calibration_forward
@@ -219,7 +221,7 @@ def test_main_bootstraps_loo_from_two_endpoints(
 def _forbid_reencode(monkeypatch, campaign):
     def forbidden(**_kwargs):
         pytest.fail("resume attempted another encode instead of validating the priced bytes")
-    monkeypatch.setattr(campaign, "_measure_anchor", forbidden)
+    monkeypatch.setattr(cell_measurement, "measure_cell", forbidden)
 
 
 def test_main_resumes_identical_cost_and_wire_without_reencoding(
@@ -559,7 +561,7 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
         invalid["anchors"][0][damage] = value
         write_unit(root, stage="Tessera campaign", qname=name,
             identity_sha256=manifest["identity_sha256"], state=invalid)
-        with pytest.raises(campaign.ActivationScaleContractError,
+        with pytest.raises(ActivationScaleContractError,
                            match="activation (contract|observation)"):
             campaign.main(argv)
         rejected = list(argv)
@@ -567,7 +569,7 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
         rejected[rejected.index("--checkpoint") + 1] = str(tmp_path / (label + ".anchors.json"))
         rejected[rejected.index("--cache-dir") + 1] = str(tmp_path / (label + "-cache"))
         rejected[rejected.index("--out") + 1] = str(tmp_path / (label + "-cost.pkl"))
-        with pytest.raises(campaign.ActivationScaleContractError,
+        with pytest.raises(ActivationScaleContractError,
                            match="activation (contract|observation)"):
             campaign.main([*rejected, "--seed-checkpoint", str(checkpoint)])
         assert not (tmp_path / (label + "-cost.pkl")).exists()
@@ -596,17 +598,17 @@ def _architecture_profile(profile_name, architecture):
 ])
 def test_declared_architecture_controls_direct_contract_and_memory(
         suffix, contract, element_bytes, profile_name, architecture, is_glm):
-    from prismaquant import tessera_campaign as campaign
-    from prismaquant.tessera_formats import get_tessera_family
 
     profile = _architecture_profile(profile_name, architecture)
     name = "model.layers.0.self_attn." + suffix
-    family = get_tessera_family("TESSERA_E4M3_K1")
-    assert campaign._direct_consumer_activation_contract(
-        name, profile=profile) == (contract if is_glm else None)
-    assert campaign._direct_consumer_memory_bytes(
-        name, family, (128, 64), profile=profile) == (
-            128 * 64 * element_bytes if is_glm else 0)
+    recipe = cell_measurement.CellRecipe.prepare(qname=name,
+        format_name="TESSERA_E4M3_K1_R1024", activation_kwargs_for=None,
+        hessian_required=False, static_input_scale=None, profile=profile)
+    assert recipe.direct_contract == (contract if is_glm else None)
+    shape = (128, 64)
+    assert recipe.memory_bytes_for_shape(shape) == (
+        recipe.spec.memory_bytes_for_shape(shape) +
+        (128 * 64 * element_bytes if is_glm else 0))
 
 
 def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
@@ -617,7 +619,9 @@ def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
     profile = _architecture_profile("future_mla", "FutureMLAForCausalLM")
     campaign, checkpoint, argv, model, _inputs = _main_fixture(
         monkeypatch, tmp_path, priced=True, unit=name, profile=profile)
-    assert campaign._direct_consumer_activation_contract(name, profile=profile) is None
+    recipe = cell_measurement.CellRecipe.prepare(qname=name, format_name="TESSERA_E4M3_K1_R1024",
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, profile=profile)
+    assert recipe.direct_contract is None
     assert campaign.main(argv) == 0
     with (tmp_path / "cost.pkl").open("rb") as handle:
         price = pickle.load(handle)["costs"][name]["TESSERA_E4M3_K1_R1024"]

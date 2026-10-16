@@ -1,4 +1,5 @@
 """Actual acquired-row settings bind the real verified source and exact work."""
+from prismaquant import tessera_cell_measurement as cell_measurement
 from copy import deepcopy
 from types import MappingProxyType
 import pickle
@@ -55,14 +56,14 @@ def test_actual_acquired_main_binds_raw_settings_and_source_before_pricing(
         events.append('checkpoint-identity')
         return result
 
-    actual_measure = campaign._measure_anchor
+    actual_measure = cell_measurement.measure_cell
     def measured(**kwargs):
         events.append(('priced', kwargs['qname']))
         return actual_measure(**kwargs)
 
     monkeypatch.setattr(intake, 'load_joint_campaign_acquisition', authenticated)
     monkeypatch.setattr(campaign, 'campaign_checkpoint_identity', record_identity)
-    monkeypatch.setattr(campaign, '_measure_anchor', measured)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measured)
     command = [*argv, '--row-head', 'load-all', '--acquisition-request', binding['path'],
                '--acquisition-request-sha256', binding['sha256']]
     if source_changed:

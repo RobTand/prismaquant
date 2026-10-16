@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.tessera_campaign_requests import anchor_placement
 
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -457,20 +458,20 @@ def render_handoff(handoff, *, aliased=False):
             audit_units=set(), route_cache={}, acquisition_requests=projected["requests"])
         assert set(primed[0]) <= members
         cache = SimpleNamespace(weights={}, cache_dir=None)
-        memo = campaign._activation_kwargs_memo(source, weights, "cpu")
+        memo = cell_measurement.encoder_kwargs_memo(source, weights, "cpu")
         measured, wire_records, keyword_names = {}, {}, set()
         for name in sorted(members):
             campaign._require_campaign_acquisition_source(name, weights[name], projected["source_weights"][name])
             for family, qs in scheduled[name].items():
                 for q in qs:
-                    anchor = campaign._measure_anchor(qname=name, weight=weights[name],
+                    anchor = cell_measurement.measure_cell(qname=name, weight=weights[name],
                         activations=handoff.run.inputs[name], format_name=f"{family}_R{q}", cache=cache,
                         wire_dir=wire_dir, hessian_required=True,
                         activation_kwargs_for=memo, static_input_scale=static_scales.get(name))
-                    prepared = campaign._prepare_anchor(qname=name, format_name=anchor.format_name,
+                    prepared = cell_measurement.CellRecipe.prepare(qname=name, format_name=anchor.format_name,
                         activation_kwargs_for=memo, hessian_required=True,
                         static_input_scale=static_scales.get(name))
-                    keyword_names.update(prepared["activation_kwargs"] or {})
+                    keyword_names.update(prepared.activation_kwargs or {})
                     campaign_table.require_campaign_acquisition_anchor(anchor, scheduled)
                     identity = campaign._checkpoint_anchor_identity(anchor, weights=weights,
                         menus=menus, calibration_source=source, static_scales=static_scales, projected_units={})
