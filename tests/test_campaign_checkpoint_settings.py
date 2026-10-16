@@ -26,12 +26,15 @@ def test_raw_mapping_preserves_historical_identity_and_acquisition_proof(record_
         calibration_identity={'text_sha256': 'a'*64, 'fit_ids_sha256': 'b'*64},
         serving_scope=None, static_scales={}, static_scale_policy='fixture')
     assert settings == original
-    # This source closure records the running implementation. Moving its
-    # input API intentionally changes the seal, never the historical oracle.
+    # Source seals describe the running packages; the historical settings and
+    # acquisition proof retain their original oracle bytes.
     from prismaquant.production_weight_cache import _production_cache_source_sha256
+    from tessera.cached_unit import encoder_source_sha256
     assert actual['prismaquant_source_sha256'] == _production_cache_source_sha256()
+    assert actual['encoder_source_sha256'] == encoder_source_sha256()
     expected = deepcopy(record['identity'])
     expected['prismaquant_source_sha256'] = actual['prismaquant_source_sha256']
+    expected['encoder_source_sha256'] = actual['encoder_source_sha256']
     assert actual == expected
     assert canonical_json_bytes(actual['settings'], where='raw checkpoint settings') == (
         '{"custom":{"flag":false,"n":0,"value":null},"false_setting":false,'
