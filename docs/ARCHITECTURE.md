@@ -25754,8 +25754,10 @@ Two properties make the numbers comparable with the rest of the menu:
   `test_the_same_weight_rate_costs_differently_on_the_two_routes`, and each
   W4A4 row carries the `input_global_scale` it was scored under.
 * **Rendering identity (§P8).** The tensor that is priced *is* the decoded wire:
-  `_encode_and_render` returns `read_unit_artifact(unit.blob)`, and the blob is
-  stored beside the render in the cache. Not two code paths that agree — one
+  `tessera_render.encode_tessera_unit` and its batched `encode_tessera_units`,
+  which `tessera_cell_measurement` calls, return
+  `read_unit_artifact(unit.blob)`, and the blob is stored beside the render in
+  the cache. Not two code paths that agree — one
   object. This proves the cached wire is the priced wire, not that an export
   or serving runtime reused it; those paths owe their own exact-byte and
   served receipts.
