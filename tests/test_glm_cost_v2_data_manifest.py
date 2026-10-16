@@ -1,5 +1,6 @@
 """COST's V2 manifest describes forward/reverse reads and stable resume windows."""
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 from prismaquant.render_cache_paths import cache_weight_filename
 import copy
 from dataclasses import replace
@@ -181,17 +182,17 @@ def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
 
 def test_cost_v2_refuses_unvalidated_resume_and_broken_read_references(cost_fixture):
     fixture, prepared, budget = cost_fixture
-    with pytest.raises(SystemExit, match="validated plan/prepared binding"):
+    with pytest.raises(ReadsetRefused, match="validated plan/prepared binding"):
         _build(fixture, prepared, budget, completed={"units": fixture["names"]})
     manifest = _build(fixture, prepared, budget)
     broken = copy.deepcopy(manifest)
     broken["read_plan"]["phases"][0]["cumulative_bytes"] += 1
-    with pytest.raises(SystemExit, match="phase byte accounting"):
+    with pytest.raises(ReadsetRefused, match="phase byte accounting"):
         producer.check_manifest_v2(broken)
     broken = copy.deepcopy(manifest)
     broken["read_plan"]["phases"][0]["entry_indices"].append(
         broken["read_plan"]["phases"][0]["entry_indices"][0])
-    with pytest.raises(SystemExit, match="repeated phase entry"):
+    with pytest.raises(ReadsetRefused, match="repeated phase entry"):
         producer.check_manifest_v2(broken)
 
 
@@ -201,7 +202,7 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
               / cache_weight_filename(name, existing.MEASURED[0]))
     render.unlink()
-    with pytest.raises(SystemExit, match="prepared COST render is missing"):
+    with pytest.raises(ReadsetRefused, match="prepared COST render is missing"):
         _build(fixture, prepared, budget)
     render.write_bytes(b"r" * 2048)
     with pytest.raises(RuntimeError, match="indivisible target"):
@@ -210,7 +211,7 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     changed = json.loads(fixture["plan"].read_text())
     changed["source_prefetch"]["prefetch_lookahead"] = 2
     fixture["plan"].write_text(json.dumps(changed))
-    with pytest.raises(SystemExit, match="source lookahead one"):
+    with pytest.raises(ReadsetRefused, match="source lookahead one"):
         _build(fixture, prepared, budget)
 
 
@@ -242,14 +243,14 @@ def test_cost_v2_refuses_probe_count_disagreement_with_the_plan(cost_fixture):
     sixteen-probe plan's manifest; now the build refuses by name."""
     fixture, prepared, budget = cost_fixture
     _declare_plan_probes(fixture, 16)
-    with pytest.raises(SystemExit, match="disagrees with the plan"):
+    with pytest.raises(ReadsetRefused, match="disagrees with the plan"):
         _build(fixture, prepared, budget)
 
 
 def test_cost_v2_refuses_a_plan_without_a_declared_probe_count(cost_fixture):
     fixture, prepared, budget = cost_fixture
     _declare_plan_probes(fixture, None)
-    with pytest.raises(SystemExit, match="execution.n_probes"):
+    with pytest.raises(ReadsetRefused, match="execution.n_probes"):
         _build(fixture, prepared, budget)
 
 
@@ -257,7 +258,7 @@ def test_cost_v2_refuses_a_plan_without_a_declared_probe_count(cost_fixture):
 def test_cost_v2_refuses_non_integer_or_below_two_probe_argument(
         cost_fixture, bad):
     fixture, prepared, budget = cost_fixture
-    with pytest.raises(SystemExit, match="at least two"):
+    with pytest.raises(ReadsetRefused, match="at least two"):
         _build(fixture, prepared, budget, n_probes=bad)
 
 
@@ -293,7 +294,7 @@ def test_cost_v2_refuses_an_incomplete_eval_draw_descriptor(cost_fixture):
     plan = json.loads(fixture["plan"].read_text())
     plan["joint_eval_draw"] = {}
     fixture["plan"].write_text(json.dumps(plan))
-    with pytest.raises(SystemExit, match="joint_eval_draw.calibration_input"):
+    with pytest.raises(ReadsetRefused, match="joint_eval_draw.calibration_input"):
         _build(fixture, prepared, budget)
 
 

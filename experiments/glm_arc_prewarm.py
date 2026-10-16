@@ -75,9 +75,24 @@ CAS_REQUESTS = "/mnt/shared/prismabuild-fleet/cas/requests"
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.campaign_data_manifests import (
-    CAMPAIGN_BASE, POOL_BASE, UNITS_RE, RECORD_SIZE, Campaign,
-    to_pool, read_optional_campaign_json as _json,
+    UNITS_RE, RECORD_SIZE, Campaign, ReadsetRefused,
+    read_optional_campaign_json as _json,
 )
+
+#: This rig's default campaign, and the pool it measures reads from. Host
+#: facts of the dl380g10 storage server, owned here rather than by the
+#: package's readset producer, which reads the paths a manifest declares.
+CAMPAIGN_BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
+SHARED_ROOT = "/mnt/shared/"
+POOL_ROOT = "/storage_pool/shared/"
+_POOL_LOCAL = os.path.isdir(POOL_ROOT)
+
+
+def to_pool(path: str) -> str:
+    """Read a shared path off the storage server's local pool when this host is it."""
+    if _POOL_LOCAL and path.startswith(SHARED_ROOT):
+        return POOL_ROOT + path[len(SHARED_ROOT):]
+    return path
 
 ARC_PATH = "/proc/spl/kstat/zfs/arcstats"
 
@@ -492,4 +507,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ReadsetRefused as refusal:
+        sys.exit(str(refusal))

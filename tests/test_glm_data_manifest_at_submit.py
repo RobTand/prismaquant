@@ -21,6 +21,7 @@ Nothing here touches the shared mount: the campaign, its captures, its shard
 and its seed wire directory are all built under ``tmp_path``.
 """
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 import json
 import struct
 import sys
@@ -329,12 +330,12 @@ def test_a_row_whose_named_seed_wire_yields_nothing_is_refused(
     named = ["--seed-checkpoint", str(checkpoint)]
 
     absent = _row(units, tmp_path / "never-written", extra=named)
-    with pytest.raises(SystemExit, match="no readable file was found"):
+    with pytest.raises(ReadsetRefused, match="no readable file was found"):
         dispatch.attach_data_manifests(workspace, [absent])
 
     empty = tmp_path / "empty-wire"
     empty.mkdir()
-    with pytest.raises(SystemExit, match="no readable file was found"):
+    with pytest.raises(ReadsetRefused, match="no readable file was found"):
         dispatch.attach_data_manifests(workspace, [_row(units, empty, extra=named)])
 
     # The checkpoint on its own is still declared when the wire directory has
@@ -365,9 +366,9 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
     # The real ceilings are far above any GLM row, so the refusal is exercised
     # by lowering them rather than by building a million entries.
     monkeypatch.setattr(glm_data_manifests, "MAX_ENTRIES", 1)
-    with pytest.raises(SystemExit, match="entries exceed 1"):
+    with pytest.raises(ReadsetRefused, match="entries exceed 1"):
         glm_data_manifests.check_manifest(manifest)
-    with pytest.raises(SystemExit, match="over the"):
+    with pytest.raises(ReadsetRefused, match="over the"):
         glm_data_manifests.check_manifest_bytes(
             b"x" * (glm_data_manifests.MAX_MANIFEST_BYTES + 1))
     assert glm_data_manifests.check_manifest_bytes(b"{}") == b"{}"
@@ -385,3 +386,29 @@ def test_seed_readset_uses_the_last_equal_or_abbreviated_directory(tmp_path, sha
     for name, size in SEED_WIRE.items():
         assert declared[str(seed_dir / name)] == size
     assert not any('unused-first-seed' in path for path in declared)
+
+
+def test_the_dispatcher_ends_a_producer_refusal_with_its_reason(monkeypatch):
+    """The producer raises a domain error; only the CLI main turns it into an exit."""
+    reason = "row-0001: zero-length entry: /mnt/shared/x"
+
+    def refuse(_args):
+        raise ReadsetRefused(reason)
+
+    monkeypatch.setattr(dispatch, "cmd_check", refuse)
+    with pytest.raises(SystemExit) as exit_info:
+        dispatch.main(["check", "--workspace", "/nowhere"])
+    assert exit_info.value.code == reason
+    assert isinstance(exit_info.value.__cause__, ReadsetRefused)
+
+
+def test_the_producer_reads_declared_paths_and_spells_no_host_layout():
+    """Host mount facts belong to the boundaries that measure them, not the producer."""
+    import ast
+    from tests.boundary_gate import code_strings
+
+    source = Path(glm_data_manifests.__file__).read_text()
+    assert not [text for _node, text in code_strings(ast.parse(source))
+                if "/storage_pool" in text]
+    assert not hasattr(glm_data_manifests, "to_pool")
+    assert issubclass(ReadsetRefused, RuntimeError)

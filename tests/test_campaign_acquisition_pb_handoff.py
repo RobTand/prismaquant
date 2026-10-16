@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.tessera_campaign_requests import anchor_placement
 
@@ -261,7 +262,7 @@ def test_readset_refuses_missing_and_drifted_original_inputs(handoff, target):
 
 def test_readset_refuses_controls_outside_shared_mount(handoff, monkeypatch):
     monkeypatch.setattr(manifests, "SHARED_MOUNT", str(handoff.root / "other-mount"))
-    with pytest.raises(SystemExit, match="outside the shared mount"):
+    with pytest.raises(ReadsetRefused, match="outside the shared mount"):
         dispatch.cmd_plan(_plan_args(handoff.spec, handoff.workspace))
     assert not (handoff.workspace / "manifest.json").exists()
 

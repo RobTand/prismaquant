@@ -27,6 +27,7 @@ so they run on the fleet's CPU boxes:
 
 from __future__ import annotations
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 import importlib.util
 import json
 import shutil
@@ -187,7 +188,7 @@ def test_a_resumed_read_set_omits_the_replayed_units_from_the_walk(
 def test_a_journal_bound_to_another_checkpoint_is_refused(scratch, shared_mount):
     fixture, _ = _workspace_with_sealed_checkpoint(scratch)
     _plant_journal(fixture, {U1}, checkpoint_sha256="d" * 64)
-    with pytest.raises(SystemExit, match="campaign checkpoint"):
+    with pytest.raises(ReadsetRefused, match="campaign checkpoint"):
         _prepare(fixture["plan"], RESUME_ARGV)
 
 
@@ -195,7 +196,7 @@ def test_a_journal_naming_a_foreign_unit_is_refused(scratch, shared_mount):
     fixture, checkpoint_sha256 = _workspace_with_sealed_checkpoint(scratch)
     _plant_journal(fixture, {U1}, checkpoint_sha256=checkpoint_sha256,
                    roster=[*fixture["names"], "model.layers.9.mlp.gate_proj"])
-    with pytest.raises(SystemExit, match="roster"):
+    with pytest.raises(ReadsetRefused, match="roster"):
         _prepare(fixture["plan"], RESUME_ARGV)
 
 

@@ -6,7 +6,10 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.campaign_data_manifests import CAMPAIGN_BASE, publish_row_manifests
+from prismaquant.campaign_data_manifests import ReadsetRefused, publish_row_manifests
+
+#: The dated GLM census this experiment publishes readsets for by default.
+CAMPAIGN_BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
@@ -41,4 +44,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except ReadsetRefused as refusal:
+        raise SystemExit(str(refusal)) from refusal

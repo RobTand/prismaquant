@@ -1455,7 +1455,7 @@ def require_data_manifests(rows: list[dict], *, where) -> None:
             manifest = producer.check_manifest(
                 json.loads(producer.check_manifest_bytes(blob, where=label)),
                 where=label)
-        except (OSError, ValueError, SystemExit) as error:
+        except (OSError, ValueError, producer.ReadsetRefused) as error:
             refusals.append(f"{label}: {named}: {error}")
             continue
         owner = manifest["annotations"].get("row_id")
@@ -2909,7 +2909,12 @@ def main(argv=None) -> int:
     merge.set_defaults(func=cmd_merge)
 
     args = ap.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except campaign_data_manifests.ReadsetRefused as refusal:
+        # The readset producer's refusal ends the command with its reason and
+        # exit status 1, exactly as the producer's own SystemExit used to.
+        raise SystemExit(str(refusal)) from refusal
 
 
 if __name__ == "__main__":

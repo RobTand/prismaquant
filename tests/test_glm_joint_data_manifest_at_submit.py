@@ -30,6 +30,7 @@ The tests exercise metadata-only paths without Torch. The producer imports
 cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
 """
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import tessera_campaign_table as campaign_table
 
@@ -533,7 +534,7 @@ def test_prepare_refuses_a_prefetch_window_it_cannot_release(scratch, shared_mou
     plan = json.loads(fixture["plan"].read_text())
     plan["source_prefetch"]["max_cache_slots"] = 3
     fixture["plan"].write_text(json.dumps(plan))
-    with pytest.raises(SystemExit, match="source prefetch can outlive"):
+    with pytest.raises(ReadsetRefused, match="source prefetch can outlive"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -722,7 +723,7 @@ def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
         handle.seek(-1, 2)
         handle.write(bytes([last[0] ^ 1]))
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
-    with pytest.raises(SystemExit, match="no longer proves"):
+    with pytest.raises(ReadsetRefused, match="no longer proves"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -765,7 +766,7 @@ def test_a_cache_written_through_another_mount_refuses_and_names_the_mount(
         "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
     fixture["plan"].write_text(json.dumps(plan))
 
-    with pytest.raises(SystemExit, match="no longer proves") as refusal:
+    with pytest.raises(ReadsetRefused, match="no longer proves") as refusal:
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     message = str(refusal.value)
@@ -802,7 +803,7 @@ def test_a_cache_written_through_another_mount_refuses_and_names_the_mount(
         handle.seek(-1, 2)
         handle.write(bytes([last[0] ^ 1]))
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
-    with pytest.raises(SystemExit, match="no longer proves"):
+    with pytest.raises(ReadsetRefused, match="no longer proves"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -900,7 +901,7 @@ def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
     # A missing render cannot turn this metadata/price action into a wire
     # consumer through the preparation synthesis fallback.
     Path(expected[-1]).unlink()
-    with pytest.raises(SystemExit, match='prepared render is missing'):
+    with pytest.raises(ReadsetRefused, match='prepared render is missing'):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture['plan']), command='run', produced_by=PRODUCED_BY,
             prepared=str(prepared))
@@ -913,7 +914,7 @@ def test_a_joint_pass_before_the_merge_is_refused_with_the_path_named(
     for shard in (fixture["parts"] / "units").iterdir():
         shard.unlink()
 
-    with pytest.raises(SystemExit) as refusal:
+    with pytest.raises(ReadsetRefused) as refusal:
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -1112,7 +1113,7 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
         str(fixture["plan"]), command="run", produced_by=PRODUCED_BY,
         prepared=str(prepared), source_transition=str(receipt))
     assert str(receipt) in _paths(manifest, "head")
-    with pytest.raises(SystemExit, match="run command only"):
+    with pytest.raises(ReadsetRefused, match="run command only"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY,
             source_transition=str(receipt))

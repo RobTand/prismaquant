@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: `campaign_data_manifests` reads the paths a manifest
+declares and refuses with `ReadsetRefused` (a `RuntimeError`); the dispatcher's
+and the experiment entry points' `main` turn it into their exit status. The
+import-time `/storage_pool/shared` probe, `to_pool` and the dated GLM census
+roots left the package: on dl380g10 both mount points are one ZFS dataset, so a
+declared path is already a local read there and also resolves datasets mounted
+beneath the shared mount. The prewarm measurement rig keeps its own pool
+mapping. Manifest bytes, provenance and every gate are unchanged.
+
 Re-stamped 2026-10-16: campaign row construction has one package owner.
 `tessera_campaign_rows` owns the run spec (`load_spec`), row classes and their
 placement attestations (`tools/fleet_interpreters.json`, read as data), the

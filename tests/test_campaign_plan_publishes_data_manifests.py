@@ -21,6 +21,7 @@ dubious.
 Nothing here touches the shared mount: each test treats its own ``tmp_path``
 as the mount the manifest declares.
 """
+from prismaquant.campaign_data_manifests import ReadsetRefused
 import json
 import sys
 import types
@@ -230,7 +231,7 @@ def test_a_row_whose_read_set_cannot_be_derived_refuses_the_plan(
     spec, workspace = _partition_workspace(tmp_path, box_memory_gb=None)
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT",
                         str(tmp_path / "elsewhere"))
-    with pytest.raises(SystemExit, match="outside the shared mount"):
+    with pytest.raises(ReadsetRefused, match="outside the shared mount"):
         dispatch.cmd_plan(_plan_args(spec, workspace))
     assert sorted(path.name for path in workspace.iterdir()) == ["census.json"]
 
@@ -239,6 +240,6 @@ def test_a_row_whose_read_set_cannot_be_derived_refuses_the_plan(
     before = _published(workspace)
     # The model's index goes missing: no row reads anything any more.
     (tmp_path / "model" / "model.safetensors.index.json").unlink()
-    with pytest.raises(SystemExit, match="non-empty"):
+    with pytest.raises(ReadsetRefused, match="non-empty"):
         dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2))
     assert _published(workspace) == before

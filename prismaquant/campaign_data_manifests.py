@@ -23,11 +23,17 @@ from . import joint_run_progress as _run_progress_module
 from .digests import (bytes_sha256hex, text_sha256hex, file_sha256hex,
     DIRECT_UTF8_STRICT, DIRECT_UTF8_LAX, DIRECT_ASCII_LAX)
 
-CAMPAIGN_BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
-POOL_BASE = "/storage_pool/shared/tessera-measurements/glm-canonical-census-20260908"
 UNITS_RE = re.compile(r"units/(row-\d{4}(?:-p\d{4})?)\.json")
-_POOL_LOCAL = os.path.isdir("/storage_pool/shared")
 RECORD_SIZE = 1 << 20
+
+
+class ReadsetRefused(RuntimeError):
+    """A campaign input, read set or data manifest the producer refuses.
+
+    A domain error: the dispatcher and the experiment entry points turn it
+    into their exit status, and library callers catch it like any other
+    ``RuntimeError``.
+    """
 
 
 def read_optional_campaign_json(path):
@@ -36,23 +42,6 @@ def read_optional_campaign_json(path):
             return json.load(fh)
     except (OSError, ValueError):
         return None
-
-
-def to_pool(path: str) -> str:
-    """Map a /mnt/shared path onto the identical local ZFS mount.
-
-    On dl380g10 both are mounts of ``storage_pool/shared``; using the pool path
-    keeps the reader off the NFS loopback so the warm is a pool read. Off that
-    box there is no pool mount, so the path is returned unchanged and only the
-    read-free modes (``--dry-run``) are meaningful.
-    """
-    if not _POOL_LOCAL:
-        return path
-    if path.startswith(CAMPAIGN_BASE):
-        return POOL_BASE + path[len(CAMPAIGN_BASE):]
-    if path.startswith("/mnt/shared/"):
-        return "/storage_pool/shared/" + path[len("/mnt/shared/"):]
-    return path
 
 
 def _seed_read_files(path: str) -> list[tuple[str, int]]:
@@ -71,12 +60,10 @@ def _seed_read_files(path: str) -> list[tuple[str, int]]:
     opens every entry ``O_NOFOLLOW``, so a symlinked leaf would only ever
     record an error, and it is dropped rather than declared.
 
-    Paths come back in the shared namespace the manifest declares, even when
-    the sizes were taken through the local pool mount.
+    Paths come back exactly as the manifest declares them.
     """
-    local = to_pool(path)
     try:
-        info = os.stat(local)
+        info = os.stat(path)
     except OSError:
         return []
     if statmod.S_ISREG(info.st_mode):
@@ -84,7 +71,7 @@ def _seed_read_files(path: str) -> list[tuple[str, int]]:
     if not statmod.S_ISDIR(info.st_mode):
         return []
     out: list[tuple[str, int]] = []
-    pending = [local]
+    pending = [path]
     while pending:
         directory = pending.pop()
         try:
@@ -104,7 +91,7 @@ def _seed_read_files(path: str) -> list[tuple[str, int]]:
                 continue
             if size <= 0:
                 continue
-            relative = os.path.relpath(item.path, local)
+            relative = os.path.relpath(item.path, path)
             out.append((os.path.normpath(os.path.join(path, relative)), size))
     return sorted(out)
 
@@ -130,7 +117,7 @@ class Campaign:
         if plan is None:
             plan = read_optional_campaign_json(os.path.join(workspace, "plan.json"))
         if plan is None:
-            raise SystemExit(f"unreadable plan: {workspace}/plan.json")
+            raise ReadsetRefused(f"unreadable plan: {workspace}/plan.json")
         self._selections = None if selections is None else dict(selections)
         self.plan = plan
         self.rows = {r["row_id"]: r for r in plan["rows"]}
@@ -150,7 +137,7 @@ class Campaign:
         else:
             manifest = read_optional_campaign_json(cap)
             if manifest is None:
-                raise SystemExit(f"unreadable capture manifest: {cap}")
+                raise ReadsetRefused(f"unreadable capture manifest: {cap}")
             self.capture_root = os.path.dirname(cap)
             self.entries = manifest["entries"]
         self._units_cache: dict[str, list[str]] = {}
@@ -168,7 +155,7 @@ class Campaign:
             else:
                 units = read_optional_campaign_json(row["units"])
             if units is None:
-                raise SystemExit(f"unreadable units: {row['units']}")
+                raise ReadsetRefused(f"unreadable units: {row['units']}")
             if units.get("schema") == _selection_owner.UNITS_SCHEMA_V3:
                 _selection_owner.validate_unit_selection(units, path=row["units"])
                 names = list(_selection_owner.selection_priced_units(units)[0])
@@ -194,7 +181,7 @@ class Campaign:
                 continue
             path = os.path.join(self.capture_root, rec["path"])
             try:
-                size = os.stat(to_pool(path)).st_size
+                size = os.stat(path).st_size
             except OSError:
                 size = 0
             out.append((path, size))
@@ -214,7 +201,7 @@ class Campaign:
 
     def _header(self, shard: str) -> dict:
         if shard not in self._header_cache:
-            path = to_pool(os.path.join(self.model_dir, shard))
+            path = os.path.join(self.model_dir, shard)
             try:
                 with open(path, "rb") as fh:
                     n = int.from_bytes(fh.read(8), "little")
@@ -269,7 +256,7 @@ class Campaign:
         for shard in sorted(by_shard):
             path = os.path.join(self.model_dir, shard)
             try:
-                end_of_file = os.stat(to_pool(path)).st_size
+                end_of_file = os.stat(path).st_size
             except OSError:
                 end_of_file = 0
             spans = sorted(by_shard[shard])
@@ -338,7 +325,7 @@ class Campaign:
         if path is None and digest is None:
             return []
         if not path or not digest:
-            raise SystemExit("acquisition read set requires paired request path/SHA256")
+            raise ReadsetRefused("acquisition read set requires paired request path/SHA256")
         return _acquisition_owner.joint_campaign_acquisition_control_inputs(
             {"path": path, "sha256": digest})
 
@@ -403,48 +390,48 @@ def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
     are cheap enough to apply to every row at submit time.
     """
     if set(manifest) != set(MANIFEST_KEYS):
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{where}: fields differ: "
             f"missing={sorted(MANIFEST_KEYS - set(manifest))}, "
             f"extra={sorted(set(manifest) - MANIFEST_KEYS)}")
     if manifest["schema"] != SCHEMA:
-        raise SystemExit(f"{where}: schema must be {SCHEMA}")
+        raise ReadsetRefused(f"{where}: schema must be {SCHEMA}")
     for field in ("produced_by", "annotations"):
         if not isinstance(manifest[field], dict):
-            raise SystemExit(f"{where}: {field} must be an object")
+            raise ReadsetRefused(f"{where}: {field} must be an object")
     prefix = manifest["mount_prefix"]
     if not prefix.startswith("/") or prefix != os.path.normpath(prefix):
-        raise SystemExit(f"{where}: mount_prefix must be a normalized absolute path")
+        raise ReadsetRefused(f"{where}: mount_prefix must be a normalized absolute path")
     if prefix == "/":
-        raise SystemExit(f"{where}: mount_prefix must name a mount, not the root")
+        raise ReadsetRefused(f"{where}: mount_prefix must name a mount, not the root")
     entries = manifest["entries"]
     if not isinstance(entries, list) or not entries:
-        raise SystemExit(f"{where}: entries must be a non-empty array")
+        raise ReadsetRefused(f"{where}: entries must be a non-empty array")
     if len(entries) > MAX_ENTRIES:
-        raise SystemExit(f"{where}: entries exceed {MAX_ENTRIES}")
+        raise ReadsetRefused(f"{where}: entries exceed {MAX_ENTRIES}")
     seen: set[tuple[str, int]] = set()
     total = 0
     for index, entry in enumerate(entries):
         at = f"{where} entries[{index}]"
         if set(entry) != set(ENTRY_KEYS):
-            raise SystemExit(f"{at}: fields differ")
+            raise ReadsetRefused(f"{at}: fields differ")
         path, offset, size = entry["path"], entry["offset"], entry["bytes"]
         if not path.startswith(prefix + "/"):
-            raise SystemExit(f"{at}: {path} is outside {prefix}")
+            raise ReadsetRefused(f"{at}: {path} is outside {prefix}")
         if os.path.normpath(path) != path:
-            raise SystemExit(f"{at}: {path} is not normalized")
+            raise ReadsetRefused(f"{at}: {path} is not normalized")
         if not isinstance(offset, int) or offset < 0:
-            raise SystemExit(f"{at}: offset must be a non-negative integer")
+            raise ReadsetRefused(f"{at}: offset must be a non-negative integer")
         if not isinstance(size, int) or size <= 0:
-            raise SystemExit(f"{at}: bytes must be positive")
+            raise ReadsetRefused(f"{at}: bytes must be positive")
         if (path, offset) in seen:
-            raise SystemExit(f"{at}: repeats a (path, offset)")
+            raise ReadsetRefused(f"{at}: repeats a (path, offset)")
         seen.add((path, offset))
         total += size
     if manifest["entry_count"] != len(entries):
-        raise SystemExit(f"{where}: entry_count disagrees with entries")
+        raise ReadsetRefused(f"{where}: entry_count disagrees with entries")
     if manifest["total_bytes"] != total:
-        raise SystemExit(f"{where}: total_bytes disagrees with entries")
+        raise ReadsetRefused(f"{where}: total_bytes disagrees with entries")
     return manifest
 
 
@@ -456,7 +443,7 @@ def check_manifest_bytes(blob: bytes, *, where: str = "data manifest") -> bytes:
     the producer is about to write keeps that refusal here.
     """
     if len(blob) > MAX_MANIFEST_BYTES:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{where}: manifest file is {len(blob)} bytes, over the "
             f"{MAX_MANIFEST_BYTES}-byte limit")
     return blob
@@ -530,7 +517,7 @@ class CachedSizeCampaign(Campaign):
                 size = 0
             out.append((path, size))
         if missing:
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"{len(missing)} capture files absent from the size cache, "
                 f"first {missing[0]}; rerun with --stat")
         return out
@@ -608,7 +595,7 @@ def build_campaign_row_manifest(campaign: Campaign, row_id: str, produced_by: di
         # A miss count of zero against a directory the row names is a broken
         # read set, not an empty one, so it fails closed here rather than
         # warming nothing at 41 MB/s.
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{row_id}: argv names --seed-wire-dir {named_seed_dir} but no "
             "readable file was found there; refusing to declare a read set "
             "that omits the row's seed wire")
@@ -616,9 +603,9 @@ def build_campaign_row_manifest(campaign: Campaign, row_id: str, produced_by: di
         if (not e["path"].startswith(SHARED_MOUNT + "/")
                 or (e["sha256"] is not None and not os.path.realpath(e["path"]).startswith(
                     os.path.realpath(SHARED_MOUNT) + "/"))):
-            raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")
+            raise ReadsetRefused(f"{row_id}: entry outside the shared mount: {e['path']}")
         if e["bytes"] <= 0:
-            raise SystemExit(f"{row_id}: zero-length entry: {e['path']}")
+            raise ReadsetRefused(f"{row_id}: zero-length entry: {e['path']}")
     # The key set is the one ``prismabuild.core.validate_data_manifest``
     # accepts exactly; everything this campaign knows and PrismaBuild does not
     # goes under ``annotations``, which the contract carries but never reads.
@@ -749,15 +736,15 @@ def _manifest_document(path: str, label: str) -> dict:
         with open(path) as handle:
             return json.load(handle)
     except OSError as exc:
-        raise SystemExit(f"{label}: unreadable {path}: {exc}") from exc
+        raise ReadsetRefused(f"{label}: unreadable {path}: {exc}") from exc
     except ValueError as exc:
-        raise SystemExit(f"{label}: {path} is not JSON: {exc}") from exc
+        raise ReadsetRefused(f"{label}: {path} is not JSON: {exc}") from exc
 
 
 def _manifest_input_path(record, label: str) -> str:
     """The path of a ``{"path", "sha256"}`` binding, or a refusal."""
     if not isinstance(record, dict) or "path" not in record:
-        raise SystemExit(f"{label}: a bound path is required, got {record!r}")
+        raise ReadsetRefused(f"{label}: a bound path is required, got {record!r}")
     return str(record["path"])
 
 
@@ -770,10 +757,9 @@ def _dir_sizes(directory: str) -> dict:
     36,423-entry directory costs one round of directory reads rather than one
     ``stat`` per file.
     """
-    local = to_pool(directory)
     out = {}
     try:
-        with os.scandir(local) as scan:
+        with os.scandir(directory) as scan:
             for item in scan:
                 try:
                     if not item.is_file(follow_symlinks=False):
@@ -788,7 +774,7 @@ def _dir_sizes(directory: str) -> dict:
 
 def _manifest_input_bytes(path: str) -> int:
     try:
-        return os.stat(to_pool(path)).st_size
+        return os.stat(path).st_size
     except OSError:
         return 0
 
@@ -804,7 +790,7 @@ def _required_size(path: str, label: str) -> int:
     """
     size = _manifest_input_bytes(path)
     if size <= 0:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{label}: {path} is absent or empty, so the pass's read set "
             "cannot be derived; the step that writes it has not finished")
     return size
@@ -820,22 +806,22 @@ def _unit_state(path: str, size_hint: int = 0) -> dict:
     references at all -- so this stays torch-free.
     """
     try:
-        with open(to_pool(path), "rb") as handle:
+        with open(path, "rb") as handle:
             envelope = pickle.load(handle)
     except OSError as exc:
-        raise SystemExit(f"checkpoint unit shard is unreadable: {path}: {exc}") from exc
+        raise ReadsetRefused(f"checkpoint unit shard is unreadable: {path}: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 - a corrupt shard is a refusal
-        raise SystemExit(f"checkpoint unit shard is corrupt: {path}: {exc}") from exc
+        raise ReadsetRefused(f"checkpoint unit shard is corrupt: {path}: {exc}") from exc
     if not isinstance(envelope, dict) or envelope.get("schema") != CHECKPOINT_UNIT_SCHEMA:
-        raise SystemExit(f"{path}: not a {CHECKPOINT_UNIT_SCHEMA} envelope")
+        raise ReadsetRefused(f"{path}: not a {CHECKPOINT_UNIT_SCHEMA} envelope")
     payload = envelope.get("payload")
     if not isinstance(payload, bytes):
-        raise SystemExit(f"{path}: checkpoint unit shard has no byte payload")
+        raise ReadsetRefused(f"{path}: checkpoint unit shard has no byte payload")
     if bytes_sha256hex(payload) != envelope.get("payload_sha256"):
-        raise SystemExit(f"{path}: checkpoint unit payload_sha256 differs")
+        raise ReadsetRefused(f"{path}: checkpoint unit payload_sha256 differs")
     state = pickle.loads(payload)
     if not isinstance(state, dict) or "anchors" not in state or "wire_records" not in state:
-        raise SystemExit(f"{path}: incomplete measured anchor journal")
+        raise ReadsetRefused(f"{path}: incomplete measured anchor journal")
     del size_hint
     return state
 
@@ -853,13 +839,13 @@ def _manifest_layers_by_unit(names) -> dict:
     for name in names:
         match = LAYER_QNAME_RE.match(str(name))
         if match is None:
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"{name} names no transformer layer, so the joint pass's "
                 "per-layer read order cannot be derived for it")
         prefixes.add(match.group("prefix"))
         index[name] = int(match.group("index"))
     if len(prefixes) != 1:
-        raise SystemExit(
+        raise ReadsetRefused(
             "the campaign roster spans more than one layers prefix "
             f"({sorted(prefixes)}); refusing to group its read set by layer")
     return index
@@ -867,13 +853,13 @@ def _manifest_layers_by_unit(names) -> dict:
 
 def _backbone_layer_count(model_path: str) -> int:
     """The actual streamed backbone depth, excluding GLM's MTP passthrough."""
-    config = _manifest_document(os.path.join(to_pool(model_path), "config.json"),
+    config = _manifest_document(os.path.join(model_path, "config.json"),
                         "source model config")
     text = config.get("text_config")
     source = text if isinstance(text, dict) else config
     count = source.get("num_hidden_layers")
     if type(count) is not int or count <= 0:
-        raise SystemExit("source config has no positive backbone num_hidden_layers")
+        raise ReadsetRefused("source config has no positive backbone num_hidden_layers")
     return count
 
 
@@ -887,7 +873,7 @@ def _source_layer_indices(weight_map: dict, prefix: str, count: int) -> list[int
             layers.add(int(match.group("index")))
     ordered = sorted(layers)
     if ordered != list(range(count)):
-        raise SystemExit("source checkpoint has noncontiguous or absent layers")
+        raise ReadsetRefused("source checkpoint has noncontiguous or absent layers")
     return ordered
 
 
@@ -926,10 +912,10 @@ class _Phases:
 
     def add(self, path: str, offset: int, size: int, kind: str) -> None:
         if self._phase is None:
-            raise SystemExit("internal: an entry was added outside a phase")
+            raise ReadsetRefused("internal: an entry was added outside a phase")
         offset, size = int(offset), int(size)
         if size <= 0:
-            raise SystemExit(f"zero-length {kind} entry: {path}")
+            raise ReadsetRefused(f"zero-length {kind} entry: {path}")
         key = (path, offset)
         if key in self._seen:
             # Read again in a later phase. The contract carries it once; the
@@ -969,10 +955,10 @@ class _ReadPlanV2:
 
     def add(self, path: str, offset: int, size: int, kind: str) -> None:
         if self._current is None:
-            raise SystemExit("internal: a V2 read was added outside a phase")
+            raise ReadsetRefused("internal: a V2 read was added outside a phase")
         offset, size = int(offset), int(size)
         if offset < 0 or size <= 0:
-            raise SystemExit(f"invalid {kind} file range: {path}@{offset}+{size}")
+            raise ReadsetRefused(f"invalid {kind} file range: {path}@{offset}+{size}")
         key = (path, offset)
         index = self._indices.get(key)
         if index is None:
@@ -1009,36 +995,36 @@ class _ReadPlanV2:
 def check_manifest_v2(manifest: dict, *, where: str = "data manifest V2") -> dict:
     """Mirror the published PB V2 unique-entry and ordered-read gates."""
     if set(manifest) != MANIFEST_KEYS | {"read_plan"} or manifest.get("schema") != SCHEMA_V2:
-        raise SystemExit(f"{where}: complete {SCHEMA_V2} fields required")
+        raise ReadsetRefused(f"{where}: complete {SCHEMA_V2} fields required")
     common = {key: value for key, value in manifest.items() if key != "read_plan"}
     common["schema"] = SCHEMA
     check_manifest(common, where=where)
     if "phases" in manifest["annotations"]:
-        raise SystemExit(f"{where}: V2 uses read_plan, not annotations.phases")
+        raise ReadsetRefused(f"{where}: V2 uses read_plan, not annotations.phases")
     plan = manifest["read_plan"]
     if not isinstance(plan, dict) or set(plan) != {"phases", "read_bytes"}:
-        raise SystemExit(f"{where}: complete read_plan required")
+        raise ReadsetRefused(f"{where}: complete read_plan required")
     phases = plan["phases"]
     if not isinstance(phases, list) or not phases:
-        raise SystemExit(f"{where}: read_plan needs nonempty phases")
+        raise ReadsetRefused(f"{where}: read_plan needs nonempty phases")
     names, used, cumulative, reads = set(), set(), 0, 0
     for phase in phases:
         if not isinstance(phase, dict) or set(phase) != {
                 "name", "entry_indices", "bytes", "cumulative_bytes"}:
-            raise SystemExit(f"{where}: malformed read phase")
+            raise ReadsetRefused(f"{where}: malformed read phase")
         name, indices = phase["name"], phase["entry_indices"]
         if (not isinstance(name, str) or not name or name.strip() != name
                 or "\x00" in name or name in names or not isinstance(indices, list)):
-            raise SystemExit(f"{where}: invalid or repeated read phase name/indices")
+            raise ReadsetRefused(f"{where}: invalid or repeated read phase name/indices")
         names.add(name)
         reads += len(indices)
         if reads > MAX_READS:
-            raise SystemExit(f"{where}: read references exceed {MAX_READS}")
+            raise ReadsetRefused(f"{where}: read references exceed {MAX_READS}")
         local, size = set(), 0
         for index in indices:
             if (type(index) is not int or index < 0 or index >= len(manifest["entries"])
                     or index in local):
-                raise SystemExit(f"{where}: invalid or repeated phase entry index")
+                raise ReadsetRefused(f"{where}: invalid or repeated phase entry index")
             local.add(index)
             used.add(index)
             size += manifest["entries"][index]["bytes"]
@@ -1046,9 +1032,9 @@ def check_manifest_v2(manifest: dict, *, where: str = "data manifest V2") -> dic
         if (type(phase["bytes"]) is not int or phase["bytes"] != size
                 or type(phase["cumulative_bytes"]) is not int
                 or phase["cumulative_bytes"] != cumulative):
-            raise SystemExit(f"{where}: phase byte accounting differs")
+            raise ReadsetRefused(f"{where}: phase byte accounting differs")
     if used != set(range(len(manifest["entries"]))) or type(plan["read_bytes"]) is not int or plan["read_bytes"] != cumulative:
-        raise SystemExit(f"{where}: read_plan coverage or read_bytes differs")
+        raise ReadsetRefused(f"{where}: read_plan coverage or read_bytes differs")
     return manifest
 
 
@@ -1121,23 +1107,23 @@ def _qualification_journal_state(plan: dict, *, roster):
     manifest = _manifest_document(manifest_path, "qualification journal manifest")
     if (manifest.get("schema") != _replay_module.JOURNAL_MANIFEST_SCHEMA
             or manifest.get("stage") != _replay_module.QUALIFICATION_STAGE):
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{manifest_path}: not a {_replay_module.QUALIFICATION_STAGE!r} "
             "journal; refusing to seal a replay frontier against it")
     identity = manifest.get("identity")
     identity_sha256 = manifest.get("identity_sha256")
     if (not isinstance(identity, dict) or not isinstance(identity_sha256, str)
             or len(identity_sha256) != 64):
-        raise SystemExit(f"{manifest_path}: journal identity is missing or malformed")
+        raise ReadsetRefused(f"{manifest_path}: journal identity is missing or malformed")
     if DIRECT_UTF8_STRICT.sha256(identity) != identity_sha256:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{manifest_path}: journal identity does not hash to its own digest; "
             "refusing to seal a replay frontier")
     checkpoint = _manifest_input_path(plan["inputs"]["merged_checkpoint"],
                         "plan inputs.merged_checkpoint")
     seal = _manifest_document(checkpoint, "merged checkpoint").get("identity_sha256")
     if identity.get("campaign_checkpoint_sha256") != seal:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{manifest_path}: journal campaign checkpoint "
             f"{identity.get('campaign_checkpoint_sha256')!r} is not the merged "
             f"checkpoint's seal {seal!r}; re-plan rather than resume against a "
@@ -1148,9 +1134,9 @@ def _qualification_journal_state(plan: dict, *, roster):
     if (listed is None or any(not isinstance(name, str) for name in listed)
             or any(not isinstance(name, str) for name in files)
             or len(set(listed)) != len(listed)):
-        raise SystemExit(f"{manifest_path}: journal unit roster is malformed")
+        raise ReadsetRefused(f"{manifest_path}: journal unit roster is malformed")
     if sorted(listed) != sorted(roster):
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{manifest_path}: journal roster of {len(listed)} unit(s) is not "
             f"this campaign's {len(roster)}-unit roster; refusing to seal a "
             "replay frontier over a different unit set")
@@ -1179,7 +1165,7 @@ def _checkpoint_unit_shards(track: "_Phases", checkpoint: str, roster) -> dict:
         # them. A joint pass submitted before that has no read set at all, and
         # a manifest built from a half-written merge would warm the wrong
         # bytes, so this fails closed on the directory it looked in.
-        raise SystemExit(
+        raise ReadsetRefused(
             f"the merged checkpoint's unit shards are absent: {parts}/units; "
             "the joint pass cannot be submitted before the campaign merge "
             "publishes them")
@@ -1188,7 +1174,7 @@ def _checkpoint_unit_shards(track: "_Phases", checkpoint: str, roster) -> dict:
         filename = text_sha256hex(str(qname)) + ".pkl"
         size = unit_sizes.get(filename)
         if not size:
-            raise SystemExit(
+            raise ReadsetRefused(
                 "the merged checkpoint's shard for "
                 f"{qname} is absent: {os.path.join(parts, 'units', filename)}; "
                 "the joint pass cannot be submitted before the campaign merge "
@@ -1208,7 +1194,7 @@ def _campaign_roster(campaign_plan_path: str) -> list:
     plan = _manifest_document(campaign_plan_path, "campaign plan")
     names = [name for row in plan["rows"] for name in row["members"]]
     if len(set(names)) != len(names):
-        raise SystemExit(f"{campaign_plan_path}: a unit belongs to two rows")
+        raise ReadsetRefused(f"{campaign_plan_path}: a unit belongs to two rows")
     return sorted(names)
 
 
@@ -1226,7 +1212,7 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
                        "joint source checkpoint index")
     weight_map = index.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
-        raise SystemExit("joint source checkpoint index has no weight_map")
+        raise ReadsetRefused("joint source checkpoint index has no weight_map")
     prefix = LAYER_QNAME_RE.match(roster[0]).group("prefix")
     layers = _source_layer_indices(weight_map, prefix,
                                    _backbone_layer_count(model))
@@ -1237,7 +1223,7 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
     for tensor, filename in weight_map.items():
         if (not isinstance(tensor, str) or not isinstance(filename, str)
                 or os.path.basename(filename) != filename):
-            raise SystemExit("joint source checkpoint index has an unsafe tensor or shard")
+            raise ReadsetRefused("joint source checkpoint index has an unsafe tensor or shard")
         match = LAYER_QNAME_RE.match(tensor)
         if match is not None and match.group("prefix") == prefix:
             layer = int(match.group("index"))
@@ -1260,7 +1246,7 @@ def _joint_source_authentication_schedule(model_path: str, roster: list):
     for filename, phase in sorted(first_use.items()):
         size = sizes.get(filename)
         if not size:
-            raise SystemExit(f"joint source shard is absent: {model}/{filename}")
+            raise ReadsetRefused(f"joint source shard is absent: {model}/{filename}")
         row = (os.path.join(model, filename), size)
         if phase == -1:
             schedule["head"].append(row)
@@ -1287,12 +1273,12 @@ def _source_tensor_extents(campaign: Campaign, prefixes, *, required=True
         header = campaign._header(shard)
         meta = header.get(tensor)
         if not isinstance(meta, dict) or "data_offsets" not in meta:
-            raise SystemExit(f"{tensor}: source index has no safetensors extent")
+            raise ReadsetRefused(f"{tensor}: source index has no safetensors extent")
         lo, hi = meta["data_offsets"]
         start = header["__data_start__"]
         by_shard.setdefault(shard, []).append((start + lo, start + hi))
     if not by_shard and required:
-        raise SystemExit(f"source checkpoint has no tensors for {prefixes}")
+        raise ReadsetRefused(f"source checkpoint has no tensors for {prefixes}")
     out = []
     for shard, spans in sorted(by_shard.items()):
         path = os.path.join(campaign.model_dir, shard)
@@ -1331,18 +1317,18 @@ def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
     binding = plan.get("source_identity_cache")
     cache = (_manifest_input_path(binding, "source identity cache") if binding is not None else
              os.path.join(plan["output_root"], "prepare", "source-identity.json"))
-    if not os.path.isfile(to_pool(cache)):
+    if not os.path.isfile(cache):
         return None
-    if binding is not None and file_sha256hex(to_pool(cache)) != binding["sha256"]:
-        raise SystemExit("bound joint source identity cache checksum changed")
-    record = _manifest_document(to_pool(cache), "joint source identity cache")
+    if binding is not None and file_sha256hex(cache) != binding["sha256"]:
+        raise ReadsetRefused("bound joint source identity cache checksum changed")
+    record = _manifest_document(cache, "joint source identity cache")
     if (record.get("schema") != "prismaquant.streamed_model.identity_cache.v1"
             or record.get("source") != plan["model"]):
-        raise SystemExit("joint source identity cache is foreign or malformed")
+        raise ReadsetRefused("joint source identity cache is foreign or malformed")
     identity = record.get("identity")
     fingerprints = record.get("fingerprints")
     if not isinstance(identity, dict) or not isinstance(fingerprints, list):
-        raise SystemExit("joint source identity cache has no full-shard proof")
+        raise ReadsetRefused("joint source identity cache has no full-shard proof")
     by_path = {row.get("path"): row for row in fingerprints if isinstance(row, dict)}
     shards = identity.get("shards")
     expected = {path for path, _size in (
@@ -1351,16 +1337,16 @@ def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
     if (not isinstance(shards, list) or len(by_path) != len(fingerprints)
             or {row.get("path") for row in shards} != expected
             or set(by_path) != expected):
-        raise SystemExit("joint source identity cache lacks exact shard coverage")
+        raise ReadsetRefused("joint source identity cache lacks exact shard coverage")
     capture = _manifest_document(_manifest_input_path(plan["canonical_capture"], "canonical capture"),
                          "canonical capture")
     source_files = (capture.get("identity") or {}).get("source_files")
     if not isinstance(source_files, dict):
-        raise SystemExit("canonical capture has no source-file SHA roster")
+        raise ReadsetRefused("canonical capture has no source-file SHA roster")
     for row in shards:
         path = row["path"]
         fingerprint = by_path[path]
-        stat = os.stat(to_pool(path))
+        stat = os.stat(path)
         # The proof is mount-instance strict: ``device`` is compared with the
         # four stat fields, because those four identify an object *within* a
         # filesystem and not across filesystems (see docs/ARCHITECTURE.md
@@ -1374,7 +1360,7 @@ def _joint_source_identity_cache_for_manifest(plan: dict, schedule: dict):
                        for key, attribute in (('device', 'st_dev'), ('inode', 'st_ino'),
                                               ('size', 'st_size'), ('mtime_ns', 'st_mtime_ns'),
                                               ('ctime_ns', 'st_ctime_ns')))):
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"joint source identity cache no longer proves {path}: "
                 f"recorded device {fingerprint.get('device')!r} with "
                 f"inode {fingerprint.get('inode')!r}, size "
@@ -1450,7 +1436,7 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
         track.add(prepared, 0, _required_size(prepared, "prepared completion"), "head")
         completion = _manifest_document(prepared, "prepared completion")
         if completion.get("schema") != JOINT_PREPARED_SCHEMA:
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"{prepared}: schema is {completion.get('schema')!r}, expected "
                 f"{JOINT_PREPARED_SCHEMA}")
         prepared_cache = _manifest_input_path(completion["production_cache"], "prepared production_cache")
@@ -1479,7 +1465,7 @@ def _joint_cells(states: dict, wire_dir: str):
         records = state["wire_records"]
         measured = sorted(anchor["format_name"] for anchor in state["anchors"])
         if set(measured) != set(records):
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"{qname}: measured anchors and wire records differ in "
                 f"{path}; refusing to declare a read set from it")
         out = []
@@ -1487,7 +1473,7 @@ def _joint_cells(states: dict, wire_dir: str):
             record = records[fmt]
             filename = record["file"]
             if os.path.basename(filename) != filename:
-                raise SystemExit(f"{qname}@{fmt}: escaping wire filename {filename!r}")
+                raise ReadsetRefused(f"{qname}@{fmt}: escaping wire filename {filename!r}")
             out.append((fmt, os.path.join(wire_dir, filename), int(record["blob_bytes"])))
         cells[qname] = out
     return cells
@@ -1545,19 +1531,19 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
     """
     command = str(command)
     if command not in ("prepare", "run"):
-        raise SystemExit(f"joint pass command must be prepare or run, not {command!r}")
+        raise ReadsetRefused(f"joint pass command must be prepare or run, not {command!r}")
     plan_path = os.path.abspath(plan_path)
     plan = _manifest_document(plan_path, "joint plan")
     if plan.get("schema") != JOINT_PLAN_SCHEMA:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{plan_path}: schema is {plan.get('schema')!r}, expected "
             f"{JOINT_PLAN_SCHEMA}")
     if command == "run" and prepared is None:
-        raise SystemExit(
+        raise ReadsetRefused(
             "the run command consumes a prepared completion; pass its path so "
             "its bytes and the production cache it names are declared")
     if source_transition is not None and command != "run":
-        raise SystemExit("a source transition receipt is consumed by the run command only")
+        raise ReadsetRefused("a source transition receipt is consumed by the run command only")
 
     inputs = plan["inputs"]
     campaign_plan_path = _manifest_input_path(inputs["campaign_plan"], "plan inputs.campaign_plan")
@@ -1572,10 +1558,10 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
 
     merged_cost = _manifest_input_path(inputs["merged_cost"], "plan inputs.merged_cost")
     try:
-        with open(to_pool(merged_cost), "rb") as handle:
+        with open(merged_cost, "rb") as handle:
             payload = pickle.load(handle)
     except OSError as exc:
-        raise SystemExit(f"merged cost payload is unreadable: {merged_cost}: {exc}") from exc
+        raise ReadsetRefused(f"merged cost payload is unreadable: {merged_cost}: {exc}") from exc
     wire_dir = str(payload["provenance"]["wire_dir"])
     # The merged payload is the campaign's whole cost table, several GB once
     # unpickled, and the only field this needs is the wire directory the
@@ -1610,7 +1596,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
             if size:
                 continue
             if command == "run":
-                raise SystemExit(f"prepared render is missing; COST will not synthesize it: {path}")
+                raise ReadsetRefused(f"prepared render is missing; COST will not synthesize it: {path}")
             absent.append(path)
             synthesized_wire_bytes += wire_bytes
             track.add(wire, 0, wire_bytes, "wires")
@@ -1643,8 +1629,8 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         binding = plan.get("source_identity_cache")
         if binding is not None:
             cache_path = _manifest_input_path(binding, "source identity cache")
-            if file_sha256hex(to_pool(cache_path)) != binding["sha256"]:
-                raise SystemExit("bound joint source identity cache checksum changed")
+            if file_sha256hex(cache_path) != binding["sha256"]:
+                raise ReadsetRefused("bound joint source identity cache checksum changed")
             track.add(cache_path, 0, _required_size(cache_path,
                 "source identity cache"), "source_identity_cache")
 
@@ -1697,7 +1683,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
                 or layers != list(range(layers[-1] + 1))
                 or any(max(0, target - source_lookahead) not in by_layer
                        for target in all_source_layers)):
-            raise SystemExit(
+            raise ReadsetRefused(
                 "joint prepare read-frontier requires contiguous source layers "
                 "and max_cache_slots=prefetch_lookahead+1; otherwise source "
                 "prefetch can outlive the phase that releases its bytes")
@@ -1778,7 +1764,7 @@ def build_joint_pass_manifest(plan_path, *, command, produced_by, argv=None,
         # The row caches hold one render per measured rung and the pass opens
         # every one of them. A read set with none of them in it is the same
         # silent zero #524 refused for a row's seed wire: broken, not empty.
-        raise SystemExit(
+        raise ReadsetRefused(
             "no render file of the merged roster was found under the campaign "
             f"row caches (first looked for {absent[0] if absent else '?'}); "
             "refusing to declare a read set that omits every render")
@@ -1836,11 +1822,11 @@ def _cost_completed_units(binding, *, plan_sha256, prepared_sha256, roster):
             or binding.get("schema") != COST_COMPLETED_BINDING_SCHEMA
             or binding.get("plan_sha256") != plan_sha256
             or binding.get("prepared_sha256") != prepared_sha256):
-        raise SystemExit("COST completed units need an exact validated plan/prepared binding")
+        raise ReadsetRefused("COST completed units need an exact validated plan/prepared binding")
     units = binding["units"]
     if (not isinstance(units, list) or any(not isinstance(name, str) for name in units)
             or units != sorted(set(units)) or not set(units) <= set(roster)):
-        raise SystemExit("COST validated completed-unit roster is not a sorted campaign subset")
+        raise ReadsetRefused("COST validated completed-unit roster is not a sorted campaign subset")
     return frozenset(units), DIRECT_ASCII_LAX.sha256(binding)
 
 
@@ -1860,14 +1846,14 @@ def _cost_layer_windows(names, *, formats_by_qname, census, owners,
 
     shapes, maxima = census.get("unit_shapes"), census.get("max_abs")
     if not isinstance(shapes, dict) or not isinstance(maxima, dict):
-        raise SystemExit("COST census lacks unit_shapes or max_abs for joint groups")
+        raise ReadsetRefused("COST census lacks unit_shapes or max_abs for joint groups")
     modules, specs, keys_by_name, costs, render_paths = {}, {}, {}, {}, {}
     for name in names:
         shape = shapes.get(name)
         if (not isinstance(shape, (list, tuple)) or len(shape) != 2
                 or any(type(axis) is not int or axis <= 0 for axis in shape)
                 or name not in maxima):
-            raise SystemExit(f"COST census lacks a complete joint target geometry: {name}")
+            raise ReadsetRefused(f"COST census lacks a complete joint target geometry: {name}")
         modules[name] = torch.nn.Linear(
             shape[1], shape[0], bias=False, device="meta", dtype=torch.bfloat16)
         fmts = formats_by_qname[name]
@@ -1876,7 +1862,7 @@ def _cost_layer_windows(names, *, formats_by_qname, census, owners,
         for fmt in fmts:
             path, size = _render_file(owners[name], render_sizes, name, fmt)
             if size <= 0:
-                raise SystemExit(f"prepared COST render is missing: {path}")
+                raise ReadsetRefused(f"prepared COST render is missing: {path}")
             costs[name, fmt] = {"incoming_storage_bytes": size,
                                 "serialized_bytes": size}
             render_paths[name, fmt] = (path, size)
@@ -1911,15 +1897,15 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     if isinstance(retained_budget, dict):
         retained_budget = RetainedWindowBudget.from_dict(retained_budget)
     if not isinstance(retained_budget, RetainedWindowBudget):
-        raise SystemExit("COST V2 requires a complete retained-window budget")
+        raise ReadsetRefused("COST V2 requires a complete retained-window budget")
     if type(source_bytes) is not int or source_bytes <= 0:
-        raise SystemExit("COST V2 requires the fixed declared source-owner byte cap")
+        raise ReadsetRefused("COST V2 requires the fixed declared source-owner byte cap")
     if type(n_probes) is not int or n_probes < 2:
-        raise SystemExit("COST V2 requires an explicit integer n_probes of at least two")
+        raise ReadsetRefused("COST V2 requires an explicit integer n_probes of at least two")
     plan_path, prepared = os.path.abspath(plan_path), os.path.abspath(prepared)
     plan = _manifest_document(plan_path, "joint plan")
     if plan.get("schema") != JOINT_PLAN_SCHEMA:
-        raise SystemExit(f"{plan_path}: not a {JOINT_PLAN_SCHEMA} plan")
+        raise ReadsetRefused(f"{plan_path}: not a {JOINT_PLAN_SCHEMA} plan")
     # The sealed probe count is the plan's, never an invented default: the
     # declared execution.n_probes is the count the pass executes, and the
     # caller's explicit argument must agree with it or the manifest would
@@ -1927,17 +1913,17 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     plan_execution = plan.get("execution")
     plan_probes = plan_execution.get("n_probes") if isinstance(plan_execution, dict) else None
     if type(plan_probes) is not int or plan_probes < 2:
-        raise SystemExit(
+        raise ReadsetRefused(
             "the joint plan must declare an exact integer execution.n_probes "
             "of at least two for COST V2")
     if plan_probes != n_probes:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"COST V2 n_probes={n_probes} disagrees with the plan's "
             f"execution.n_probes={plan_probes}")
     prefetch = plan.get("source_prefetch") or {}
     if (prefetch.get("prefetch_lookahead") != 1
             or prefetch.get("max_cache_slots") != 2):
-        raise SystemExit("COST V2 requires source lookahead one and two cache slots")
+        raise ReadsetRefused("COST V2 requires source lookahead one and two cache slots")
     plan_sha256, prepared_sha256 = file_sha256hex(plan_path), file_sha256hex(prepared)
     inputs = plan["inputs"]
     campaign_plan_path = _manifest_input_path(inputs["campaign_plan"], "plan inputs.campaign_plan")
@@ -1947,18 +1933,18 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         prepared_sha256=prepared_sha256, roster=roster)
     completion = _manifest_document(prepared, "prepared completion")
     if completion.get("schema") != JOINT_PREPARED_SCHEMA or completion.get("status") != "complete":
-        raise SystemExit("COST V2 requires a complete prepared completion")
+        raise ReadsetRefused("COST V2 requires a complete prepared completion")
     raw_formats = completion.get("formats_by_qname")
     if not isinstance(raw_formats, dict) or set(raw_formats) != set(roster):
-        raise SystemExit("prepared COST candidate roster differs from the campaign")
+        raise ReadsetRefused("prepared COST candidate roster differs from the campaign")
     formats_by_qname = {}
     for name, raw in raw_formats.items():
         if (not isinstance(raw, list) or raw.count("BF16") != 1
                 or raw[-1] != "BF16" or len(set(raw)) != len(raw)):
-            raise SystemExit(f"prepared COST formats are incomplete or repeated: {name}")
+            raise ReadsetRefused(f"prepared COST formats are incomplete or repeated: {name}")
         fmts = tuple(fmt for fmt in raw if fmt != "BF16")
         if not fmts or any(not isinstance(fmt, str) or not fmt for fmt in fmts):
-            raise SystemExit(f"prepared COST has no measured candidate: {name}")
+            raise ReadsetRefused(f"prepared COST has no measured candidate: {name}")
         formats_by_qname[name] = fmts
 
     # An optional diagnostic ``joint_eval_targets`` roster selects the subset
@@ -1967,20 +1953,20 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     from prismaquant.tessera_joint_eval_panel import evaluation_formats
     formats_by_qname = evaluation_formats(plan, formats_by_qname)
     if not isinstance(formats_by_qname, dict) or not formats_by_qname:
-        raise SystemExit("COST V2 eval target selection left no repriced target")
+        raise ReadsetRefused("COST V2 eval target selection left no repriced target")
     if not set(formats_by_qname) <= set(roster):
-        raise SystemExit("COST V2 eval target roster names units outside the campaign")
+        raise ReadsetRefused("COST V2 eval target roster names units outside the campaign")
     if any(not fmts for fmts in formats_by_qname.values()):
-        raise SystemExit("COST V2 eval target selection has a formatless unit")
+        raise ReadsetRefused("COST V2 eval target selection has a formatless unit")
 
     workspace = os.path.dirname(campaign_plan_path)
     campaign = Campaign(workspace)
     if os.path.abspath(campaign.model_dir) != os.path.abspath(plan["model"]):
-        raise SystemExit("COST plan source model differs from campaign source")
+        raise ReadsetRefused("COST plan source model differs from campaign source")
     owners = {name: row["dir"] for row in campaign.plan["rows"]
               for name in row["members"]}
     if set(owners) != set(roster):
-        raise SystemExit("COST row-owner roster differs from campaign")
+        raise ReadsetRefused("COST row-owner roster differs from campaign")
     render_sizes = {owner: _dir_sizes(os.path.join(owner, "cache"))
                     for owner in sorted(set(owners.values()))}
     census = _manifest_document(_manifest_input_path(inputs["census"], "plan inputs.census"), "joint census")
@@ -1992,10 +1978,10 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     source_layers = _source_layer_indices(
         campaign.weight_map, prefix, _backbone_layer_count(campaign.model_dir))
     if source_layers != list(range(source_layers[-1] + 1)):
-        raise SystemExit("COST source layers are not a contiguous backbone")
+        raise ReadsetRefused("COST source layers are not a contiguous backbone")
     last_layer = source_layers[-1]
     if any(layer not in source_layers for layer in by_layer):
-        raise SystemExit("COST target lies outside the source backbone")
+        raise ReadsetRefused("COST target lies outside the source backbone")
 
     # Freeze every full per-layer target partition from file-size upper bounds
     # before applying completed units. Runtime PWC separately opens each
@@ -2025,8 +2011,8 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     source_cache = plan.get("source_identity_cache")
     if source_cache is not None:
         path = _manifest_input_path(source_cache, "source identity cache")
-        if file_sha256hex(to_pool(path)) != source_cache.get("sha256"):
-            raise SystemExit("bound COST source identity cache checksum changed")
+        if file_sha256hex(path) != source_cache.get("sha256"):
+            raise ReadsetRefused("bound COST source identity cache checksum changed")
         track.add(path, 0, _required_size(path, "source identity cache"),
                   "source_identity_cache")
 
@@ -2099,7 +2085,7 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
 def _finish_manifest(track: _Phases, produced_by: dict, annotations: dict, *, where: str) -> dict:
     for entry in track.entries:
         if not entry["path"].startswith(SHARED_MOUNT + "/"):
-            raise SystemExit(f"{where}: entry outside the shared mount: {entry['path']}")
+            raise ReadsetRefused(f"{where}: entry outside the shared mount: {entry['path']}")
     manifest = {
         "schema": SCHEMA,
         "produced_by": produced_by,
@@ -2131,16 +2117,16 @@ def build_allocation_manifest(joint_cost, plan, *, produced_by, argv=None):
     if evidence is None and provenance.get("join_schema") == "prismaquant.joint_layer_quanta.joined_results.v1":
         coverage = provenance.get("coverage", {})
         if coverage.get("status") != "complete" or coverage.get("gaps"):
-            raise SystemExit(f"{joint_cost}: joined costs are gapped; allocation handoff refuses")
+            raise ReadsetRefused(f"{joint_cost}: joined costs are gapped; allocation handoff refuses")
         evidence = {"prepared": provenance.get("prepared")}
     if not isinstance(evidence, dict) or "prepared" not in evidence:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{joint_cost}: no tessera_joint_anchors record, so the prepared "
             "completion this handoff reads cannot be named")
     prepared = _manifest_input_path(evidence["prepared"], "joint cost prepared binding")
     plan_payload = _manifest_document(plan_path, "joint plan")
     if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
             f"{JOINT_PLAN_SCHEMA}")
 
@@ -2181,10 +2167,10 @@ def build_allocation_manifest(joint_cost, plan, *, produced_by, argv=None):
 
 def _manifest_pickle(path: str, label: str):
     try:
-        with open(to_pool(path), "rb") as handle:
+        with open(path, "rb") as handle:
             return pickle.load(handle)
     except OSError as exc:
-        raise SystemExit(f"{label}: unreadable {path}: {exc}") from exc
+        raise ReadsetRefused(f"{label}: unreadable {path}: {exc}") from exc
 
 
 def read_manifest_assignment(path: str) -> dict:
@@ -2201,13 +2187,13 @@ def read_manifest_assignment(path: str) -> dict:
         if name == LAYER_CONFIG_META_KEY:
             continue
         if not isinstance(value, str):
-            raise SystemExit(
+            raise ReadsetRefused(
                 f"{path}: {name} carries a {type(value).__name__} recipe; this "
                 "reader accepts only a format name, and the production parser "
                 "in prismaquant.layer_config owns the richer shapes")
         out[str(name)] = value
     if not out:
-        raise SystemExit(f"{path}: the assignment names no unit")
+        raise ReadsetRefused(f"{path}: the assignment names no unit")
     return out
 
 
@@ -2232,7 +2218,7 @@ def build_export_manifest(plan, *, assignment, allocation_cost, produced_by,
     allocation_cost = os.path.abspath(allocation_cost)
     plan_payload = _manifest_document(plan_path, "joint plan")
     if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
             f"{JOINT_PLAN_SCHEMA}")
     selected = read_manifest_assignment(assignment_path)
@@ -2261,7 +2247,7 @@ def build_export_manifest(plan, *, assignment, allocation_cost, produced_by,
 
     named = sorted(set(selected) & set(states))
     if not named:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{assignment_path}: no assigned unit is in the campaign roster, "
             "so the export's selected read set would be empty")
     layer_of = _manifest_layers_by_unit(named)
@@ -2324,7 +2310,7 @@ def cached_activation_paths(act_dir: str, names) -> list:
     out = []
     for name in sorted(names):
         path = os.path.join(act_dir, str(name).replace(".", "__") + ".pt")
-        if os.path.isfile(to_pool(path)):
+        if os.path.isfile(path):
             out.append(path)
     return out
 
@@ -2358,7 +2344,7 @@ def build_aqua_manifest(plan, *, card, cost_in, act_dir, produced_by, argv=None)
     act_dir = os.path.abspath(act_dir) if act_dir else None
     plan_payload = _manifest_document(plan_path, "joint plan")
     if plan_payload.get("schema") != JOINT_PLAN_SCHEMA:
-        raise SystemExit(
+        raise ReadsetRefused(
             f"{plan_path}: schema is {plan_payload.get('schema')!r}, expected "
             f"{JOINT_PLAN_SCHEMA}")
     inputs = plan_payload["inputs"]
@@ -2448,7 +2434,7 @@ def publish_row_manifests(campaign_manifest, workspace, *, out_dir, out_manifest
     src = campaign_manifest
     rows = json.load(open(src))
     if not isinstance(rows, list):
-        raise SystemExit(f"{src}: expected a list of pbcampaign rows")
+        raise ReadsetRefused(f"{src}: expected a list of pbcampaign rows")
     src_sha = file_sha256hex(src)
 
     sizes = None if stat else load_sizes(sizes_cache)
@@ -2461,9 +2447,9 @@ def publish_row_manifests(campaign_manifest, workspace, *, out_dir, out_manifest
     for row in rows:
         rid = row_id_of(row)
         if rid is None:
-            raise SystemExit(f"{src}: a row's argv names no single units/row-XXXX.json")
+            raise ReadsetRefused(f"{src}: a row's argv names no single units/row-XXXX.json")
         if rid not in campaign.rows:
-            raise SystemExit(f"{src}: {rid} is not a row of {workspace}/plan.json")
+            raise ReadsetRefused(f"{src}: {rid} is not a row of {workspace}/plan.json")
         man = build_campaign_row_manifest(campaign, rid, produced_by, row.get("argv"))
         path = os.path.join(out_dir, f"{rid}.data-manifest.json")
         blob = json.dumps(man, indent=1, sort_keys=False).encode() + b"\n"
