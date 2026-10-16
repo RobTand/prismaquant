@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: paired boundary measurements bind `shipcard_slots.py`
+in their producer source fingerprint, alongside the original measurement,
+validation, card, launcher and pin files. The schema and threshold owner can
+therefore no longer change without changing that fingerprint. The recipe lives
+in `boundary_control.producer_source_hashes` and the actual producer calls it;
+missing owners refuse. Historical measurement fingerprints retain their recorded
+values; new candidate/control pairs must share the updated source identity.
+Tests: `tests/test_boundary_control.py`.
+
 Re-stamped 2026-10-16: gold construction and publication replay share the
 slot owner's explicit-boolean no-spec policy. Gold slots and uniform-control
 arms refuse malformed falsy values such as `0`, `""`, `[]` and `{}`; only
