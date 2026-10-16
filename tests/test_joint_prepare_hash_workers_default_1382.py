@@ -42,7 +42,9 @@ def test_joint_prepare_default_equals_prepare_cache_default_for_the_environment(
 
 
 @pytest.mark.parametrize("explicit", [1, 2, 3])
-def test_explicit_plan_value_still_wins(explicit):
+def test_explicit_plan_value_still_wins(monkeypatch, explicit):
+    # Pure resolver calls: provide capacity without starting any worker pool.
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: {0, 1, 2})
     assert resolve_file_hash_workers({"file_hash_workers": explicit}) == explicit
 
 
@@ -65,6 +67,7 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
     from types import SimpleNamespace
 
     import prismaquant.joint_stage_b_head as head_module
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: {0, 1})
     root = Path(__file__).resolve().parents[1]
     if str(root / "tools") not in sys.path:
         sys.path.insert(0, str(root / "tools"))
