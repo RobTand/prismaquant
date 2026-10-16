@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the obsolete Gridbook fresh-text LDLQ harness is archived
+with its corpus, manifests and original report at
+`archive/ldlq_fresh_2026-10-16/`. Its eight tracked files retain their original
+bytes. The harness already depended on the removed `prismaquant.cb_layout` at
+the refactor base; it is historical evidence rather than a live command.
+No pipeline stage, calibration policy, format, pin or serving gate changes.
+
 Re-stamped 2026-10-16: `tessera_cell_measurement` owns selected served-wire
 recipes and output-MSE cell measurements. Its frozen `CellRecipe` retains the
 resolved wire, per-plane encoder inputs and activation contract. Direct-consumer
