@@ -86,10 +86,16 @@ def _request(path):
 
 def _check_census(path, cost, source, units):
     from . import tessera_campaign as tc
-    provenance = {**cost['provenance']['hessian']['calibration_identity'], **cost['provenance']}
-    args = SimpleNamespace(**{field:provenance[field]
-        for field in ('model', 'nsamples', 'seqlen', 'seed', 'layer_stride')})
-    census = tc.load_calibration_census(path, args=args)
+    identity = cost['provenance']['hessian']['calibration_identity']
+    provenance = {**identity, **cost['provenance']}
+    # The priced payload records the draw but no lifted-pin roster, so the
+    # census is held to the body roster: a lifted-pin census refuses here.
+    request = SimpleNamespace(
+        **{field: provenance[field]
+           for field in ('model', 'nsamples', 'seqlen', 'seed', 'layer_stride')},
+        calibration_input_receipt=identity.get('calibration_input'),
+        allow_pinned=None, pinned_roster_only=False)
+    census = tc.load_calibration_census(path, request=request)
     tc.require_census_draw(census, provenance['hessian']['calibration_identity'],
                            where='selected-wire planning')
     census_source, census_units, _stacks = tep.carried_units(census.get('expert_projection'))

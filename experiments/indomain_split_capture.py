@@ -198,7 +198,7 @@ def load_census(args, capture_root):
     """Load and draw-check the census through the existing loader."""
     path = effective_census_path(args, capture_root)
     namespace = campaign_args(args, json.loads(path.read_text()))
-    census = campaign.load_calibration_census(path, args=namespace)
+    census = campaign.load_calibration_census(path, request=namespace)
     return path, census, namespace
 
 
@@ -248,7 +248,7 @@ def selected_units(args, census, namespace) -> list:
     """The parent's selected capture targets, through the existing authority."""
     selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
-        selection, args=namespace, resolved=census["anchor_groups"])
+        selection, request=namespace, resolved=census["anchor_groups"])
     missing = sorted(set(names) - set(census["counts"]))
     if missing:
         raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")
@@ -1005,10 +1005,10 @@ def _real_metadata_preflight(args, guard) -> dict:
     path = Path(args.calibration_census)
     census = json.loads(path.read_text())
     namespace = campaign_args(args, census)
-    checked = campaign.load_calibration_census(path, args=namespace)
+    checked = campaign.load_calibration_census(path, request=namespace)
     selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
-        selection, args=namespace, resolved=checked["anchor_groups"])
+        selection, request=namespace, resolved=checked["anchor_groups"])
     missing = sorted(set(names) - set(checked["counts"]))
     if missing:
         raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")

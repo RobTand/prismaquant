@@ -381,40 +381,40 @@ def test_selected_capture_scope_refusals():
               "model": "src", "layer_stride": 1, "groups": [
         {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
     assert campaign.selected_capture_unit_names(
-        routed, args=args, resolved=resolved) == ["m.a", "m.b"]
+        routed, request=args, resolved=resolved) == ["m.a", "m.b"]
     mixed = {"schema": "prismaquant.tessera_campaign_units.v1",
              "model": "src", "layer_stride": 1, "groups": [
         {"key": "g:model.layers.0.mlp.up_proj", "members": ["d.a", "d.b"]},
         {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
     assert campaign.selected_capture_unit_names(
-        mixed, args=args, resolved=resolved) == ["d.a", "d.b", "m.a", "m.b"]
+        mixed, request=args, resolved=resolved) == ["d.a", "d.b", "m.a", "m.b"]
     sampled = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         routed["groups"][0], sampled=["m.a"],
         inclusion_probability={"m.a": 0.5})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(sampled, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(sampled, request=args, resolved=resolved)
     partition = {"schema": "prismaquant.tessera_campaign_units.v3", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         partition={"schema": "prismaquant.tessera_campaign_expert_partition.v1",
                    "experts_per_row": 8, "index": 0, "count": 2, "rate_q256": 64,
                    "members": ["m.a"]})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(partition, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(partition, request=args, resolved=resolved)
     exact = SimpleNamespace(**{**vars(args), "research_exact_member": "m.a"})
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(routed, args=exact, resolved=resolved)
+        campaign.selected_capture_unit_names(routed, request=exact, resolved=resolved)
     other_model = SimpleNamespace(**{**vars(args), "model": "other"})
     with pytest.raises(ValueError):
-        campaign.selected_capture_unit_names(routed, args=other_model, resolved=resolved)
+        campaign.selected_capture_unit_names(routed, request=other_model, resolved=resolved)
     outside = {"schema": "prismaquant.tessera_campaign_units.v1",
                "groups": [{"key": "elsewhere", "members": ["m.a", "m.b"]}]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(outside, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(outside, request=args, resolved=resolved)
     partial = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         sampled=["m.a", "m.b"], inclusion_probability={"m.a": 0.5, "m.b": 0.25})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(partial, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(partial, request=args, resolved=resolved)
 
 
 def test_chain_quantum_empty_range_scope_rules():

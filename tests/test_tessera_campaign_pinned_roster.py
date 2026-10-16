@@ -109,7 +109,9 @@ def _census(tmp_path, args, roster, name="census.json"):
 
 
 def _args(**kw):
-    return argparse.Namespace(model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1, **kw)
+    unset = dict(allow_pinned=None, pinned_roster_only=False, calibration_input_receipt=None)
+    return argparse.Namespace(model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1,
+                              **{**unset, **kw})
 
 
 def test_census_records_the_lift_and_refuses_another(tmp_path, profile):
@@ -120,22 +122,27 @@ def test_census_records_the_lift_and_refuses_another(tmp_path, profile):
     assert block["schema"] == tc.PINNED_ROSTER_SCHEMA
     assert block["pinned_roster_only"] is True
     assert block["lifted"] == sorted(roster.lifted)
-    assert tc.load_calibration_census(path, args=lifted)["counts"] == {"u": 3}
+    assert tc.load_calibration_census(path, request=lifted)["counts"] == {"u": 3}
     for other in (_args(), _args(allow_pinned=ATTENTION, pinned_roster_only=False),
                   _args(allow_pinned="self_attn.o_proj", pinned_roster_only=True)):
         with pytest.raises(RuntimeError, match="must be the same scope"):
-            tc.load_calibration_census(path, args=other)
+            tc.load_calibration_census(path, request=other)
 
 
 def test_a_body_census_carries_no_block_and_refuses_a_lifted_run(tmp_path, profile):
     roster = tc.campaign_roster(_names()["all"], profile)
     path, payload = _census(tmp_path, _args(), roster)
     assert "pinned_roster" not in payload
-    tc.load_calibration_census(path, args=_args())
-    tc.load_calibration_census(path, args=argparse.Namespace(  # a caller with no such flags
-        model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1))
+    tc.load_calibration_census(path, request=_args())
+    for missing in ("allow_pinned", "pinned_roster_only"):
+        # A request that cannot state its roster fails loudly; it is never
+        # read as an unlifted one.
+        partial = _args()
+        delattr(partial, missing)
+        with pytest.raises(AttributeError, match=missing):
+            tc.load_calibration_census(path, request=partial)
     with pytest.raises(RuntimeError, match="must be the same scope"):
-        tc.load_calibration_census(path, args=_args(allow_pinned=ATTENTION, pinned_roster_only=True))
+        tc.load_calibration_census(path, request=_args(allow_pinned=ATTENTION, pinned_roster_only=True))
 
 
 def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):

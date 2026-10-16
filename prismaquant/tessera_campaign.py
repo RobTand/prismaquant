@@ -1812,12 +1812,12 @@ def _calibration_tokens(model_path: str, n: int, seqlen: int, seed: int):
     return out, text
 
 
-def _campaign_calibration_parameters(args) -> dict[str, object]:
+def _campaign_calibration_parameters(request) -> dict[str, object]:
     """Draw metadata, separate from the CLI seed when a saved draw is supplied."""
     parameters: dict[str, object] = {"source": "wikitext-2-raw-v1/train", "split_role": "calibration",
-                  "model": str(args.model), "seed": int(args.seed),
-                  "nsamples": int(args.nsamples), "seqlen": int(args.seqlen)}
-    receipt = getattr(args, "calibration_input_receipt", None)
+                  "model": str(request.model), "seed": int(request.seed),
+                  "nsamples": int(request.nsamples), "seqlen": int(request.seqlen)}
+    receipt = request.calibration_input_receipt
     if receipt is not None:
         provenance = receipt["provenance"]
         parameters.update(source=provenance["source"], seed=provenance["seed"],
@@ -2043,7 +2043,7 @@ def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[
             "stack_estimate": False}
 
 
-def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
+def selected_capture_unit_names(selection, *, request, resolved) -> list[str]:
     """The exact unit scope one full-group ``--units`` fresh capture may take.
 
     A streamed capture today takes whole anchor groups, so a selection that
@@ -2056,14 +2056,15 @@ def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
     model rows (which resolve against the scope they loaded) call this one
     authority; :func:`select_anchor_groups` holds the selection to the
     resolved grouping member for member before a unit name is derived.
-    ``args`` supplies the campaign's model and layer stride, which the
-    selection file itself must declare.
+    ``request`` supplies the campaign's model and layer stride, which the
+    selection file itself must declare, and its ``units`` and
+    ``research_exact_member``; a request without them fails at the read.
     """
-    where = f"--units {getattr(args, 'units', None)}"
-    if (selection.get("model", args.model) != args.model
-            or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
+    where = f"--units {request.units}"
+    if (selection.get("model", request.model) != request.model
+            or selection.get("layer_stride", request.layer_stride) != request.layer_stride):
         raise StackSampleError("--units model/layer_stride disagrees with this campaign")
-    if getattr(args, "research_exact_member", None) is not None:
+    if request.research_exact_member is not None:
         raise RuntimeError(
             f"{where}: --research-exact-member prices one member, not the "
             "whole group a fresh capture records")
@@ -2135,23 +2136,29 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
     }
 
 
-def load_calibration_census(path, *, args) -> dict:
-    """Read a census and refuse one taken on a different draw or scope."""
+def load_calibration_census(path, *, request) -> dict:
+    """Read a census and refuse one taken on a different draw or scope.
+
+    ``request`` states the run's draw (``model``, ``nsamples``, ``seqlen``,
+    ``seed``, ``layer_stride``, ``calibration_input_receipt``) and its pinned
+    roster (``allow_pinned``, ``pinned_roster_only``). Every field is read, so
+    a request that lacks one fails here instead of reading as unset.
+    """
     census = json.loads(Path(path).read_text())
     if not isinstance(census, dict) or census.get("schema") != CENSUS_SCHEMA:
         raise RuntimeError(
             f"--calibration-census {path}: not a {CENSUS_SCHEMA} census")
-    for field, value in (("model", str(args.model)),
-                         ("nsamples", int(args.nsamples)),
-                         ("seqlen", int(args.seqlen)),
-                         ("seed", _campaign_calibration_parameters(args)["seed"]),
-                         ("layer_stride", int(args.layer_stride))):
+    for field, value in (("model", str(request.model)),
+                         ("nsamples", int(request.nsamples)),
+                         ("seqlen", int(request.seqlen)),
+                         ("seed", _campaign_calibration_parameters(request)["seed"]),
+                         ("layer_stride", int(request.layer_stride))):
         if census.get(field) != value:
             raise RuntimeError(
                 f"--calibration-census {path}: {field} is {census.get(field)!r} "
                 f"in the census and {value!r} in this run; the census must be "
                 "the same draw over the same scope")
-    _require_census_pinned_roster(census, args, path)
+    _require_census_pinned_roster(census, request, path)
     counts = census.get("counts")
     maxima = census.get("max_abs")
     if not isinstance(counts, dict) or not counts:
@@ -2376,25 +2383,25 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
     return CampaignRoster(dense=tuple(dense), pinned=tuple(pinned), lifted=tuple(lifted))
 
 
-def pinned_roster_block(args, roster: CampaignRoster):
+def pinned_roster_block(request, roster: CampaignRoster):
     """The census's record of a lifted-pin roster, or None without a lift."""
     from .fixed_head import parse_allow_pinned
 
-    tokens = parse_allow_pinned(getattr(args, "allow_pinned", None))
+    tokens = parse_allow_pinned(request.allow_pinned)
     if not tokens:
         return None
     return {"schema": PINNED_ROSTER_SCHEMA, "allow_pinned": list(tokens),
-            "pinned_roster_only": bool(getattr(args, "pinned_roster_only", False)),
+            "pinned_roster_only": bool(request.pinned_roster_only),
             "lifted": sorted(roster.lifted)}
 
 
-def _require_census_pinned_roster(census: Mapping, args, path) -> None:
+def _require_census_pinned_roster(census: Mapping, request, path) -> None:
     """Refuse a census whose lifted-pin roster is not this run's."""
     from .fixed_head import parse_allow_pinned
 
     block = census.get("pinned_roster")
-    tokens = list(parse_allow_pinned(getattr(args, "allow_pinned", None)))
-    only = bool(getattr(args, "pinned_roster_only", False))
+    tokens = list(parse_allow_pinned(request.allow_pinned))
+    only = bool(request.pinned_roster_only)
     if block is None and not tokens:
         return
     if block is not None and block.get("schema") != PINNED_ROSTER_SCHEMA:
@@ -3437,13 +3444,13 @@ def run_capture_chain_prep(request: CapturePrepRequest, saved_calibration) -> in
     from . import tessera_calibration_cache as store
     store.require_automatic_capture_source_recording()
     from . import capture_layer_chain as chain
-    census = load_calibration_census(request.calibration_census, args=request)
+    census = load_calibration_census(request.calibration_census, request=request)
     # The prep has no model: the selected scope is derived from the census's
     # own anchor groups, through the same helper the model rows confirm with.
     unit_names = None
     if request.units:
         unit_names = selected_capture_unit_names(
-            load_unit_selection(request.units), args=request,
+            load_unit_selection(request.units), request=request,
             resolved=census["anchor_groups"])
         print(f"[campaign] --units full-group capture takes {len(unit_names)} "
               "units of the census scope", flush=True)
@@ -3917,7 +3924,7 @@ def resolve_campaign_scope(request: CampaignScopeRequest, model, profile, *,
     full_expert_members = expert_members
     census = (selected_capture_census if selected_capture_census is not None else
               (None if not request.calibration_census
-               else load_calibration_census(request.calibration_census, args=request)))
+               else load_calibration_census(request.calibration_census, request=request)))
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -3956,7 +3963,7 @@ def resolve_campaign_scope(request: CampaignScopeRequest, model, profile, *,
         if request.capture_calibration_out:
             # The census-derived scope the pre-model check derived; the run's
             # own grouping must resolve the selection to exactly that set.
-            confirmed = selected_capture_unit_names(selection, args=request,
+            confirmed = selected_capture_unit_names(selection, request=request,
                                                     resolved=scope_groups)
             if confirmed != capture_unit_names:
                 raise RuntimeError(
@@ -4431,9 +4438,9 @@ def _main(argv, *, source_scope, waits) -> int:
         if acquisition is not None:
             ap.error("--acquisition-request narrows the run's priced scope; a "
                      "--units fresh capture takes exactly the selection's whole groups")
-        selected_capture_census = load_calibration_census(args.calibration_census, args=args)
+        selected_capture_census = load_calibration_census(args.calibration_census, request=args)
         capture_unit_names = selected_capture_unit_names(
-            load_unit_selection(args.units), args=args,
+            load_unit_selection(args.units), request=args,
             resolved=selected_capture_census["anchor_groups"])
         print(f"[campaign] --units full-group capture takes {len(capture_unit_names)} "
               "units of the census scope", flush=True)
