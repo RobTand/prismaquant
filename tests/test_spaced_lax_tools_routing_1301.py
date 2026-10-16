@@ -7,6 +7,7 @@ consumer evidence matrix states which remaining outputs are not exercised here.
 from __future__ import annotations
 
 import copy
+import ast
 import importlib.util
 import json
 import os
@@ -138,8 +139,13 @@ def test_campaign_row_embeds_the_resolved_container_spec():
 
     spec = {"cwd": "/work", "python": "python3", "cpus": 2, "tags": ["gb10"],
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
-    GOLDEN.call(lambda: _row(spec, ["--value", "é"], mem_gb=16,
-                            timeout_s=30, module="prismaquant.tessera_campaign"))
+    frozen = json.loads((ROOT / "tests/fixtures/spaced_lax_tools_consumers_2320.json").read_text())
+    expected = ast.literal_eval(frozen['test_campaign_row_embeds_the_resolved_container_spec#0']['returned'])
+    # The serializer oracle predates campaign argument admission. Only the
+    # input flag changes; all serialized bytes and row obligations stay checked.
+    expected['argv'][-2] = '--model'
+    assert _row(spec, ["--model", "é"], mem_gb=16,
+                timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
 
 def test_standalone_worker_atomic_publication_keeps_ascii_and_final_newline(tmp_path):
