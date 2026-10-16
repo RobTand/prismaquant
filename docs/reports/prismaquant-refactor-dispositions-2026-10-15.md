@@ -790,3 +790,108 @@ scope is listed in `analysis/residue-remaining-after.json` and left unchanged.
 
 **Fixed on sight.** ARCHITECTURE section 4.10 still named the removed
 `_encode_and_render` as the owner of the rendering-identity rule.
+
+## Native cache witness binding, review r3 dispositions, 2026-10-16
+
+The independent Claude re-review of NATIVE-LEGACY-01 (`b20d0d8639`..`5ca499e660`)
+reported N3-01 (P0, reproduced by PrismaBuild action `70bc988746a8`), N3-02 (P2)
+and N3-03 to N3-06 (P3). They are fixed or recorded on
+`t3/native-cache-witness-binding` from `8b041119e1`, in separate refactor, test,
+fix and docs commits. No format, default, pin, serving lane or rendered byte
+changes. Every production cache built before `b6ec244eac` refuses its fused NVFP4
+re-packs under the default match-render-scale export and must be re-rendered into
+a fresh `--cache-dir`. No serving, quality or performance claim is made. Evidence
+paths are under
+`/home/rob/tmp/pq-claude-review-20261016/fix-native-binding-r4/`.
+
+**N3-01, fixed at the root (`70b242338a` refactor, `b6ec244eac` fix).** A witness
+named only `(qname, format)` and a float. A resident resume adopted it for whatever
+file held that name, and an export from an older pickle never checked the file it
+re-packed. Each witness now also names the shard its producer published: its
+manifest name and `file_identity.file_stat_signature`, read through the
+descriptor held across the publishing rename (schema v2). One check decides
+whether a witness still binds the bytes served. Resume adopts only bound sidecar
+witnesses and warns about the rest. Export reads the entry first and then requires
+the binding, so no window remains between check and load. A shard manifest refuses
+a witness its just-hashed files break, and the exact union re-binds each shard's
+witnesses to its own SHA-256-verified copies. The binding is file identity, not
+content, chosen so no shard is hashed per read. A copied or transferred cache
+directory refuses its fused entries; renaming the directory keeps them. Not seen:
+a change that bypasses the kernel's timestamp update, a same-size rewrite or inode
+reuse within one timestamp tick of the publish, and stale network-filesystem
+attributes. The 2026-10-16 provenance section above said out-of-band shard
+replacement stayed outside the guarantee; that no longer holds for fused entries.
+Unfused entries carry no witness and rely on the directory's render identity.
+
+**N3-01's enabler, closed (`257910d59d`, scoped by `dfe5c8fde6`).** The streamed
+fill never resumes, so it now claims only a directory no rendering has claimed: it
+refuses one holding `render_identity.json`, a fused-witness sidecar or a rendered
+shard, and publishes a `streamed_fill` section without replacing a sidecar
+another writer published first. The resident fill refuses a claimed directory;
+the streamed build's own MTP and packed appends join it. Re-running a streamed
+build needs a fresh `--cache-dir`. Streamed directories written before this
+change carry no claim and are still admitted on trust as pre-guard directories.
+
+**N3-02, recorded (`e298af2263`; settled scope `ff00dc4d0c`).**
+Since `1b7b7757b1` (2026-07-02) main's export pre-passes derive the fused joint
+global under the cache's recorded rule while main's fills use the ambient rule, so
+a default-environment JSO cache rendered fused siblings on `static_6` globals and
+was re-packed under `joint_mse` ones. Main still has both sides; this branch
+closes them at `c6eb3bcfd9` and `5646b10406`. ARCHITECTURE §6.1 records the
+window, the one CPU-fixture measurement (893 of 1024 elements for a 1.5x global
+mismatch, review action `70bc988746a8`) and what is not measured. Rob chose to
+record the historical warning and leave #2697 open
+(https://github.com/RobTand/prismaquant/issues/2697#issuecomment-6226062928). No
+retrospective retained-artifact audit runs under this task, and no shipped
+artifact has been identified as affected.
+
+**N3-03, fixed (`5329ab959d`).** The MTP append test now carries one witnessed and
+one unwitnessed body entry, and both appends must keep the body witness unchanged
+and certify nothing else.
+
+**N3-04, fixed (`5ab93f7b9c`).** q_proj's planted peak moves to 2.6x; a fixture
+test requires the two fused groups' globals to differ by a ratio that is not a
+power of two, which makes the per-entry witness assertion separate the groups.
+
+**N3-05, fixed.** Refusal messages no longer attribute an unwitnessed entry to a
+fill from cache-level metadata and say to re-render into a fresh `--cache-dir`,
+since resuming the same directory refuses again (`b6ec244eac`). ARCHITECTURE no
+longer claims a resume never attaches a foreign witness. `5fec3650f7` corrects the
+match-render-scale flag row (reader `native_render_levers.py:287`; `0` does not
+admit a cache without a complete recipe record) and the §6.1 block-output
+paragraph that still described the module archived on 2026-07-30.
+
+**N3-06, not changed.** Witness writes and reads still validate the whole section
+on every call, and the resident fill still rewrites its witness sidecar, with
+file and directory fsync, after each fused shard: O(N) per entry, O(N²) per run.
+This is a source-based estimate, not a measurement: a 27B-class profile has about
+320 fused entries, so about 10^5 record parses and some 10 MB of sidecar writes
+per fill. Whole-section validation keeps each read fail-closed on a malformed
+record. Revisit only for a profile that fuses tens of thousands of entries.
+
+**Tests and mutations (`818594e6a3` adds two oracles).** The two N3-01 variants
+are inverted with the streamed claim bypassed, and the ungated re-pack is shown to
+ship other bytes. Other tests cover rename-over and in-place rewrite, a
+replacement after the read and one between check and load, moved and copied
+directories, v1 refusal, union transfer and re-binding, and the production
+streaming exporter on CPU and CUDA. Each mutation ran on its own frozen snapshot.
+Ignoring the file identity failed the 11 binding tests; dropping the directory
+claim failed the 6 claim tests; dropping all MTP witnesses failed the retention
+test; witnessing the wrong group's global failed the group oracle and the 14
+export and resume tests that rely on a correct witness, while the same mutation
+on the old fixture passed the group oracle, which is the gap N3-04 reported;
+checking before the read failed only the race test.
+The reviewer's unmodified reproduction now fails both variants at the streamed
+claim.
+
+Evidence, all through PrismaBuild with the pinned interpreter, every terminal
+record, log hash and sealed snapshot verified: the 149-file targeted CPU cohort on
+`dfe5c8fde6` passed 3,559 tests in four shards with 60 skips (CUDA-only cases,
+31 Stage B spill cases that need administrator-provisioned scratch, two campaign
+branch contracts and one two-device case). The same cohort passed on
+`b6ec244eac`. On sparklina, in the known-good CUDA container, both fresh-process
+GPU bodies and 120 GPU-file tests passed with no skips, including the CUDA
+resident-fill to CUDA streaming-export case. PrismaBuild compiled every touched
+Python file. Full CLI batch/resume parity remains unqualified, because its frozen
+x86 CUDA producer environment does not run in the ARM container, and no serving
+run was made.
