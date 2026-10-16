@@ -27217,7 +27217,10 @@ rendered on changed 893 of 1024 elements (review N3-01 reproduction, PrismaBuild
 artifacts were exported in the window, how often real weights give the two rules different
 fused globals, and any served effect. Served gold metrics of such artifacts describe the
 bytes they shipped; a claim that those bytes equal the cache render their frontier KL
-measured is unverified.
+measured is unverified. Rob chose to record this as a historical warning and leave #2697
+open as its follow-up (decision comment 6226062928, 2026-10-16); no retrospective
+retained-artifact audit runs under this refactor, and no shipped artifact has been
+identified as affected.
 
 **Block-output match** (quality lever #12, formerly `prismaquant/block_output_match.py`) was
 archived on 2026-07-30 (`archive/block_output_match_2026-07-30/`, re-vet R25). It never ran on
