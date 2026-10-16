@@ -1,6 +1,5 @@
 """Overlap the producer's exact cold source seal, never replace it (PQ #1742)."""
 
-from prismaquant import tessera_campaign_wire as campaign_wire
 from concurrent.futures import Future
 from contextlib import ExitStack
 from functools import lru_cache
@@ -10,6 +9,7 @@ import pytest
 
 from prismaquant import io_engine
 from prismaquant import tessera_campaign as campaign
+from prismaquant import tessera_campaign_wire as campaign_wire
 
 
 class ControlledSubmit:
@@ -103,8 +103,11 @@ def test_pricing_scopes_have_no_shared_future(monkeypatch):
     scope_b.close()
 
 
-def test_main_submits_before_model_and_joins_before_producer_identity(monkeypatch, tmp_path):
-    from prismaquant import cost_streaming
+@pytest.mark.parametrize('row_head,identity_bytes', [
+    ('load-all', 0), ('load-all', 1 << 20), ('stream', 0)])
+def test_main_joins_the_encoder_seal_before_identity_consumers(
+        monkeypatch, tmp_path, row_head, identity_bytes):
+    from prismaquant import autoscale, cost_streaming
     from test_tessera_row_stream import stream_fixture
 
     campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
@@ -115,6 +118,14 @@ def test_main_submits_before_model_and_joins_before_producer_identity(monkeypatc
     wait = campaign._EncoderSourceSealAhead.wait
     build = cost_streaming.build_streamed_causal_lm
     identity = campaign.campaign_checkpoint_identity
+    metadata_plan = campaign._campaign_identity_metadata_plan
+    bind_identities = campaign._campaign_bound_identities
+    resources = autoscale.selected_anchor_resources
+
+    def resources_with_identity_hold(*args, **kwargs):
+        result = resources(*args, **kwargs)
+        result['phases']['resident_anchors']['campaign_identity_hold_scratch_bytes'] = 0
+        return result
 
     def observed_start(*args, **kwargs):
         nonlocal ahead_started
@@ -143,12 +154,29 @@ def test_main_submits_before_model_and_joins_before_producer_identity(monkeypatc
         events.append(('identity', result['encoder_source_sha256']))
         return result
 
+    def observed_metadata_plan(*args, **kwargs):
+        assert joined
+        events.append('metadata_plan')
+        return metadata_plan(*args, **kwargs)
+
+    def observed_bind_identities(*args, **kwargs):
+        assert joined
+        events.append('bound_identities')
+        return bind_identities(*args, **kwargs)
+
     monkeypatch.setattr(campaign, '_start_encoder_source_seal_ahead', observed_start)
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', observed_build)
     monkeypatch.setattr(campaign._EncoderSourceSealAhead, 'wait', observed_wait)
     monkeypatch.setattr(campaign, 'campaign_checkpoint_identity', observed_identity)
-    assert campaign.main([*argv, '--row-head', 'load-all']) == 0
+    monkeypatch.setattr(campaign, '_campaign_identity_metadata_plan', observed_metadata_plan)
+    monkeypatch.setattr(campaign, '_campaign_bound_identities', observed_bind_identities)
+    monkeypatch.setattr(autoscale, 'selected_anchor_resources', resources_with_identity_hold)
+    assert campaign.main([
+        *argv, '--row-head', row_head,
+        '--campaign-identity-bytes', str(identity_bytes)]) == 0
     assert events[:3] == ['submitted', 'model', 'joined']
+    assert events.count('metadata_plan') == int(row_head == 'stream' or identity_bytes > 0)
+    assert events.count('bound_identities') == int(row_head == 'load-all' and identity_bytes > 0)
     identities = [item[1] for item in events if isinstance(item, tuple)]
     assert identities
     assert set(identities) == {
