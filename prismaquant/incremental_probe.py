@@ -2128,10 +2128,6 @@ def _compute_global_precompute(
                 total_ce += float(tok_ce.sum().item())
                 total_count += int(tok_ce.numel())
         ce_mean = total_ce / max(total_count, 1)
-    elif importance_weighting:
-        ce_mean = float(None)
-        if not np.isfinite(ce_mean) or ce_mean <= 0.0:
-            raise RuntimeError("global importance CE mean must be finite and positive")
     else:
         ce_mean = None
 
