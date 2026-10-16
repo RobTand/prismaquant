@@ -699,14 +699,14 @@ def _run_mtp_cost_shard(
         n for n, m in mtp_wrapper.named_modules()
         if isinstance(m, nn.Linear) and not n.endswith(".mlp.gate")
     }
-    from prismaquant.probe_inventory import (
-        is_packed_experts_module as _is_packed_experts_module,
-        packed_experts_param_names as _packed_experts_param_names,
+    from .probe_inventory import (
+        is_packed_experts_module,
+        packed_experts_param_names,
     )
     for name, module in mtp_wrapper.named_modules():
-        if not _is_packed_experts_module(module, profile):
+        if not is_packed_experts_module(module, profile):
             continue
-        for pn in _packed_experts_param_names(module, profile):
+        for pn in packed_experts_param_names(module, profile):
             mtp_linears.add(f"{name}.{pn}")
 
     target_names = shard_targets & mtp_linears

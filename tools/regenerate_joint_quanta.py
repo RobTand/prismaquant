@@ -742,7 +742,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     producer, and nothing it reads is re-read by a quantum. Returns
     ``{layer: {"bytes", "binding"}}``; nothing is written.
     """
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256
     from prismaquant.joint_layer_quanta import qname_layer
     from prismaquant.joint_stage_b_head import (
         HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
@@ -761,7 +761,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
         config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
         completion=prepared, production_cache=production_cache, data=data,
         layers=layers, layer_of=qname_layer,
-        implementation_sha256=_aura_source_sha256())
+        implementation_sha256=producer_package_sha256())
     sealed = {}
     for layer, head_slice in slices.items():
         raw = head_slice_bytes(head_slice)

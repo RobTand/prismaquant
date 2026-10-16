@@ -90,7 +90,7 @@ def mtp_probe_identity(*, source_model, calibration_ids, n_probes, seed_base, ar
     sequence contributes ``T - 1`` rows, the probe is normalized by
     ``n * (T - 1)``, and ``glm_mtp.mtp_objective_identity`` names the seed.
     """
-    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from .aura_provenance import producer_package_sha256
     from .kl_fisher import ROW_PROBE_LAYOUT
     from .joint_aura import make_joint_probe_identity
 
@@ -99,7 +99,7 @@ def mtp_probe_identity(*, source_model, calibration_ids, n_probes, seed_base, ar
         calibration_ids=calibration_ids, source_model=source_model,
         n_probes=int(n_probes), seed_base=int(seed_base),
         token_scope="all", temperature=1.0,
-        producer_source_sha256=_aura_source_sha256(),
+        producer_source_sha256=producer_package_sha256(),
         source_execution=source_execution, arithmetic=arithmetic,
     )
     probe["noise_layout"] = {

@@ -249,7 +249,7 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     the source-identity seed, minus the GPU-only steps."""
     import pickle
 
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.stage_inputs import bound as _bound, same as _same
@@ -266,7 +266,7 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     marks["device_policy_s"] = time.monotonic() - started
     header = json.loads(_bound(prepared, "prepared anchors").read_text())
     reader = load_declared_reader(config.get("reader"))
-    implementation = _aura_source_sha256()
+    implementation = producer_package_sha256()
     _same(header.get("status"), "complete", "prepared completion")
     marks["prepared_s"] = time.monotonic() - started
     execution = config["execution"]
@@ -317,7 +317,7 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
     The projection backend identity is the one the completion records: the
     harness has no device to prewarm one, and the head only compares it.
     """
-    from prismaquant.aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from prismaquant.aura_provenance import producer_package_sha256
     from prismaquant.joint_stage_b_head import (
         load_quantum_head, read_prepared_head, read_quantum_head_slice)
     from prismaquant.tessera_reader import load_declared_reader
@@ -333,7 +333,7 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
     head = load_quantum_head(
         config, record=record, head_slice=head_slice, files=files,
         completion=completion, plan_sha256=plan_sha256,
-        implementation_sha256=_aura_source_sha256(),
+        implementation_sha256=producer_package_sha256(),
         reader_identity=None if reader is None else reader.identity,
         projection_backend=completion.get("projection_backend"))
     marks["head_s"] = time.monotonic() - started

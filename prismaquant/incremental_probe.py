@@ -1748,10 +1748,6 @@ def _compute_global_precompute(
     resident_include_union: str,
     resident_exclude: str,
     activation_cache_dir: str | None,
-
-
-
-
 ) -> GlobalPrecompute:
     """Run Phase-1 (streaming forward, cache activations on CPU) and
     Phase-2 (chunked CE backward through lm_head). Install resident
@@ -2641,7 +2637,6 @@ def _run_body_streaming_shard(
     minimax_fast_moe_chunk_size: int = 32,
     activation_rows_limit: int = 256,
     precomputed: GlobalPrecompute | None = None,
-
 ):
     if precomputed is None:
         raise ValueError(
@@ -3828,7 +3823,7 @@ def _run_body_streaming_shard(
             )
             flush_activation_snapshots(packed_act_snaps)
 
-            phase_pressure_trim_bytes += int((ctx.unload(L)))
+            phase_pressure_trim_bytes += int(ctx.unload(L))
             # The `del` drops all per-layer refs; CPython ref counting
             # reclaims them synchronously. The per-layer gc + empty_cache
             # is a quick win for in-scope MoE layers where 768 hooks have
@@ -4351,69 +4346,37 @@ def main():
                          "Default 42 reproduces historical behavior.")
     ap.add_argument(
         "--global-calibration-tensor", default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--sample-partition-index", type=int, default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--sample-run-contract", default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--sample-cover", default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--producer-snapshot-root",
         default=os.environ.get("PRISMAQUANT_PRODUCER_SNAPSHOT_ROOT"),
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--container-image-digest",
         default=os.environ.get("PRISMAQUANT_PRODUCER_IMAGE_DIGEST"),
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--sample-importance-stats-output", default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument(
         "--sample-global-importance-receipt", default=None,
-        help=(
-            'Retired sample-parallel flag. Execution and offline commands are '
-            'archived at archive/sample_parallel_probe_2026-10-15/; '
-            '--global-calibration-tensor refuses before model reads.'
-        ),
+        help=SAMPLE_PARALLEL_RETIRED,
     )
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--device-map", default=None)
@@ -4837,10 +4800,6 @@ def main():
             resident_include_union=resident_include_union,
             resident_exclude=linear_exclude,
             activation_cache_dir=args.activation_cache_dir,
-
-
-
-
         )
         _save_precompute_cache(
             precompute_cache_path, precomputed, precompute_meta)
@@ -4976,7 +4935,6 @@ def main():
                     minimax_fast_moe_chunk_size=args.minimax_fast_moe_chunk_size,
                     activation_rows_limit=args.activation_rows_limit,
                     precomputed=pre,
-
                 )
             elif kind == "mtp":
                 pre = _ensure_precompute()

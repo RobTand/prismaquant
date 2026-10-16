@@ -319,7 +319,12 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     in between. Without ``source_files`` the shards are checked against the
     checkpoint index alone. Returns ``({shard name: sha256}, proof sha256)``.
     """
-    from .streamed_model_identity import _local_checkpoint_shards, _read_streamed_model_identity_cache, stat_fingerprint, stat_fingerprint_reusable
+    from .streamed_model_identity import (
+        _local_checkpoint_shards,
+        _read_streamed_model_identity_cache,
+        stat_fingerprint,
+        stat_fingerprint_reusable,
+    )
 
     root = Path(os.path.abspath(root))
     path = Path(cache_path)

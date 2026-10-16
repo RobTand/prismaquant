@@ -26,7 +26,11 @@ from typing import Any
 import torch
 
 from .cost_stage_checkpoint import canonical_json_sha256
-from .streamed_model_identity import canonical_streamed_model_semantic_config, portable_streamed_model_content_identity, validate_streamed_model_identity
+from .streamed_model_identity import (
+    canonical_streamed_model_semantic_config,
+    portable_streamed_model_content_identity,
+    validate_streamed_model_identity,
+)
 from .prismasnap import (
     PRISMASNAP_ALGORITHM,
     PRISMASNAP_BF16_REALIZATION_POLICY,

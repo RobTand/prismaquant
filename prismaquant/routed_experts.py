@@ -38,15 +38,15 @@ def enumerate_packed_experts(model: nn.Module, target_names: set[str],
     probe's stat keys. Only entries appearing in `target_names` are
     returned.
     """
-    from prismaquant.probe_inventory import (
-        is_packed_experts_module as _is_packed_experts_module,
-        packed_experts_param_names as _packed_experts_param_names,
+    from .probe_inventory import (
+        is_packed_experts_module,
+        packed_experts_param_names,
     )
     out = []
     for qname, mod in model.named_modules():
-        if not _is_packed_experts_module(mod, profile):
+        if not is_packed_experts_module(mod, profile):
             continue
-        for pn in _packed_experts_param_names(mod, profile):
+        for pn in packed_experts_param_names(mod, profile):
             p = getattr(mod, pn)
             full = f"{qname}.{pn}" if qname else pn
             if full in target_names:

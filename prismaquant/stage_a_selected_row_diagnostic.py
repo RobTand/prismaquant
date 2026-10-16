@@ -249,14 +249,14 @@ def read_original_diagnostic_session_preparation(binding, *, context, expected_s
 
 def prepare_original_diagnostic_session(base_plan_input, static_authority_input):
     """Issue an actual pending artifact session, never a source/capture receipt."""
-    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
+    from .aura_provenance import producer_package_sha256
     from .calibration_data import load_calibration_input
     from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from .joint_adjoint_checkpoints import adjoint_space
 
     context = load_original_diagnostic_context(base_plan_input, static_authority_input)
     base, prepared = context["base_plan"], context["prepared"]
-    _contract.require(prepared["implementation_sha256"] == _aura_source_sha256(),
+    _contract.require(prepared["implementation_sha256"] == producer_package_sha256(),
                       "diagnostic preparation implementation differs from current capture code")
     ids, calibration = load_calibration_input(base["calibration_input"]["path"],
         expected_sha256=base["calibration_input"]["sha256"], n_samples=512, seqlen=512)

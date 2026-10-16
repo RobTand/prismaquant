@@ -186,19 +186,6 @@ BOUNDARY_CHAT_TEMPLATE_KWARGS = {
 
 
 # -----------------------------------------------------------------
-# Default thresholds (tune via CLI if needed)
-# -----------------------------------------------------------------
-# Boundary-behavior gate (issue #87).  Temperature 1.0 is the unmodified
-# distribution and `REPS` 6 is the published battery's own replication count.
-# The zero bound and 64-token cap are retained as fail-closed historical
-# defaults only while the paired-control policy is unresolved: a first real
-# endpoint audit found healthy DSV4 at 7/30 defects under 64 tokens and stock
-# Qwen3-8B at 10/15 even under 600.  They are not calibrated universal claims
-# and must not be used to close #87 or promote an artifact without the pending
-# same-session control decision.
-
-
-# -----------------------------------------------------------------
 # Data classes
 # -----------------------------------------------------------------
 class SpecDecodeUndetermined(RuntimeError):
