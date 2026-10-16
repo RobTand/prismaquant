@@ -233,6 +233,7 @@ class PhaseRecorder:
     def wrap(self, function, name):
         @functools.wraps(function)
         def measured(*args, **kwargs):
+            units = list(kwargs['qnames']) if 'qnames' in kwargs else None
             start = time.time()
             wall = time.perf_counter()
             cpu = time.thread_time()
@@ -243,6 +244,8 @@ class PhaseRecorder:
                     seconds=time.perf_counter()-wall, thread_cpu_seconds=time.thread_time()-cpu,
                     thread=threading.current_thread().name, qname=kwargs.get('qname'),
                     format_name=kwargs.get('format_name'))
+                if units is not None:
+                    record.update(qnames=units, batch_size=len(units))
                 if len(self.records) >= self.limit:
                     raise RuntimeError('phase profile exceeded its bounded record budget')
                 self.records.append(record)

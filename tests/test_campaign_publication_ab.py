@@ -39,6 +39,41 @@ def test_profile_keeps_original_error_and_records_failed_span():
     assert recorder.records[0]['thread_cpu_seconds'] >= 0
 
 
+@pytest.mark.parametrize('batched', [False, True])
+@pytest.mark.parametrize('failed', [False, True])
+def test_profile_preserves_unit_attribution_when_a_callback_mutates_its_batch(batched, failed):
+    recorder = PhaseRecorder()
+    names = ['a.gate_proj', 'a.up_proj']
+    inputs = dict(qnames=names) if batched else dict(qname=names[0])
+    result = object()
+    error = ValueError('original measurement failure')
+
+    def measure(**kwargs):
+        if batched:
+            kwargs['qnames'].clear()
+        if failed:
+            raise error
+        return result
+
+    measured = recorder.wrap(measure, 'measurement')
+    if failed:
+        with pytest.raises(ValueError) as caught:
+            measured(format_name='tessera', **inputs)
+        assert caught.value is error
+    else:
+        assert measured(format_name='tessera', **inputs) is result
+    assert len(recorder.records) == 1
+    record = recorder.records[0]
+    assert record['format_name'] == 'tessera'
+    if batched:
+        assert record['qname'] is None
+        assert record['qnames'] == ['a.gate_proj', 'a.up_proj']
+        assert record['batch_size'] == 2
+    else:
+        assert record['qname'] == 'a.gate_proj'
+        assert 'qnames' not in record and 'batch_size' not in record
+
+
 def test_a_repeat_order_replaces_the_default_matrix_instead_of_being_shadowed():
     B, I = OVERLAP_BUDGET, 268435456
     assert arm_order(I) == [(0, 0), (B, 0), (B, I), (B, I), (B, 0)]
