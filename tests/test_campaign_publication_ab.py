@@ -231,3 +231,83 @@ def test_profile_reader_keeps_historical_key_for_old_new_and_recursive_frames(tm
     assert result['samples'] == 15
     assert result['inclusive']['_campaign_checkpoint_identity'] == 15
     assert 'campaign_checkpoint_identity' not in result['inclusive']
+
+
+#: Collapsed py-spy stacks of both code eras. The first two old lines are
+#: frames of the 2026-09-15 row-0055 arm (stream-row-head-640/arms/after-1)
+#: verbatim; the scalar line follows the 138069b799 call chain; the new lines
+#: follow the tessera_cell_measurement owner. Counts are chosen so every sum
+#: is distinct.
+_RUNPY = ('_run_module_as_main (<frozen runpy>:198);_run_code (<frozen runpy>:88);'
+          '<module> (prismaquant/tessera_campaign.py:7041);')
+_OLD_MAIN = _RUNPY + 'main (prismaquant/tessera_campaign.py:5068);_main (prismaquant/tessera_campaign.py:6608);'
+_NEW_MAIN = (_RUNPY + 'main (prismaquant/tessera_campaign.py:3829);_main (prismaquant/tessera_campaign.py:4836);'
+             'run_loaded_campaign (prismaquant/tessera_campaign.py:6016);')
+OLD_STACKS = (
+    _OLD_MAIN + '_measure_anchor_batch (prismaquant/tessera_campaign.py:698);'
+    'encode_tessera_units (prismaquant/tessera_render.py:1402);read_unit_artifact '
+    '(tessera/unit_artifact.py:811);reconstruct_unit (tessera/decode.py:1139);'
+    'dequantize (tessera/decode.py:646) 3',
+    _OLD_MAIN + '_measure_anchor_batch (prismaquant/tessera_campaign.py:705);'
+    '_finish_anchor (prismaquant/tessera_campaign.py:648);_publish '
+    '(prismaquant/tessera_campaign.py:625);_store_rendered_weight_entry '
+    '(prismaquant/production_weight_cache.py:1856);save (torch/serialization.py:1003) 5',
+    _OLD_MAIN + '_measure_anchor (prismaquant/tessera_campaign.py:522);_encode_and_render '
+    '(prismaquant/tessera_campaign.py:451);encode_tessera_unit (prismaquant/tessera_render.py:1287) 7',
+)
+NEW_STACKS = (
+    _NEW_MAIN + 'measure_cells (prismaquant/tessera_cell_measurement.py:494);'
+    'encode_tessera_units (prismaquant/tessera_render.py:1260) 11',
+    _NEW_MAIN + 'measure_cells (prismaquant/tessera_cell_measurement.py:501);_score_and_publish '
+    '(prismaquant/tessera_cell_measurement.py:425);_publish (prismaquant/tessera_cell_measurement.py:400) 13',
+    _NEW_MAIN + 'measure_cells (prismaquant/tessera_cell_measurement.py:466);measure_cell '
+    '(prismaquant/tessera_cell_measurement.py:103);encode_tessera_unit (prismaquant/tessera_render.py:1066) 17',
+)
+
+
+@pytest.mark.parametrize(('stacks', 'samples', 'expected'), [
+    (OLD_STACKS, 15, {'_measure_anchor_batch': 8, '_encode_and_render': 7,
+                      'measure_cells': 0, 'encode_tessera_unit': 10}),
+    (NEW_STACKS, 41, {'_measure_anchor_batch': 0, '_encode_and_render': 0,
+                      'measure_cells': 41, 'encode_tessera_unit': 28}),
+], ids=['before-cell-owner', 'cell-owner'])
+def test_profile_reader_counts_each_era_under_its_own_measurement_names(
+        tmp_path, stacks, samples, expected):
+    """A historical arm still reads its measurement frames, and a new arm's
+    frames are never counted under the old names (C-PRF-02)."""
+    from experiments.stream_row_head_640.profile_summary import profile
+
+    (tmp_path / 'pyspy.raw.txt').write_text('\n'.join(stacks) + '\n')
+    result = profile(tmp_path)
+    assert result['samples'] == samples
+    assert {name: result['inclusive'][name] for name in expected} == expected
+
+
+def test_instrument_names_cell_spans_apart_and_keeps_the_memo_key(monkeypatch):
+    """``measure_cells`` and ``_score_and_publish`` record under their own
+    names, nothing records as ``_finish_anchor``, and the moved memo's
+    counters keep their historical key (C-PRF-02)."""
+    from experiments.campaign_publication_ab import instrument
+    from prismaquant import tessera_campaign as campaign
+    from prismaquant import tessera_cell_measurement as cell_measurement
+
+    def score(**kwargs):
+        return 'scored'
+
+    def batch(**kwargs):
+        return 'measured'
+
+    monkeypatch.setattr(cell_measurement, '_score_and_publish', score)
+    monkeypatch.setattr(cell_measurement, 'measure_cells', batch)
+    recorder = PhaseRecorder()
+    with instrument(campaign, recorder, 'gate_up'):
+        assert cell_measurement._score_and_publish(qname='u', format_name='f') == 'scored'
+        assert cell_measurement.measure_cells(qnames=['u', 'v'], format_name='f') == 'measured'
+        cell_measurement.encoder_kwargs_memo(None, {}, 'cpu')
+    assert cell_measurement._score_and_publish is score
+    assert cell_measurement.measure_cells is batch
+    assert [(record['phase'], record['qname'], record.get('qnames'))
+            for record in recorder.records] == [
+        ('prismaquant.tessera_cell_measurement._score_and_publish', 'u', None),
+        ('prismaquant.tessera_cell_measurement.measure_cells', None, ['u', 'v']),
+        ('tessera_campaign._activation_kwargs_memo.cache_info', None, None)]

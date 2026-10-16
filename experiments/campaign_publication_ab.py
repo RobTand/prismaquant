@@ -263,7 +263,15 @@ def instrument(campaign, recorder, projection):
         for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record',
                                       '_campaign_bound_identities', '_adopt_seed_checkpoint')
     ] + [
+        # Two spans under their own names. ``measure_cells`` is one compatible
+        # batch end to end: recipe admission, the encode and every unit's
+        # scoring and publication. ``_score_and_publish`` is one unit's scoring
+        # and publication of decoded bytes, the span the pre-2026-10-16
+        # profiles name ``tessera_campaign._finish_anchor``, except that the
+        # direct-consumer contract lookup now runs in ``CellRecipe.prepare``.
+        # Neither is relabelled as the historical span.
         (cell_measurement, 'measure_cells'),
+        (cell_measurement, '_score_and_publish'),
         # The per-anchor derivation off a sealed template.  Its thread name
         # in the record is the evidence of where the post-work ran.
         (campaign._BoundCheckpointUnitIdentity, 'derive'),
@@ -321,7 +329,9 @@ def instrument(campaign, recorder, projection):
             setattr(owner, name, original)
         for built in memos:
             info = built.cache_info()
-            recorder.records.append(dict(phase='tessera_cell_measurement.encoder_kwargs_memo.cache_info',
+            # The same memo, moved to ``tessera_cell_measurement.encoder_kwargs_memo``;
+            # its counters keep their historical key.
+            recorder.records.append(dict(phase='tessera_campaign._activation_kwargs_memo.cache_info',
                 started_unix=time.time(), seconds=0.0, thread_cpu_seconds=0.0,
                 thread=threading.current_thread().name, qname=None, format_name=None,
                 cache_info=dict(hits=info.hits, misses=info.misses, maxsize=info.maxsize, currsize=info.currsize)))
