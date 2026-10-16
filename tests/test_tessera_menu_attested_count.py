@@ -1,8 +1,6 @@
 """An explicitly named Tessera rung is not "attested" until the predicate says so (#278)."""
 from tests.tessera_metadata_fixture import install_metadata
 
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-
 from prismaquant import format_registry as fr
 from prismaquant import tessera_menu as menu
 

@@ -16,8 +16,6 @@ CPU-only; no external checkpoint is touched.
 """
 from __future__ import annotations
 
-from prismaquant import aura_provenance
-
 import hashlib
 import json
 from pathlib import Path
@@ -27,6 +25,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import aura_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
@@ -354,7 +354,6 @@ def test_submit_joint_wrong_digest_still_refuses_without_dev_mode(
         scratch, shared_mount, monkeypatch):
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from prismaquant import campaign_data_manifests as glm_data_manifests
     with pytest.raises(RuntimeError, match="hashes to"):
         dispatch.main(argv)
 
@@ -364,7 +363,6 @@ def test_submit_joint_digest_arguments_are_records_under_dev_mode(
     import shlex
     dispatch, fixture, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from prismaquant import campaign_data_manifests as glm_data_manifests
     monkeypatch.setenv(DEV_ENV, "1")
     assert dispatch.main(argv) == 0
     out = capsys.readouterr().out
@@ -381,7 +379,6 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
     import shlex
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume"])  # no --source-transition: no receipt wiring
-    from prismaquant import campaign_data_manifests as glm_data_manifests
     # Certified mode refuses this shape at the pass gates (gates 1-3 above);
     # the submission itself is admitted only under dev mode's contract.
     monkeypatch.setenv(DEV_ENV, "1")
@@ -419,7 +416,6 @@ def _submitted_launcher_argv(capsys):
 def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
         scratch, shared_mount, monkeypatch, capsys):
     dispatch, _fixture_, spec, argv = _joint_submission(scratch)
-    from prismaquant import campaign_data_manifests as glm_data_manifests
     # Certified is "0" since PQ #1147 (unset is dev mode), and the certified
     # submitter seals "0" so the container, which does not inherit this
     # environment, stays certified.

@@ -114,7 +114,7 @@ def _population() -> dict:
 
 def _cost_payload(tmp_path, *, formats=(FMT,)) -> dict:
     from prismaquant.cost_currency import RENDER_SCORE_COST_MODE
-    from prismaquant.tessera_campaign_table import (CURRENCY)
+    from prismaquant.tessera_campaign_table import CURRENCY
 
     carried = _carried()
     units = carried["stacks"][STACK]

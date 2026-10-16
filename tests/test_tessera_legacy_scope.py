@@ -21,14 +21,10 @@ regime)`` scope keeps its own published rungs, flags and launches, so the
 v4-era dense E4M3 rung exists in the table again exactly as it did when the
 grammar was live, while every admission fact stays the pin's real one.
 """
-from tests.tessera_metadata_fixture import install_metadata
-
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-
 import json
 
+from tests.tessera_metadata_fixture import install_metadata
 import pytest
-
 from conftest import (
     down_convert_lane_table, lane_cells_on_one_image, project_lane_cells_onto_structures)
 

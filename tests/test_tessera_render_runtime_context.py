@@ -3,12 +3,9 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from tests.tessera_metadata_fixture import install_metadata
-
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-from prismaquant.lane_eligibility import native_rung_verdict
-
 import pytest
 
+from prismaquant.lane_eligibility import native_rung_verdict
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 

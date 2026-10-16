@@ -8,14 +8,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_original_streaming_bootstrap_2010 import original_model, _context  # noqa: F401
+from test_capture_original_material import material, _owner, _forget_state  # noqa: F401
 
 from prismaquant import cost_streaming as cs, layer_streaming as ls
 from prismaquant import streamed_model_identity as cs_identity
-from prismaquant import streamed_model_identity as cs_identity
 from prismaquant.source_generation import original_checkpoint_description
 from prismaquant import joint_cost_stage_a as stage_a
-from test_original_streaming_bootstrap_2010 import original_model, _context  # noqa: F401
-from test_capture_original_material import material, _owner, _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 

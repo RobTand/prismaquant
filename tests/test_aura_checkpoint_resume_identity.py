@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, aura_provenance, joint_price_step
-
 import json
 import re
 import subprocess
@@ -12,6 +10,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant import aura_checkpoint_journal, aura_provenance, joint_price_step
 import prismaquant.aura_cost as aura
 
 

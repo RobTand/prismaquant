@@ -8,10 +8,28 @@ different reduction tree than the per-Linear sequential path).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+from unittest import mock
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
 import prismaquant.export_native_compressed as _test_exporter
 from prismaquant.native_render_levers import NativeRenderLevers
-from dataclasses import replace
-import pytest
+import prismaquant.native_render_codec as _native_render_codec
+
+
+from prismaquant.native_render_codec import (
+    gptq_obs_rounding_nvfp4,
+    rtn_dequant_nvfp4,
+    scale_sweep_nvfp4,
+)
+from prismaquant.export_batched_gptq import (
+    gptq_obs_rounding_nvfp4_batched,
+    scale_sweep_nvfp4_batched,
+)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_export_inputs():
@@ -23,25 +41,6 @@ def _isolate_export_inputs():
     yield
     (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
      _test_exporter._INPUT_GLOBAL_SCALES) = saved
-
-
-import prismaquant.native_render_codec as _native_render_codec
-
-import pytest
-from unittest import mock
-
-torch = pytest.importorskip("torch")
-
-import prismaquant.export_native_compressed as enc
-from prismaquant.native_render_codec import (
-    gptq_obs_rounding_nvfp4,
-    rtn_dequant_nvfp4,
-    scale_sweep_nvfp4,
-)
-from prismaquant.export_batched_gptq import (
-    gptq_obs_rounding_nvfp4_batched,
-    scale_sweep_nvfp4_batched,
-)
 
 
 @pytest.fixture
@@ -408,10 +407,7 @@ def test_quantize_2d_nvfp4_group_batched_integration(seeded):
     equivalence tests above; this test just exercises the integration
     plumbing."""
     import torch.nn as nn
-    from prismaquant.native_render_codec import (
-        quantize_2d_nvfp4_group_batched,
-    )
-    import prismaquant.export_native_compressed as enc
+    from prismaquant.native_render_codec import quantize_2d_nvfp4_group_batched
 
     E, out_features, in_features = 4, 64, 128
 

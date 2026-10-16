@@ -1,16 +1,16 @@
 """Real joint entry points must not leak their activation-scale policy."""
-from prismaquant import aura_provenance
 import os
 from types import SimpleNamespace
 
 import pytest
 import torch
+from test_joint_cost_quantum_runtime import _prefetch_budget, _stage_a_run_stub
+from test_quantum_failure_counters import _Sampler, _record
 
+from prismaquant import aura_provenance
 from prismaquant import joint_cost_quantum as quantum
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
-from test_joint_cost_quantum_runtime import _prefetch_budget, _stage_a_run_stub
-from test_quantum_failure_counters import _Sampler, _record
 
 
 class WorkloadError(RuntimeError):

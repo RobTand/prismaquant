@@ -35,24 +35,21 @@ claim that launch at all; the test below pins that a cell which did would be
 refused by name at all three legs, on the E2M1 dense pair, whose rung 896
 plans rate 7 for the same reason.
 """
-from tests.tessera_metadata_fixture import install_metadata
-
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-
 import copy
 import dataclasses
 import hashlib
 import json
 from types import SimpleNamespace
+from importlib.resources import as_file
 
+from tests.tessera_metadata_fixture import install_metadata
 import pytest
 import torch
-from importlib.resources import as_file
+from tests.conftest import set_cell_census
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
-from tests.conftest import set_cell_census
 
 
 WINDOW_LANE = "tessera_window_gemv"

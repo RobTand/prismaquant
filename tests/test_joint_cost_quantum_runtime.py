@@ -1,4 +1,3 @@
-from prismaquant import aura_checkpoint_journal
 """The distributed campaign's per-quantum runtime gates (#778, §11).
 
 Stage A (adjoint capture) and stage B (the layer quantum) against the
@@ -8,7 +7,6 @@ with the single-run path (bitwise unit envelopes -- the §9.3 gate's dry
 run), write-space isolation, chunk-granular progress cadence, §8.1 counter
 shapes, and the comparison tool on a synthetic pair.
 """
-from prismaquant import aura_provenance
 from pathlib import Path
 from contextlib import nullcontext
 import hashlib
@@ -18,7 +16,12 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from test_joint_operator_windows import policy as operator_policy
+from test_layer_major_boundary_capture import fixture, draw
+from test_streamed_cost_checkpoints import _model_identity
 
+from prismaquant import aura_checkpoint_journal
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
@@ -54,10 +57,6 @@ from prismaquant.joint_cost_stage_a import (
     run_adjoint_capture_core,
 )
 from prismaquant.sensitivity_probe import SharedStateCotangents
-
-from test_joint_operator_windows import policy as operator_policy
-from test_layer_major_boundary_capture import fixture, draw
-from test_streamed_cost_checkpoints import _model_identity
 
 QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 HEX = "0123456789abcdef"
@@ -1588,7 +1587,7 @@ def test_shared_state_cotangents_state_dict_roundtrip():
 
 def _journal(tmp_path, rows, identity_extra):
     """A synthetic AURA journal: manifest + per-unit envelopes."""
-    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
+    from prismaquant.cost_stage_checkpoint import unit_path as _aura_unit_checkpoint_path
 
     root = tmp_path
     identity = {"schema": "prismaquant.aura.checkpoint.identity.v1",

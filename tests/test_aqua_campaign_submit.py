@@ -41,10 +41,6 @@ The fixture is torch-free on the producer side on purpose: the manifest is
 built by the CPU path, exactly as it is at submission time. The stage itself is
 never executed here -- these tests run no GPU work.
 """
-from prismaquant import joint_aura_rows
-from prismaquant import priced_cell
-from prismaquant import tessera_campaign_table as campaign_table
-
 import hashlib
 import json
 import pickle
@@ -55,6 +51,10 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
+from prismaquant import tessera_campaign_table as campaign_table
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
@@ -190,7 +190,6 @@ def _workspace(scratch: Path) -> dict:
     spec.write_text(json.dumps({"container": {"image": "x"},
                                 "cpu_memory_gb": 34, "box_memory_gb": 114}))
 
-    import dispatch_tessera_campaign as dispatch
 
     scope = campaign_table.joint_campaign_scope(json.loads(plan.read_text()))
     identity = scratch / "campaign-identity.json"
@@ -244,7 +243,6 @@ def shared_mount(scratch, monkeypatch):
 
 @pytest.fixture()
 def campaign(scratch, shared_mount, monkeypatch):
-    import dispatch_tessera_campaign as dispatch
 
     return _workspace(scratch)
 
@@ -386,7 +384,6 @@ def test_the_plan_may_price_a_narrower_surface_than_the_census(campaign):
     rungs -- and it is why the expected set is read per ``(unit, format)``
     rather than as units times formats.
     """
-    import dispatch_tessera_campaign as dispatch
 
     names = campaign["names"]
     payload = {"provenance": {},
@@ -475,7 +472,6 @@ def test_a_joint_cell_the_plan_never_priced_refuses_or_is_recorded_unverified(
     campaign never priced beside the plan's own table. By default that
     refuses; the explicit flag reuses it and says so in the record.
     """
-    import dispatch_tessera_campaign as dispatch
 
     names = campaign["names"]
     payload = _cost_payload(names)

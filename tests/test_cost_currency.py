@@ -30,7 +30,7 @@ import pytest
 
 
 def _tessera_row():
-    from prismaquant.tessera_campaign_table import (CURRENCY)
+    from prismaquant.tessera_campaign_table import CURRENCY
 
     return {
         "output_mse": 1e-3,
@@ -158,7 +158,7 @@ def test_the_tessera_currency_the_gate_reads_is_the_one_the_campaign_stamps():
     declares on its format family, and that declaration is the stamping
     module's own constant (decoupling step 6, PQ #1552)."""
     from prismaquant import cost_currency as cc
-    from prismaquant.tessera_campaign_table import (CURRENCY)
+    from prismaquant.tessera_campaign_table import CURRENCY
 
     assert [family.cost_currency for family in cc.campaign_currency_families()
             if family.id == "tessera"] == [CURRENCY]
