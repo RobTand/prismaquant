@@ -109,33 +109,73 @@ def test_batch_admits_every_hessian_before_encoding_or_publishing(monkeypatch, t
     assert all(torch.equal(weight, original) for weight, original in zip(weights, originals))
 
 
-@pytest.mark.parametrize("leaf,contract,dtype", [
-    ("indexer.weights_proj", "a32", torch.float32),
-    ("kv_b_proj", "a16", torch.bfloat16),
-])
-def test_direct_measurement_uses_public_producer_without_serving(
-        monkeypatch, tmp_path, leaf, contract, dtype):
-    import importlib.abc
+#: Run as a fresh interpreter: the blocker is installed before anything else
+#: is imported, so a ``tessera.serving`` module an earlier test loaded into
+#: this process cannot be returned from ``sys.modules`` behind its back, and an
+#: attempt the code under test swallows is still recorded.
+COLD_DIRECT_MEASUREMENT = """
+import importlib.abc
+import json
+import sys
 
-    class BlockServing(importlib.abc.MetaPathFinder):
-        def find_spec(self, fullname, path=None, target=None):
-            if fullname.startswith("tessera.serving"):
-                raise AssertionError(fullname)
 
-    monkeypatch.setattr(sys, "meta_path", [BlockServing(), *sys.meta_path])
-    profile = SimpleNamespace(name="glm5_next",
-        declared_architectures=lambda: ("Glm5NextForConditionalGeneration",))
-    source = torch.randn(32, 32, generator=torch.Generator().manual_seed(194)).bfloat16()
-    original = source.clone()
-    cache = SimpleNamespace(weights={}, cache_dir=None)
-    name = "model.layers.0.self_attn." + leaf
-    anchor = measurement.measure_cell(qname=name, weight=source,
-        activations=torch.ones(2, 32), format_name=FORMAT, cache=cache,
-        wire_dir=tmp_path, hessian_required=False, profile=profile, structure="dense")
-    assert cache.weights[(name, FORMAT)].dtype == dtype
-    assert anchor.activation_contract == contract
-    assert anchor.activation_quantized is False
-    assert torch.equal(source, original)
+def forbidden(name):
+    return name == "tessera.serving" or name.startswith("tessera.serving.")
+
+
+attempts = []
+
+
+class BlockServing(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if forbidden(fullname):
+            attempts.append(fullname)
+            raise AssertionError(fullname)
+        return None
+
+
+preloaded = sorted(name for name in sys.modules if forbidden(name))
+sys.meta_path.insert(0, BlockServing())
+
+from pathlib import Path
+
+import torch
+
+from tests import test_tessera_cell_measurement as cells
+
+root = Path(sys.argv[1])
+measured = {}
+for batch_size in (1, 4):
+    run = cells._direct_consumer_cells(root / str(batch_size), batch_size=batch_size)
+    measured[batch_size] = sorted(
+        [name, anchor.activation_contract, anchor.encoding_batch_size,
+         anchor.activation_quantized,
+         str(torch.load(run.cache_dir / run.cache.weights[(name, cells.FORMAT)],
+                        weights_only=True).dtype)]
+        for name, anchor in run.anchors.items())
+print(json.dumps({"preloaded": preloaded, "attempts": attempts, "measured": measured,
+                  "loaded": sorted(name for name in sys.modules if forbidden(name))}))
+"""
+
+
+def test_direct_measurement_never_loads_the_serving_runtime_in_a_cold_process(tmp_path):
+    """Scalar and batched direct-consumer cells run on public Tessera modules only."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([sys.executable, "-c", COLD_DIRECT_MEASUREMENT, str(tmp_path)],
+                            cwd=root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert (report["preloaded"], report["attempts"], report["loaded"]) == ([], [], [])
+    expected = {"indexer.weights_proj": ["a32", "torch.float32"],
+                "kv_b_proj": ["a16", "torch.bfloat16"]}
+    for batch_size, rows in report["measured"].items():
+        assert len(rows) == 4
+        for name, contract, encoded_with, quantized, dtype in rows:
+            assert [contract, dtype] == expected[name.split(".self_attn.", 1)[1]]
+            assert encoded_with == min(int(batch_size), 2) and quantized is False
 
 
 def test_batched_direct_consumers_keep_their_contracts_charge_and_inputs(monkeypatch, tmp_path):
