@@ -458,3 +458,29 @@ validation gap too.
 The loaded operation also now reads 19 stable scope fields directly, retaining
 only the three context/structure temporaries that are rebound. Census and
 pricing keep one synchronous source, memo and publication lifetime.
+
+
+### Native fused-cache provenance correction, 2026-10-16
+
+NATIVE-LEGACY-01 is fixed at `5ca499e660`, pending independent Claude review.
+A complete recipe record did not prove which joint global a fused NVFP4 entry
+actually used. The rendering producer now records that exact float32 value per
+entry. Export requires the recomputed global to equal the entry's record before
+re-packing under the default match-render policy.
+
+The resident fill persists the records after publishing their shards. Resume
+retains only those persisted records. An MTP append replaces its own scope, and
+a union accepts records only for entries held by the contributing shard. Export
+resume also binds this admission version, so pre-fix layer payloads re-pack.
+Missing or differing records require a fresh render. The documented opt-out
+continues to use the exporter's own recipe without claiming render parity.
+
+The record binds the global value, not the shard's content digest. Out-of-band
+shard replacement remains outside that guarantee. A crash between shard and
+record publication leaves the entry refused. AURA pair resume already binds
+producer source; explicitly retaining older price rows through a source
+transition still requires its own acceptance.
+
+The verification report records the passing CPU/GPU checks, intended mutation
+failures and the worker's local compile-policy deviation. The full CLI parity
+qualification and final combined review remain pending.

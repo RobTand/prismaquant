@@ -1073,3 +1073,41 @@ The new test at `fa4646a631` reproduces the missing refusal through PrismaBuild:
 cases pass and the new case fails with `DID NOT RAISE` in action `09f6e00e98cd`.
 Producer and consumer need a shared witness or equivalent parity proof before
 this branch can pass its final gate. The PR is not release-ready.
+
+
+### Native legacy-cache fix qualification, 2026-10-16
+
+The gap above is repaired by `83c68fe5dd` and `5ca499e660`. The latter's tree is
+`670d16f26671d2b35d9400ac13053f14610bf712`. Each fused NVFP4 entry now carries
+the rendering producer's joint-global record. Missing or differing records
+refuse at export, including after resident resume, MTP append and union. Export
+resume invalidates payloads produced before this check. The original regression
+now removes that actual record and checks refusal for all five fused entries.
+
+| PrismaBuild scope at `5ca499e660` | Result | Action |
+| --- | --- | --- |
+| 69 CPU files, one shard | 1,365 passed, 12 CUDA-only skips, 59 passing subtests | `09c8e8eb52b900012ac844b9e1d97e9584b8d3e4450ab74cf3338cd77644bc03` |
+| Known CUDA image on GB10 | 100 pytest cases passed, zero skips, plus both fresh-process parity bodies | `775fbcff27e00bcf08492589dc740fc637926e0a03ac16cd5db22aa4e67db920` |
+| Five deliberate gate/resume/append/union mutations | Exactly 10 intended failures, 64 passing controls | `70d46acbcabc19d965b0e0e765fb3d293c190fed9e2ecc7f915cae37772ad892` |
+
+Evidence is under
+`/home/rob/tmp/pq-claude-review-20261016/fix-native-legacy-r2/`.
+`pb-evidence.json` binds the sealed snapshots to the tested tree and records
+every attempt. The parent independently checked three successful terminal/CAS
+receipts, result bytes and both logs in `parent-receipt-audit.json`. A separate
+`parent-terminal-and-log-audit.json` verifies all 12 terminal records, including
+the original regression and mutation failures. Overlapping runs are not added
+into a unique total.
+
+The first eight-shard attempt failed when the worker root filesystem filled;
+seven shards never reached pytest, and a T3 restart cancelled its client. The
+complete single-shard resubmission above passed. The failed records remain.
+The worker also disclosed one local `py_compile` invocation contrary to the
+mandatory PrismaBuild routing policy. That invocation is excluded from
+acceptance evidence. Final compile checks must run through PrismaBuild.
+
+An independent Claude review of this fix is running. Depth B has now completed
+all 163 patches and its ten P3 findings are assigned for correction; depth C is
+still in progress. The final combined review and official final-head checks
+remain pending. These small-fixture checks do not qualify full CLI batch/resume
+parity, serving, model quality or performance.
