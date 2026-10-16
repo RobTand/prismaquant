@@ -1,9 +1,12 @@
 """Gold records can be constructed and replayed without CLI arguments."""
+import ast
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
+from prismaquant import shipcard, shipcard_slots
 from prismaquant.shipcard import open_shipcard, verify, write_shipcard
 from prismaquant.shipcard_slots import make_gold_record, ship_slot
 
@@ -54,3 +57,32 @@ def test_configured_gate_fills_gold_without_the_cli(artifact, monkeypatch):
     record = _replay_slot({"id": "gold.kl"}, {"artifact": str(artifact)}, output, produced=True)
     assert record["passed"] is True
     assert record["metrics"]["kl_mean"] == 0.1
+
+
+def _imports(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = (node.module or "").rsplit(".", 1)[-1]
+            yield node, [module] if node.module else [alias.name for alias in node.names]
+        elif isinstance(node, ast.Import):
+            yield node, [alias.name.rsplit(".", 1)[-1] for alias in node.names]
+
+
+def test_slot_owner_and_card_module_import_in_one_direction():
+    package = Path(shipcard.__file__).resolve().parent
+    slots_tree = ast.parse((package / "shipcard_slots.py").read_text(encoding="utf-8"))
+    back = [ast.dump(node) for node, modules in _imports(slots_tree) if "shipcard" in modules]
+    assert back == [], "shipcard_slots must not import the card module"
+    card_tree = ast.parse((package / "shipcard.py").read_text(encoding="utf-8"))
+    from_slots = [node for node, modules in _imports(card_tree) if "shipcard_slots" in modules]
+    assert from_slots and all(node in card_tree.body for node in from_slots)
+    assert [alias.name for node in from_slots for alias in node.names
+            if alias.name.startswith("_")] == []
+
+
+def test_every_core_slot_policy_lives_with_the_slot_owner():
+    registry = shipcard_slots.ship_slot_registry()
+    core = set(shipcard_slots.REQUIRED_SLOTS) | set(shipcard_slots.OPTIONAL_SLOTS) | set(
+        shipcard_slots.CORE_LANE_SLOTS)
+    assert {name: registry[name].policy.__module__ for name in core} == {
+        name: "prismaquant.shipcard_slots" for name in core}

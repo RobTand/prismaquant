@@ -135,7 +135,7 @@ def test_the_rate_axis_facts_are_lane_data():
     assert family.rate_axis
     assert family.uniform_control_schema == "tessera.uniform_control.v1"
     assert lane_spec.load_lane_spec("tessera").quant_method == "tessera"
-    assert shipcard.uniform_control_schemas() == ("tessera.uniform_control.v1",)
+    assert shipcard_slots.uniform_control_schemas() == ("tessera.uniform_control.v1",)
     assert shipcard._is_rate_axis_artifact({"build": {"quant_method": "tessera"}})
     assert shipcard._is_rate_axis_artifact({"build": {"export_container": " Tessera "}})
     assert not shipcard._is_rate_axis_artifact(
@@ -145,7 +145,7 @@ def test_the_rate_axis_facts_are_lane_data():
 def test_no_rate_axis_lane_means_no_rate_axis_artifact(monkeypatch):
     monkeypatch.setattr(lane_spec, "rate_axis_lanes", lambda: ())
     assert not shipcard._is_rate_axis_artifact({"build": {"quant_method": "tessera"}})
-    assert shipcard.uniform_control_schemas() == ()
+    assert shipcard_slots.uniform_control_schemas() == ()
 
 
 def test_a_rate_axis_family_must_name_its_control_schema():

@@ -595,7 +595,7 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
         {"lane": "tessera", "slots": {}})
 
     sha = "abc"
-    passing = shipcard_mod.make_record(
+    passing = shipcard_slots.make_record(
         slot="route.entropy", tool="true", passed=True, model_sha=sha,
         extra={"route_entropy": {"match": True}})
     problems = shipcard_mod.verify(

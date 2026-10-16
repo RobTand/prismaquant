@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16 (review STD-018, slot ownership): `shipcard_slots` now holds
+every core slot's constructor and replay, including `uniform_control`
+(`make_uniform_control_record`, `_verify_uniform_control_record` and its byte-match,
+arm and override replays) and `route.sweep` (`make_route_sweep_record`,
+`_verify_route_sweep_record`). `shipcard` imports the slot owner once at module
+scope; the owner never imports `shipcard`, and the gold verifier is public as
+`verify_gold_record`. Moved bodies are byte-identical, so every refusal, message
+and record schema is unchanged. The card-level uniform-control helpers
+(`_is_rate_axis_artifact`, `uniform_control_summary`,
+`record_uniform_control_override`) stay in `shipcard`. Tests:
+`tests/test_shipcard_slot_contract.py` and the migrated shipcard suites.
+
 Re-stamped 2026-10-16 (review STD-015): the validated-frontier selector ranks
 surrogate against KL only within one surrogate basis. Each measured row carries
 `surrogate_basis` (validation's `mse.predicted_dloss_basis`; none for pre-label
@@ -12031,8 +12043,12 @@ off the running engine instead of received from it.
   runtime quantized, a priced module that dispatched zero forwards, and two
   ranks with different contract maps are each REFUSED.
 - **The slot.** `lane_specs/compressed_tensors.json` declares a required
-  `route.sweep` gate; `shipcard._verify_route_sweep_record` replays it at
-  publication and refuses carried config text that is not the artifact's.
+  `route.sweep` gate; `shipcard_slots._verify_route_sweep_record` replays the
+  served-vs-priced comparison from the carried sweeps at publication. Its
+  comparison of the carried config text with the artifact's `config.json`
+  runs only when a caller passes `model_dir`; the registered publication
+  replay passes none (unchanged since #631, reported 2026-10-16 for a gate
+  decision).
   `python -m prismaquant.shipcard_cli fill-route-sweep` exits 0 agree, 1
   refused, 3 NOT VERIFIED. No operator flag overrides a refusal.
 - **The exporter now stamps the lane.** `_write_shipcard` passed no `lane`,
@@ -28046,9 +28062,10 @@ the Hub. Tests: `tests/test_publish_artifact.py`, `tests/test_publish_license.py
 
 **`uniform_control` (rate-axis artifacts only; PrismaQuant #121).** The
 shipcard of a Tessera artifact carries one more required slot: the verdict of
-its allocation against the byte-matched uniform control (`shipcard.py`
-`_verify_uniform_control_record`, `make_uniform_control_record`,
-`record_uniform_control_override`; CLI `fill-control` / `override-control`).
+its allocation against the byte-matched uniform control (`shipcard_slots`
+`_verify_uniform_control_record` and `make_uniform_control_record`;
+`shipcard.record_uniform_control_override`; CLI `fill-control` /
+`override-control`).
 `verify` refuses a card whose allocation LOST to spending the same bytes
 uniformly, and refuses the substitutes for a loss -- a control that is not
 byte-matched (the match is replayed from integer bit counts, the carried flag

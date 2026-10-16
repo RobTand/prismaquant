@@ -245,21 +245,21 @@ def test_an_artifact_that_prices_nothing_is_refused():
 # The lane owes the slot, and the shipcard replays the comparison.
 # --------------------------------------------------------------------------
 def test_the_compressed_tensors_lane_owes_route_sweep():
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_gate_slots(
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.lane_gate_slots(
         "compressed-tensors")
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard_slots.CORE_LANE_SLOTS
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_scoped_slots()
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard_slots.CORE_LANE_SLOTS
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.lane_scoped_slots()
 
 
 def test_a_compressed_tensors_card_is_required_to_close_route_sweep():
     card = {"lane": "compressed-tensors", "slots": {}}
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.required_slots(card)
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.required_slots(card)
 
 
 def test_a_historical_card_with_no_lane_keeps_its_base_set():
     """Cards opened before #631 carry no lane and must not retroactively owe."""
     card = {"slots": {}}
-    assert shipcard.ROUTE_SWEEP_SLOT not in shipcard.required_slots(card)
+    assert shipcard_slots.ROUTE_SWEEP_SLOT not in shipcard.required_slots(card)
 
 
 def test_the_run_prints_how_to_close_the_slot_it_opens(tmp_path, capsys):
@@ -277,7 +277,7 @@ def test_the_run_prints_how_to_close_the_slot_it_opens(tmp_path, capsys):
     assert lane_main([
         "gates", "--lane", "compressed-tensors", "--shipcard", str(card)]) == 0
     printed = capsys.readouterr().out
-    assert f"[OPEN] route.sweep -> slots['{shipcard.ROUTE_SWEEP_SLOT}']" in printed
+    assert f"[OPEN] route.sweep -> slots['{shipcard_slots.ROUTE_SWEEP_SLOT}']" in printed
     assert "--route-sweep-out" in printed
     assert "fill-route-sweep" in printed
 
@@ -293,7 +293,7 @@ def test_make_route_sweep_record_refuses_a_disagreeing_sweep():
     sweep = _sweep()
     _first_quantized(sweep)["scheme_attrs"]["use_a16"] = "True"
     with pytest.raises(gate.CompressedRouteSweepError):
-        shipcard.make_route_sweep_record(
+        shipcard_slots.make_route_sweep_record(
             tool="test", model_sha=None,
             sweeps=[("rank0", json.dumps(sweep))], expected_ranks=1,
             config_json=(FIXTURE / "config.json").read_text())
@@ -301,7 +301,7 @@ def test_make_route_sweep_record_refuses_a_disagreeing_sweep():
 
 def test_make_route_sweep_record_refuses_a_missing_sweep():
     with pytest.raises(gate.RouteSweepNotVerified):
-        shipcard.make_route_sweep_record(
+        shipcard_slots.make_route_sweep_record(
             tool="test", model_sha=None, sweeps=[("rank0", None)],
             expected_ranks=1,
             config_json=(FIXTURE / "config.json").read_text())
@@ -309,45 +309,45 @@ def test_make_route_sweep_record_refuses_a_missing_sweep():
 
 def test_verify_replays_the_comparison_and_refuses_a_hand_set_pass(tmp_path):
     model_dir = _model_dir(tmp_path)
-    record = shipcard.make_route_sweep_record(
+    record = shipcard_slots.make_route_sweep_record(
         tool="test", model_sha=None,
         sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
         expected_ranks=1, config_json=(model_dir / "config.json").read_text())
-    assert shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, record, model_dir=model_dir) == []
+    assert shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, record, model_dir=model_dir) == []
 
     forged = json.loads(json.dumps(record))
     for row in forged["route_sweeps"][0]["sweep"]["ranks"][0]["modules"]:
         if row.get("scheme"):
             row["scheme_attrs"]["use_a16"] = "True"
             break
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, forged, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, forged, model_dir=model_dir)
     assert problems and "priced" in problems[0]
 
     lying = json.loads(json.dumps(record))
     lying["sweep_verdict"]["histogram"] = {"A4:float/g16:dynamic": 1}
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, lying, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, lying, model_dir=model_dir)
     assert any("differs from the replay" in p for p in problems)
 
 
 def test_verify_refuses_carried_config_text_that_is_not_the_artifacts(tmp_path):
     model_dir = _model_dir(tmp_path)
-    record = shipcard.make_route_sweep_record(
+    record = shipcard_slots.make_route_sweep_record(
         tool="test", model_sha=None,
         sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
         expected_ranks=1, config_json=(model_dir / "config.json").read_text())
     (model_dir / "config.json").write_text(
         (model_dir / "config.json").read_text() + " ")
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, record, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, record, model_dir=model_dir)
     assert any("compared against another price" in p for p in problems)
 
 
 def test_verify_reads_an_absent_observation_as_unfilled_not_as_clean(tmp_path):
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, {"passed": True},
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, {"passed": True},
         model_dir=_model_dir(tmp_path))
     assert any("not a clean bill" in p for p in problems)
 
@@ -374,7 +374,7 @@ def _fill(card: Path, model_dir: Path, sweep: Path) -> int:
 def test_cli_fills_the_slot_from_the_real_sweep(tmp_path):
     model_dir, card = _card(tmp_path)
     assert _fill(card, model_dir, FIXTURE / "sweep_rank0.json") == 0
-    filled = json.loads(card.read_text())["slots"][shipcard.ROUTE_SWEEP_SLOT]
+    filled = json.loads(card.read_text())["slots"][shipcard_slots.ROUTE_SWEEP_SLOT]
     assert filled["passed"] is True
     assert filled["metrics"]["activation_contracts"] == {
         "A4:float/g16:dynamic": 112}
@@ -388,14 +388,14 @@ def test_cli_exits_1_and_leaves_the_slot_unfilled_on_disagreement(tmp_path):
     path.write_text(json.dumps(sweep))
     assert _fill(card, model_dir, path) == 1
     assert json.loads(card.read_text())["slots"][
-        shipcard.ROUTE_SWEEP_SLOT] is None
+        shipcard_slots.ROUTE_SWEEP_SLOT] is None
 
 
 def test_cli_exits_3_when_the_sweep_is_missing(tmp_path):
     model_dir, card = _card(tmp_path)
     assert _fill(card, model_dir, tmp_path / "absent.json") == 3
     assert json.loads(card.read_text())["slots"][
-        shipcard.ROUTE_SWEEP_SLOT] is None
+        shipcard_slots.ROUTE_SWEEP_SLOT] is None
 
 
 def test_cli_exits_3_on_a_graph_arm_sweep(tmp_path):

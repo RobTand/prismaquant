@@ -25,18 +25,12 @@ import sys
 from pathlib import Path
 
 from prismaquant.shipcard import (
-    GOLD_SLOTS,
-    OPTIONAL_SLOTS,
-    ROUTE_SWEEP_SLOT,
-    UNIFORM_CONTROL_METRIC_KEYS,
-    UNIFORM_CONTROL_SLOT,
     _strict_json_object,
     assert_weight_stat_attestation,
     compute_model_sha,
     ensure_optional_slot,
     fill_slot,
     load_shipcard,
-    make_uniform_control_record,
     record_uniform_control_override,
     required_slots,
     reattest_weight_stats,
@@ -45,9 +39,17 @@ from prismaquant.shipcard import (
     write_shipcard,
     verify_gold_producer_record,
 )
-from prismaquant.shipcard_slots import make_record
-
-from prismaquant.shipcard_slots import make_gold_record, CARRIED_METRIC_KEYS
+from prismaquant.shipcard_slots import (
+    CARRIED_METRIC_KEYS,
+    GOLD_SLOTS,
+    OPTIONAL_SLOTS,
+    ROUTE_SWEEP_SLOT,
+    UNIFORM_CONTROL_METRIC_KEYS,
+    UNIFORM_CONTROL_SLOT,
+    make_gold_record,
+    make_route_sweep_record,
+    make_uniform_control_record,
+)
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
@@ -282,7 +284,6 @@ def _cmd_fill_route_sweep(args: argparse.Namespace) -> int:
         CompressedRouteSweepError,
         RouteSweepNotVerified,
     )
-    from prismaquant.shipcard import make_route_sweep_record
 
     model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
     card = load_shipcard(args.shipcard)

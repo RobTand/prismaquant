@@ -375,7 +375,7 @@
    "tools/kl_ab.py"
   ],
   "_finite_float": [
-   "prismaquant/shipcard.py",
+   "prismaquant/shipcard_slots.py",
    "prismaquant/tessera_allocator.py"
   ],
   "_finite_number": [
