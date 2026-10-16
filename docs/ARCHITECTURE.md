@@ -19,6 +19,8 @@ are removed, including profiler callers. Stage, cache, format and serving gates
 retain their existing behavior.
 The reseal proof driver binds its declared PrismaQuant tree before importing
 that tree's measurement owner; experiment helpers retain the driver checkout.
+The legal-domain audit records the same API pin against unchanged contract,
+export and grammar bytes; its historical study counts retain their evidence.
 Provenance: 2026-10-16 T3 owner extraction, parent
 `3867674f74529d1091dd31681557a76eae9aa9aa`, implementation `cdb768e832`;
 API-only producer `aaa417003f0ee690e8ace138acd18df7f9531369`, unchanged v60 contract.
