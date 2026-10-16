@@ -11,6 +11,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+
 import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -87,9 +88,6 @@ def test_seed_for_selection_routes_through_owner(monkeypatch, tmp_path):
     out = CAMPAIGN._seed_for_selection(rows, ["g"], selection)
     assert out["manifest_sha256_at_plan"] == "routed"
     assert seen == [(rowdir / "cost.anchors.json").read_bytes()]
-
-
-
 
 
 

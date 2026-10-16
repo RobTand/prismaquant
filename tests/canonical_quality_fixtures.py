@@ -1,8 +1,8 @@
 """Complete synthetic scientific coordinates; no measured qualification."""
 from __future__ import annotations
-from prismaquant import joint_aura_rows
-
 import copy
+
+from prismaquant import joint_aura_rows
 
 FAMILY = "TESSERA_E4M3_K1"
 
@@ -33,7 +33,6 @@ def scope_for(row, *, family=FAMILY):
 
 
 def served_scope(*, unit="u", rate=768, shape=(4, 8), currency="served_kl", validated=True, **extra):
-    from prismaquant import joint_aura as joint
     from test_glm_mtp_selection import _row
     row = _row(unit, f"{FAMILY}_R{rate}", [1.0] * 4, complete_probe())
     scope = copy.deepcopy(scope_for(row))

@@ -1,14 +1,12 @@
 """Check actual checkpoint bytes against the retained manifest recipe."""
 from __future__ import annotations
 
-from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
-
 import hashlib
 import json
 
 import pytest
 
-from prismaquant import aura_cost as aura
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 from prismaquant import production_weight_cache as cache
 
 

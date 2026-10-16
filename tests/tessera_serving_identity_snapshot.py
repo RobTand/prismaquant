@@ -33,13 +33,13 @@ Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.
 """
 from __future__ import annotations
 
-from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
-
 import copy
 import json
 import os
 import pathlib
 import sys
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TRACE_509 = ROOT / "tests" / "fixtures" / "tessera_route_trace_509"
@@ -189,8 +189,6 @@ def _trace_verdicts() -> dict:
 
 
 def snapshot() -> dict:
-    from prismaquant import tessera_render
-
     snapshot = installed_runtime_snapshot()
     table, _formats = snapshot.eligibility, snapshot.published_formats
     return {

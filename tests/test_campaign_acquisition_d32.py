@@ -1,7 +1,5 @@
 """Development identity drift does not waive authenticated acquisition controls."""
 from __future__ import annotations
-from prismaquant import tessera_campaign_table as campaign_table
-
 import copy
 import hashlib
 import json
@@ -14,6 +12,7 @@ import tempfile
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
 from test_campaign_acquisition_pb_handoff import (
     handoff, real_joint_run, plan, records, dispatch, load_joint_campaign_acquisition,
     build_handoff, manifests,

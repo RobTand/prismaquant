@@ -514,7 +514,7 @@ def test_source_digest_mismatch_names_the_package_inputs():
     """A ``producer_source_sha256`` refusal must name files, not just digests (#2218)."""
     from pathlib import Path
 
-    from prismaquant.aura_checkpoint_journal import (_checkpoint_identity_mismatch as _checkpoint_identity_mismatch)
+    from prismaquant.aura_checkpoint_journal import _checkpoint_identity_mismatch
 
     from prismaquant import production_weight_cache as cache
 
