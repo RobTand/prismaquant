@@ -17,6 +17,8 @@ FP32 cache values and one FP32 matrix charge; MLA `kv_b_proj` keeps a16, BF16 va
 and one BF16 matrix charge. Old campaign measurement APIs and the encode adapter
 are removed, including profiler callers. Stage, cache, format and serving gates
 retain their existing behavior.
+The reseal proof driver binds its declared PrismaQuant tree before importing
+that tree's measurement owner; experiment helpers retain the driver checkout.
 Provenance: 2026-10-16 T3 owner extraction, parent
 `3867674f74529d1091dd31681557a76eae9aa9aa`, implementation `cdb768e832`;
 API-only producer `aaa417003f0ee690e8ace138acd18df7f9531369`, unchanged v60 contract.

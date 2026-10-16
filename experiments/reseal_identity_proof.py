@@ -23,7 +23,6 @@ assembles those into the proof bundle it requires before rewriting a row.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_cell_measurement as cell_measurement
 import argparse
 import functools
 import hashlib
@@ -824,6 +823,7 @@ def run_gpu_arm(args, *, prefix):
     engagement = FusedEngagement().install()
     try:
         if prefix:
+            from prismaquant import tessera_cell_measurement as cell_measurement
             run_prefix, PrefixComplete = helper.run_prefix, helper.PrefixComplete
             classes = args.shape_classes.split(',')
             original = cell_measurement.compatible_batches
