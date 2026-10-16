@@ -279,6 +279,10 @@ def test_no_channel_is_byte_identical_to_this_module_being_absent(monkeypatch, t
 
 
 # -- submission and reporter phase agreement -------------------------------
+# The read-set builders' use of ``layer_phase_name`` is held where they are
+# built: tests/test_glm_joint_data_manifest_at_submit.py (run and export) and
+# tests/test_aqua_campaign_submit.py replace the function and require the
+# declared phases to follow it.
 
 
 def test_a_joint_run_submission_declares_the_manifest_s_own_phase_names():

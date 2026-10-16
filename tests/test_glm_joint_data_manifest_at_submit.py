@@ -1017,6 +1017,48 @@ def test_the_export_manifest_declares_selected_wires_and_passthrough_source(
     assert manifest["annotations"]["read_order_attested"] is False
 
 
+def test_layer_phases_are_spelled_by_the_progress_reporters_one_function(
+    scratch, shared_mount, monkeypatch,
+):
+    """The run and export read sets name layer phases through the reporter.
+
+    ``joint_run_progress.layer_phase_name`` is the one spelling of a layer
+    phase: the reporter commits under it, so a declared phase spelled any
+    other way would match none of its commits. The function is replaced with
+    a sentinel spelling here, and the builders must declare the sentinel. A
+    builder that typed ``layer-<L>`` itself would still declare the old names.
+    """
+    from prismaquant import joint_run_progress
+
+    assert joint_run_progress.layer_phase_name(7) == "layer-7"
+    monkeypatch.setattr(joint_run_progress, "layer_phase_name",
+                        lambda layer: f"sentinel-{layer}")
+    fixture = _workspace(scratch)
+    prepared = scratch / "prepared.json"
+    cache = scratch / "production.pkl"
+    cache.write_bytes(b"p" * 5000)
+    prepared.write_text(json.dumps({
+        "schema": glm_data_manifests.JOINT_PREPARED_SCHEMA,
+        "status": "complete",
+        "production_cache": {"path": str(cache), "sha256": None},
+    }))
+    allocation = scratch / "shared-allocation-cost.pkl"
+    allocation.write_bytes(b"a" * 1024)
+    assignment = scratch / "layer_config.json"
+    assignment.write_text(json.dumps({name: MEASURED[0] for name in fixture["names"]}))
+
+    run = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="run", produced_by=PRODUCED_BY,
+        prepared=str(prepared))
+    export = glm_data_manifests.build_export_manifest(
+        str(fixture["plan"]), assignment=str(assignment),
+        allocation_cost=str(allocation), produced_by=PRODUCED_BY)
+
+    for manifest in (run, export):
+        assert [phase["name"] for phase in manifest["annotations"]["phases"]] == [
+            "head", "sentinel-0", "sentinel-1"]
+
+
 def test_the_submit_command_puts_the_manifest_before_the_detach(
     scratch, shared_mount, capsys, monkeypatch,
 ):

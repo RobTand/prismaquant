@@ -309,6 +309,24 @@ def test_the_declared_read_set_is_the_units_extents_and_the_card(
         "head", "layer-0"]
 
 
+def test_the_aqua_read_set_names_layer_phases_through_the_reporter(campaign, monkeypatch):
+    """A layer phase is spelled by ``joint_run_progress.layer_phase_name`` alone.
+
+    The function is replaced with a sentinel spelling; a builder that typed
+    ``layer-<L>`` itself would still declare the old name.
+    """
+    from prismaquant import joint_run_progress
+
+    monkeypatch.setattr(joint_run_progress, "layer_phase_name",
+                        lambda layer: f"sentinel-{layer}")
+    manifest = glm_data_manifests.build_aqua_manifest(
+        str(campaign["plan"]), card=str(campaign["card"]),
+        cost_in=str(campaign["cost_in"]), act_dir=None,
+        produced_by={"entry_point": glm_data_manifests.AQUA_ENTRY_POINT})
+    assert [phase["name"] for phase in manifest["annotations"]["phases"]] == [
+        "head", "sentinel-0"]
+
+
 def test_a_cost_artifact_that_drifted_from_the_plan_roster_refuses(campaign):
     """A payload is not the campaign's roster just because it is well formed."""
     payload = _cost_payload(campaign["names"][:-1])
