@@ -345,6 +345,24 @@ def test_verify_refuses_carried_config_text_that_is_not_the_artifacts(tmp_path):
     assert any("compared against another price" in p for p in problems)
 
 
+def test_registered_sweep_replay_binds_the_config_of_its_current_artifact(tmp_path):
+    model_dir = _model_dir(tmp_path)
+    carried_config = (model_dir / "config.json").read_text()
+    (model_dir / "config.json").write_text(carried_config + " ")
+    # The card and record both carry the current artifact identity. Only the
+    # sweep's carried price config differs, so the model identity check alone
+    # cannot detect this mismatch.
+    card = shipcard.open_shipcard(model_dir, lane="compressed-tensors")
+    record = shipcard_slots.make_route_sweep_record(
+        tool="test", model_sha=card["model_sha"],
+        sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
+        expected_ranks=1, config_json=carried_config)
+    card["slots"][shipcard_slots.ROUTE_SWEEP_SLOT] = record
+    problems = shipcard.verify(
+        card, model_dir=model_dir, required=[shipcard_slots.ROUTE_SWEEP_SLOT])
+    assert any("compared against another price" in p for p in problems)
+
+
 def test_verify_reads_an_absent_observation_as_unfilled_not_as_clean(tmp_path):
     problems = shipcard_slots._verify_route_sweep_record(
         shipcard_slots.ROUTE_SWEEP_SLOT, {"passed": True},

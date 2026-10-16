@@ -1077,10 +1077,6 @@ def _ship_gate_replay(slot, record, **context):
     return _verify_ship_gate_record(slot, record)
 
 
-def _sweep_replay(slot, record, **context):
-    return _verify_route_sweep_record(slot, record)
-
-
 @dataclass(frozen=True)
 class ShipSlot:
     name: str
@@ -1130,7 +1126,7 @@ _BASE_SLOTS = {
 #: Core entries replay after the generic ``passed`` check. A plugin's replays
 #: own the slot's whole verdict (``owns_pass``), so :meth:`ShipSlot.replay`
 #: skips that check for them.
-CORE_LANE_SLOTS = {ROUTE_SWEEP_SLOT: ShipSlot(ROUTE_SWEEP_SLOT, _sweep_replay)}
+CORE_LANE_SLOTS = {ROUTE_SWEEP_SLOT: ShipSlot(ROUTE_SWEEP_SLOT, _verify_route_sweep_record)}
 
 
 def ship_slot_registry():

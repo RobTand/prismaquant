@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the registered `route.sweep` slot passes the artifact
+directory to its existing verifier. Publication now compares the carried
+price config with that artifact's `config.json`, including when the card and
+record already carry the same current model identity. This repairs the missing
+context at the slot boundary; the served-versus-priced comparison is unchanged.
+Tests: `tests/test_compressed_route_sweep_gate.py`.
+
 Re-stamped 2026-10-16 (review STD-018, lane card): `lane_shipcard.open_lane_shipcard`
 computes only the lane's build block and opens the card through `open_shipcard`,
 so the card and its model identity are built once. `open_shipcard` resolves the
@@ -12062,9 +12069,9 @@ off the running engine instead of received from it.
   `route.sweep` gate; `shipcard_slots._verify_route_sweep_record` replays the
   served-vs-priced comparison from the carried sweeps at publication. Its
   comparison of the carried config text with the artifact's `config.json`
-  runs only when a caller passes `model_dir`; the registered publication
-  replay passes none (unchanged since #631, reported 2026-10-16 for a gate
-  decision).
+  receives `model_dir` through the registered publication replay and refuses
+  a mismatch. The October 16 review found and repaired the former wrapper
+  that discarded that directory.
   `python -m prismaquant.shipcard_cli fill-route-sweep` exits 0 agree, 1
   refused, 3 NOT VERIFIED. No operator flag overrides a refusal.
 - **The exporter now stamps the lane.** `_write_shipcard` passed no `lane`,
