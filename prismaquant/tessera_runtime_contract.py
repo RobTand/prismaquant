@@ -426,9 +426,9 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: v56 uses lane schema v11, rule-derived window coverage, four extensions
 #: and 22 eager cells. The literal is the complete existing-reader projection
 #: from PB bb291153; no compiled or full-artifact qualification is inferred.
-#: Re-pinned 2026-10-15 to API-only d2e98b3c; the v60 table bytes are unchanged.
+#: Re-pinned 2026-10-16 to API-only aaa417003f; the v60 table bytes are unchanged.
 #: The installed contract supplies the generated admission answer.
-TESSERA_DEV_PIN_COMMIT = "d2e98b3cb2fcb6fdc27a552442ea021ee02da8ff"
+TESSERA_DEV_PIN_COMMIT = "aaa417003f0ee690e8ace138acd18df7f9531369"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
