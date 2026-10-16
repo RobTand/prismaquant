@@ -35,7 +35,7 @@ from prismaquant.digests import (
 from tests.golden_table import GoldenTable, outcome
 
 
-GOLDEN = GoldenTable("digest_profiles_1301")
+GOLDEN = GoldenTable("digest_profiles_1301", every_row_used=True)
 
 
 _CYCLE_LIST: list = []

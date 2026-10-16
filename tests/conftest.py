@@ -1030,6 +1030,58 @@ def pytest_collectreport(report):
         _append_own_process_record(report)
 
 
+# -- golden tables: every frozen row is used (tests/golden_table.py) ---------
+
+_GOLDEN_OUTCOME = pytest.StashKey[str]()
+_GOLDEN_DESELECTED = pytest.StashKey[set]()
+
+
+def pytest_deselected(items):
+    """Record each module ``-k``, ``-m`` or ``--deselect`` did not select whole."""
+    for item in items:
+        item.config.stash.setdefault(_GOLDEN_DESELECTED, set()).add(item.path)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Keep the outcome each test reached, for the golden-row check below."""
+    report = yield
+    if report.when == "call" or not report.passed:
+        item.stash[_GOLDEN_OUTCOME] = report.outcome
+    return report
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _golden_rows_all_used(request):
+    """Fail a module whose opted-in golden table kept rows no passing call used.
+
+    Active only when this process ran the whole module; see
+    ``golden_table.unfinished_tests_if_whole_module_ran``.
+    """
+    yield
+    from tests.golden_table import GoldenTable, unfinished_tests_if_whole_module_ran
+
+    tables = [table for table in vars(request.module).values()
+              if isinstance(table, GoldenTable) and table.every_row_used]
+    if not tables:
+        return
+    module = request.node.path
+    unfinished = unfinished_tests_if_whole_module_ran(
+        module, args=request.config.args,
+        deselected=request.config.stash.get(_GOLDEN_DESELECTED, set()),
+        outcomes={item.nodeid: item.stash.get(_GOLDEN_OUTCOME, None)
+                  for item in request.session.items if item.path == module})
+    if unfinished is None:
+        return
+    for table in tables:
+        unused = table.unused_rows(unfinished=unfinished)
+        if unused:
+            pytest.fail(
+                f"fixtures/{table.name}.json has {len(unused)} frozen row(s) that no "
+                f"passing call used: {unused[:10]}. Restore the call, or archive the "
+                "rows of a retired test with its archive wall.", pytrace=False)
+
+
 @pytest.fixture
 def legacy_capture_mechanism(monkeypatch):
     """Exercise explicit legacy capture mechanics, without provider qualification.

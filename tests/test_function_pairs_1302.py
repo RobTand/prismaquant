@@ -37,7 +37,7 @@ import torch.nn as nn
 
 from tests.golden_table import GoldenTable
 
-GOLDEN = GoldenTable("function_pairs_1302")
+GOLDEN = GoldenTable("function_pairs_1302", every_row_used=True)
 
 
 def _site(ref):

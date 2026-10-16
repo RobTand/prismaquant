@@ -47,7 +47,7 @@ from prismaquant import (
 from tests.golden_table import GoldenTable, outcome
 
 
-GOLDEN = GoldenTable("contract_checks_1300")
+GOLDEN = GoldenTable("contract_checks_1300", every_row_used=True)
 
 
 # Documents every strict loader is fed. Each refusal case appears at least once:
