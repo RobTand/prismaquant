@@ -52,3 +52,24 @@ The disposition remains one local incorporation, 22 independent changes, seven
 unrelated changes, two blocks and four conditional retirements. All remain open.
 No remote disposition was executed; final refactor verification does not
 automatically qualify an independent PR or discharge its replacement proof.
+
+## Read-only refresh, 2026-10-16
+
+The 12:58 UTC GitHub snapshot still contains the same 36 open PRs at the same
+heads. No original PR has merged or closed, and no new open PR appears. The
+dispositions above remain one local incorporation, 22 independent changes,
+seven unrelated changes, two D44 holds and four conditional retirements.
+Neither a changed owner nor the new producer API delivery satisfies the
+retirement proofs. Keep the original PRs open until their stated conditions hold.
+
+The existing open parent issue #1295 covers consolidation of logically duplicated
+functionality. The final refactor uses `Refs #1295`; its broader streaming and
+performance acceptance remains with that issue. No new bookkeeping issue is
+needed. Live main remains `138069b799323435fb5f0b3cec3ee339f6264a62`, the refactor's
+original base. No independent PR is established as a prerequisite for delivery.
+
+The rerunnable read-only collector and exact-head inventory are retained at
+`/home/rob/tmp/pq-refactor-resume-20261016/pr-audit/collect_inventory.py` and
+`/home/rob/tmp/pq-refactor-resume-20261016/pr-audit/inventory.json`.
+This refresh does not grant a composed pass to an independent PR, transfer an
+issuegraph or merge-train owner, or close any PR.
