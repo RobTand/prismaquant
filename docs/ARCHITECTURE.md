@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the loaded campaign operation reads its resolved
+scope directly. Nineteen stable aliases are removed; only the three context
+and structure temporaries that are actually rebound remain local. Census and
+pricing retain their shared synchronous source, memo and publication lifetime.
+No request, draw, measurement, receipt or stage policy changes.
+
 Re-stamped 2026-10-16: the completed native-render comparison driver joins
 `archive/refactor_2026-10-16/`, with its bytes preserved from `dfad64a185`.
 Permanent tests exercise the public codec, explicit levers, recorded fused

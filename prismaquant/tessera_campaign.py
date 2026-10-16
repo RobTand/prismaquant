@@ -4896,32 +4896,13 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     if selected_source:
         from . import tessera_calibration_cache as calibration_store
 
-    population = scope.population
-    roster = scope.roster
-    pinned_roster = scope.pinned_roster
-    dense_targets = scope.dense_targets
-    expert_targets = scope.expert_targets
-    expert_members = scope.expert_members
-    census_dense_targets = scope.census_dense_targets
-    census_expert_targets = scope.census_expert_targets
-    scope_groups = scope.scope_groups
-    census = scope.census
-    selection = scope.selection
-    stack_samples = scope.stack_samples
-    exact_member_scope = scope.exact_member_scope
-    partition_menu_targets = scope.partition_menu_targets
-    partition_unit_records = scope.partition_unit_records
-    selected_groups = scope.selected_groups
-    audit_units = scope.audit_units
-    inclusion_probability = scope.inclusion_probability
     context_by_unit = scope.context_by_unit
     structure_by_unit = scope.structure_by_unit
     encode_structure = scope.encode_structure
-    acquisition = scope.acquisition
-    all_dense = list(roster.dense)
-    pinned = list(roster.pinned)
-    targets = [*dense_targets, *expert_targets]
-    census_targets = [*census_dense_targets, *census_expert_targets]
+    all_dense = list(scope.roster.dense)
+    pinned = list(scope.roster.pinned)
+    targets = [*scope.dense_targets, *scope.expert_targets]
+    census_targets = [*scope.census_dense_targets, *scope.census_expert_targets]
     acts, hessians, hessian_rows, act_max_abs = statistics
 
     # ONE ActivationSource for the whole campaign, and ONE set of encoder
@@ -5005,8 +4986,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
 
     route_cache: dict[tuple, str | None] = {}
     acquisition_schedule = None
-    if isinstance(request, LoadedPricingRequest) and acquisition is not None:
-        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+    if isinstance(request, LoadedPricingRequest) and scope.acquisition is not None:
+        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=scope.expert_members)
         acquisition_rates = {name: {} for name in targets}
         for name in targets:
             for rung in menus[name]:
@@ -5016,12 +4997,12 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
         acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
             encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
         acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
-            placement=request.recipe.placement, audit_units=audit_units, snap=None, requests=acquisition["requests"],
+            placement=request.recipe.placement, audit_units=scope.audit_units, snap=None, requests=scope.acquisition["requests"],
             rates_by_unit=acquisition_rates)
         checkpoint_settings["acquisition_schedule"] = acquisition_schedule
-        acquisition_origin = campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
+        acquisition_origin = campaign_acquisition_origin(scope.acquisition, acquisition_schedule, menus)
         checkpoint_settings["acquisition_origin"] = acquisition_origin
-        checkpoint_settings["acquisition_source_weights"] = acquisition["source_weights"]
+        checkpoint_settings["acquisition_source_weights"] = scope.acquisition["source_weights"]
 
     if not streaming_head:
         close_source_authentication()
@@ -5033,13 +5014,13 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
 
     if isinstance(request, LoadedCensusRequest):
         return run_census(request.census, counts=hessian_rows, maxima=act_max_abs,
-            groups=scope_groups, dense_targets=census_dense_targets,
-            expert_targets=census_expert_targets,
+            groups=scope.scope_groups, dense_targets=scope.census_dense_targets,
+            expert_targets=scope.census_expert_targets,
             shapes={name: tuple(weight.shape) for name, weight in weights.items()},
             identity=hessian_identity, expert_projection=expert_projection,
             model_load_contract=model_load_contract,
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
-            pinned_roster=pinned_roster, expected_units=census_targets)
+            pinned_roster=scope.pinned_roster, expected_units=census_targets)
 
     recipe = request.recipe
     placement = recipe.placement
@@ -5117,12 +5098,12 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
-    if acquisition is not None and not streaming_head:
+    if scope.acquisition is not None and not streaming_head:
         for name in sorted(targets):
             receipt = (bound_checkpoint_units[name].campaign_inputs()["source"]
                        if bound_checkpoint_units else None)
             _require_campaign_acquisition_source(name, weights[name],
-                acquisition["source_weights"][name], receipt=receipt)
+                scope.acquisition["source_weights"][name], receipt=receipt)
 
     row_stream = None
     if streaming_head:
@@ -5171,9 +5152,9 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                 menu=menus[name], projected_unit=projected_units.get(name),
                 static_scales=static_scales, metadata_bound=window_bounds[name])
             try:
-                if acquisition is not None and name not in acquisition_source_checked:
+                if scope.acquisition is not None and name not in acquisition_source_checked:
                     _require_campaign_acquisition_source(name, weight,
-                        acquisition["source_weights"][name], receipt=receipts["weight"])
+                        scope.acquisition["source_weights"][name], receipt=receipts["weight"])
                     acquisition_source_checked.add(name)
             except BaseException:
                 if holder is not None:
@@ -5185,7 +5166,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
 
         row_stream = RowStream(
             capture_path=source.capture, expected_sha256=source.capture_sha256,
-            expected_identity=capture_identity, census=census, names=targets,
+            expected_identity=capture_identity, census=scope.census, names=targets,
             policy=source.load_policy, weights=weights, hessian_identity=hessian_identity,
             bind=bind_stream_unit,
             load_unit=load_projected_source if streamed_units else None,
@@ -5201,10 +5182,10 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             batch_size=publication.batch_size, max_artifact_bpp=recipe.max_artifact_bpp,
             checkpoint=checkpoint,
             targets=targets, menus=menus, weights=weights, profile=profile,
-            expert_members=expert_members, encode_structure=encode_structure,
-            projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
-            partitioned=partition_menu_targets is not None,
-            acquisition_requests=None if acquisition is None else acquisition["requests"])
+            expert_members=scope.expert_members, encode_structure=encode_structure,
+            projected_units=projected_units, audit_units=scope.audit_units, route_cache=route_cache,
+            partitioned=scope.partition_menu_targets is not None,
+            acquisition_requests=None if scope.acquisition is None else scope.acquisition["requests"])
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -5219,7 +5200,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             static_scales=static_scales, static_scale_policy=static_scale_policy,
             expert_projection=expert_projection,
             stack_sampling_identity={name: record
-                for entry in (selection or {}).get("groups", [])
+                for entry in (scope.selection or {}).get("groups", [])
                 for name, record in entry.get("stack_samples", {}).items()},
             structure_by_unit=structure_by_unit, **receipts)
 
@@ -5528,7 +5509,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
         return write_export_inputs(
             cache_dir,
             hessians=export_hessians if want_h else None,
-            hessian_rows=(hessian_rows if census is None else census["counts"]),
+            hessian_rows=(hessian_rows if scope.census is None else scope.census["counts"]),
             hessian_identity=hessian_identity,
             static_scales=static_scales,
             static_scale_policy=static_scale_policy,
@@ -5578,8 +5559,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
         # Every projected unit's source bytes have now been checked on a
         # reader, so the owner's receipt covers the reads the serial check made.
         close_source_authentication()
-        census_token_counts(census, row_stream.observed_counts())
-        census_max_abs(census, row_stream.observed_max_abs())
+        census_token_counts(scope.census, row_stream.observed_counts())
+        census_max_abs(scope.census, row_stream.observed_max_abs())
         receipts = row_stream.unit_identities()
         selected_source_preparation['capture_load_execution'] = _publish_capture_load_execution(
             cache_dir, capture=row_stream.capture, execution=row_stream.load_execution(),
@@ -5606,7 +5587,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
                 phase['export_input_page_window_bytes'])
         # Geometry-only stand-ins: every H commitment is the receipt its
         # reader sealed while the entry was resident, so no H is read again.
-        stand_ins = {name: torch.empty([census['unit_shapes'][name][1]] * 2,
+        stand_ins = {name: torch.empty([scope.census['unit_shapes'][name][1]] * 2,
                                        dtype=torch.float32, device='meta')
                      for name in sorted(targets)}
         hessian_capture_path, input_scales_path, capture_sha256 = publish_export_inputs(
@@ -5793,8 +5774,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     # left unpriced rather than extrapolated into.
     cap = float(recipe.max_artifact_bpp)
     rates_by_unit: dict[str, dict[str, set[int]]] = {}
-    rate_menu_targets = partition_menu_targets or targets
-    rate_menus = full_partition_menus if partition_menu_targets is not None else menus
+    rate_menu_targets = scope.partition_menu_targets or targets
+    rate_menus = full_partition_menus if scope.partition_menu_targets is not None else menus
     for name in rate_menu_targets:
         per_family: dict[str, set[int]] = {}
         for rung in rate_menus[name]:
@@ -5817,10 +5798,10 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     # do with Tessera. One grid per group, from the intersection of its
     # members' realisable sets, and every member measures the same rungs.
     def _group_key(name: str) -> str:
-        return anchor_group_key(name, profile=profile, expert_members=expert_members)
+        return anchor_group_key(name, profile=profile, expert_members=scope.expert_members)
 
     anchor_groups = resolve_anchor_groups(
-        targets, profile=profile, expert_members=expert_members)
+        targets, profile=profile, expert_members=scope.expert_members)
 
     # The rungs every member of the group can realise, per family. A family
     # missing from one member is not a group family at all: a shared grid over
@@ -5830,14 +5811,14 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     # read off the pinned contract: kept in the menu, not measured, and
     # recorded here with the contract's reason rather than hidden.
     route_refused: dict[str, dict[str, dict[str, dict]]] = {}
-    rate_groups = ({entry["key"]: entry["members"] for entry in selection["groups"]}
-                   if partition_menu_targets is not None else anchor_groups)
+    rate_groups = ({entry["key"]: entry["members"] for entry in scope.selection["groups"]}
+                   if scope.partition_menu_targets is not None else anchor_groups)
     group_rates, route_refused = anchor_group_rate_grids(
         rate_groups, rates_by_unit,
-        encode_structure=(partition_encode_structure if partition_menu_targets is not None else encode_structure),
-        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units),
+        encode_structure=(partition_encode_structure if scope.partition_menu_targets is not None else encode_structure),
+        projected_units=(scope.partition_unit_records if scope.partition_menu_targets is not None else projected_units),
         route_cache=route_cache)
-    if partition_menu_targets is not None:
+    if scope.partition_menu_targets is not None:
         fixed_rate = parse_rate_band(placement.rate_band)[0]
         if any(not any(fixed_rate in rates for rates in families.values())
                for families in group_rates.values()):
@@ -5865,8 +5846,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
     round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
-        placement=placement, audit_units=audit_units, snap=_snap,
-        requests=None if acquisition is None else acquisition["requests"], rates_by_unit=rates_by_unit)
+        placement=placement, audit_units=scope.audit_units, snap=_snap,
+        requests=None if scope.acquisition is None else scope.acquisition["requests"], rates_by_unit=rates_by_unit)
 
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.
@@ -5879,8 +5860,8 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
     if rate_band is not None:
         print(f"[campaign] rate band q256 {rate_band[0]}..{rate_band[1]}: two "
               "anchors per window family at the band ends"
-              + (f", a third for {len(audit_units)} audit unit(s)"
-                 if audit_units else ""), flush=True)
+              + (f", a third for {len(scope.audit_units)} audit unit(s)"
+                 if scope.audit_units else ""), flush=True)
     # The publisher owns a thread; every exit from the pricing loop,
     # including one that raises, has to go past its close. Close drains
     # what is queued, so files already computed still land, and it cannot
@@ -6211,7 +6192,7 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             "menu_mode": mode,
             **({"acquisition": acquisition_origin,
                 "acquisition_schedule": acquisition_schedule,
-                "acquisition_source_weights": acquisition["source_weights"]} if acquisition is not None else {}),
+                "acquisition_source_weights": scope.acquisition["source_weights"]} if scope.acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means
             # the default: every render and wire published on the encode
             # thread before the next batch started. Present means one bounded
@@ -6243,13 +6224,13 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             "rate_band": (None if rate_band is None
                           else [int(rate_band[0]), int(rate_band[1])]),
             "unit_selection_sample": {
-                "audit_units": sorted(audit_units),
+                "audit_units": sorted(scope.audit_units),
                 "inclusion_probability": {
-                    name: float(inclusion_probability[name])
-                    for name in sorted(inclusion_probability)},
+                    name: float(scope.inclusion_probability[name])
+                    for name in sorted(scope.inclusion_probability)},
             },
-            **({"research_exact_member_scope": exact_member_scope}
-               if exact_member_scope is not None else {}),
+            **({"research_exact_member_scope": scope.exact_member_scope}
+               if scope.exact_member_scope is not None else {}),
             "tp_degree": int(tp_degree),
             "model": str(model_path),
             "nsamples": int(draw.nsamples),
@@ -6273,36 +6254,36 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             # Rows this run did not encode itself, and where they came from.
             # None when every row was measured here.
             "seed_checkpoint": seed_provenance,
-            "unit_selection": ({**selection, "selected": True} if selection else {
+            "unit_selection": ({**scope.selection, "selected": True} if scope.selection else {
                 "schema": UNITS_SCHEMA,
                 "selected": True if request.selection_requested else False,
                 "groups": [
-                    {"key": key, "members": list(scope_groups[key])}
-                    for key in sorted(selected_groups)
+                    {"key": key, "members": list(scope.scope_groups[key])}
+                    for key in sorted(scope.selected_groups)
                 ],
             }),
             # The scope every shard shares: the enumeration the population
             # block is built from, the full grouping, and the census the
             # Hessian identity's token counts came from.
             "campaign_scope": {
-                "dense_targets": sorted(census_dense_targets),
-                "expert_targets": sorted(census_expert_targets),
+                "dense_targets": sorted(scope.census_dense_targets),
+                "expert_targets": sorted(scope.census_expert_targets),
                 "dense_all": sorted(all_dense),
                 "pinned": sorted(pinned),
                 "declared_stacks": {
                     stack: {name: list(shape) for name, shape in sorted(units.items())}
-                    for stack, units in sorted(population.declared.items())},
+                    for stack, units in sorted(scope.population.declared.items())},
                 "packed_in_scope": {
                     name: list(shape) for name, shape
-                    in sorted(population.packed_in_scope.items())},
+                    in sorted(scope.population.packed_in_scope.items())},
                 "packed_outside_layer_stride": {
                     name: list(shape) for name, shape
-                    in sorted(population.omitted_outside_layer_stride.items())},
+                    in sorted(scope.population.omitted_outside_layer_stride.items())},
                 "anchor_groups": {
-                    key: list(members) for key, members in sorted(scope_groups.items())},
+                    key: list(members) for key, members in sorted(scope.scope_groups.items())},
                 "calibration_census": (
-                    None if census is None else
-                    {"counts": dict(census["counts"]),
+                    None if scope.census is None else
+                    {"counts": dict(scope.census["counts"]),
                      "token_count": int(hessian_token_count),
                      "token_count_min": int(hessian_token_min)}),
             },
@@ -6436,14 +6417,14 @@ def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
             acquisition_schedule[name].get(rung.family, [])] for name in targets}
     payload = campaign_cost_payload(
         measured, payload_menus, loo=loo, provenance=provenance,
-        wire_backed=frozenset(projected_units), stack_samples=stack_samples)
+        wire_backed=frozenset(projected_units), stack_samples=scope.stack_samples)
     # Empty menus, failed anchors and interrupted work do not establish a
     # price. Publish coverage only after the cost rows have been constructed.
     payload["provenance"][POPULATION_KEY] = campaign_population_block(
-        dense_targets=dense_targets, expert_targets=expert_targets,
-        dense_all=all_dense, pinned=pinned, population=population,
+        dense_targets=scope.dense_targets, expert_targets=scope.expert_targets,
+        dense_all=all_dense, pinned=pinned, population=scope.population,
         layer_stride=int(draw.layer_stride), costs=payload["costs"], menus=menus,
-        stack_samples=stack_samples, profile=profile)
+        stack_samples=scope.stack_samples, profile=profile)
     if projected_units:
         # The producer's receipts for every priced expert wire, keyed by unit
         # then rung; the allocator carries the selected rung's receipt into
