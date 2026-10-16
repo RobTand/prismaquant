@@ -159,7 +159,7 @@ def test_invalid_produced_files_refuse_before_shared_hash(files, tmp_path, monke
     def forbidden(raw):
         raise AssertionError("invalid produced files reached digest")
 
-    monkeypatch.setattr(streamed, "bytes_sha256hex", forbidden, raising=False)
+    monkeypatch.setattr(streamed_boundaries, "bytes_sha256hex", forbidden)
     with _owner(tmp_path) as owner:
         directory = owner.directory
         assert directory is not None
