@@ -206,6 +206,27 @@ def test_dispatch_refuses_edited_record_before_publishing(tmp_path, records_dir,
     assert gateway.submitted == []
 
 
+@pytest.mark.parametrize("defect", ["edited", "schema", "campaign", "receipt"])
+def test_load_records_names_the_offending_file_among_valid_records(records_dir, defect):
+    from dispatch_joint_quanta import load_records
+    from prismaquant.joint_campaign_ledger import seal_quantum_record
+
+    path = records_dir / "layer-001.json"
+    record = json.loads(path.read_text())
+    if defect in {"edited", "campaign"}:
+        record["campaign"]["plan_path"] = "/other-plan"
+    elif defect == "schema":
+        record["schema"] = "foreign"
+    else:
+        record["adjoint"]["receipt_sha256"] = "f" * 64
+    if defect != "edited":
+        record = seal_quantum_record(record)
+    path.write_text(json.dumps(record))
+    with pytest.raises(DispatchRefused) as refused:
+        load_records(records_dir)
+    assert str(refused.value).startswith(f"{path}: ")
+
+
 def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
     """Every quantum submits exactly the contract's argv: the shared GB10
     class tag (PB requires *every* tag a row lists, so a host pair would

@@ -317,8 +317,11 @@ CHAIN_ROLL_CEILING_GB10 = {
 }
 COMPUTE_UNIT_CEILINGS = (SPILL_CAPTURE_CEILING_GB10, CHAIN_ROLL_CEILING_GB10)
 
-from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
-                                                require_quantum_record_set)
+from prismaquant.joint_campaign_ledger import (
+    LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
+    QuantumRecordRefused,
+    require_quantum_record_set,
+)
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 #: The schema of the stage-A data manifest the dispatcher binds
 #: (``prismabuild.core.DATA_MANIFEST_SCHEMA_V1``, restated: this module
@@ -488,8 +491,10 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     loaded = [(path, _load_json(path, where="layer record")) for path in paths]
     try:
         require_quantum_record_set([record for _, record in loaded])
+    except QuantumRecordRefused as exc:
+        raise DispatchRefused(f"{loaded[exc.index][0]}: {exc}") from exc
     except ValueError as exc:
-        raise DispatchRefused(str(exc)) from exc
+        raise DispatchRefused(f"{records_dir}: {exc}") from exc
     ordered = sorted(loaded,
                      key=lambda item: item[1].get("layer", -1),
                      reverse=True)

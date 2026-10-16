@@ -16,6 +16,14 @@ from .digests import canonical_json_sha256 as canonical_sha256, newline_utf8_sha
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 
 
+class QuantumRecordRefused(ValueError):
+    """A record-set refusal tied to one input record, before file adaptation."""
+
+    def __init__(self, index: int, reason: str):
+        super().__init__(reason)
+        self.index = index
+
+
 def require_quantum_digest(value: object, label: str) -> str:
     if type(value) is not str or not is_sha256hex(value):
         raise ValueError(f"{label} must be a lowercase SHA-256 digest")
@@ -144,25 +152,29 @@ def require_quantum_campaign(record: Mapping, campaign: Mapping) -> None:
 def require_quantum_record_set(records: Sequence[Mapping]) -> None:
     if not records:
         raise ValueError("no quantum records to admit")
-    for record in records:
-        require_quantum_identity(record)
-        if not isinstance(record.get("campaign"), dict):
-            raise ValueError("a quantum record carries no campaign binding")
-        if not isinstance(record.get("adjoint"), dict):
-            raise ValueError("a quantum record carries no adjoint binding")
-        layer = record.get("layer")
-        if record.get("quantum_id") != quantum_id(layer):
-            raise ValueError("a quantum id does not name its layer")
+    for index, record in enumerate(records):
+        try:
+            require_quantum_identity(record)
+            if not isinstance(record.get("campaign"), dict):
+                raise ValueError("a quantum record carries no campaign binding")
+            if not isinstance(record.get("adjoint"), dict):
+                raise ValueError("a quantum record carries no adjoint binding")
+            layer = record.get("layer")
+            if record.get("quantum_id") != quantum_id(layer):
+                raise ValueError("a quantum id does not name its layer")
+        except ValueError as exc:
+            raise QuantumRecordRefused(index, str(exc)) from exc
     ids = [record.get("quantum_id") for record in records]
     if len(set(ids)) != len(ids):
         raise ValueError("layer records carry duplicated quantum ids")
     first = records[0]["campaign"]
-    for record in records[1:]:
+    for index, record in enumerate(records[1:], start=1):
         if record.get("campaign") != first:
-            raise ValueError("campaign block differs (mixed campaign)")
-    for record in records:
+            raise QuantumRecordRefused(index, "campaign block differs (mixed campaign)")
+    for index, record in enumerate(records):
         if record.get("adjoint", {}).get("receipt_sha256") is not None:
-            raise ValueError("record binds a whole stage-A receipt, not its slice (PQ #993): regenerate")
+            raise QuantumRecordRefused(
+                index, "record binds a whole stage-A receipt, not its slice (PQ #993): regenerate")
     bindings = {record.get("adjoint", {}).get("slice_sha256") is not None for record in records}
     if len(bindings) != 1:
         raise ValueError("layer records mix unbound and slice-bound stage-A bindings")
