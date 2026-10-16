@@ -27199,6 +27199,24 @@ under the exporter's own recipe and is not gated; export resume binds
 `_pack_production_cached_2d` re-packs only — no re-run of GPTQ/scale-sweep, which would
 measure a different artifact.
 
+**History: a fused-global window on main (review N3-02, recorded 2026-10-16).** Since
+`1b7b7757b1` (2026-07-02, audit M2) main's export pre-passes derive the fused joint global
+under the cache's recorded scale rule, while main's resident and streamed fills derive it
+under the build process's ambient rule. A JSO cache built without
+`PRISMAQUANT_NVFP4_SCALE_RULE` set, the `run-pipeline.sh` default, records `joint_mse` but
+rendered its fused siblings on the `static_6` joint global, so a main export since 2026-07-02
+re-packed those siblings under a global their render did not use. Main still has both sides;
+this refactor closes the fills at `c6eb3bcfd9` (resident) and `5646b10406` (streamed), and
+every cache built before the shard-bound witness refuses its fused re-packs here under the
+default match-render-scale export. Measured
+only on a CPU fixture: re-packing a fused render under a joint global 1.5x the one it was
+rendered on changed 893 of 1024 elements (review N3-01 reproduction, PrismaBuild action
+`70bc988746a8`; that render used `static_6` levels, not JSO's). Not measured: which shipped
+artifacts were exported in the window, how often real weights give the two rules different
+fused globals, and any served effect. Served gold metrics of such artifacts describe the
+bytes they shipped; a claim that those bytes equal the cache render their frontier KL
+measured is unverified.
+
 **Block-output match** (quality lever #12, formerly `prismaquant/block_output_match.py`) was
 archived on 2026-07-30 (`archive/block_output_match_2026-07-30/`, re-vet R25). It never ran on
 the shipping recipe, because the production-cache pack returns first. Setting
