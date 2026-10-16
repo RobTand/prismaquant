@@ -335,3 +335,10 @@ broader streaming-performance acceptance remains open. The final read-only
 14:14 UTC inventory retains all 36 prior PRs at their original heads and main
 at `138069b799323435fb5f0b3cec3ee339f6264a62`. Their dispositions and ownership
 remain as recorded. No independent PR is closed or merged by this refactor.
+
+
+The trusted-base GitHub policy requires a `prismaquant-1295-...` delivery branch.
+The authoring branch remains `sol/refactor-simplify-20261014`; its qualified
+implementation is delivered through `prismaquant-1295-refactor`. The first new
+PR #2695 is replaced for that branch-name correction alone. The 36 prior PRs
+and their dispositions are unaffected.

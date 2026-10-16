@@ -915,3 +915,10 @@ observation, not a performance result. Historical artifacts and dated measuremen
 retain their original provenance. Incomplete native recipes require re-rendering.
 
 The committed [qualification manifest](../results/prismaquant-refactor-qualification-2026-10-16.json) records the accepted actions, result digests, replacement revisions and limits.
+
+
+The first publication, PR #2695, was refused by the trusted-base issue policy
+because `sol/refactor-simplify-20261014` does not follow its required branch
+spelling. Delivery uses `prismaquant-1295-refactor` from the same qualified
+implementation. The original authoring branch is retained. This correction
+changes report text and branch metadata only; no policy or source gate is relaxed.

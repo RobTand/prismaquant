@@ -89,3 +89,9 @@ are archived under
 T1/T3 consumer implementation is complete. Its explicit verification matrix and
 remaining qualification limits are in the refactor verification report and
 `docs/results/prismaquant-refactor-qualification-2026-10-16.json`.
+
+
+The new refactor PR uses `prismaquant-1295-refactor` to satisfy the trusted-base
+branch policy, while retaining `sol/refactor-simplify-20261014` as its authoring
+branch. The first publication #2695 is replaced for branch spelling alone.
+Neither the existing 36 PRs nor the parent issue is closed by that correction.
