@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: campaign row construction has one package owner.
+`tessera_campaign_rows` owns the run spec (`load_spec`), row classes and their
+placement attestations (`tools/fleet_interpreters.json`, read as data), the
+census-derived demand (`row_memory_gb`, `row_memory_demand`,
+`streamed_resource_plan`) and `prismabuild_row`, formerly the dispatcher's
+`_row*` helpers. `campaign_container_spec` owns the stdlib-only container spec
+contract (`validate_container`, `admission_image_reference`, the reader,
+safe-path and bounded-capture environment names); the host launcher loads it by
+path, as it loads `container_runtime_identity`. The dispatcher keeps argv,
+submission and printing, and `tessera_materialization` no longer imports
+`tools`. Row bytes, demands and class, placement and container gates are
+unchanged.
+
 Re-stamped 2026-10-16: the Tessera menu-mode vocabulary (`MENU_*`,
 `MENU_MODE_ENV`) is owned by `tessera_menu_modes`, which imports nothing.
 `tessera_campaign_cli` reads it there, so the campaign parser, the dispatcher
@@ -25345,7 +25358,7 @@ a startup-share objective and available GPU slots; infeasible or invalid
 inputs refuse before publication. Routed groups retain their original sorted
 row IDs, selection bytes, action fields and data manifests. Dense rows record
 predicted pricing/share, and the plan records the profile SHA-256 and contents.
-`_row_memory_gb` and `partition_rows_by_fit` still derive and gate every packed
+`tessera_campaign_rows.row_memory_gb` and `partition_rows_by_fit` still derive and gate every packed
 row; a declined bundle is not resized. This predicts a layout, not speed or
 numerical equivalence. The [profile contract](campaign_row_work_profile.md)
 defines the measurement and production-validation boundary. Defaults, the
@@ -25597,7 +25610,7 @@ be running (#391). A partitioned plan is deliberately not mergeable: `merge`
 still requires every planned row's `cost.pkl`, so the rows that were never
 submitted refuse the merged scope table rather than quietly narrowing it. The
 resident-model branch prices `_model_bytes` for the whole checkpoint. Streamed
-selected rows instead use `_streamed_resource_plan` with their selected source
+selected rows instead use `tessera_campaign_rows.streamed_resource_plan` with their selected source
 layers, canonical capture and encoder bounds; their anchor preparation reuses
 the completed capture without a source forward. Both branches retain their
 derived demand when the dispatcher partitions the rows.
@@ -33429,10 +33442,10 @@ produced output a consumer could wait on through `pbrun --after`, so the tool
 orders the rows by what they leave on disk, as `dispatch_stage_a_split` does:
 
 - `seal` writes `<workspace>/capture-chain/round.json` from the campaign
-  spec. Each row comes from `dispatch_tessera_campaign._row`, at priority -10
+  spec. Each row comes from `tessera_campaign_rows.prismabuild_row`, at priority -10
   (the agent band) unless `--priority` names another (#1918: a chain that
   feeds a gate is campaign work and runs at 0), with an explicit `timeout_s`. A quantum's memory demand is the monolithic
-  capture row's (`_row_memory_gb` over every census unit), an overestimate
+  capture row's (`row_memory_gb` over every census unit), an overestimate
   for one range. The prep and the join claim no GPU. A quantum's `capture`
   progress phase is declared only with `--progress-grace-s`, and `pbrun`
   refuses it unless the fleet announces the progress contract.

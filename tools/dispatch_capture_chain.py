@@ -9,7 +9,7 @@ on disk, as ``dispatch_stage_a_split`` does for the Stage A split:
 
 * **seal** writes ``<workspace>/capture-chain/round.json`` from the campaign
   spec: every row's PrismaBuild row (built by
-  ``dispatch_tessera_campaign._row``, so the class, container, environment
+  ``tessera_campaign_rows.prismabuild_row``, so the class, container, environment
   and demand are the capture row's), at priority -10 (``--priority``: a chain
   that feeds a gate is campaign work and runs at 0) with an explicit
   ``timeout_s``. The prep and the join run no forward and claim no GPU.
@@ -46,7 +46,10 @@ from dispatch_stage_a_split import (  # noqa: E402
     submission_path,
     submission_result,
 )
-from dispatch_tessera_campaign import PBCAMPAIGN, _row, _row_memory_gb, load_spec  # noqa: E402
+from dispatch_tessera_campaign import PBCAMPAIGN  # noqa: E402
+from prismaquant.tessera_campaign_rows import (  # noqa: E402
+    load_spec, prismabuild_row, row_memory_gb,
+)
 
 ROUND_SCHEMA = "prismaquant.capture_chain_round.v1"
 ROUND_NAME = "round.json"
@@ -103,7 +106,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
         argv = ["--out", str(round_dir / "out" / f"{name}-unused.pkl"),
                 "--cache-dir", str(round_dir / "cache" / name), *common,
                 "--capture-chain", kind, *extra]
-        row = _row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
+        row = prismabuild_row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
         row["priority"] = priority
         if not gpu:
             row["demand"] = {**row["demand"], "gpu": 0}
@@ -113,7 +116,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
     add("prep", "prep", ["--capture-chain-ranges", text, "--capture-chain-boundary-storage",
                          DIRECT_ASCII_SPACED_LAX.text(boundary_storage)],
         mem_gb=bookend_mem_gb, timeout=bookend_timeout_s, phases=(), gpu=False)
-    quantum_mem_gb = _row_memory_gb(spec, sorted(census["counts"]), census)
+    quantum_mem_gb = row_memory_gb(spec, sorted(census["counts"]), census)
     for start, stop in pairs:
         add(range_label(start, stop), "quantum", ["--capture-layer-range", f"{start}:{stop}"],
             mem_gb=quantum_mem_gb, timeout=timeout_s, phases=tuple(progress_phases),

@@ -1,4 +1,5 @@
 """Real planner and merge coverage for opt-in unsampled expert partitions."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import json
@@ -31,7 +32,7 @@ def planned(tmp_path, monkeypatch):
     _write_model(Path(spec["model"]), census["unit_shapes"])
     (workspace / "census.json").write_text(json.dumps(census))
     seen = []
-    monkeypatch.setattr(dispatch, "_row_memory_gb",
+    monkeypatch.setattr(campaign_rows, "row_memory_gb",
                         lambda spec, members, census, **kw: seen.append(sorted(members)) or 5)
     return spec_path, workspace, seen
 

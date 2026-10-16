@@ -1,4 +1,5 @@
 """Opt-in CPU planner checks; synthetic timings are not performance evidence."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 import hashlib
 import json
 from pathlib import Path
@@ -227,7 +228,7 @@ def test_memory_fit_still_declines_packed_rows_without_shrinking_demand(campaign
         seen.append(list(members))
         return 70 if len(members) > 2 else 5
 
-    monkeypatch.setattr(dispatch, "_row_memory_gb", demand)
+    monkeypatch.setattr(campaign_rows, "row_memory_gb", demand)
     assert dispatch.cmd_plan(_plan_args(spec, workspace, row_work_profile=profile)) == 0
     plan = json.loads((workspace / "plan.json").read_text())
     assert len(plan["inadmissible_rows"]) == 2

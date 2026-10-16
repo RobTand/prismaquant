@@ -117,7 +117,7 @@ def _planned_groups(census, selected, cost):
 
 
 def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1):
-    from tools import dispatch_tessera_campaign as dispatcher
+    from . import tessera_campaign_rows as campaign_rows
     if anchor_batch_size < 1:
         raise ValueError('anchor batch size must be positive')
     request, cost, source, units, expanded = _request(request_path)
@@ -125,7 +125,7 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
     census = _check_census(census_path, cost, source, units)
     workspace = Path(workspace).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    spec = dispatcher.load_spec(Path(spec_path))
+    spec = campaign_rows.load_spec(Path(spec_path))
     if spec['model'] != provenance['model']:
         raise RuntimeError('materialization spec model differs from priced model')
     selected = {n: expanded[n] for n in units if expanded[n].startswith('TESSERA_')}
@@ -137,9 +137,9 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
     _json(plan_path, result)
     rows = []
     for index, group in enumerate(groups):
-        row = dispatcher._row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
+        row = campaign_rows.prismabuild_row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
                                      '--anchor-batch-size', str(anchor_batch_size)],
-            mem_gb=dispatcher._row_memory_gb({**spec, 'max_act_rows':provenance['max_act_rows']},
+            mem_gb=campaign_rows.row_memory_gb({**spec, 'max_act_rows':provenance['max_act_rows']},
                                             list(group['assignment']), census),
             timeout_s=int(spec.get('timeout_s', 86400)), module='prismaquant.tessera_materialization')
         rows.append(row)

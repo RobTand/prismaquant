@@ -6,6 +6,7 @@ No tensors, model files or GPU are allocated by this 864-unit geometry fixture.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 
 import pytest
@@ -114,7 +115,7 @@ def test_runtime_and_planner_keep_the_stream_plan_for_checkpoint_resume(
         (units / "unit.pkl").write_bytes(b"presence only")
     assert checkpoint_present(checkpoint) == (checkpoint_kind != "absent")
     members = sorted(census["unit_shapes"])
-    plans = dispatch._streamed_resource_plan(spec, census, members, selected_source=True)
+    plans = campaign_rows.streamed_resource_plan(spec, census, members, selected_source=True)
     stream_bytes = plans[MEMORY_PLANS[ROW_HEAD_STREAM]]
     load_all_bytes = plans[MEMORY_PLANS[ROW_HEAD_LOAD_ALL]]
     assert isinstance(stream_bytes, int) and isinstance(load_all_bytes, int)
@@ -125,8 +126,8 @@ def test_runtime_and_planner_keep_the_stream_plan_for_checkpoint_resume(
     assert runtime_bytes + BASELINE_BYTES <= CAP_BYTES, (
         "a checkpoint changed the runtime head after stream-sized admission: " + str(head))
     assert head == ROW_HEAD_STREAM
-    assert dispatch._row_head_dependency(spec["campaign_argv"]) is None
-    demand = dispatch._row_memory_demand(spec, members, census, selected_source=True)
+    assert campaign_rows.row_head_dependency(spec["campaign_argv"]) is None
+    demand = campaign_rows.row_memory_demand(spec, members, census, selected_source=True)
     assert demand["plan_bytes"] == runtime_bytes
     assert demand["mem_gb"] <= 69
 
@@ -144,7 +145,7 @@ def test_genuine_load_all_dependencies_are_refused_before_submission(
         argv[argv.index(extra[0]) + 1] = extra[1]
     else:
         argv.extend(extra)
-    assert words in dispatch._row_head_dependency(argv)
+    assert words in campaign_rows.row_head_dependency(argv)
     selection = tmp_path / "units.json"
     selection.write_text(json.dumps({"schema": "prismaquant.tessera_campaign_units.v1",
                                     "groups": [{"key": "s:stack", "members": sorted(census["counts"])}]}))

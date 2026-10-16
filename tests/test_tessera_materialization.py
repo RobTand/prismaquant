@@ -1,5 +1,6 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_render
 from prismaquant import tessera_campaign_wire as campaign_wire
@@ -104,12 +105,11 @@ def test_request_refuses_input_drift(selection, defect):
 
 
 def _plan(selection, monkeypatch):
-    from tools import dispatch_tessera_campaign as dispatcher
     calls = []
     def row(spec, argv, **kwargs):
         calls.append((argv, kwargs))
         return dict(argv=argv, **kwargs)
-    monkeypatch.setattr(dispatcher, '_row', row)
+    monkeypatch.setattr(campaign_rows, 'prismabuild_row', row)
     result = tm.plan(selection.request, selection.census, selection.workspace, selection.spec)
     return selection.workspace / 'plan.json', result, calls
 

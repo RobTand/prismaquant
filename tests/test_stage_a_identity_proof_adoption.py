@@ -7,6 +7,7 @@ through ``CaptureSourceAuthentication.adopt_streamed_identity_cache``, the
 same check the joint pass uses (#1374), and a proof that refuses leaves every
 read to hash fresh.
 """
+from prismaquant import tessera_campaign_rows as campaign_rows
 import hashlib
 import json
 import os
@@ -175,4 +176,4 @@ def test_the_planner_binds_the_proof_by_digest_and_owns_the_flags(tmp_path):
     spec.write_text(json.dumps({'model': str(model), 'cwd': str(tmp_path), 'python': 'python3',
         'env': {}, 'campaign_argv': ['--source-identity-cache', str(proof)]}))
     with pytest.raises(RuntimeError, match='owns per row'):
-        dispatch.load_spec(spec)
+        campaign_rows.load_spec(spec)

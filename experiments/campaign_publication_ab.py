@@ -140,7 +140,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
     ``profiler_allowance_gib`` is the bounded CUDA trace plus its decoded
     objects, charged on top of the workload; the trace cap is a quarter of it.
     """
-    from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
+    from prismaquant.tessera_campaign_rows import load_spec, streamed_resource_plan
     spec = load_spec(spec_path)
     workspace, out = Path(workspace), Path(out)
     plan = json.loads((workspace/'plan.json').read_text())
@@ -167,7 +167,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
         argv = list(selected['campaign_argv'])
         argv[argv.index('--anchor-batch-size')+1] = str(batch)
         selected['campaign_argv'] = argv+arm_flags(budget, identity)
-        resources['%d:%d:%d' % (budget, identity, batch)] = _streamed_resource_plan(
+        resources['%d:%d:%d' % (budget, identity, batch)] = streamed_resource_plan(
             selected, census, row['members'], selected_source=True)
     # Existing measured process baseline plus a bounded CUDA trace and its
     # decoded profiler objects. This allowance is separate from staged bytes.

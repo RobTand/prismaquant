@@ -1,0 +1,12 @@
+# Shrink-only allowlist for tests/test_package_tools_boundary.py: package
+# modules that still import a module under tools/. The campaign table and
+# selected-wire materialization import none (T1); these pre-existing serving,
+# gold-measurement and task-suite sites remain until their owners move.
+# One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
+# CI refuses a pull request that adds a line here.
+prismaquant/boundary_control.py	import	tools.serve_fingerprint
+prismaquant/g3_v2.py	import	tools.gold_measurement_fidelity
+prismaquant/prismasnap_validation.py	import	tools.serve_fingerprint
+prismaquant/ship_gates.py	import	tools.gold_engine_options
+prismaquant/shipcard.py	import	tools.serve_fingerprint
+prismaquant/task_suite.py	import	tools.full_kl_teacher_payload

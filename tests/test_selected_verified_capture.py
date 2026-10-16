@@ -1,4 +1,5 @@
 """Selected reuse keeps canonical identity while authenticating one buffer."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,7 +73,7 @@ def test_dispatch_seals_same_selected_load_demand(monkeypatch):
         seen.update(kwargs)
         return {'memory_bytes': 100}
     monkeypatch.setattr(autoscale, 'selected_anchor_resources', selected)
-    dispatch._streamed_resource_plan(dict(model='/source', campaign_argv=[
+    campaign_rows.streamed_resource_plan(dict(model='/source', campaign_argv=[
         '--streaming', '--capture-load-policy', json.dumps(policy())]),
         dict(unit_shapes={'a': [3, 4]}, counts={'a': 9}), ['a'], selected_source=True)
     assert seen['capture_load_policy'] == policy()

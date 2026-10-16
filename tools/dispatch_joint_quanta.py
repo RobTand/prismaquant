@@ -60,10 +60,8 @@ from pathlib import Path, PurePosixPath
 
 if __package__:
     from tools.tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
-        admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
         stage_b_spill_environment,
@@ -75,10 +73,8 @@ if __package__:
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
-        admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
         stage_b_spill_environment,
@@ -88,6 +84,7 @@ else:
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 
+from prismaquant.campaign_container_spec import CONTAINER_IMAGE_FLAG, admission_image_reference
 from prismaquant import joint_quantum_row as quantum_row
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")

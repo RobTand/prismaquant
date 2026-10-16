@@ -8,6 +8,7 @@ encodes; the window test drives the row stream directly.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign_wire as campaign_wire
 
@@ -832,15 +833,15 @@ def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
         return {"memory_bytes": 10 * 1024 ** 3, "stream_memory_bytes": 1024 ** 3}
 
     monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
-    monkeypatch.setattr(dispatch, "_process_baseline", lambda _spec: (0, "explicit"))
-    monkeypatch.setattr(dispatch, "_guard_margin_bytes", lambda: 0)
+    monkeypatch.setattr(campaign_rows, "process_baseline", lambda _spec: (0, "explicit"))
+    monkeypatch.setattr(campaign_rows, "guard_margin_bytes", lambda: 0)
     census = dict(unit_shapes={"a": [3, 4]}, counts={"a": 9})
     argv = ["--streaming", "--capture-load-policy", json.dumps(LOAD_POLICY),
             "--export-hessian-reference-policy", json.dumps(REFERENCE_POLICY),
             "--max-rounds", "1"]
 
     def demand(extra):
-        return dispatch._row_memory_demand(dict(model="/source", cpus=6,
+        return campaign_rows.row_memory_demand(dict(model="/source", cpus=6,
             campaign_argv=[*argv, *extra]), ["a"], census, selected_source=True)
 
     assert demand([])["plan_bytes"] == 1024 ** 3
@@ -864,7 +865,7 @@ def test_dispatcher_head_and_publication_reservation_follow_effective_cli(monkey
             '--export-hessian-reference-policy=' + json.dumps(REFERENCE_POLICY),
             '--max-rounds=1']
     def demand(extra):
-        return dispatch._row_memory_demand({'model': '/source', 'cpus': 2,
+        return campaign_rows.row_memory_demand({'model': '/source', 'cpus': 2,
             'process_baseline_bytes': 0, 'campaign_argv': [*base, *extra]},
             ['a'], census, selected_source=True)
     assert demand(['--row-head', 'load-all', '--row-he=stream'])['plan_bytes'] == 1024**3

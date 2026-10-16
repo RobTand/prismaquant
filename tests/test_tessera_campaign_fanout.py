@@ -14,6 +14,7 @@ Three properties make the split honest, and these tests pin them:
   or a unit priced twice.
 """
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_campaign_wire as campaign_wire
 from prismaquant import tessera_campaign_selection as campaign_selection
 from prismaquant import tessera_campaign_table as campaign_table
@@ -476,7 +477,7 @@ def test_a_row_may_not_carry_the_round_loop_s_own_deadline(tmp_path):
         "model": "m", "cwd": "/tmp", "python": "py", "env": {},
         "campaign_argv": ["--menu-mode", "research", "--deadline-seconds", "100"]}))
     with pytest.raises(RuntimeError, match="deadline"):
-        dispatch.load_spec(spec)
+        campaign_rows.load_spec(spec)
 
 
 def test_merge_refuses_a_journal_that_names_a_shard_it_does_not_have(tmp_path):

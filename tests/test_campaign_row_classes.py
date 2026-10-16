@@ -17,6 +17,7 @@ Three properties, in the order they matter.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 import sys
@@ -49,7 +50,7 @@ def fleet() -> dict:
     that wants a non-containerised default class injects the entry it needs
     rather than borrowing the tracked one.
     """
-    table = json.loads(json.dumps(dispatch.load_fleet_interpreters()))
+    table = json.loads(json.dumps(campaign_rows.load_fleet_interpreters()))
     table["tags"]["gb10"]["interpreters"][GB10_PYTHON] = {
         "attested_by": "0" * 64, "observed": "fixture"}
     return table
@@ -68,7 +69,7 @@ def base_spec(**extra) -> dict:
 
 
 def build(spec, **kwargs) -> dict:
-    return dispatch._row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 
@@ -134,7 +135,7 @@ def test_a_class_overrides_placement_and_merges_its_environment():
 def test_an_undeclared_class_is_refused():
     try:
         build(base_spec(), row_class_name="rocm-encode")
-    except dispatch.RowClassRefused as error:
+    except campaign_rows.RowClassRefused as error:
         assert "declares no row class" in str(error)
     else:
         raise AssertionError("an undeclared class built a row")
@@ -143,8 +144,8 @@ def test_an_undeclared_class_is_refused():
 def test_a_class_may_not_declare_a_field_it_does_not_own():
     spec = base_spec(classes={"rocm-encode": {"model": "/models/other"}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "does not own" in str(error)
     else:
         raise AssertionError("a class redefined the campaign's model")
@@ -160,8 +161,8 @@ def test_an_unattested_interpreter_on_a_tag_is_refused():
                         "tags": ["gfx1201"],
                         "wire_shared": False, "weights_only": True}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "not attested on tag 'gfx1201'" in str(error)
     else:
         raise AssertionError("an unattested interpreter was accepted")
@@ -173,8 +174,8 @@ def test_the_rocm_interpreter_is_refused_on_a_gb10_tag():
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["gb10"],
                         "wire_shared": False, "weights_only": True}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "not attested on tag 'gb10'" in str(error)
     else:
         raise AssertionError("a ROCm interpreter was accepted on a GB10 tag")
@@ -185,8 +186,8 @@ def test_a_tag_the_fleet_does_not_attest_is_refused():
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["some-new-box"],
                         "wire_shared": False, "weights_only": True}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "does not attest" in str(error)
     else:
         raise AssertionError("an unknown tag placed a row")
@@ -198,8 +199,8 @@ def test_a_class_spanning_two_instruction_sets_is_refused(monkeypatch):
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["gfx1201", "gb10"],
                         "wire_shared": False, "weights_only": True}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "instruction sets" in str(error)
     else:
         raise AssertionError("one class was placed on two ISAs")
@@ -209,8 +210,8 @@ def test_a_wire_sharing_class_may_not_leave_the_campaign_isa():
     spec = base_spec(classes={
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["gfx1201"]}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "not bit-comparable" in str(error)
     else:
         raise AssertionError("a wire-sharing class left the campaign's ISA")
@@ -221,8 +222,8 @@ def test_a_class_that_does_not_share_the_wire_must_be_weights_only():
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["gfx1201"],
                         "wire_shared": False}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "weights_only" in str(error)
     else:
         raise AssertionError("a non-weights-only class was placed off-ISA")
@@ -235,7 +236,7 @@ def test_the_rocm_encode_class_this_issue_exists_for_is_accepted():
                         "wire_shared": False, "weights_only": True,
                         "_why": "weights-only encode quanta only"}})
     records = {record["class"]: record
-               for record in dispatch.validate_row_classes(spec, fleet=fleet())}
+               for record in campaign_rows.validate_row_classes(spec, fleet=fleet())}
     assert records["default"]["isa"] == "sm121"
     assert records["rocm-encode"]["isa"] == "gfx1201"
     assert records["rocm-encode"]["weights_only"] is True
@@ -250,8 +251,8 @@ def test_a_container_class_is_refused_the_wrong_gpu_runtime(monkeypatch):
                         "weights_only": True,
                         "container": {"image": "prismaquant-rocm:pinned"}}})
     try:
-        dispatch.validate_row_classes(spec, fleet=fleet())
-    except dispatch.RowClassRefused as error:
+        campaign_rows.validate_row_classes(spec, fleet=fleet())
+    except campaign_rows.RowClassRefused as error:
         assert "attaches its GPU with 'rocm-wsl'" in str(error)
     else:
         raise AssertionError("an NVIDIA container was placed on a ROCm box")
@@ -265,7 +266,7 @@ def test_a_container_class_with_the_box_s_gpu_runtime_is_accepted():
                         "container": {"image": "prismaquant-rocm:pinned",
                                       "gpu_runtime": "rocm-wsl"}}})
     records = {record["class"]: record
-               for record in dispatch.validate_row_classes(spec, fleet=fleet())}
+               for record in campaign_rows.validate_row_classes(spec, fleet=fleet())}
     assert records["rocm-encode"]["containerized"] is True
 
 
@@ -282,21 +283,21 @@ def rocm_spec() -> dict:
 def test_a_weights_only_class_may_not_run_the_campaign_module():
     try:
         build(rocm_spec(), row_class_name="rocm-encode")
-    except dispatch.RowClassRefused as error:
+    except campaign_rows.RowClassRefused as error:
         assert "prismaquant.tessera_campaign" in str(error)
     else:
         raise AssertionError("a weights-only class ran the campaign module")
 
 
 def test_a_weights_only_row_may_not_carry_a_hessian_aware_flag():
-    for flag in dispatch.HESSIAN_AWARE_FLAGS:
+    for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            dispatch._row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
                                         flag, "/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
                           row_class_name="rocm-encode")
-        except dispatch.RowClassRefused as error:
+        except campaign_rows.RowClassRefused as error:
             assert flag in str(error)
         else:
             raise AssertionError(f"a weights-only row carried {flag}")
@@ -304,14 +305,14 @@ def test_a_weights_only_row_may_not_carry_a_hessian_aware_flag():
 
 def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
     """``--flag=value`` is the same flag as ``--flag value``."""
-    for flag in dispatch.HESSIAN_AWARE_FLAGS:
+    for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            dispatch._row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
                                         f"{flag}=/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
                           row_class_name="rocm-encode")
-        except dispatch.RowClassRefused as error:
+        except campaign_rows.RowClassRefused as error:
             assert flag in str(error)
         else:
             raise AssertionError(f"a weights-only row carried {flag}=")
@@ -319,7 +320,7 @@ def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
 
 def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
     """The gate is a property of the class, not of the flag list."""
-    row = dispatch._row(base_spec(), ["--model", "/models/example",
+    row = campaign_rows.prismabuild_row(base_spec(), ["--model", "/models/example",
                                       "--calibration-census", "/c.json"],
                         mem_gb=34, timeout_s=None)
     assert "--calibration-census" in row["argv"]
@@ -393,9 +394,9 @@ def test_retired_interpreters_refuse_in_certified_mode(tag, class_name, monkeypa
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={
         class_name: {"python": SDK3_PYTHON}})
-    with pytest.raises(dispatch.RowClassRefused):
-        dispatch.validate_row_classes(spec)
-    shape = dispatch.load_fleet_interpreters()["tags"][tag]
+    with pytest.raises(campaign_rows.RowClassRefused):
+        campaign_rows.validate_row_classes(spec)
+    shape = campaign_rows.load_fleet_interpreters()["tags"][tag]
     assert SDK3_PYTHON not in shape["interpreters"]
 
 
@@ -406,11 +407,11 @@ def test_retired_interpreters_continue_in_default_dev_mode(
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={
         class_name: {"python": SDK3_PYTHON}})
-    records = dispatch.validate_row_classes(spec)
+    records = campaign_rows.validate_row_classes(spec)
     record = next(record for record in records if record["class"] == class_name)
     assert record["python"] == SDK3_PYTHON
     assert "[DEV-MODE]" in capsys.readouterr().out
-    assert SDK3_PYTHON not in dispatch.load_fleet_interpreters()["tags"][tag][
+    assert SDK3_PYTHON not in campaign_rows.load_fleet_interpreters()["tags"][tag][
         "interpreters"]
 
 
@@ -418,7 +419,7 @@ def test_unattested_interpreter_continues_in_default_dev_mode(monkeypatch, capsy
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     python = "/home/rob/no/such/python"
     spec = base_spec(python=SDK4_PYTHON, classes={"probe": {"python": python}})
-    records = dispatch.validate_row_classes(spec)
+    records = campaign_rows.validate_row_classes(spec)
     assert records[0]["python"] == python
     assert "[DEV-MODE]" in capsys.readouterr().out
 
@@ -426,8 +427,8 @@ def test_unattested_interpreter_continues_in_default_dev_mode(monkeypatch, capsy
 @pytest.mark.parametrize("tag", ["dl380g10", "gb10", "sparky", "sparklina"])
 def test_active_sdk4_interpreters_validate_explicit_classes(tag):
     spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={"default": {}})
-    records = dispatch.validate_row_classes(spec)
-    assert records == [{"class": "default", "isa": dispatch.load_fleet_interpreters()[
+    records = campaign_rows.validate_row_classes(spec)
+    assert records == [{"class": "default", "isa": campaign_rows.load_fleet_interpreters()[
         "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
         "containerized": False, "wire_shared": True, "weights_only": False}]
 
@@ -436,7 +437,7 @@ def test_active_sdk4_interpreters_validate_explicit_classes(tag):
 def test_attested_train_layers_validate_in_certified_mode(python, monkeypatch):
     """Placement admits both attested train layers without a host lookup."""
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
-    records = dispatch.validate_row_classes(base_spec(
+    records = campaign_rows.validate_row_classes(base_spec(
         python=python, tags=["dl380g10"], classes={"default": {}}))
     assert records == [{
         "class": "default", "isa": "x86_64", "tags": ["dl380g10"],
@@ -457,23 +458,23 @@ def test_invalid_retired_inventory_is_refused(
         monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     else:
         monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_env)
-    table = dispatch.load_fleet_interpreters()
+    table = campaign_rows.load_fleet_interpreters()
     table["tags"]["dl380g10"]["retired_interpreters"] = history
     source = tmp_path / "fleet.json"
     source.write_text(json.dumps(table))
-    with pytest.raises(dispatch.RowClassRefused, match=message):
-        dispatch.load_fleet_interpreters(source)
+    with pytest.raises(campaign_rows.RowClassRefused, match=message):
+        campaign_rows.load_fleet_interpreters(source)
 
 
 def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
-    table = dispatch.load_fleet_interpreters()
+    table = campaign_rows.load_fleet_interpreters()
     for tag in ("wsl-gpu", "gfx1201"):
         shape = table["tags"][tag]
         assert shape["isa"] == "gfx1201"
         assert shape["gpu_runtime"] == "rocm-wsl"
         record = shape["interpreters"][ROCM_PYTHON]
         assert len(record["attested_by"]) == 64
-        records = dispatch.validate_row_classes(base_spec(
+        records = campaign_rows.validate_row_classes(base_spec(
             python=ROCM_PYTHON, tags=[tag], classes={"default": {}}))
         assert records[0]["isa"] == "gfx1201"
         assert records[0]["python"] == ROCM_PYTHON

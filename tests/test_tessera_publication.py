@@ -10,6 +10,7 @@ on the boxes, against the real arms.
 
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
 import os
 import threading
@@ -634,7 +635,7 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
         return {"memory_bytes": 100}
 
     monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
-    dispatch._streamed_resource_plan(
+    campaign_rows.streamed_resource_plan(
         dict(model="/source", campaign_argv=[
             "--streaming", "--publication-overlap-bytes", "8388608",
             "--campaign-identity-bytes", "536870912"]),
@@ -644,7 +645,7 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     assert seen["campaign_identity_bytes"] == 536870912
 
     seen.clear()
-    dispatch._streamed_resource_plan(
+    campaign_rows.streamed_resource_plan(
         dict(model="/source", campaign_argv=["--streaming"]),
         dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
         selected_source=True)

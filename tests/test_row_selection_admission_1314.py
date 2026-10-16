@@ -1,5 +1,6 @@
 """Check the existing whole-group contract before admitting a campaign row."""
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 import sys
 from pathlib import Path
@@ -35,7 +36,7 @@ def row_case(tmp_path, monkeypatch):
                     "--max-rounds", "1", "--rate-band", "832,1088"],
            "demand": {"mem_gb": 8}}
     model_reads = []
-    monkeypatch.setattr(dispatch, "_model_bytes",
+    monkeypatch.setattr(campaign_rows, "_model_bytes",
                         lambda model: model_reads.append(model) or 256)
 
     def publish(selection):
@@ -87,7 +88,7 @@ def test_valid_whole_groups_keep_their_derived_demand(row_case):
     spec, census, row, reads, publish = row_case
     publish(selection(whole_group(), {"key": "g:dense", "members": ["dense"]}))
     result = dispatch.verify_row_demand(spec, census, row, label="whole")
-    expected = dispatch._row_memory_demand(spec, [*MEMBERS, "dense"], census)
+    expected = campaign_rows.row_memory_demand(spec, [*MEMBERS, "dense"], census)
     assert {key: result[key] for key in expected} == expected
     assert reads == [spec["model"], spec["model"]]
 
@@ -104,9 +105,9 @@ def test_schema_valid_sample_keeps_own_member_demand_and_whole_group_identity(ro
                        "inclusion_probability": {name: 0.5 for name in sampled}},
                       schema=V2))
     result = dispatch.verify_row_demand(spec, census, row)
-    expected = dispatch._row_memory_demand(spec, sampled, census)
+    expected = campaign_rows.row_memory_demand(spec, sampled, census)
     assert {key: result[key] for key in expected} == expected
-    whole = dispatch._row_memory_demand(spec, MEMBERS, census)
+    whole = campaign_rows.row_memory_demand(spec, MEMBERS, census)
     assert result["plan_bytes"] < whole["plan_bytes"]
 
 

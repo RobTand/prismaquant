@@ -1,4 +1,5 @@
 """A bounded capture must release completed CPU allocations before its next layer."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 
 import pytest
@@ -16,7 +17,7 @@ def test_capture_manifest_seals_immediate_host_purge_before_python_starts(contai
     if not container:
         del data['container']
     original_env = dict(data['env'])
-    row = dispatch._row(data, ['--streaming', '--capture-calibration-out', '/capture', *flags],
+    row = campaign_rows.prismabuild_row(data, ['--streaming', '--capture-calibration-out', '/capture', *flags],
                         mem_gb=104, timeout_s=86400)
     assert row['env']['MIMALLOC_PURGE_DELAY'] == '0'
     assert row['env']['PRISMAQUANT_RELEASE_SOURCE_PAGES'] == '1'
@@ -31,7 +32,7 @@ def test_explicit_incompatible_capture_environment_refuses(name, value):
     data = spec()
     data['env'][name] = value
     with pytest.raises(RuntimeError, match=name):
-        dispatch._row(data, ['--streaming-capture-policy', 'shared-inputs-bounded-v1'],
+        campaign_rows.prismabuild_row(data, ['--streaming-capture-policy', 'shared-inputs-bounded-v1'],
                       mem_gb=104, timeout_s=86400)
 
 
@@ -46,7 +47,7 @@ def test_direct_cuda_capture_cannot_claim_missing_allocator_policy(monkeypatch):
 def test_legacy_manifest_keeps_explicit_allocator_environment():
     data = spec()
     data['env']['MIMALLOC_PURGE_DELAY'] = '10'
-    row = dispatch._row(data, ['--streaming-capture-policy', 'legacy'], mem_gb=104, timeout_s=60)
+    row = campaign_rows.prismabuild_row(data, ['--streaming-capture-policy', 'legacy'], mem_gb=104, timeout_s=60)
     assert row['env'] == data['env']
 
 
@@ -55,10 +56,10 @@ def test_a_capture_policy_flag_with_no_value_refuses_before_publication(capsys):
     data = spec()
     data['env']['MIMALLOC_PURGE_DELAY'] = '10'
     with pytest.raises(SystemExit) as classified:
-        dispatch._row_is_bounded(['--streaming-capture-policy'])
+        campaign_rows.row_is_bounded(['--streaming-capture-policy'])
     assert classified.value.code == 2
     with pytest.raises(SystemExit) as published:
-        dispatch._row(data, ['--streaming-capture-policy'], mem_gb=104, timeout_s=60)
+        campaign_rows.prismabuild_row(data, ['--streaming-capture-policy'], mem_gb=104, timeout_s=60)
     assert published.value.code == 2
     assert 'argument --streaming-capture-policy: expected one argument' in capsys.readouterr().err
     assert data['env']['MIMALLOC_PURGE_DELAY'] == '10'

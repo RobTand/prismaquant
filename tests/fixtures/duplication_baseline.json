@@ -621,10 +621,6 @@
    "prismaquant/gguf_formats.py",
    "prismaquant/gguf_iq_formats.py"
   ],
-  "_row": [
-   "tools/band_serial_handoff_live_pair.py",
-   "tools/dispatch_tessera_campaign.py"
-  ],
   "_runtime_identity": [
    "prismaquant/glm_kda_capture_kernel.py",
    "prismaquant/joint_projection_backend.py"

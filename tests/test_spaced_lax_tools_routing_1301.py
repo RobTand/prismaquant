@@ -135,7 +135,7 @@ def test_campaign_submission_preserves_inline_spec_bytes_and_envelope(tmp_path):
 
 
 def test_campaign_row_embeds_the_resolved_container_spec():
-    from tools.dispatch_tessera_campaign import _row
+    from prismaquant.tessera_campaign_rows import prismabuild_row
 
     spec = {"cwd": "/work", "python": "python3", "cpus": 2, "tags": ["gb10"],
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
@@ -144,7 +144,7 @@ def test_campaign_row_embeds_the_resolved_container_spec():
     # The serializer oracle predates campaign argument admission. Only the
     # input flag changes; all serialized bytes and row obligations stay checked.
     expected['argv'][-2] = '--model'
-    assert _row(spec, ["--model", "é"], mem_gb=16,
+    assert prismabuild_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
 

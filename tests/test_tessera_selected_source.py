@@ -1,4 +1,5 @@
 """Selected anchors reuse canonical inputs without loading the whole source."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import tessera_cell_measurement as cell_measurement
 import pytest
 
@@ -285,7 +286,7 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     def resources(spec, census, members, *, selected_source):
         assert selected_source and members == ['layers.0.proj']
         return dict(memory_bytes=3*1024**3, selected_layers=['0'])
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan', resources)
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan', resources)
     # ``plan`` derives each row's data manifest from the capture manifest and
     # the model's shards; both are bare paths here. The phase plan is under
     # test; the read set is covered by
@@ -544,7 +545,7 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
     # without moving the deltas.  Fold it into ``memory_bytes`` instead and the
     # predicate compares an inflated plan against an inflated cap and nets to
     # zero, which is exactly what declared headroom already does.
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan',
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan',
         lambda spec, census, members, *, selected_source: dict(
             memory_bytes=_ROUNDING_LOSER_PLAN_BYTES, selected_layers=['0'],
             baseline_policy='declared-headroom-pre-run-measured-in-row'))
@@ -579,7 +580,7 @@ def test_a_malformed_process_baseline_reservation_refuses_before_any_row(
                 python='python3', env={}, cpus=1, process_baseline_bytes=value)
     (tmp_path/'spec.json').write_text(json.dumps(spec))
     with pytest.raises(RuntimeError, match='process_baseline_bytes'):
-        dispatch.load_spec(tmp_path/'spec.json')
+        campaign_rows.load_spec(tmp_path/'spec.json')
 
 
 def test_an_absent_reservation_still_reports_the_pre_run_term_it_actually_has(monkeypatch):
@@ -627,17 +628,17 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
     from prismaquant.memory_management import CaptureMemoryGuard
     gib = 1024 ** 3
     margin = CaptureMemoryGuard.MARGIN_BYTES
-    monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * gib)
+    monkeypatch.setattr(campaign_rows, '_model_bytes', lambda model: 10 * gib)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
     spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
     hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
     body = 10 * gib + hessian + rows
 
-    default = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
+    default = campaign_rows.row_memory_gb(spec, ['layers.0.proj'], census)
     assert default == math.ceil(
-        (body + dispatch.DEFAULT_PROCESS_BASELINE_BYTES + margin) / gib) + 3
+        (body + campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES + margin) / gib) + 3
 
-    reserved = dispatch._row_memory_gb(
+    reserved = campaign_rows.row_memory_gb(
         {**spec, 'process_baseline_bytes': 2147483648}, ['layers.0.proj'], census)
     # Charged inside the same ceil as the body, so the demand covers
     # body + reservation + margin rather than rounding each of them up
@@ -646,16 +647,16 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
 
     # A declared zero opts out of the floor and of nothing else: the margin is
     # the guard's, not the spec's.
-    assert dispatch._row_memory_gb(
+    assert campaign_rows.row_memory_gb(
         {**spec, 'process_baseline_bytes': 0}, ['layers.0.proj'],
         census) == math.ceil((body + margin) / gib) + 3
 
     # Headroom is untouched by the reservation: they are separate terms and
     # only one of them is inside ``memory_bytes``.
-    assert dispatch._row_memory_gb(
+    assert campaign_rows.row_memory_gb(
         {**spec, 'headroom_gb': 9, 'process_baseline_bytes': 2147483648},
         ['layers.0.proj'], census) == reserved + 6
 
     with pytest.raises(RuntimeError, match='process_baseline_bytes'):
-        dispatch._row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
+        campaign_rows.row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
                                 ['layers.0.proj'], census)

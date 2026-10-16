@@ -1,4 +1,5 @@
 """The actual campaign parser is a cold authority for CLI syntax and defaults."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 from pathlib import Path
 import subprocess
 import sys
@@ -115,4 +116,4 @@ def test_spec_cannot_hide_dispatcher_owned_or_deadline_options_in_another_spelli
     path.write_text(json.dumps({'model': 'm', 'cwd': str(tmp_path), 'python': 'python3',
                                'env': {}, 'campaign_argv': [option]}))
     with pytest.raises(RuntimeError, match='this tool owns per row|deadline-seconds'):
-        dispatch.load_spec(path)
+        campaign_rows.load_spec(path)

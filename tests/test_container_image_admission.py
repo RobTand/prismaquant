@@ -26,6 +26,8 @@ apart fail here.
 """
 from __future__ import annotations
 
+from prismaquant import campaign_container_spec as container_spec
+from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 import sys
@@ -272,7 +274,7 @@ def _base_spec(**extra) -> dict:
 
 
 def _row(spec: dict, **kwargs) -> dict:
-    return campaign._row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 
@@ -385,7 +387,7 @@ def _portable_spec(**extra):
 def test_shared_owner_and_campaign_row_honor_portable_admission():
     spec = _portable_spec()
     expected = spec["container_admission_reference"]
-    assert container_tool.admission_image_reference(spec) == expected
+    assert container_spec.admission_image_reference(spec) == expected
     row = _row(spec)
     assert row["container_images"] == [expected]
     assert _embedded_spec(row["argv"])["container_admission_reference"] == expected
@@ -415,7 +417,7 @@ def test_portable_admission_requires_inspected_image_identity():
     spec = _portable_spec()
     del spec["container"]["content_sha256"]
     with pytest.raises(RuntimeError, match="portable image admission"):
-        container_tool.admission_image_reference(spec)
+        container_spec.admission_image_reference(spec)
 
 
 def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
@@ -436,26 +438,26 @@ def test_explicit_archive_admission_keeps_the_joint_override_semantics():
     spec = _portable_spec()
     spec["container"]["archive"] = {"path": "/mnt/shared/images/campaign.tar",
                                      "sha256": ARCHIVE_SHA}
-    assert container_tool.admission_image_reference(spec) == spec["container_admission_reference"]
+    assert container_spec.admission_image_reference(spec) == spec["container_admission_reference"]
 
 
 def test_an_archive_backed_container_yields_no_admission_reference():
     container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
                  "archive": {"path": "/mnt/shared/images/campaign.tar",
                              "sha256": ARCHIVE_SHA}}
-    assert container_tool.admission_image_reference(
+    assert container_spec.admission_image_reference(
         {"container": container}) is None
 
 
 def test_an_image_container_yields_the_exact_reference():
-    assert container_tool.admission_image_reference(
+    assert container_spec.admission_image_reference(
         {"container": {"image": REPO_IMAGE}}) == REPO_IMAGE
 
 
 def test_no_container_yields_no_admission_reference():
-    assert container_tool.admission_image_reference({}) is None
+    assert container_spec.admission_image_reference({}) is None
 
 
 def test_a_malformed_container_refuses_rather_than_declines():
     with pytest.raises(RuntimeError):
-        container_tool.admission_image_reference({"container": {"mounts": []}})
+        container_spec.admission_image_reference({"container": {"mounts": []}})

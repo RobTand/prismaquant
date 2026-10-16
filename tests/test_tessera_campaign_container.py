@@ -1,4 +1,5 @@
 """The fanout must execute the sealed source in its declared Docker runtime."""
+from prismaquant import tessera_campaign_rows as campaign_rows
 import importlib
 import json
 import re
@@ -28,7 +29,7 @@ def spec():
 
 
 def test_container_row_keeps_row_arguments_and_declared_runtime():
-    row = dispatch._row(spec(), ["--units", "/mnt/shared/units.json"],
+    row = campaign_rows.prismabuild_row(spec(), ["--units", "/mnt/shared/units.json"],
                         mem_gb=48, timeout_s=600)
     assert row["argv"][:3] == ["python3", "-m", "tools.tessera_campaign_container"]
     cut = row["argv"].index("--")
@@ -162,6 +163,18 @@ assert "PRISMABUILD_ACTION_PROGRESS_TOKEN=minted-token" in argv
     assert completed.returncode == 0, completed.stderr
 
 
+def test_host_launcher_validates_with_the_package_spec_contract():
+    """One owner: the launcher runs the planners' contract, loaded by path."""
+    from prismaquant import campaign_container_spec as contract
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    assert (Path(runner.validate_container.__code__.co_filename).resolve()
+            == Path(contract.__file__).resolve())
+    for name in ("READER_CONTEXT_ENV", "SAFE_PATH_ENV", "CHECKOUT_COMMIT_ENV",
+                 "BOUNDED_CAPTURE_ENV", "GPU_RUNTIME_FLAGS", "DEFAULT_GPU_RUNTIME"):
+        assert getattr(runner, name) == getattr(contract, name), name
+
+
 def test_host_progress_names_match_the_container_reporter():
     """Forwarded names and the in-container writer remain one PB contract."""
 
@@ -183,13 +196,13 @@ def test_spec_refuses_mounts_that_hide_the_sealed_source(tmp_path, target):
     path = tmp_path / "spec.json"
     path.write_text(json.dumps(data))
     with pytest.raises(RuntimeError, match="workspace|canonical"):
-        dispatch.load_spec(path)
+        campaign_rows.load_spec(path)
 
 
 def test_host_rows_remain_direct():
     data = spec()
     del data["container"]
-    assert dispatch._row(data, [], mem_gb=40, timeout_s=60)["argv"] == [
+    assert campaign_rows.prismabuild_row(data, [], mem_gb=40, timeout_s=60)["argv"] == [
         "python3", "-u", "-m", "prismaquant.tessera_campaign"]
 
 
@@ -203,7 +216,7 @@ def test_materialization_row_preserves_its_subcommand_and_resource_demand(contai
         del data['container']
     arguments = ['run', '--plan', '/mnt/shared/plan.json', '--group', '0',
                  '--anchor-batch-size', '2']
-    row = dispatch._row(data, arguments, module='prismaquant.tessera_materialization',
+    row = campaign_rows.prismabuild_row(data, arguments, module='prismaquant.tessera_materialization',
                         mem_gb=48, timeout_s=600)
     command = ['python3', '-u', '-m', 'prismaquant.tessera_materialization', *arguments]
     if container:
