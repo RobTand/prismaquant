@@ -26,8 +26,8 @@ Tests: `tests/test_compressed_route_sweep_gate.py`.
 Re-stamped 2026-10-16 (review STD-018, lane card): `lane_shipcard.open_lane_shipcard`
 computes only the lane's build block and opens the card through `open_shipcard`,
 so the card and its model identity are built once. `open_shipcard` resolves the
-build claims and the lane (`_resolved_build`) before it seals weight content, so a
-refused open writes neither `weight_content_manifest.json` nor a card. Opened
+build claims and the lane (`_resolved_build`) before it seals weight content, so
+those refusals write neither `weight_content_manifest.json` nor a card. Opened
 card bytes are unchanged. Tests: `tests/test_shipcard_slot_contract.py`,
 `tests/test_lane_gate_recording.py`.
 

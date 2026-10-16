@@ -1568,8 +1568,8 @@ def _assemble_shipcard(
 def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False):
     """Seal finished weight content and write a fresh canonical shipcard.
 
-    The build claims and lane resolve before anything is written, so a refused
-    card leaves the artifact directory as it found it.
+    The build claims and lane resolve before anything is written. Conflicting
+    build or lane claims therefore leave the artifact directory untouched.
     """
     root = Path(model_dir)
     path = Path(shipcard_path) if shipcard_path is not None else root / SHIPCARD_FILENAME
