@@ -70,3 +70,6 @@ Cells belong to Tessera #689. Absent cells never block honest prices.
 The 42 historical gamut rungs do not define the full legal domain.
 See `docs/measurements/glm-full-domain-acquisition-2026-09-13.md:123-127`.
 This packet covers the 14 requested rows only.
+
+The October 9 packet recorded no price row for these requested rungs. That is
+the state retained here; live campaign outputs were not reconciled.
