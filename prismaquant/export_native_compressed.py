@@ -1944,8 +1944,11 @@ def _compute_nvfp4_joint_global(
     (max across siblings). Return a dict mapping each sibling's qname
     to the shared global_real tensor.
 
-    ``levers`` is the recipe the siblings render under; every caller
-    names it explicitly."""
+    ``levers`` is the recipe the siblings render under.  The resident and
+    streamed cache fills pass their recorded recipe and export passes
+    ``_export_render_options()`` (that same record under match-render-scale),
+    so the global a sibling is rendered on is the one its shipped codes and
+    FP8 block scales are re-derived under."""
     # Bucket siblings by (parent_prefix, kind). Missing siblings are
     # OK — vLLM's loader handles partial fusion fine.
     groups: dict[str, list[tuple[str, nn.Linear]]] = {}
@@ -3457,7 +3460,7 @@ def _materialize_tensors_inmemory(
             active_cache = _inline_expert_caches.get(qname)
 
             # M2: joint globals + re-derive below run under the render's
-            # recorded NVFP4 scale rule (see _packed_expert_render_scale_rule).
+            # recorded recipe (``_export_render_options`` of the active cache).
             packed_render_options = _export_render_options(active_cache)
             per_expert_joint: list[torch.Tensor | None] = [None] * E
             if fmt == "NVFP4" and len(proj_split) > 1:

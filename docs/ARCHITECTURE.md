@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-16: the streamed dense fill derives fused-sibling NVFP4 joint
+globals from the cache's recorded recipe, like the resident fill and both
+export pre-passes; the AURA anchor renderer and the MTP fill share that code.
+Before, it used the builder's ambient recipe (`static_6` under a JSO record), so
+export re-derived those siblings' codes and FP8 scales against a global up to
+1.5x larger. On the CPU fixture (1.5x) 821-868 of 1,024 bf16 elements per
+sibling changed; under the matching global, export reproduced every element.
+Streamed JSO caches with fused NVFP4 siblings built before this change carry
+the old globals and must be re-rendered; their metadata cannot tell them apart.
+
 Re-stamped 2026-10-16: every native numerical function takes
 `NativeRenderLevers` as a required keyword. `native_render_codec`, batched
 GPTQ, GGUF GPTQ fields and the fused-kernel packer resolve no recipe and read
@@ -27076,14 +27086,14 @@ shipping it. CB artifacts record the manifest and acknowledgement in `quant_conf
 GGUF records it in metadata. Unstamped production selections follow the existing gates
 unchanged (`research_cost_acceptance.enforce_research_export_acknowledgement`).
 
-**M19 — export honours the render's scale rule.** `_export_match_render_scale_rule`
-`:2130-2147` reads the cache's `levers["nvfp4_scale_rule"]` and re-derives NVFP4 codes under
-*that* rule rather than the entry default `static_6`, making the re-quant of the cache's bf16
-dequant near-idempotent; `PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE` **defaults ON**
-(`:2143`). Packed companion `_packed_expert_render_scale_rule` `:2150-2177` — without it,
-joint_mse-rendered experts re-derived under `static_6` flipped 43% of packed bytes. Residual
-gap: joint scale *levels* are not in the lever dict, so a non-default
-`PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS` must match between cache-build and export.
+**M19 — export honours the render's recipe.** `_export_render_options()` returns the
+cache's complete recorded `NativeRenderLevers` and re-derives NVFP4 codes under *that* recipe
+(scale rule, joint scale levels, global grid and span) rather than the entry default `static_6`,
+making the re-quant of the cache's bf16 dequant near-idempotent;
+`PRISMAQUANT_NVFP4_EXPORT_MATCH_RENDER_SCALE` **defaults ON**. Packed experts re-derive under
+the same recorded recipe — without it, joint_mse-rendered experts re-derived under `static_6`
+flipped 43% of packed bytes. The fused-sibling joint global is derived from that record by
+the resident fill, the streamed fill and both export pre-passes (2026-10-16).
 `_pack_production_cached_2d` `:2180-2279` re-packs only — no re-run of GPTQ/scale-sweep, which
 would measure a different artifact.
 

@@ -142,18 +142,16 @@ def _render_dense_layer(
     ``_store_rendered_weight_entry``.
     """
     from prismaquant.decision_units import fused_group_key
-    from prismaquant.export_native_compressed import (
-        _compute_nvfp4_joint_global,
-        _export_render_options,
-    )
+    from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
     from prismaquant.production_weight_cache import (
         _render_levers_input_global_scale_policy,
     )
 
-    # The A-side scale policy this stream was resolved under, from the same
-    # levers the resident fill stamps it in (#227): the streamed and resident
-    # renders must price identically, so neither may re-read the environment
-    # per layer.
+    # The recorded recipe and the A-side scale policy this stream was resolved
+    # under, from the same levers the resident fill stamps (#227): the streamed
+    # and resident renders must price identically, so neither may re-read the
+    # environment per layer.
+    render_options = NativeRenderLevers.from_record(levers)
     stream_score_policy = _render_levers_input_global_scale_policy(levers)
     if not retain_rendered and consume_render is None:
         raise ValueError(
@@ -185,14 +183,16 @@ def _render_dense_layer(
 
     # Joint fused-sibling NVFP4 global (max across q/k/v or gate/up). Restricted
     # to this layer's non-BF16 dense qnames; siblings are co-resident. The
-    # synthetic all-NVFP4 assignment matches the resident derivation.
+    # synthetic all-NVFP4 assignment and the recorded recipe match the resident
+    # derivation and the export pre-pass, which re-derives the shipped codes
+    # under this same global.
     joint_globals: dict[str, torch.Tensor] = {}
     if needs_nvfp4:
         joint_globals = _compute_nvfp4_joint_global(
             model,
             {q: "NVFP4" for q in joint_scope},
             profile=profile,
-            levers=_export_render_options(),
+            levers=render_options,
         )
 
     # Per-Linear calibrated max_abs, unified (max) across fused sibling groups
@@ -267,7 +267,7 @@ def _render_dense_layer(
                 _nvfp4_input_global_scale_from_max_abs,
             )
             export_scale = _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=stream_score_policy, levers=NativeRenderLevers.from_record(levers))
+                float(max_abs), policy=stream_score_policy, levers=render_options)
         row_weights = (
             fisher_rows.get(qname)
             if (fisher_rows is not None
@@ -300,7 +300,7 @@ def _render_dense_layer(
                 activations=X,
                 activation_max_abs=max_abs,
                 input_global_scale_policy=stream_score_policy,
-                levers=NativeRenderLevers.from_record(levers),
+                levers=render_options,
             )
             render_score_records[score_key] = render_score
             if not retain_rendered:
