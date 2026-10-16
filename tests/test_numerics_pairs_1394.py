@@ -114,7 +114,7 @@ def test_log_error_values_keep_their_floats(site):
 # 2. The MX E8M0 scale's power-of-two rounding.
 # ---------------------------------------------------------------------------
 MX_SITES = [
-    pytest.param("prismaquant.native_render_codec._mx_rounded_amax_power2",
+    pytest.param("prismaquant.native_render_codec.mx_rounded_amax_power2",
                  id="prismaquant.export_native_compressed._mx_rounded_amax_power2"),
     "prismaquant.format_registry._mx_rounded_amax_power2",
 ]
