@@ -5,7 +5,8 @@ recipe. Each now binds or calls ``prismaquant.tensor_digests``. The outcomes
 of the pre-move code on every input here (the returned digest or identity,
 key order included, or the exception type, ``str()`` and chained cause) are
 frozen in ``fixtures/tensor_digests_1384_portable.json`` (``tests/golden_table.py``),
-and every call goes through the old site's name. The CPU rows were recorded
+and each call exercises its active consumer. The archived sample-parallel
+site replays its frozen outcomes through the tensor-digest owner. The CPU rows were recorded
 from main at 2cd57b53dc4 through PB action 733e778ebc78; the 94 CUDA rows
 were then checked against the pre-change functions on a GB10 in action
 e2b14fa8a90c. Every CUDA outcome matched its corresponding CPU row. The

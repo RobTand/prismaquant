@@ -4345,7 +4345,7 @@ import no lane module. The Tessera lane's `route.census` and `route.trace`
 fill and replay code moves unchanged into `prismaquant/tessera_shipcard.py`,
 and the plugin registers the replays (`shipcard_slot_verifiers`) and the
 `fill-route-census` and `fill-route-trace` commands (`shipcard_cli_commands`).
-`shipcard.LANE_SLOT_VERIFIERS` keeps only the replays core owns
+`shipcard_slots.CORE_LANE_SLOTS` keeps only the replays core owns
 (`route.sweep`), and `shipcard.lane_slot_verifiers()` is the merged view
 every check reads. The rate axis, the uniform control's block schema, the
 checkpoint's `quant_method` and the route-histogram obligation are lane-spec
@@ -19373,7 +19373,7 @@ vocabulary** (§7.1; RobTand/prismaquant#162 closed). `shipcard.ALL_SLOTS` and
 `shipcard.LANE_SCOPED_SLOTS` are no longer two enumerated tuples: the
 vocabulary is every `shipcard_slot` any `lane_specs/<lane>.json` declares,
 union the base set, and each derived slot names its replay in
-`shipcard.LANE_SLOT_VERIFIERS`. `route.census`'s entry is the #136
+`shipcard_slots.CORE_LANE_SLOTS`. `route.census`'s entry is the #136
 priced-vs-served replay, dispatched through the registry. A lane that declares
 a slot with no verifier is REFUSED at parse time, the same way
 `LaneGate.from_dict` refuses a null slot with no `unrecorded_reason` -- so a
@@ -28076,7 +28076,7 @@ one** — the GGUF lane declares no `native_export.graph` gate and is still
 required to close that slot. The vocabulary is derived from every lane spec
 (`shipcard.all_slots`), and each derived slot names the verifier
 `shipcard.verify` replays for it (`shipcard.lane_slot_verifiers()`: core's
-`LANE_SLOT_VERIFIERS` plus the replays a lane plugin registers, PQ #1553;
+`shipcard_slots.CORE_LANE_SLOTS` plus the replays a lane plugin registers, PQ #1553;
 dispatched by registry, #162 closed). The fourth link is `publish_artifact`, above.
 
 One lane holds all four links, and it is Tessera. Native
@@ -30521,7 +30521,7 @@ plus a plugin module.
   (`shipcard_slot_verifiers`, returning `{slot: replay}`) and the commands
   that fill it (`shipcard_cli_commands`, which adds subparsers to
   `python -m prismaquant.shipcard_cli`). `shipcard.lane_slot_verifiers()`
-  merges core's own `LANE_SLOT_VERIFIERS` (the replays of a data-only lane's
+  merges core's own `shipcard_slots.CORE_LANE_SLOTS` (the replays of a data-only lane's
   slots, today `route.sweep`) with every plugin's, and refuses a slot two
   owners claim. A plugin replay takes `(slot, record, *, card, model_dir)`
   and owns the slot's whole verdict, so `verify` routes it past the generic

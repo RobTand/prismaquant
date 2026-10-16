@@ -245,7 +245,7 @@ def test_a_lane_declaring_a_slot_the_shipcard_has_no_name_for_is_REFUSED(
     """Not filtered away. #162 closed the roster but kept the refusal.
 
     `lane_gate_slots` admits a declared slot that is in the base set or names
-    a verifier in `shipcard.LANE_SLOT_VERIFIERS`. Dropping any other slot
+    a verifier in `shipcard_slots.CORE_LANE_SLOTS`. Dropping any other slot
     would mean the lane declared a gate, the card never opened it, and
     `verify` passed an artifact that closed nothing -- the same silence one
     link earlier that #119 reported. So it raises, and the refusal names the
@@ -457,7 +457,6 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
     test edit.
     """
     import prismaquant.shipcard as shipcard_mod
-    from prismaquant import shipcard_slots
 
     base = set(REQUIRED_SLOTS) | set(shipcard_mod.OPTIONAL_SLOTS)
     derived = sorted({
@@ -474,7 +473,7 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
         f"lane-declared slot(s) {missing} name no verifier: a record with "
         "passed=True would close them on the generic checks alone. Register "
         "the verifier with the lane's plugin (shipcard_slot_verifiers), or in "
-        "shipcard.LANE_SLOT_VERIFIERS for a data-only lane")
+        "shipcard_slots.CORE_LANE_SLOTS for a data-only lane")
     for slot in derived:
         assert callable(verifiers[slot]), f"{slot}: verifier is not callable"
 
@@ -483,7 +482,7 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     """`route.census` refuses silence, and refuses a wrong census.
 
     The replay is the #136 priced-vs-served comparison, dispatched through
-    `shipcard.LANE_SLOT_VERIFIERS`: a bare `passed=True` record with no
+    `shipcard_slots.CORE_LANE_SLOTS`: a bare `passed=True` record with no
     carried census is refused, a receipt whose records replay to agreement
     closes the slot, and a `passed=true` over substitute-decoder records is
     refused at publication.

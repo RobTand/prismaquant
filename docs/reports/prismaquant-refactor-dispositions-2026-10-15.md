@@ -419,3 +419,29 @@ The gold verifier also drops two unused context parameters and migrates its
 callers. The initial failed regressions, the child qualification and the composed
 follow-up remain distinct evidence in the verification report. Full combined
 Claude re-review and final branch qualification are still required.
+
+
+### Claude depth review corrections, 2026-10-16
+
+The proposal pointer in the introduction names the original authoring copy.
+The delivered source is [`docs/reviews/prismaquant-architecture-review-20261014.html`](../reviews/prismaquant-architecture-review-20261014.html),
+SHA-256 `df542280ade842f6f61d0349664ab22fe0410591a89fb532989d06a189ba3ca5`.
+The authoring copy is not part of the delivered tree.
+
+J1 also moved quantum identity authentication to dispatch-time record loading.
+An edited record, a foreign schema, or a quantum ID that does not name its layer
+now refuses before publication. The dispatcher reports the offending record
+path; mixed-set refusals name the records directory. This is a deliberate
+fail-closed tightening, in addition to moving record ownership.
+
+T2 parses planning arguments through the execution parser. Malformed row flags
+refuse before publication, replacing the earlier predicate's permissive answer.
+Planning raises a contextual exception instead of exiting through argparse;
+shared flags name their spec path and class flags name both spec and class.
+The execution CLI retains argparse's normal exit and usage behavior.
+
+The deferred checkpoint ledger accepts only bounded builtin, tensor-free
+graphs. The depth review's requested deferred tensor snapshot therefore becomes
+a refusal test at that boundary. Direct unit encoding still accepts tensors;
+its byte and mutation tests now compare the actual encoder with an independent
+pickle-envelope oracle, rather than comparing the file writer with itself.
