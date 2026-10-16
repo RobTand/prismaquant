@@ -49,9 +49,9 @@ from .shipcard import (
     build_shipcard,
     lane_gate_slots,
     load_shipcard,
+    open_shipcard,
     required_slots,
     verify,
-    write_shipcard,
 )
 
 
@@ -78,9 +78,7 @@ def lane_spec_for_lane(lane: str) -> LaneSpec:
         ) from None
 
 
-def _build_lane_card(
-    root: Path, spec: LaneSpec, build: Mapping[str, Any] | None,
-) -> dict[str, Any]:
+def _lane_build(spec: LaneSpec, build: Mapping[str, Any] | None) -> dict[str, Any]:
     # The EXPORT_CONTAINER spelling, not the spec-file id: the card records
     # what the operator set and what `canonical_export_lane` speaks.
     #
@@ -94,7 +92,7 @@ def _build_lane_card(
     # control nothing. A caller that already declared the key keeps it.
     build_payload = dict(build or {})
     build_payload.setdefault("export_container", spec.export_container)
-    return build_shipcard(root, build=build_payload, lane=spec.export_container)
+    return build_payload
 
 
 def open_lane_shipcard(
@@ -122,9 +120,7 @@ def open_lane_shipcard(
             "discard every slot the serve lane has filled. Pass --overwrite "
             "only when the artifact's bytes changed"
         )
-    card = _build_lane_card(root, spec, build)
-    from .shipcard import open_shipcard
-    open_shipcard(root, build=card["build"], lane=spec.export_container,
+    open_shipcard(root, build=_lane_build(spec, build), lane=spec.export_container,
                   shipcard_path=path, overwrite=overwrite)
     return path
 
@@ -150,7 +146,7 @@ def preflight_lane_shipcard(
     path = Path(shipcard_path) if shipcard_path else root / SHIPCARD_FILENAME
     provisional = shipcard_path is None and not (path.exists() or path.is_symlink())
     if provisional:
-        card = _build_lane_card(root, spec, build)
+        card = build_shipcard(root, build=_lane_build(spec, build), lane=spec.export_container)
     else:
         if build is not None:
             raise LaneShipcardError(

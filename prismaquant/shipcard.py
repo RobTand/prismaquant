@@ -1483,8 +1483,14 @@ def build_shipcard(
     ``open_shipcard`` to persist the content claim and canonical card together.
     """
     root = Path(model_dir)
-    from prismaquant.export_output_safety import directory_publication_target
+    build_payload, resolved_lane = _resolved_build(root, build, lane)
+    return _assemble_shipcard(root, build_payload, resolved_lane, attested_weight_stats)
 
+
+def _resolved_build(
+    root: Path, build: Mapping[str, Any] | None, lane: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    """The build block with its recipe's replay claim, and the one lane it names."""
     build_payload = dict(build or {})
     from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
 
@@ -1499,7 +1505,17 @@ def build_shipcard(
                 if key in build_payload and build_payload[key] != value:
                     raise ValueError(f"prefill frontier replay build.{key} differs from recipe")
             build_payload.update(claim)
-    resolved_lane = artifact_lane({"lane": lane, "build": build_payload}, model_dir=root)
+    return build_payload, artifact_lane({"lane": lane, "build": build_payload}, model_dir=root)
+
+
+def _assemble_shipcard(
+    root: Path,
+    build_payload: dict[str, Any],
+    resolved_lane: str | None,
+    attested_weight_stats: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    from prismaquant.export_output_safety import directory_publication_target
+
     slots = list(REQUIRED_SLOTS) + [
         slot for slot in lane_gate_slots(resolved_lane) if slot not in REQUIRED_SLOTS
     ]
@@ -1550,11 +1566,16 @@ def build_shipcard(
 
 
 def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False):
-    """Seal finished weight content and write a fresh canonical shipcard."""
+    """Seal finished weight content and write a fresh canonical shipcard.
+
+    The build claims and lane resolve before anything is written, so a refused
+    card leaves the artifact directory as it found it.
+    """
     root = Path(model_dir)
     path = Path(shipcard_path) if shipcard_path is not None else root / SHIPCARD_FILENAME
     if (path.exists() or path.is_symlink()) and not overwrite:
         raise ValueError("a ship record already exists; reopening would discard its measurements")
+    build_payload, resolved_lane = _resolved_build(root, build, lane)
     attestation = None
     if tuple(root.glob("*.safetensors")):
         attestation = weight_stat_attestation(root)
@@ -1564,7 +1585,7 @@ def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overw
             raise ValueError("weight content differs from the immutable export manifest")
         if expected is None:
             _write_weight_content_manifest(root, observed)
-    card = build_shipcard(root, build=build, lane=lane, attested_weight_stats=attestation)
+    card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
     write_shipcard(path, card)
     return card
 

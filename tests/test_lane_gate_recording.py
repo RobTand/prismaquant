@@ -618,6 +618,7 @@ def test_preflight_without_card_reports_every_slot_without_writes(
     tmp_path, monkeypatch, capsys,
 ):
     from prismaquant import lane_shipcard as cli
+    from prismaquant import shipcard
 
     root = _artifact(tmp_path)
     before = {p.name: p.read_bytes() for p in root.iterdir()}
@@ -625,7 +626,10 @@ def test_preflight_without_card_reports_every_slot_without_writes(
     def no_write(*args, **kwargs):
         pytest.fail("preflight attempted to write a shipcard")
 
-    monkeypatch.setattr(cli, "write_shipcard", no_write)
+    # The lane module writes only through open_shipcard; the card module's
+    # writer is the one every open reaches.
+    monkeypatch.setattr(cli, "open_shipcard", no_write)
+    monkeypatch.setattr(shipcard, "write_shipcard", no_write)
     assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "refused"

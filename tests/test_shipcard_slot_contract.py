@@ -121,3 +121,43 @@ def test_every_core_slot_policy_lives_with_the_slot_owner():
         shipcard_slots.CORE_LANE_SLOTS)
     assert {name: registry[name].policy.__module__ for name in core} == {
         name: "prismaquant.shipcard_slots" for name in core}
+
+
+@pytest.fixture
+def tessera_artifact(tmp_path):
+    root = tmp_path / "exported"
+    root.mkdir()
+    (root / "config.json").write_text(json.dumps({"model_type": "qwen3"}))
+    (root / "model-00001-of-00001.safetensors").write_bytes(b"weights")
+    return root
+
+
+def test_lane_card_computes_the_model_identity_once(tessera_artifact, monkeypatch):
+    from prismaquant.lane_shipcard import open_lane_shipcard
+
+    real = shipcard.compute_model_sha
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shipcard, "compute_model_sha", counted)
+    card = load_shipcard(open_lane_shipcard(tessera_artifact, "tessera"))
+    assert len(calls) == 1
+    assert card["model_sha"] == real(tessera_artifact)
+    assert card["build"]["export_container"] == "tessera"
+
+
+@pytest.mark.parametrize("opener", ["lane", "card"])
+def test_conflicting_lane_facts_refuse_before_any_artifact_write(tessera_artifact, opener):
+    from prismaquant.lane_shipcard import open_lane_shipcard
+
+    before = {path.name: path.read_bytes() for path in tessera_artifact.iterdir()}
+    conflict = {"export_container": "compressed-tensors"}
+    with pytest.raises(ValueError, match="artifact lane facts conflict"):
+        if opener == "lane":
+            open_lane_shipcard(tessera_artifact, "tessera", build=conflict)
+        else:
+            open_shipcard(tessera_artifact, build=conflict, lane="tessera")
+    assert {path.name: path.read_bytes() for path in tessera_artifact.iterdir()} == before
