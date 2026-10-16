@@ -130,9 +130,9 @@ import os
 from pathlib import Path
 from pytest import MonkeyPatch
 from tessera import image_metadata as image
-from prismaquant.tessera_route_receipt import _check_runtime_image_declaration, TesseraRouteReceiptError
-from prismaquant import tessera_shipcard
-from test_tessera_scoped_route_receipt import fixture, make
+from prismaquant.tessera_route_receipt import (
+    _check_runtime_image_declaration, check_scoped_route_receipt, TesseraRouteReceiptError)
+from test_tessera_scoped_route_receipt import fixture
 requested = 'example/runtime@sha256:' + 'a' * 64
 other = 'example/runtime@sha256:' + 'b' * 64
 record = {'schema': 'tessera.runtime_image/1', 'refused': False,
@@ -152,10 +152,9 @@ assert declaration == before
 with MonkeyPatch.context() as patch:
     for structure in ('dense', 'routed_moe'):
         data = fixture(Path.cwd(), patch, structure=structure)
-        filled = make(data)
-        assert filled['passed'] is True
-        assert tessera_shipcard.verify_route_census_record('route.census', filled,
-            card={'build': data[2]}, model_dir=data[3]) == []
+        verdict = check_scoped_route_receipt(data[0], data[1], build=data[2], model_dir=data[3])
+        assert verdict['n_records'] == 2
+        assert verdict['served_routes'] and verdict['served_decoders']
 for updates, target, reason in (
     ({'refused': True, 'reason': 'image_absent'}, requested, 'image_declaration_refused'),
     ({'schema': 'unknown'}, requested, 'image_declaration_unreadable'),
