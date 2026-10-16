@@ -389,7 +389,7 @@ def test_atomic_unit_is_not_acknowledged_before_directory_fsync(
             assert release.wait(WAIT)
         original(fd)
 
-    encoded = _published_checkpoint_bytes(tmp_path, "unit", "a" * 64, {"value": 1})
+    encoded = _expected_unit_bytes("unit", "a" * 64, {"value": 1})
     monkeypatch.setattr(os, "fsync", fsync)
     pub = _pool_publisher(engine, budget=4096)
     path = tmp_path / "unit.bin"
