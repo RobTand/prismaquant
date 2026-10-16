@@ -26,6 +26,16 @@ def _sha(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def _launch(image):
+    """The launcher record Tessera's resolver emits for ``image`` pinned and
+    present, typed here; test_the_typed_launch_record_is_the_producers checks it."""
+    return {"schema": "tessera.runtime_image/1", "requested": image,
+            "requested_tag": None, "pinned": image, "required": image,
+            "gated": True, "present": True, "repo_digests": [image],
+            "resolved_digest": image.rsplit("@", 1)[1], "resolved_reference": image,
+            "local_id": "fixture", "refused": False, "reason": "pinned", "fix": None}
+
+
 def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
     owner = OWNER if structure == "routed_moe" else "model.layers.0.self_attn.o_proj"
     target = {"platform": "sm_121", "runtime_image": IMAGE,
@@ -87,14 +97,9 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
               "checkpoint_sidecars": {"config.json": _sha(binding["config_json"]),
                                       "tessera_serving_manifest.json": _sha(binding["manifest_json"])},
               "records": {}, "record_owner": {}}
-    launch = {"schema": "tessera.runtime_image/1", "requested": IMAGE,
-              "requested_tag": None, "pinned": IMAGE, "required": IMAGE,
-              "gated": True, "present": True, "repo_digests": [IMAGE],
-              "resolved_digest": IMAGE.rsplit("@", 1)[1], "resolved_reference": IMAGE,
-              "local_id": "fixture", "refused": False, "reason": "pinned", "fix": None}
     census["runtime_image_declaration"] = image_metadata.declared_reference(
         IMAGE, env={image_metadata.CENSUS_IMAGE_ENV: IMAGE,
-                    image_metadata.CENSUS_DECLARATION_ENV: json.dumps(launch)})
+                    image_metadata.CENSUS_DECLARATION_ENV: json.dumps(_launch(IMAGE))})
     for phase, m in (("decode", 1), ("prefill", 64)):
         census["records"][phase] = {module: {"kind": kind, "policy": "TESSERA_FP8:resident",
                                             "symbol": symbol, "decoder": decoder,
@@ -141,6 +146,24 @@ def make(data):
     return tessera_shipcard.make_route_census_record(tool="test", model_sha=shipcard.compute_model_sha(model_dir),
         route_records=census, priced_routes=[], substitute_decoders=[],
         binding=binding, build=build, model_dir=model_dir)
+
+
+def test_the_typed_launch_record_is_the_producers():
+    """The census fixture types Tessera's launcher record; the producer emits it.
+
+    Where Tessera's serving package is installed beside the tests (never from
+    production), its resolver runs on the same pinned, present image, and its
+    launcher export must declare the same reference the fixture declares.
+    """
+    runtime_image = pytest.importorskip("tessera.serving.runtime_image")
+    launch = runtime_image.resolve(
+        IMAGE, contract={"versions": {"default_serve_image": IMAGE}},
+        inspector=lambda _: {"present": True, "repo_digests": [IMAGE], "local_id": "fixture"})
+    assert launch == _launch(IMAGE)
+    typed = {image_metadata.CENSUS_IMAGE_ENV: IMAGE,
+             image_metadata.CENSUS_DECLARATION_ENV: json.dumps(_launch(IMAGE))}
+    assert (image_metadata.declared_reference(IMAGE, env=runtime_image.container_env(launch))
+            == image_metadata.declared_reference(IMAGE, env=typed))
 
 
 @pytest.mark.parametrize("structure", ["dense", "routed_moe"])
