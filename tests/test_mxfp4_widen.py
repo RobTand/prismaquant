@@ -6,9 +6,9 @@ carried byte-identically. Both halves are pinned exhaustively where the input
 space allows it (all 256 byte codes, all 256 scale codes) rather than sampled,
 because "exact" is not a statistical property.
 
-Real-checkpoint arms run only when the DSv4-Flash source is present; they read
-a handful of small tensor slices from the safetensors headers and never load a
-layer. Skipped otherwise so the suite stays hermetic on CI.
+Real-checkpoint arms run only when the DSv4-Flash source is present. They load
+complete selected weight and scale tensors, then decode the first 16 rows.
+They do not load a whole layer and are skipped when that source is absent.
 """
 from __future__ import annotations
 
