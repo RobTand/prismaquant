@@ -1172,11 +1172,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     # Load the render cache before tokenizer/model construction.
+    dtype = _dtype_from_name(args.dtype)
     production_cache = None
     pristine_cache_dir: object = "__unset__"
     if args.production_weight_cache:
+        from prismaquant.streamed_model_identity import (
+            build_source_model_binding, resolve_source_checkpoint_path,
+        )
+
         with Path(args.production_weight_cache).open("rb") as fh:
             production_cache = pickle.load(fh)
+        args.model = str(resolve_source_checkpoint_path(
+            args.model, local_files_only=args.local_files_only,
+        ))
+        expected_source_binding = build_source_model_binding(
+            args.model, dtype=dtype, local_files_only=args.local_files_only,
+        )
+        production_cache.require_source_binding(
+            expected_source_binding, where="assignment validation cache attachment",
+        )
         if args.production_cache_dir_override:
             # Remember the as-pickled cache_dir: if the M4 lazy gap-fill
             # re-pickles this cache, the session's dir override must not be
@@ -1200,7 +1214,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "validate_assignments_kl requires a CUDA-resident model. CPU/offload "
             f"device_map={args.device_map!r} is not allowed."
         )
-    dtype = _dtype_from_name(args.dtype)
     staged, cleanup = stage_multimodal(args.model)
     if args.work_dir:
         work_root = Path(args.work_dir)

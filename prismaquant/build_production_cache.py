@@ -58,6 +58,10 @@ from prismaquant.production_weight_cache import (
     fill_production_weight_cache,
 )
 from prismaquant.calibration_data import load_calibration
+from prismaquant.streamed_model_identity import (
+    build_source_model_binding,
+    resolve_source_checkpoint_path,
+)
 
 
 def _load_col_weights(path, formats) -> dict | None:
@@ -681,10 +685,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             levers[name] = False
 
     dtype = _dtype_from_name(args.dtype)
+    args.model = str(resolve_source_checkpoint_path(args.model))
 
     if args.streaming:
         return _run_streaming(args, formats, levers, dtype)
 
+    source_digest_cache = None
+    if args.cache_dir:
+        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
+        source_digest_cache = Path(args.cache_dir) / "source_identity_cache.json"
+    source_binding = build_source_model_binding(
+        args.model, dtype=dtype, digest_cache_path=source_digest_cache,
+    )
     staged, cleanup = stage_multimodal(args.model)
     device = require_cuda_hot_path("build_production_cache")
     print(f"[build-prod-cache] device={device}", flush=True)
@@ -824,6 +836,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             recache_microbatch_size=args.recache_microbatch_size,
             h_detail_dir=args.h_detail_dir,
             col_weights=col_weights,
+            source_binding=source_binding,
         )
         # R14: stamp the calibration identity onto the cache so every artifact
         # derived from it (production_render_cost's cost table) can be checked

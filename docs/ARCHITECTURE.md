@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, production-cache source
+binding. Source-aware resident and streamed producers record the original
+checkpoint's content identity and effective load dtype in cache metadata.
+Resident directory reuse checks this binding before reading shards, including
+packed-only builds. Native export, assignment-KL validation and recache require
+the binding before attaching an independent cache. Remote references resolve
+once to the checkpoint used for both binding and model loading. Source-less
+internal live-model calls remain available; this contract does not identify
+arbitrary mutations after checkpoint loading. Other source-aware metric intake
+is being audited separately; these checks do not qualify a served artifact.
+
 As of: 2026-10-17, architecture audit continuation, C-008. A PrismaSnap
 null-floor receipt requires distinct arm names, student-result digests and
 splice-receipt digests before it can relax the fold-fidelity threshold. The
@@ -19578,9 +19589,9 @@ through the same validator, and the match path rewrites nothing — so the guard
 cannot launder its own confession on the next run. The record is history,
 never render input: it is excluded from the comparison, so a guarded directory
 carrying it still resumes cleanly. Warn-and-admit stays, since refusing would
-strand every existing cache. No downstream consumer is wired: nothing outside
-`production_weight_cache.py` reads `render_identity.json`, so no shipcard or
-receipt echoes the admission; the sidecar is the record. Gates:
+strand every existing cache. The 2026-10-17 source-binding update also carries
+this history into the pickle and warns through `require_source_binding` at
+independent attachment. It does not add a shipcard or receipt field. Gates:
 `tests/test_production_cache_render_identity.py` (7 new: a hand-built v1
 sidecar resumes, pre-guard records while fresh does not, the append merge and
 the base adoption preserve, no false mismatch, malformed refuses).
@@ -26885,6 +26896,23 @@ resident fill refuses a directory carrying that section, and the same streamed b
 and packed appends add their sections beside it. Re-running a streamed build, after a crash
 too, needs a fresh `--cache-dir`. Directories streamed builds wrote before this claim carry
 no section, so a resident fill still admits them on trust as pre-guard directories.
+
+Source-aware producers also bind the original checkpoint's safetensors, source
+metadata and effective load dtype through `prismaquant.source_model_binding.v1`.
+The existing checkpoint identity owner uses mutation-sensitive stat reuse for
+this binding, even in dev mode; recorded-provenance callers keep their existing
+policy. The resident base sidecar owns the binding for dense and packed-only
+builds, and each exported pickle carries it in `metadata["source_binding"]`.
+A bound directory cannot be resumed without a binding, and an older guarded
+base sidecar without one requires a fresh directory. A no-sidecar or append-only
+legacy adoption retains `pre_guard_admission` in both sidecar and pickle and
+warns on attachment: its original source remains unverified. This preserves the
+explicit trust exception without describing old shards as byte-verified.
+Independent native export, assignment-KL validation and recache compare the
+current source binding before cache relocation, prefetch or weight installation.
+Unbound independent pickles refuse. Exact union uses its existing metadata
+agreement rule to preserve a shared binding or refuse mismatched/missing values.
+Packed fit-corpus exemptions and MTP append identities remain separate contracts.
 
 Render mechanisms are a registry with declared ordering semantics, not a lever string parsed in
 spelling order (`render_score.py:188-260`): each `RenderMechanismSpec` declares `operation`,

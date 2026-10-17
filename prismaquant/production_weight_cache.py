@@ -388,6 +388,37 @@ class ProductionWeightCache:
         elif self.activation_scales is None and self.activation_max_abs is not None:
             self.activation_scales = self.activation_max_abs
 
+    def require_source_binding(self, expected_binding, *, where: str) -> None:
+        """Require this pickle's producer source before independent attachment."""
+        from .streamed_model_identity import validate_source_model_binding
+
+        expected = validate_source_model_binding(expected_binding, where=where)
+        metadata = self.metadata or {}
+        if "source_binding" not in metadata:
+            raise ValueError(
+                f"{where}: production cache has no source binding; rebuild "
+                "the production cache from the current source into a fresh --cache-dir"
+            )
+        stored = validate_source_model_binding(
+            metadata["source_binding"], where=f"{where} production cache",
+        )
+        difference = first_identity_difference(stored, expected)
+        if difference is not None:
+            field, cached, current = difference
+            raise ValueError(
+                f"{where}: production cache source binding differs at {field!r}: "
+                f"cached={identity_value_for_error(cached)} "
+                f"current={identity_value_for_error(current)}; rebuild the "
+                "production cache into a fresh --cache-dir"
+            )
+        if PRE_GUARD_ADMISSION_SIDECAR_KEY in metadata:
+            validate_pre_guard_admission(metadata[PRE_GUARD_ADMISSION_SIDECAR_KEY])
+            print(
+                f"[prod-cache] WARNING: {where} uses pre_guard_admission "
+                "shards admitted on trust; their original source is unverified.",
+                flush=True,
+            )
+
     def enable_lru(self, max_bytes: int) -> None:
         """Bound the in-memory tensor footprint to ``max_bytes`` via LRU
         eviction.  Required for very large disk-streamed caches (e.g.
@@ -4589,6 +4620,7 @@ def build_production_cache_render_identity(
     eligible_qnames: Iterable[str],
     render_formats_by_qname: Mapping[str, Sequence[str]],
     max_act_rows: int,
+    source_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the render identity a cache directory's shards were rendered under.
 
@@ -4669,6 +4701,8 @@ def build_production_cache_render_identity(
         "hooked_qnames": len(hooked),
         "rendered_pairs": rendered_pairs,
         "max_act_rows": rows,
+        **({"source_binding": dict(source_binding)}
+           if source_binding is not None else {}),
     }
 
 
@@ -4705,6 +4739,7 @@ def validate_production_cache_render_identity(
         PACKED_STREAMING_APPEND_SIDECAR_KEY,
     }
     admission_fields = {PRE_GUARD_ADMISSION_SIDECAR_KEY}
+    source_fields = {"source_binding"}
     # Not `set(raw) < base_fields`: that is a PROPER-subset test, so a
     # sidecar missing a base field but carrying an append section is
     # neither a subset nor an unknown-field case and would fall through
@@ -4712,7 +4747,7 @@ def validate_production_cache_render_identity(
     # got past this in practice -- but a field check should refuse for
     # the reason it names.
     if (
-        set(raw) - base_fields - append_fields - admission_fields
+        set(raw) - base_fields - append_fields - admission_fields - source_fields
         or not base_fields <= set(raw)
     ):
         raise ValueError(f"{where} has unsupported fields")
@@ -4753,13 +4788,13 @@ def validate_production_cache_render_identity(
     pairs = raw.get("rendered_pairs")
     if (
         not isinstance(pairs, list)
-        or not pairs
+        or (not pairs and "source_binding" not in raw)
         or any(not isinstance(pair, str) or "|" not in pair for pair in pairs)
         or list(pairs) != sorted(pairs)
     ):
         raise ValueError(
-            f"{where}.rendered_pairs must be a sorted nonempty "
-            '"qname|FMT" string list'
+            f"{where}.rendered_pairs must be a sorted "
+            '"qname|FMT" string list; empty requires source_binding'
         )
     _check_rendered_cache_destinations(pairs, where=where)
     rows = raw.get("max_act_rows")
@@ -4782,6 +4817,12 @@ def validate_production_cache_render_identity(
         "rendered_pairs": list(pairs),
         "max_act_rows": int(rows),
     }
+    if "source_binding" in raw:
+        from .streamed_model_identity import validate_source_model_binding
+
+        identity["source_binding"] = validate_source_model_binding(
+            raw["source_binding"], where=f"{where}.source_binding",
+        )
     # Append sections (#170) ride in the same sidecar but are owned by their
     # append writers, not by the base fill. The base fill neither writes nor
     # compares them; each append compare-or-writes its own section through
@@ -5773,7 +5814,7 @@ def _check_production_cache_render_identity(
     current: Mapping[str, object],
     *,
     progress: bool = True,
-) -> None:
+) -> dict[str, object]:
     """Enforce one rendering per cache directory (#146, extended by #170).
 
     The resume loop admits a unit as done by file presence alone, so without
@@ -5844,7 +5885,7 @@ def _check_production_cache_render_identity(
             sidecar_path,
             DIRECT_ASCII_INDENT2_LAX.encoded(publication_identity),
         ):
-            return
+            return publication_identity
         # Another fill published first. Read and compare that complete
         # identity below; never replace its claim with this fill's identity.
     try:
@@ -5871,6 +5912,12 @@ def _check_production_cache_render_identity(
             f"{STREAMED_FILL_SIDECAR_KEY!r}); the resident fill neither resumes "
             "nor adopts them — rebuild this directory (fresh --cache-dir) "
             "instead of mixing renders"
+        )
+    if "source_binding" in stored_raw and "source_binding" not in current_identity:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} has a source binding "
+            "but this fill supplied none; refusing source identity downgrade; "
+            "supply the original source binding or rebuild into a fresh --cache-dir"
         )
     base_fields = set(current_identity)
     stored_base_raw = {
@@ -5902,6 +5949,18 @@ def _check_production_cache_render_identity(
             - {PRE_GUARD_ADMISSION_SIDECAR_KEY}
         )
         if not stored_base_raw and stored_sections and not unknown:
+            if ("source_binding" in current_identity
+                    and PRE_GUARD_ADMISSION_SIDECAR_KEY not in stored_raw):
+                trusted = _pre_guard_trusted_shards(cache_dir_path)
+                if trusted:
+                    stored_raw[PRE_GUARD_ADMISSION_SIDECAR_KEY] = (
+                        build_pre_guard_admission(trusted)
+                    )
+                    print(
+                        "[prod-cache] WARNING: append-only source history is "
+                        "unverified; admitting existing shards on trust and "
+                        "recording pre_guard_admission.", flush=True,
+                    )
             try:
                 adopted = validate_production_cache_render_identity(
                     {**stored_raw, **current_identity},
@@ -5928,7 +5987,7 @@ def _check_production_cache_render_identity(
                 sidecar_path,
                 DIRECT_ASCII_INDENT2_LAX.encoded(adopted),
             )
-            return
+            return adopted
         raise ValueError(
             f"production cache directory {cache_dir_path} has an invalid "
             f"{RENDER_IDENTITY_SIDECAR_FILENAME}: missing base render "
@@ -5967,6 +6026,7 @@ def _check_production_cache_render_identity(
             "reusing on-disk shards",
             flush=True,
         )
+    return stored
 
 
 def claim_streamed_cache_directory(
@@ -6056,6 +6116,7 @@ def fill_production_weight_cache(
     recache_microbatch_size: int = 1,
     h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
+    source_binding: Mapping[str, object] | None = None,
 ) -> ProductionWeightCache:
     """End-to-end fill: collect activations, render production δw per
     (qname, fmt), return a `ProductionWeightCache`.
@@ -6078,6 +6139,10 @@ def fill_production_weight_cache(
         `render_assignment`. Render just these qnames (a stripe, a shard) while
         still hooking all of `qnames`, so the shard's bytes are the whole
         run's bytes. `None` renders everything in scope.
+      source_binding: optional original checkpoint/effective-dtype identity.
+        Source-aware producers supply it for directory reuse and independent
+        consumers require it before attachment. Source-less live-model callers
+        remain internal; mutations after checkpoint loading are not identified.
       levers: which production levers to enable (default: GPTQ with optional
         joint NVFP4 scale optimization when requested by the caller).
       recache_pass: when True, run a second calibration forward with the
@@ -6165,11 +6230,46 @@ def fill_production_weight_cache(
         }
         render_scope = "format-menu"
 
+    cache_dir_path: Path | None = None
+    directory_identity: dict[str, object] = {}
+    if cache_dir is not None and (qname_set or source_binding is not None):
+        cache_dir_path = Path(cache_dir)
+        cache_dir_path.mkdir(parents=True, exist_ok=True)
+        from prismaquant.perturbed_x_cache import calibration_data_hash
+
+        # #146: resume admits a unit as done by file presence alone, so a
+        # directory resumed under a different scope, include-file, lever
+        # string or calibration would silently mix units rendered under
+        # different conditions. Compare this call's render identity against
+        # the sidecar before any shard is read or written; refuse on mismatch.
+        directory_identity = _check_production_cache_render_identity(
+            cache_dir_path,
+            build_production_cache_render_identity(
+                render_scope=render_scope,
+                requested_formats=requested_formats,
+                levers=levers,
+                mechanism_plan=mechanism_plan,
+                calib_hash=calibration_data_hash(calib_ids),
+                eligible_qnames=eligible_qnames,
+                render_formats_by_qname=render_formats_by_qname,
+                max_act_rows=max_act_rows,
+                source_binding=source_binding,
+            ),
+            progress=progress,
+        )
+    source_metadata: dict[str, object] = (
+        {"source_binding": dict(source_binding)} if source_binding is not None else {}
+    )
+    if PRE_GUARD_ADMISSION_SIDECAR_KEY in directory_identity:
+        source_metadata[PRE_GUARD_ADMISSION_SIDECAR_KEY] = (
+            directory_identity[PRE_GUARD_ADMISSION_SIDECAR_KEY]
+        )
     if not qname_set:
         return ProductionWeightCache(
             weights={},
             levers=dict(levers),
             metadata={
+                **source_metadata,
                 "render_scope": render_scope,
                 "requested_formats": list(requested_formats),
                 "requested_entries": 0,
@@ -6209,31 +6309,6 @@ def fill_production_weight_cache(
     # render.  On a job that's 99%+ complete this drops activation
     # collection memory + compute by 99% — and lets a borderline-OOM
     # job finish on the same hardware.
-    cache_dir_path: Path | None = None
-    if cache_dir is not None:
-        cache_dir_path = Path(cache_dir)
-        cache_dir_path.mkdir(parents=True, exist_ok=True)
-        from prismaquant.perturbed_x_cache import calibration_data_hash
-
-        # #146: resume admits a unit as done by file presence alone, so a
-        # directory resumed under a different scope, include-file, lever
-        # string or calibration would silently mix units rendered under
-        # different conditions. Compare this call's render identity against
-        # the sidecar before any shard is read or written; refuse on mismatch.
-        _check_production_cache_render_identity(
-            cache_dir_path,
-            build_production_cache_render_identity(
-                render_scope=render_scope,
-                requested_formats=requested_formats,
-                levers=levers,
-                mechanism_plan=mechanism_plan,
-                calib_hash=calibration_data_hash(calib_ids),
-                eligible_qnames=eligible_qnames,
-                render_formats_by_qname=render_formats_by_qname,
-                max_act_rows=max_act_rows,
-            ),
-            progress=progress,
-        )
     render_score_sidecar_path: Path | None = (
         cache_dir_path / "render_scores.json"
         if cache_dir_path is not None else None
@@ -6822,6 +6897,7 @@ def fill_production_weight_cache(
         failed=failed,
         cache_dir=str(cache_dir_path) if cache_dir_path is not None else None,
         metadata={
+            **source_metadata,
             "render_mechanism_order": [
                 {
                     "name": spec.name,

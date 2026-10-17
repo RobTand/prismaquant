@@ -7,6 +7,7 @@ import pickle
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from safetensors.torch import save_file
 
 from prismaquant import build_production_cache as builder
 from prismaquant import union_production_cache as union
@@ -23,6 +24,7 @@ def test_dense_producer_preserves_gate_coverage_for_exact_union(
     profile = DefaultProfile()
     model_dir = tmp_path / "model"
     model_dir.mkdir()
+    save_file(model.state_dict(), str(model_dir / "model.safetensors"))
     calibration = torch.tensor([[0, 1]], dtype=torch.long)
     assignment = {"l1": "NVFP4", "l2": "NVFP4"}
     assignment_path = tmp_path / "layer_config.json"

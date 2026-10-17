@@ -4965,10 +4965,17 @@ def main(argv: Sequence[str] | None = None):
     preflight.add_argument("--output")
     preflight.add_argument("--export-cache-dir")
     preflight.add_argument("--keep-export-cache", action="store_true")
+    preflight.add_argument("--production-weight-cache")
     known, _unknown = preflight.parse_known_args(parse_argv)
     if known.model is None or known.output is None:
         # Preserve the complete parser's native --help/missing-argument errors.
         return _main_impl(parse_argv)
+
+    if known.production_weight_cache:
+        from prismaquant.streamed_model_identity import resolve_source_checkpoint_path
+
+        known.model = str(resolve_source_checkpoint_path(known.model))
+        parse_argv = _replace_cli_option(parse_argv, "--model", known.model)
 
     # Refuse a stale/tampered or merely MATERIALIZED PrismaSnap source before
     # opening the export transaction or doing any GPU render work.  Ordinary
@@ -5201,11 +5208,17 @@ def _main_impl(argv: Sequence[str] | None = None):
         profile,
     )
 
+    dtype = torch.bfloat16
     if args.production_weight_cache:
         import pickle
+        from prismaquant.streamed_model_identity import build_source_model_binding
 
         with open(args.production_weight_cache, "rb") as fh:
             production_cache = pickle.load(fh)
+        expected_source_binding = build_source_model_binding(args.model, dtype=dtype)
+        production_cache.require_source_binding(
+            expected_source_binding, where="native export cache attachment",
+        )
         if args.production_cache_dir_override:
             production_cache.relocate(args.production_cache_dir_override)
         if args.production_cache_lru_gb and args.production_cache_lru_gb > 0:
@@ -5443,7 +5456,6 @@ def _main_impl(argv: Sequence[str] | None = None):
 
     from prismaquant.gpu_guard import require_cuda_hot_path
 
-    dtype = torch.bfloat16
     device = require_cuda_hot_path(
         "export_native_compressed",
         args.device,

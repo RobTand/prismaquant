@@ -363,6 +363,8 @@ def _hash_source_shards(
 def _digest_cache_entries(
     reusable: dict[str, dict[str, object]],
     fingerprints: list[dict[str, object]],
+    *,
+    current_bytes: bool = False,
 ) -> list[dict[str, object] | None]:
     """Stored source metadata, including the original fence as well as its digest.
 
@@ -370,7 +372,7 @@ def _digest_cache_entries(
     under the running object's fingerprint. Both publishing callers retain the
     returned original fence; byte-proof consumers use strict stat reuse.
     """
-    dev = dev_mode_enabled()
+    dev = dev_mode_enabled() and not current_bytes
     key_for = (lambda fp: fp['path']) if dev else portable_fingerprint_key
     index: dict[str, dict[str, object]] = {}
     tainted: set[str] = set()
@@ -414,6 +416,7 @@ def build_source_checkpoint_identity(
     extra_shard_paths: object = (),
     digest_cache_path: str | Path | None = None,
     source_authentication=None,
+    current_bytes: bool = False,
 ) -> dict[str, object]:
     """Content identity of the exact safetensors byte set a run consumes.
 
@@ -444,6 +447,10 @@ def build_source_checkpoint_identity(
     digest instead of rereading that shard. Discovery, metadata hashing,
     digest-cache JSON handling and identity construction still run. Without
     this cache, every call hashes every shard.
+
+    ``current_bytes`` requires mutation-sensitive stat reuse even in dev mode.
+    It is for identities that authorize reading current cached weights, rather
+    than retaining recorded source provenance after metadata drift.
 
     An explicit qualified original ``source_authentication`` owner supplies
     independently bound expected whole-file descriptors instead. Config/index
@@ -508,7 +515,9 @@ def build_source_checkpoint_identity(
     )
 
     fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
-    cached_entries = _digest_cache_entries(reusable, fingerprints)
+    cached_entries = _digest_cache_entries(
+        reusable, fingerprints, current_bytes=current_bytes,
+    )
     digests = [str(entry['sha256']) if entry is not None else None for entry in cached_entries]
     recorded_fingerprints = [entry['fingerprint'] if entry is not None and
         not stat_fingerprint_reusable(live, entry['fingerprint']) else live
@@ -614,6 +623,95 @@ def build_source_checkpoint_identity(
             # directory costs a re-read next time; it never changes identity.
             pass
     return identity
+
+
+SOURCE_MODEL_BINDING_SCHEMA = "prismaquant.source_model_binding.v1"
+_SOURCE_MODEL_DTYPES = frozenset({
+    "torch.bfloat16", "torch.float16", "torch.float32",
+})
+
+
+def resolve_source_checkpoint_path(
+    source_model: str | Path, *, local_files_only: bool = False,
+) -> Path:
+    """Resolve one original local checkpoint, using the Hub's snapshot owner."""
+    root = Path(source_model)
+    if root.is_dir():
+        return root
+    from huggingface_hub import snapshot_download
+
+    return Path(snapshot_download(
+        repo_id=str(source_model), local_files_only=local_files_only,
+    ))
+
+
+def build_source_model_binding(
+    original_checkpoint_root: str | Path,
+    *,
+    dtype,
+    digest_cache_path: str | Path | None = None,
+    local_files_only: bool = False,
+) -> dict[str, object]:
+    """Bind checkpoint bytes and effective load dtype for cache reuse.
+
+    The checkpoint is the original source, before text-only staging. Live
+    model mutation after loading is outside this file-source contract.
+    """
+    effective_dtype = str(dtype)
+    if effective_dtype not in _SOURCE_MODEL_DTYPES:
+        raise ValueError(f"source model binding has unsupported dtype {dtype!r}")
+    root = resolve_source_checkpoint_path(
+        original_checkpoint_root, local_files_only=local_files_only,
+    )
+    return {
+        "schema": SOURCE_MODEL_BINDING_SCHEMA,
+        "checkpoint": build_source_checkpoint_identity(
+            root, digest_cache_path=digest_cache_path, current_bytes=True,
+        ),
+        "effective_dtype": effective_dtype,
+    }
+
+
+def validate_source_model_binding(
+    value: object, *, where: str = "source model binding",
+) -> dict[str, object]:
+    """Parse one serialized checkpoint/dtype binding without rereading source."""
+    from collections.abc import Mapping
+    from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+
+    if (not isinstance(value, Mapping)
+            or set(value) != {"schema", "checkpoint", "effective_dtype"}
+            or value.get("schema") != SOURCE_MODEL_BINDING_SCHEMA
+            or not isinstance(value.get("effective_dtype"), str)
+            or value.get("effective_dtype") not in _SOURCE_MODEL_DTYPES):
+        raise ValueError(f"{where} has an invalid source model binding")
+    checkpoint = value["checkpoint"]
+    if (not isinstance(checkpoint, Mapping)
+            or set(checkpoint) != {"schema", "shards", "metadata", "content_sha256"}
+            or checkpoint.get("schema") != SOURCE_CHECKPOINT_IDENTITY_SCHEMA):
+        raise ValueError(f"{where} has an invalid checkpoint identity")
+    for field in ("shards", "metadata"):
+        rows = checkpoint[field]
+        if not isinstance(rows, list) or (field == "shards" and not rows):
+            raise ValueError(f"{where} checkpoint {field} must be a list")
+        names = set()
+        for row in rows:
+            if (not isinstance(row, Mapping)
+                    or set(row) != {"name", "size", "sha256"}
+                    or not isinstance(row.get("name"), str)
+                    or not row["name"] or row["name"] in names
+                    or Path(row["name"]).is_absolute()
+                    or ".." in Path(row["name"]).parts
+                    or type(row.get("size")) is not int or row["size"] < 0
+                    or not isinstance(row.get("sha256"), str)
+                    or re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is None):
+                raise ValueError(f"{where} checkpoint {field} row is malformed")
+            names.add(row["name"])
+    body = {key: checkpoint[key] for key in ("schema", "shards", "metadata")}
+    if checkpoint["content_sha256"] != canonical_json_sha256(
+            body, where=f"{where} checkpoint"):
+        raise ValueError(f"{where} checkpoint content identity does not match")
+    return canonical_json(dict(value), where=where)
 
 
 def _read_streamed_model_identity_cache(

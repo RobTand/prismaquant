@@ -7,6 +7,7 @@ import pickle
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from safetensors.torch import save_file
 
 from prismaquant import build_production_cache as builder
 from prismaquant import production_weight_cache as pwc
@@ -31,6 +32,7 @@ def _fixture(tmp_path, monkeypatch, *, alias):
     assignment_path.write_text(json.dumps({name: "FP8_E4M3" for name in live_names}))
     model_dir = tmp_path / "model"
     model_dir.mkdir()
+    save_file(model.state_dict(), str(model_dir / "model.safetensors"))
     calibration = torch.arange(8, dtype=torch.long).reshape(2, 4) % VOCAB
     monkeypatch.setattr(AutoTokenizer, "from_pretrained", lambda *args, **kwargs: object())
     monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained", lambda *args, **kwargs: model)

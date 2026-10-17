@@ -1,4 +1,4 @@
-"""Native CLI attachment must bind an independent producer pickle to its source."""
+"""Source-aware CLIs bind independent producer caches before using their weights."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from prismaquant import build_production_cache as builder
 from prismaquant import export_native_compressed as exporter
 from prismaquant import model_profiles
+from prismaquant import validate_assignments_kl as validator
 from prismaquant.model_profiles import DefaultProfile
 from test_production_weight_cache import _TinyChain
 
@@ -22,12 +23,14 @@ class _ReachedNativePacker(Exception):
     pass
 
 
-@pytest.mark.parametrize(
-    "case", ["unchanged", "relocated", "changed_weights", "changed_config", "dtype_mismatch"],
-)
-def test_native_main_checks_source_before_independent_cache_attachment(
-    tmp_path, monkeypatch, case,
-):
+CASES = ("unchanged", "relocated", "changed_weights", "changed_config", "dtype_mismatch", "missing_binding", "hf_id")
+
+
+class _ReachedValidatedSource(Exception):
+    pass
+
+
+def _check_independent_attachment(tmp_path, monkeypatch, case, *, validation):
     source = _TinyChain().eval()
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -77,6 +80,7 @@ def test_native_main_checks_source_before_independent_cache_attachment(
     assert original is not None
     original = {name: value.clone() for name, value in original.items()}
     attach_source = model_dir
+    snapshot_calls = []
     if case == "relocated":
         attach_source = tmp_path / "same_bytes_elsewhere"
         shutil.copytree(model_dir, attach_source)
@@ -92,6 +96,29 @@ def test_native_main_checks_source_before_independent_cache_attachment(
         assert any(not torch.equal(fresh_packed[name], value) for name, value in original.items())
     elif case == "changed_config":
         config.write_text(json.dumps({"model_type": "test", "hidden_size": 32, "source_revision": 2}))
+    elif case == "missing_binding":
+        cache.metadata.pop("source_binding", None)
+        produced.write_bytes(pickle.dumps(cache))
+    elif case == "hf_id":
+        import huggingface_hub
+
+        def snapshot_download(*, repo_id, local_files_only=False):
+            assert repo_id == "audit/source"
+            assert local_files_only is validation
+            assert not snapshot_calls, "the consumer resolved its remote checkpoint twice"
+            snapshot_calls.append(repo_id)
+            return str(model_dir)
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot_download)
+        attach_source = "audit/source"
+
+    expected_source = model_dir if case == "hf_id" else attach_source
+
+    def detect_profile(path):
+        assert Path(path) == Path(expected_source)
+        return DefaultProfile()
+
+    monkeypatch.setattr(model_profiles, "detect_profile", detect_profile)
 
     packed = {}
 
@@ -106,20 +133,46 @@ def test_native_main_checks_source_before_independent_cache_attachment(
 
     monkeypatch.setattr(exporter, "_production_cache_scales", observe_attached_cache)
 
+    probe = tmp_path / "probe.pkl"
+    rows, columns = source.l1.weight.shape
+    probe.write_bytes(pickle.dumps({"stats": {"l1": {
+        "n_params": rows * columns, "out_features": rows, "in_features": columns,
+        "h_trace": 1.0,
+    }}}))
+    base_assignment = tmp_path / "base_assignment.json"
+    base_assignment.write_text("{}")
+
+    def validated_source(path):
+        assert Path(path) == Path(expected_source)
+        raise _ReachedValidatedSource
+
+    monkeypatch.setattr(validator, "require_cuda_hot_path", lambda *args: torch.device("cpu"))
+    monkeypatch.setattr(validator, "stage_multimodal", validated_source)
+
     def attach():
         try:
-            exporter.main([
-                "--model", str(attach_source), "--layer-config", str(assignment),
-                "--production-weight-cache", str(produced),
-                "--production-cache-lru-gb", "0",
-                "--output", str(tmp_path / "exported"),
-                "--no-gptq", "--no-scale-sweep",
-            ])
-        except _ReachedNativePacker:
+            if validation:
+                validator.main([
+                    "--model", str(attach_source), "--probe", str(probe),
+                    "--base-assignment", str(base_assignment), "--assignment", str(assignment),
+                    "--production-weight-cache", str(produced), "--production-cache-lru-gb", "0",
+                    "--formats", "FP8_E4M3,BF16", "--dtype", "bf16",
+                    "--local-files-only",
+                    "--output", str(tmp_path / "validation.json"),
+                ])
+            else:
+                exporter.main([
+                    "--model", str(attach_source), "--layer-config", str(assignment),
+                    "--production-weight-cache", str(produced),
+                    "--production-cache-lru-gb", "0",
+                    "--output", str(tmp_path / "exported"),
+                    "--no-gptq", "--no-scale-sweep",
+                ])
+        except (_ReachedValidatedSource if validation else _ReachedNativePacker):
             return
-        pytest.fail("native attachment did not reach the observed packer")
+        pytest.fail("source-aware attachment did not reach its observed boundary")
 
-    if case in {"unchanged", "relocated"}:
+    if case in {"unchanged", "relocated", "hf_id"}:
         attach()
     else:
         with pytest.raises((RuntimeError, ValueError), match=r"source|dtype|identity|binding"):
@@ -127,3 +180,15 @@ def test_native_main_checks_source_before_independent_cache_attachment(
     if packed:
         assert packed.keys() == original.keys()
         assert all(torch.equal(packed[name], value) for name, value in original.items())
+    if case == "hf_id":
+        assert snapshot_calls == ["audit/source"]
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_native_main_checks_source_before_independent_cache_attachment(tmp_path, monkeypatch, case):
+    _check_independent_attachment(tmp_path, monkeypatch, case, validation=False)
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_validation_main_checks_source_before_model_or_cache_use(tmp_path, monkeypatch, case):
+    _check_independent_attachment(tmp_path, monkeypatch, case, validation=True)

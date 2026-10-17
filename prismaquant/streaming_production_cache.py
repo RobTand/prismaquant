@@ -1250,6 +1250,15 @@ def fill_production_weight_cache_streaming(
     device = torch.device(device)
     cache_dir_path = Path(cache_dir)
     cache_dir_path.mkdir(parents=True, exist_ok=True)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+    )
+
+    model_path = str(resolve_source_checkpoint_path(model_path))
+    source_binding = build_source_model_binding(
+        model_path, dtype=dtype,
+        digest_cache_path=cache_dir_path / "source_identity_cache.json",
+    )
     if offload_folder is None:
         offload_folder = cache_dir_path / "streaming_offload"
 
@@ -1313,4 +1322,5 @@ def fill_production_weight_cache_streaming(
         )
     finally:
         ctx.shutdown()
+    cache.metadata["source_binding"] = source_binding
     return cache
