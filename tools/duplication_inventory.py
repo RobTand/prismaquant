@@ -96,9 +96,8 @@ def _import_aliases(tree: ast.Module) -> dict[str, str]:
 
     ``import hashlib as h`` yields ``h -> hashlib``; ``from hashlib import
     sha256`` yields ``sha256 -> hashlib.sha256``. Module-wide is the method
-    the round-2 count snapshots used: a function-local import is visible to
-    the whole module's resolution, which over-approximates (never misses) a
-    digest site.
+    the round-2 count snapshots used. Function-local imports overwrite the
+    same dictionary, so shadowed aliases can produce missed or extra sites.
     """
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):

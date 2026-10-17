@@ -335,11 +335,7 @@ def _write_all(root, campaign, probe, **kwargs):
         _write_quantum(root, campaign, probe, layer, **kwargs)
 
 
-# -- canonical bytes under receipt permutation -------------------------------
-
-
-def test_permuted_arrival_yields_canonical_bytes(tmp_path, campaign, probe):
-    """The join is a disjoint union: arrival order cannot change the bytes."""
+def test_repeated_join_preserves_bytes_and_non_timing_fields(tmp_path, campaign, probe):
     root = tmp_path / "campaign"
     _seal_inputs(root, campaign)
     _write_all(root, campaign, probe)
