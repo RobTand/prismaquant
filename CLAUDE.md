@@ -249,11 +249,11 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
 9. **Serving reality gates every format — per lane, and per artifact.** A
    format is production-eligible only when its lane's **pinned runtime**
    (vanilla vLLM for `compressed-tensors`, llama.cpp/vLLM-GGUF for GGUF, and
-   the pinned Tessera release for the Tessera wire, served by Tessera's own vLLM
-   plugin `tessera.serving` and admitted only through
-   `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`, which is
-   PENDING, so that lane admits nothing yet — the sanctioned **three**, per
-   `AGENTS.md`)
+   the exactly pinned Tessera commit and packaged contract for the Tessera wire,
+   served by Tessera's own vLLM plugin `tessera.serving` and admitted through
+   `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json` within each
+   matched cell's scope and the independent export and serving gates, the
+   sanctioned **three** per `AGENTS.md`)
    loads it on real shapes, generates correctly eager **and** graph-mode,
    doesn't break MTP/spec-decode (or is gated away), and routes it to a
    **native** kernel for the declared target platform — tensor cores on the
@@ -486,18 +486,17 @@ production-render-staged) **fail fast with `exit 2`** pointing at their archive.
 
 `COST_MODE` is a **spelling** over two axes since 2026-07-30 (re-vet R3):
 `COST_RENDER ∈ {inline, cached-menu}` × `COST_OBJECTIVE ∈ {weight-recon,
-render-score, aura-adjoint}`. The CB/GGUF lanes are no longer pinned to
-`COST_MODE=local` — that gate named a *render* property to block an *objective*;
-it is now a render-faithfulness assertion, and `col_weights` on the production
-render path (CB Milestone C) lets a cached-menu render be the exporter's
-imatrix-weighted render. Non-`local` objectives on CB are reachable but
-**opt-in and not recommended** until a served CB A/B exists.
+render-score, aura-adjoint}`. The GGUF lane checks render faithfulness rather
+than requiring `COST_MODE=local`. For an imatrix-weighted format family, the
+pipeline harvests the exporter's imatrix and passes `--col-weights` to the
+cached-menu render. The former CB lane's implementation is historical context
+at `archive/gridbook_lane_2026-09-02/`; that lane is retired.
 
 **Subsystem owners (the files that matter):**
 
 | Concern | Files |
 |---|---|
-| Orchestrate / contract | `run-pipeline.sh` (exec) · `pipeline.py` (declarative spec + owner validation, not executor) · `__init__.py` (transformers-5.x polyfills) |
+| Orchestrate / contract | `run-pipeline.sh` (exec) · `pipeline.py` (declarative spec + owner validation, not executor) · `__init__.py` (lazy public exports) |
 | Allocate | `allocator.py` (CLI, Pareto sweep, log-error kneedle, `--bit-attribution-json/csv`) · `allocator_solver.py` (numpy multi-choice knapsack DP, union-find serving-unit promotion, `predicted_dloss`) · `allocator_candidates.py` (legality gate + cost-source precedence + passthrough integrity) · `decision_units.py` |
 | Probe / cost | `incremental_probe.py` + `sensitivity_probe.py` + `kl_fisher.py` (Fisher probe) · `incremental_measure_quant_cost.py` + `measure_quant_cost.py` · `production_render_cost.py` (default cost) · `aura_cost.py` + `expert_empirical_cost.py` (`COST_MODE=aura`, MoE hybrid) · `kl_measurement.py` (whole-assignment KL + per-sequence tail) · `perturbed_x_cache.py` (activation cache / model loading — **not** a cost stage). The L3 propagated stack is walled at `archive/l3_propagated_2026-07-30/` |
 | Formats | `format_registry.py` (FormatSpec + RTN `quantize_dequantize`/`activation_quantize_dequantize`, codebook bucketize, E8M0 snap, `torch.compile` hot path) · `mx_formats.py` · `fp8_dynamic.py` |
