@@ -152,25 +152,9 @@ def _source_profile(model_path, source_authentication=None, *, config=None):
     return detect_profile(model_path)
 
 
-# ---------------------------------------------------------------------------
-# v21 #5: opt-in direct-to-CUDA safetensors load. Default path opens the
-# safetensors file with framework="pt" (CPU mmap) and explicitly moves
-# each tensor to device with `.to(device, non_blocking=True)`. That
-# allocates a host-side torch.Tensor object even though the underlying
-# bytes are mmapped, then issues a host→device cudaMemcpy.
-#
-# When PRISMAQUANT_DIRECT_CUDA_LOAD=1 is set, we instead pass
-# `device=str(device)` to safe_open so safetensors materializes the
-# tensor directly on the CUDA device. On UMA hardware (DGX Spark) the
-# physical memory is shared, so the win is mostly the elision of the
-# extra Python-side host tensor object and one redundant memcpy step;
-# expected savings are 10–30 ms per layer load (modest but additive
-# across 16 chunks × 2 phases × ~62 layers).
-#
-# Falls back to the host-stage path on any TypeError / RuntimeError to
-# stay compatible with older safetensors releases that do not accept
-# the device kwarg.
-# ---------------------------------------------------------------------------
+# Direct CUDA loading is enabled by default; PRISMAQUANT_DIRECT_CUDA_LOAD=0
+# selects CPU staging. Older safetensors releases that reject the device
+# argument also fall back to CPU staging.
 def _direct_cuda_enabled() -> bool:
     raw = os.environ.get("PRISMAQUANT_DIRECT_CUDA_LOAD")
     if raw is None:
