@@ -48,7 +48,7 @@ def _prepared(directory, dtype):
 
 
 @pytest.mark.parametrize("case", [
-    "same_preparation", "different_preparation", "changed_render_file",
+    "same_preparation", "different_preparation", "changed_render_file", "unrelated_prior_entry",
 ])
 def test_size_cache_does_not_change_current_preparation_derivation(tmp_path, case):
     repository = Path(__file__).resolve().parents[1]
@@ -103,7 +103,11 @@ def test_size_cache_does_not_change_current_preparation_derivation(tmp_path, cas
         selected, current_render = _prepared(tmp_path / "second", torch.float32)
     elif case == "changed_render_file":
         torch.save(torch.zeros(32, 32, dtype=torch.float32), original_render)
-    if case != "same_preparation":
+    elif case == "unrelated_prior_entry":
+        previous = json.loads(sizes.read_text())
+        previous[json.dumps(["unrelated.candidate", FORMAT])] = 1
+        sizes.write_text(json.dumps(previous))
+    if case in {"different_preparation", "changed_render_file"}:
         assert current_render.stat().st_size != original_size
 
     reused = derive(selected, tmp_path / "reused.json", cached=True)
@@ -116,3 +120,7 @@ def test_size_cache_does_not_change_current_preparation_derivation(tmp_path, cas
     assert reused["execution"]["retained_operator_windows"]["budget"] == (
         fresh["execution"]["retained_operator_windows"]["budget"]
     )
+    assert json.loads(sizes.read_text()) == {json.dumps([UNIT, FORMAT]): expected_bytes}
+    current = reused["retained_window_budget_derivation"]["derived_from"]
+    assert current["candidate_files_measured"] == 1
+    assert current["candidate_files_stated_now"] == 1

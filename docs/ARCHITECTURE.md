@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, retained-budget sizes.
+Budget derivation measures the current prepared cache's selected candidate
+files on every invocation. `--render-size-cache` refreshes an optional size
+record; its previous contents cannot supply a budget input. The existing
+cache estimator and budget planner remain the owners of sizes and arithmetic.
+
 As of: 2026-10-17, architecture audit continuation, calibration source intake.
 The shared calibration loader accepts namespaced Hub dataset IDs. Missing
 absolute paths, explicit `./` or `../` paths, and `.txt` or `.jsonl` inputs
@@ -13225,6 +13231,10 @@ where the aggregate window becomes binding and the multiplier floors at
 writes the plan and stamps a top-level `retained_window_budget_derivation`
 record naming the maximizing target of each cap and the sources it read. A
 budget may still be authored by hand; nothing reads the record at run time.
+The tool measures current selected candidate sizes on every invocation through
+`ProductionWeightCache.estimate_nbytes`. Its optional `--render-size-cache`
+file is refreshed from that roster and is not read as an input. Reusing the
+same candidate names or pickle therefore cannot hide changed backing sizes.
 The occasion was a sealed `candidate_delta_bytes` of 4 MiB against a roster
 whose smallest matrix demanded 32 MiB and whose largest demanded 192 MiB.
 
