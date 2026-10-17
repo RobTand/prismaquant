@@ -27272,8 +27272,11 @@ refuses. After confirming `render_identity.json` matches the intended current bu
 remove only the unwitnessed shard and resume: the fill re-renders and witnesses the
 missing entry while reusing the remaining shards. Legacy caches still require the
 re-render described above. The refusal and resume warning name this targeted repair.
-Streamed fills cannot resume and require a fresh cache directory. An exact union
-instead needs rebuilding from its verified input stripes at the final export location.
+Streamed fills cannot resume and require a fresh cache directory. Exact unions
+cannot resume either. If a union's existing witnesses stop binding after a copy or
+metadata change, rebuild it from its verified input stripes at the final export
+location. If a union entry has no witness, repair or re-render its input stripe
+and regenerate that stripe's manifest before rebuilding the union.
 
 **History: a fused-global window on main (review N3-02, recorded 2026-10-16).** Since
 `1b7b7757b1` (2026-07-02, audit M2) main's export pre-passes derive the fused joint global
