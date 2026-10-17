@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, teacher dump ownership.
+Stored-dump KL reads the teacher document once, hashes those owned bytes and
+parses the same bytes. Its teacher receipt therefore identifies the input
+used in the calculation even if the pathname is replaced after parsing.
+The raw buffer is released after parsing. `gold-teacher-green-v1` passes
+49 CPU cases and compiles both touched files, including real atomic path
+replacement with unchanged-byte controls. Source, logs, terminal outcome and
+CAS receipt are verified against parent `a19784e8e3f` plus the recorded
+overlays. This binds stored evidence; it adds no served measurement.
+
 As of: 2026-10-17, architecture audit continuation, finite comparison metrics.
 `tools/kl_ab.py` refuses an explicitly selected nonfinite value in either
 comparison arm before computing a delta or cross-stack range. Finite zero

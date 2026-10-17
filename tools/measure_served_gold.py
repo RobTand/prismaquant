@@ -419,7 +419,10 @@ def _tail_logprob(row: Mapping[str, float], vocab_size: int) -> float:
 
 
 def _cmd_kl(args: argparse.Namespace) -> int:
-    teacher_payload = json.loads(Path(args.teacher).read_text(encoding="utf-8"))
+    teacher_raw = Path(args.teacher).read_bytes()
+    teacher_sha256 = hashlib.sha256(teacher_raw).hexdigest()
+    teacher_payload = json.loads(teacher_raw)
+    del teacher_raw
     student_payload = json.loads(Path(args.student).read_text(encoding="utf-8"))
     for name, payload in (("teacher", teacher_payload), ("student", student_payload)):
         if payload.get("schema") != SERVED_DUMP_SCHEMA:
@@ -517,7 +520,7 @@ def _cmd_kl(args: argparse.Namespace) -> int:
             "git_commit": teacher_payload["git_commit"],
             "prompt_top_k": teacher_payload["prompt_top_k"],
             "n_positions": teacher_payload["n_positions"],
-            "dump_sha256": _sha256_file(Path(args.teacher)),
+            "dump_sha256": teacher_sha256,
         },
     }
     Path(args.out).write_text(json.dumps(record, indent=2), encoding="utf-8")
