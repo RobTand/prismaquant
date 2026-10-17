@@ -8,10 +8,10 @@ export will ship and records the scorer objective used to accept GPTQ/JSO
 and scale-sweep candidates.  This module turns those rendered scores into
 allocator-compatible ``predicted_dloss`` entries.
 
-The synthesized entries intentionally set ``output_mse_measured=False`` so
-``priced_cell.cost_entry_predicted_dloss`` consumes
-``predicted_dloss`` directly instead of applying the diagonal-Fisher proxy
-again.
+Entries synthesized as ``predicted_dloss`` set ``output_mse_measured=False``
+so ``priced_cell.cost_entry_predicted_dloss`` consumes that value directly.
+The explicit ``output_mse`` path instead sets ``output_mse_measured=True``
+and leaves the diagonal-Fisher conversion to the shared pricing owner.
 """
 from __future__ import annotations
 
