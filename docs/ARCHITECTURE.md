@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, cost shard dtype identity.
+Incremental cost shards record the resolved model dtype in their existing
+reuse metadata. A changed or absent dtype requires measurement before reuse;
+old scores are never relabeled. The deliberately mode-independent baseline
+may still be shared across cost modes when its other inputs match.
+
 As of: 2026-10-17, architecture audit continuation, native schedule summary.
 The native receipt summary records `native_kernel_schedule` once if either
 prefill or decode used an older architecture schedule. Per-phase observations
@@ -22706,6 +22712,9 @@ restamped, so the table keeps no `cost_mode` this run invented and the artifact'
 files the same unverified admission (§3.4). Under
 `COST_MODE=local` the baseline *is* the allocator table so it carries the same gate; under the
 other modes `cost_baseline.pkl` is mode-agnostic on purpose and is shared across mode changes.
+Incremental baseline shards also require the same resolved model dtype. Missing
+or different dtype metadata triggers remeasurement, even when the mode-independent
+baseline would otherwise be reusable.
 This is re-vet **R2 precondition (i)** — the prerequisite to flipping the `COST_MODE` default,
 which is *not* done here.
 

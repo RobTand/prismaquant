@@ -148,6 +148,7 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
 
 def _expected_cost_shard_meta(*,
                               model: str,
+                              dtype: torch.dtype,
                               probe_path: Path,
                               linear_include: str,
                               shard_idx: int,
@@ -160,6 +161,7 @@ def _expected_cost_shard_meta(*,
                               n_linears_expected: int = 0) -> dict[str, Any]:
     meta = {
         "model": model,
+        "dtype": str(dtype),
         "probe": str(probe_path),
         "activation_cache_dir": str(Path(activation_cache_dir)),
         "linear_include": linear_include,
@@ -1156,6 +1158,7 @@ def main():
     expected_metas = [
         _expected_cost_shard_meta(
             model=args.model,
+            dtype=dtype,
             probe_path=args.probe,
             linear_include=linear_include,
             shard_idx=i,

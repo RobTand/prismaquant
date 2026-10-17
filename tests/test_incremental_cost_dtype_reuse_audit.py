@@ -48,10 +48,14 @@ class _TinyContext:
         pass
 
 
-@pytest.mark.parametrize("next_dtype, next_mode", [
-    ("bf16", "local"), ("fp16", "local"), ("fp32", "local"), ("bf16", "aura"),
-], ids=["unchanged", "fp16", "fp32", "cross_mode_same_dtype"])
-def test_real_cost_main_reuses_only_matching_dtype(tmp_path, monkeypatch, next_dtype, next_mode):
+@pytest.mark.parametrize("next_dtype, next_mode, legacy_unmarked", [
+    ("bf16", "local", False), ("fp16", "local", False),
+    ("fp32", "local", False), ("bf16", "aura", False),
+    ("bf16", "local", True),
+], ids=["unchanged", "fp16", "fp32", "cross_mode_same_dtype", "legacy_unmarked"])
+def test_real_cost_main_reuses_only_matching_dtype(
+    tmp_path, monkeypatch, next_dtype, next_mode, legacy_unmarked,
+):
     root = tmp_path / "source"
     root.mkdir()
     (root / "config.json").write_text(json.dumps({
@@ -97,8 +101,21 @@ def test_real_cost_main_reuses_only_matching_dtype(tmp_path, monkeypatch, next_d
         return record
 
     initial = run(tmp_path / "shared", "bf16", "local")
+    shard = tmp_path / "shared" / "shards" / "cost_shard_000.pkl"
+    if legacy_unmarked:
+        with shard.open("rb") as file:
+            old_payload = pickle.load(file)
+        del old_payload["meta"]["incremental_shard"]["dtype"]
+        with shard.open("wb") as file:
+            pickle.dump(old_payload, file)
     resumed = run(tmp_path / "shared", next_dtype, next_mode)
     after_resume = list(loads)
+    with shard.open("rb") as file:
+        resumed_shard = pickle.load(file)
+    expected_dtype = {
+        "bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32,
+    }[next_dtype]
+    assert resumed_shard["meta"]["incremental_shard"]["dtype"] == str(expected_dtype)
     fresh = run(tmp_path / "fresh", next_dtype, next_mode)
     fields = ("weight_mse", "output_mse", "rel_output_mse")
     if next_dtype != "bf16":
@@ -111,6 +128,6 @@ def test_real_cost_main_reuses_only_matching_dtype(tmp_path, monkeypatch, next_d
         f"context_loads_after_resume={after_resume}"
     )
     expected_loads = [torch.bfloat16]
-    if next_dtype != "bf16":
-        expected_loads.append({"fp16": torch.float16, "fp32": torch.float32}[next_dtype])
+    if next_dtype != "bf16" or legacy_unmarked:
+        expected_loads.append(expected_dtype)
     assert after_resume == expected_loads
