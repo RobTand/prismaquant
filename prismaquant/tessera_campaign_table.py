@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .digests import (
     DIRECT_ASCII_STRICT, DIRECT_ASCII_SPACED_LAX_DEFAULT_STR,
-    DIRECT_UTF8_INDENT2_STRICT, text_sha256hex, file_sha256hex,
+    DIRECT_UTF8_INDENT2_STRICT, text_sha256hex, file_sha256hex, bytes_sha256hex,
 )
 from .cost_stage_checkpoint import merge_identity_migrations
 from .schemas import strict_json_loads
@@ -1682,19 +1682,26 @@ class ScopeRefused(RuntimeError):
     """A joint row's evaluated scope is not the scope it is submitted for."""
 
 
+def _bound_bytes(path: Path, expected: str, *, label: str, where: str,
+                 mismatch_detail: str = "") -> bytes:
+    raw = path.read_bytes()
+    actual = bytes_sha256hex(raw)
+    if actual != expected:
+        raise ScopeRefused(
+            f"{label}: {where} is {path}, which hashes to {actual}, "
+            f"not the bound {expected}{mismatch_detail}")
+    return raw
+
+
 def _bound_json(plan: dict, key: str, *, label: str) -> dict:
     """The JSON artifact a joint plan binds by path and sha256, re-checked."""
     declared = (plan.get("inputs") or {}).get(key)
     if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
             or not isinstance(declared.get("sha256"), str)):
         raise ScopeRefused(f"{label}: joint plan inputs.{key} is not a bound artifact")
-    path = Path(declared["path"])
-    actual = file_sha256hex(path)
-    if actual != declared["sha256"]:
-        raise ScopeRefused(
-            f"{label}: plan inputs.{key} is {path}, which hashes to {actual}, "
-            f"not the bound {declared['sha256']}")
-    return json.loads(path.read_text())
+    raw = _bound_bytes(Path(declared["path"]), declared["sha256"],
+                       label=label, where=f"plan inputs.{key}")
+    return json.loads(raw.decode("utf-8"))
 
 
 def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
@@ -1728,7 +1735,8 @@ def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
     caller's -- an edited table no longer hashes to what the plan declares --
     and reading it is one sequential pass over a few hundred MiB, not the
     multi-GiB candidate roster a per-cell re-derivation from the checkpoint
-    would need.
+    would need. Serialized bytes are owned only until parsing completes;
+    no process-scoped byte cache retains the table alongside its objects.
     """
     import pickle
 
@@ -1737,14 +1745,10 @@ def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
             or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
         raise ScopeRefused(f"{label}: {where} is not a bound artifact")
     path = Path(declared["path"])
-    actual = file_sha256hex(path)
-    if actual != declared["sha256"]:
-        raise ScopeRefused(
-            f"{label}: {where} is {path}, which hashes to {actual}, not the "
-            f"bound {declared['sha256']}; the campaign cost table the plan names "
-            "is not the one on disk, so the cells it priced are not the plan's")
-    with path.open("rb") as handle:
-        blob = pickle.load(handle)
+    blob = pickle.loads(_bound_bytes(
+        path, declared["sha256"], label=label, where=where,
+        mismatch_detail="; the campaign cost table the plan names is not the one "
+                        "on disk, so the cells it priced are not the plan's"))
     if not isinstance(blob, dict):
         raise ScopeRefused(f"{label}: {where} ({path}) is not a cost payload")
     return blob

@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, bound campaign tables.
+Campaign scope reads and hashes one owned byte string before parsing its JSON
+or pickle. Replacing the path after authentication cannot change the parsed
+roster. Serialized table bytes live only through parsing and are not cached;
+that transient allocation is additional to the parsed objects.
+
 As of: 2026-10-17, architecture audit continuation, MTP final-hidden source.
 MTP capture and pricing compare the hidden-state producer's canonical source
 roster with the current plan's roster before loading or prefetching. Certified
@@ -13565,6 +13571,18 @@ A-side. A joint row that does not name its own key is a refusal
 (`JointCellCoordinateError`, distinct from the malformed-row failure so
 instructions that turn one into a refusal leave the other alone), not a row to
 skip quietly.
+
+The campaign table reader parses the same owned bytes that it hashes for
+bound JSON and pickle inputs. A path replacement after hashing cannot change
+scope or shrink the requested-cell denominator. Large serialized tables are
+not retained in a process cache, but parsing temporarily owns both serialized
+bytes and parsed objects. This is an ownership guarantee, not a measured peak
+memory or throughput claim. Re-stamped 2026-10-17 against the architecture
+audit fix: the admitted `table-mtp-green-v1` campaign-table shards passed 37
+cases and the companion compile action checked both touched files. Exact
+commands, source and CAS evidence remain in the audit's `celestia-tmux`
+directory. The public regression is
+`tests/test_campaign_bound_table_same_bytes_audit.py`.
 
 A joint-priced cell the plan's own bound cost table never priced refuses as
 well. Such a row is bound to the coordinate it names and to nothing else -- it

@@ -63,3 +63,62 @@ def test_requested_cells_use_the_authenticated_planned_table(
         "Coverage narrowed to a table the declared SHA never authenticated: "
         f"missing={sorted(wanted - cells)}, replacements={events}, record={record}")
     assert record["requested_cells"] == len(wanted)
+
+
+@pytest.mark.parametrize("kind", ["census", "merged_cost"], ids=["json", "pickle"])
+@pytest.mark.parametrize("replace_after_hash", [False, True],
+                         ids=["unchanged", "replace-after-owned-hash"])
+def test_public_scope_parses_its_authenticated_owned_bytes(
+    tmp_path, monkeypatch, kind, replace_after_hash,
+):
+    workspace = _workspace(tmp_path)
+    plan = json.loads(workspace["plan"].read_text())
+    bound = plan["inputs"][kind]
+    path = Path(bound["path"])
+    payload = _cost_payload(workspace["names"])
+
+    def scope():
+        if kind == "census":
+            return table.joint_campaign_scope(plan)
+        return table.aqua_requested_cells(plan, payload, list(MEASURED))
+
+    expected = scope()
+    if kind == "census":
+        replacement = json.loads(path.read_text())
+        replacement["text_sha256"] = "c" * 64
+        replacement = json.dumps(replacement).encode()
+    else:
+        replacement = copy.deepcopy(payload)
+        del replacement["costs"][workspace["names"][0]][MEASURED[0]]
+        replacement = pickle.dumps(replacement)
+    events = []
+    real_hasher = table.bytes_sha256hex
+
+    def hash_then_replace(raw):
+        actual = real_hasher(raw)
+        if replace_after_hash and actual == bound["sha256"] and not events:
+            temporary = path.with_name(path.name + ".replacement")
+            temporary.write_bytes(replacement)
+            temporary.replace(path)
+            changed = real_hasher(path.read_bytes())
+            assert changed != actual
+            events.append((actual, changed))
+        return actual
+
+    monkeypatch.setattr(table, "bytes_sha256hex", hash_then_replace)
+    assert scope() == expected
+    assert bool(events) is replace_after_hash
+
+
+@pytest.mark.parametrize("kind", ["census", "merged_cost"], ids=["json", "pickle"])
+def test_public_scope_refuses_bytes_changed_before_owned_read(tmp_path, kind):
+    workspace = _workspace(tmp_path)
+    plan = json.loads(workspace["plan"].read_text())
+    path = Path(plan["inputs"][kind]["path"])
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(table.ScopeRefused, match="not the bound"):
+        if kind == "census":
+            table.joint_campaign_scope(plan)
+        else:
+            table.aqua_requested_cells(
+                plan, _cost_payload(workspace["names"]), list(MEASURED))
