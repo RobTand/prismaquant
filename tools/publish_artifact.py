@@ -239,6 +239,7 @@ def check_shipcard(
             return None, structural
         problems = verify(card, model_dir=artifact_dir,
                           observed_weight_content=observed_weight_content)
+        problems.extend(_research_standing_problems(card))
     except Exception as exc:
         return None, [f"{shipcard_path} is not a readable shipcard: {exc!r}"]
     return card, problems
@@ -1339,8 +1340,6 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 2
-
-    problems.extend(_research_standing_problems(card))
 
     _print_bpp_claim_with_control(card, artifact_dir)
 

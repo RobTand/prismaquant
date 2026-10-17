@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, frozen publication standing.
+The publisher checks research-only standing through its shared card replay on
+both preflight and the authoritative frozen snapshot. A standing change before
+freeze cannot pass as verified; explicit forced publication remains UNVERIFIED.
+
 As of: 2026-10-17, architecture audit continuation, shipcard transactions.
 Supported card mutations reload, validate and publish under one directory lock.
 Publication fsyncs a complete stage, atomically replaces the card and fsyncs the
@@ -28628,6 +28633,9 @@ Noncanonical cards placed inside an artifact retain their existing auxiliary
 identity semantics; this change does not add support for that placement.
 
 The publication authority is a **frozen snapshot**, not a final check followed by a live path.
+The same card replay checks `build.research_only` in preflight and in that
+frozen snapshot. A research-standing artifact requires an explicitly confirmed
+unverified publication even if its preflight card was previously releasable.
 The preflight shipcard replay is payload-cheap: it rejects failed slots and stat/model-identity
 problems before paying for the tree scan, but does not traverse weight payloads. After that
 preflight (and after an override stamp, if any), the publisher opens the complete tree
