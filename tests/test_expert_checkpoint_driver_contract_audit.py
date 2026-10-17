@@ -66,3 +66,22 @@ def test_expert_driver_resumes_its_own_published_payload(tmp_path, monkeypatch, 
         resume=True, identity=identity, qnames=[qname],
     )
     assert restored[qname] == state
+
+
+@pytest.mark.parametrize("forked", [False, True])
+def test_expert_checkpoint_refuses_the_other_driver_payload(forked):
+    qname = "model.layers.0.mlp.experts"
+    state = {"stats": {}, "costs": {}, "unit_kls": {qname: {"NVFP4": 0.25}}}
+    if not forked:
+        state["kl_windows"] = {"NVFP4": [0.2, 0.3]}
+    with pytest.raises(RuntimeError, match="has fields"):
+        expert._validate_expert_checkpoint_state(qname, state, forked=forked)
+
+
+@pytest.mark.parametrize("windows", [None, [], 0])
+def test_forked_checkpoint_requires_a_window_mapping(windows):
+    qname = "model.layers.0.mlp.experts"
+    state = {"stats": {}, "costs": {}, "unit_kls": {qname: {"NVFP4": 0.25}},
+             "kl_windows": windows}
+    with pytest.raises(RuntimeError, match="invalid kl_windows"):
+        expert._validate_expert_checkpoint_state(qname, state, forked=True)

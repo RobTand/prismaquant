@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-06. Expert checkpoint
+resume validates the payload belonging to its evaluation driver. The forked
+driver retains its `kl_windows` mapping alongside stats, costs and unit KL;
+the window driver retains its three-field contract. A payload from the other
+driver refuses. Journal identity and numerical measurements are unchanged.
+
 As of: 2026-10-17, architecture audit continuation, CR-004. The shared packed
 cache owner applies explicit include lists to resident assignment builds,
 resident format-menu builds and streamed assignment builds. Names may match

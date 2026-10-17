@@ -873,9 +873,11 @@ def _write_expert_unit_checkpoint(
 
 
 def _validate_expert_checkpoint_state(
-    qname: str, state: Mapping[str, object]
+    qname: str, state: Mapping[str, object], *, forked: bool
 ) -> dict[str, object]:
     expected = {"stats", "costs", "unit_kls"}
+    if forked:
+        expected.add("kl_windows")
     if set(state) != expected:
         raise RuntimeError(
             f"expert unit checkpoint for {qname} has fields "
@@ -982,7 +984,7 @@ def measure_expert_unit_costs_streamed(
             qnames=qnames,
         )
         completed = {
-            qname: _validate_expert_checkpoint_state(qname, state)
+            qname: _validate_expert_checkpoint_state(qname, state, forked=False)
             for qname, state in raw_completed.items()
         }
 
@@ -1318,7 +1320,7 @@ def measure_expert_unit_costs_forked(
             qnames=qnames,
         )
         completed = {
-            qname: _validate_expert_checkpoint_state(qname, state)
+            qname: _validate_expert_checkpoint_state(qname, state, forked=True)
             for qname, state in raw_completed.items()
         }
     pending = [qn for qn in qnames if qn not in completed]
