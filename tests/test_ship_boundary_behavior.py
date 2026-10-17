@@ -8,10 +8,9 @@ added fifth check — sampled terse prompts scored mechanically for
 `</think>` stutter/loop, zero-tag runaway, and cap-truncation — and the
 shipcard replay that refuses a receipt without it.
 
-The ledger key set is derived from the producer that owns it (the same shape
-as `test_shipcard._producer_check_names`): a sixth check added to the
-producer appears here on its own; a roster restated from today's five names
-would not.
+The five listed producer constructors supply their own ledger names, as in
+`test_shipcard._producer_check_names`. Adding another check still requires
+adding its constructor to this fixture.
 """
 from __future__ import annotations
 
@@ -440,8 +439,7 @@ def _full_card(tmp_path, **record_kwargs):
 
 
 def test_producer_names_boundary_behavior_as_its_own_check():
-    """The fix is a check the producer owns, not a roster restated here:
-    membership, not equality — a sixth check must not require a test edit."""
+    """The boundary constructor supplies its ledger name to the fixture roster."""
     assert "boundary_behavior" in _producer_check_names()
 
 

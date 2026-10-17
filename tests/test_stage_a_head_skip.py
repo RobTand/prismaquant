@@ -12,9 +12,9 @@ stride 2. The claims:
   fresh run opens nothing under the walk's input roots.
 * A fresh root run with and without the walk seals the same roster digest
   and the same checkpoint bytes; the receipts differ only in ``head.walked``.
-* A completion under another digest, a completion prepared under another
-  plan (dev mode included), and a capsule whose campaign record changed all
-  refuse.
+* A completion under another digest and a capsule whose campaign record
+  changed refuse. Another prepared plan refuses in certified mode and
+  stamps the mismatch in dev mode.
 * The adjoint data manifest's head declares none of the walk's reads.
 """
 from __future__ import annotations

@@ -10,11 +10,12 @@ its lowest sealed checkpoint. The claims these tests hold it to:
 * The interrupted run keeps its forward boundary entries and its sealed
   checkpoints when it fails, and a resume removes only the interrupted
   attempt's rolling entries and sets partial checkpoint directories aside.
-* A resume under a different implementation needs dev mode and an explicit
-  declaration. The run header keeps the original implementation; the
-  declaration is in the receipt and in every band sealed below the switch.
-* Every difference in what decides the chain's bytes refuses, before
-  anything is removed or renamed.
+* Certified resumes refuse changed run seals. Default dev mode stamps seal
+  mismatches, including undeclared implementation and arithmetic changes.
+  Explicit switch declarations remain in receipts and affected bands; the
+  run header retains the original implementation.
+* Chain layout and data constraints refuse in both modes before anything
+  is removed or renamed.
 
 The fixture is a five-layer dense model at stride 2, so the run seals the
 tail checkpoint 5 and checkpoints 4 and 2, and a four-layer model whose

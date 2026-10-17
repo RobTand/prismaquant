@@ -2,10 +2,9 @@
 
 PQ #848, root reviews R2/R3 (post-capture bound metadata generation --
 runtime staging/phase consumption stays a concrete follow-up). Fixtures
-are built by the REAL producer at tiny CPU scale
-(`write_adjoint_checkpoint` + the exact activation owner +
-`exact_entry_record`, real `layer_quanta` records, the real regen CLI) --
-no handbuilt receipt shapes, no payloads. Proves the manifest freezes the
+use real checkpoint and activation writers with tiny CPU tensor payloads,
+`exact_entry_record`, assembled receipt metadata, and the real regen CLI.
+The tests check that the manifest freezes the
 reader's exact repeated schedule, seals byte-exact accounting, binds new
 record generations with recomputed identity through the existing binder,
 and refuses malformed input. Full-chain staging tests belong to the
