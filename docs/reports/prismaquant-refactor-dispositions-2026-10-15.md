@@ -958,3 +958,26 @@ unchanged, with the historical warning recorded and the P2 follow-up open.
 The combined CPU, compile and CUDA qualification is appended to
 `prismaquant-refactor-verification-2026-10-14.md`. No full CLI batch/resume,
 serving, model-quality or performance promotion follows from these small tests.
+
+
+### Native binding commit references in the delivered branch, 2026-10-17
+
+The native-binding author report above records commits from its worker branch.
+The parent integrated them by cherry-pick; these are their delivered equivalents
+in this PR. The historical author references remain unchanged. All delivered
+commits below are ancestors of candidate `5bddb69057`. The integration proof is
+`/home/rob/tmp/pq-claude-review-20261016/fix-native-binding-r4/parent-integration-proof.json`.
+
+| Author branch | Delivered branch |
+|---|---|
+| `70b242338a` | `fcf0ad74c8` |
+| `5ab93f7b9c` | `21d3db7a57` |
+| `5329ab959d` | `5f08d375d0` |
+| `b6ec244eac` | `00c8e03273` |
+| `257910d59d` | `ddeccbd868` |
+| `5fec3650f7` | `e574b6bf95` |
+| `e298af2263` | `3f4b3aaf9a` |
+| `818594e6a3` | `83c3f60a65` |
+| `dfe5c8fde6` | `b5aeadd926` |
+| `ff00dc4d0c` | `0a08082194` |
+| `3d5df6e0ca` | `dd746e5cb3` |
