@@ -35,3 +35,26 @@ def test_routing_factor_names_its_actual_declared_scopes(config, source):
     assert routing.n_routed_experts == 8
     assert routing.read_probability == 0.25
     assert routing.source == source
+
+
+@pytest.mark.parametrize("config,tied", [
+    ({"language_model_config": {"vocab_size": 17, "tie_word_embeddings": True}}, True),
+    ({"text_config": {"vocab_size": 17, "tie_word_embeddings": False},
+      "language_model_config": {"vocab_size": 29, "tie_word_embeddings": True}}, False),
+    ({"vocab_size": 17, "tie_word_embeddings": True,
+      "text_config": {"vocab_size": 29, "tie_word_embeddings": False},
+      "language_model_config": {"vocab_size": 31, "tie_word_embeddings": False}}, True),
+], ids=["language_only", "text_precedence", "top_level_precedence"])
+def test_other_scope_consumers_keep_declared_values_and_precedence(config, tied):
+    from prismaquant.model_profiles.registry import profile_from_config
+    from prismaquant.read_traffic import resolve_embedding_disposition, resolve_vocab_size
+
+    profile = profile_from_config({"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]})
+    embedding = resolve_embedding_disposition(
+        ["model.embed_tokens.weight", "lm_head.weight"], profile=profile, config=config,
+    )
+
+    assert resolve_vocab_size(config) == 17
+    assert embedding.tie_declared is tied
+    assert embedding.lm_head_present is True
+    assert embedding.streamed is False

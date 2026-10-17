@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, routing provenance.
+Read-traffic configuration lookup retains each mapping's actual path. Routing
+metadata distinguishes top-level, `text_config` and `language_model_config`
+declarations. Lookup precedence, routing arithmetic and embedding disposition
+are unchanged.
+
 As of: 2026-10-17, architecture audit continuation, Tessera broadcast shapes.
 The opt-in `broadcast-by-role` planner retains each rate's actual source tensor
 and shape. Every target must match that shape, including nested model names.
