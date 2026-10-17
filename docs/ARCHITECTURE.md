@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, CUDA render qualification.
+Two admitted GB10 checks passed for toy resident/streamed rendering and
+cached/inline packed export on source parent `408c15b4f7a`. They establish the
+numerical comparisons recorded in
+[the qualification report](results/2026-10-17_architecture_render_cuda.md).
+They do not qualify a served artifact, disk streaming or performance.
+
 As of: 2026-10-17, architecture audit continuation, shared cache attachment.
 `ProductionWeightCache.require_source_checkpoint` owns checkpoint admission for
 AURA and the LFM joint screen. Both check the recorded producer dtype and source
