@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-006. Artifact completeness
+retains the persisted-scale requirement when decoding supported static
+compressed-tensors config groups. Direct targets, profile aliases and fused
+sibling targets require the physical unit's `weight_scale` tensor. Dynamic
+weight schemes retain their existing behavior. This is a header-level
+completeness check, not numerical decoding or a served-artifact qualification.
+
 As of: 2026-10-17, architecture audit continuation, CR-005. Packed cache fill
 releases a module's captured and derived activation references after its last
 selected parameter, including fully resumed and score-only resumed entries.

@@ -123,6 +123,30 @@ def test_completeness_cli_refuses_missing_static_channel_scale(tmp_path, capsys)
     assert "lm_head" in output
 
 
+@pytest.mark.parametrize("with_scale", [False, True], ids=["missing_scale", "complete"])
+def test_omitted_dynamic_uses_the_static_weight_default(tmp_path, with_scale):
+    root = tmp_path / "artifact"
+    unit = _quantized_artifact(root, encoding="fp8_channel", fused=False, with_scale=with_scale)
+    config = json.loads((root / "config.json").read_text())
+    config["quantization_config"]["config_groups"]["group_0"]["weights"].pop("dynamic")
+    (root / "config.json").write_text(json.dumps(config))
+    report = completeness.check_artifact_completeness(root)
+    assert report.ok is with_scale
+    assert report.missing_scale == ([] if with_scale else [unit])
+
+
+def test_dynamic_weight_scheme_keeps_unquantized_storage_without_persisted_scale(tmp_path):
+    root = tmp_path / "artifact"
+    scheme = {"format": "float-quantized",
+              "weights": {"num_bits": 8, "type": "float", "strategy": "tensor",
+                          "symmetric": True, "dynamic": True}}
+    _write_artifact(root, scheme=scheme, targets=["lm_head"],
+                    tensors=[("lm_head.weight", "BF16", (4, 32))])
+    report = completeness.check_artifact_completeness(root)
+    assert report.ok, report.failure_text()
+    completeness.assert_artifact_complete(root)
+
+
 def test_plain_float_weight_requires_no_scale_or_quantization_config(tmp_path):
     root = tmp_path / "artifact"
     _write_artifact(root, scheme=None, targets=[], tensors=[("lm_head.weight", "BF16", (4, 32))])
