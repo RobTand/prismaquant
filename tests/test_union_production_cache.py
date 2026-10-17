@@ -725,15 +725,20 @@ def test_union_merges_each_shards_own_joint_global_witnesses(tmp_path):
 
 @pytest.mark.parametrize("change", ["chmod", "copy"])
 def test_union_export_refusal_names_rebuild_instead_of_unscoped_resume(change, tmp_path):
-    assignment = {"model.a": "NVFP4"}
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
     manifest = _make_shard(
         tmp_path, shard_id="a", assignment=assignment,
         entries={("model.a", "NVFP4"): torch.ones(3)},
         witnesses={("model.a", "NVFP4"): 0.25},
     )
+    other = _make_shard(
+        tmp_path, shard_id="c", assignment=assignment,
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        witnesses={("model.c", "NVFP4"): 0.5},
+    )
     output = tmp_path / "union"
     union.union_shard_manifests(
-        [manifest], assignment=assignment, output_bundle=output)
+        [manifest, other], assignment=assignment, output_bundle=output)
     _payload, cache = union.verify_union_manifest(
         output / "union_manifest.json", assignment=assignment)
     assert not (output / "render_identity.json").exists()
