@@ -185,6 +185,17 @@ def _producer_identity() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Corpus
 # ---------------------------------------------------------------------------
+def _window_geometry(n_tokens: int, seqlen: int) -> tuple[range, int]:
+    """Return window starts and scored count, excluding a trailing singleton."""
+    if type(n_tokens) is not int or n_tokens < 0:
+        raise ValueError("invalid calibration token count")
+    if type(seqlen) is not int or seqlen < 2:
+        raise ValueError("calibration seqlen must be at least two")
+    starts = range(0, max(n_tokens - 1, 0), seqlen)
+    scored = min(n_tokens, len(starts) * seqlen) - len(starts)
+    return starts, scored
+
+
 def _calibration_contract(
     corpus: Path,
     tokenizer_dir: Path,
@@ -227,6 +238,60 @@ def _tokenize(corpus: Path, tokenizer_dir: Path, max_tokens: int) -> list[int]:
         corpus.read_text(encoding="utf-8"), add_special_tokens=False
     )
     return list(ids[:max_tokens])
+
+
+def recorded_calibration_contract(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Authenticate a carried calibration contract without reopening its inputs."""
+    contract = payload.get("calibration_contract")
+    if not isinstance(contract, dict) or not isinstance(contract.get("schema"), str):
+        raise ValueError("missing calibration contract")
+    if payload.get("calibration_contract_sha256") != _canonical_sha256(contract):
+        raise ValueError("calibration contract digest is missing or stale")
+    current = payload.get("schema") in (
+        SERVED_KL_SCHEMA, SERVED_PPL_SCHEMA, SERVED_DUMP_SCHEMA)
+    if current and contract["schema"] != CALIBRATION_SCHEMA:
+        raise ValueError("unsupported served calibration schema")
+    if contract["schema"] == CALIBRATION_SCHEMA:
+        required = {
+            "corpus_sha256", "corpus_bytes", "tokenizer_files_sha256",
+            "add_special_tokens", "n_tokens_requested", "n_tokens_selected",
+            "seqlen", "n_windows", "window_overlap", "calib_ids_sha256",
+        }
+        missing = required - contract.keys()
+        if missing:
+            raise ValueError(f"calibration contract missing {sorted(missing)}")
+        for key in ("corpus_bytes", "n_tokens_requested", "n_tokens_selected",
+                    "seqlen", "n_windows", "window_overlap"):
+            if type(contract[key]) is not int or contract[key] < 0:
+                raise ValueError(f"invalid calibration {key}")
+        if type(contract["add_special_tokens"]) is not bool or not isinstance(
+                contract["tokenizer_files_sha256"], dict):
+            raise ValueError("invalid calibration tokenizer settings")
+        digests = [contract["corpus_sha256"], contract["calib_ids_sha256"],
+                   *contract["tokenizer_files_sha256"].values()]
+        if any(not isinstance(value, str) or len(value) != 64
+               or any(char not in "0123456789abcdef" for char in value)
+               for value in digests):
+            raise ValueError("invalid calibration content digest")
+        starts, scored = _window_geometry(
+            contract["n_tokens_selected"], contract["seqlen"])
+        if (not starts or contract["n_windows"] != len(starts)
+                or contract["window_overlap"] != 0
+                or contract["n_tokens_selected"] > contract["n_tokens_requested"]):
+            raise ValueError("inconsistent calibration window geometry")
+        if current:
+            expected = {"seqlen": contract["seqlen"], "n_samples": len(starts)}
+            if payload["schema"] == SERVED_PPL_SCHEMA:
+                expected.update(n_tokens_requested=contract["n_tokens_requested"],
+                                n_tokens_scored=scored)
+            else:
+                expected["n_positions"] = scored
+            for key, value in expected.items():
+                if type(payload.get(key)) is not int or payload[key] != value:
+                    raise ValueError(f"metric population {key} disagrees with calibration")
+    # Local paths do not define a different text population when their bound
+    # bytes and all recorded geometry agree.
+    return {key: value for key, value in contract.items() if key != "corpus_path"}
 
 
 def _windows(token_ids: list[int], seqlen: int) -> list[list[int]]:

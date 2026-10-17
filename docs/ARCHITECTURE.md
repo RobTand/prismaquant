@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, recorded gold populations.
+`tools/kl_ab.py` compares recorded calibration and metric populations before
+printing a delta or a cross-stack range. Current served-gold records require
+their authenticated calibration contract, coherent window/count geometry,
+and metric-specific settings; KL also binds the recorded teacher dump.
+Different student artifacts and sessions remain legal comparison arms.
+Corpus relocation alone does not change the bound text population. Partial,
+mixed, or incompatible known populations refuse, including under the
+cross-fingerprint override. Two legacy records without population metadata
+retain an explicit warning that population equivalence is unestablished.
+`gold-comparison-green-v1` passes 75 CPU cases and compiles three files;
+source, logs, terminal outcome, and CAS receipt are verified. This checks
+recorded contracts, not a new served measurement or artifact equivalence.
+
 As of: 2026-10-17, architecture audit continuation, capture benchmark ownership.
 The Stage A I/O benchmark creates its run root exclusively and checks that
 ownership before reuse or cleanup. Its `capture-run` directory also serves
