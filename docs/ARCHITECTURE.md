@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, MoE plan resume.
+The experimental PrismaSnap MoE planner checks the current source, probe,
+layers, profile, search, and tensor metadata request before adopting an
+existing plan or publishing completed staging. Both resume paths share that
+check. Plan bytes and the independent refusal of production promotion remain
+unchanged; CPU request checks add no MoE fold or served-quality evidence.
+
 As of: 2026-10-17, Rob clarified Tessera dependency policy.
 PrismaQuant may import Tessera's numerical, producer, and serving integration
 APIs where needed. Keep dependencies local to their responsibility and prefer

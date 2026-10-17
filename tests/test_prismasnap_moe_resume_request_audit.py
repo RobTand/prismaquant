@@ -6,6 +6,7 @@ CPU policy controls provide no MoE fold-fidelity or serving qualification.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import pickle
@@ -80,9 +81,13 @@ def _write_inputs(root, *, seed):
     return {"source": source, "identity": identity_path, "probe": probe_path}
 
 
-def _plan(inputs, output, *, layers=(0,), resume=False):
+def _plan(inputs, output, *, layers=(0,), resume=False, search_config=None,
+          tensor_metadata_manifest_path=None):
     return moe.plan_moe_checkpoint(inputs["source"], inputs["probe"], inputs["identity"], output,
-                                   device="cpu", layers=layers, search_config=_config(), resume=resume)
+                                   device="cpu", layers=layers,
+                                   search_config=_config() if search_config is None else search_config,
+                                   tensor_metadata_manifest_path=tensor_metadata_manifest_path,
+                                   resume=resume)
 
 
 @pytest.fixture(scope="module")
@@ -144,4 +149,55 @@ def test_moe_resume_publishes_matching_completed_staging(tmp_path, genuine_plan)
 
     assert _plan(inputs, output, resume=True) == plan_record
     assert common.load_plan(output)[0] == plan_record
+    assert not staging.exists()
+
+
+@pytest.mark.parametrize("change", ["search", "tensor_metadata_manifest"])
+@pytest.mark.parametrize("location", ["output", "staging"])
+def test_moe_resume_retains_current_search_and_metadata_request(
+    tmp_path, genuine_plan, change, location,
+):
+    _root, inputs, plan_dir, _plan_record = genuine_plan
+    output = tmp_path / "requested-plan"
+    retained = output if location == "output" else output.with_name(output.name + ".prismasnap-plan-incomplete")
+    shutil.copytree(plan_dir, retained)
+    before = _snapshot(retained)
+    request = {}
+    if change == "search":
+        request["search_config"] = replace(_config(), max_rounds=2)
+    else:
+        manifest = tmp_path / "tensor-metadata.json"
+        common.scan_tensor_metadata_manifest(inputs["source"], inputs["identity"], manifest)
+        request["tensor_metadata_manifest_path"] = manifest
+
+    with pytest.raises(RuntimeError, match="different requested inputs"):
+        _plan(inputs, output, resume=True, **request)
+
+    assert _snapshot(retained) == before
+    if location == "staging":
+        assert not output.exists()
+
+
+def test_moe_resume_returns_matching_existing_output(tmp_path, genuine_plan):
+    _root, inputs, plan_dir, plan_record = genuine_plan
+    output = tmp_path / "requested-plan"
+    shutil.copytree(plan_dir, output)
+    before = _snapshot(output)
+
+    assert _plan(inputs, output, resume=True) == plan_record
+    assert _snapshot(output) == before
+
+
+def test_moe_resume_keeps_matching_explicit_metadata_binding(tmp_path, genuine_plan):
+    _root, inputs, _plan_dir, _plan_record = genuine_plan
+    manifest = tmp_path / "tensor-metadata.json"
+    common.scan_tensor_metadata_manifest(inputs["source"], inputs["identity"], manifest)
+    output = tmp_path / "requested-plan"
+    plan_record = _plan(inputs, output, tensor_metadata_manifest_path=manifest)
+    staging = output.with_name(output.name + ".prismasnap-plan-incomplete")
+    output.rename(staging)
+
+    assert _plan(inputs, output, resume=True, tensor_metadata_manifest_path=manifest) == plan_record
+    assert common.load_plan(output)[0] == plan_record
+    assert plan_record["tensor_metadata_binding"]["mode"] == "external_manifest"
     assert not staging.exists()
