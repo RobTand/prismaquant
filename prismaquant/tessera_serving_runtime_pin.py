@@ -975,8 +975,8 @@ def require_exact_tessera_runtime_pin(
     A pure predicate over two inputs -- the tracked pin and the digest of the
     contract actually installed -- so the rule can be tested without an
     importable Tessera and cannot be satisfied by reading whatever happens to
-    be on ``PYTHONPATH``.  :func:`require_pinned_tessera_runtime` is the thin
-    resolver every live caller uses.
+    be on ``PYTHONPATH``. :func:`require_pinned_tessera_runtime` resolves these
+    inputs; captured contract snapshots also call this predicate directly.
 
     Three conjuncts, in the order a reader needs them:
 

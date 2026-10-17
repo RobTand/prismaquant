@@ -4324,6 +4324,9 @@ SAMPLE_PARALLEL_RETIRED = (
     "(archive/gridbook_lane_2026-09-02/). Run without "
     "--global-calibration-tensor/--sample-partition-index."
 )
+SAMPLE_PARALLEL_RETIRED_HELP = (
+    "Retired sample-parallel mode; see archive/sample_parallel_probe_2026-10-15/."
+)
 
 
 def main():
@@ -4346,37 +4349,37 @@ def main():
                          "Default 42 reproduces historical behavior.")
     ap.add_argument(
         "--global-calibration-tensor", default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-partition-index", type=int, default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-run-contract", default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-cover", default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--producer-snapshot-root",
         default=os.environ.get("PRISMAQUANT_PRODUCER_SNAPSHOT_ROOT"),
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--container-image-digest",
         default=os.environ.get("PRISMAQUANT_PRODUCER_IMAGE_DIGEST"),
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-importance-stats-output", default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-global-importance-receipt", default=None,
-        help=SAMPLE_PARALLEL_RETIRED,
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--device-map", default=None)
