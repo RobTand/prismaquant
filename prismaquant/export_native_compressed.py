@@ -5947,7 +5947,8 @@ def _materialize_mtp_tensors(src_model: str,
     wrapper.add_module("mtp", inner)
     wrapper.to(dtype=torch.bfloat16)
     raw = profile.read_mtp_source_state_dict(src_model)
-    profile.load_mtp_state_dict(inner, raw)
+    from prismaquant.model_profiles.base import load_complete_mtp_state_dict
+    load_complete_mtp_state_dict(profile, inner, raw, where="native MTP export")
     # Move the whole MTP module to the export device so
     # _materialize_tensors_inmemory's per-linear quant runs on GPU when
     # EXPORT_DEVICE=cuda. Previously defaulted to CPU, costing ~10× on

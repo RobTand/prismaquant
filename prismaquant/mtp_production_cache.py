@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 
 from prismaquant import format_registry as fr
+from prismaquant.model_profiles.base import load_complete_mtp_state_dict
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.measure_quant_cost import (
     ActivationIndex,
@@ -158,13 +159,7 @@ def _load_exact_mtp_wrapper(
             f"profile '{profile.name}' declares MTP but the checkpoint has "
             f"no source tensors under {profile.mtp_source_prefix()!r}"
         )
-    unmatched_source, module_unset = profile.load_mtp_state_dict(inner, raw)
-    if unmatched_source or module_unset:
-        raise RuntimeError(
-            "MTP source/module coverage failure: "
-            f"unmatched_source={unmatched_source[:8]} "
-            f"module_params_unset={module_unset[:8]}"
-        )
+    load_complete_mtp_state_dict(profile, inner, raw, where="production MTP cache")
 
     wrapper.to(device=device)
     wrapper.eval()

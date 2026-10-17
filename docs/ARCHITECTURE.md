@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, complete MTP source loading.
+The profile loader tracks every packed expert projection and requires exact
+slice shapes. Its partial-load interface still reports unset parameters.
+The shared `load_complete_mtp_state_dict` boundary refuses incomplete or
+unmatched source before cache rendering, native export, incremental probe/cost
+measurement or successful profile validation. Complete zero-valued weights are
+valid. The probe's empty-source skip and cost's no-target skip remain explicit.
+
 As of: 2026-10-17, architecture audit continuation, physical memory reserves.
 `ServeConstraintContext.validate` rejects negative KV or peak-scratch bytes,
 including when the serving constraint axis is inactive. Physical reserves
@@ -26837,6 +26845,16 @@ source tensor, module-name, activation-row/width, requested-pair, and resulting 
 are all checked exactly before the append can succeed. An explicit non-BF16 MTP assignment
 therefore requires `--activation-cache-dir` and fails closed rather than degrading to RTN or
 BF16.
+
+`ModelProfile.load_mtp_state_dict` retains partial-load semantics but reports a
+packed parent unset until every expert projection has a complete source matrix.
+It rejects mismatched slice shapes and out-of-range experts. The shared
+`load_complete_mtp_state_dict` boundary checks both unmatched source keys and
+unset module state. Cache append, native materialization, incremental probe and
+cost measurement, and profile validation use this boundary before consuming the
+constructed module. Complete exact-name packed tensors, including all-zero
+weights, remain valid. The incremental probe still writes its historical empty
+shard for absent source; incremental cost still skips a scope with no targets.
 
 Compatibility is deliberate. Assignment scope appends only its concrete non-BF16 `mtp.*`
 pairs. Format-menu scope without an activation-cache directory retains the historical

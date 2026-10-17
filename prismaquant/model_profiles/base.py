@@ -99,6 +99,24 @@ def _read_config_alias_with_fallback(explicit, declared, *names):
     return _read_config_alias(declared, *names)
 
 
+def load_complete_mtp_state_dict(
+    profile,
+    mtp_module: nn.Module,
+    raw: dict,
+    *,
+    where: str,
+) -> None:
+    """Admit a complete source before an MTP module is measured or emitted."""
+    unmatched_source, module_unset = profile.load_mtp_state_dict(mtp_module, raw)
+    if unmatched_source or module_unset:
+        raise RuntimeError(
+            f"{where}: MTP source/module coverage failure: "
+            f"unmatched_source={unmatched_source[:8]} "
+            f"module_params_unset={module_unset[:8]}; "
+            "provide a complete checkpoint matching this MTP module"
+        )
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
@@ -647,6 +665,8 @@ class ModelProfile(ABC):
             layers.N.mlp.experts.{e}.up_proj.weight   -> ...experts.gate_up_proj[e, I:]
             layers.N.mlp.experts.{e}.down_proj.weight -> ...experts.down_proj[e]
 
+        Partial loads are allowed. A packed parent remains in the unset
+        list until every expert projection has a full source matrix.
         Dense MTP blocks simply never match that pattern and fall
         through to the exact-name path."""
         sd = mtp_module.state_dict()
@@ -654,6 +674,7 @@ class ModelProfile(ABC):
         mapped: dict = {}
         missing: list[str] = []
         loaded_module_keys: set[str] = set()
+        loaded_packed_slices: dict[str, set[tuple[int, str]]] = {}
         packed_pat = re.compile(
             r"^(layers\.\d+\.mlp\.experts)\.(\d+)\."
             r"(gate_proj|up_proj|down_proj)\.weight$"
@@ -672,28 +693,41 @@ class ModelProfile(ABC):
 
             prefix, expert_id_s, proj = m.groups()
             expert_id = int(expert_id_s)
-            if proj == "down_proj":
-                packed_name = f"{prefix}.down_proj"
-                packed = params.get(packed_name)
-                if packed is None:
-                    missing.append(k)
-                    continue
-                packed.data[expert_id].copy_(
-                    v.to(device=packed.device, dtype=packed.dtype))
-                loaded_module_keys.add(packed_name)
-                continue
-
-            packed_name = f"{prefix}.gate_up_proj"
+            packed_leaf = "down_proj" if proj == "down_proj" else "gate_up_proj"
+            packed_name = f"{prefix}.{packed_leaf}"
             packed = params.get(packed_name)
             if packed is None:
                 missing.append(k)
                 continue
-            rows = v.shape[0]
-            start = 0 if proj == "gate_proj" else rows
-            packed.data[expert_id, start:start + rows].copy_(
-                v.to(device=packed.device, dtype=packed.dtype)
-            )
-            loaded_module_keys.add(packed_name)
+            if packed.ndim != 3 or expert_id >= packed.shape[0]:
+                raise RuntimeError(
+                    "MTP source/module coverage failure: "
+                    f"source={k!r} cannot address packed shape={tuple(packed.shape)}"
+                )
+            if proj == "down_proj":
+                target = packed.data[expert_id]
+            else:
+                if packed.shape[1] % 2:
+                    raise RuntimeError(
+                        "MTP source/module coverage failure: "
+                        f"packed gate/up parent {packed_name!r} has odd row count"
+                    )
+                rows = packed.shape[1] // 2
+                start = 0 if proj == "gate_proj" else rows
+                target = packed.data[expert_id, start:start + rows]
+            if tuple(v.shape) != tuple(target.shape):
+                raise RuntimeError(
+                    "MTP source/module coverage failure: "
+                    f"source={k!r} shape={tuple(v.shape)} "
+                    f"expected={tuple(target.shape)}"
+                )
+            target.copy_(v.to(device=packed.device, dtype=packed.dtype))
+            loaded_packed_slices.setdefault(packed_name, set()).add((expert_id, proj))
+
+        for packed_name, slices in loaded_packed_slices.items():
+            projections_per_expert = 1 if packed_name.endswith(".down_proj") else 2
+            if len(slices) == params[packed_name].shape[0] * projections_per_expert:
+                loaded_module_keys.add(packed_name)
 
         # Load exact-name tensors through state_dict for everything that
         # isn't a packed expert tensor filled manually above.

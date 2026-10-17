@@ -4015,13 +4015,17 @@ def _load_mtp_source_for_probe(
     mtp_profile,
     inner_mtp: nn.Module,
     model_path: str,
-) -> tuple[dict[str, torch.Tensor], list[str], list[str]]:
-    """Load MTP source weights and report unmatched source/module parameters."""
+) -> dict[str, torch.Tensor]:
+    """Admit complete MTP source weights, or preserve the empty-source skip."""
+    from .model_profiles.base import load_complete_mtp_state_dict
+
     raw = mtp_profile.read_mtp_source_state_dict(model_path)
     if not raw:
-        return {}, [], []
-    missing, extra = mtp_profile.load_mtp_state_dict(inner_mtp, raw)
-    return raw, list(missing), list(extra)
+        return {}
+    load_complete_mtp_state_dict(
+        mtp_profile, inner_mtp, raw, where="incremental MTP probe",
+    )
+    return raw
 
 
 def _build_mtp_fisher_accumulator(
@@ -4115,7 +4119,7 @@ def _run_mtp_streaming_shard(
     mtp_wrapper.to(device=device, dtype=dtype)
     mtp_wrapper.eval()
 
-    raw, missing, extra = _load_mtp_source_for_probe(
+    raw = _load_mtp_source_for_probe(
         mtp_profile,
         inner_mtp,
         model_path,
@@ -4151,13 +4155,9 @@ def _run_mtp_streaming_shard(
         print(f"[incremental/mtp] no MTP weights; wrote empty shard "
               f"pickle to {output_path}", flush=True)
         return
-    loaded = len(raw) - len(missing)
-    print(f"[incremental/mtp] loaded {loaded}/{len(raw)} mtp weights "
-          f"(missing={len(missing)}, module_params_unset={len(extra)})",
+    print(f"[incremental/mtp] loaded {len(raw)} mtp source tensors "
+          "with complete module coverage",
           flush=True)
-    if missing:
-        print(f"[incremental/mtp] unmatched checkpoint keys (first 5): "
-              f"{missing[:5]}{'...' if len(missing) > 5 else ''}", flush=True)
 
     # Freeze every leaf; Fisher hooks capture ||grad_w||² without
     # retaining leaf .grads.

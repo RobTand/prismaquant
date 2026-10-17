@@ -683,10 +683,12 @@ def _run_mtp_cost_shard(
     mtp_wrapper.eval()
 
     raw = profile.read_mtp_source_state_dict(model_path)
-    missing, extra = profile.load_mtp_state_dict(inner_mtp, raw)
-    loaded = len(raw) - len(missing)
-    print(f"[incremental-cost/mtp] loaded {loaded}/{len(raw)} mtp weights "
-          f"(missing={len(missing)}, module_params_unset={len(extra)})",
+    from .model_profiles.base import load_complete_mtp_state_dict
+    load_complete_mtp_state_dict(
+        profile, inner_mtp, raw, where="incremental MTP cost",
+    )
+    print(f"[incremental-cost/mtp] loaded {len(raw)} mtp source tensors "
+          "with complete module coverage",
           flush=True)
 
     for p in mtp_wrapper.parameters():
