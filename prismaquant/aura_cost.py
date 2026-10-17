@@ -3021,7 +3021,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--output", required=True)
     p.add_argument("--formats", default="NVFP4,FP8_DYNAMIC,BF16")
     p.add_argument("--production-cache", default=None,
-                   help="ProductionWeightCache pickle for production-faithful dW")
+                   help="ProductionWeightCache pickle for production-faithful dW; "
+                        "checks current source bytes and declared render dtype "
+                        "independently of the Fisher measurement --dtype.")
     p.add_argument("--checkpoint-dir", default=None,
                    help="Durable per-Linear AURA checkpoint directory. The "
                         "manifest value-binds calibration, cache rendering, "
@@ -3195,6 +3197,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     from prismaquant.calibration_data import load_wikitext_calibration_windowed
     from prismaquant.model_profiles import detect_profile
 
+    cache = None
+    if args.production_cache:
+        from prismaquant.streamed_model_identity import (
+            build_source_model_binding,
+            resolve_source_checkpoint_path,
+            validate_source_model_binding,
+        )
+
+        with open(args.production_cache, "rb") as fh:
+            cache = pickle.load(fh)
+        producer_binding = validate_source_model_binding(
+            (cache.metadata or {}).get("source_binding"),
+            where="AURA production cache attachment",
+        )
+        args.model = str(resolve_source_checkpoint_path(args.model))
+        cache.require_source_binding(
+            build_source_model_binding(
+                args.model, dtype=producer_binding["effective_dtype"],
+            ),
+            where="AURA production cache attachment",
+        )
+        _log(f"loaded production cache: {args.production_cache}")
+
     staged = _stage_aura_model(args.model)
     # Profile detection installs architecture-owned vendored modelling where
     # required and is also the fail-closed authority for routed-expert
@@ -3284,12 +3309,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             tok, args.n_calib_samples, args.calib_seqlen,
             split=args.calib_split, seed=args.calib_seed,
         ).to(args.device)
-
-    cache = None
-    if args.production_cache:
-        with open(args.production_cache, "rb") as fh:
-            cache = pickle.load(fh)
-        _log(f"loaded production cache: {args.production_cache}")
 
     requested_formats = [
         f.strip() for f in args.formats.split(",") if f.strip()

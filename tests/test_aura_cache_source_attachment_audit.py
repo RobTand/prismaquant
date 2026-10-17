@@ -25,7 +25,8 @@ class _ReachedPricing(Exception):
 @pytest.mark.parametrize("streaming", [False, True], ids=["resident", "streamed"])
 @pytest.mark.parametrize("case", [
     "unchanged", "relocated", "changed_weights", "changed_config",
-    "dtype_mismatch", "missing_binding",
+    "fp16_render_bf16_measurement", "missing_binding",
+    "bf16_render_fp32_measurement", "hf_id",
 ])
 def test_aura_main_binds_independent_cache_before_pricing(
     tmp_path, monkeypatch, streaming, case,
@@ -40,12 +41,14 @@ def test_aura_main_binds_independent_cache_before_pricing(
     assignment = tmp_path / "assignment.json"
     assignment.write_text(json.dumps({"l1": "FP8_E4M3"}))
     calibration = torch.tensor([[0, 1]], dtype=torch.long)
+    model_loads = []
 
     def load_model(path, **kwargs):
         model = _TinyChain().eval()
         model.load_state_dict(load_file(str(Path(path) / "model.safetensors")))
         dtype = kwargs.get("torch_dtype", kwargs.get("dtype"))
         assert isinstance(dtype, torch.dtype)
+        model_loads.append((str(path), dtype))
         return model.to(dtype=dtype)
 
     monkeypatch.setattr(AutoTokenizer, "from_pretrained", lambda *args, **kwargs: object())
@@ -67,7 +70,7 @@ def test_aura_main_binds_independent_cache_before_pricing(
             "--cache-dir", str(directory / "weights"),
             "--render-scope", "assignment", "--render-layer-config", str(assignment),
             "--formats", "FP8_E4M3", "--enable", "none",
-            "--dtype", "fp16" if case == "dtype_mismatch" else "bf16",
+            "--dtype", "fp16" if case == "fp16_render_bf16_measurement" else "bf16",
             "--max-act-rows", "8",
         ]) == 0
         return output
@@ -76,6 +79,7 @@ def test_aura_main_binds_independent_cache_before_pricing(
     cache = pickle.loads(produced.read_bytes())
     original_render = cache.get("l1", "FP8_E4M3").clone()
     attach_source = model_dir
+    snapshot_calls = []
     if case == "relocated":
         attach_source = tmp_path / "same_bytes_elsewhere"
         shutil.copytree(model_dir, attach_source)
@@ -90,12 +94,39 @@ def test_aura_main_binds_independent_cache_before_pricing(
     elif case == "missing_binding":
         cache.metadata.pop("source_binding", None)
         produced.write_bytes(pickle.dumps(cache))
+    elif case == "hf_id":
+        import huggingface_hub
+
+        def snapshot_download(*, repo_id, local_files_only=False):
+            assert repo_id == "audit/aura-source"
+            assert local_files_only is False
+            assert not snapshot_calls, "AURA resolved its remote source twice"
+            snapshot_calls.append(repo_id)
+            return str(model_dir)
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot_download)
+        attach_source = "audit/aura-source"
 
     pricing_calls = []
+    staged_sources = []
+    model_loads.clear()
+    expected_source = model_dir if case == "hf_id" else attach_source
+    measurement_dtype = (
+        torch.float32 if case == "bf16_render_fp32_measurement" else torch.bfloat16
+    )
+    stage_model = aura_cost._stage_aura_model
+
+    def stage(path):
+        assert Path(path) == Path(expected_source)
+        staged_sources.append(str(path))
+        return stage_model(path)
+
+    monkeypatch.setattr(aura_cost, "_stage_aura_model", stage)
 
     def price(model_or_runner, calibration_ids, formats, **kwargs):
         pricing_calls.append(streaming)
         model = model_or_runner.model if streaming else model_or_runner
+        assert model.l1.weight.dtype == measurement_dtype
         assert kwargs["require_production_cache"] is True
         assert formats == ["FP8_E4M3"]
         delta, origin = aura_cost._delta_w(
@@ -121,16 +152,26 @@ def test_aura_main_binds_independent_cache_before_pricing(
     argv = [
         "--model", str(attach_source), "--output", str(tmp_path / "cost.pkl"),
         "--production-cache", str(produced), "--require-production-cache",
-        "--formats", "FP8_E4M3", "--dtype", "bfloat16", "--device", "cpu",
+        "--formats", "FP8_E4M3", "--dtype", str(measurement_dtype).removeprefix("torch."),
+        "--device", "cpu",
         "--n-calib-samples", "1", "--calib-seqlen", "2",
     ]
     if streaming:
         argv.append("--streaming")
-    if case in {"unchanged", "relocated"}:
+    if case in {
+        "unchanged", "relocated", "fp16_render_bf16_measurement",
+        "bf16_render_fp32_measurement", "hf_id",
+    }:
         with pytest.raises(_ReachedPricing):
             aura_cost.main(argv)
         assert pricing_calls == [streaming]
+        assert model_loads == [(str(expected_source), measurement_dtype)]
+        assert staged_sources == [str(expected_source)]
     else:
         with pytest.raises((RuntimeError, ValueError), match=r"source|dtype|identity|binding"):
             aura_cost.main(argv)
         assert pricing_calls == []
+        assert model_loads == []
+        assert staged_sources == []
+    if case == "hf_id":
+        assert snapshot_calls == ["audit/aura-source"]

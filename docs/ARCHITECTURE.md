@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, AURA cache attachment.
+AURA checks the production cache's original checkpoint before staging or
+loading a model. It uses the cache's declared producer dtype for that binding;
+the Fisher measurement dtype remains independent. Missing binding or changed
+source bytes refuse. Resident and streamed paths reuse one resolved snapshot.
+CPU regressions cover these boundaries, not served quality or performance.
+
 As of: 2026-10-17, architecture audit continuation, validation cache attachment.
 The metric harness checks a configured production cache against the original
 checkpoint and effective evaluation dtype before loading a model or attaching
@@ -26936,6 +26943,12 @@ before tokenizer or model loading. Its metrics share the same admitted cache.
 Unbound independent pickles refuse. Exact union uses its existing metadata
 agreement rule to preserve a shared binding or refuse mismatched/missing values.
 Packed fit-corpus exemptions and MTP append identities remain separate contracts.
+
+AURA also checks this binding before staging or loading its model. It validates
+the cache's recorded producer dtype and uses that dtype when checking the current
+checkpoint. The measurement model may use another dtype, including FP32 Fisher
+measurement of a BF16 render. This comparison authenticates the checkpoint and
+declared render dtype; it does not require the measurement to use that dtype.
 
 Render mechanisms are a registry with declared ordering semantics, not a lever string parsed in
 spelling order (`render_score.py:188-260`): each `RenderMechanismSpec` declares `operation`,
