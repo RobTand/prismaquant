@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit documentation correction. The Tessera
+producer-checkout predicate verifies its packaged contract SHA-256. It does
+not attest the checkout commit, working tree or encoder bytes. Installed
+runtime pin admission remains a separate check. Neither predicate changed.
+
 As of: 2026-10-17, architecture audit continuation, CR-003. Allocation
 requires every mutable body Linear to retain a priced candidate after explicit
 fixed and auxiliary scope disposition. It checks coverage again after serving
@@ -31014,7 +31019,7 @@ and the charged-bits accounting are the producer's records, so the translation
 lives on this side of the boundary; previously Tessera's
 `experiments/plan_from_layer_config.py`) and the encode is Tessera's supported
 `python -m tessera.export_serving` (RobTand/tessera#687), NAMED by the arm under
-`TESSERA_REPO` with the pin-verified checkout first on its PYTHONPATH, the same
+`TESSERA_REPO` with the contract-checked checkout first on its PYTHONPATH, the same
 boundary the lane spec already uses for the serve script and the route census.
 A second copy of the encode here would be a second place a wire recipe can
 drift, which is the failure principle 14 exists to prevent. `TESSERA_PLAN_COVER` (`as-allocated` by default) decides whether
@@ -31034,14 +31039,13 @@ declares it shells out to must exist under the env var that declaration names
 (`require_producer_tools`); the INSTALLED Tessera must be the pinned
 one — the pin's commit plus the SHA-256 of the `runtime_contract.json` this
 process imports (`require_release_pin` → `require_pinned_tessera_runtime`); and
-the checkout those tools come from must be that SAME Tessera —
+the producer checkout must package the pinned contract bytes.
 `require_producer_repo_is_pinned` hashes the contract `$TESSERA_REPO` packages
-against the pin's `contract_sha256`, because gate 1 hashes the package this
-process *imports* and nothing else bound the two. That hole is one the move to
-a commit pin OPENS rather than closes: while the pin carried PENDING sentinels
-the lane could not build at all, so the attesting Tessera and the encoding
-Tessera could never diverge in a run that produced bytes (principle 8). Any
-other Tessera tree, on either side, refuses shipping. Runtime-scoped v5/v6 add an explicit validated target before
+against the pin's `contract_sha256`. It does not check that checkout's Git
+commit, working tree or encoder source bytes. A different checkout carrying
+the same contract can pass this producer predicate. Installed-runtime
+admission independently checks the reader's pinned constants and packaged
+contract digest. Runtime-scoped v5/v6 add an explicit validated target before
 work and selected-unit scope/source-shape admission before translation;
 passing the release pin does not bypass those gates. For a selected **routed
 expert** unit that source-shape admission is replaced by the producer's own
