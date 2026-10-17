@@ -3697,7 +3697,7 @@ def _scan_source_dtype_manifest(
         # weights at different granularities, and source-passthrough legality
         # is checked against the live probe/cost key. The layer reuses
         # `footprint.packed_expert_alias` with the profile's own mapping;
-        # mixed kinds fold to ``other`` so no byte-copy format can be
+        # mixed kinds fold to ``heterogeneous`` so no byte-copy format can be
         # admitted for a heterogeneous stack. With NO caller-supplied
         # profile there is no declared mapping and nothing folds
         # (historical behavior).

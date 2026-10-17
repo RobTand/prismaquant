@@ -2152,12 +2152,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--visual-format",
                     choices=_format_cli_choices(),
                     default="BF16",
-                    help="Uniform format for all visual-encoder Linears "
-                         "(`model.visual.blocks.*`). Phase 1 fallback: "
-                         "assigned to every visual Linear when "
-                         "--visual-sensitivity=uniform OR when --visual-"
-                         "sensitivity=fisher but the probe / cost pickles "
-                         "don't carry real visual Fisher data. BF16 (default) "
+                    help="Fixed auxiliary format for profile-declared visual "
+                         "Linears when --visual-sensitivity=uniform or no "
+                         "visual costs are supplied. Measured fisher mode "
+                         "requires complete stats, costs and legal candidates. "
+                         "BF16 (default) "
                          "reproduces passthrough behavior; NVFP4 / "
                          "FP8_DYNAMIC shrink the tower to quantized storage via the "
                          "existing RTN math at export time.")
