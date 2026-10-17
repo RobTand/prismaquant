@@ -46,7 +46,7 @@ from .digests import (
 from .file_identity import file_stat_signature
 from .prismabuild_progress import commit as _pb_commit
 from .stage_inputs import (
-    bound as _bound, require as _require, same as _same,
+    bound as _bound, read_bound as _read_bound, require as _require, same as _same,
     source_prefetch as _source_prefetch,
 )
 
@@ -2427,8 +2427,8 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     walk. The boundary directory is never resolved here in either mode: the
     admission discards it, and its owner resolves it when it opens storage.
     """
-    path = _bound({"path": str(path), "sha256": digest}, "joint anchor plan")
-    config = json.loads(path.read_text())
+    config = json.loads(_read_bound(
+        {"path": str(path), "sha256": digest}, "joint anchor plan"))
     _same(config.get("schema"), SCHEMA, "joint anchor plan schema")
     for key, label in (("source_identity_cache", "source identity cache"),
                        ("source_digest_cache", "source digest cache")):

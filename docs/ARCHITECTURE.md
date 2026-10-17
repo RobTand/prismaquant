@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, authenticated joint plans.
+`load_joint_anchor_plan` parses the bytes returned by the existing
+`stage_inputs.read_bound` owner. It no longer authenticates a pathname and
+then opens that pathname again to parse a potentially replaced document.
+The four relevant `resident-intake-green-v1` shards pass 135 CPU cases with
+three explicit deselections. The replacement regression uses the actual
+digest and plan admission; it runs no projection backend or model. Terminal
+logs, source bytes, compile results, and CAS success receipts are verified.
+
 As of: 2026-10-17, architecture audit continuation, materialized walk dtype.
 The materialized `model_walk` CLI resolves short precision names through the
 existing calibration dtype parser, including its advertised `bf16` default.
