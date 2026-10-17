@@ -31,4 +31,4 @@ def test_schedule_summary_retains_any_observed_older_phase(joined, tmp_path, old
     assert observation["status"] == "operator_evidence"
     assert observation["runtime_table_admissible"] is False
     assert {phase: row["kernel_arch"] for phase, row in observation["phases"].items()} == expected_arches
-    assert ("native_kernel_schedule" in observation["unknown"]) is bool(older_phases)
+    assert observation["unknown"].count("native_kernel_schedule") == int(bool(older_phases))

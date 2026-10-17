@@ -541,6 +541,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     activation_scope = require_panel_execution_scope(
         expected_panel, executing_image=(expected_panel.get("runtime") or {}).get("image"))
     observations = {}
+    unknowns = ["fixed_and_full_model_resources"] + ([] if complete else ["native_operator_scratch"])
     for phase in PHASES:
         observed, expected = receipt["phases"][phase], expected_panel["phases"][phase]
         _admit(observed, f"receipt {phase}", RECEIPT_PHASE_FIELDS)
@@ -569,8 +570,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
         # refusal is a measured-delta decision for Rob, not this gate.
         schedule = observed_kernel_schedule(route)
         arch = kernel_arch_status(schedule, platform=route.get("platform"))
-        unknowns = ["fixed_and_full_model_resources"] + ([] if complete else ["native_operator_scratch"])
-        if arch == "older_arch":
+        if arch == "older_arch" and "native_kernel_schedule" not in unknowns:
             unknowns.append("native_kernel_schedule")
         observations[phase] = {"measurement": measurement.as_dict(), "median_ms": measurement.median_ms,
                                "peak_scratch_bytes": scratch, "resource_bound": bound,

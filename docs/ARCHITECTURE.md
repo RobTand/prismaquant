@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, native schedule summary.
+The native receipt summary records `native_kernel_schedule` once if either
+prefill or decode used an older architecture schedule. Per-phase observations
+and the existing advisory admission policy are unchanged. This preserves the
+warning when a later phase uses a native schedule.
+
 As of: 2026-10-17, architecture audit continuation, KDA qualification roster.
 The qualification builder requires the complete literal case roster from the
 same harness bytes whose digest it checks. A selected-case run cannot qualify
