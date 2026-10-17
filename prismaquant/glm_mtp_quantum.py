@@ -381,6 +381,8 @@ def run_mtp_scope(runner, *, config, data, production_cache, calibration_ids, ca
         raise RuntimeError("the final hidden states were computed on another calibration draw")
     if tuple(calibration_ids.shape)[0] != len(final["records"]):
         raise RuntimeError("the final-hidden entries do not cover the calibration draw")
+    cap.require_final_hidden_source(
+        final, config["canonical_capture"], where="MTP pricing final hidden")
 
     runner.context.schedule_prefetch(layer)
     runner.context.install(layer, require_prefetched=runner.require_prefetched_residency,

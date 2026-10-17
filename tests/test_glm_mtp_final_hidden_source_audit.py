@@ -168,3 +168,98 @@ def test_real_cli_final_hidden_source_policy(source_pair, monkeypatch, capsys, d
             assert report["source_authentication"]["dev_uncertified"] is True
     finally:
         assert all(_sha(path) == digest for path, digest in pair.owned.items())
+
+
+class _AdmissionReached(Exception):
+    pass
+
+
+def _pricing_intake(current, selected, prefetch):
+    final = json.loads(selected.final.read_text())
+    layer = int(current.env.mtp.layer_idx)
+    runner = SimpleNamespace(source_layers=(layer,),
+                             context=SimpleNamespace(schedule_prefetch=prefetch))
+    data = SimpleNamespace(census={"mtp_extension": {
+        "layer": layer,
+        "final_hidden": {"path": str(selected.final), "sha256": _sha(selected.final)},
+    }})
+    config = {"canonical_capture": current.plan["canonical_capture"]}
+    calibration = {"calibration_sha256": final["inputs"]["calibration_sha256"]}
+    return runner, data, config, calibration
+
+
+@pytest.mark.parametrize("dev", [False, True], ids=["certified", "dev"])
+@pytest.mark.parametrize("different", [False, True], ids=["same_source", "other_source"])
+def test_real_pricing_admits_source_before_prefetch(
+        source_pair, monkeypatch, capsys, dev, different):
+    from prismaquant import glm_mtp_quantum
+
+    pair = source_pair
+    current = pair.b
+    selected = pair.a if different else pair.b
+    prefetched = []
+
+    def after_admission(layer):
+        prefetched.append(layer)
+        raise _AdmissionReached
+
+    runner, data, config, calibration = _pricing_intake(current, selected, after_admission)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    capsys.readouterr()
+    expected = RuntimeError if different and not dev else _AdmissionReached
+    try:
+        with pytest.raises(expected) as error:
+            glm_mtp_quantum.run_mtp_scope(
+                runner, config=config, data=data, production_cache=None,
+                calibration_ids=current.env.ids, calibration=calibration,
+                source_model={}, projection_backend=None, operator_windows={}, device_bytes=1)
+        if different and not dev:
+            assert "source model" in str(error.value)
+            assert not prefetched
+        else:
+            assert prefetched == [int(current.env.mtp.layer_idx)]
+        if different and dev:
+            lines = capsys.readouterr().out.splitlines()
+            assert any("[DEV-MODE]" in line and "final-hidden source" in line for line in lines), lines
+    finally:
+        assert all(_sha(path) == digest for path, digest in pair.owned.items())
+
+
+@pytest.mark.parametrize("dev", [False, True], ids=["certified", "dev"])
+def test_pricing_calibration_stays_strict(source_pair, monkeypatch, dev):
+    from prismaquant import glm_mtp_quantum
+
+    def unexpected_prefetch(layer):
+        pytest.fail(f"prefetched layer {layer} before calibration admission")
+
+    current = source_pair.b
+    runner, data, config, calibration = _pricing_intake(current, current, unexpected_prefetch)
+    calibration["calibration_sha256"] = "0" * 64
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    with pytest.raises(RuntimeError, match="another calibration draw"):
+        glm_mtp_quantum.run_mtp_scope(
+            runner, config=config, data=data, production_cache=None,
+            calibration_ids=current.env.ids, calibration=calibration,
+            source_model={}, projection_backend=None, operator_windows={}, device_bytes=1)
+
+
+def test_same_source_can_have_an_independent_canonical_capture(source_pair):
+    from prismaquant import glm_mtp_capture as cap
+    from prismaquant import tessera_calibration_cache as cc
+
+    current = source_pair.b
+    env = current.env
+    name = fixture.DENSE_UNIT
+    identity = dict(env.canonical, max_act_rows=env.canonical["max_act_rows"] + 1)
+    count = int(env.census["counts"][name])
+    rows = torch.randn(min(count, identity["max_act_rows"]), env.census["unit_shapes"][name][1],
+                       generator=torch.Generator().manual_seed(43))
+    capture = cc.publish_capture(
+        env.root / "independent-canonical", census_path=env.census_path, identity=identity,
+        acts={name: rows}, hessians={name: rows.T @ rows},
+        counts=env.census["counts"], maxima=env.census["max_abs"])
+    assert capture["sha256"] != current.plan["canonical_capture"]["sha256"]
+    final, _ = cap.read_bound_json(current.final, _sha(current.final))
+    assert cap.require_final_hidden_source(
+        final, capture, where="independent-capture source control") is True
+    assert all(_sha(path) == digest for path, digest in source_pair.owned.items())

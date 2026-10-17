@@ -156,6 +156,36 @@ def read_bound_json(path, expected_sha256):
     return json.loads(raw), digest
 
 
+def require_final_hidden_source(manifest, canonical_capture, *, where):
+    """Admit CLI hidden states under the canonical capture's source seal.
+
+    Independent captures of the same checkpoint may have different draws,
+    units or generations. Compare their bound source rosters, leaving the
+    caller's calibration equality and each artifact's own integrity strict.
+    """
+    from . import tessera_calibration_cache as cc
+    from .dev_mode import seal_check
+
+    if manifest.get("schema") != FINAL_HIDDEN_SCHEMA:
+        raise RuntimeError(f"{where}: not a GLM MTP final-hidden manifest")
+
+    def source_files(binding):
+        if not isinstance(binding, dict) or not {"path", "sha256"} <= binding.keys():
+            raise RuntimeError(f"{where}: final-hidden source needs a bound canonical capture")
+        capture, _ = read_bound_json(binding["path"], binding["sha256"])
+        source = cc.validate_capture_contract(capture)["identity"]["source_files"]
+        if not isinstance(source, dict):
+            raise RuntimeError(f"{where}: canonical capture source roster is invalid")
+        cc._require_sha256_roster(source, what="final-hidden canonical source")
+        return source
+
+    recorded = source_files((manifest.get("inputs") or {}).get("canonical_capture"))
+    current = source_files(canonical_capture)
+    return seal_check("MTP final-hidden source", recorded, current, where=where,
+        refusal=lambda: RuntimeError(
+            f"{where}: final hidden states were computed from another source model"))
+
+
 def ordered_boundary_records(manifest, n_sequences, *, layer):
     """Layer ``layer``'s input for sequences ``0..n-1``, in order.
 
@@ -484,5 +514,6 @@ __all__ = [
     "publish_final_hidden",
     "publish_mtp_capture",
     "read_bound_json",
+    "require_final_hidden_source",
     "write_final_hidden",
 ]

@@ -249,6 +249,8 @@ def capture_phase(args):
         final, _ = cap.read_bound_json(args.final_hidden, args.final_hidden_sha256)
         if final["inputs"]["calibration_sha256"] != calibration["calibration_sha256"]:
             raise RuntimeError("the final hidden states were computed on another calibration draw")
+        cap.require_final_hidden_source(
+            final, plan["canonical_capture"], where="MTP capture final hidden")
         final_ref = {"schema": cap.FINAL_HIDDEN_SCHEMA,
                      "path": str(Path(args.final_hidden).resolve()),
                      "sha256": args.final_hidden_sha256}

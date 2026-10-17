@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, MTP final-hidden source.
+MTP capture and pricing compare the hidden-state producer's canonical source
+roster with the current plan's roster before loading or prefetching. Certified
+mode refuses a mismatch; development mode records the existing seal warning.
+Calibration equality and artifact integrity stay strict in both modes.
+Independent captures of the same source remain valid.
+
 As of: 2026-10-17, architecture audit continuation, MoE plan resume.
 The experimental PrismaSnap MoE planner checks the current source, probe,
 layers, profile, search, and tensor metadata request before adopting an
@@ -9850,11 +9857,24 @@ calibration draw, in two PrismaBuild actions (`tools/glm_mtp_capture.py`,
   phase reads is authenticated through that owner. The owner's receipt names
   each admitted census (`derived_census_sha256`).
 
-No format, pipeline default, stage, lane or ship gate changes; nothing reads
-the MTP capture yet. `stage_a_chain_seed.tensor_payload_sha256` now hashes in
-bounded host chunks (same digest). Gate: `tests/test_glm_mtp_capture.py`
-(both phases end to end on a tiny checkpoint, the CLI from a body-shaped
-plan, the derived-census and load-contract refusals).
+The capture and `glm_mtp_quantum.run_mtp_scope` pricing path consume the
+final-hidden manifest. Both call `glm_mtp_capture.require_final_hidden_source`
+after calibration admission and before model loading or prefetch. It validates
+the two bound canonical captures and compares their `identity.source_files`
+rosters. Different source bytes refuse in certified mode and use the existing
+seal warning in development mode. Different capture generations, draws, or unit
+rosters may still identify the same source. Artifact integrity and calibration
+equality remain strict in both modes.
+
+Re-stamped 2026-10-17 against the architecture audit fix. Admitted CPU actions
+`table-mtp-green-v1` passed 56 MTP cases; its companion compile action checked
+four MTP files. Commands, sealed source and CAS receipts are retained under
+`/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/celestia-tmux/`.
+These fixtures establish source admission, not new served quality. No format,
+pipeline default or lane changed. `stage_a_chain_seed.tensor_payload_sha256`
+hashes in bounded host chunks. Existing gates include
+`tests/test_glm_mtp_capture.py` and the new
+`tests/test_glm_mtp_final_hidden_source_audit.py`.
 
 Re-stamped (2026-09-25, `claude/stageb-pass-profile-1269`) for **the Stage B
 pass profiler** (PQ #1269), an opt-in development instrument:
