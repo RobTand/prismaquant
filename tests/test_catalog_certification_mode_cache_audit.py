@@ -31,3 +31,27 @@ def test_proved_catalog_remains_admitted_after_dev_to_certified_transition(
     assert before["added_cells"] == len(campaign["roster"])
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     assert verify_catalog_pair(inputs) == before
+
+
+def test_proved_catalog_survives_certified_dev_certified_transition(
+    tmp_path, monkeypatch, campaign, probe,
+):
+    inputs, _, _ = _pair(tmp_path, campaign, probe, proof=True)
+    answers = []
+    for mode in ("0", "1", "0"):
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+        answers.append(verify_catalog_pair(inputs))
+    assert answers[0] == answers[1] == answers[2]
+
+
+def test_certified_refusal_does_not_remove_dev_waiver(
+    tmp_path, monkeypatch, campaign, probe,
+):
+    inputs, _, _ = _pair(tmp_path, campaign, probe, proof=False)
+    for mode in ("0", "1", "0"):
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+        if mode == "0":
+            with pytest.raises(ValueError, match="names no encoder source proof"):
+                verify_catalog_pair(inputs)
+        else:
+            assert verify_catalog_pair(inputs)["added_cells"] == len(campaign["roster"])

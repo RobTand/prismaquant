@@ -663,8 +663,9 @@ def verify_catalog_pair(inputs):
         _same(policy["calibration_input"], old["calibration_input"], "served-group calibration")
         bindings += [new_plan["served_activation_policy"], policy["census"]]
     fences = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in bindings)
-    if fences in _VERIFIED_PAIR:
-        cached = _VERIFIED_PAIR[fences]
+    key = (dev_mode_enabled(), fences)
+    if key in _VERIFIED_PAIR:
+        cached = _VERIFIED_PAIR[key]
         if cached["proof_fences"] == tuple((path, digest, _bound_stat_fence(Path(path)))
                                             for path, digest, _fence in cached["proof_fences"]):
             return dict(cached["evidence"])
@@ -783,11 +784,11 @@ def verify_catalog_pair(inputs):
             "source_qnames": len(old["formats_by_qname"])}
     _same(fences, tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
                         for b in bindings), "catalog metadata changed during verification")
-    # One validated pair per process. Rebinding 45 records does not deserialize
-    # both large PWCs 45 times; every dependency retains the existing bound
-    # reader's inode/size/mtime/ctime fence, and drift revalidates from bytes.
+    # One validated pair under its admission policy. Rebinding 45 records does
+    # not deserialize both large PWCs 45 times. Every dependency keeps the bound
+    # reader's inode/size/mtime/ctime fence; drift revalidates from bytes.
     _VERIFIED_PAIR.clear()
-    _VERIFIED_PAIR[fences] = {"evidence": evidence, "proof_fences": tuple(sorted(proof_fences))}
+    _VERIFIED_PAIR[key] = {"evidence": evidence, "proof_fences": tuple(sorted(proof_fences))}
     return dict(evidence)
 
 

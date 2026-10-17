@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, catalog admission reuse.
+The catalog pair memo includes the current development/certified mode in its
+identity. A development waiver cannot satisfy a later certified request.
+The existing one-entry memo, dependency fences and development waiver remain;
+the transition checks add no encoder or serving qualification.
+
 As of: 2026-10-17, architecture audit continuation, saved-walk provenance.
 The walk loader checks schema and execution consistency, plus claim-rule
 identity when requested. Predicate names do not attest implementation bytes;
