@@ -27220,6 +27220,13 @@ under the exporter's own recipe and is not gated; export resume binds
 `_pack_production_cached_2d` re-packs only — no re-run of GPTQ/scale-sweep, which would
 measure a different artifact.
 
+A current fill interrupted between publishing a fused shard and writing its witness
+sidecar leaves that entry unwitnessed. A plain resume keeps the shard and export
+refuses. After confirming `render_identity.json` matches the intended current build,
+remove only the unwitnessed shard and resume: the fill re-renders and witnesses the
+missing entry while reusing the remaining shards. Legacy caches still require the
+re-render described above. The refusal and resume warning name this targeted repair.
+
 **History: a fused-global window on main (review N3-02, recorded 2026-10-16).** Since
 `1b7b7757b1` (2026-07-02, audit M2) main's export pre-passes derive the fused joint global
 under the cache's recorded scale rule, while main's resident and streamed fills derive it

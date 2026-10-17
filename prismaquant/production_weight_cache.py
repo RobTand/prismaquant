@@ -1830,8 +1830,11 @@ class ProductionWeightCache:
                 "covers caches built before shard-bound witnesses, shards "
                 "resumed or appended without one, and witnesses a resume "
                 "could not bind to the shard on disk. Re-render the production "
-                "cache into a fresh --cache-dir; resuming the same directory "
-                "keeps the unwitnessed shard and refuses again."
+                "cache into a fresh --cache-dir. If a current fill was "
+                "interrupted after publishing this shard, remove only that "
+                "unwitnessed shard and resume with the matching "
+                "render_identity.json. Resuming without removing it keeps "
+                "the unwitnessed shard and refuses again."
             )
         value = self.weights[key]
         served = (
@@ -6269,7 +6272,8 @@ def fill_production_weight_cache(
             "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
             f"witness for {len(unbound_resumed_witnesses)} shards the fill "
             "did not leave as published; export refuses them until they are "
-            "re-rendered into a fresh --cache-dir. "
+            "re-rendered. Remove only the affected shards and resume with "
+            "the matching render identity, or use a fresh --cache-dir. "
             f"sample={unbound_resumed_witnesses[:3]}",
             flush=True,
         )
