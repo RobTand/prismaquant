@@ -338,10 +338,11 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
     unrecognized sweep is not verified, never a pass. It sees neither the
     activation representation (#567) nor whether a kernel is native on the
     target: the kernel each scheme selected is recorded and not judged,
-    because vLLM publishes no table to judge it against. The test may not
-    import the serving runtime (`AGENTS.md` principle 5 forbids vendoring it); the
-    attestation travels as data — a contract file on one lane, a sweep record
-    on the other. **Corollary for prose:** a
+    because vLLM publishes no table to judge it against. Metadata checks use
+    producer APIs and contract/receipt data without loading the serving stack.
+    Serving integration checks may import Tessera in their declared runtime
+    under `AGENTS.md` principle 5; importability supplies no qualification.
+    **Corollary for prose:** a
     recorded blocker or capability claim inherits the scope of the artifact it
     was measured on — record the scope or do not record the claim. *Two of our
     own spec files disagreed about one runtime; the runtime was never

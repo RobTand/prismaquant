@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, Rob clarified Tessera dependency policy.
+PrismaQuant may import Tessera's numerical, producer, and serving integration
+APIs where needed. Keep dependencies local to their responsibility and prefer
+published interfaces. Serving measurements run in their declared runtime;
+ordinary metadata checks retain their lightweight producer API. Historical
+experiments remain executable under their recorded pins. Importability does
+not establish compatibility or qualification; pins and admission gates remain.
+
 As of: 2026-10-17, architecture audit continuation, shipcard assurance wording.
 The retained CB recipe comparison reports a priced-subset blend, which does
 not bound the whole recipe's rate. Its historical tolerance and unit-coverage
@@ -1795,7 +1803,7 @@ An isolated PB install at this exact commit imports root
 all nine scope fields including `fabric`: `none` for TP1, `socket` or
 `roce` for TP2+. Its source digest is
 `6e9abbfd5a5ccf455dbd61b6c0c5d2353d4c4162c9652947205d7a6b7e20d41b`.
-PrismaQuant does not import or vendor the Tessera serving runtime.
+This graph-receipt path uses Tessera's producer API.
 Availability does not qualify Tessera #702, PQ #1586, a graph card or a
 compiled cell. Requested NCCL fabric and observed per-rank banners remain
 separate; the ship window is SOCKET under the existing CEO decision.
@@ -13200,8 +13208,8 @@ review named closed.
   while TP1 can use its sole rank. The wire cut itself goes
   through `tessera.layout.can_shard`/`slice_unit`, the producer-neutral
   primitive the loader calls (including the trellis `INITIAL_STATE` a row cut
-  needs); PrismaQuant never imports `tessera.serving`, and the cross-repo
-  equivalence to the serving cut is Tessera's own test.
+  needs). This cut uses Tessera's layout API; the cross-repo equivalence to
+  the serving cut is Tessera's own test.
   `measured_runtime_prices.rank_local_member_shapes` derives the binding from
   the trusted table context's `tensor_parallel` and refuses a member whose
   intermediate extent does not divide by it, so the canonical combination of
@@ -31542,7 +31550,9 @@ digest, PQ #1561), read by
 table `tessera.lane-eligibility.v10` as installed, with the consumer also
 reading the v9, v8, v7, v6, v5, v4 and legacy v3 grammars, each at its own
 member set), read through
-`importlib.resources`. PrismaQuant never vendors or imports the serving half.
+`importlib.resources`. These metadata readers stay independent of serving
+initialization. Numerical and serving integration imports follow the module
+boundaries in `AGENTS.md`; Tessera remains an external dependency.
 Unlike the Gridbook serving pin this one binds no wheel digest — Tessera
 publishes no wheel and is installed from a source checkout — but since
 2026-09-04 it binds the CONTRACT's digest, which is the one artifact that both
