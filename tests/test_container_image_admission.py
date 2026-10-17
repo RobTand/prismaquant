@@ -46,7 +46,6 @@ for _entry in (ROOT, ROOT / "tools"):
 
 import dispatch_joint_quanta as joint  # noqa: E402
 import dispatch_tessera_campaign as campaign  # noqa: E402
-import tessera_campaign_container as container_tool  # noqa: E402
 
 IMAGE = "sha256:" + "a" * 64
 OTHER_IMAGE = "sha256:" + "b" * 64

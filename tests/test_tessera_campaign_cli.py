@@ -111,7 +111,6 @@ def test_explicit_options_read_the_campaign_after_the_last_module_invocation():
                                     '--deadline-seconds=0'])
 def test_spec_cannot_hide_dispatcher_owned_or_deadline_options_in_another_spelling(tmp_path, option):
     import json
-    from tools import dispatch_tessera_campaign as dispatch
     path = tmp_path / 'spec.json'
     path.write_text(json.dumps({'model': 'm', 'cwd': str(tmp_path), 'python': 'python3',
                                'env': {}, 'campaign_argv': [option]}))

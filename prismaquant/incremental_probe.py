@@ -52,7 +52,7 @@ import types
 from collections.abc import Mapping
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import io_spans
 from prismaquant.incremental_shards import (

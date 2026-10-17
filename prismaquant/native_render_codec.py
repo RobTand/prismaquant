@@ -9,7 +9,7 @@ import math
 import os
 from collections import Counter
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import torch
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
