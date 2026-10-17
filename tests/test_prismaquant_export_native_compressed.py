@@ -1033,7 +1033,6 @@ class TestRoundTrip(unittest.TestCase):
         )
 
     def test_nvfp4_rtn_dequant_matches_exported_scale_metadata(self):
-
         W = torch.randn(16, 64) * 2.0
         prev = (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).nvfp4_scale_rule
         try:
@@ -2443,7 +2442,6 @@ class TestQuantize2DDispatch(unittest.TestCase):
 
     def test_mxfp8_export_static_act_order_do_no_harm_selects_lower_candidate(self):
         import os
-        import prismaquant.export_native_compressed as m
 
         W = torch.randn(4, 32) * 0.1
         X = torch.randn(12, 32)
@@ -2496,7 +2494,6 @@ class TestQuantize2DDispatch(unittest.TestCase):
 
     def test_mxfp8_export_do_no_harm_reverts_bad_gptq_to_rtn(self):
         import os
-        import prismaquant.export_native_compressed as m
 
         W = torch.randn(4, 32) * 0.1
         X = torch.randn(12, 32)
@@ -4396,7 +4393,6 @@ class TestActivationAwarePasses(unittest.TestCase):
     def test_activation_matrix_explicit_threshold_overrides_quantile(self):
         import os
         import torch
-        import prismaquant.export_native_compressed as m
 
         saved = os.environ.get("PRISMAQUANT_ACT_CLIP_QUANTILE")
         os.environ["PRISMAQUANT_ACT_CLIP_QUANTILE"] = "0.5"
@@ -4419,7 +4415,6 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def test_activation_matrix_applies_fisher_row_weights(self):
         import torch
-        import prismaquant.export_native_compressed as m
 
         x = torch.ones(2, 2)
         out = _native_render_codec.activation_matrix_for_gptq(
@@ -4436,7 +4431,6 @@ class TestActivationAwarePasses(unittest.TestCase):
     def test_mxfp8_scale_sweep_is_no_worse_than_baseline(self):
         import os
         import torch
-        import prismaquant.export_native_compressed as m
 
         torch.manual_seed(7)
         W = torch.randn(16, 64) * 0.2
@@ -4465,7 +4459,6 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def test_fp8_scale_sweep_is_no_worse_than_baseline(self):
         import torch
-        import prismaquant.export_native_compressed as m
 
         torch.manual_seed(11)
         W = torch.randn(16, 64) * 0.2
@@ -4523,7 +4516,6 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def test_joint_mse_scale_rule_subsumes_four_over_six(self):
         import torch
-        import prismaquant.export_native_compressed as m
 
         torch.manual_seed(23)
         grouped = torch.randn(8, 4, 16, dtype=torch.float32) * 0.3
@@ -4544,7 +4536,6 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def test_gptq_lift_static_order_and_joint_scale_opt_grid_aligned(self):
         import torch
-        import prismaquant.export_native_compressed as m
 
         torch.manual_seed(29)
         W = torch.randn(16, 32) * 0.2
@@ -4599,7 +4590,6 @@ class TestActivationAwarePasses(unittest.TestCase):
         import os
         import torch
         from unittest import mock
-        import prismaquant.export_native_compressed as m
 
         torch.manual_seed(912)
         W = torch.randn(8, 16) * 0.3
@@ -4704,7 +4694,6 @@ class TestActivationAwarePasses(unittest.TestCase):
     def test_quantize_2d_uses_explicit_render_options(self):
         """Explicit options select GPTQ with the supplied activation rows."""
         import torch
-        import prismaquant.export_native_compressed as m
         torch.manual_seed(11)
         W = torch.randn(32, 64) * 0.2
         # Imbalanced activations so GPTQ's block-wise error propagation

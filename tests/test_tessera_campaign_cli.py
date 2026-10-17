@@ -6,7 +6,6 @@ import sys
 import pytest
 
 from prismaquant import tessera_campaign_rows as campaign_rows
-
 from prismaquant.tessera_campaign_cli import parse_campaign_arguments
 from prismaquant.tessera_campaign_requests import (
     CaptureJoinRequest, CapturePrepRequest, capture_chain_bookend_request,

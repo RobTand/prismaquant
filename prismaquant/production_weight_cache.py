@@ -65,16 +65,9 @@ Usage:
 """
 from __future__ import annotations
 
-import prismaquant.native_render_codec as _native_render_codec
-from .native_render_levers import NativeRenderLevers
-from .render_cache_paths import (
-    cache_weight_filename, require_injective_cache_filenames,
-)
-from dataclasses import replace
-
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from itertools import chain
 import hashlib
@@ -92,6 +85,11 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 
+import prismaquant.native_render_codec as _native_render_codec
+from .native_render_levers import NativeRenderLevers
+from .render_cache_paths import (
+    cache_weight_filename, require_injective_cache_filenames,
+)
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import (

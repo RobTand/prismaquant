@@ -9,15 +9,15 @@ import math
 import os
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import torch
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
+
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from .format_registry import _mx_rounded_amax_power2
 from .fp8_dynamic import fp8_dynamic_weight_qdq
 from .mx_formats import e8m0_to_scale, mxfp8_e4m3_qdq
-from .layer_config import canonicalize_format
 from .native_render_levers import NativeRenderLevers
 from .render_score import normalize_clipped_fisher_row_weights
 
@@ -588,7 +588,7 @@ def canonical_export_format(fmt: str) -> str:
     return fmt_u
 
 
-def _resolve_act_clip_quantile(default: str = "0.999",
+def _resolve_act_clip_quantile(
     *,
     levers: NativeRenderLevers,
 ) -> float | None:

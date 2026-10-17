@@ -18,7 +18,7 @@ from .digests import (
 from .cost_stage_checkpoint import merge_identity_migrations
 from .schemas import strict_json_loads
 from .tessera_campaign_selection import (
-    UNITS_SCHEMA, UNITS_SCHEMA_V2, UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
+    UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
     selection_priced_units, validate_unit_selection,
 )
 
@@ -2556,16 +2556,24 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
         family_policies[row_id] = policy
     family_policy = require_equal("provenance.family_restriction.policy", family_policies)
     for field in SHARED_PROVENANCE:
-        require_equal(f"provenance.{field}",
-                       {row: prov.get(field) for row, prov in provenances.items()})
-    require_equal("provenance.hessian.calibration_identity",
-                   {row: prov["hessian"]["calibration_identity"]
-                    for row, prov in provenances.items()})
-    require_equal("provenance.activation_static_scales.policy",
-                   {row: prov["activation_static_scales"]["policy"]
-                    for row, prov in provenances.items()})
-    require_equal("currency", {row: payload["currency"]
-                                for row, payload in row_payloads.items()})
+        require_equal(
+            f"provenance.{field}",
+            {row: prov.get(field) for row, prov in provenances.items()},
+        )
+    require_equal(
+        "provenance.hessian.calibration_identity",
+        {row: prov["hessian"]["calibration_identity"]
+         for row, prov in provenances.items()},
+    )
+    require_equal(
+        "provenance.activation_static_scales.policy",
+        {row: prov["activation_static_scales"]["policy"]
+         for row, prov in provenances.items()},
+    )
+    require_equal(
+        "currency",
+        {row: payload["currency"] for row, payload in row_payloads.items()},
+    )
     scope = require_equal(
         "provenance.campaign_scope",
         {row: {key: value for key, value in prov["campaign_scope"].items()}
