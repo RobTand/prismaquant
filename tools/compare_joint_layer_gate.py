@@ -10,8 +10,8 @@ difference is a defect to find, never noise to threshold away.
 
 Re-runnable and stateless: it owns nothing, writes nothing (unless --json is
 given), and reads both journals fresh each run. A layer's gate arm resolves
-when BOTH campaigns hold that layer's units; a layer present on one side
-only is reported pending, not failed.
+when BOTH campaigns hold that layer's units. A selected layer present on
+one side only is pending. Without --layers, selection uses the shared layers.
 
 Usage:
   compare_joint_layer_gate.py --single-run DIR --quantum DIR \

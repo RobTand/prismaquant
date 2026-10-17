@@ -1626,11 +1626,8 @@ def _persistent_probe_context_enabled() -> bool:
 # sync is a ~50 us host stall AND blocks subsequent kernel issue, so
 # the cumulative GPU pipeline gap was several seconds per chunk.
 #
-# This cache is keyed by (fqn, weight.data_ptr) so a model swap or
-# in-place weight modification (for example, an export pass) invalidates
-# automatically — different storage, different key. Within a single
-# probe run the weights are immutable, so the cache holds for the whole
-# multi-chunk driver lifetime.
+# The key contains FQN, storage pointer and shape. In-place value changes
+# do not change that key; reuse relies on immutable weights within a probe.
 _W_STATS_CACHE: dict[tuple[str, int, tuple[int, ...]], tuple[float, float]] = {}
 _ROUTER_COVERAGE_VERSION = 2
 
@@ -3207,33 +3204,9 @@ def _run_body_streaming_shard(
             deferred_sync = _env_flag(
                 "PRISMAQUANT_DEFERRED_FISHER_SYNC", default=True)
             emit_marginals = _marginals_enabled()
-            # v22 Fix B: deferred Fisher COMPUTE. Beyond just deferring the
-            # device→host syncs (above), this defers the per-Linear matmul
-            # itself out of the autograd engine's per-Linear callback path.
-            #
-            # Why: even with #1 (no .item() syncs), every Linear's bwd
-            # hook still does ~6 GPU kernel launches (gy², x², matmul,
-            # sum, h_w2 multiply, sum) DURING autograd's traversal. Each
-            # launch is bounced through Python and the autograd engine
-            # serializes against it, leaving the GPU idle waiting for
-            # Python to dispatch the next kernel. nvidia-smi dmon shows
-            # 13% SM utilization during phase-3 because of this.
-            #
-            # With deferred_compute=on, the bwd hook just appends
-            # (name, x_ref, gy_ref, mod_ref) to a per-layer queue and
-            # returns immediately. The autograd graph traversal flies
-            # through; the GPU stream stays busy with the layer's actual
-            # bwd kernels (Q/K/V/O, attn, FFN). After `out.backward()`
-            # returns, a tight Python loop drains the queue, issuing
-            # the per-Linear Fisher matmuls back-to-back. The CUDA
-            # driver's command queue stays full — SM utilization should
-            # rise from ~13% to ~50-80%.
-            #
-            # Math is byte-identical to the immediate path. Memory cost:
-            # the queue pins (x, gy) refs for one layer's tracked Linears
-            # — typical MiniMax MoE layer ≈ 770 entries × ~2 MB = ~1.5 GB
-            # peak, well within the cache budget that already accounts
-            # for it.
+            # Deferring Fisher matmuls moves Python work out of autograd's
+            # callbacks. The queue retains each layer's activation and
+            # gradient references until the post-backward drain.
             deferred_compute = _env_flag(
                 "PRISMAQUANT_DEFERRED_FISHER_COMPUTE", default=True)
             # Per-Linear device-resident accumulators built lazily inside
