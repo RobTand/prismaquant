@@ -1166,8 +1166,8 @@ class ModelProfile(ABC):
         """`EXPORT_CONTAINER` lanes this architecture is actually wired for.
 
         Lane eligibility is a per-architecture fact, not an operator
-        preference: the CB lane needs the pinned external Gridbook runtime to
-        declare the arch's expert layout in its packaged runtime contract, and the GGUF lane needs
+        preference: the Tessera lane needs the pinned external reader to
+        declare the arch's expert layout in its packaged runtime contract, and the deprecated GGUF lane needs
         a llama.cpp-side arch. Where that wiring is missing the run still
         *completes* and the artifact serves uninitialised memory — coherent
         garbage, not a crash (commit `9a79963`, Laguna). So the honest lane
