@@ -25,7 +25,8 @@ def test_public_ceiling_refuses_noninteger_byte_inputs(peak, headroom):
     (GIB_BYTES, 0, GIB_BYTES),
     (GIB_BYTES, 1, 2 * GIB_BYTES),
     (GIB_BYTES + 1, GIB_BYTES, 3 * GIB_BYTES),
-], ids=["zero", "one_byte", "exact_gib", "headroom_crosses_gib", "multi_gib"])
+    (2**60 + 1, 0, 2**60 + GIB_BYTES),
+], ids=["zero", "one_byte", "exact_gib", "headroom_crosses_gib", "multi_gib", "exact_large"])
 def test_public_ceiling_preserves_integer_byte_contract(peak, headroom, ceiling):
     result = derive_cache_ceiling(peak, headroom_bytes=headroom)
     assert result == {

@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, cache ceiling inputs.
+The existing cache ceiling derivation accepts nonnegative integer byte counts
+and rounds up using integer arithmetic. Fractions and booleans refuse;
+large counts retain exact GiB boundaries. The observed-peak and operator
+headroom contract is unchanged, and this correction adds no peak measurement.
+
 As of: 2026-10-17, architecture audit continuation, stage-settings roster.
 The current settings declaration and shell guard roster contain 15 stage
 identifiers, including `tessera-plan`. Retired CB cost/bundle stages are no
