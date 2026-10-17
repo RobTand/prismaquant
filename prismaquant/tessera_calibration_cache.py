@@ -950,9 +950,9 @@ class CaptureSourceAuthentication:
         each full-file SHA against the hash-bound canonical capture, then
         open and hold those exact objects through all future reads. The live
         runner's ``build_streamed_model_identity`` still checks its semantic
-        config and executable weight map before qualification. A changed file
-        (including a same-size edit with restored mtime) refuses; it is never
-        silently rehashed under a manifest that omitted the source read.
+        config and executable weight map before qualification. In certified
+        mode, changed source/proof metadata refuses. Development mode follows
+        the existing seal policy: warn and retain recorded source metadata.
 
         ``expected_sha256`` binds the proof file itself: the bytes read here
         must hash to it, checked before any held state changes. A caller that
@@ -969,8 +969,8 @@ class CaptureSourceAuthentication:
             _, held[name] = self._file(self.root / name)
             return held[name]['before']
 
-        # ``_expected`` agrees with ``_source_files`` on every roster name (the
-        # constructor refuses otherwise), so the roster is the capture's own.
+        # The roster is the capture's own; producer digest disagreements go
+        # through seal_check's certified refusal/development warning policy.
         digests, proof_sha256 = streamed_identity_proof_digests(
             self.root, cache_path, self._source_files, live_stat=live_stat,
             expected_sha256=expected_sha256)
@@ -983,7 +983,7 @@ class CaptureSourceAuthentication:
         return len(digests)
 
     def adopt_identity_proof_or_hash(self, cache_path, expected_sha256):
-        """Adopt a planned identity proof, or leave every read to hash fresh.
+        """Adopt a planned identity proof, or use ordinary source authentication.
 
         A Stage A row reads a few shards of a complete source. Hashing each
         one on first read idled the GPU reservation for 41% of a row
@@ -992,11 +992,11 @@ class CaptureSourceAuthentication:
         :meth:`adopt_streamed_identity_cache`, with that method's own checks
         and nothing weaker. A proof that refuses -- a changed stat
         fingerprint, a proof file that differs from its declared digest, a
-        missing file -- changes no held state: each payload read then hashes
-        its shard through the held descriptor, as it did before this method
-        existed, and the receipt records why. Integrity is the same either
-        way; only where the digest came from differs. Returns the count of
-        shards adopted, 0 on refusal.
+        missing file -- leaves payload reads to the existing source policy.
+        Certified mode hashes each shard through its held descriptor;
+        development mode may retain its recorded digest without hashing.
+        The receipt records the adoption refusal and digest source. Returns
+        the count of shards adopted, 0 on refusal.
         """
         try:
             adopted = self.adopt_streamed_identity_cache(
@@ -1008,7 +1008,7 @@ class CaptureSourceAuthentication:
                 path=str(cache_path), declared_sha256=expected_sha256,
                 reason=f'{type(exc).__name__}: {exc}')
             print(f'[source] identity proof {cache_path} refused ({exc}); '
-                  'every payload read hashes its shard fresh', flush=True)
+                  'payload reads use the current source-authentication policy', flush=True)
             return 0
         print(f'[source] adopted {adopted} full-file SHA proofs from {cache_path}',
               flush=True)
