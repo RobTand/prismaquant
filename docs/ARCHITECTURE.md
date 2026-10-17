@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, netbench tensor ownership.
+The TP netbench driver retains the Torch module returned by its process-group
+initializer. Bandwidth reception reads the supplied tensor after synchronous
+broadcast mutates it, rather than treating the broadcast return as a tensor.
+`tp-decode-green-v1` verifies both ranks through CPU adapters in its 35-case
+suite and compiles all three touched files. Source, logs and CAS receipt are
+verified against parent `3bfefd72f1f` plus the recorded overlays. The adapters
+establish Python wiring only; no network throughput or TP performance result
+is supplied by these tests.
+
 As of: 2026-10-17, architecture audit continuation, TP decision percentile.
 The standalone TP decode decision uses the requested latency percentile for
 its verdict and prints that coordinate. Exact-size and largest-size fallback

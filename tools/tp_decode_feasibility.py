@@ -391,7 +391,9 @@ def _iperf3_leg(rank: int, dist: Any, peer: Optional[str], port: int, seconds: i
             gbps = report["end"]["sum_received"]["bits_per_second"] / 1e9
             dist.broadcast(torch.tensor([gbps]), src=1)
         else:
-            gbps = float(dist.broadcast(torch.zeros(1), src=1).item())
+            received = torch.zeros(1)
+            dist.broadcast(received, src=1)
+            gbps = float(received.item())
         if rank == 0:
             print(f"iperf3 bandwidth leg: MEASURED {gbps:.2f} Gbit/s "
                   f"(tcp, {seconds}s, rank1->rank0 receive)")
@@ -503,7 +505,7 @@ def mode_netbench(args: argparse.Namespace) -> int:
         if len(cpu_pin) != 2:
             raise SystemExit("--cpu-pin takes one core or range per rank, e.g. '16-17,18-19'")
         os.sched_setaffinity(0, cpu_pin[args.rank])
-    _, dist = _init_pg(args.rank, 2, init_method)
+    torch, dist = _init_pg(args.rank, 2, init_method)
     results: List[Dict[str, Any]] = []
     try:
         for nbytes in sizes:
