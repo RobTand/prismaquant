@@ -6773,8 +6773,11 @@ def fill_production_weight_cache(
             "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
             f"witness for {len(unwitnessed_resumed_shards)} resumed shards "
             "with missing or unbound witnesses; export refuses unverified "
-            "fused renders. For device-only mismatches, use the writer's view "
-            "or an NFS client mount. Other causes require re-rendering. "
+            "fused renders. If this resume rendered no fused entries, rerun "
+            "it through the writer's view or an NFS client mount to recover "
+            "device-only mismatches. Otherwise its sidecar rewrites dropped "
+            "those records; re-render those shards. Other causes also require "
+            "re-rendering. "
             "Remove only the affected shards and resume "
             "with the matching render identity, or use a fresh --cache-dir. "
             f"sample={unwitnessed_resumed_shards[:3]}",

@@ -793,6 +793,48 @@ def test_resident_resume_warns_about_a_resumed_shard_without_a_witness(
     _assert_exports_bit_exact(repaired, layer, FUSED)
 
 
+@pytest.mark.parametrize("render_missing", [False, True], ids=["full-resume", "partial-resume"])
+def test_resume_device_guidance_accounts_for_witness_sidecar_rewrites(
+    render_missing, rendered, tmp_path, monkeypatch, capsys,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "resident"
+    first = _resident_fill(rendered, cache_dir)
+    witnesses = nvfp4_joint_global_witnesses(first.metadata, where="test")
+    witnesses = {key: witness._replace(shard=PublishedShard(
+        witness.shard.name, (witness.shard.stat[0] + 1, *witness.shard.stat[1:])))
+        for key, witness in witnesses.items()}
+    sidecar = cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME
+    sidecar.write_text(json.dumps(nvfp4_joint_global_witness_section(witnesses)))
+    renewed = sorted(FUSED)[0]
+    if render_missing:
+        (cache_dir / cache_weight_filename(renewed, "NVFP4")).unlink()
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "zfs")
+    capsys.readouterr()
+    resumed = _resident_fill(rendered, cache_dir)
+    warning = capsys.readouterr().out
+    assert "If this resume rendered no fused entries, rerun it through the writer's view" in warning
+    assert "Otherwise its sidecar rewrites dropped those records; re-render those shards" in warning
+    adopted = {(renewed, "NVFP4")} if render_missing else set()
+    assert set(nvfp4_joint_global_witnesses(resumed.metadata, where="test")) == adopted
+    persisted = set(json.loads(sidecar.read_text())["records"])
+    expected = {f"{renewed}|NVFP4"} if render_missing else {f"{name}|NVFP4" for name in FUSED}
+    assert persisted == expected
+
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "nfs4")
+    rechecked = _resident_fill(rendered, cache_dir)
+    assert set(nvfp4_joint_global_witnesses(rechecked.metadata, where="test")) == (
+        adopted if render_missing else {(name, "NVFP4") for name in FUSED})
+    if render_missing:
+        for name in FUSED - {renewed}:
+            (cache_dir / cache_weight_filename(name, "NVFP4")).unlink()
+        rechecked = _resident_fill(rendered, cache_dir)
+    _options, layer, _whole = _export_globals(rendered, rechecked, monkeypatch)
+    _assert_exports_bit_exact(rechecked, layer, FUSED)
+
+
 def test_resident_resume_witnesses_only_the_shard_it_renders(
     rendered, tmp_path, monkeypatch,
 ):
