@@ -15,8 +15,8 @@ quantization path:
     * joint NVFP4 fused-sibling globals (q/k/v share a per-tensor scale,
       gate/up share theirs)
     * calibrated `input_global_scale` per fused-sibling group
-      (max_abs(activations) / 6.0; the same value the export persists
-      to the artifact)
+      (448 * 6 / max_abs(activations), or legacy 6 / max_abs under the
+      explicit scale policy; export persists this reciprocal scale)
     * progressive local render gates using the shared mechanism order
       baseline -> format scale rule -> GPTQ -> optional scale_sweep;
       individual formats explicitly opt out of unsupported mechanisms,
@@ -34,12 +34,12 @@ quantization path:
     * retired input-axis rotation experiments are not part of the production
       cache path.
 
-  KNOWN GAPS (v2 work, NOT implemented):
-    * batched NVFP4 GPTQ + scale-sweep across same-shape Linears
-      (defaults-on in the export when activations are cached;
-      mathematically equivalent to scalar but ~3-8× faster on MoE)
-    * block-output match (post-GPTQ refinement against BF16 block output)
-    * any export-only refinements added after this docstring is written
+  PACKED EXPERTS:
+    * the default NVFP4 path batches fixed-damp GPTQ across a layer's experts;
+      it does not apply the dense JSO, act-order or damp-sweep passes
+    * per-expert rendering is an explicit alternative with its own recorded
+      mechanism metadata
+    * block-output match is archived and refused by native export
 
   FP8_DYNAMIC / BF16:
     * FP8_DYNAMIC is represented by the canonical FP8_E4M3 format name:
@@ -51,7 +51,7 @@ quantization path:
 PerturbedActivationCache installs `W_tilde` (and applies the calibrated
 `input_global_scale` on activations) instead of RTN-quantizing on the
 fly, so per-Linear probes, frontier validation, and polish gates use the
-same δw the export will deliver, modulo the v2 gaps above.
+stored candidate weights that export consumes.
 
 Usage:
 
