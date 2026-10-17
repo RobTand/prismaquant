@@ -929,6 +929,10 @@ if [[ -z "$SERVE_DISPATCH_TABLE" ]] && [[ -n "$SLO_PREFILL_P95_TTFT_MS$SLO_DECOD
   echo "[pipeline] ERROR: a latency SLO was set but SERVE_DISPATCH_TABLE is empty. Latency constraints are priced from MEASURED rows; there is no built-in cost model to fall back on, and inventing one is exactly what the constrained-Pareto axis exists to prevent (ultraplan_perf_2026-08-01 §6, P5c). Point SERVE_DISPATCH_TABLE at a measured table for your own hardware; the retired codebook lane's example table is at archive/gridbook_lane_2026-09-02/ and was PROPOSAL DATA." >&2
   exit 2
 fi
+if [[ -z "$SERVE_DISPATCH_TABLE" ]] && [[ -n "$SERVE_DEVICE_BUDGET_BYTES" ]]; then
+  echo "[pipeline] ERROR: SERVE_DEVICE_BUDGET_BYTES was set but SERVE_DISPATCH_TABLE is empty. Supply a measured dispatch table and an explicit SERVE_WORKLOAD_MIX so the requested memory budget can be evaluated." >&2
+  exit 2
+fi
 
 PROBE_PATH="${WORK_DIR}/artifacts/probe.pkl"
 case "$COST_MODE" in

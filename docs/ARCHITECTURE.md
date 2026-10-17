@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, pipeline device budget.
+`run-pipeline.sh` refuses an explicit `SERVE_DEVICE_BUDGET_BYTES` when
+`SERVE_DISPATCH_TABLE` is empty. The allocator still requires the measured
+table and explicit workload mix to evaluate the budget. Omitting the budget
+keeps the existing unconstrained path. Admitted `pipeline-budget-green-v1`
+passed 14 focused cases, compiled the regression, and checked shell syntax;
+its commands, source seal and CAS receipt are in the audit's `celestia-tmux`
+directory. This validates argument admission, not a measured device peak.
+
 As of: 2026-10-17, architecture audit continuation, bound campaign tables.
 Campaign scope reads and hashes one owned byte string before parsing its JSON
 or pickle. Replacing the path after authentication cannot change the parsed
