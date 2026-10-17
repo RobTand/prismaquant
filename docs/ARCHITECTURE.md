@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, external cost ownership.
+The pipeline's AURA additivity tail stamps provenance only into run-owned
+cost tables. A caller's validated `COST_PATH_OVERRIDE` stays byte-for-byte
+unchanged; its additivity report remains under the run's `WORK_DIR`.
+The three relevant `resident-intake-green-v1` shards pass 32 CPU cases,
+including the actual shell report tail with measured-report and automatic
+selection inputs. Source, terminal logs, shell syntax, and CAS receipts are
+verified. Synthetic zero-KL fixtures establish ownership, not model quality.
+
 As of: 2026-10-17, architecture audit continuation, authenticated joint plans.
 `load_joint_anchor_plan` parses the bytes returned by the existing
 `stage_inputs.read_bound` owner. It no longer authenticates a pathname and

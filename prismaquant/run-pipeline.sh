@@ -2308,9 +2308,9 @@ with open(sys.argv[3], "w") as fh:
 print(json.dumps(result, indent=1))
 PY
   fi
-  # Stamp the trust-region number into the cost table's provenance so every
-  # artifact derived from it carries it (the R2 provenance contract).
-  if [[ -f "$AURA_ADDITIVITY_JSON" ]]; then
+  # Stamp the trust-region number into run-owned cost provenance (R2).
+  # External costs keep the additivity report under WORK_DIR only.
+  if [[ -f "$AURA_ADDITIVITY_JSON" && -z "$PREPRICED_COST_REPORT" ]]; then
     python3 - "$COST_PATH" "$AURA_ADDITIVITY_JSON" "$AURA_MEASURED_SOURCE" <<'PY' || \
       echo "[pipeline] [3c] WARNING: could not stamp additivity provenance (non-blocking)"
 import json
