@@ -23,9 +23,8 @@ This module checks the contract's schemas and digests; it does not construct
 producer or runtime records. The *constructions* it shares with the producer
 -- the roster digest and quantum-id padding -- belong to
 ``joint_campaign_ledger``. The producer retains phase tiling and qname-layer
-geometry. These shared owners keep the two sides of
-the wire cannot drift again (issue #787: they did, four ways, and every
-genuine record refused).
+geometry. Both sides of the wire use these shared owners (issue #787:
+they previously drifted four ways, and every genuine record refused).
 """
 from __future__ import annotations
 
