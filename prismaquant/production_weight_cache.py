@@ -2778,7 +2778,10 @@ def nvfp4_joint_global_witness_problem(
     witness holds while ``served`` names the shard its producer published and
     that file still has the identity it was published with
     (``file_identity.file_stat_signature``: device, inode, size, mtime and
-    ctime). Renaming, linking, unlinking, writing, truncating or changing the
+    ctime). The shared stat-fingerprint predicate admits a device-only
+    difference on NFS, whose device number identifies the client's mount.
+    Its dev-mode relaxation does not admit a different local device here.
+    Renaming, linking, unlinking, writing, truncating or changing the
     attributes of a file updates its ctime on a local Linux filesystem, so an
     unchanged identity means the published file has held the path, unmodified,
     since its producer witnessed it: whatever read that path in between read
@@ -2787,6 +2790,10 @@ def nvfp4_joint_global_witness_problem(
     update, a same-size rewrite or an inode reuse within one timestamp tick
     of the publish, and a stale network-filesystem attribute cache.
     """
+    from prismaquant.streamed_model_identity import (
+        stat_fingerprint, stat_fingerprint_reuse,
+    )
+
     shard = witness.shard
     if shard is None:
         if served is None:
@@ -2810,7 +2817,11 @@ def nvfp4_joint_global_witness_problem(
     except OSError as exc:
         return f"its shard {path} cannot be checked ({exc.strerror})"
     identity = file_stat_signature(observed)
-    if not stat.S_ISREG(observed.st_mode) or identity != shard.stat:
+    recorded = dict(zip(
+        ("device", "inode", "size", "mtime_ns", "ctime_ns"), shard.stat,
+    ), path=str(path))
+    reuse = stat_fingerprint_reuse(stat_fingerprint(path, observed), recorded)
+    if not stat.S_ISREG(observed.st_mode) or reuse not in {"exact", "mount"}:
         return (
             f"its shard {path} is not the file its producer published (file "
             f"identity {identity} != witnessed {shard.stat}): it was replaced, "

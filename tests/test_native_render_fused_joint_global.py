@@ -564,6 +564,77 @@ def test_witness_binding_names_each_way_bytes_can_differ(tmp_path):
         bound, served=shard.name, path=shard)
 
 
+@pytest.mark.parametrize("filesystem", ["nfs", "nfs4"])
+@pytest.mark.parametrize("builder", ["resident", "streamed"])
+def test_fused_export_and_resume_accept_the_same_shard_on_another_nfs_mount(
+    rendered, filesystem, builder, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: filesystem)
+    cache_dir = tmp_path / "pwc"
+    fill = _resident_fill if builder == "resident" else _streamed_fill
+    cache = fill(rendered, cache_dir)
+    witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
+    # The persisted device is from the writer's mount. All four file fields
+    # still identify the same server inode on the reader's NFS mount.
+    witnesses = {
+        key: witness._replace(shard=PublishedShard(
+            witness.shard.name,
+            (witness.shard.stat[0] + 1, *witness.shard.stat[1:])))
+        for key, witness in witnesses.items()
+    }
+    section = nvfp4_joint_global_witness_section(witnesses)
+    cache.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = section
+    if builder == "resident":
+        (cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME).write_text(
+            json.dumps(section))
+        cache = _resident_fill(rendered, cache_dir)
+        assert nvfp4_joint_global_witnesses(cache.metadata, where="test") == witnesses
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
+    _assert_exports_bit_exact(cache, globals_by_name, FUSED)
+
+
+@pytest.mark.parametrize("filesystem", ["ext4", "zfs", None])
+@pytest.mark.parametrize("dev_mode", ["0", "1"])
+def test_fused_witness_refuses_other_local_devices_even_in_dev_mode(
+    filesystem, dev_mode, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: filesystem)
+    shard = tmp_path / "entry__NVFP4.pt"
+    shard.write_bytes(b"rendered bytes")
+    observed = file_stat_signature(shard.lstat())
+    witness = NVFP4JointGlobalWitness(0.5, PublishedShard(
+        shard.name, (observed[0] + 1, *observed[1:])))
+    assert "is not the file its producer published" in (
+        nvfp4_joint_global_witness_problem(
+            witness, served=shard.name, path=shard))
+
+
+@pytest.mark.parametrize("field", [1, 2, 3, 4], ids=["inode", "size", "mtime", "ctime"])
+def test_fused_witness_refuses_file_identity_drift_across_nfs_mounts(
+    field, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "nfs4")
+    shard = tmp_path / "entry__NVFP4.pt"
+    shard.write_bytes(b"rendered bytes")
+    changed = list(file_stat_signature(shard.lstat()))
+    changed[0] += 1
+    changed[field] += 1
+    witness = NVFP4JointGlobalWitness(0.5, PublishedShard(shard.name, tuple(changed)))
+    assert "is not the file its producer published" in (
+        nvfp4_joint_global_witness_problem(
+            witness, served=shard.name, path=shard))
+
+
 def test_legacy_caches_still_pack_unfused_entries(rendered, monkeypatch):
     cache = _without_witness(rendered["streamed"])
     _export_globals(rendered, cache, monkeypatch)

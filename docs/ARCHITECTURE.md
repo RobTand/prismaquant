@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: fused NVFP4 shard witnesses use
+`streamed_model_identity.stat_fingerprint_reuse`, the shared file identity
+predicate, to admit the same shard on another NFS mount. Its client-local
+device number may differ; the inode, size, mtime and ctime must still match.
+Readers on local filesystems require the original device number, including
+in dev mode. The witness schema, rendered bytes and export recipe are unchanged.
+
 Re-stamped 2026-10-16: the streamed production-cache fill claims its
 `--cache-dir` through `render_identity.json` (#146, §5.4). It never resumes,
 so it refuses a directory that already holds a render identity, a
@@ -27181,7 +27188,11 @@ one records that exact global in `metadata.nvfp4_joint_global_witness`, with the
 published for it (schema v2; resident resume sidecar `nvfp4_joint_global_witness.json`).
 The shard is named by its manifest value
 and its `file_identity.file_stat_signature` (device, inode, size, mtime, ctime), read through
-the descriptor the publisher holds across its rename. `_pack_production_cached_2d` reads the
+the descriptor the publisher holds across its rename. The shared
+`streamed_model_identity.stat_fingerprint_reuse` predicate admits only `exact` or
+`mount`: on an NFS reader a different client-local device number alone is admitted;
+inode, size, mtime and ctime must match. A local device difference refuses in both
+certified and dev mode. `_pack_production_cached_2d` reads the
 entry first, then refuses unless the bytes the cache served are still that shard
 (`ProductionWeightCache.witnessed_nvfp4_joint_global`) and the export's override equals the
 witnessed global. A resume adopts a sidecar witness only for a shard that is still the
@@ -27192,7 +27203,8 @@ file has held its path, unmodified, since it was witnessed, so every read of tha
 between read those bytes; checking after the read leaves no window between check and load.
 It is a file-identity binding, not a content digest. A byte-identical copy is another file, so
 a copied, rsynced or transferred cache directory refuses its fused entries until they are
-re-rendered; renaming the directory within one filesystem keeps them. Not seen: a change that
+re-rendered; renaming the directory within one filesystem keeps them. Adding or removing
+a hard link changes the shard's ctime and voids the witness too. Not seen: a change that
 bypasses the kernel's timestamp update, a same-size rewrite or inode reuse within one timestamp
 tick of the publish, and a stale network-filesystem attribute cache. A shard replaced after its
 bytes were read refuses even when those bytes were the witnessed ones. The opt-out re-derives
