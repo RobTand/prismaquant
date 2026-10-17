@@ -32,15 +32,11 @@ def test_kl_is_zero_when_the_two_arms_agree():
     assert divergence == pytest.approx(0.0, abs=1e-12)
 
 
-def test_the_untabulated_tail_is_max_entropy_and_never_optimistic():
-    """`min(row)` -- what the ad-hoc script used -- understates divergence.
+def test_the_untabulated_tail_uses_a_clamped_max_entropy_estimate():
+    """Spread residual mass uniformly, capped at the observed K-th value.
 
-    The K-th logprob is an upper bound on every value the endpoint did not
-    tabulate, so substituting it can only make the student look CLOSER to the
-    teacher than it is. Spreading the residual mass uniformly over the
-    untabulated vocabulary is the max-entropy estimate given what was
-    observed, and it is clamped at the K-th value so truncation can never
-    manufacture a larger KL term than it licenses.
+    This max-entropy estimate can be above or below an unknown token's true
+    probability. It does not bound the true full-vocabulary KL.
     """
     row = {"1": math.log(0.5), "2": math.log(0.3)}      # 0.2 mass unaccounted
     tail = gold._tail_logprob(row, vocab_size=1002)
