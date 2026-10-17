@@ -59,13 +59,15 @@ def _run_main(tmp_path, monkeypatch, *, physical_bytes, output):
 
 @pytest.mark.parametrize("physical_bytes", [0, 16], ids=["warm-zero", "positive"])
 def test_pool_reader_main_publishes_warm_and_positive_io_metadata(
-    tmp_path, monkeypatch, physical_bytes,
+    tmp_path, monkeypatch, capsys, physical_bytes,
 ):
     arm = _run_main(tmp_path, monkeypatch, physical_bytes=physical_bytes,
                     output="nested/result.json")
     assert arm["self_physical_read_bytes"] == physical_bytes
     assert arm["box_hdd_over_self"] == (None if physical_bytes == 0 else 0.0)
     assert arm["cold"] is (physical_bytes > 0)
+    expected_ratio = "n/a" if physical_bytes == 0 else "0.00"
+    assert f"box_hdd/self={expected_ratio}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("output", ["result.json", "nested/result.json"],

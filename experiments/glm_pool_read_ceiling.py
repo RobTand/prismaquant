@@ -304,10 +304,12 @@ def main() -> int:
             out["arm_id"] = arm["arm_id"]
             out["source_row"] = arm["source_row"]
             result["arms"].append(out)
+            ratio = out["box_hdd_over_self"]
+            ratio_text = f"{ratio:.2f}" if ratio is not None else "n/a"
             print(f"[arm] {arm['arm_id']} -> {out['mb_per_s']:.1f} MB/s "
                   f"wall={out['wall_s']:.1f}s self_phys={out['self_physical_read_bytes']} "
                   f"self/log={out['self_physical_over_logical']:.3f} "
-                  f"box_hdd/self={out['box_hdd_over_self']:.2f} "
+                  f"box_hdd/self={ratio_text} "
                   f"claims={out['concurrent_claims_before']}->"
                   f"{out['concurrent_claims_after']} "
                   f"cold={out['cold']}", flush=True)
@@ -322,7 +324,7 @@ def main() -> int:
     result["samples"] = sampler.samples
 
     if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w") as fh:
             json.dump(result, fh, indent=1)
         print(f"[out] {args.out}", flush=True)
@@ -331,10 +333,12 @@ def main() -> int:
     print(f"{'arm':24} {'readers':>7} {'GiB':>7} {'wall_s':>8} {'MB/s':>8} "
           f"{'self/log':>9} {'boxhdd/self':>12} {'claims':>7} {'cold':>5}")
     for a in result["arms"]:
+        ratio = a["box_hdd_over_self"]
+        ratio_text = f"{ratio:.2f}" if ratio is not None else "n/a"
         print(f"{a['arm_id']:24} {a['readers']:7d} "
               f"{a['logical_bytes']/1024**3:7.2f} {a['wall_s']:8.1f} "
               f"{a['mb_per_s']:8.1f} {a['self_physical_over_logical']:9.3f} "
-              f"{a['box_hdd_over_self']:12.2f} "
+              f"{ratio_text:>12} "
               f"{a['concurrent_claims_before']:7d} {str(a['cold']):>5}")
 
     compact = dict(result)
