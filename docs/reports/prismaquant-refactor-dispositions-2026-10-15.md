@@ -759,6 +759,10 @@ parity docstring credits `initialize_model_runtime()`, not the package
 import, with the initialization no-op. The selected-anchor observer test's name
 says it wraps only the batch entry.
 
+**Parent note, 2026-10-17:** The C-PRV-01 worker proposal in the following
+paragraph was not integrated. See Parent composition decisions below for the
+delivered documentation-only correction. The author paragraph remains history.
+
 **C-PRV-01, fixed under the 2026-10-15 contract.** `PRODUCER_SOURCES` binds the
 readset producer's executed path and phase dependencies, and it omitted the
 four COST window planners that `_cost_layer_windows` and
@@ -981,3 +985,6 @@ commits below are ancestors of candidate `5bddb69057`. The integration proof is
 | `dfe5c8fde6` | `b5aeadd926` |
 | `ff00dc4d0c` | `0a08082194` |
 | `3d5df6e0ca` | `dd746e5cb3` |
+
+The delivered shard-bound witness cut-off named in the author report is
+`00c8e03273`. Author commit `b6ec244eac` names the equivalent worker change.
