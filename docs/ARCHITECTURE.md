@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, validator bpp population.
+Assignment validation excludes the profile's fixed and auxiliary populations,
+then requires stats for every mutable assigned unit before reporting bpp.
+A missing ordinary BF16 assignment cannot silently vanish from the accounting.
+The existing format byte owner and generic partial-assignment helper remain;
+no cost or parameter count is invented. Profile intake precedes multimodal
+staging so incomplete accounting refuses before model work.
+`validator-bpp-green-v1` passes 37 CPU cases and compiles both touched files;
+source, logs, terminal outcome and CAS receipt are verified against parent
+`3bfefd72f1f` plus the recorded overlays. The shared tiny fixture is now
+committed with the resident owner. These checks establish accounting and
+refusal order, with no served or peak-memory claim.
+
 As of: 2026-10-17, architecture audit continuation, resident source ownership.
 `load_resident_source_model` delivers resident text heads and body through
 the existing meta skeleton, source decoder, layer cache, prefetch and

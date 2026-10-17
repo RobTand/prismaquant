@@ -154,8 +154,14 @@ def _assignment_bpp_details(
 ) -> dict[str, float | int]:
     names = [
         name for name, fmt in assignment.items()
-        if name in stats and not _profile_excludes_bpp_name(str(name), str(fmt), profile)
+        if not _profile_excludes_bpp_name(str(name), str(fmt), profile)
     ]
+    missing = [name for name in names if name not in stats]
+    if missing:
+        raise ValueError(
+            f"{where}: missing probe stats for {len(missing)} mutable assigned "
+            f"tensor(s), sample={missing[:8]}. Rebuild the probe stats to cover "
+            "the full mutable assignment before reporting bpp.")
     total_params = sum(int(stats[name].get("n_params", 0) or 0) for name in names)
     if total_params <= 0:
         return {
@@ -1215,6 +1221,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "validate_assignments_kl requires a CUDA-resident model. CPU/offload "
             f"device_map={args.device_map!r} is not allowed."
         )
+    profile = detect_profile_with_warning(
+        args.model,
+        entrypoint="validate-kl",
+    )
+    for label, assignment, path in assignments:
+        _assignment_bpp_details(
+            stats, assignment, specs_by_name, profile=profile,
+            where=f"assignment {label!r} ({path})",
+        )
     staged, cleanup = stage_multimodal(args.model)
     if args.work_dir:
         work_root = Path(args.work_dir)
@@ -1315,10 +1330,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "--production-cache-lru-gb budget"
                 )
 
-        profile = detect_profile_with_warning(
-            args.model,
-            entrypoint="validate-kl",
-        )
         # Every repeat's references must exist before the first measurement --
         # the in-place install is one-way and destroys the model that produces
         # them. Holding them all in the pool is what broke repeats>=4 at 27B
