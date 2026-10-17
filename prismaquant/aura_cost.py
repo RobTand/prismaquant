@@ -3199,25 +3199,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     cache = None
     if args.production_cache:
-        from prismaquant.streamed_model_identity import (
-            build_source_model_binding,
-            resolve_source_checkpoint_path,
-            validate_source_model_binding,
-        )
-
         with open(args.production_cache, "rb") as fh:
             cache = pickle.load(fh)
-        producer_binding = validate_source_model_binding(
-            (cache.metadata or {}).get("source_binding"),
-            where="AURA production cache attachment",
-        )
-        args.model = str(resolve_source_checkpoint_path(args.model))
-        cache.require_source_binding(
-            build_source_model_binding(
-                args.model, dtype=producer_binding["effective_dtype"],
-            ),
-            where="AURA production cache attachment",
-        )
+        args.model = str(cache.require_source_checkpoint(
+            args.model, where="AURA production cache attachment",
+        ))
         _log(f"loaded production cache: {args.production_cache}")
 
     staged = _stage_aura_model(args.model)

@@ -237,6 +237,18 @@ def main():
         gc.collect()
         torch.cuda.empty_cache()
 
+    if args.mode == 'cost':
+        if args.cache is None or not args.cache_sha256 or file_sha(args.cache) != args.cache_sha256:
+            raise ValueError('actual original-wire production cache hash is required')
+        with args.cache.open('rb') as handle:
+            cache = pickle.load(handle)
+        if not isinstance(cache, ProductionWeightCache):
+            raise TypeError('expected the existing ProductionWeightCache pickle')
+        args.model = str(cache.require_source_checkpoint(
+            args.model, where='LFM joint screen production cache attachment'))
+        result['production_cache'] = {'path': str(args.cache), 'sha256': args.cache_sha256}
+        formats = ['TESSERA_E4M3_K1_R1024', 'BF16']
+
     profile = detect_profile(args.model)
     runner = build_streamed_causal_lm(args.model, device=torch.device('cuda'), dtype=torch.bfloat16,
         offload_folder=str(args.out / 'offload'), profile=profile, attn_implementation='eager',
@@ -291,15 +303,6 @@ def main():
         runner.context.install = install
         cache = ProductionWeightCache(weights={}, levers={})
         formats = ['BF16']
-    else:
-        if args.cache is None or not args.cache_sha256 or file_sha(args.cache) != args.cache_sha256:
-            raise ValueError('actual original-wire production cache hash is required')
-        with args.cache.open('rb') as handle:
-            cache = pickle.load(handle)
-        if not isinstance(cache, ProductionWeightCache):
-            raise TypeError('expected the existing ProductionWeightCache pickle')
-        result['production_cache'] = {'path': str(args.cache), 'sha256': args.cache_sha256}
-        formats = ['TESSERA_E4M3_K1_R1024', 'BF16']
     original_capture = runner.capture_boundaries
     original_tail = runner.tail_logits
     def capture(ids):

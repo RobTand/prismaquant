@@ -388,6 +388,34 @@ class ProductionWeightCache:
         elif self.activation_scales is None and self.activation_max_abs is not None:
             self.activation_scales = self.activation_max_abs
 
+    def require_source_checkpoint(
+        self, source_model: str | Path, *, where: str,
+        local_files_only: bool = False,
+    ) -> Path:
+        """Admit a checkpoint using this cache's declared producer render dtype.
+
+        Measurement dtype is independent. Return the resolved source root for
+        the caller's model load so a remote source is resolved only once.
+        """
+        from .streamed_model_identity import (
+            build_source_model_binding,
+            resolve_source_checkpoint_path,
+            validate_source_model_binding,
+        )
+
+        producer = validate_source_model_binding(
+            (self.metadata or {}).get("source_binding"),
+            where=f"{where} production cache",
+        )
+        root = resolve_source_checkpoint_path(
+            source_model, local_files_only=local_files_only,
+        )
+        self.require_source_binding(
+            build_source_model_binding(root, dtype=producer["effective_dtype"]),
+            where=where,
+        )
+        return root
+
     def require_source_binding(self, expected_binding, *, where: str) -> None:
         """Require this pickle's producer source before independent attachment."""
         from .streamed_model_identity import validate_source_model_binding

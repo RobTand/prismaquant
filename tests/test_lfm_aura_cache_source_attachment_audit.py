@@ -110,6 +110,7 @@ class _ReachedPricing(Exception):
 
 @pytest.mark.parametrize("case", [
     "unchanged", "relocated", "changed_weights", "changed_config", "missing_binding",
+    "malformed_binding", "hf_id",
 ])
 def test_lfm_cost_main_binds_independent_cache_before_pricing(
     tmp_path, monkeypatch, rendered_source, case,
@@ -121,10 +122,13 @@ def test_lfm_cost_main_binds_independent_cache_before_pricing(
     shutil.copyfile(original_pickle, produced)
     cache = pickle.loads(produced.read_bytes())
     original_render = cache.get(UNITS[0], FORMAT).clone()
+    attach_source = model_dir
+    snapshot_calls = []
     if case == "relocated":
         relocated = tmp_path / "same_source_elsewhere"
         shutil.copytree(model_dir, relocated)
         model_dir = relocated
+        attach_source = relocated
     elif case == "changed_weights":
         values = load_file(str(model_dir / "model.safetensors"))
         values[UNITS[0] + ".weight"].mul_(2)
@@ -137,13 +141,30 @@ def test_lfm_cost_main_binds_independent_cache_before_pricing(
     elif case == "missing_binding":
         cache.metadata.pop("source_binding", None)
         produced.write_bytes(pickle.dumps(cache))
+    elif case == "malformed_binding":
+        cache.metadata["source_binding"]["effective_dtype"] = "torch.float64"
+        produced.write_bytes(pickle.dumps(cache))
+    elif case == "hf_id":
+        import huggingface_hub
+
+        def snapshot_download(*, repo_id, local_files_only=False):
+            assert repo_id == "audit/lfm-source"
+            assert local_files_only is False
+            assert not snapshot_calls, "LFM resolved its remote source twice"
+            snapshot_calls.append(repo_id)
+            return str(model_dir)
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot_download)
+        attach_source = "audit/lfm-source"
 
     tokens = tmp_path / "tokens.safetensors"
     save_file({"calibration_ids": torch.zeros(1, 512, dtype=torch.int64)}, str(tokens))
     pricing_calls = []
+    runner_sources = []
 
     def build_runner(path, *, dtype, **kwargs):
         assert Path(path) == model_dir
+        runner_sources.append(str(path))
         model = _load_model(path, dtype=dtype)
         config = json.loads((Path(path) / "config.json").read_text())
         model.config = SimpleNamespace(
@@ -181,16 +202,20 @@ def test_lfm_cost_main_binds_independent_cache_before_pricing(
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build_runner)
     monkeypatch.setattr(aura_cost, "compute_aura_cost_streamed", price)
     monkeypatch.setattr("sys.argv", [
-        "lfm_packed_joint_screen.py", "--mode", "cost", "--model", str(model_dir),
+        "lfm_packed_joint_screen.py", "--mode", "cost", "--model", str(attach_source),
         "--tokens", str(tokens), "--tokens-sha256", hashlib.sha256(tokens.read_bytes()).hexdigest(),
         "--cache", str(produced), "--cache-sha256", hashlib.sha256(produced.read_bytes()).hexdigest(),
         "--profile-tool", "none", "--out", str(tmp_path / "out"),
     ])
-    if case in {"unchanged", "relocated"}:
+    if case in {"unchanged", "relocated", "hf_id"}:
         with pytest.raises(_ReachedPricing):
             screen.main()
         assert pricing_calls == [case]
+        assert runner_sources == [str(model_dir)]
     else:
         with pytest.raises((RuntimeError, ValueError), match=r"source|identity|binding"):
             screen.main()
         assert pricing_calls == []
+        assert runner_sources == []
+    if case == "hf_id":
+        assert snapshot_calls == ["audit/lfm-source"]

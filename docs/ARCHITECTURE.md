@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, shared cache attachment.
+`ProductionWeightCache.require_source_checkpoint` owns checkpoint admission for
+AURA and the LFM joint screen. Both check the recorded producer dtype and source
+bytes before loading a measurement model, then use the same resolved snapshot.
+The measurement dtype remains independent of the cache's render dtype.
+
 As of: 2026-10-17, architecture audit continuation, frozen publication standing.
 The publisher checks research-only standing through its shared card replay on
 both preflight and the authoritative frozen snapshot. A standing change before
@@ -27007,11 +27013,13 @@ Unbound independent pickles refuse. Exact union uses its existing metadata
 agreement rule to preserve a shared binding or refuse mismatched/missing values.
 Packed fit-corpus exemptions and MTP append identities remain separate contracts.
 
-AURA also checks this binding before staging or loading its model. It validates
-the cache's recorded producer dtype and uses that dtype when checking the current
-checkpoint. The measurement model may use another dtype, including FP32 Fisher
-measurement of a BF16 render. This comparison authenticates the checkpoint and
-declared render dtype; it does not require the measurement to use that dtype.
+AURA and the LFM joint screen use
+`ProductionWeightCache.require_source_checkpoint` before staging or loading a
+measurement model. This owner validates the cache's recorded producer dtype,
+checks the current checkpoint with that dtype and returns its resolved path for
+model loading. The measurement model may use another dtype, including FP32
+Fisher measurement of a BF16 render. This comparison authenticates the checkpoint
+and declared render dtype; it does not require the measurement to use that dtype.
 
 Render mechanisms are a registry with declared ordering semantics, not a lever string parsed in
 spelling order (`render_score.py:188-260`): each `RenderMechanismSpec` declares `operation`,
