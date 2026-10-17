@@ -85,3 +85,26 @@ def test_dense_card_needs_no_expert_arrays():
         expert_act_sq_sum=None, expert_act_absmax=None, expert_tokens=None,
     )
     dense.validate()
+
+
+def test_legacy_packed_card_needs_no_expert_arrays():
+    legacy = replace(
+        _packed_unit(), expert_g_sq_sum=None, expert_act_sq_sum=None,
+        expert_act_absmax=None, expert_tokens=None,
+    )
+    legacy.validate()
+
+
+@pytest.mark.parametrize("n_params", [0, 23, 36])
+def test_expert_arrays_must_match_packed_parameter_count(n_params):
+    with pytest.raises(ValueError, match="expert"):
+        replace(_packed_unit(), n_params=n_params).validate()
+
+
+def test_expert_absmax_alone_does_not_admit_partial_statistics():
+    partial = replace(
+        _packed_unit(), expert_g_sq_sum=None,
+        expert_act_sq_sum=None, expert_tokens=None,
+    )
+    with pytest.raises(ValueError, match="expert"):
+        partial.validate()

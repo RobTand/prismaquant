@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-05. Sensitivity-card
+admission validates packed expert gradient sums, activation sums, routed token
+counts and optional absolute maxima before pricing. Present expert statistics
+must form a complete tuple with shapes matching the packed parameter count,
+finite values and nonnegative entries. Legacy cards without any expert arrays
+and experts with zero routed tokens remain supported. Cost formulas are unchanged.
+
 As of: 2026-10-17, architecture audit continuation, RE-03. Validation loads
 the configured production weight cache once and passes that same object to
 PPL, MMLU and end-KL evaluation. PPL/MMLU hooks restore the teacher before
