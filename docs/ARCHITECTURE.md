@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, dense activation ownership.
+Resident cache fill drops the capture collector after extracting scalar maxima
+and releases each Linear's captured rows after its last selected format. It
+owns the captured map; the shared renderer preserves caller-owned maps.
+Reference-lifetime regressions cover successful, failed and resumed renders.
+These checks do not measure peak memory, throughput or large-model capacity.
+
 As of: 2026-10-17, architecture audit continuation, production-cache source
 binding. Source-aware resident and streamed producers record the original
 checkpoint's content identity and effective load dtype in cache metadata.
@@ -26704,6 +26711,12 @@ weights and `render_production_weight` (`:1785`) the only producer. Not tidiness
 surrogate, the KL validation, and the exported bytes must be the *same* rendering, or every A/B
 carries a rendering confound. Levers are recorded on the cache (`:165`, `:835-858`), which is
 what makes M19 (§6.1) possible.
+
+Resident dense fill owns its collected activation map. Once scalar maxima have
+been extracted, it releases the collector's reservoirs and removes each map
+entry after all selected formats for that Linear finish, including failures.
+Fully resumed entries with retained scores need no new capture. The shared
+renderer does not consume or mutate a caller's activation map.
 
 **The A-side scale policy is one of those levers (#227).** `_resolve_production_render_levers`
 resolves `PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE` once per fill into

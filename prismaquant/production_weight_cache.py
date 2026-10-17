@@ -6642,6 +6642,7 @@ def fill_production_weight_cache(
                 if a is None:
                     continue
                 mx = float(a.abs().max().item())
+                del a
             if mx <= 0:
                 continue
             per_qname_max_abs[qname] = mx
@@ -6673,12 +6674,8 @@ def fill_production_weight_cache(
                 json.dumps(activation_max_abs, indent=2).encode("utf-8"),
             )
 
-    # MEM: free per-Linear activation tensors after each render so peak
-    # memory stays bounded.  On 27B, 497 Linears × ~10K in_features × 512
-    # rows × fp32 = ~10 GB just for activations.  Freeing in-loop drops
-    # this to ~20 MB resident.
+    collector = None
     import gc as _gc
-    activations_local = dict(activations)  # shallow copy; we'll pop entries
     n = sum(len(render_formats_by_qname.get(q, ())) for q in qname_to_module)
     done = 0
     skipped_resumed = 0
@@ -6755,7 +6752,7 @@ def fill_production_weight_cache(
                                 render_format=render_fmt,
                                 reference_weight=weight,
                                 rendered_weight=cached,
-                                activations=activations_local.get(qname),
+                                activations=activations.get(qname),
                                 activation_max_abs=max_abs,
                                 input_global_scale_policy=render_score_policy,
                                 levers=render_options,
@@ -6771,7 +6768,7 @@ def fill_production_weight_cache(
                         "progressive_gate": "not-run",
                         "mechanism": "resumed_shard",
                     })
-                    # Do NOT pop activations_local[qname] here: this
+                    # Do NOT pop activations[qname] here: this
                     # loop iterates through every format for this
                     # Linear, and a later format in the same outer
                     # iteration may still need the activation tensor
@@ -6783,7 +6780,7 @@ def fill_production_weight_cache(
                 w_dq = render_production_weight(
                     weight, render_fmt,
                     qname=qname,
-                    activations=activations_local,
+                    activations=activations,
                     levers=levers,
                     joint_global_real=joint,
                     input_global_scale=export_scale,
@@ -6801,7 +6798,7 @@ def fill_production_weight_cache(
                         render_format=render_fmt,
                         reference_weight=weight,
                         rendered_weight=w_dq,
-                        activations=activations_local.get(qname),
+                        activations=activations.get(qname),
                         activation_max_abs=max_abs,
                         input_global_scale_policy=render_score_policy,
                         levers=render_options,
@@ -6856,7 +6853,7 @@ def fill_production_weight_cache(
                 )
         # Free this Linear's activation tensor — won't render this qname
         # again, and the activation can be tens of MB on big models.
-        activations_local.pop(qname, None)
+        activations.pop(qname, None)
         if done % 50 == 0:
             _gc.collect()
             try:
