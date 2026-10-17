@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, CR-004. The shared packed
+cache owner applies explicit include lists to resident assignment builds,
+resident format-menu builds and streamed assignment builds. Names may match
+the live parameter or its profile recipe name. An empty list selects nothing;
+an absent list preserves the full scope. Activation hooks still cover every
+visible packed module, preserving the selected render's sampling stream.
+CPU scope and codec regressions do not establish served or performance results.
+
 As of: 2026-10-17, architecture audit continuation, RE-09. The streamed
 visual sensitivity probe counts a sample only after image features merge
 into text embeddings and the backward pass completes. A placeholder or merge

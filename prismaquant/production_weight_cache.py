@@ -7595,6 +7595,7 @@ def fill_packed_expert_cache_entries(
     *,
     render_assignment: Mapping[str, str] | None = None,
     force_format: str | None = None,
+    include_qnames: Sequence[str] | None = None,
     levers: Mapping[str, object],
     profile,
     module_token_budget: int = 32768,
@@ -7643,9 +7644,9 @@ def fill_packed_expert_cache_entries(
 
     Hook invariant (#145, mirrors the dense #130/#135 one): the activation
     collector hooks EVERY packed-experts module this call can see
-    (``eligible_experts_qnames``), and ``render_assignment``/``force_format`` narrow
-    only which tensors get rendered. The bytes of a packed (tensor, fmt)
-    pair are therefore a function of the visible modules and the
+    (``eligible_experts_qnames``), and the assignment, forced format and include
+    list narrow only which tensors get rendered. The bytes of a packed
+    (tensor, fmt) pair are therefore a function of the visible modules and the
     calibration, never of which subset a call renders — a ``force_format``
     frontier build and an assignment-scoped export build that BF16s one
     layer's experts render identical bytes for the rest.
@@ -7657,6 +7658,8 @@ def fill_packed_expert_cache_entries(
         disk-streaming is on).
       render_assignment: the concrete export assignment (recipe_key -> fmt).
         Only non-BF16 packed-expert tensors are rendered (BF16 = passthrough).
+      include_qnames: optional live or profile recipe names to render.
+        ``None`` leaves the scope unrestricted; an empty sequence renders none.
       levers: the resolved production lever dict. It is consumed by
         ``render_mode="per_expert"``; the production ``"batched"`` path uses
         its fixed fast recipe regardless of dense-linears JSO/damp-sweep
@@ -7755,6 +7758,10 @@ def fill_packed_expert_cache_entries(
     #    subset of them this call happens to render. That is what makes a
     #    force_format frontier build and an assignment-scoped export build
     #    reproduce each other's bytes.
+    include_qname_set = (
+        set(include_qnames)
+        if include_qnames is not None else None
+    )
     in_scope: list[tuple[str, nn.Module, nn.Module, str, str, str]] = []
     experts_qnames: set[str] = set()
     eligible_experts_qnames: set[str] = set()
@@ -7787,16 +7794,22 @@ def fill_packed_expert_cache_entries(
         for pn in _packed_experts_param_names(mod, profile):
             full = f"{experts_qname}.{pn}" if experts_qname else pn
             all_packed_fullnames.add(full)
+            try:
+                recipe_key = profile.live_to_recipe_name(full)
+            except Exception:
+                recipe_key = full
+            if (
+                include_qname_set is not None
+                and full not in include_qname_set
+                and recipe_key not in include_qname_set
+            ):
+                continue
             if force_format is not None:
-                # Force-format mode: render every packed expert at one format,
+                # Force-format mode: render the selected experts at one format,
                 # ignoring render_assignment. Used by the format-menu frontier
                 # build (eager NVFP4) and by per-Pareto-point lazy FP8 gap-fill.
                 fmt = _canon(force_format)
             else:
-                try:
-                    recipe_key = profile.live_to_recipe_name(full)
-                except Exception:
-                    recipe_key = full
                 fmt = render_assignment.get(recipe_key)
                 if fmt is None and recipe_key != full:
                     fmt = render_assignment.get(full)

@@ -127,6 +127,7 @@ def render_format_menu_packed_experts(
     cache_dir=None,
     module_token_budget: int = 32768,
     render_mode: str = "batched",
+    include_qnames: Sequence[str] | None = None,
 ) -> dict:
     """Eagerly render packed-MoE experts for a format-menu frontier cache.
 
@@ -165,6 +166,7 @@ def render_format_menu_packed_experts(
         cov = fill_packed_expert_cache_entries(
             cache, model, calib_ids,
             force_format=ef,
+            include_qnames=include_qnames,
             levers=cache.levers,
             profile=profile,
             cache_dir=cache_dir,
@@ -874,6 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expert_coverage = fill_packed_expert_cache_entries(
                 cache, model, calib_ids,
                 render_assignment=expert_assignment,
+                include_qnames=include_qnames,
                 levers=cache.levers,
                 profile=profile,
                 cache_dir=args.cache_dir,
@@ -895,6 +898,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cache_dir=args.cache_dir,
                 module_token_budget=args.expert_token_budget,
                 render_mode=args.expert_render_mode,
+                include_qnames=include_qnames,
             )
         elif _model_has_packed_experts(model, profile):
             print(

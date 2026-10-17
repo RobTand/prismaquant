@@ -921,6 +921,7 @@ def _render_packed_layer(
     render_mode: str,
     col_weights: Mapping[str, torch.Tensor] | None,
     progress: bool,
+    include_qnames: Sequence[str] | None = None,
 ) -> dict:
     """Render this layer's packed experts via the shared packed-expert path,
     feeding each experts-module's input snapshot from the probe act cache."""
@@ -934,6 +935,7 @@ def _render_packed_layer(
     return fill_packed_expert_cache_entries(
         cache, model, None,
         render_assignment=render_assignment,
+        include_qnames=include_qnames,
         levers=levers,
         profile=profile,
         module_token_budget=module_token_budget,
@@ -1132,6 +1134,7 @@ def run_streaming_render(
                     render_mode=expert_render_mode,
                     col_weights=col_weights,
                     progress=progress,
+                    include_qnames=include_qnames,
                 )
                 coverage.update(cov)
         finally:
