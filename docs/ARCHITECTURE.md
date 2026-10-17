@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, TP decision percentile.
+The standalone TP decode decision uses the requested latency percentile for
+its verdict and prints that coordinate. Exact-size and largest-size fallback
+rows use the same selected statistic; missing requested percentiles refuse.
+Unrequested p90 may remain absent from older p50/p99 inputs. Flat inputs stay
+explicit assumptions, and unknown single-device TPOT stays unknown.
+The combined `tp-decode-green-v1` suite passes 35 CPU cases and compiles three
+files; source, terminal logs and CAS receipt are verified against parent
+`3bfefd72f1f` plus the recorded overlays. These checks establish decision
+arithmetic and CLI wiring, with no new network or serving measurement.
+
 As of: 2026-10-17, architecture audit continuation, standalone TP budget intake.
 `tools/tp2_budget_plan.py` requires finite, nonnegative configured device
 budgets and per-rank overhead before reading artifact headers or writing a
