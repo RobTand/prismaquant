@@ -89,7 +89,7 @@ fi
 : "${TARGET_DISK_GB:=}"
 : "${ARTIFACT_OVERHEAD_RESERVE_BYTES:=}"
 # Calibration defaults. 4x256 was the historical minimum for correctness
-# validation; 32x1024 (N=32, T=1024 = 32768 tokens/sample, 32 samples)
+# validation; 32x1024 (32 samples of 1024 tokens, 32768 tokens total)
 # produces ~7% lower PPL on the resulting quantized artifact at a
 # linear time cost in probe wall-time. Override for faster iteration.
 : "${NSAMPLES:=32}"
@@ -225,9 +225,8 @@ PIPELINE_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # 2026-08-20: "package all models using 1gb file sizes"; it was 5 GiB before).
 # This mirrors export_native_compressed's own --shard-bytes default so the
 # pipeline and a hand-run export agree. NOTE the scope: only the
-# compressed-tensors lane shards its output. The CB lane's streaming exporter
-# writes a single model.safetensors and has no shard-size concept, so it is
-# NOT covered by this default.
+# compressed-tensors lane shards its output. The retired CB lane's streaming
+# exporter wrote a single model.safetensors and was outside this default.
 : "${EXPORT_SHARD_BYTES:=1073741824}"
 # TARGET_PROFILE is deliberately UNSET by default (re-vet R11 / debt D4). A
 # hardcoded `:=vllm_packed_moe` here won `resolve_target_profile`'s explicit-
@@ -866,15 +865,11 @@ fi
 : "${CB_COL_WEIGHTS:=${WORK_DIR}/artifacts/cb_col_weights.pkl}"
 # Activation-fair pricing (ultraplan P5a,
 # docs/audits/ultraplan_perf_2026-08-01.md §6). The allocator's cost
-# precedence prices the W4A4-vs-W8A8 activation contract ONLY on the measured
-# output_mse branch, and the two levers above are exactly what removes that
-# branch from most rows of a production run: CB_EXPERT_SAMPLE /
-# PRISMAQUANT_EXPERT_COST_SAMPLE make measure_quant_cost stamp
-# output_mse_measured=False on every packed-expert row, and CB_LADDER_INTERP=1
-# fills interpolated rungs weight-only. On those rows NVFP4-CB is credited
-# with its cheaper index stream and charged none of its A-side cost. The
-# allocator now calibrates one per-format-family correction per run from the
-# measured rows that DO exist and applies it to the weight-only ones.
+# precedence prices activation error on measured output_mse rows. The
+# historical codebook example used expert sampling and ladder interpolation
+# to produce weight-only rows; those retired CB knobs above no longer drive
+# computation. The allocator calibrates a per-format-family correction from
+# available measured rows and applies it to weight-only rows.
 # 1 (default) = calibrate wherever the inputs exist; 0 = reproduce a pre-0.5.3
 # artifact's pricing bit-for-bit. It is NOT a knob to tune — the run refuses
 # outright rather than hand the DP a half-corrected (mixed-scale) menu.
