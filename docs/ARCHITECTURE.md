@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: native export takes visual namespaces from the same
+model profile as visual allocation. Gemma vision-tower and vision-projector
+assignments now reach the native codec before shard and quantization-config
+publication. Unassigned visual tensors and audio retain source passthrough.
+
 Re-stamped 2026-10-17: Rob deprecated GGUF support. Its code, format registry
 entries and existing commands remain available as deprecated paths, with no
 further fixes or enhancements. New engineering work targets compressed-tensors

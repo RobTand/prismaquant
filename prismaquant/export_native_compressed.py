@@ -5517,15 +5517,11 @@ def _main_impl(argv: Sequence[str] | None = None):
             seen_keys=writer.seen_keys,
         )
 
-        # Phase 1 visual-encoder quant: when the allocator's recipe
-        # assigns a non-BF16 format to a visual Linear, run its 2D
-        # weight through `quantize_2d` before emit. BF16 entries and
-        # non-Linear tensors (norms, conv1d, biases, buffers) pass
-        # through unchanged. See allocator's `--visual-format` docstring
-        # for why this is a uniform override rather than a per-Linear
-        # decision — text-only probe never exercises the visual tower.
+        # Visual assignments may come from measured per-Linear selection or
+        # the explicit uniform control. Emit both through the same codec;
+        # the profile owns which source namespaces contain visual Linears.
         src_extra = _apply_visual_recipe_quant(
-            src_extra, assignment, device=device)
+            src_extra, assignment, profile=profile, device=device)
 
         writer.add_tensors(mtp_tensors)
         writer.add_tensors(src_extra)
@@ -6035,46 +6031,43 @@ def _filter_source_passthrough_against_materialized(
     }
 
 
-_VISUAL_KEY_RE = re.compile(r"^(?:model\.)?visual\.")
-
-
 def _apply_visual_recipe_quant(
     src_extra: dict[str, torch.Tensor],
     assignment: dict[str, str],
     *,
+    profile: "ModelProfile | None" = None,
     device: torch.device = torch.device("cpu"),
 ) -> dict[str, torch.Tensor]:
     """Rewrite visual-encoder `.weight` entries in `src_extra` under the
     recipe's per-Linear format assignment.
 
-    The allocator's `--visual-format` flag stamps every visual Linear
-    with a uniform format (`BF16` | `NVFP4` | `MXFP8_E4M3`). For BF16 we do
-    nothing — the passthrough tensor is already in the right dtype
-    (typically bf16 in the source). For NVFP4 / MXFP8_E4M3 we route the
-    rank-2 weight through `quantize_2d` and replace the single
-    `<name>.weight` key with the compressed-tensors tensor set
-    (`<name>.weight_packed`, `<name>.weight_scale`,
-    `<name>.weight_global_scale`, `<name>.input_global_scale` for NVFP4;
-    `<name>.weight`, `<name>.weight_scale` for MXFP8_E4M3).
+    The profile declares the visual namespaces, as it does for allocation.
+    Preserve the existing source/recipe `model.` alias and the historical
+    visual namespace when no roots are declared. Measured per-Linear choices
+    and the explicit uniform control use the same native codec.
 
     Non-Linear tensors (norms, conv1d, biases, buffers) and visual
     keys WITHOUT a recipe entry are passed through unchanged —
-    consistent with the Phase 1 uniform-override contract: only
-    Linears discovered by `discover_visual_linears_from_source` end up
-    with a recipe entry, and that helper rejects anything that isn't
-    rank-2.
+    consistent with the source census, which only admits rank-2 Linears.
 
     `device` is the compute device for quant arithmetic; outputs are
     moved to CPU before storage so they're ready for the sharded
     safetensors writer.
     """
+    roots = profile.visual_root_prefixes() if profile is not None else ()
+    roots = roots or ("model.visual",)
+    prefixes = tuple(
+        prefix + "."
+        for root in roots
+        for prefix in ((root, root[6:]) if root.startswith("model.") else (root,))
+    )
     out: dict[str, torch.Tensor] = {}
     touched = 0
     for key, tensor in src_extra.items():
         if not key.endswith(".weight"):
             out[key] = tensor
             continue
-        if not _VISUAL_KEY_RE.match(key):
+        if not key.startswith(prefixes):
             out[key] = tensor
             continue
         base = key[:-len(".weight")]
