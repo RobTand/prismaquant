@@ -82,9 +82,8 @@ UNKNOWN_OVERHEAD = "UNKNOWN-NEEDS-OVERHEAD"
 # The default is the operator's rule of thumb for a 128 GB DGX Spark
 # (MemTotal on sparky is 121.6 GiB); it is NOT a measurement made here.
 PER_DEVICE_GB_DEFAULT = 121.0
-LABEL_PER_DEVICE_DEFAULT = (
-    "ASSUMED / default 121 GiB usable of a 128 GB unified pool (not measured "
-    "by this tool; pass --per-device-gb to override)")
+LABEL_PER_DEVICE_BUDGET = (
+    "ASSUMED / configured usable device budget (not measured by this tool)")
 
 # Measured cross-box link facts, printed for context only.  This planner does
 # not model bandwidth or latency -- tools/tp_decode_feasibility.py does.
@@ -664,7 +663,7 @@ def build_plan(
         "unit_note": GB_UNIT_NOTE,
         "parallelism": {"mode": mode, "world_size": world},
         "per_device_gb": per_device_gb,
-        "per_device_gb_label": LABEL_PER_DEVICE_DEFAULT,
+        "per_device_gb_label": LABEL_PER_DEVICE_BUDGET,
         "overhead_gb_per_rank": overhead_gb,
         "inventory": {
             "label": LABEL_EXACT,
