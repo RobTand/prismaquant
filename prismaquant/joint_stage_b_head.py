@@ -38,7 +38,7 @@ from .digests import bytes_sha256hex
 HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
 
 #: The head files a slice may declare, in the order a quantum reads them.
-#: ``prepared`` and ``production_cache`` are always present; the other two
+#: ``prepared`` and ``production_cache`` are always present; optional roles
 #: exist exactly when the plan binds them.
 HEAD_FILE_ROLES = ("prepared", "production_cache", "served_activation_policy",
                    "source_identity_cache", "source_digest_cache")
