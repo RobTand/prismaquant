@@ -1047,8 +1047,8 @@ def _shard_resident_bytes(path: Path, dtype_bytes: int,
     raw file size undercounts them 2x and blows the memory budget.
 
     ``fp4_experts`` is the checkpoint's explicit packed-FP4 expert
-    declaration (`declared_fp4_expert_dtype`): expert I8/U8 tensors (routed
-    and shared alike, see `declared_expert_dtype_covers`) are then MXFP4
+    declaration (`declared_fp4_expert_dtype`): routed expert I8/U8 tensors
+    matched by `declared_expert_dtype_covers` are then MXFP4
     nibble-packs that dequant to TWO logical elements of the execution
     dtype per on-disk byte (a 4x undercount at bf16 if sized verbatim).
     Other non-float dtypes stay verbatim.
@@ -1167,8 +1167,8 @@ def pick_layers_per_shard(
 
     `hold_all_layers_in_cache=True` reserves enough RAM for the layer
     cache to fit every decoder layer (zero evictions → no empty_cache
-    stalls). Falls back to holding half the layers if that leaves
-    too little for shard work.
+    stalls). If that leaves too little for shard work, it reserves the
+    streaming window of at most `STREAMING_CACHE_WINDOW_LAYERS` instead.
     """
     cfg_path = Path(model_path) / "config.json"
     if not cfg_path.exists():
@@ -1210,7 +1210,7 @@ def pick_layers_per_shard(
     overhead = int(fixed_overhead_gb * 1024 ** 3)
 
     shard_budget = avail - safety - cache_reserve - full_graph_act - overhead
-    # If reserving the full cache leaves too little, fall back to half-cache
+    # If the full cache leaves too little, reserve the streaming window.
     if shard_budget < per_layer_active and hold_all_layers_in_cache:
         return pick_layers_per_shard(
             model_path, nsamples=nsamples, seqlen=seqlen,
