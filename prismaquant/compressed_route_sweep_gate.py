@@ -474,8 +474,8 @@ def _served_activation(row: Mapping[str, Any]) -> tuple[dict | None, str]:
         return None, (
             f"module {row.get('name')!r} resolved quant_method "
             f"{method!r} with no scheme, and this gate has observed no "
-            "activation contract for that method class (no packed-MoE "
-            "artifact has been swept; see METHOD_ACTIVATION)")
+            "activation contract for that method class "
+            "(see METHOD_ACTIVATION for observed classes)")
     reader = SCHEME_ACTIVATION.get(str(scheme))
     if reader is None:
         return None, (
