@@ -779,7 +779,7 @@ def _backing_records(
 
 
 def _require_witnesses_bind_hashed_files(
-    cache: ProductionWeightCache, *, cache_dir: Path,
+    cache: ProductionWeightCache, *, cache_dir: Path, where: str, remedy: str,
 ) -> None:
     """Refuse a shard whose fused witnesses do not bind the files it hashed.
 
@@ -802,10 +802,7 @@ def _require_witnesses_bind_hashed_files(
             path=None if served is None else cache_dir / served,
         )
         if problem is not None:
-            raise ValueError(
-                f"cache shard entry {key[0]}@{key[1]}: {problem}; re-render "
-                "the shard into a fresh --cache-dir before manifesting it"
-            )
+            raise ValueError(f"{where} entry {key[0]}@{key[1]}: {problem}; {remedy}")
 
 
 def _manifest_envelope(
@@ -854,7 +851,10 @@ def create_shard_manifest(
     cache.relocate(cache_dir)
     _expected_keys_for_coverage(cache, expected, require_complete=False)
     records = _backing_records(cache, cache_dir=cache_dir)
-    _require_witnesses_bind_hashed_files(cache, cache_dir=cache_dir)
+    _require_witnesses_bind_hashed_files(
+        cache, cache_dir=cache_dir, where="cache shard",
+        remedy="re-render the shard into a fresh --cache-dir before manifesting it",
+    )
     campaign = build_campaign_identity(
         cache,
         source_model_identity=source_model_identity,
