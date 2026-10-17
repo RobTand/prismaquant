@@ -75,7 +75,9 @@ include = ["prismaquant*"]
 [tool.setuptools.package-data]
 prismaquant = [
     "*.sh",
-    "kernels/cuda_allocator_state.cpp",
+    "kernels/*.cpp",
+    "kernels/*.cu",
+    "kernels/*_qualification.json",
     "data/*.pt",
     "data/*.json",
     "model_profiles/specs/*.json",
