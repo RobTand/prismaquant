@@ -27,13 +27,15 @@ def row_case(tmp_path, monkeypatch):
     census = {"anchor_groups": {STACK: MEMBERS, "g:dense": ["dense"]},
               "unit_shapes": {name: [8, 4 + index % 3]
                               for index, name in enumerate([*MEMBERS, "dense"])}}
-    spec = {"model": str(tmp_path / "model"), "campaign_argv": [],
+    spec = {"model": str(tmp_path / "model"),
+            "campaign_argv": ["--max-act-rows", "32"],
             "cwd": str(tmp_path), "python": "python3", "env": {},
             "process_baseline_bytes": 0, "headroom_gb": 0,
-            "max_act_rows": 32, "box_memory_gb": 64}
+            "box_memory_gb": 64}
     row = {"argv": ["python3", "-m", "prismaquant.tessera_campaign",
                     "--model", spec["model"], "--units", str(selection_path),
                     "--out", str(workspace / "cost.pkl"),
+                    "--max-act-rows", "32",
                     "--max-rounds", "1", "--rate-band", "832,1088"],
            "demand": {"mem_gb": 8}}
     model_reads = []
