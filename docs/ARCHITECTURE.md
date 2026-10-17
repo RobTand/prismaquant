@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, layer-zero comparison intake.
+`tools/cost_layer0_identity_gate.py` admits nonempty cost, format, and entry
+mappings before comparison. Every new entry must contain the declared additive
+activation-row field with its expected value, even when the reference already
+contains that field. Missing fields and malformed rows cannot produce `PASS`.
+The existing invariant comparison and verdict vocabulary remain. This is the
+standalone recorded-shard comparison; it adds no encoder, GPU, or serving
+qualification. The audit's `tooling-boundary-red-v1-shard0` records the two
+baseline failures and two positive controls with verified source and logs.
+`layer0-gate-green-v1` passes 23 CPU cases and compiles both touched Python
+files; terminal logs, source bytes, and the CAS success receipt are verified.
+
 As of: 2026-10-17, architecture audit continuation, pipeline device budget.
 `run-pipeline.sh` refuses an explicit `SERVE_DEVICE_BUDGET_BYTES` when
 `SERVE_DISPATCH_TABLE` is empty. The allocator still requires the measured
