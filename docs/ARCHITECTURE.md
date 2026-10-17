@@ -23,8 +23,10 @@ publishes first, it reads that identity and applies the normal resume
 comparison, including refusal of a streamed fill's claim. Concurrent first
 publications cannot overwrite an existing initial identity; a matching resident
 identity still resumes. This guarantee covers the resident fill's and the
-streamed claim's sidecar creation. Append writers create and adopt sidecars
-by replacement and require one writer per directory at a time.
+streamed claim's sidecar creation. Append writers create sidecars or merge
+sections by replacement. Base fills also replace an append-only sidecar when
+adopting it. Run appends after their base fill, with one writer per directory
+at a time.
 Rendered bytes and pre-guard admission are unchanged.
 
 Re-stamped 2026-10-17: fused NVFP4 shard witnesses use
