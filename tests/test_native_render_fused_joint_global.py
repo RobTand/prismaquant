@@ -685,6 +685,42 @@ def test_resident_resume_keeps_the_witnesses_its_fill_published(
     _assert_exports_bit_exact(resumed, layer, FUSED)
 
 
+def test_resident_resume_warns_about_a_resumed_shard_without_a_witness(
+    rendered, tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "pwc"
+    _resident_fill(rendered, cache_dir)
+    missing_name = sorted(FUSED)[0]
+    missing_shard = cache_dir / cache_weight_filename(missing_name, "NVFP4")
+    sidecar = cache_dir / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME
+    record = json.loads(sidecar.read_text())
+    del record["records"][f"{missing_name}|NVFP4"]
+    sidecar.write_text(json.dumps(record))
+    capsys.readouterr()
+
+    def no_joint_recalculation(*args, **kwargs):
+        raise AssertionError("a fully resumed cache recalculated joint globals")
+
+    with monkeypatch.context() as fully_resumed:
+        fully_resumed.setattr(enc, "_compute_nvfp4_joint_global", no_joint_recalculation)
+        resumed = _resident_fill(rendered, cache_dir)
+    warning = capsys.readouterr().out
+    assert "resume adopts no fused NVFP4 joint-global witness for 1" in warning
+    assert missing_shard.name in warning
+    assert "Remove only the affected shards" in warning
+    assert set(nvfp4_joint_global_witnesses(resumed.metadata, where="test")) == {
+        (name, "NVFP4") for name in FUSED - {missing_name}}
+    _options, layer, _whole = _export_globals(rendered, resumed, monkeypatch)
+    with pytest.raises(RuntimeError, match=UNWITNESSED):
+        _pack_fused(missing_name, layer[missing_name])
+
+    missing_shard.unlink()
+    repaired = _resident_fill(rendered, cache_dir)
+    _options, layer, _whole = _export_globals(rendered, repaired, monkeypatch)
+    _assert_exports_bit_exact(repaired, layer, FUSED)
+
+
 def test_resident_resume_witnesses_only_the_shard_it_renders(
     rendered, tmp_path, monkeypatch,
 ):

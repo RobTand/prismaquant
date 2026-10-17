@@ -114,6 +114,7 @@ from prismaquant.render_score import (
     score_render_error,
 )
 from prismaquant.source_prefetch import prefetch_files_to_page_cache
+from prismaquant.name_projection import fused_sibling_group_key
 
 
 ACTIVATION_HOOK_SCOPE_SCHEMA = (
@@ -6248,7 +6249,7 @@ def fill_production_weight_cache(
     )
     resumed_joint_global_witnesses: dict[
         tuple[str, str], NVFP4JointGlobalWitness] = {}
-    unbound_resumed_witnesses: list[str] = []
+    resumed_witness_problems: dict[tuple[str, str], str] = {}
     rendered_keys = {
         (qname, str(fmt).upper())
         for qname, fmts in render_formats_by_qname.items()
@@ -6267,17 +6268,7 @@ def fill_production_weight_cache(
         if problem is None:
             resumed_joint_global_witnesses[key] = witness
         else:
-            unbound_resumed_witnesses.append(f"{key[0]}@{key[1]}: {problem}")
-    if unbound_resumed_witnesses:
-        print(
-            "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
-            f"witness for {len(unbound_resumed_witnesses)} shards the fill "
-            "did not leave as published; export refuses them until they are "
-            "re-rendered. Remove only the affected shards and resume with "
-            "the matching render identity, or use a fresh --cache-dir. "
-            f"sample={unbound_resumed_witnesses[:3]}",
-            flush=True,
-        )
+            resumed_witness_problems[key] = problem
     joint_global_witnesses: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
 
     fmt_set = {
@@ -6591,6 +6582,7 @@ def fill_production_weight_cache(
     done = 0
     skipped_resumed = 0
     skipped_prewritten = 0
+    unwitnessed_resumed_shards: list[str] = []
     render_gate_records: list[dict[str, object]] = []
     for qname, mod in qname_to_module.items():
         weight = mod.weight.data
@@ -6642,6 +6634,12 @@ def fill_production_weight_cache(
                         joint_global_witnesses[key] = (
                             resumed_joint_global_witnesses[key]
                         )
+                    elif render_fmt == "NVFP4" and fused_sibling_group_key(
+                        qname, profile=model_profile,
+                    ) is not None:
+                        problem = resumed_witness_problems.get(key, "no published witness")
+                        unwitnessed_resumed_shards.append(
+                            f"{qname}@{fmt_key}: {disk_path}: {problem}")
                     score_key = _render_score_record_key(qname, fmt_key)
                     if score_key not in render_score_records:
                         try:
@@ -6758,6 +6756,16 @@ def fill_production_weight_cache(
                     _torch.cuda.empty_cache()
             except Exception:
                 pass
+    if unwitnessed_resumed_shards:
+        print(
+            "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
+            f"witness for {len(unwitnessed_resumed_shards)} resumed shards "
+            "with missing or unbound witnesses; export refuses them until "
+            "they are re-rendered. Remove only the affected shards and resume "
+            "with the matching render identity, or use a fresh --cache-dir. "
+            f"sample={unwitnessed_resumed_shards[:3]}",
+            flush=True,
+        )
     if progress:
         print(
             f"[prod-cache] rendered {len(weights)} (qname, fmt) entries "
