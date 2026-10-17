@@ -672,9 +672,12 @@ def test_fused_witness_refuses_file_identity_drift_across_nfs_mounts(
     changed[0] += 1
     changed[field] += 1
     witness = NVFP4JointGlobalWitness(0.5, PublishedShard(shard.name, tuple(changed)))
-    assert "does not match its published file identity" in (
-        nvfp4_joint_global_witness_problem(
-            witness, served=shard.name, path=shard))
+    problem = nvfp4_joint_global_witness_problem(
+        witness, served=shard.name, path=shard)
+    assert "does not match its published file identity" in problem
+    assert "device-only" not in problem
+    field_name = {1: "inode", 2: "size", 3: "mtime_ns", 4: "ctime_ns"}[field]
+    assert f"changed fields: device, {field_name}" in problem
 
 
 def test_legacy_caches_still_pack_unfused_entries(rendered, monkeypatch):
