@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-007. Initial container
+runtime identity publication is create-only. Concurrent writers stage separate
+complete files; one publishes and the other verifies that winner through the
+same identity comparison used by resume. Matching identities are idempotent;
+different identities refuse without replacing an acknowledged claim. Existing
+legacy-checkpoint refusal and the pre-import standard-library boundary remain.
+
 As of: 2026-10-17, architecture audit continuation, CR-006. A resumed dense
 cache shard contributes its per-key render-gate record to the existing cache
 metadata, so fresh and resumed stripe outputs satisfy exact-union coverage.
