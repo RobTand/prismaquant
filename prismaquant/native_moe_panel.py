@@ -1540,7 +1540,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(inputs["routing_capture_sha256"], joint_identity_sha256(inputs["routing_capture"]), "routing capture digest")
     rows = _validated_assignment(cost_rows, "additive")  # validation only; no scalar summary
     if set(rows) != {member["unit"] for member in members}:
-        raise ValueError("native MoE runtime binding must cover exactly all 96 members")
+        raise ValueError("native MoE runtime binding must cover exactly all declared members")
     first = rows[members[0]["unit"]]
     probe, request = first["probe_identity"], inputs["probe_request"]
     from .native_execution_binding import require_reference_quantizer
