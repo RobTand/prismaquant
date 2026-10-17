@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, reseal request binding.
+Bundle reuse checks every arm's dropped settings against the current migration
+request before planning or rewriting rows. Pin-only catalog adoption makes no
+setting-removal request and retains its existing contract.
+
 As of: 2026-10-17, architecture audit continuation, catalog admission reuse.
 The catalog pair memo includes the current development/certified mode in its
 identity. A development waiver cannot satisfy a later certified request.
@@ -25956,6 +25961,14 @@ tessera#486 are the case this closes: `extension-e2m1-01` rows 0045-0052 are
 are `routed:{TESSERA_BF16_K1, TESSERA_E2M1_K2, TESSERA_E4M3_K1}`. The 09-11
 bundle's routed cells cover none of those new strata. Gate:
 `tests/test_reseal_campaign_identity.py`.
+
+Bundle assembly and reuse also share the requested-setting-removal check
+(2026-10-17 architecture audit). Each bound arm must prove exactly the
+`drop_settings` supplied by the current migration. Reusing a no-drop bundle
+does not authorize a later request to remove settings. Catalog source adoption
+supplies only old/new pins and does not request removal; that existing caller
+remains distinct. This adds no new proof requirement for legacy empty-arm
+bundles and changes neither row bytes nor numerical qualification.
 
 **Row classes: placement is a property of the class, not of the spec**
 (2026-09-13, #542). A spec may declare a `classes` block, and a class owns the

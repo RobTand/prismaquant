@@ -316,6 +316,14 @@ def _arm_comparison(result):
     return result.get('comparison', result)
 
 
+def _require_requested_setting_drops(comparison, pins, *, where):
+    """An arm must prove the setting removal the migration requests."""
+    declared = tuple(sorted(comparison.get('dropped_settings') or ()))
+    if declared != tuple(sorted(pins['drop_settings'])):
+        raise Refused(f'{where}: arm dropped settings {list(declared)}, the pins file '
+                      f'drops {sorted(pins["drop_settings"])}')
+
+
 def load_bundle(path, pins):
     bundle = json.loads(Path(path).read_text())
     if bundle.get('schema') != BUNDLE_SCHEMA:
@@ -339,6 +347,9 @@ def load_bundle(path, pins):
         scope = arm_pin_scope(comparison.get('old_pins'), comparison.get('new_pins'), pins, where=f'{path}: {arm["result"]}')
         if arm.get('pin_scope') not in (None, scope):
             raise Refused(f'{path}: arm {arm["result"]} is recorded as {arm["pin_scope"]}, but its pins make it {scope}')
+        # Pin-only source adoption declares no setting-removal request.
+        if 'drop_settings' in pins:
+            _require_requested_setting_drops(comparison, pins, where=f'{path}: {arm["result"]}')
         if encoder_moves:
             arm_engagement(result, comparison, where=f'{path}: {arm["result"]}')
     bundle['covered'] = bundle_coverage(bundle, path)
@@ -390,10 +401,7 @@ def assemble_bundle(pins_path, *, arm_paths, fixture_id=None, action_keys=()):
         # write, dropped settings and all.  An arm that dropped nothing proves
         # a different migration than the one this pins file describes, and an
         # older result that predates the field reads as "dropped nothing".
-        declared = tuple(sorted(comparison.get('dropped_settings') or ()))
-        if declared != tuple(sorted(pins['drop_settings'])):
-            raise Refused(f'{path}: arm dropped settings {list(declared)}, the pins file '
-                          f'drops {sorted(pins["drop_settings"])}')
+        _require_requested_setting_drops(comparison, pins, where=path)
         if not comparison.get('identity_matches_with_pins_substituted'):
             raise Refused(f'{path}: produced identity does not equal the stored identity with pins substituted')
         engagement = arm_engagement(result, comparison, where=path) if encoder_moves else None
