@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-10. The native dense
+experiment launcher obtains image metadata through PrismaQuant's existing
+Docker inspection and content-identity owners. It requires the fixed image's
+exact RepoDigest and passes the declaration consumed by the external producer,
+without importing Tessera's serving runtime. The image, encoder checkout and
+numerical child commands remain fixed. CPU command tests establish this
+boundary and inherited CPU affinity, not a new GPU measurement qualification.
+
 As of: 2026-10-17, architecture audit continuation, RE-07. A legacy frontier
 row must bind the assignment it measured before the selector emits that
 assignment. The full assignment SHA is authoritative when present; otherwise

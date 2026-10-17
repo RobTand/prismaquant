@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -54,6 +55,7 @@ def _launcher(monkeypatch, *, forbid_serving=False, matching_digest=True):
     monkeypatch.setattr(subprocess, "Popen", unexpected_process)
     monkeypatch.setattr(sys, "argv", ["glm_native_dense_launch.py", "--format", FORMAT, "--run", RUN])
     monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: {2, 7})
 
     legacy = ModuleType("tessera.serving.runtime_image")
 
@@ -63,10 +65,12 @@ def _launcher(monkeypatch, *, forbid_serving=False, matching_digest=True):
         return {
             "schema": "tessera.runtime_image/1",
             "requested": requested,
+            "required": requested,
             "resolved_reference": requested,
             "repo_digests": inspection["RepoDigests"],
             "local_id": inspection["Id"],
             "present": True,
+            "gated": True,
             "refused": requested not in inspection["RepoDigests"],
             "reason": "explicit_digest" if matching_digest else "image_digest_mismatch",
         }
@@ -116,6 +120,7 @@ def test_native_dense_launcher_preserves_image_and_downstream_declaration(monkey
     assert argv[image_index + 1:image_index + 3] == ["python3", "-c"]
     assert argv[argv.index("--memory") + 1] == "16g"
     assert argv[argv.index("--memory-swap") + 1] == "16g"
+    assert argv[argv.index("--cpuset-cpus") + 1] == "2,7"
     mounts = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--mount"]
     assert f"type=bind,src={ENCODER},dst=/tessera,readonly" in mounts
     assert "type=bind,src=/mnt/shared,dst=/mnt/shared" in mounts
@@ -125,9 +130,14 @@ def test_native_dense_launcher_preserves_image_and_downstream_declaration(monkey
     declaration = json.loads(env["TESSERA_CENSUS_RUNTIME_IMAGE_DECLARATION"])
     assert declaration["schema"] == "tessera.runtime_image/1"
     assert not declaration["refused"]
-    assert declaration["requested"] == declaration["resolved_reference"] == IMAGE
+    assert declaration["present"] is declaration["gated"] is True
+    assert declaration["requested"] == declaration["required"] == declaration["resolved_reference"] == IMAGE
+    assert declaration["reason"] == "explicit_digest"
     assert IMAGE in declaration["repo_digests"]
     assert declaration["repo_digests"] == inspection["RepoDigests"]
+    identity_owner = runpy.run_path(str(path.parents[1] / "prismaquant/container_runtime_identity.py"))
+    assert env["PRISMAQUANT_CONTAINER_CONTENT_SHA256"] == identity_owner["image_content_sha256"](inspection)
+    assert env["MAX_JOBS"] == "2"
     for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "TORCHINDUCTOR_COMPILE_THREADS"):
         assert env[key] == "1"
     code = argv[image_index + 3]
