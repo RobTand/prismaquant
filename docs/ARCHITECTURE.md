@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, calibration source intake.
+The shared calibration loader accepts namespaced Hub dataset IDs. Missing
+absolute paths, explicit `./` or `../` paths, and `.txt` or `.jsonl` inputs
+still report a missing local file. Existing regular files retain local parsing;
+other dataset references use the existing dataset adapter and sampler.
+
 As of: 2026-10-17, architecture audit continuation, AURA cache attachment.
 AURA checks the production cache's original checkpoint before staging or
 loading a model. It uses the cache's declared producer dtype for that binding;

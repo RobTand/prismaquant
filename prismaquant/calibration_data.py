@@ -278,7 +278,8 @@ def load_calibration(tokenizer, source: str, n_samples: int,
     # Hub` -- an error that names a filesystem path as a dataset id and sends
     # the reader looking for something to download. Nothing is downloadable;
     # the file is simply absent.
-    if (source.endswith((".jsonl", ".txt")) or os.sep in source) \
+    if (source.endswith((".jsonl", ".txt")) or os.path.isabs(source)
+            or source.startswith(("./", "../"))) \
             and not os.path.exists(source):
         raise FileNotFoundError(
             f"calibration file not found: {source}\n"

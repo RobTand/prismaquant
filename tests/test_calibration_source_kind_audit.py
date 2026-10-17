@@ -33,12 +33,13 @@ def test_hub_dataset_ids_reach_the_dataset_adapter(tmp_path, monkeypatch, source
     assert calls == [(source, {"split": "train", "streaming": True})] * 2
 
 
-@pytest.mark.parametrize("kind", ["absolute", "explicit_relative", "jsonl", "txt"])
+@pytest.mark.parametrize("kind", ["absolute", "explicit_relative", "parent_relative", "jsonl", "txt"])
 def test_missing_explicit_local_sources_refuse_before_dataset_access(tmp_path, monkeypatch, kind):
     monkeypatch.chdir(tmp_path)
     sources = {
         "absolute": str(tmp_path / "missing" / "corpus"),
         "explicit_relative": "./missing/corpus",
+        "parent_relative": "../pq-audit-missing/corpus",
         "jsonl": "missing.jsonl",
         "txt": "missing.txt",
     }
@@ -62,3 +63,18 @@ def test_existing_local_corpus_keeps_local_parsing(tmp_path, monkeypatch, name):
     monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load_dataset))
     ids = load_calibration(_Tokenizer(), str(path), n_samples=1, seqlen=8)
     assert ids.shape == (1, 8)
+
+
+def test_existing_directory_keeps_the_dataset_adapter_boundary(tmp_path, monkeypatch):
+    directory = tmp_path / "dataset"
+    directory.mkdir()
+    calls = []
+
+    def load_dataset(name, **options):
+        calls.append(name)
+        return [{"text": "abcdefghijklmnopqrstuvwxyz"}]
+
+    monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load_dataset))
+    ids = load_calibration(_Tokenizer(), str(directory), n_samples=1, seqlen=8)
+    assert ids.shape == (1, 8)
+    assert calls == [str(directory)] * 2
