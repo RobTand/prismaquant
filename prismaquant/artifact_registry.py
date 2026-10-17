@@ -12,11 +12,27 @@ from pathlib import Path
 from typing import Mapping
 
 from .pipeline import MetricGateSpec
-from .digests import DIRECT_ASCII_LAX
+from .digests import DIRECT_ASCII_LAX, is_sha256hex
 
 
 DEFAULT_REGISTRY_PATH = Path("/home/rob/dq-runs/prismaquant-artifact-registry.json")
 COMPARE_EPSILON = 0.005
+_EVALUATION_SETTING_TYPES = {
+    "model_sha": str,
+    "model_identity_scope": str,
+    "eval_split": str,
+    "metric_era": str,
+    "wikitext_split": str,
+    "n_wikitext_tokens": int,
+    "n_mmlu_questions": int,
+    "calib_seqlen": int,
+    "calib_n_samples": int,
+    "calib_split": str,
+    "calib_seed": int,
+    "wikitext_max_window_tokens": int,
+    "device": str,
+    "dtype": str,
+}
 
 
 @dataclass
@@ -100,6 +116,37 @@ def resolve_layer_config_sha(layer_config: Mapping | str | Path) -> str:
     return layer_config_sha256(payload)
 
 
+def _evaluation_settings_reasons(candidate: ArtifactRecord, baseline: ArtifactRecord) -> list[str]:
+    metadata = {}
+    reasons = []
+    for role, record in (("candidate", candidate), ("baseline", baseline)):
+        metadata[role] = record.eval_meta if isinstance(record.eval_meta, Mapping) else {}
+    for name, expected_type in _EVALUATION_SETTING_TYPES.items():
+        values = {}
+        for role, settings in metadata.items():
+            if name not in settings:
+                reasons.append(f"{role} evaluation settings missing {name}")
+                continue
+            value = settings[name]
+            invalid = type(value) is not expected_type or (
+                expected_type is str and not value.strip())
+            if name == "model_sha":
+                invalid = invalid or not is_sha256hex(value)
+            elif name == "model_identity_scope":
+                invalid = invalid or value not in ("local_content", "remote_identifier")
+            if invalid:
+                reasons.append(f"{role} evaluation settings invalid {name}")
+            else:
+                values[role] = value
+        if len(values) == 2 and values["candidate"] != values["baseline"]:
+            reasons.append(f"evaluation settings differ for {name}")
+    for role, settings in metadata.items():
+        if ("eval_split" in settings and "wikitext_split" in settings
+                and settings["eval_split"] != settings["wikitext_split"]):
+            reasons.append(f"{role} evaluation settings eval_split differs from wikitext_split")
+    return reasons
+
+
 class ArtifactRegistry:
     def __init__(self, path: str | Path = DEFAULT_REGISTRY_PATH):
         self.path = Path(path)
@@ -141,6 +188,7 @@ class ArtifactRegistry:
     def compare(self, candidate_id: str, baseline_id: str) -> dict:
         candidate = self._record_by_id(candidate_id)
         baseline = self._record_by_id(baseline_id)
+        settings_reasons = _evaluation_settings_reasons(candidate, baseline)
 
         metrics = {
             "end_kl": _compare_metric(
@@ -181,7 +229,7 @@ class ArtifactRegistry:
                 ),
             ),
         }
-        reasons = [
+        reasons = settings_reasons + [
             f"{name} failed"
             for name, result in metrics.items()
             if not result["passed"]
@@ -190,6 +238,9 @@ class ArtifactRegistry:
             "candidate_id": candidate_id,
             "baseline_id": baseline_id,
             "epsilon": COMPARE_EPSILON,
+            "comparison_scope": "recorded_evaluation_settings",
+            "content_equivalence": "not_established",
+            "evaluation_settings_compatible": not settings_reasons,
             "metrics": metrics,
             "pass": not reasons,
             "reasons": reasons,

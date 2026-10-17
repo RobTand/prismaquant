@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-005. Validation records
+the effective evaluation settings once and registration preserves them.
+Registry comparison refuses missing, invalid or different model identities,
+metric eras, splits, sample budgets, calibration seeds, window limits, devices
+or dtypes. Compatible settings permit the existing numeric comparison; they
+do not establish dataset, tokenizer or remote-model content equivalence.
+Historical records remain readable but receive no inferred metadata.
+
 As of: 2026-10-17, architecture audit continuation, RE-06. Expert checkpoint
 resume validates the payload belonging to its evaluation driver. The forked
 driver retains its `kl_windows` mapping alongside stats, costs and unit KL;
@@ -28920,12 +28928,20 @@ rather than guessing. Relatedly, `--calib-skip-first` on the wikitext branch was
 no-op** (computed, never applied) and now raises — the mechanism that guarantees the held-out
 split cannot quietly do nothing.
 
-**`validation_harness.py`** — `validate_artifact` `:77-153` records `{ppl_wikitext, end_kl,
-ppl_mmlu_acc, model_sha, layer_config_sha, eval_split, metric_era}` into `artifact_registry`
-(`:18`); defaults 65,536 wikitext tokens, 200 MMLU questions, calib 8 × 512 on split `test`
-(`:84-89`). Raises on non-finite metrics (`:156`), otherwise passes everything: measurement and
-provenance, not a gate. `metric_era` matters — records lacking `eval_split` were measured on
-wikitext **train** and are not face-value comparable (`:147-152`).
+**`validation_harness.py`** — `validate_artifact` returns PPL, MMLU accuracy,
+end-KL, model and layer-config identities, and `eval_meta`. The CLI persists that
+same metadata when registration is requested. Defaults are 65,536 WikiText tokens,
+200 MMLU questions and calibration 8 × 512 on split `test`. Non-finite metrics
+refuse. The effective options are resolved once, including the WikiText window
+limit. `eval_split` retains its fixed historical `test` marker; `wikitext_split`
+records PPL's test split and `calib_split` records end-KL's selected split.
+Registry comparison requires matching, well-typed evaluation settings and model
+identity scopes before numeric improvements can pass. Unmarked historical records
+are readable but cannot qualify a comparison; missing metadata is not backfilled.
+The result explicitly scopes compatibility to recorded settings. Local model
+references are content-hashed; remote references identify the supplied name only.
+Dataset and tokenizer content or revisions are not bound, so this comparison does
+not establish complete evaluation-content equivalence or served quality.
 When `PRISMAQUANT_VALIDATION_PROD_CACHE` is set, the harness loads and configures
 one `ProductionWeightCache` at the metric boundary. Both PPL/MMLU perturbation
 hooks and the end-KL evaluator receive that object. Removing the first hooks

@@ -101,20 +101,24 @@ def validate_artifact(
     config_payload, _config_path = _load_layer_config_input(layer_config)
     config_sha = layer_config_sha256(config_payload)
 
+    metric_options = {
+        "device": device,
+        "dtype": dtype,
+        "n_wikitext_tokens": int(n_wikitext_tokens),
+        "n_mmlu_questions": int(n_mmlu_questions),
+        "calib_seqlen": int(calib_seqlen),
+        "calib_n_samples": int(calib_n_samples),
+        "calib_split": str(calib_split),
+        "calib_seed": int(calib_seed),
+        "wikitext_max_window_tokens": _wikitext_window_limit(),
+    }
     backend = _metric_backend or _env_metric_backend() or _compute_metrics
     raw_metrics = dict(
         backend(
             model_path=model_path,
             layer_config=config_payload,
             cache_dir=cache_dir,
-            device=device,
-            dtype=dtype,
-            n_wikitext_tokens=int(n_wikitext_tokens),
-            n_mmlu_questions=int(n_mmlu_questions),
-            calib_seqlen=int(calib_seqlen),
-            calib_n_samples=int(calib_n_samples),
-            calib_split=str(calib_split),
-            calib_seed=int(calib_seed),
+            **metric_options,
             progress=bool(progress),
         )
     )
@@ -144,15 +148,21 @@ def validate_artifact(
         metrics["ppl_mmlu_acc"] = mmlu_value  # explicit-skip sentinel
     else:
         metrics["ppl_mmlu_acc"] = _finite_metric(raw_metrics, "ppl_mmlu_acc")
-    metrics["model_sha"] = _sha256_model_reference(model_path)
+    model_sha, model_identity_scope = _sha256_model_reference(model_path)
     metrics["layer_config_sha"] = config_sha
     metrics["eval_seconds"] = float(time.monotonic() - started)
-    # Metric-era marker (QC on review-batch): the end-KL eval split moved
-    # from wikitext TRAIN to TEST on 2026-06-12 — pre-marker registry
-    # records were measured on train and are NOT comparable at face value.
-    # Records without 'eval_split' are the train era.
-    metrics["eval_split"] = "test"
-    metrics["metric_era"] = "2026-06-12-test-split"
+    # eval_split retains the fixed test marker; calib_split records end-KL.
+    eval_meta = {
+        **metric_options,
+        "model_sha": model_sha,
+        "model_identity_scope": model_identity_scope,
+        "eval_split": "test",
+        "metric_era": "2026-06-12-test-split",
+        "wikitext_split": "test",
+    }
+    for key in ("model_sha", "eval_split", "metric_era"):
+        metrics[key] = eval_meta[key]
+    metrics["eval_meta"] = eval_meta
     return metrics
 
 
@@ -190,6 +200,7 @@ def _compute_metrics(
     calib_n_samples: int,
     calib_split: str,
     calib_seed: int,
+    wikitext_max_window_tokens: int,
     progress: bool,
 ) -> dict:
     from prismaquant.model_runtime import initialize_model_runtime
@@ -245,6 +256,7 @@ def _compute_metrics(
                 cache_dir=cache_dir,
                 device=torch_device,
                 n_tokens=n_wikitext_tokens,
+                max_window_tokens=wikitext_max_window_tokens,
                 progress=progress,
             )
             ppl_mmlu_acc = _mmlu_accuracy(
@@ -389,6 +401,7 @@ def _wikitext_ppl(
     device,
     n_tokens: int,
     progress: bool,
+    max_window_tokens: int | None = None,
 ) -> float:
     input_ids = _load_wikitext_ids(
         tokenizer,
@@ -406,15 +419,7 @@ def _wikitext_ppl(
     # token of every window sees no context from the previous window. This is
     # deliberately NOT strided/sliding-window evaluation. The env knob keeps
     # its historical name for compatibility but sets the window (chunk) size.
-    max_window = 2048
-    raw_window = os.environ.get("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE")
-    if raw_window:
-        try:
-            max_window = max(2, int(raw_window))
-        except ValueError as exc:
-            raise ValueError(
-                "PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE must be an integer"
-            ) from exc
+    max_window = _wikitext_window_limit() if max_window_tokens is None else max_window_tokens
     window_len = min(_model_context_length(model, tokenizer), max_window, seq_len)
     window_len = max(int(window_len), 2)
     nll_sum = 0.0
@@ -458,6 +463,16 @@ def _wikitext_ppl(
     if token_count <= 0:
         raise ValueError("WikiText PPL accumulated zero target tokens")
     return float(math.exp(nll_sum / float(token_count)))
+
+
+def _wikitext_window_limit() -> int:
+    raw_window = os.environ.get("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE")
+    if not raw_window:
+        return 2048
+    try:
+        return max(2, int(raw_window))
+    except ValueError as exc:
+        raise ValueError("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE must be an integer") from exc
 
 
 def _load_wikitext_ids(
@@ -876,21 +891,21 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
-def _sha256_model_reference(model_path: str) -> str:
+def _sha256_model_reference(model_path: str) -> tuple[str, str]:
     path = Path(model_path)
     h = hashlib.sha256()
     if path.is_file():
         _hash_file(h, path)
-        return h.hexdigest()
+        return h.hexdigest(), "local_content"
     if path.is_dir():
         for child in sorted(p for p in path.rglob("*") if p.is_file()):
             rel = child.relative_to(path).as_posix()
             h.update(rel.encode("utf-8"))
             h.update(b"\0")
             _hash_file(h, child)
-        return h.hexdigest()
+        return h.hexdigest(), "local_content"
     h.update(f"hf:{model_path}".encode("utf-8"))
-    return h.hexdigest()
+    return h.hexdigest(), "remote_identifier"
 
 
 def _hash_file(h: "hashlib._Hash", path: Path) -> None:
@@ -985,17 +1000,7 @@ def _main_validate(argv: list[str]) -> int:
             ppl_wikitext=metrics["ppl_wikitext"],
             ppl_mmlu_acc=metrics["ppl_mmlu_acc"],
             end_kl=metrics["end_kl"],
-            eval_meta={
-                "model_sha": metrics["model_sha"],
-                "n_wikitext_tokens": args.n_wikitext_tokens,
-                "n_mmlu_questions": args.n_mmlu_questions,
-                "calib_seqlen": args.calib_seqlen,
-                "calib_n_samples": args.calib_n_samples,
-                "calib_split": args.calib_split,
-                "calib_seed": args.calib_seed,
-                "device": args.device,
-                "dtype": args.dtype,
-            },
+            eval_meta=metrics["eval_meta"],
             created_at=utc_timestamp(),
             notes=args.notes,
         )
