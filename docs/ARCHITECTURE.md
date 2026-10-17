@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-08. Batched plain
+FP8 weight-cost measurement uses the same format-registry reconstruction as
+individual measurement and export. FP8_E4M3 and FP8_E5M2 retain their row scales
+and dtype; the generic codebook midpoint rule no longer prices these formats.
+CPU tests cover midpoint and batched geometry parity. CUDA cases remain a
+separate qualification requirement; no serving or performance claim follows.
+
 As of: 2026-10-17, architecture audit continuation, RE-10. The native dense
 experiment launcher obtains image metadata through PrismaQuant's existing
 Docker inspection and content-identity owners. It requires the fixed image's
