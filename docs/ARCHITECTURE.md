@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, research figure binding.
+The sparse-rate family-transfer plot uses the existing seal validator before
+reading predictions. Its audit comparison and plotted values use that same
+validated object, so a retained digest cannot bless changed prediction bytes.
+This gate checks research provenance and supplies no new measured result.
+
 As of: 2026-10-17, architecture audit continuation, Stage B batch ratios.
 Workspace profiling charges each measured peak at the exact ratio between
 successive batch sizes, rounded up to whole bytes before adding the spill
