@@ -970,7 +970,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Optional measure_quant_cost pickle. When supplied, each result "
         "includes assignment-level local MSE / predicted-Δloss summaries "
-        "from the same cost table the allocator optimized.",
+        "from the supplied table. Predicted loss is an unadjusted row estimate, "
+        "not a replay of the allocator's objective.",
     )
     parser.add_argument("--base-assignment", required=True)
     parser.add_argument(
@@ -1330,9 +1331,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             # These are pure scratch and they are LARGE -- 8.14 GiB per repeat
             # at 27B, so a 3-arm A/B would strand ~98 GiB. Keeping >=10% of the
             # disk free is a standing rule here, and a leak this size eats the
-            # margin in one campaign. atexit covers normal exit and SIGTERM
-            # (which is what the memory watchdog sends); a SIGKILL still
-            # strands them, so the directory is prefixed for easy sweeping.
+            # margin in one campaign. atexit covers normal interpreter exit.
+            # Signal termination can strand files, so the directory is
+            # prefixed for easy sweeping.
             atexit.register(shutil.rmtree, str(_ref_dir), True)
             ref_log_prob_repeats = [
                 _SpilledRefLogProbs(
