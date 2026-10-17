@@ -107,7 +107,7 @@ def test_owner_orders_fsync_replace_dirfsync(tmp_path, monkeypatch) -> None:
     assert leftovers == [], leftovers
 
 
-def test_owner_preserves_existing_file_mode(tmp_path) -> None:
+def test_owner_replaces_file_with_fresh_staging_mode(tmp_path) -> None:
     # The copies opened the staging file with plain "wb" and never chmod'ed;
     # the owner must not either -- a replaced file keeps the staging mode.
     target = tmp_path / "mode.bin"
