@@ -1382,8 +1382,8 @@ def test_a_mutated_origin_is_refused_before_it_can_be_staged(
     caught by a read, and honestly cannot be -- the reader is served the
     staged copy, which still matches the receipt the producer signed, and
     the origin it no longer reads is not re-examined. Re-checking the
-    origin's identity belongs to the re-materialization path, which
-    PrismaBuild does not publish yet (see the skipped acceptance below).
+    origin's identity belongs to the re-materialization path; the bounded
+    cycle test above exercises that separate successor-mover contract.
     """
 
     storage, _publication, q, _env, _pb = _bound_owner(tmp_path)

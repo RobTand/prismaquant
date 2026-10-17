@@ -292,20 +292,9 @@ def test_stream_hooks_refuse_a_wrong_rank(tiny_model):
 # Long-sequence parity -- the pinpointing tool
 # ----------------------------------------------------------------------
 #
-# The 12-token cases above cannot see a defect that only appears with depth,
-# and depth is exactly where this architecture is fragile: the KDA linear
-# attention runs a CHUNKED scan whose recurrent state carries across chunk
-# boundaries, the short convolution carries a 4-wide window across the same
-# boundaries, and the DSA indexer only starts actually sparsifying once the
-# sequence exceeds `index_topk`.  At 12 tokens none of those three is
-# exercised; a streamed pass that drops or resets state between chunks is
-# bit-identical to a correct one.
-#
-# So the long case runs past all three thresholds and reports WHERE the two
-# implementations start to disagree, by context octave.  A wiring defect
-# shows up as divergence that switches on at a specific position and grows;
-# floating-point noise is flat and tiny.  Isolating the layer types tells
-# you which of the three suspects owns it.
+# The short cases already exceed the four-token convolution window and
+# eight-token indexer threshold. The long case adds recurrent scan chunk
+# boundaries and reports divergence by context octave and layer type.
 
 _LONG_SEQLEN = 1024
 
