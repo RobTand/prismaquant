@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: the resident fill publishes a fresh
+`render_identity.json` without replacing an existing claim. If another fill
+publishes first, it reads that identity and applies the normal resume
+comparison, including refusal of a streamed fill's claim. Two concurrent
+starts cannot overwrite each other's initial identities; a matching resident
+identity still resumes. Rendered bytes and pre-guard admission are unchanged.
+
 Re-stamped 2026-10-17: fused NVFP4 shard witnesses use
 `streamed_model_identity.stat_fingerprint_reuse`, the shared file identity
 predicate, to admit the same shard on another NFS mount. Its client-local

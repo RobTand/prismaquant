@@ -186,6 +186,55 @@ def test_fresh_directory_writes_validated_sidecar(tmp_path, monkeypatch):
     assert identity["rendered_pairs"] == ["l1|NVFP4", "l2|NVFP4"]
 
 
+@pytest.mark.parametrize("first_writer", ["streamed", "different-resident", "same-resident"])
+def test_first_published_render_identity_survives_a_concurrent_resident_start(
+    first_writer, tmp_path, monkeypatch,
+):
+    import prismaquant.production_weight_cache as pwc
+
+    _fake_render_env(monkeypatch)
+    calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
+    sidecar = _sidecar(tmp_path)
+    injected = False
+    first_bytes = None
+
+    def interleave(publish):
+        def after_first_writer(path, payload, **kwargs):
+            nonlocal injected, first_bytes
+            if path == sidecar and not injected:
+                injected = True
+                if first_writer == "streamed":
+                    pwc.claim_streamed_cache_directory(
+                        tmp_path, render_scope="format-menu",
+                        requested_formats=["NVFP4"], levers={},
+                        calib_hash="streamed-calibration",
+                        render_formats_by_qname={"l1": ["NVFP4"]},
+                        max_act_rows=8,
+                    )
+                else:
+                    first_ids = (
+                        calib_ids if first_writer == "same-resident"
+                        else torch.tensor([[2, 3]], dtype=torch.long)
+                    )
+                    _fill(_TinyTwoLinear(), first_ids, tmp_path)
+                first_bytes = sidecar.read_bytes()
+            return publish(path, payload, **kwargs)
+
+        return after_first_writer
+
+    # Interleave the actual first writer at either publication boundary, so
+    # the oracle covers the old replace and the corrected no-clobber publish.
+    monkeypatch.setattr(pwc, "atomic_write_bytes", interleave(pwc.atomic_write_bytes))
+    monkeypatch.setattr(pwc, "publish_new_bytes", interleave(pwc.publish_new_bytes))
+    if first_writer == "same-resident":
+        _fill(_TinyTwoLinear(), calib_ids, tmp_path)
+    else:
+        with pytest.raises(ValueError, match="streamed fill|calib_hash"):
+            _fill(_TinyTwoLinear(), calib_ids, tmp_path)
+    assert injected and first_bytes is not None
+    assert sidecar.read_bytes() == first_bytes
+
+
 def test_preguard_directory_warns_and_adopts_identity(
     tmp_path, monkeypatch, capsys
 ):

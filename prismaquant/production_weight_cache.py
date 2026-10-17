@@ -5809,11 +5809,13 @@ def _check_production_cache_render_identity(
                     trusted_shards
                 ),
             }
-        atomic_write_bytes(
+        if publish_new_bytes(
             sidecar_path,
             DIRECT_ASCII_INDENT2_LAX.encoded(current_identity),
-        )
-        return
+        ):
+            return
+        # Another fill published first. Read and compare that complete
+        # identity below; never replace its claim with this fill's identity.
     try:
         stored_raw = json.loads(sidecar_path.read_bytes().decode("utf-8"))
     except Exception as exc:
