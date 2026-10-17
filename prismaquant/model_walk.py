@@ -707,9 +707,9 @@ def _callable_identity(fn: Callable | None) -> dict | None:
 
     Predicates are code, not data: the artifact records WHAT ran (name,
     qualname, module, owner class, and for lambdas the defining source
-    line) so an auditor can find it — never a pickle. The digest over the
-    serialized list still changes if a different predicate object is swapped
-    in, because the identity strings change with it.
+    line) so an auditor can find it. The serialized digest covers these
+    identity strings, not the predicate's implementation or object identity.
+    Different implementations can retain the same recorded strings.
     """
     if fn is None:
         return None
@@ -764,13 +764,12 @@ def _claim_rules_digest(rules: Sequence[ClaimRule]) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class WalkProvenance:
-    """Everything a reloaded walk artifact must prove about its origin.
+    """Trace-time origin metadata retained with a walk result.
 
-    Captured at trace time by :func:`walk_model`. Load-bearing, not
-    decoration: two walks of the same weights under different input contracts
-    can differ in ``trace_coverage`` when data-dependent control flow
-    executes shape-wise under fake tensors, so the example-input spec travels
-    with the result and ``load_walk`` refuses mismatches.
+    Different input contracts can change ``trace_coverage``, so the
+    example-input spec is recorded. ``load_walk`` checks execution consistency
+    and an optional expected claim-rules digest; it does not compare the
+    recorded model or input spec against a caller's current request.
     """
 
     created_utc: str                    # ISO 8601, UTC
@@ -968,7 +967,7 @@ def load_walk(
     *,
     expect_claim_rules: Sequence[ClaimRule] | None = None,
 ) -> LoadedWalk:
-    """Load a saved walk artifact, refusing anything it cannot prove.
+    """Load schema-checked walk data and compare optional rule identity.
 
     Fail-closed on: a foreign schema (parse-time refusal, same pattern as
     ``decision_units.parse_payload``); a provenance whose ``execution``

@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, saved-walk provenance.
+The walk loader checks schema and execution consistency, plus claim-rule
+identity when requested. Predicate names do not attest implementation bytes;
+recorded model and input metadata are not compared to a current request.
+This corrects the documented assurance without changing reload admission.
+
 As of: 2026-10-17, architecture audit continuation, settings request admission.
 The settings guard validates the current request schema and stage projection
 before recording or comparing an artifact identity. Required keys come from
@@ -30942,9 +30948,12 @@ kind (e.g. quantization-group vs shard-boundary misalignment) refuses on
 today's gate via the unknown-kind catch-all. Walks are also cacheable now:
 `save_walk`/`load_walk` wrap the payload in `{schema,
 prismaquant.model_walk.v1, provenance, result}` with fail-closed reload
-(foreign schema, execution mismatch, claim-rule digest mismatch) and
+(foreign schema, execution mismatch, or an explicitly requested claim-rule
+digest mismatch) and
 trace-time provenance (model+config digest, versions, input contract, applied
-rule list). The same commit landed the R5 sweep's claim-table fixes: universal
+rule list). Model and input metadata are retained without comparison to a
+current request; predicate identity strings do not hash implementation bytes.
+The same commit landed the R5 sweep's claim-table fixes: universal
 base rules pin router gates (hy_v3, qwen3_5, laguna, minimax_m2, qwen3-moe;
 DSv4 keeps its specific pins) and decide packed expert stacks (seven
 `*Experts` families), and gemma4's router — decided by rule 9 while the
