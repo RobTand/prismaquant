@@ -203,7 +203,7 @@ def test_interpolated_rungs_are_priced_between_their_measured_neighbours():
     K13 and K14 are interpolated; K12 and K15 are measured. A CB ladder spends
     bits to buy error, so price must fall monotonically in K — and each
     interpolated rung must sit strictly between the rungs on either side of
-    it, on a projection whose ratio is 25x below the family constant and on
+    it, on a projection whose ratio is 5x below the family constant and on
     one 5x above it.
     """
     stats, costs = _tables()

@@ -24,8 +24,9 @@ PrismaQuant side, in one admitted GPU action:
 The cost identity this produces is real (a fresh joint AURA probe on the real
 model and the real rendered bytes), but the rendered bytes are NOT the served
 artifacts' layer-0 wires: those were rendered by the campaign under its own
-calibration. Timing does not read weight values, so a same-shape same-rung
-operator prices the artifact's operator; the doc that cites these rows says so.
+calibration. These measurements use fresh renders with the same declared
+operator shape and rung; they do not attest the served artifact's weight bytes.
+Applicability is limited to the matched native operator contract.
 
 The native FP8 operator executes Tessera's unclipped ``fp8_per_token_dynamic``
 contract; the joint rows and the reference QDQ must be priced under the same

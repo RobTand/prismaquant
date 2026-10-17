@@ -1645,7 +1645,7 @@ def artifact_binding(
     *,
     launch_model: str | os.PathLike | None = None,
 ) -> dict[str, Any]:
-    """Bind a live server manifest to the exact mounted CB artifact."""
+    """Bind a live server manifest to the exact mounted model artifact."""
     root = Path(model_dir)
     try:
         resolved_root = root.resolve(strict=True)
