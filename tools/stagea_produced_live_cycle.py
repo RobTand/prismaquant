@@ -85,9 +85,9 @@ class _ComputeClock:
     after comparison cannot rest on them. This clock does not: it times
     every call the driver makes into the owner, and separately the raw
     tensor writes and reads inside those calls. Owner time less raw tensor
-    I/O is what the compute thread spent on the owner's bookkeeping and on
-    PrismaBuild, which is the time a GPU would have been idle. It reads the
-    same on any owner implementation.
+    I/O is foreground wall time spent on bookkeeping and PrismaBuild calls.
+    This synthetic cycle does not measure GPU idle time. The call boundaries
+    stay the same across owner implementations.
     """
 
     def __init__(self):
