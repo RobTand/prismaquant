@@ -461,14 +461,9 @@ class TestVisualCostShardBasic(unittest.TestCase):
 
 
 class TestAllocatorVisualSensitivityModes(unittest.TestCase):
-    """--visual-sensitivity decides whether visual Linears flow through
-    the knapsack DP (fisher) or get stamped uniformly (uniform).
-    Covers both modes + the graceful fallback when fisher is requested
-    but the probe has no visual stats."""
+    """Exercise visual-name scans and the uniform assignment helper."""
 
     def test_visual_fisher_available_detects_both_probe_and_cost(self):
-        # Helper replicated here since it's defined inside main(); we
-        # test its guts via the public flow below.
         from prismaquant.allocator import _is_visual_linear
         body = {"model.layers.0.self_attn.q_proj": 1,
                 "mtp.layers.0.mlp.gate_proj": 1}
@@ -494,9 +489,7 @@ class TestAllocatorVisualSensitivityModes(unittest.TestCase):
         self.assertEqual(out["model.layers.0.self_attn.q_proj"], "NVFP4")
 
     def test_fisher_mode_detection_via_visual_prefix_scan(self):
-        # Replicate the _visual_fisher_available predicate at test level:
-        # a probe+cost combo is "Fisher available" iff both carry at
-        # least one visual-prefix entry.
+        # This local scan checks presence only, not measured-row admission.
         from prismaquant.allocator import _is_visual_linear
 
         stats_with = {"model.visual.blocks.0.attn.qkv": {}}
