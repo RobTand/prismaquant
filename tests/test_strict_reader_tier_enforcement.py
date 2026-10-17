@@ -712,6 +712,42 @@ def test_strict_pwc_stage_serves_pinned_with_digest_binding(tmp_path, monkeypatc
     assert _pins_live(tmp_path, consumer) == []
 
 
+@pytest.mark.parametrize("error_type", [MemoryError, OSError])
+def test_strict_pwc_releases_pin_when_buffer_allocation_fails(tmp_path, monkeypatch, error_type):
+    from prismaquant import io_engine
+    from prismaquant.staged_lease import LeaseWindow
+
+    cache, key, path, _tensor = _pwc(tmp_path)
+    cache.require_file_load_sha256(
+        {key: hashlib.sha256(path.read_bytes()).hexdigest()},
+        max_file_bytes=path.stat().st_size,
+    )
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    _resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch, {'p': (path, staged, None)})
+    descriptors = []
+    original_open = LeaseWindow.open
+
+    def record_open(self, key):
+        fd, serving = original_open(self, key)
+        descriptors.append(fd)
+        return fd, serving
+
+    def refuse_allocation(self, size):
+        assert _pins_live(tmp_path, consumer)
+        raise error_type("buffer allocation failed")
+
+    monkeypatch.setattr(LeaseWindow, "open", record_open)
+    monkeypatch.setattr(io_engine.SealedBuffer, "__init__", refuse_allocation)
+    with pytest.raises(error_type, match="buffer allocation failed"):
+        cache.prefetch([key], max_workers=1)
+    assert len(descriptors) == 1
+    assert _pins_live(tmp_path, consumer) == []
+    assert _resolver.report()["bytes_from_pool"] == 0
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+
+
 def test_strict_pwc_missing_digest_refuses(tmp_path, monkeypatch):
     cache, key, path, _ = _pwc(tmp_path)
     cache.enable_file_load_receipts(max_file_bytes=path.stat().st_size)

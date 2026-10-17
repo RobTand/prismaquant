@@ -87,7 +87,7 @@ writes to its counters (Stage B: ``counters.json``'s ``io_engine`` block).
 from __future__ import annotations
 
 from concurrent.futures import CancelledError, ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import fcntl
 from functools import partial
@@ -361,94 +361,82 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     started = time.monotonic()
     source, source_before = path, before
     serving_tier = "pool"
-    pinned: tuple | None = None
-    if staged is not None:
-        # PrismaBuild recomposes the map after every egress, so a staged
-        # copy can be released between the resolver's stat and this open.
-        # That is an ordinary fallback, not a failed load.
-        strict = policy_is_active()
-        if not strict:
-            source = Path(staged["stage_path"])
-            try:
-                source_before = source.lstat()
-            except OSError as error:
-                raise StagedReadRefused(
-                    f'staged copy is unreadable: {error.strerror}') from None
-            if not stat.S_ISREG(source_before.st_mode):
-                raise StagedReadRefused('staged copy is not a regular file')
-            if source_before.st_size != before.st_size:
-                raise StagedReadRefused('staged copy size differs from the declared file')
-            serving_tier = "stage"
-        else:
-            from .staged_lease import LeaseRefused, acquire_entry_window
-            recorder = residency_resolver()
-            if recorder is None:
-                raise StagedReadRefused("readset-not-staged")
-            if lease is not None:
-                # The group pin already holds this file; its owner releases
-                # it once every read under it is done.
-                window, key, _pinned_entry = lease
-                try:
-                    fd, serving = window.open(key)
-                except LeaseRefused as refusal:
-                    recorder.record_fallback(path, str(refusal))
-                    raise
-            else:
-                window, key = acquire_entry_window(recorder, path, staged)
-                try:
-                    window.__enter__()
-                except LeaseRefused as refusal:
-                    recorder.record_fallback(path, str(refusal))
-                    raise
-                try:
-                    fd, serving = window.open(key)
-                except LeaseRefused as refusal:
-                    recorder.record_fallback(path, str(refusal))
-                    try:
-                        window.__exit__(None, None, None)
-                    except (LeaseRefused, RuntimeError):
-                        pass
-                    raise
-            serving_tier = window.serving_tier or "stage"
-            recorder.record_serving_tier(
-                path, serving_tier,
-                pin_id=str(serving.get("pin_id") or ""),
-                range_ref=str(serving.get("range_ref") or ""))
-            pinned = (window, fd, serving, lease is not None)
-        recorder = residency_resolver()
-        if recorder is not None and pinned is None:
-            recorder.record_serving_tier(path, serving_tier)
-    source_signature = _stat_signature(source_before)
-
-    def changed(message):
-        return (StagedReadRefused(f'staged copy {message}') if staged is not None
-                else RuntimeError(f"PWC file {message}"))
-
-    buffer = SealedBuffer(source_before.st_size) if sealed else None
+    pinned_fd: int | None = None
+    buffer = None
     try:
-        if pinned is None:
-            try:
-                with source.open("rb") as handle:
-                    if _stat_signature(os.fstat(handle.fileno())) != source_signature:
-                        raise changed("changed before its content read")
-                    if buffer is None:
-                        raw = handle.read(source_before.st_size + 1)
-                        exact = len(raw) == source_before.st_size
+        # Acquire, allocate and read under one lifetime. The read owns a
+        # per-entry lease, or just its descriptor under a caller-owned pin.
+        with ExitStack() as read_scope:
+            if staged is not None:
+                # PrismaBuild recomposes the map after every egress, so a
+                # staged copy can be released before this open.
+                strict = policy_is_active()
+                if not strict:
+                    source = Path(staged["stage_path"])
+                    try:
+                        source_before = source.lstat()
+                    except OSError as error:
+                        raise StagedReadRefused(
+                            f'staged copy is unreadable: {error.strerror}') from None
+                    if not stat.S_ISREG(source_before.st_mode):
+                        raise StagedReadRefused('staged copy is not a regular file')
+                    if source_before.st_size != before.st_size:
+                        raise StagedReadRefused('staged copy size differs from the declared file')
+                    serving_tier = "stage"
+                else:
+                    from .staged_lease import LeaseRefused, acquire_entry_window
+                    recorder = residency_resolver()
+                    if recorder is None:
+                        raise StagedReadRefused("readset-not-staged")
+                    if lease is not None:
+                        window, key, _pinned_entry = lease
                     else:
-                        exact = buffer.fill(handle.fileno())
-                    if (not exact
-                            or _stat_signature(os.fstat(handle.fileno())) != source_signature
-                            or _stat_signature(source.lstat()) != source_signature):
-                        raise changed("changed during its content read")
-            except OSError as error:
-                if staged is None:
-                    raise
-                raise StagedReadRefused(
-                    f'staged copy is unreadable: {error.strerror}') from None
-        else:
-            window, fd, serving, shared = pinned
-            try:
-                first = os.fstat(fd)
+                        window, key = acquire_entry_window(recorder, path, staged)
+                    try:
+                        if lease is None:
+                            read_scope.enter_context(window)
+                        pinned_fd, serving = window.open(key)
+                        if lease is not None:
+                            read_scope.callback(window.close_fd, pinned_fd)
+                    except LeaseRefused as refusal:
+                        recorder.record_fallback(path, str(refusal))
+                        raise
+                    serving_tier = window.serving_tier or "stage"
+                    recorder.record_serving_tier(
+                        path, serving_tier,
+                        pin_id=str(serving.get("pin_id") or ""),
+                        range_ref=str(serving.get("range_ref") or ""))
+                recorder = residency_resolver()
+                if recorder is not None and pinned_fd is None:
+                    recorder.record_serving_tier(path, serving_tier)
+            source_signature = _stat_signature(source_before)
+
+            def changed(message):
+                return (StagedReadRefused(f'staged copy {message}') if staged is not None
+                        else RuntimeError(f"PWC file {message}"))
+
+            buffer = SealedBuffer(source_before.st_size) if sealed else None
+            if pinned_fd is None:
+                try:
+                    with source.open("rb") as handle:
+                        if _stat_signature(os.fstat(handle.fileno())) != source_signature:
+                            raise changed("changed before its content read")
+                        if buffer is None:
+                            raw = handle.read(source_before.st_size + 1)
+                            exact = len(raw) == source_before.st_size
+                        else:
+                            exact = buffer.fill(handle.fileno())
+                        if (not exact
+                                or _stat_signature(os.fstat(handle.fileno())) != source_signature
+                                or _stat_signature(source.lstat()) != source_signature):
+                            raise changed("changed during its content read")
+                except OSError as error:
+                    if staged is None:
+                        raise
+                    raise StagedReadRefused(
+                        f'staged copy is unreadable: {error.strerror}') from None
+            else:
+                first = os.fstat(pinned_fd)
                 if first.st_size != source_before.st_size:
                     raise changed("changed before its content read")
                 if buffer is None:
@@ -456,7 +444,7 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
                     remaining = source_before.st_size + 1
                     offset = 0
                     while remaining > 0:
-                        block = os.pread(fd, min(remaining, 8 << 20), offset)
+                        block = os.pread(pinned_fd, min(remaining, 8 << 20), offset)
                         if not block:
                             break
                         parts.append(block)
@@ -465,18 +453,9 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
                     raw = b"".join(parts)
                     exact = len(raw) == source_before.st_size
                 else:
-                    exact = buffer.fill(fd)
-                if not exact or _stat_signature(os.fstat(fd)) != _stat_signature(first):
+                    exact = buffer.fill(pinned_fd)
+                if not exact or _stat_signature(os.fstat(pinned_fd)) != _stat_signature(first):
                     raise changed("changed during its content read")
-            finally:
-                # The owned buffer is fully read above: the descriptor is
-                # closed and the exact ref released before deserialization,
-                # on success and on failure alike. A group pin outlives this
-                # read: its owner releases it.
-                if shared:
-                    window.close_fd(fd)
-                else:
-                    window.__exit__(None, None, None)
         if timing is not None:
             timing["read_s"] = time.monotonic() - started
         if staged is not None and _stat_signature(path.lstat()) != signature:

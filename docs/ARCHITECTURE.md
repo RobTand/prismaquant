@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: the I/O engine owns staged-read acquisition, descriptor
+open, serving provenance, buffer allocation and reading in one scope. Setup
+and allocation failures release a per-entry lease. A read under a caller's
+group pin closes its own descriptor while the group pin remains with its owner.
+
 Re-stamped 2026-10-17: required production-cache prefetch honors the active
 LRU cap as well as the caller's resident budget. It refreshes selected
 residents before admitting missing entries and checks every selected tensor
