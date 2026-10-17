@@ -12,7 +12,7 @@ import math
 import operator
 import os
 from collections import Counter, defaultdict
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -1426,6 +1426,21 @@ def refuse_retired_trellis_surface(env: Mapping[str, str] | None = None) -> None
 class CandidateBuild:
     candidates: dict[str, list[Candidate]]
     cost_rows: dict[str, dict[str, dict]]
+
+
+def require_candidate_coverage(
+    required_names: Collection[str],
+    candidates: Mapping[str, Sequence[Candidate]],
+) -> None:
+    """Require a priced menu for the caller's explicit mutable population."""
+    missing = sorted(name for name in required_names if not candidates.get(name))
+    if missing:
+        raise ValueError(
+            f"[alloc] candidate coverage incomplete: {len(missing)} mutable "
+            "Linear(s) have no legal priced candidates: "
+            + ", ".join(missing)
+            + ". Refusing to omit them from allocation accounting."
+        )
 
 
 def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],

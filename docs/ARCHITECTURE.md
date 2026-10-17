@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, CR-003. Allocation
+requires every mutable body Linear to retain a priced candidate after explicit
+fixed and auxiliary scope disposition. It checks coverage again after serving
+profile filtering and menu reduction, before computing the mutable population's
+totals. Missing costs, error-only rows and fully masked menus refuse by name.
+Pinned heads, fixed MTP, explicitly unpriced BF16 MTP and uniform visual
+assignments retain their existing dispositions. No fallback costs are invented.
+
 As of: 2026-10-17, architecture audit continuation, RE-02. `FormatSpec`
 counts per-channel scales over every outer row of a packed tensor, including
 every expert's output rows. The native FP8 codec, footprint accounting and

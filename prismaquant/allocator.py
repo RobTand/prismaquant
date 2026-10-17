@@ -134,6 +134,7 @@ from prismaquant.allocator_candidates import (
     reduce_continuous_menu,
     price_paired_rate_trade,
     reprice_paired_candidates,
+    require_candidate_coverage,
 )
 from prismaquant.priced_cell import CostPricingPolicy
 from .digests import (
@@ -3523,6 +3524,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             flush=True,
         )
 
+    require_candidate_coverage(
+        set(stats) - set(mtp_names_without_costs), candidates,
+    )
+
     pre_aggregation_availability = {
         spec.name: sum(
             1 for per_name in candidates.values()
@@ -3669,6 +3674,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 profile=model_profile, ucb_z=pricing_policy.ucb_z, report=paired_candidate_report)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
+    aggregated_candidate_names = tuple(candidates)
     candidates = filter_candidates_for_profile(candidates, target_profile)
 
     # The aggregated super items were built one candidate per format NAME,
@@ -3686,6 +3692,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         report=tessera_menu_report_agg,
         **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
+
+    require_candidate_coverage(aggregated_candidate_names, candidates)
 
     post_aggregation_availability = {
         spec.name: sum(
