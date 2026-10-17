@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-04. MTP rung selection
+resolves numeric acceptance points against the complete menu before fitting.
+A bit value must identify exactly one rung; absent or ambiguous values refuse.
+Named points retain their existing meaning, and calibration may use a rung
+excluded by the selection memory budget. Fit provenance records the canonical
+rung and the submitted bit value. The acceptance fit and cost model are unchanged.
+
 As of: 2026-10-17, architecture audit documentation correction. MTP append
 identity binds the selected population through its activation hash and row
 counts. A different disk-backed population requires a fresh directory;
