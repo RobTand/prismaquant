@@ -1185,9 +1185,9 @@ class ProductionWeightCache:
     ) -> dict[str, object]:
         """Prefetch rendered weights required by a concrete assignment.
 
-        ``require`` converts missing entries or resident-budget overflow into
-        a hard failure.  That is the production-safe mode for GPU-bound
-        recache/export runs because it prevents accidental NVMe streaming.
+        ``require`` admits the assignment against both the caller's budget
+        and the cache's LRU cap, and succeeds only with every selected entry
+        resident. Missing entries or insufficient capacity are hard failures.
         """
         keys, missing = self.assignment_keys(assignment)
         nbytes = self.estimate_nbytes(keys)
@@ -1196,6 +1196,11 @@ class ProductionWeightCache:
             if max_resident_bytes is not None and int(max_resident_bytes) > 0
             else None
         )
+        if require and self._lru_order is not None and self._lru_max_bytes > 0:
+            budget = (
+                min(budget, self._lru_max_bytes)
+                if budget is not None else self._lru_max_bytes
+            )
         stats: dict[str, object] = {
             "keys": len(keys),
             "missing": len(missing),
@@ -1233,7 +1238,16 @@ class ProductionWeightCache:
                 f"{len(keys)} entries, {nbytes / 1024**3:.2f} GiB",
                 flush=True,
             )
+        if require:
+            # Selected residents must outlive unrelated entries when the
+            # missing selected tensors are admitted through the same LRU.
+            for key in keys:
+                if isinstance(self.weights.get(key), torch.Tensor):
+                    self.get_resident(*key)
         loaded = self.prefetch(keys, max_workers=max_workers)
+        if require:
+            for key in keys:
+                self.get_resident(*key)
         stats["loaded"] = int(loaded)
         if progress:
             print(

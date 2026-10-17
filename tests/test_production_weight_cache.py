@@ -94,6 +94,51 @@ def test_prefetch_loads_disk_entries_and_respects_lru(tmp_path):
     assert cache._lru_bytes == 0
 
 
+def test_required_prefetch_keeps_selected_resident_entries(tmp_path, monkeypatch):
+    weights = {}
+    for index, name in enumerate(("a", "b", "c")):
+        path = tmp_path / f"{name}.pt"
+        torch.save(torch.full((1 << 18,), float(index)), path)
+        weights[(name, "NVFP4")] = path.name
+    budget = 2 * max((tmp_path / f"{name}.pt").stat().st_size for name in ("a", "b", "c"))
+    cache = ProductionWeightCache(weights=weights, levers={}, cache_dir=str(tmp_path))
+    cache.enable_lru(budget)
+    cache.prefetch([("a", "NVFP4"), ("b", "NVFP4")], max_workers=1)
+
+    stats = cache.prefetch_assignment(
+        {"a": "NVFP4", "c": "NVFP4"}, max_resident_bytes=budget,
+        max_workers=1, require=True,
+    )
+    assert stats["loaded"] == 1
+    assert cache._lru_bytes <= budget
+
+    def no_late_load(*args, **kwargs):
+        raise AssertionError("required prefetch left a selected tensor on disk")
+
+    monkeypatch.setattr(torch, "load", no_late_load)
+    assert torch.equal(cache.get_resident("a", "NVFP4"), torch.zeros(1 << 18))
+    assert torch.equal(cache.get_resident("c", "NVFP4"), torch.full((1 << 18,), 2.0))
+
+
+def test_required_prefetch_respects_cache_lru_limit(tmp_path, monkeypatch):
+    path = tmp_path / "a.pt"
+    torch.save(torch.ones(1 << 18), path)
+    cache = ProductionWeightCache(
+        weights={("a", "NVFP4"): path.name}, levers={}, cache_dir=str(tmp_path),
+    )
+    cache.enable_lru(1)
+
+    def no_load(*args, **kwargs):
+        raise AssertionError("required prefetch must refuse before loading")
+
+    monkeypatch.setattr(cache, "_load_file_tensor", no_load)
+    with pytest.raises(RuntimeError, match="resident budget"):
+        cache.prefetch_assignment(
+            {"a": "NVFP4"}, max_resident_bytes=path.stat().st_size * 2,
+            max_workers=1, require=True,
+        )
+
+
 def test_release_resident_tensors_frees_memory_without_losing_data(tmp_path):
     """Releasing after a one-way install must be lossless, not destructive.
 

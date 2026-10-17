@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: required production-cache prefetch honors the active
+LRU cap as well as the caller's resident budget. It refreshes selected
+residents before admitting missing entries and checks every selected tensor
+through the resident-only interface before returning success.
+
 Re-stamped 2026-10-17: native export takes visual namespaces from the same
 model profile as visual allocation. Gemma vision-tower and vision-projector
 assignments now reach the native codec before shard and quantization-config
