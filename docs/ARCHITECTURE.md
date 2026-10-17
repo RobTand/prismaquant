@@ -1,5 +1,32 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, resident source ownership.
+`load_resident_source_model` delivers resident text heads and body through
+the existing meta skeleton, source decoder, layer cache, prefetch and
+initialization witness. A memory guard is required. Header geometry uses the
+existing expert packer and concat rules before payload allocation; each
+packed projection must fit its configured destination. Declared FP8 blocks
+keep their existing BF16 arithmetic, then tensors take the requested and
+model-required dtypes. Tail reservations charge the decoded logical extent.
+The factory owns cleanup until it returns, including installed aliases and
+any executor. Failed reads retain and join all submitted work before release.
+
+`resident-critical-green-v1` passes 255 CPU cases with one CUDA deselection
+and compiles eight files. `resident-source-cuda-profile-v4` then records one
+fresh CUDA pass without skips and eight fresh profiled loads of frozen tiny
+native-FP8/BF16 sources. Resident tensors match the decoded source in every
+arm; the legacy native-FP8 load differs. Source seals, terminal logs, CAS
+receipts, 111 artifact hashes and 12 Netdata series across both GPU hosts are
+verified. The core bytes match the CPU input; GPU parent is `ab76840caa4`
+plus the recorded overlays. V3 remains a failed profiling action.
+
+This qualifies the new owner before its caller migration. Its witness covers
+text heads/body, excluding MTP and visual delivery. Calculated reservations
+are not full-model peak-memory measurements. Tiny cold BF16 resident startup
+is slower than the legacy arm; import/compile activity is observed, while
+the Python call graph has missing outer frames and non-additive totals.
+The profiles establish neither a speedup nor serving or model quality.
+
 As of: 2026-10-17, architecture audit continuation, TP physical input domain.
 The standalone TP decision refuses nonfinite or negative flat latency,
 nonfinite or negative displayed/selected JSON latency coordinates, and

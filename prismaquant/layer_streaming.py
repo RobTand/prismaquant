@@ -762,12 +762,12 @@ def _dequant_fp8_block_weight(
     target_device = (scale_inv.device if scale_inv.device.type != "cpu"
                      else weight.device)
     if out_dim % block_r != 0 or in_dim % block_c != 0:
-        # Unaligned tail: fall back to the expanded-scale path. Shouldn't
-        # hit in practice on MiniMax/DeepSeek — both ship weights that
-        # are exact multiples of 128 along both dims.
+        # A block wider than the logical axis has one scale on that axis.
+        # Repeat only its used prefix; padded declared blocks must not turn
+        # a small logical weight into an unbounded temporary allocation.
         scale = scale_inv.to(device=target_device, dtype=target_dtype)
-        expanded = scale.repeat_interleave(block_r, dim=0)[:out_dim]
-        expanded = expanded.repeat_interleave(block_c, dim=1)[:, :in_dim]
+        expanded = scale.repeat_interleave(min(block_r, out_dim), dim=0)[:out_dim]
+        expanded = expanded.repeat_interleave(min(block_c, in_dim), dim=1)[:, :in_dim]
         return (weight.to(device=target_device, dtype=target_dtype)
                 * expanded)
     out_blocks = out_dim // block_r
@@ -1210,24 +1210,28 @@ def _pack_per_expert_into_packed(
         target = tuple(live_param_shape(packed_full))
         if not order or len(target) != 3 or set(by_expert) != set(range(target[0])):
             raise ValueError(f"per-expert pack: {packed_full} missing expert or invalid live shape {target}")
+        if target[1] % len(order):
+            raise ValueError(
+                f"per-expert pack: {packed_full} live shape {target} rows "
+                f"cannot split evenly into configured projections {order}")
+        projection_shape = (target[1] // len(order), target[2])
         first = None
         for i in range(target[0]):
             projs = by_expert[i]
             if set(projs) != set(order):
                 raise ValueError(f"per-expert pack: {packed_full} missing expert {i} projection(s) {order}")
-            rows = 0
             for proj in order:
                 tensor = out[projs[proj]]
-                if tensor.ndim != 2 or tensor.shape[1] != target[2]:
-                    raise ValueError(f"per-expert pack: {packed_full} source shape {tuple(tensor.shape)} != live param {target}")
-                rows += tensor.shape[0]
+                if tuple(tensor.shape) != projection_shape:
+                    raise ValueError(
+                        f"per-expert pack: {packed_full} expert {i} {proj} "
+                        f"source shape {tuple(tensor.shape)} != configured "
+                        f"projection shape {projection_shape}")
                 precision = (tensor.dtype, tensor.device)
                 if first is None:
                     first = precision
                 if precision != first:
                     raise ValueError(f"per-expert pack: {packed_full} source dtype/device differs")
-            if rows != target[1]:
-                raise ValueError(f"per-expert pack: {packed_full} assembled shape rows {rows} != live param {target}")
         plans.append((packed_full, by_expert, order, target))
     # The validation loop's last tensor must not keep a consumed allocation.
     if groups:
@@ -2078,12 +2082,14 @@ def _read_layer_to_device(prefix: str,
         for shard, pairs in by_shard.items():
             for chunk in _split_pairs(pairs, threads):
                 jobs.append((shard, chunk))
-        futures = [pool.submit(_read_chunk, shard, chunk)
-                   for shard, chunk in jobs]
-        if release_pages or source_authentication is not None:
-            # Drain every launched reader before propagating an error;
-            # each chunk fences its own copies, including on read failure.
-            # An authenticated owner must outlive every reader on CPU too.
+        futures = []
+        try:
+            for shard, chunk in jobs:
+                futures.append(pool.submit(_read_chunk, shard, chunk))
+        finally:
+            # Every launched reader belongs to this gather, even when a
+            # later submit fails or unauthenticated CPU reads are used.
+            # Join before either submission or result errors can escape.
             wait_futures(futures)
         # `.result()` re-raises any worker exception: a partially gathered
         # layer must never be installed as if it were complete.
@@ -2245,17 +2251,17 @@ def _unload(model: nn.Module, prefixes: list[str]) -> int:
     KB per layer; keeping them resident is free.
     """
     n = 0
-    for name, _ in list(model.named_parameters()):
+    for name, _ in list(model.named_parameters(remove_duplicate=False)):
         if any(name.startswith(p) for p in prefixes):
             set_module_tensor_to_device(model, name, "meta")
             n += 1
     non_persistent: set[str] = set()
-    for mod_name, mod in model.named_modules():
+    for mod_name, mod in model.named_modules(remove_duplicate=False):
         for buf_name in getattr(mod, "_non_persistent_buffers_set", ()):
             non_persistent.add(
                 f"{mod_name}.{buf_name}" if mod_name else buf_name
             )
-    for name, _ in list(model.named_buffers()):
+    for name, _ in list(model.named_buffers(remove_duplicate=False)):
         if any(name.startswith(p) for p in prefixes):
             if name in non_persistent:
                 continue
