@@ -1,6 +1,7 @@
 """Every validation metric must measure the configured production render."""
 from __future__ import annotations
 
+import json
 import math
 import pickle
 import sys
@@ -8,11 +9,13 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
+from safetensors.torch import save_file
 from torch import nn
 from torch.nn import functional as F
 
 from prismaquant import format_registry, model_runtime, validation_harness
 from prismaquant.production_weight_cache import ProductionWeightCache
+from prismaquant.streamed_model_identity import build_source_model_binding
 
 
 class _Model(nn.Module):
@@ -94,7 +97,16 @@ def test_real_validation_uses_one_production_render_for_ppl_mmlu_and_end_kl(
     original = model.proj.weight.detach().clone()
     cached_weight = torch.zeros_like(original)
     fmt = "INT8_W8A16"
-    cache = ProductionWeightCache(weights={("proj", fmt): cached_weight}, levers={})
+    model_dir = tmp_path / "source"
+    model_dir.mkdir()
+    save_file(model.state_dict(), str(model_dir / "model.safetensors"))
+    (model_dir / "config.json").write_text(json.dumps(vars(model.config)))
+    cache = ProductionWeightCache(
+        weights={("proj", fmt): cached_weight}, levers={},
+        metadata={
+            "source_binding": build_source_model_binding(model_dir, dtype=torch.float32),
+        },
+    )
     cache_path = tmp_path / "production.pkl"
     with cache_path.open("wb") as stream:
         pickle.dump(cache, stream)
@@ -125,7 +137,7 @@ def test_real_validation_uses_one_production_render_for_ppl_mmlu_and_end_kl(
     assert abs(expected - rtn) > 0.1, "fixture must distinguish cached and RTN weights"
 
     result = validation_harness.validate_artifact(
-        "local-toy-model", {"proj": fmt}, cache_dir=tmp_path, device="cpu",
+        str(model_dir), {"proj": fmt}, cache_dir=tmp_path, device="cpu",
         dtype="fp32", n_wikitext_tokens=32, n_mmlu_questions=1,
         calib_seqlen=8, calib_n_samples=2, calib_split="test", calib_seed=42,
         progress=False,

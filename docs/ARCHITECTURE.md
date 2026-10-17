@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, validation cache attachment.
+The metric harness checks a configured production cache against the original
+checkpoint and effective evaluation dtype before loading a model or attaching
+weights. A remote model reference resolves once; tokenizer, model and binding
+use that snapshot. PPL, MMLU and end-KL continue to share the admitted cache.
+CPU regressions establish this boundary, not served quality or GPU parity.
+
 As of: 2026-10-17, architecture audit continuation, dense activation ownership.
 Resident cache fill drops the capture collector after extracting scalar maxima
 and releases each Linear's captured rows after its last selected format. It
@@ -26921,8 +26928,11 @@ base sidecar without one requires a fresh directory. A no-sidecar or append-only
 legacy adoption retains `pre_guard_admission` in both sidecar and pickle and
 warns on attachment: its original source remains unverified. This preserves the
 explicit trust exception without describing old shards as byte-verified.
-Independent native export, assignment-KL validation and recache compare the
-current source binding before cache relocation, prefetch or weight installation.
+Independent native export, assignment-KL validation, the metric harness and
+recache compare the current source binding before cache relocation, prefetch or
+weight installation. The metric harness uses its effective evaluation dtype,
+including the existing CPU BF16-to-FP32 resolution, and performs this check
+before tokenizer or model loading. Its metrics share the same admitted cache.
 Unbound independent pickles refuse. Exact union uses its existing metadata
 agreement rule to preserve a shared binding or refuse mismatched/missing values.
 Packed fit-corpus exemptions and MTP append identities remain separate contracts.

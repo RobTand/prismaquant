@@ -218,8 +218,26 @@ def _compute_metrics(
 
     torch_device = _resolve_torch_device(torch, device)
     torch_dtype = _torch_dtype(torch, dtype, torch_device)
+    assignment = _layer_config_to_assignment(layer_config)
+    loading_path = model_path
+    production_cache = None
+    if _active_assignment(assignment) and os.environ.get(
+        "PRISMAQUANT_VALIDATION_PROD_CACHE"
+    ):
+        from .streamed_model_identity import (
+            build_source_model_binding, resolve_source_checkpoint_path,
+        )
+
+        source_root = resolve_source_checkpoint_path(model_path)
+        expected_source_binding = build_source_model_binding(
+            source_root, dtype=torch_dtype,
+        )
+        production_cache = _load_validation_production_cache(
+            expected_source_binding=expected_source_binding,
+        )
+        loading_path = str(source_root)
     tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
+        loading_path,
         cache_dir=str(cache_dir / "hf"),
         trust_remote_code=True,
     )
@@ -227,7 +245,7 @@ def _compute_metrics(
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_path,
+        loading_path,
         cache_dir=str(cache_dir / "hf"),
         torch_dtype=torch_dtype,
         trust_remote_code=True,
@@ -235,14 +253,10 @@ def _compute_metrics(
     model.to(torch_device)
     model.eval()
 
-    assignment = _layer_config_to_assignment(layer_config)
     cal_hash = hashlib.blake2b(
         canonical_layer_config_json(layer_config).encode("utf-8"),
         digest_size=16,
     ).hexdigest()
-    production_cache = (
-        _load_validation_production_cache() if _active_assignment(assignment) else None
-    )
 
     with torch.no_grad():
         with _perturbed_model(
@@ -310,7 +324,7 @@ def _torch_dtype(torch, dtype: str, device) -> Any:
     raise ValueError(f"unsupported dtype: {dtype!r}")
 
 
-def _load_validation_production_cache():
+def _load_validation_production_cache(*, expected_source_binding: Mapping[str, Any]):
     """Resolve one configured render for all metrics in a validation run."""
     prod_cache_obj = None
     prod_cache_path = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE")
@@ -318,6 +332,9 @@ def _load_validation_production_cache():
         import pickle as _pickle
         with open(prod_cache_path, "rb") as _fh:
             prod_cache_obj = _pickle.load(_fh)
+        prod_cache_obj.require_source_binding(
+            expected_source_binding, where="validation production cache",
+        )
         override_dir = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_DIR")
         if override_dir and hasattr(prod_cache_obj, "relocate"):
             prod_cache_obj.relocate(override_dir)
