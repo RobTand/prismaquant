@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, LFM launcher affinity.
+The LFM native preflight launcher passes its inherited CPU set to Docker and
+records that same set in its receipt. The four-CPU quota, native thread bounds
+and fixed image remain unchanged. Command tests establish this launch boundary,
+not runtime-affinity measurement, served qualification or performance.
+
 As of: 2026-10-17, architecture audit continuation, explicit device budgets.
 Outside measured-runtime-table mode, an explicit device-memory budget requires
 the existing dispatch table and workload mix. Incomplete context refuses at
