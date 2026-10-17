@@ -2963,9 +2963,10 @@ def _render_score_read_contract(record: Mapping[str, object]):
     the one owner of which contract that format carries, so the read resolves
     the same object the write priced through rather than a second expectation.
 
-    ``None`` (unknown format, no contract, or a registry that cannot answer) is
-    not an error here: the caller falls back to the process binding, which is
-    what a row with no contract-bound arithmetic was priced under.
+    ``None`` covers a legacy static-G record with no format name or a resolved
+    format with no static contract. A named format that cannot resolve, or a
+    contract that cannot be read, refuses rather than falling back to the
+    process binding.
     """
     fmt = record.get("format")
     if not isinstance(fmt, str) or not fmt:
