@@ -1,12 +1,10 @@
-"""PRISMAQUANT_DEV_MODE turns run-gate provenance into recorded stamps (#771).
+"""Run-gate provenance in certified and development modes (#771, #1147).
 
-Rob's decision (2026-09-19): rapid iteration must not pay provenance tax --
-the seal returns at the artifact gate, not the run gate. One environment
-variable, ``PRISMAQUANT_DEV_MODE=1``, read at the gates:
+Development mode is the default. ``PRISMAQUANT_DEV_MODE=0`` selects certified
+mode, which is also this suite's default fixture:
 
-* without it, every gate below refuses under the same fixtures it refused
-  under before the switch existed -- certified behavior is byte-identical;
-* with it, the gate accepts and RECORDS: a loud ``[DEV-MODE]`` warning and a
+* certified mode refuses the incomplete provenance fixtures below;
+* development mode accepts and records a ``[DEV-MODE]`` warning and a
   top-level ``dev_uncertified`` stamp in results.json, so a dev result can
   never masquerade as a certified one. Progress records carry the stamp only
   when ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opts in (PR #828): the default
