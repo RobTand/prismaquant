@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, power sampler lifetime.
+An unexpected sampler EOF, child exit, or incomplete teardown records
+`sampler_error`. Collected samples remain diagnostic data; the existing
+pilot validity gate refuses them as complete measurement evidence. Teardown
+errors do not replace an exception from the measured workload. CPU lifecycle
+checks establish this error propagation, not GPU power or performance.
+
 As of: 2026-10-17, architecture audit continuation, cache ceiling inputs.
 The existing cache ceiling derivation accepts nonnegative integer byte counts
 and rounds up using integer arithmetic. Fractions and booleans refuse;

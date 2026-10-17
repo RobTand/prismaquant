@@ -84,3 +84,58 @@ def test_public_sampler_requested_stop_preserves_successful_sample(monkeypatch):
     assert record["sample_count"] == 1
     assert record["gpu_power_w_p50"] == 70.0
     assert record["gpu_joules"] == 70.0
+
+
+def test_public_stop_reports_known_child_death_before_reader_sees_eof(monkeypatch):
+    process = _LiveProcess()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    sampler = GpuPowerSampler().start()
+    try:
+        assert process.waiting.wait(5)
+        process.returncode = 7
+    finally:
+        record = sampler.stop()
+    assert not sampler._sampler.is_alive()
+    assert record.get("sampler_error")
+
+
+def test_public_stop_reports_a_reader_still_alive_after_join(monkeypatch):
+    class StuckProcess(_LiveProcess):
+        def terminate(self):
+            self.returncode = -15
+
+        def wait(self, timeout):
+            return self.returncode
+
+    process = StuckProcess()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    sampler = GpuPowerSampler().start()
+    try:
+        assert process.waiting.wait(5)
+        record = sampler.stop()
+        assert "reader did not stop" in record.get("sampler_error", "")
+    finally:
+        process.stopped.set()
+        sampler._sampler.join(timeout=5)
+    assert not sampler._sampler.is_alive()
+
+
+def test_sampler_teardown_failure_does_not_replace_workload_failure(monkeypatch):
+    class FailedWait(_LiveProcess):
+        def wait(self, timeout):
+            raise OSError("controlled process wait failure")
+
+    class WorkloadFailure(RuntimeError):
+        pass
+
+    process = FailedWait()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    sampler = GpuPowerSampler().start()
+    with pytest.raises(WorkloadFailure, match="original workload failure"):
+        try:
+            assert process.waiting.wait(5)
+            raise WorkloadFailure("original workload failure")
+        finally:
+            record = sampler.stop()
+    assert not sampler._sampler.is_alive()
+    assert "teardown failed" in record.get("sampler_error", "")

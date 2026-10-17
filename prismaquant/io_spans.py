@@ -745,7 +745,11 @@ class GpuPowerSampler:
             if not self._sampler.stopping:
                 self.error = f"sampler read failed: {exc}"
             return False
-        if not line or self._sampler.stopping:
+        if not line:
+            if not self._sampler.stopping:
+                self.error = self.error or "sampler process ended before requested stop"
+            return False
+        if self._sampler.stopping:
             return False
         value = line.strip().split(",")[0].strip()
         try:
@@ -762,16 +766,28 @@ class GpuPowerSampler:
                 if start <= when <= end]
 
     def stop(self) -> dict:
+        try:
+            if (self._process is not None and self._sampler is not None
+                    and not self._sampler.stopping
+                    and self._process.poll() is not None):
+                self.error = self.error or "sampler process exited before requested stop"
+        except Exception as exc:  # noqa: BLE001 - measurement failure only
+            self.error = self.error or f"sampler process check failed: {exc}"
         if self._sampler is not None:
             self._sampler.request_stop()
         try:
             if self._process is not None:
                 self._process.terminate()
                 self._process.wait(timeout=5)
-        except Exception:  # noqa: BLE001 - teardown best effort, sample list stands
-            pass
+        except Exception as exc:  # noqa: BLE001 - measurement failure only
+            self.error = self.error or f"sampler teardown failed: {exc}"
         if self._sampler is not None:
-            self._sampler.join(timeout=2)
+            try:
+                self._sampler.join(timeout=2)
+                if self._sampler.is_alive():
+                    self.error = self.error or "sampler reader did not stop"
+            except Exception as exc:  # noqa: BLE001 - measurement failure only
+                self.error = self.error or f"sampler reader teardown failed: {exc}"
         watts = sorted(self.samples)
         block = {
             "sample_count": len(watts),
