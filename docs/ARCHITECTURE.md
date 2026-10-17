@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, physical memory reserves.
+`ServeConstraintContext.validate` rejects negative KV or peak-scratch bytes,
+including when the serving constraint axis is inactive. Physical reserves
+cannot subtract from resident weight requirements. Valid reserve arithmetic,
+measured-runtime admission and unconstrained selection remain unchanged.
+
 As of: 2026-10-17, architecture audit continuation, CUDA render qualification.
 Two admitted GB10 checks passed for toy resident/streamed rendering and
 cached/inline packed export on source parent `408c15b4f7a`. They establish the
@@ -37,6 +43,8 @@ Outside measured-runtime-table mode, an explicit device-memory budget requires
 the existing dispatch table and workload mix. Incomplete context refuses at
 `ServeConstraintContext.validate`; no allocation may silently ignore the limit.
 Complete-context pricing and the absence of serving constraints are unchanged.
+KV and peak-scratch byte inputs must be nonnegative even without an active
+constraint. They are physical reserves, not credits against resident memory.
 
 As of: 2026-10-17, architecture audit continuation, stored-candidate scores.
 Dense and packed production render scores describe the canonical stored dtype.

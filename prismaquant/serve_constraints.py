@@ -334,12 +334,18 @@ class ServeConstraintContext:
         )
 
     def validate(self) -> None:
-        """Refuse an incoherent activation up front, by name.
+        """Refuse invalid physical reserves or incoherent activation up front.
 
         Fail-closed on the combinations that would otherwise silently evaluate
         nothing: an SLO with no table or mix to price it, or a constrained
         phase the mix never weights.
         """
+        for flag, value in (
+            ("--serve-kv-bytes", self.slos.kv_bytes),
+            ("--serve-peak-scratch-bytes", self.slos.peak_scratch_bytes),
+        ):
+            if value < 0:
+                raise ServeConstraintError(f"{flag} must be nonnegative")
         if not self.slos.any_set:
             return
         if self.slos.device_budget_bytes is not None and not self.active:
