@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, KDA qualification roster.
+The qualification builder requires the complete literal case roster from the
+same harness bytes whose digest it checks. A selected-case run cannot qualify
+the kernel. Existing path, tensor and numerical requirements still apply.
+The six admitted CPU checks exercise this evidence gate; they add no GPU
+qualification and change neither the kernel nor its packaged qualification.
+
 As of: 2026-10-17, architecture audit continuation, routing provenance.
 Read-traffic configuration lookup retains each mapping's actual path. Routing
 metadata distinguishes top-level, `text_config` and `language_model_config`
