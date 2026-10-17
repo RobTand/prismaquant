@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, settings request admission.
+The settings guard validates the current request schema and stage projection
+before recording or comparing an artifact identity. Required keys come from
+`STAGE_SETTINGS_KEYS` after runtime overrides resolve aliases; malformed or
+incomplete requests refuse. Optional Tessera plan scope and the existing
+unknown-identity treatment of legacy artifacts retain their separate rules.
+
 As of: 2026-10-17, architecture audit continuation, power sampler lifetime.
 An unexpected sampler EOF, child exit, or incomplete teardown records
 `sampler_error`. Collected samples remain diagnostic data; the existing

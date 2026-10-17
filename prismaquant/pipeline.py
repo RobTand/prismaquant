@@ -517,6 +517,38 @@ def stage_settings_document(settings: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
+def _stage_request_projection(stage, document, *, overrides):
+    """Decode a current request and resolve it through the shared key owner."""
+    keys = STAGE_SETTINGS_KEYS.get(stage)
+    if keys is None:
+        raise ValueError(f"unknown settings-hash stage {stage!r}")
+    if not isinstance(document, Mapping) or document.get("schema") != STAGE_SETTINGS_SCHEMA:
+        raise ValueError(f"current settings request must use schema {STAGE_SETTINGS_SCHEMA}")
+    artifacts, pending = document.get("artifacts"), document.get("unresolved")
+    if not isinstance(artifacts, Mapping) or not isinstance(pending, Mapping):
+        raise ValueError("current settings request needs artifacts and unresolved mappings")
+    projection = artifacts.get(stage)
+    if not isinstance(projection, Mapping):
+        raise ValueError(f"current settings request has no {stage!r} projection mapping")
+    source_for_key = dict(keys)
+    if any(key not in source_for_key or not isinstance(value, str)
+           for key, value in projection.items()):
+        raise ValueError(f"current {stage!r} projection has unknown keys or non-string values")
+    unresolved = pending.get(stage, [])
+    if (not isinstance(unresolved, list)
+            or any(not isinstance(name, str) or name not in source_for_key.values()
+                   for name in unresolved)):
+        raise ValueError(f"current {stage!r} unresolved settings must name declared sources")
+    declared = dict(projection)
+    if overrides:
+        extra, _ = stage_settings_projection(stage, overrides)
+        declared.update(extra)
+    supplied = {source: declared[key] for key, source in keys if key in declared}
+    declared, missing = stage_settings_projection(stage, supplied)
+    unresolved = [name for name in unresolved if name not in (overrides or {})]
+    return declared, [*unresolved, *missing]
+
+
 def _load_stage_manifest(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text())
     if not isinstance(payload, dict):
@@ -619,12 +651,10 @@ def check_stage_settings(
       Tessera plans are the exception: an old plan cannot be bound to a new
       allocation by recording today's hash after translation already happened.
     """
-    declared = dict((document.get("artifacts") or {}).get(stage) or {})
-    unresolved = list((document.get("unresolved") or {}).get(stage) or [])
-    if overrides:
-        extra, still_missing = stage_settings_projection(stage, overrides)
-        declared.update(extra)
-        unresolved = [name for name in unresolved if name not in overrides]
+    try:
+        declared, unresolved = _stage_request_projection(stage, document, overrides=overrides)
+    except ValueError as exc:
+        return 2, [f"[pipeline] ERROR: {stage}: {exc}"]
     if unresolved:
         return 2, [
             f"[pipeline] ERROR: {stage}: settings-hash key(s) "
