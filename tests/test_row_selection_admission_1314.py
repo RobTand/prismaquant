@@ -140,11 +140,11 @@ def test_row_demand_uses_the_actual_final_model_and_selection(tmp_path):
         {'key': 'g:one', 'members': ['one']})))
     census = {'anchor_groups': {'g:one': ['one'], 'g:two': ['two']},
               'unit_shapes': {'one': [8, 4], 'two': [8, 100]}}
-    spec = {'model': 'unrelated-spec-model', 'campaign_argv': [], 'max_act_rows': 2,
+    spec = {'model': 'unrelated-spec-model', 'campaign_argv': [],
             'process_baseline_bytes': 0, 'headroom_gb': 0}
     argv = ['--model', 'unused-first-model', '--mod=' + str(model),
             '--units', str(tmp_path / 'missing-first-selection'),
-            '--units=' + str(selection_path)]
+            '--units=' + str(selection_path), '--max-act-rows', '2']
     row = {'argv': ['python3', '-m', 'prismaquant.tessera_campaign', *argv],
            'demand': {'mem_gb': 8}}
     result = dispatch.verify_row_demand(spec, census, row)

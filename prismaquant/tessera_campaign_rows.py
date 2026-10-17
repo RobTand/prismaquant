@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 
 from .campaign_container_spec import admission_image_reference, validate_container
-from .tessera_campaign_cli import explicit_campaign_options
+from .tessera_campaign_cli import campaign_argument_parser, explicit_campaign_options
 
 
 class RowClassRefused(RuntimeError):
@@ -463,6 +463,19 @@ def row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sour
                               selected_source=selected_source)["mem_gb"]
 
 
+def _row_execution_options(spec: dict) -> dict:
+    """Resolve demand inputs from the same options and defaults execution reads."""
+    options = explicit_campaign_options(spec['campaign_argv'])
+    max_act_rows = options.get('max_act_rows',
+                              campaign_argument_parser(planning=True).get_default('max_act_rows'))
+    if 'max_act_rows' in spec and (
+            type(spec['max_act_rows']) is not int or spec['max_act_rows'] != max_act_rows):
+        raise RowClassRefused(
+            "spec max_act_rows differs from execution; set --max-act-rows in campaign_argv "
+            "and remove or match the top-level value")
+    return {**options, 'max_act_rows': max_act_rows}
+
+
 def row_memory_demand(spec: dict, members: list[str], census: dict, *,
                        selected_source=False) -> dict:
     """The row's demand and every term it is made of.
@@ -476,7 +489,8 @@ def row_memory_demand(spec: dict, members: list[str], census: dict, *,
     gib = 1024 ** 3
     baseline, policy = process_baseline(spec)
     margin = guard_margin_bytes()
-    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
+    options = _row_execution_options(spec)
+    if options.get("streaming", False):
         resource = streamed_resource_plan(spec, census, members,
                                            selected_source=selected_source)
         # A selected row that runs the streaming row head holds a window, not
@@ -490,7 +504,7 @@ def row_memory_demand(spec: dict, members: list[str], census: dict, *,
     else:
         shapes = census.get("unit_shapes") or {}
         hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
-        rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
+        rows = sum(int(shapes.get(name, [0, 0])[1]) * options['max_act_rows'] * 4
                    for name in members)
         plan_bytes = _model_bytes(spec["model"]) + hessian + rows
         headroom_gb = int(spec.get("headroom_gb", 24))
@@ -508,13 +522,13 @@ def row_memory_demand(spec: dict, members: list[str], census: dict, *,
 
 def streamed_resource_plan(spec, census, members, *, selected_source=False):
     from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
-    options = explicit_campaign_options(spec['campaign_argv'])
+    options = _row_execution_options(spec)
     baseline_bytes, baseline_policy = process_baseline(spec)
     shapes = census.get('unit_shapes') or {}
     counts = census.get('counts') or {}
     resource_options = dict(
         unit_shapes={n: shapes[n] for n in members}, counts=counts,
-        max_act_rows=options.get('max_act_rows', int(spec.get('max_act_rows', 512))),
+        max_act_rows=options['max_act_rows'],
         cache_slots=options.get('streaming_cache_slots', 2),
         prefetch_workers=options.get('streaming_prefetch_workers', 1),
         headroom_gb=max(float(spec.get('headroom_gb', 24)),

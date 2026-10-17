@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-003. Campaign memory
+admission takes `max_act_rows` from the effective `campaign_argv` and the
+execution parser's default for both resident and streamed rows. A top-level
+shadow value must be an integer equal to that execution value or admission
+refuses. Set the execution option through `--max-act-rows`; the top-level
+field does not configure execution. This fixes the declared activation-row
+term without claiming measured peak memory or changing a default.
+
 Re-stamped 2026-10-17: the I/O engine owns staged-read acquisition, descriptor
 open, serving provenance, buffer allocation and reading in one scope. Setup
 and allocation failures release a per-entry lease. A read under a caller's

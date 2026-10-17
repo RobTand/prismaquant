@@ -177,7 +177,7 @@ def test_the_resident_source_branch_charges_the_same_two_terms(monkeypatch, tmp_
     dispatch = _dispatch()
     monkeypatch.setattr(campaign_rows, '_model_bytes', lambda model: 10 * GIB)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
-    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    spec = dict(model='/source', campaign_argv=['--max-act-rows', '2'], headroom_gb=3)
     body = 10 * GIB + 8 ** 2 * 4 + 8 * 2 * 4
     demand = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census)
     assert demand['plan_bytes'] == body

@@ -629,7 +629,7 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
     margin = CaptureMemoryGuard.MARGIN_BYTES
     monkeypatch.setattr(campaign_rows, '_model_bytes', lambda model: 10 * gib)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
-    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    spec = dict(model='/source', campaign_argv=['--max-act-rows', '2'], headroom_gb=3)
     hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
     body = 10 * gib + hessian + rows
 
