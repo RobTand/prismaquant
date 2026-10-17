@@ -50,3 +50,44 @@ def test_broadcast_preserves_actual_priced_source_shape(tmp_path, prefix, target
     assert {row["tensor"]: (row["rows"], row["columns"]) for row in provenance["units"]} == {
         source + ".weight": (32, 64), target + ".weight": (32, 64),
     }
+
+
+@pytest.mark.parametrize("case", ["missing_source", "multiple_tessera_sources", "tessera_and_bf16_sources"])
+def test_broadcast_refuses_unbound_or_ambiguous_priced_role(case):
+    source = "model.language_model.layers.0.mlp.down_proj"
+    other = "model.language_model.layers.0.mlp.shared_experts.down_proj"
+    target = "model.language_model.layers.1.mlp.down_proj"
+    shape = (32, 64)
+    shapes = {name + ".weight": shape for name in (source, other, target)}
+    choice = {"tessera_format": "TESSERA_E4M3_K1_R1024"}
+    assignment = {source: choice}
+    if case == "missing_source":
+        del shapes[source + ".weight"]
+        reason = "priced source.*has no model shape"
+    else:
+        assignment[other] = "BF16" if case == "tessera_and_bf16_sources" else dict(choice)
+        reason = "ambiguous priced sources"
+
+    with pytest.raises(writer.PlanError, match=reason):
+        writer.build_serving_plan(
+            assignment, shapes, cover="broadcast-by-role", allow_disagreement=False,
+            surface=writer.tessera_surface(), with_control=False,
+        )
+
+
+def test_broadcast_keeps_unpriced_roles_bf16():
+    source = "model.language_model.layers.0.mlp.down_proj"
+    target = "model.language_model.layers.1.mlp.down_proj"
+    unpriced = "model.language_model.layers.1.self_attn.o_proj.weight"
+    shapes = {source + ".weight": (32, 64), target + ".weight": (32, 64), unpriced: (32, 32)}
+
+    plan, provenance = writer.build_serving_plan(
+        {source: {"tessera_format": "TESSERA_E4M3_K1_R1024"}}, shapes,
+        cover="broadcast-by-role", allow_disagreement=False,
+        surface=writer.tessera_surface(), with_control=False,
+    )
+
+    assert plan[unpriced] == "BF16"
+    assert plan[source + ".weight"] == plan[target + ".weight"] == {"grid": "E4M3", "q256": 1024}
+    assert provenance["coverage"]["extrapolated"] is True
+    assert provenance["coverage"]["planned_bf16_units"] == 1

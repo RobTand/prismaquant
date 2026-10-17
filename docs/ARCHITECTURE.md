@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, Tessera broadcast shapes.
+The opt-in `broadcast-by-role` planner retains each rate's actual source tensor
+and shape. Every target must match that shape, including nested model names.
+Missing or ambiguous priced sources refuse; unpriced roles remain BF16 and
+broadcast provenance continues to mark the plan as extrapolated.
+
 As of: 2026-10-17, architecture audit continuation, complete MTP source loading.
 The profile loader tracks every packed expert projection and requires exact
 slice shapes. Its partial-load interface still reports unset parameters.
