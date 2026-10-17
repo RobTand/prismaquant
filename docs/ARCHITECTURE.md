@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, explicit device budgets.
+Outside measured-runtime-table mode, an explicit device-memory budget requires
+the existing dispatch table and workload mix. Incomplete context refuses at
+`ServeConstraintContext.validate`; no allocation may silently ignore the limit.
+Complete-context pricing and the absence of serving constraints are unchanged.
+
 As of: 2026-10-17, architecture audit continuation, stored-candidate scores.
 Dense and packed production render scores describe the canonical stored dtype.
 Records name `prismaquant.production_render_score.stored_candidate.v1` and

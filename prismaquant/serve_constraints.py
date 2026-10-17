@@ -342,6 +342,12 @@ class ServeConstraintContext:
         """
         if not self.slos.any_set:
             return
+        if self.slos.device_budget_bytes is not None and not self.active:
+            raise ServeConstraintError(
+                "--serve-device-budget-bytes requires --serve-dispatch-table "
+                "and --serve-workload-mix to evaluate the explicit device "
+                "budget; refusing to leave the constraint unevaluated"
+            )
         if self.slos.any_latency:
             if self.table is None:
                 raise ServeConstraintError(

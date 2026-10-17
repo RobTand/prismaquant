@@ -2281,7 +2281,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--serve-device-budget-bytes", type=int, default=None,
                     help="Hard constraint: resident weight bytes + "
                          "--serve-kv-bytes + --serve-peak-scratch-bytes must "
-                         "be <= this.")
+                         "be <= this. Without --measured-runtime-table, requires "
+                         "--serve-dispatch-table and --serve-workload-mix.")
     ap.add_argument("--rank-device-budget-bytes", default=None,
                     help="Comma-separated per-rank device budgets, one per rank "
                          "of the world a per-rank measured runtime table prices. "

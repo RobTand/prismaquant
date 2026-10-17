@@ -41,7 +41,10 @@ score.
 
 **No default workload mix.** Policy §1: "no default workload mix hidden in the
 allocator". A mix is a claim about what the deployment runs; the allocator does
-not get to assume one. With no mix supplied, the axis is inert.
+not get to assume one. With no serving constraints supplied, the axis is inert.
+An explicit latency or device-memory constraint requires both the dispatch
+table and mix; incomplete context refuses instead of ignoring the limit.
+The separate measured-runtime-table path keeps its own admission contract.
 
 **No change to `solve_allocation`.** The bits-DP's semantics for the
 unconstrained case are byte-identical and pinned by
