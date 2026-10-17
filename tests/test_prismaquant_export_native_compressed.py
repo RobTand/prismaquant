@@ -1085,13 +1085,9 @@ class TestRoundTrip(unittest.TestCase):
             "FP8_BLOCK_UE8M0_SOURCE",
         }
         nvfp4_cb_container_requant = {
-            # RE-QUANTIZED carriers of the nvfp4_cb container: unlike the
-            # passthroughs above these DO have a render, but it is not a
-            # compressed-tensors one — the exporter writes the element and
-            # scale planes itself under a Gridbook wire id. "rendered ==
-            # served" is therefore a real claim with real content, and it is
-            # checked directly below (against the same E8M0 served formula the
-            # stock MXFP8 rungs use) rather than deferred to another file.
+            # Historical CB requant carrier. The render remains, but its
+            # writer is archived and the branch below makes no served-byte
+            # comparison.
             "MXFP8_UE8M0_G32",
         }
         self.assertEqual(
