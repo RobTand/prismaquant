@@ -229,9 +229,15 @@ def _compute_metrics(
         canonical_layer_config_json(layer_config).encode("utf-8"),
         digest_size=16,
     ).hexdigest()
+    production_cache = (
+        _load_validation_production_cache() if _active_assignment(assignment) else None
+    )
 
     with torch.no_grad():
-        with _perturbed_model(model, assignment, cache_dir, cal_hash):
+        with _perturbed_model(
+            model, assignment, cache_dir, cal_hash,
+            production_weight_cache=production_cache,
+        ):
             ppl_wikitext = _wikitext_ppl(
                 model=model,
                 tokenizer=tokenizer,
@@ -266,6 +272,7 @@ def _compute_metrics(
                 calib_seed=calib_seed,
                 cal_hash=cal_hash,
                 progress=progress,
+                production_weight_cache=production_cache,
             )
     return {
         "ppl_wikitext": float(ppl_wikitext),
@@ -291,19 +298,8 @@ def _torch_dtype(torch, dtype: str, device) -> Any:
     raise ValueError(f"unsupported dtype: {dtype!r}")
 
 
-@contextlib.contextmanager
-def _perturbed_model(
-    model,
-    assignment: Mapping[str, str],
-    cache_dir: Path,
-    cal_hash: str,
-):
-    active = _active_assignment(assignment)
-    if not active:
-        yield
-        return
-    from .perturbed_x_cache import PerturbedActivationCache
-
+def _load_validation_production_cache():
+    """Resolve one configured render for all metrics in a validation run."""
     prod_cache_obj = None
     prod_cache_path = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE")
     if prod_cache_path:
@@ -316,6 +312,23 @@ def _perturbed_model(
         lru_gb = float(os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_LRU_GB", "16"))
         if lru_gb > 0 and hasattr(prod_cache_obj, "enable_lru"):
             prod_cache_obj.enable_lru(int(lru_gb * 1024**3))
+    return prod_cache_obj
+
+
+@contextlib.contextmanager
+def _perturbed_model(
+    model,
+    assignment: Mapping[str, str],
+    cache_dir: Path,
+    cal_hash: str,
+    *,
+    production_weight_cache,
+):
+    active = _active_assignment(assignment)
+    if not active:
+        yield
+        return
+    from .perturbed_x_cache import PerturbedActivationCache
 
     hooks = PerturbedActivationCache(
         model,
@@ -323,7 +336,7 @@ def _perturbed_model(
         cache_dir / "validation_perturbed_hooks",
         input_rows=0,
         cal_hash=cal_hash,
-        production_weight_cache=prod_cache_obj,
+        production_weight_cache=production_weight_cache,
     )
     if hooks.missing:
         preview = ", ".join(hooks.missing[:8])
@@ -672,6 +685,7 @@ def _end_kl(
     calib_seed: int,
     cal_hash: str,
     progress: bool,
+    production_weight_cache=None,
 ) -> float:
     active = _active_assignment(assignment)
     if not active:
@@ -721,6 +735,7 @@ def _end_kl(
             # student log-probs (audit M7). measure_assignment_kl also
             # hard-fails on any teacher/student shape mismatch now.
             kl_scope="last_token",
+            production_weight_cache=production_weight_cache,
         )
     )
 

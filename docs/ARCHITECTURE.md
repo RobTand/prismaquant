@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-03. Validation loads
+the configured production weight cache once and passes that same object to
+PPL, MMLU and end-KL evaluation. PPL/MMLU hooks restore the teacher before
+end-KL runs. Without a configured cache, the existing RTN path remains available.
+CPU regressions establish metric consistency, not served quality or GPU behavior.
+
 As of: 2026-10-17, architecture audit continuation, RE-04. MTP rung selection
 resolves numeric acceptance points against the complete menu before fitting.
 A bit value must identify exactly one rung; absent or ambiguous values refuse.
@@ -28886,6 +28892,10 @@ ppl_mmlu_acc, model_sha, layer_config_sha, eval_split, metric_era}` into `artifa
 (`:84-89`). Raises on non-finite metrics (`:156`), otherwise passes everything: measurement and
 provenance, not a gate. `metric_era` matters — records lacking `eval_split` were measured on
 wikitext **train** and are not face-value comparable (`:147-152`).
+When `PRISMAQUANT_VALIDATION_PROD_CACHE` is set, the harness loads and configures
+one `ProductionWeightCache` at the metric boundary. Both PPL/MMLU perturbation
+hooks and the end-KL evaluator receive that object. Removing the first hooks
+restores teacher weights without discarding the selected production render.
 
 **`validate_native_export.py`** — does vLLM accept the checkpoint and emit tokens. Defaults
 `--max-new-tokens 16`, `--gpu-memory-utilization 0.55`, `--max-model-len 2048` (`:206-209`);
