@@ -679,7 +679,8 @@ def test_export_witness_refusal_distinguishes_view_and_metadata_changes(
     assert "Only resident-fill directories support removing the affected shard" in message
     assert "resuming with the matching render_identity.json" in message
     if cause == "device":
-        assert "device-only mismatch" in message
+        assert "device-only mismatch (" in message
+        assert "changed fields" not in message
     else:
         assert "changed fields: ctime_ns" in message
         assert "permissions, ownership" in message
