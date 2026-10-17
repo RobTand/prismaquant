@@ -1860,10 +1860,9 @@ class ModelProfile(ABC):
     def structure_spec(self):
         """Return this profile's declarative structure spec, if present.
 
-        The spec is an additive, no-behavior-change description of naming,
-        grouping, passthrough, and decomposition rules.  Existing production
-        paths continue to use the executable profile methods until call sites
-        explicitly opt into a ``ModelGraph``.
+        Profile methods use its naming, grouping, passthrough, and
+        decomposition rules. Explicit Python overrides remain available;
+        ``build_model_graph`` exposes the resolved structure to graph consumers.
         """
         from .structure import load_structure_spec
 
