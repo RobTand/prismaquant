@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, capture benchmark ownership.
+The Stage A I/O benchmark creates its run root exclusively and checks that
+ownership before reuse or cleanup. Its `capture-run` directory also serves
+as the exclusive output claim, so two run roots cannot publish into one
+capture output. Existing capture products refuse before work; unrelated
+benchmark products may share the output directory. The report uses the
+existing create-only publisher, and interrupted captures retain their output
+evidence. `bench-ownership-green-v1` passes 19 CPU ownership cases and
+compiles three files with verified source, terminal logs, and CAS receipt.
+Capture workloads are replaced by tiny fixtures; no benchmark result or
+performance claim is established by these checks.
+
 As of: 2026-10-17, architecture audit continuation, external cost ownership.
 The pipeline's AURA additivity tail stamps provenance only into run-owned
 cost tables. A caller's validated `COST_PATH_OVERRIDE` stays byte-for-byte

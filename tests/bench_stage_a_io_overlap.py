@@ -33,7 +33,11 @@ Two fixtures, each written to ``<directory>``:
   ``cotangent_sha256`` and the chain state's seal hash records that hold
   absolute entry paths, so run the base and the head with the same
   ``PQ_IO_BENCH_RUN_ROOT``: the capture then runs at that one path and those
-  digests compare byte for byte.
+  digests compare byte for byte. That root must be absent when the benchmark
+  starts. The benchmark creates it exclusively and removes its owned run
+  after both captures; the first capture's evidence remains in ``capture-run/``.
+  Use separate base/head output directories: ``capture-run/`` and
+  ``capture.json`` must not preexist. Other benchmark products may share OUT.
 
 The session id is pinned in both, so a file's bytes are comparable across
 runs. Compare the two runs' manifests with ``compare`` below.
@@ -55,6 +59,8 @@ import uuid
 
 import pytest
 import torch
+
+from prismaquant.cost_stage_checkpoint import publish_new_bytes
 
 import test_produced_output_spool as spool_tests
 import test_stage_a_produced_boundary_chain as chain
@@ -102,11 +108,13 @@ ROWS = {
 }
 
 
-def _out() -> Path:
+def _out(*, run_root: Path | None = None) -> Path:
     value = os.environ.get(OUT_ENV)
     if not value:
         pytest.skip(f"{OUT_ENV} names no output directory")
     path = Path(value)
+    if run_root is not None and path.resolve().is_relative_to(run_root.resolve()):
+        raise ValueError(f"{OUT_ENV} must be outside {RUN_ROOT_ENV}")
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -348,23 +356,66 @@ def _relative_json(document, root) -> str:
 def test_capture_manifest(tmp_path, monkeypatch):
     import test_stage_a_chain_resume as capture
 
-    out = _out()
+    root = Path(os.environ.get(RUN_ROOT_ENV) or tmp_path / "run")
+    out = _out(run_root=root)
+    report = out / "capture.json"
+    if os.path.lexists(report):
+        raise FileExistsError(f"capture report already exists: {report}")
+    retained = out / "capture-run"
+    # The output product is also the exclusive claim, including when captures
+    # use different run roots. An interrupted claim remains refused evidence.
+    retained.mkdir()
+    created_output = retained.lstat()
+    output_identity = (created_output.st_dev, created_output.st_ino)
+
+    def require_owned_output():
+        try:
+            current = retained.lstat()
+        except FileNotFoundError as exc:
+            raise RuntimeError("benchmark capture output changed after creation") from exc
+        if (current.st_dev, current.st_ino) != output_identity:
+            raise RuntimeError("benchmark capture output changed after creation")
+
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
     deactivate_staged_tier_policy_for_tests()
-    root = Path(os.environ.get(RUN_ROOT_ENV) or tmp_path / "run")
-    trees = []
-    for _attempt in range(2):
-        if root.exists():
-            shutil.rmtree(root)
-        capture._run(root, monkeypatch)
-        trees.append(_capture_tree(root))
-        if not (out / "capture-run").exists():
-            shutil.copytree(root, out / "capture-run")
-    record = {"schema": "pq1128.bench.capture.v1",
-              "repeat_identical": trees[0] == trees[1],
-              "root": str(root),
-              "files": trees[0]}
-    (out / "capture.json").write_text(json.dumps(record, indent=1, sort_keys=True))
+    root.mkdir(parents=True, exist_ok=False)
+    created = root.lstat()
+    root_identity = (created.st_dev, created.st_ino)
+
+    def require_owned_root():
+        try:
+            current = root.lstat()
+        except FileNotFoundError as exc:
+            raise RuntimeError("benchmark run root changed after creation") from exc
+        if (current.st_dev, current.st_ino) != root_identity:
+            raise RuntimeError("benchmark run root changed after creation")
+
+    try:
+        trees = []
+        for attempt in range(2):
+            require_owned_root()
+            if attempt:
+                for child in root.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+            capture._run(root, monkeypatch)
+            require_owned_root()
+            require_owned_output()
+            trees.append(_capture_tree(root))
+            if not attempt:
+                shutil.copytree(root, retained, dirs_exist_ok=True)
+        record = {"schema": "pq1128.bench.capture.v1",
+                  "repeat_identical": trees[0] == trees[1],
+                  "root": str(root),
+                  "files": trees[0]}
+        require_owned_output()
+        if not publish_new_bytes(report, json.dumps(record, indent=1, sort_keys=True).encode()):
+            raise FileExistsError(f"capture report already exists: {report}")
+    finally:
+        require_owned_root()
+        shutil.rmtree(root)
 
 
 def compare(base: Path, head: Path) -> dict:
