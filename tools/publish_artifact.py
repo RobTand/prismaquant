@@ -11,8 +11,8 @@ Model publication is deliberately stricter than a convenience ``hf upload``:
   bytes, then rechecks the setting before announcing success;
 * the complete local file set is frozen before the authoritative shipcard
   replay. Small files are captured as bytes. Large files stay zero-copy, but
-  are held by no-follow file descriptors and content-addressed blockwise; the
-  upload reader refuses to expose a block that differs from that snapshot;
+  are held by no-follow file descriptors and content-addressed blockwise.
+  Their digests are replayed after the remote commit, before success is announced;
 * the remote file set is enumerated at one exact branch head and replaced in
   one ``create_commit`` call with ``revision`` plus ``parent_commit`` CAS.
   ``.gitattributes`` is the one intentional retained Hub-managed file;
@@ -1412,10 +1412,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        # The one-pass safetensors content capture existed for the strict
-        # RTX4090 FP8-CB publication replay (Gridbook lane retired 2026-09-02,
-        # archive/gridbook_lane_2026-09-02/). No publication asks
-        # for it now; the freeze keeps the capability for a future lane.
         snapshot_cm = _freeze_artifact(
             artifact_dir,
             expected_shipcard_sha256=expected_shipcard_sha,
