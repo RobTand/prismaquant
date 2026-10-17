@@ -1,15 +1,16 @@
-"""Baseline draft for RE-07; authored only, never executed by this worker."""
+"""Legacy frontier output must retain its measured assignment identity."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
+from prismaquant import select_validated_frontier as selector
 from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.select_validated_frontier import main
 
 
-def _legacy_selection(tmp_path, replacement, identity):
+def _legacy_selection(tmp_path, replacement, identity, *, artifact_bytes=None):
     qname = "model.layers.0.self_attn.q_proj"
     candidate = tmp_path / "candidate.json"
     candidate.write_text(json.dumps({"assignment": {qname: replacement}}))
@@ -21,6 +22,8 @@ def _legacy_selection(tmp_path, replacement, identity):
             "bpp": 4.0,
             "last_token_kl": 0.01,
             **identity,
+            **({"whole_artifact_upper_bound_bytes": artifact_bytes}
+               if artifact_bytes is not None else {}),
         }],
     }))
     output_assignment = tmp_path / "selected_assignment.json"
@@ -82,3 +85,34 @@ def test_legacy_frontier_full_sha_is_authoritative_over_pair_list(tmp_path):
     })
     assert main(argv) == 0
     assert json.loads(output_assignment.read_text())["assignment"] == measured_assignment
+
+
+def test_legacy_frontier_matching_pair_list_cannot_override_wrong_full_sha(tmp_path):
+    qname = "model.layers.0.self_attn.q_proj"
+    output_assignment, argv = _legacy_selection(tmp_path, "NVFP4", {
+        "assignment_sha256": assignment_serialization_sha256({qname: "BF16"}),
+        "assignment_hash": [[qname, "NVFP4"]],
+    })
+    with pytest.raises(ValueError, match="assignment"):
+        main(argv)
+    assert not output_assignment.exists()
+
+
+def test_legacy_frontier_selected_intake_reads_one_payload(tmp_path, monkeypatch):
+    qname = "model.layers.0.self_attn.q_proj"
+    output_assignment, argv = _legacy_selection(tmp_path, "NVFP4", {
+        "assignment_sha256": assignment_serialization_sha256({qname: "NVFP4"}),
+    }, artifact_bytes=4096)
+    candidate = tmp_path / "candidate.json"
+    original_load = selector._load_json
+    reads = []
+
+    def load_json(path):
+        if str(path) == str(candidate):
+            reads.append(path)
+        return original_load(path)
+
+    monkeypatch.setattr(selector, "_load_json", load_json)
+    assert main(argv) == 0
+    assert len(reads) == 1
+    assert json.loads(output_assignment.read_text())["assignment"] == {qname: "NVFP4"}

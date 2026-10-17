@@ -1239,11 +1239,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "assignment identity bound to its KL result"
             )
     else:
-        # Backwards-compatible path for validation files produced before the
-        # validator persisted its exact base+candidate merge. New production
-        # validation always takes the resolved branch above.
+        # Historical validation rows predate the persisted base+candidate merge.
         selected_payload = _load_json(selected["path"])
-        assignment = _load_assignment(selected["path"])
+        assignment = _assignment_from_payload(
+            selected_payload, where=str(selected["path"]),
+        )
+        row_assignment_sha256 = selected.get("assignment_sha256")
+        if row_assignment_sha256 is not None:
+            if row_assignment_sha256 != assignment_serialization_sha256(assignment):
+                raise ValueError(
+                    "legacy measured assignment does not match the exact "
+                    "assignment identity bound to its KL result"
+                )
+        elif selected.get("assignment_hash") is not None:
+            actual_assignment_hash = [list(item) for item in sorted(assignment.items())]
+            if selected["assignment_hash"] != actual_assignment_hash:
+                raise ValueError(
+                    "legacy measured assignment does not match the historical "
+                    "assignment identity bound to its KL result"
+                )
+        else:
+            raise ValueError(
+                "legacy measured assignment has no assignment identity bound "
+                "to its KL result"
+            )
     # A rate-axis pick (#117) is a candidate until a byte-matched uniform arm
     # corroborates it. The validated frontier re-ranks the allocator's own
     # Pareto rows and carries no uniform arm, so no input to this stage can

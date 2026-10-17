@@ -314,12 +314,15 @@ def test_rows_without_a_row_estimate_are_counted_not_silently_dropped():
 
 def test_selector_cli_reports_mixed_era_surrogates_without_pooling(tmp_path):
     paths = {}
+    assignment = {"model.layers.0.self_attn.q_proj": "BF16"}
     for label in ("a", "b", "c", "legacy"):
         paths[label] = tmp_path / f"{label}.json"
-        paths[label].write_text(json.dumps({
-            "assignment": {"model.layers.0.self_attn.q_proj": "BF16"}}))
+        paths[label].write_text(json.dumps({"assignment": assignment}))
+    results = _mixed_era_results(paths)
+    for row in results:
+        row["assignment_sha256"] = assignment_serialization_sha256(assignment)
     validation_path = tmp_path / "validation.json"
-    validation_path.write_text(json.dumps({"results": _mixed_era_results(paths)}))
+    validation_path.write_text(json.dumps({"results": results}))
     summary_path = tmp_path / "selection.json"
     completed = subprocess.run(
         [sys.executable, "-m", "prismaquant.select_validated_frontier",
@@ -375,14 +378,15 @@ def test_worst_rank_inversion_none_when_too_few_pairs():
 
 
 def test_select_validated_frontier_cli_writes_layer_config(tmp_path):
+    assignment = {
+        "model.layers.0.self_attn.q_proj": "NVFP4",
+        "model.layers.0.mlp.down_proj": "MXFP8_E4M3",
+        "model.layers.1.mlp.down_proj": "BF16",
+    }
     assignment_path = tmp_path / "candidate.json"
     assignment_path.write_text(json.dumps({
         "schema": "prismaquant.allocator.pareto_assignment.v1",
-        "assignment": {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.layers.0.mlp.down_proj": "MXFP8_E4M3",
-            "model.layers.1.mlp.down_proj": "BF16",
-        },
+        "assignment": assignment,
     }))
     validation_path = tmp_path / "validation.json"
     validation_path.write_text(json.dumps({
@@ -391,6 +395,7 @@ def test_select_validated_frontier_cli_writes_layer_config(tmp_path):
             "path": str(assignment_path),
             "bpp": 5.0,
             "last_token_kl": 0.01,
+            "assignment_sha256": assignment_serialization_sha256(assignment),
             "format_counts": {"NVFP4": 1, "MXFP8_E4M3": 1, "BF16": 1},
         }],
     }))
@@ -582,6 +587,7 @@ def test_selector_carries_non_cb_whole_artifact_budget_to_layer_config(tmp_path)
             "path": str(assignment_path),
             "bpp": 4.5,
             "last_token_kl": 0.01,
+            "assignment_sha256": assignment_serialization_sha256(assignment),
         }],
     }))
     layer_config = tmp_path / "layer_config.json"
@@ -617,11 +623,10 @@ def test_selector_carries_non_cb_whole_artifact_budget_to_layer_config(tmp_path)
 def test_selector_refuses_a_retired_codebook_rung(tmp_path):
     # A stale validated assignment naming a retired codebook rung (archived
     # 2026-09-25, #1304) refuses; the selector writes no layer config for it.
+    assignment = {"model.layers.0.self_attn.q_proj": "NVFP4_CB_K16"}
     assignment_path = tmp_path / "candidate_cb.json"
     assignment_path.write_text(json.dumps({
-        "assignment": {
-            "model.layers.0.self_attn.q_proj": "NVFP4_CB_K16",
-        },
+        "assignment": assignment,
     }))
     validation_path = tmp_path / "validation.json"
     validation_path.write_text(json.dumps({
@@ -630,6 +635,7 @@ def test_selector_refuses_a_retired_codebook_rung(tmp_path):
             "path": str(assignment_path),
             "bpp": 2.3,
             "last_token_kl": 0.01,
+            "assignment_sha256": assignment_serialization_sha256(assignment),
         }],
     }))
 
@@ -718,6 +724,9 @@ def test_budget_selector_requires_reconciled_export_gate(
             "path": str(assignment_path),
             "bpp": 4.5,
             "last_token_kl": 0.01,
+            "assignment_sha256": assignment_serialization_sha256(
+                assignment_payload["assignment"]
+            ),
             "whole_artifact_upper_bound_bytes": 9_000,
         }],
     }))
@@ -753,12 +762,11 @@ def test_budget_selector_requires_reconciled_export_gate(
 def test_selector_drops_a_stale_cb_stamp_on_a_non_cb_assignment(tmp_path):
     # The stamp is inert provenance from the retired codebook lane: the
     # selection proceeds and does not carry it forward.
+    assignment = {"model.layers.0.self_attn.q_proj": "NVFP4"}
     assignment_path = tmp_path / "candidate.json"
     assignment_path.write_text(json.dumps({
         "cb_serialized_payload": _STALE_CB_STAMP,
-        "assignment": {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-        },
+        "assignment": assignment,
     }))
     validation_path = tmp_path / "validation.json"
     validation_path.write_text(json.dumps({
@@ -767,6 +775,7 @@ def test_selector_drops_a_stale_cb_stamp_on_a_non_cb_assignment(tmp_path):
             "path": str(assignment_path),
             "bpp": 4.5,
             "last_token_kl": 0.01,
+            "assignment_sha256": assignment_serialization_sha256(assignment),
         }],
     }))
 
@@ -799,24 +808,25 @@ def test_selector_drops_a_stale_cb_stamp_on_a_non_cb_assignment(tmp_path):
 
 def test_select_validated_frontier_diagnostics_include_dominated_rows(tmp_path):
     assignment_paths = {}
+    assignment = {"model.layers.0.self_attn.q_proj": "BF16"}
+    assignment_sha256 = assignment_serialization_sha256(assignment)
     for label in ("a", "b", "c"):
         path = tmp_path / f"{label}.json"
-        path.write_text(json.dumps({
-            "assignment": {
-                "model.layers.0.self_attn.q_proj": "BF16",
-            },
-        }))
+        path.write_text(json.dumps({"assignment": assignment}))
         assignment_paths[label] = path
 
     validation_path = tmp_path / "validation.json"
     validation_path.write_text(json.dumps({
         "results": [
             {"label": "a", "path": str(assignment_paths["a"]), "bpp": 4.5,
+             "assignment_sha256": assignment_sha256,
              "last_token_kl": 0.10, "mse": {"predicted_dloss_sum": 2.0}},
             # Dominated by a on both bpp and KL, but surrogate ranks it best.
             {"label": "b", "path": str(assignment_paths["b"]), "bpp": 4.6,
+             "assignment_sha256": assignment_sha256,
              "last_token_kl": 0.30, "mse": {"predicted_dloss_sum": 1.0}},
             {"label": "c", "path": str(assignment_paths["c"]), "bpp": 5.0,
+             "assignment_sha256": assignment_sha256,
              "last_token_kl": 0.05, "mse": {"predicted_dloss_sum": 3.0}},
         ],
     }))
@@ -1103,15 +1113,17 @@ def test_select_frontier_point_threads_the_veto():
 
 def _write_validation(tmp_path, rows, columns=("kl_p99",)):
     results = []
+    assignment = {"model.layers.0.mlp.down_proj": "NVFP4"}
     for row in rows:
         path = tmp_path / f"{row['label']}.json"
         path.write_text(json.dumps({
             "schema": "prismaquant.allocator.pareto_assignment.v1",
-            "assignment": {"model.layers.0.mlp.down_proj": "NVFP4"},
+            "assignment": assignment,
         }))
         results.append({
             "label": row["label"], "path": str(path), "bpp": row["bpp"],
             "last_token_kl": row["kl"],
+            "assignment_sha256": assignment_serialization_sha256(assignment),
             **{c: row[c] for c in columns if c in row},
         })
     validation_path = tmp_path / "validation.json"
@@ -1259,13 +1271,14 @@ _RECEIPT_CANDIDATE_BYTES = 1761722368 // 8
 
 
 def _rate_axis_cli_fixture(tmp_path, *, formats):
+    assignment = {
+        "model.layers.0.self_attn.q_proj": formats[0],
+        "model.layers.0.mlp.down_proj": formats[1],
+    }
     assignment_path = tmp_path / "rate_axis_candidate.json"
     assignment_path.write_text(json.dumps({
         "schema": "prismaquant.allocator.pareto_assignment.v1",
-        "assignment": {
-            "model.layers.0.self_attn.q_proj": formats[0],
-            "model.layers.0.mlp.down_proj": formats[1],
-        },
+        "assignment": assignment,
     }))
     validation_path = tmp_path / "validation.json"
     validation_path.write_text(json.dumps({
@@ -1275,6 +1288,7 @@ def _rate_axis_cli_fixture(tmp_path, *, formats):
                 "path": str(assignment_path),
                 "bpp": 4.0,
                 "last_token_kl": 0.02,
+                "assignment_sha256": assignment_serialization_sha256(assignment),
                 "whole_artifact_upper_bound_bytes": _RECEIPT_CANDIDATE_BYTES,
                 "format_counts": {formats[0]: 1, formats[1]: 1},
             },
@@ -1283,6 +1297,7 @@ def _rate_axis_cli_fixture(tmp_path, *, formats):
                 "path": str(assignment_path),
                 "bpp": 5.0,
                 "last_token_kl": 0.015,
+                "assignment_sha256": assignment_serialization_sha256(assignment),
                 "whole_artifact_upper_bound_bytes": _RECEIPT_CANDIDATE_BYTES,
                 "format_counts": {formats[0]: 1, formats[1]: 1},
             },

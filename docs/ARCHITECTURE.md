@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-07. A legacy frontier
+row must bind the assignment it measured before the selector emits that
+assignment. The full assignment SHA is authoritative when present; otherwise
+the historical sorted pair list must match. Missing or different identity
+refuses. Final selected-payload intake checks and emits the same parsed value;
+the persisted resolved-assignment path and selection mathematics are unchanged.
+
 As of: 2026-10-17, architecture audit continuation, C-007. Initial container
 runtime identity publication is create-only. Concurrent writers stage separate
 complete files; one publishes and the other verifies that winner through the
