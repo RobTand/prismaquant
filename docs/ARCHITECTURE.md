@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, materialized walk dtype.
+The materialized `model_walk` CLI resolves short precision names through the
+existing calibration dtype parser, including its advertised `bf16` default.
+Canonical Torch names remain accepted through the existing attribute lookup.
+The real tiny-checkpoint regression covers eleven names/default cases; the
+four relevant `resident-intake-green-v1` shards pass 78 CPU cases, with one
+deprecated-lane test deliberately deselected. The source and CAS receipts,
+plus the admitted compile action, are verified. These checks establish CLI
+and walk behavior, with no serving or performance qualification.
+
 As of: 2026-10-17, architecture audit continuation, layer-zero comparison intake.
 `tools/cost_layer0_identity_gate.py` admits nonempty cost, format, and entry
 mappings before comparison. Every new entry must contain the declared additive

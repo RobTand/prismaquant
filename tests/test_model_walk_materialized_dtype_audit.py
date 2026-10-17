@@ -30,9 +30,20 @@ def checkpoint(tmp_path):
     return source
 
 
-@pytest.mark.parametrize("dtype", [None, "bf16", "bfloat16", "float32"],
-                         ids=["default", "advertised_bf16", "canonical_bf16", "canonical_fp32"])
-def test_actual_materialized_model_walk_dtype(checkpoint, tmp_path, dtype):
+@pytest.mark.parametrize("dtype,wanted", [
+    pytest.param(None, "torch.bfloat16", id="default"),
+    pytest.param("bf16", "torch.bfloat16", id="advertised_bf16"),
+    pytest.param("bfloat16", "torch.bfloat16", id="canonical_bf16"),
+    pytest.param("float32", "torch.float32", id="canonical_fp32"),
+    pytest.param("fp16", "torch.float16", id="short_fp16"),
+    pytest.param("float16", "torch.float16", id="canonical_fp16"),
+    pytest.param("half", "torch.float16", id="torch_half"),
+    pytest.param("fp32", "torch.float32", id="short_fp32"),
+    pytest.param("float", "torch.float32", id="torch_float"),
+    pytest.param("double", "torch.float64", id="torch_double"),
+    pytest.param("float64", "torch.float64", id="canonical_fp64"),
+])
+def test_actual_materialized_model_walk_dtype(checkpoint, tmp_path, dtype, wanted):
     from prismaquant.model_walk import main
 
     output = tmp_path / "walk.json"
@@ -45,7 +56,6 @@ def test_actual_materialized_model_walk_dtype(checkpoint, tmp_path, dtype):
     assert report["context"]["materialized"] is True
     assert report["provenance"]["execution"] == "real"
     assert report["gate"]["refused"] is False
-    wanted = "torch.float32" if dtype == "float32" else "torch.bfloat16"
     parameters = [node for node in report["walk"]["nodes"] if node["kind"] == "parameter"]
     assert parameters
     assert all(node["dtype"] == wanted for node in parameters)

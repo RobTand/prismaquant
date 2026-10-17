@@ -1912,7 +1912,12 @@ def main(argv: list[str] | None = None) -> int:
         args.model, trust_remote_code=args.trust_remote_code)
     load_kwargs: dict = {"trust_remote_code": args.trust_remote_code}
     if args.materialize:
-        load_kwargs["dtype"] = getattr(torch, args.dtype)
+        from .calibration_data import _dtype_from_name
+
+        try:
+            load_kwargs["dtype"] = _dtype_from_name(args.dtype)
+        except ValueError:
+            load_kwargs["dtype"] = getattr(torch, args.dtype)
         load_kwargs["low_cpu_mem_usage"] = True
         model_class_used = ""
         if have_causal_lm:
