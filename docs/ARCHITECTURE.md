@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: Rob deprecated GGUF support. Its code, format registry
+entries and existing commands remain available as deprecated paths, with no
+further fixes or enhancements. New engineering work targets compressed-tensors
+and Tessera within their existing admission and qualification gates.
+
 Re-stamped 2026-10-17: a resident resume warns about fused NVFP4 shards with
 missing witnesses, using the same profile group resolver as export without
 recalculating weight data. Pre-guard trust history is kept out of the losing

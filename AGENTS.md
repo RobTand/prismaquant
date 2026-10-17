@@ -4,6 +4,11 @@ These rules are mandatory for coding agents working in this repository.
 Before implementing new functionality, read this file,
 `docs/design/design_guidelines.md`, and `docs/ARCHITECTURE.md`.
 
+**GGUF is deprecated, per Rob on 2026-10-17.** Preserve the existing GGUF code,
+but do not fix, enhance or extend it. The GGUF contracts below describe the
+retained implementation, not an ongoing support commitment. Focus new work on
+the supported compressed-tensors and Tessera paths within their existing gates.
+
 ## Repository change delivery
 
 Every change to `main` must start with an issue in this repository and arrive

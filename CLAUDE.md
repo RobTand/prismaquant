@@ -3,6 +3,10 @@
 This file is the durable, code-validated brief for working on PrismaQuant with
 Robert Tand.
 
+**GGUF is deprecated as of 2026-10-17.** Rob directed us to preserve its code
+without further fixes or enhancements. GGUF examples and measurements below
+remain historical reference. See `AGENTS.md` for the current support policy.
+
 > **Prime directive — read every other doc incredulously.** This repo accretes
 > handovers, results docs, READMEs, and a paper. They go stale *fast* and
 > sometimes invert. A claim is true only if (a) it lives in current code/tests,
