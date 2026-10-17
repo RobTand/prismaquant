@@ -573,8 +573,8 @@ class FusedModuleLicence:
     Every attribute here is a value a gate on this side decides on, which is
     what makes :meth:`answer` the block's whole projection into
     :func:`contract_answer`.  The block's ``container`` is deliberately not
-    among them: nothing here reads the sidecar's magic, because there is no
-    Tessera export leg to write one with.
+    among them: this contract reader does not consume the sidecar's magic.
+    The export lane hands container production to the external producer.
     """
 
     #: The block's own schema id.  A gate: the reader refuses a block carrying
@@ -583,7 +583,7 @@ class FusedModuleLicence:
     #: ``field -> "shared" | "per_member"``, verbatim.
     fields: Mapping[str, str]
     #: How a mixed-rung module is SPELLED in the checkpoint's scheme.
-    #: Recorded and carried into the fold's receipt; there is no writer yet.
+    #: Recorded and carried into the fold's receipt for the external producer.
     sidecar_q256: str
     #: Whether a container receipt covers a SERVED mixed-rung module.  False
     #: today: the relaxation is proven by a decode identity, not by a serve.
@@ -852,8 +852,8 @@ def contract_answer(contract: "TesseraContract") -> dict:
     ``shared`` would change what this producer may allocate.  It carries
     exactly the block's values this reader parses -- see
     :class:`FusedModuleLicence` -- which is why ``container`` is NOT here.
-    Nothing on this side reads the sidecar's magic (there is no Tessera export
-    leg to write one with), and a value in the answer that no gate reads makes
+    This reader does not consume the sidecar's magic, and a value in the answer
+    that no gate reads makes
     a re-review out of a field nobody uses.  The block's three ``*_note`` keys
     are prose and stay out for the same reason ``rationale`` does.
     """
@@ -1463,7 +1463,7 @@ class ActivationQuantizerAttestation:
 
 
 def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
-                                 ) -> dict[str, dict[str, ActivationQuantizerAttestation]]:
+                                 ) -> dict[str, dict[str, dict[str, ActivationQuantizerAttestation]]]:
     """Read ``activation_quantizers``, or read that there is none.
 
     Absence is permitted HERE and refused in
