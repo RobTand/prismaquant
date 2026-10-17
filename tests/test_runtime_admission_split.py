@@ -4,9 +4,9 @@
 first attests the per-row prices `build_runtime_resources` hands the DP; the
 second attests the whole-engine charge the allocator adds once, outside the DP.
 Before this split they shared one `producer_admitted` flag inside one `try`, so
-the fixed-resource refusal that fires for every table at the producer's current
-schema version discarded a native attestation that had passed -- 49 rows,
-refusal `None`, the first real one ever produced (PQ #557).
+a fixed-resource refusal discarded a native attestation that had passed.
+PQ #557 recorded that failure with 49 native rows and native refusal `None`;
+these fixtures do not establish the current qualification of real tables.
 
 The fixtures here are synthetic gate stand-ins. They establish which flag
 governs which consumer, and nothing about any measurement.
