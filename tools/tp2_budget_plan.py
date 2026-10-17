@@ -974,6 +974,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="write the full plan as JSON here (never under /tmp)")
     args = ap.parse_args(argv)
 
+    for flag, value in (("--per-device-gb", args.per_device_gb),
+                        ("--overhead-gb-per-rank", args.overhead_gb_per_rank)):
+        if value is not None and (not math.isfinite(value) or value < 0):
+            ap.error(f"{flag} must be finite and nonnegative")
+
     mode, world = parse_parallelism(args.parallelism)
     artifact = args.artifact.expanduser().resolve()
     if not artifact.is_dir():

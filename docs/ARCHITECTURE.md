@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, standalone TP budget intake.
+`tools/tp2_budget_plan.py` requires finite, nonnegative configured device
+budgets and per-rank overhead before reading artifact headers or writing a
+report. Zero remains a legal input with the existing infeasible outcome;
+omitted overhead remains explicitly unknown. `tp2-budget-green-v1` passes
+60 CPU cases and compiles both touched files with verified source, logs,
+terminal outcome, and CAS receipt. Configured budgets remain assumptions,
+and this inventory calculation establishes no runtime memory measurement.
+
 As of: 2026-10-17, architecture audit continuation, recorded gold populations.
 `tools/kl_ab.py` compares recorded calibration and metric populations before
 printing a delta or a cross-stack range. Current served-gold records require
