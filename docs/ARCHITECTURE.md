@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, stage-settings roster.
+The current settings declaration and shell guard roster contain 15 stage
+identifiers, including `tessera-plan`. Retired CB cost/bundle stages are no
+longer current entries. The retained GGUF stage remains deprecated.
+
 As of: 2026-10-17, architecture audit continuation, research figure binding.
 The sparse-rate family-transfer plot uses the existing seal validator before
 reading predictions. Its audit comparison and plotted values use that same
@@ -22691,16 +22696,12 @@ stamping. A refused mismatch files nothing, and the `tessera-plan` carve-out is 
 plan still refuses, because an allocation binding guessed after translation is a fiction rather
 than an admission.
 
-**Coverage is now every skip-if-exists artifact** — **16 call sites over 16 declared
-artifacts**: `probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
-`aura-cost`, `aura-hybrid-cost`, `cb-col-weights`, `cb-hybrid-cost`, `frontier-cache`,
+**The current guard roster has 15 call sites over 15 declared stage identifiers**:
+`probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
+`aura-cost`, `aura-hybrid-cost`, `cb-col-weights`, `frontier-cache`,
 `frontier-kl-point`, `frontier-recache`, `production-cache-recached`, `production-cache-raw`,
-`gguf-skeleton`, and `cb-learned-bundle`. The last is keyed on the source model,
-format menu, learned scope, bundle path, and the exact col-weight file digest
-(`pipeline.py:158-167`; `run-pipeline.sh:1053-1081`). (Wave 3 reported 16 sites
-because `cb-col-weights` was guarded at three
-near-copies of the harvest; wave 4's `harvest_cb_col_weights` collapsed those into one function
-with four callers, so the guard is now stated once and the artifact-to-site map is 1:1.) Render-affecting env is captured in `RENDER_ENV_SETTINGS` (`585`:
+`gguf-skeleton` (deprecated), and `tessera-plan`. The Tessera plan's allocation
+binding is described above. Render-affecting env is captured in `RENDER_ENV_SETTINGS` (`585`:
 `PRISMAQUANT_NVFP4_SCALE_RULE`, `PRISMAQUANT_GPTQ_DAMP_SWEEP` default `0`,
 `PRISMAQUANT_GPTQ_DAMP`, `PRISMAQUANT_ACT_CLIP_QUANTILE` default `0.999`,
 `PRODUCTION_CACHE_LEVERS`, `PRODUCTION_CACHE_DISABLE_LEVERS`) and spliced into every artifact
