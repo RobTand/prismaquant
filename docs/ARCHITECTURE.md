@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, Stage B batch ratios.
+Workspace profiling charges each measured peak at the exact ratio between
+successive batch sizes, rounded up to whole bytes before adding the spill
+capture reserve. Odd final batches no longer truncate that ratio. CPU checks
+cover the reservation arithmetic and guard integration; two CUDA allocator
+checks were skipped and add no new measured workspace evidence.
+
 As of: 2026-10-17, architecture audit continuation, cost shard dtype identity.
 Incremental cost shards record the resolved model dtype in their existing
 reuse metadata. A changed or absent dtype requires measurement before reuse;
