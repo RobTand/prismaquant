@@ -35,8 +35,6 @@ from torch import nn
 from prismaquant.sensitivity_probe import FisherAccumulator, grouped_linear_fisher_chunk, grouped_linear_groups, grouped_linear_stats_entry
 from prismaquant.probe_statistics import finalize_fisher_stats
 
-# Tiny but non-trivial: G does not divide R or D, so a mis-shapen
-# accumulator cannot pass by symmetry.
 G, R, D, T = 2, 3, 4, 4
 
 
