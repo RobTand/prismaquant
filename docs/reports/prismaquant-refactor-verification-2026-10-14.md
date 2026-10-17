@@ -1443,3 +1443,12 @@ and the two previously qualified typing imports. Arithmetic and admission
 remain unchanged. These results compose with the earlier source-specific
 checks; they are not a full-suite or GPU run at the later source. Final
 independent review remains required before the authorized push.
+
+### 2026-10-17: NVFP4 scope of the resident resume warning
+
+The preceding clarification's "any fused entry" means "any fused NVFP4 entry".
+Only a fused NVFP4 render rewrites the joint-global witness sidecar. Rendering
+fused entries only in other formats keeps the original records on disk, so a
+resume through the writer's view or an NFS client mount can still recover
+device-only mismatches. The warning and its assertion now name NVFP4 explicitly.
+Witness admission and sidecar rewrite behavior are unchanged.

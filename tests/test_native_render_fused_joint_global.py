@@ -816,7 +816,7 @@ def test_resume_device_guidance_accounts_for_witness_sidecar_rewrites(
     capsys.readouterr()
     resumed = _resident_fill(rendered, cache_dir)
     warning = capsys.readouterr().out
-    assert "If this resume rendered no fused entries, rerun it through the writer's view" in warning
+    assert "If this resume rendered no fused NVFP4 entries, rerun it through the writer's view" in warning
     assert "Otherwise its sidecar rewrites dropped those records; re-render those shards" in warning
     adopted = {(renewed, "NVFP4")} if render_missing else set()
     assert set(nvfp4_joint_global_witnesses(resumed.metadata, where="test")) == adopted
