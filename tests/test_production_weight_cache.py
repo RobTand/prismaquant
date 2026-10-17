@@ -1728,9 +1728,8 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
 # pair refuses before any shard is written or read, naming both qnames and
 # the shared filename. They run against the shared check
 # (``require_injective_cache_filenames``) and the reader/residency open
-# (``ProductionWeightCache.prefetch``); both refuse only after the fix, so
-# every test in this section fails on the unfixed code (pre-fix failure
-# recorded in the PR).
+# (``ProductionWeightCache.prefetch``). Negative collision tests fail on
+# the unfixed code; positive controls preserve noncolliding admission.
 
 
 def test_require_injective_cache_filenames_refuses_colliding_pair():
