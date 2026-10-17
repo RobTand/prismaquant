@@ -8,7 +8,9 @@ from prismaquant.allocator_candidates import build_candidates
 from prismaquant.production_render_cost import (
     synthesize_production_render_cost_payload,
 )
-from prismaquant.production_weight_cache import ProductionWeightCache
+from prismaquant.production_weight_cache import (
+    ProductionWeightCache, STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+)
 
 
 def _cache_with_scores() -> ProductionWeightCache:
@@ -27,6 +29,8 @@ def _cache_with_scores() -> ProductionWeightCache:
                         "score_sum": 12.0,
                         "normalizer": 24.0,
                         "activation_rows": 3,
+                        "scoring_contract": STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+                        "rendered_weight_dtype": "torch.bfloat16",
                     },
                     "layers.0.q_proj|MXFP8_E4M3": {
                         "qname": "layers.0.q_proj",
@@ -36,6 +40,8 @@ def _cache_with_scores() -> ProductionWeightCache:
                         "score_sum": 6.0,
                         "normalizer": 24.0,
                         "activation_rows": 3,
+                        "scoring_contract": STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+                        "rendered_weight_dtype": "torch.bfloat16",
                     },
                 },
             },
@@ -51,6 +57,8 @@ def _split_cache(*, identity: str | None = "f" * 64) -> ProductionWeightCache:
             "metric": "output_mse",
             "score": 1.0,
             "score_sum": 4.0,
+            "scoring_contract": STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+            "rendered_weight_dtype": "torch.bfloat16",
         },
     }
     return ProductionWeightCache(

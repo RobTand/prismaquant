@@ -2260,11 +2260,20 @@ def _store_rendered_weight_entry(
     return published
 
 
+def _rendered_weight_storage_dtype(
+    weight_dtype: torch.dtype, *, preserve_fp32: bool = False,
+) -> torch.dtype:
+    return (
+        weight_dtype if preserve_fp32 or weight_dtype != torch.float32 else torch.bfloat16
+    )
+
+
 def _canonical_rendered_weight_tensor(
     tensor: torch.Tensor,
     *,
     weight_dtype: torch.dtype,
     preserve_fp32: bool = False,
+    device: torch.device | str = "cpu",
 ) -> torch.Tensor:
     """Return the exact tensor representation a cache shard would contain.
 
@@ -2273,12 +2282,11 @@ def _canonical_rendered_weight_tensor(
     the wider temporary, so its scalar describes the bytes later installed by
     validation/export.
     """
-    target_dtype = (
-        weight_dtype if preserve_fp32 or weight_dtype != torch.float32 else torch.bfloat16
-    )
+    target_dtype = _rendered_weight_storage_dtype(
+        weight_dtype, preserve_fp32=preserve_fp32)
     return tensor.detach().to(
         dtype=target_dtype,
-        device="cpu",
+        device=device,
     ).contiguous()
 
 @dataclass
@@ -2369,6 +2377,46 @@ def _gate_activation_matrix(
 
 def _render_score_record_key(qname: str, fmt: str) -> str:
     return f"{qname}|{fmt.upper()}"
+
+
+STORED_CANDIDATE_RENDER_SCORE_CONTRACT = (
+    "prismaquant.production_render_score.stored_candidate.v1"
+)
+_STORED_CANDIDATE_SCORE_DTYPES = {
+    str(dtype): dtype for dtype in (torch.bfloat16, torch.float16, torch.float32)
+}
+
+
+def _stored_candidate_render_score_dtype(record: object) -> torch.dtype | None:
+    if (not isinstance(record, Mapping)
+            or record.get("scoring_contract") != STORED_CANDIDATE_RENDER_SCORE_CONTRACT):
+        return None
+    dtype = record.get("rendered_weight_dtype")
+    return _STORED_CANDIDATE_SCORE_DTYPES.get(dtype) if isinstance(dtype, str) else None
+
+
+def _qualify_stored_candidate_render_score(
+    record: Mapping[str, object], *, scored_dtype: torch.dtype,
+) -> dict[str, object]:
+    """Stamp a score only after its producer scores the stored representation."""
+    return {
+        **record,
+        "scoring_contract": STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+        "rendered_weight_dtype": str(scored_dtype),
+    }
+
+
+def require_stored_candidate_render_score(
+    record: Mapping[str, object], *, where: str,
+) -> None:
+    """Refuse retained scalars that do not identify the candidate they priced."""
+    if _stored_candidate_render_score_dtype(record) is None:
+        raise ValueError(
+            f"{where}: render score lacks the supported stored-candidate scoring "
+            "contract and scored dtype; resume the production-cache producer "
+            "with the original source and calibration to rescore stored shards, "
+            "or rebuild the cache before synthesizing costs"
+        )
 
 
 def _render_score_normalizer(
@@ -6421,7 +6469,9 @@ def fill_production_weight_cache(
         )
         missing_activation_score = any(
             f in activation_aware_formats
-            and _render_score_record_key(q, f) not in render_score_records
+            and _stored_candidate_render_score_dtype(
+                render_score_records.get(_render_score_record_key(q, f), {})
+            ) is None
             for f in requested
         )
         if missing_activation_render or missing_activation_score:
@@ -6739,14 +6789,16 @@ def fill_production_weight_cache(
                         unwitnessed_resumed_shards.append(
                             f"{qname}@{fmt_key}: {disk_path}: {problem}")
                     score_key = _render_score_record_key(qname, fmt_key)
-                    if score_key not in render_score_records:
+                    if _stored_candidate_render_score_dtype(
+                        render_score_records.get(score_key, {})
+                    ) is None:
                         try:
                             cached = torch.load(
                                 disk_path,
                                 map_location=weight.device,
                                 weights_only=True,
-                            ).to(device=weight.device, dtype=weight.dtype)
-                            render_score_records[score_key] = _render_score_record(
+                            )
+                            record = _render_score_record(
                                 qname=qname,
                                 fmt=fmt_key,
                                 render_format=render_fmt,
@@ -6757,9 +6809,15 @@ def fill_production_weight_cache(
                                 input_global_scale_policy=render_score_policy,
                                 levers=render_options,
                             )
+                            render_score_records[score_key] = _qualify_stored_candidate_render_score(
+                                record, scored_dtype=cached.dtype)
                             del cached
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            if score_key in render_score_records:
+                                raise RuntimeError(
+                                    f"cannot rescore stored candidate {qname}@{fmt_key}; "
+                                    "refusing to reuse its unqualified retained score"
+                                ) from exc
                     render_gate_records.append({
                         "qname": qname,
                         "format": fmt_key,
@@ -6791,19 +6849,21 @@ def fill_production_weight_cache(
                     ),
                     gate_trace=gate_trace,
                 )
-                render_score_records[_render_score_record_key(qname, fmt_key)] = (
-                    _render_score_record(
-                        qname=qname,
-                        fmt=fmt_key,
-                        render_format=render_fmt,
-                        reference_weight=weight,
-                        rendered_weight=w_dq,
-                        activations=activations.get(qname),
-                        activation_max_abs=max_abs,
-                        input_global_scale_policy=render_score_policy,
-                        levers=render_options,
-                    )
+                w_dq = _canonical_rendered_weight_tensor(
+                    w_dq, weight_dtype=weight.dtype, device=weight.device)
+                record = _render_score_record(
+                    qname=qname,
+                    fmt=fmt_key,
+                    render_format=render_fmt,
+                    reference_weight=weight,
+                    rendered_weight=w_dq,
+                    activations=activations.get(qname),
+                    activation_max_abs=max_abs,
+                    input_global_scale_policy=render_score_policy,
+                    levers=render_options,
                 )
+                render_score_records[_render_score_record_key(qname, fmt_key)] = (
+                    _qualify_stored_candidate_render_score(record, scored_dtype=w_dq.dtype))
                 if gate_trace:
                     render_gate_records.append({
                         "qname": qname,
@@ -6819,11 +6879,7 @@ def fill_production_weight_cache(
                         flush=True,
                     )
                 continue
-            # MEM: store as the model's native dtype (bf16 by default)
-            # rather than fp32 — quantize_2d's compute_only path returns
-            # fp32 but we always re-cast at install time, so storing fp32
-            # is wasteful (2× memory).  On 27B this drops the cache from
-            # ~25 GB to ~12 GB.
+            # Store the canonical representation already used by its score.
             shard = _store_rendered_weight_entry(
                 weights=weights,
                 cache_dir_path=cache_dir_path,
@@ -6921,9 +6977,9 @@ def fill_production_weight_cache(
                     "mean after the format activation quantizer; score_sum "
                     "is score multiplied by activation_rows * out_features "
                     "for output metrics, or by parameter count for weight_mse "
-                    "fallback. raw_render_score records the post-render "
-                    "weight-only reconstruction objective used by local "
-                    "render gates."
+                    "fallback. raw_render_score records the stored "
+                    "candidate's reconstruction objective before activation "
+                    "quantization."
                 ),
             },
             "four_over_six": (
@@ -7323,6 +7379,7 @@ def _packed_expert_render_score_record(
     device: torch.device,
     score_rows_source: str,
     input_global_scale_policy: str | None = None,
+    stored_dtype: torch.dtype | None = None,
     levers: NativeRenderLevers,
 ) -> dict[str, object]:
     """Score one packed 3-D expert cache entry honestly.
@@ -7338,6 +7395,8 @@ def _packed_expert_render_score_record(
     excluded from the output metric (averaging an undefined error in would
     be a fabrication) and counted in ``experts_without_activations``;
     ``weight_mse`` is activation-independent and always covers every expert.
+    Producers pass ``stored_dtype`` to score the stored representation one
+    expert at a time. Omitted, this remains a pure score of ``rendered``.
     """
     if reference.dim() != 3:
         raise RuntimeError(
@@ -7356,6 +7415,11 @@ def _packed_expert_render_score_record(
         acts_e = _packed_expert_score_rows(
             per_expert_acts, expert, eval_rows=eval_rows, device=device,
         )
+        rendered_e = rendered[expert].detach().to(device=device)
+        if stored_dtype is not None:
+            rendered_e = _canonical_rendered_weight_tensor(
+                rendered_e, weight_dtype=stored_dtype, preserve_fp32=True,
+                device=device)
         per_expert.append(
             _render_score_record(
                 qname=f"{qname}.e{expert}",
@@ -7364,14 +7428,14 @@ def _packed_expert_render_score_record(
                 reference_weight=reference[expert].detach().to(
                     device=device, dtype=torch.float32,
                 ),
-                rendered_weight=rendered[expert].detach().to(device=device),
+                rendered_weight=rendered_e,
                 activations=acts_e,
                 activation_max_abs=activation_max_abs,
                 input_global_scale_policy=input_global_scale_policy,
                 levers=levers,
             )
         )
-        del acts_e
+        del acts_e, rendered_e
     if not per_expert:
         raise RuntimeError(
             f"packed expert render score for {qname}@{fmt} has zero experts"
@@ -7424,7 +7488,7 @@ def _packed_expert_render_score_record(
         for record in scored
         if record.get("input_global_scale_policy") is not None
     }
-    return {
+    record = {
         "qname": str(qname),
         "format": str(fmt).upper(),
         "render_format": str(render_format).upper(),
@@ -7469,6 +7533,10 @@ def _packed_expert_render_score_record(
         "score_rows_source": str(score_rows_source),
         "score_rows_per_expert_cap": int(eval_rows),
     }
+    return (
+        _qualify_stored_candidate_render_score(record, scored_dtype=stored_dtype)
+        if stored_dtype is not None else record
+    )
 
 
 def _packed_expert_render_gate_record(
@@ -8009,10 +8077,9 @@ def fill_packed_expert_cache_entries(
 
     def _has_render_score(qname: str, fmt: str) -> bool:
         score_key = _render_score_record_key(qname, fmt)
-        return (
-            score_key in packed_score_records
-            or score_key in existing_score_records
-        )
+        return _stored_candidate_render_score_dtype(
+            packed_score_records.get(score_key, existing_score_records.get(score_key, {}))
+        ) is not None
 
     resolved_packed_levers = _resolve_production_render_levers(levers)
     render_options = NativeRenderLevers.from_record(resolved_packed_levers)
@@ -8360,6 +8427,7 @@ def fill_packed_expert_cache_entries(
                         device=device,
                         score_rows_source="fit_corpus_tail",
                         input_global_scale_policy=packed_score_policy,
+                        stored_dtype=resumed_render.dtype,
                         levers=render_options,
                     )
                 )
@@ -8592,6 +8660,7 @@ def fill_packed_expert_cache_entries(
             device=device,
             score_rows_source="fit_corpus_tail",
             input_global_scale_policy=packed_score_policy,
+            stored_dtype=_rendered_weight_storage_dtype(mod_dtype),
             levers=render_options,
         )
         packed_gate_records[gate_key] = _packed_expert_render_gate_record(

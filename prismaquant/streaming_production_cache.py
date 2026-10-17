@@ -53,6 +53,7 @@ from prismaquant.production_weight_cache import (
     _render_base_format,
     _render_score_record,
     _render_score_record_key,
+    _qualify_stored_candidate_render_score,
     _resolve_production_render_levers,
     _resolve_render_mechanism_plan,
     _store_rendered_weight_entry,
@@ -292,6 +293,8 @@ def _render_dense_layer(
                 ),
                 gate_trace=gate_trace,
             )
+            w_dq = _canonical_rendered_weight_tensor(
+                w_dq, weight_dtype=weight.dtype, device=device)
             score_key = _render_score_record_key(qname, fmt)
             render_score = _render_score_record(
                 qname=qname,
@@ -304,6 +307,8 @@ def _render_dense_layer(
                 input_global_scale_policy=stream_score_policy,
                 levers=render_options,
             )
+            render_score = _qualify_stored_candidate_render_score(
+                render_score, scored_dtype=w_dq.dtype)
             render_score_records[score_key] = render_score
             if not retain_rendered:
                 canonical_render = _canonical_rendered_weight_tensor(

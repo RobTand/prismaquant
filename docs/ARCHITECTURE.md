@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, stored-candidate scores.
+Dense and packed production render scores describe the canonical stored dtype.
+Records name `prismaquant.production_render_score.stored_candidate.v1` and
+`rendered_weight_dtype`. Producer resume rescores unqualified retained rows
+against their existing shards after the original identity and activation gates.
+Independent cost synthesis refuses selected unqualified rows; missing-row
+fallback remains explicit. CPU tests establish this numerical contract, not
+served quality or performance.
+
 As of: 2026-10-17, architecture audit continuation, native card lane wording.
 Native export opens a lane-bound card through the existing shipcard owner.
 This correction records the implemented gate derivation; it adds no new gate.
@@ -22941,21 +22950,27 @@ Qwen3.6-27B and Qwen3.5-35B-A3B probe/cost pairs at `TARGET_BITS` were unchanged
 
 ### 4.2 `production-render-score` — the explicit/legacy cost mode
 
-The default until 2026-07-30, now the explicit spelling that reproduces every pre-flip
-artifact (§3.3; the flip is re-vet R2). It builds a format-menu render-score cache and derives cost from the scores
+The default until 2026-07-30, now an explicit cost mode (§3.3; the flip is re-vet R2).
+It builds a format-menu render-score cache and derives cost from the scores
 the render itself recorded (`run-pipeline.sh:665-715`; staged/tail variant `:717-823`).
 Contract at `production_render_cost.py:1-16`: the rendered score is the damage of the weights
 export will actually ship, so rows set `output_mse_measured=False` and the allocator consumes
 `predicted_dloss` directly instead of re-applying the Fisher proxy.
 
-The streamed CB spelling changes **render lifetime only**, never menu membership or score
-semantics. `streaming_production_cache.py` visits every eligible `(Linear, requested CB rung)`,
-hands the cache-canonical tensor to the scalar consumer synchronously, and requires an
-acknowledged pair checkpoint before releasing it. `production_render_cost.py` may consume a
-score-only CB pair only through that attestation; an unattested scalar with no retained shard
-is stale, not a cache hit. The complete pair count is a close condition, so disk pressure can
-bound residency but can never prune the allocator's candidate set (§5.4; contrast the archived
-`PRODUCTION_CACHE_UNION`, §11).
+Dense resident and streamed producers score the canonical tensor representation
+before storing it or passing it to a synchronous consumer. Packed producers
+canonicalize one expert at a time for scoring. Each record names the stored
+candidate contract and dtype; weight, output and raw reconstruction fields
+describe that same representation. The storage dtype policy is unchanged.
+
+Resuming a dense or packed producer repairs an old unqualified score from the
+actual retained shard, without rendering or rewriting its weights. Source,
+calibration, static activation-scale and served-quantizer checks still apply.
+An unqualified selected record presented directly to `production_render_cost`
+refuses with a resume/rebuild instruction, including malformed retained rows.
+A missing record retains the caller's explicit baseline-fallback policy, and
+BF16 retains zero cost. MTP append uses its existing rebuild path; this does
+not add a historical MTP shard repair mechanism.
 
 **M6 — the score field is `weight_mse`, not `h_trace × output_mse`.** The legacy product
 carries activation energy `E‖x‖²` twice, since `h_trace` is already a weight-space Fisher

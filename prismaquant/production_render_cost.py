@@ -4,9 +4,12 @@
 The local cost path estimates layer damage from a separate RTN-style cost
 measurement and then, for measured output MSE, multiplies by
 ``0.5 * h_trace``.  Production cache fill already renders the weights the
-export will ship and records the scorer objective used to accept GPTQ/JSO
-and scale-sweep candidates.  This module turns those rendered scores into
-allocator-compatible ``predicted_dloss`` entries.
+export will ship and scores their stored representation. This module turns
+those scores into allocator-compatible ``predicted_dloss`` entries.
+
+A present selected record must name the stored-candidate scoring contract and
+scored dtype. Older unqualified records require producer resume or rebuild;
+missing records keep the caller's explicit baseline fallback behavior.
 
 Entries synthesized as ``predicted_dloss`` set ``output_mse_measured=False``
 so ``priced_cell.cost_entry_predicted_dloss`` consumes that value directly.
@@ -23,6 +26,7 @@ from pathlib import Path
 
 from prismaquant import format_registry as fr
 from prismaquant.name_projection import strip_weight_leaf
+from prismaquant.production_weight_cache import require_stored_candidate_render_score
 from prismaquant.schemas import refuse_retired_format_plan_identity
 
 
@@ -73,7 +77,9 @@ def _cache_render_score_records(cache: object) -> dict[tuple[str, str], dict]:
     out: dict[tuple[str, str], dict] = {}
     for raw_key, raw_record in records.items():
         if not isinstance(raw_record, Mapping):
-            continue
+            # Its pair key can still name a selected record. Keep that
+            # presence so the contract guard refuses instead of falling back.
+            raw_record = {}
         qname = canonical_cost_name(str(raw_record.get("qname", "")))
         fmt = fr.canonical_format_name(str(raw_record.get("format", "")))
         if not qname or not fmt:
@@ -278,6 +284,8 @@ def synthesize_production_render_cost_payload(
 
             record = _lookup_record(records, qname, fmt_c)
             if record is not None:
+                require_stored_candidate_render_score(
+                    record, where=f"production render cost {qname}@{fmt_c}")
                 metric = str(record.get("metric", ""))
                 if require_output_metric and metric not in {
                     "output_mse",
