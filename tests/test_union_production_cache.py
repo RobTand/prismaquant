@@ -756,7 +756,7 @@ def test_shard_manifest_refuses_a_witness_its_hashed_file_breaks(tmp_path):
     shutil.copy2(shard, copied)
     os.replace(copied, shard)
 
-    with pytest.raises(ValueError, match="is not the file its producer published"):
+    with pytest.raises(ValueError, match="does not match its published file identity"):
         union.create_shard_manifest(
             cache_path=manifest.parent / "cache.pkl",
             cache_dir=manifest.parent / "weights",
@@ -771,6 +771,53 @@ def test_shard_manifest_refuses_a_witness_its_hashed_file_breaks(tmp_path):
             code_identity=CODE_IDENTITY,
             assignment=assignment,
         )
+
+
+@pytest.mark.parametrize("operation", ["manifest", "verify"])
+def test_union_boundary_names_a_server_local_device_mismatch(
+    operation, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    manifests = [
+        _make_shard(
+            tmp_path, shard_id=label,
+            entries={(qname, "NVFP4"): torch.ones(3)},
+            assignment=assignment, witnesses={(qname, "NVFP4"): 0.25},
+        )
+        for label, qname in [("a", "model.a"), ("c", "model.c")]
+    ]
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        manifests, assignment=assignment, output_bundle=output)
+    original_fingerprint = identity.stat_fingerprint
+
+    def another_device_view(path, value):
+        observed = original_fingerprint(path, value)
+        return {**observed, "device": observed["device"] + 1}
+
+    monkeypatch.setattr(identity, "stat_fingerprint", another_device_view)
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "zfs")
+
+    def check_boundary():
+        if operation == "verify":
+            return union.verify_union_manifest(
+                output / "union_manifest.json", assignment=assignment)
+        return union.create_shard_manifest(
+            cache_path=manifests[0].parent / "cache.pkl",
+            cache_dir=manifests[0].parent / "weights",
+            manifest_path=manifests[0].parent / "again.json",
+            shard_id="a", source_model_identity=_source_identity(),
+            settings={"schema": "test.union_settings.v1", "max_act_rows": 512, "dtype": "bf16"},
+            code_identity=CODE_IDENTITY, assignment=assignment,
+        )
+
+    with pytest.raises(ValueError, match="device-only mismatch.*NFS client mount"):
+        check_boundary()
+    # Identical recorded fields through an NFS client retain their admission.
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "nfs4")
+    check_boundary()
 
 
 def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path, monkeypatch):
@@ -817,7 +864,7 @@ def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path, m
         copy_cache.metadata, where="test"
     ).items():
         served = copy_cache.weights[key]
-        assert "is not the file its producer published" in (
+        assert "does not match its published file identity" in (
             nvfp4_joint_global_witness_problem(
                 witness, served=served, path=copied / "weights" / served))
 
@@ -832,7 +879,7 @@ def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path, m
 
     monkeypatch.setattr(
         exporter._native_render_codec, "quantize_dequantize_nvfp4", no_unwitnessed_repack)
-    with pytest.raises(RuntimeError, match="is not the file its producer published"):
+    with pytest.raises(RuntimeError, match="does not match its published file identity"):
         exporter._pack_production_cached_2d(
             "model.a", "NVFP4", nvfp4_global_real_override=torch.tensor(0.25),
             device=torch.device("cpu"),

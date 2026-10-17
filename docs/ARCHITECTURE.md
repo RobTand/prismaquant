@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-17: a resident resume warns about fused NVFP4 shards with
+missing witnesses, using the same profile group resolver as export without
+recalculating weight data. Pre-guard trust history is kept out of the losing
+publisher's render-identity comparison. Witness refusals distinguish a
+device-only view mismatch from other identity changes. Witness-checking
+steps must use the writer's filesystem view or an NFS client mount; the
+NFS server's local ZFS view of `/mnt/shared` is a different device view.
+
 Re-stamped 2026-10-17: exact-union verification checks every recorded fused
 NVFP4 witness after verifying the bundle's bytes. Transfer input stripe
 bundles to the final export filesystem before union; copying a completed
@@ -12,9 +20,11 @@ Unions without fused witnesses retain their existing transfer behavior.
 Re-stamped 2026-10-17: the resident fill publishes a fresh
 `render_identity.json` without replacing an existing claim. If another fill
 publishes first, it reads that identity and applies the normal resume
-comparison, including refusal of a streamed fill's claim. Two concurrent
-starts cannot overwrite each other's initial identities; a matching resident
-identity still resumes. Rendered bytes and pre-guard admission are unchanged.
+comparison, including refusal of a streamed fill's claim. Concurrent first
+publications cannot overwrite an existing initial identity; a matching resident
+identity still resumes. This guarantee covers sidecar creation. Append-only
+sidecar adoption remains a replacement and requires one base fill at a time.
+Rendered bytes and pre-guard admission are unchanged.
 
 Re-stamped 2026-10-17: fused NVFP4 shard witnesses use
 `streamed_model_identity.stat_fingerprint_reuse`, the shared file identity
@@ -20556,7 +20566,9 @@ profile-built `mtp.*` Linears from the probe activation rows into the one
 filtering. `production_cache_stripes.py` emits deterministic layer-local qname stripes, and
 `union_production_cache.py` publishes, verifies, and atomically unions portable disjoint
 cache bundles under exact source/calibration/code/settings/render coverage; this native-only
-set union is not the archived surrogate-driven smart union. The final integration commit is
+set union is not the archived surrogate-driven smart union. Current fused-witness limits
+require transferring input stripe bundles before union at the final export filesystem
+(§5.4); a copied completed union carrying fused witnesses refuses verification and export. The final integration commit is
 deliberately not predicted in this provenance stamp. Earlier same-day stamp (2026-08-29, `review/pr86`, merged to main as #89) for the
 **codebook lane's namespace contract** (§6.2): delegated (stock-CT) and
 source-passthrough group targets now ship in the CANONICAL namespace rather
@@ -26586,7 +26598,7 @@ model/profile, requested formats, work/parameter counts, and SHA-256-bound
 `build_production_cache --include-qnames-file ...` calls into distinct disk-backed cache
 bundles; no worker shares a cache directory or tensor file.
 
-`union_production_cache.py` owns the portable reconciliation workflow:
+`union_production_cache.py` owns reconciliation of portable input stripe bundles:
 
 ```
 python -m prismaquant.union_production_cache manifest ... (--assignment A | --stripe-plan P)
@@ -26614,7 +26626,19 @@ activation maxima, and the MTP receipt. It deliberately refuses all CB keys beca
 identity sidecars do not yet have a union rule. The publisher copies verified tensors into a
 temporary bundle under content/key-addressed names, fsyncs, verifies complete coverage, and
 atomically publishes `production_weight_cache.pkl`, `weights/`, and `union_manifest.json`
-without overwriting an existing output. `verify` must be run again after transfer. This is an
+without overwriting an existing output. Transfer the verified input stripe bundles to the
+final export filesystem before union, then verify the published union there. Keep the input
+stripes if the union may need rebuilding: copying a completed union carrying fused NVFP4
+witnesses voids those witnesses and refuses at verification and export. Bundles without
+fused witnesses retain their byte-verification transfer behavior.
+
+Witness-checking steps (`manifest`, `verify`, export and resident resume) must read through
+the writer's filesystem view or an NFS client mount with matching inode, size and times.
+On this fleet, dl380g10 sees `/mnt/shared` as local ZFS, so it refuses a device-only mismatch
+from an NFS writer. Run those checks on an NFS client instead; that filesystem dependency
+justifies placement there through PrismaBuild. The union step itself may run on dl380g10:
+it SHA-verifies its input bundles and binds new witnesses to its own copies there. No
+server-local/client inode or timestamp equality measurement is claimed. This is an
 operator-selected native cache-build path and is not wired as a `run-pipeline.sh` default
 (`production_cache_stripes.py`, `union_production_cache.py`,
 `tests/test_production_cache_stripes.py`, `tests/test_union_production_cache.py`).
@@ -27208,7 +27232,12 @@ the descriptor the publisher holds across its rename. The shared
 `streamed_model_identity.stat_fingerprint_reuse` predicate admits only `exact` or
 `mount`: on an NFS reader a different client-local device number alone is admitted;
 inode, size, mtime and ctime must match. A local device difference refuses in both
-certified and dev mode. `_pack_production_cached_2d` reads the
+certified and dev mode. On dl380g10, the NFS server, `/mnt/shared` is local ZFS.
+A stripe witnessed on an NFS client must be manifested through the writer's view or an
+NFS client mount; a union witnessed there must also be verified through such a view.
+The refusal names a device-only mismatch and this cheaper remedy. The union step can
+run on the server because it binds its own new copies. Other identity fields must
+still match; a server-local/client pair was not measured. `_pack_production_cached_2d` reads the
 entry first, then refuses unless the bytes the cache served are still that shard
 (`ProductionWeightCache.witnessed_nvfp4_joint_global`) and the export's override equals the
 witnessed global. A resume adopts a sidecar witness only for a shard that is still the
@@ -27224,7 +27253,8 @@ at the final export location, preserving rendered bytes and binding its new copi
 `verify_union_manifest` checks the recorded fused witnesses after the byte checks and
 refuses a copied union with this recovery instruction. Renaming the directory within
 one filesystem keeps its witnesses. Adding or removing
-a hard link changes the shard's ctime and voids the witness too. Not seen: a change that
+a hard link changes the shard's ctime and voids the witness too. Permission, ownership
+and extended-attribute changes also update ctime and void witnesses. Not seen: a change that
 bypasses the kernel's timestamp update, a same-size rewrite or inode reuse within one timestamp
 tick of the publish, and a stale network-filesystem attribute cache. A shard replaced after its
 bytes were read refuses even when those bytes were the witnessed ones. The opt-out re-derives

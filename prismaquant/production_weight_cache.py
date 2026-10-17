@@ -2820,16 +2820,25 @@ def nvfp4_joint_global_witness_problem(
         observed = path.lstat()
     except OSError as exc:
         return f"its shard {path} cannot be checked ({exc.strerror})"
-    identity = file_stat_signature(observed)
     recorded = dict(zip(
         ("device", "inode", "size", "mtime_ns", "ctime_ns"), shard.stat,
     ), path=str(path))
-    reuse = stat_fingerprint_reuse(stat_fingerprint(path, observed), recorded)
+    live = stat_fingerprint(path, observed)
+    reuse = stat_fingerprint_reuse(live, recorded)
     if not stat.S_ISREG(observed.st_mode) or reuse not in {"exact", "mount"}:
+        changed = [field for field in recorded if live[field] != recorded[field]]
+        if stat.S_ISREG(observed.st_mode) and changed == ["device"]:
+            return (
+                f"its shard {path} does not match its published file identity: "
+                f"device-only mismatch ({live['device']} != {recorded['device']}). "
+                "A server-local filesystem view can cause this; check through "
+                "the writer's view or an NFS client mount"
+            )
         return (
-            f"its shard {path} is not the file its producer published (file "
-            f"identity {identity} != witnessed {shard.stat}): it was replaced, "
-            "modified or copied since"
+            f"its shard {path} does not match its published file identity "
+            f"(changed fields: {', '.join(changed) or 'file type'}). "
+            "Replacement, content changes, hard links, permissions, ownership "
+            "or extended-attribute changes can invalidate a witness"
         )
     return None
 

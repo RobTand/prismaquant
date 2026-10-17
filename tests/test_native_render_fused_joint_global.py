@@ -361,7 +361,7 @@ def test_streamed_and_resident_fused_renders_are_bit_identical(rendered):
 
 
 UNWITNESSED = "carries no fused-sibling joint-global witness.*fresh --cache-dir"
-UNBOUND = "is not the file its producer published.*fresh --cache-dir"
+UNBOUND = "does not match its published file identity.*fresh --cache-dir"
 
 
 def _without_witness(cache):
@@ -557,7 +557,7 @@ def test_witness_binding_names_each_way_bytes_can_differ(tmp_path):
     assert "serves it from other" in nvfp4_joint_global_witness_problem(
         bound, served="other__NVFP4.pt", path=tmp_path / "other__NVFP4.pt")
     _replace_by_copy(shard)
-    assert "is not the file its producer published" in (
+    assert "does not match its published file identity" in (
         nvfp4_joint_global_witness_problem(bound, served=shard.name, path=shard))
     shard.unlink()
     assert "cannot be checked" in nvfp4_joint_global_witness_problem(
@@ -611,9 +611,10 @@ def test_fused_witness_refuses_other_local_devices_even_in_dev_mode(
     observed = file_stat_signature(shard.lstat())
     witness = NVFP4JointGlobalWitness(0.5, PublishedShard(
         shard.name, (observed[0] + 1, *observed[1:])))
-    assert "is not the file its producer published" in (
-        nvfp4_joint_global_witness_problem(
-            witness, served=shard.name, path=shard))
+    problem = nvfp4_joint_global_witness_problem(
+        witness, served=shard.name, path=shard)
+    assert "device-only mismatch" in problem
+    assert "writer's view or an NFS client mount" in problem
 
 
 @pytest.mark.parametrize("field", [1, 2, 3, 4], ids=["inode", "size", "mtime", "ctime"])
@@ -630,7 +631,7 @@ def test_fused_witness_refuses_file_identity_drift_across_nfs_mounts(
     changed[0] += 1
     changed[field] += 1
     witness = NVFP4JointGlobalWitness(0.5, PublishedShard(shard.name, tuple(changed)))
-    assert "is not the file its producer published" in (
+    assert "does not match its published file identity" in (
         nvfp4_joint_global_witness_problem(
             witness, served=shard.name, path=shard))
 

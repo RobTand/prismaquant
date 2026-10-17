@@ -24,6 +24,15 @@ witnesses. Verification and export refuse that copy. Rebuild the union from
 its verified input stripe bundles at the final location; no weight re-render
 is needed. Bundles without fused witnesses retain their byte-verification
 transfer behavior.
+
+Witness-checking steps (manifest, verify, export and resident resume) require
+its writer's filesystem view or an NFS client mount with matching inode,
+size and timestamps. The fleet's NFS server dl380g10 sees /mnt/shared as
+local ZFS and refuses device-only drift from an NFS writer. That filesystem
+dependency justifies placing those checks on an NFS client through
+PrismaBuild. Union itself can run on the server: its SHA-verified copies
+receive witnesses for that server's own view. Server-local/client inode and
+timestamp equality has not been measured.
 """
 from __future__ import annotations
 
@@ -789,7 +798,7 @@ def _backing_records(
 def _require_witnesses_bind_hashed_files(
     cache: ProductionWeightCache, *, cache_dir: Path, where: str, remedy: str,
 ) -> None:
-    """Refuse a shard whose fused witnesses do not bind the files it hashed.
+    """Refuse a cache whose fused witnesses do not bind the files it hashed.
 
     Runs after ``_backing_records`` hashed every backing file. A witness that
     still binds its shard then shows the hashed bytes are its producer's
@@ -798,7 +807,7 @@ def _require_witnesses_bind_hashed_files(
     entries the shard does not hold are the union merge's to refuse.
     """
     for key, witness in nvfp4_joint_global_witnesses(
-        cache.metadata, where="cache shard"
+        cache.metadata, where=where
     ).items():
         value = cache.weights.get(key)
         if value is None:
@@ -861,7 +870,11 @@ def create_shard_manifest(
     records = _backing_records(cache, cache_dir=cache_dir)
     _require_witnesses_bind_hashed_files(
         cache, cache_dir=cache_dir, where="cache shard",
-        remedy="re-render the shard into a fresh --cache-dir before manifesting it",
+        remedy=(
+            "for a device-only mismatch, run manifest through the writer's "
+            "view or an NFS client mount; otherwise re-render the shard into "
+            "a fresh --cache-dir before manifesting it"
+        ),
     )
     campaign = build_campaign_identity(
         cache,
@@ -1929,9 +1942,10 @@ def verify_union_manifest(
     _require_witnesses_bind_hashed_files(
         cache, cache_dir=cache_dir, where="union cache",
         remedy=(
-            "rebuild the union from the verified input stripe bundles at the "
-            "final export location; copying a completed union does not "
-            "transfer its fused witnesses"
+            "for a device-only mismatch, verify through the writer's view or "
+            "an NFS client mount; for a copied union, rebuild the union from "
+            "the verified input stripe bundles at the final export location, "
+            "because copying a completed union does not transfer its fused witnesses"
         ),
     )
     return payload, cache
