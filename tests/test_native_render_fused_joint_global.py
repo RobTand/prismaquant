@@ -617,6 +617,46 @@ def test_fused_witness_refuses_other_local_devices_even_in_dev_mode(
     assert "writer's view or an NFS client mount" in problem
 
 
+@pytest.mark.parametrize("cause", ["device", "ctime"])
+def test_export_witness_refusal_distinguishes_view_and_metadata_changes(
+    cause, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "zfs")
+    shard = tmp_path / "entry__NVFP4.pt"
+    expected = torch.eye(2)
+    torch.save(expected, shard)
+    published = list(file_stat_signature(shard.lstat()))
+    if cause == "device":
+        published[0] += 1
+    else:
+        # Only permissions/ctime change. The payload and its inode stay put.
+        mode = shard.stat().st_mode & 0o777
+        shard.chmod(0o600 if mode != 0o600 else 0o644)
+        assert shard.stat().st_ctime_ns != published[4]
+    key = ("entry", "NVFP4")
+    cache = ProductionWeightCache(
+        weights={key: shard.name}, levers={}, cache_dir=str(tmp_path),
+        metadata={NVFP4_JOINT_GLOBAL_WITNESS_KEY: nvfp4_joint_global_witness_section({
+            key: NVFP4JointGlobalWitness(0.5, PublishedShard(shard.name, tuple(published))),
+        })},
+    )
+    assert torch.equal(cache.get(*key), expected)
+    with pytest.raises(RuntimeError) as refusal:
+        cache.witnessed_nvfp4_joint_global(*key, where="export")
+    message = str(refusal.value)
+    assert "The cache cannot show these bytes are the render" in message
+    assert "serves are not the render" not in message
+    assert "For a device-only mismatch, read through the writer's view" in message
+    assert "otherwise re-render the production cache into a fresh --cache-dir" in message
+    if cause == "device":
+        assert "device-only mismatch" in message
+    else:
+        assert "changed fields: ctime_ns" in message
+        assert "permissions, ownership" in message
+
+
 @pytest.mark.parametrize("field", [1, 2, 3, 4], ids=["inode", "size", "mtime", "ctime"])
 def test_fused_witness_refuses_file_identity_drift_across_nfs_mounts(
     field, tmp_path, monkeypatch,

@@ -1847,11 +1847,12 @@ class ProductionWeightCache:
         )
         if problem is not None:
             raise RuntimeError(
-                f"{where} entry {entry}: {problem}. The bytes this cache "
-                "serves are not the render its producer witnessed. Re-render "
-                "the production cache into a fresh --cache-dir, or export from "
-                "the directory the fill wrote: a copy of a cache directory "
-                "carries no witness."
+                f"{where} entry {entry}: {problem}. The cache cannot show "
+                "these bytes are the render its producer witnessed. For a "
+                "device-only mismatch, read through the writer's view or an "
+                "NFS client mount; otherwise re-render the production cache "
+                "into a fresh --cache-dir. A copied cache directory does not "
+                "retain its fused witnesses."
             )
         return witness.joint_global
 
@@ -6767,8 +6768,10 @@ def fill_production_weight_cache(
         print(
             "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
             f"witness for {len(unwitnessed_resumed_shards)} resumed shards "
-            "with missing or unbound witnesses; export refuses them until "
-            "they are re-rendered. Remove only the affected shards and resume "
+            "with missing or unbound witnesses; export refuses unverified "
+            "fused renders. For device-only mismatches, use the writer's view "
+            "or an NFS client mount. Other causes require re-rendering. "
+            "Remove only the affected shards and resume "
             "with the matching render identity, or use a fresh --cache-dir. "
             f"sample={unwitnessed_resumed_shards[:3]}",
             flush=True,
