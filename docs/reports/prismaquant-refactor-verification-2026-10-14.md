@@ -1393,3 +1393,53 @@ The earlier broad producer delivery with two baseline failures stays failed.
 Rob left historical warning #2697 open without a retained-artifact audit;
 no affected shipped artifact has been established. A1/S2 remain accepted
 partial scopes, and parent #1295 remains open.
+
+
+## Witness repair guidance scope correction, 2026-10-17
+
+The earlier references to targeted shard removal and resume apply only to a
+current resident-fill directory with a matching `render_identity.json`.
+Streamed fills cannot resume and need a fresh cache directory. An exact union
+can instead be rebuilt from its verified input stripes at the final export
+location. For a copied cache, export from the original directory. The export
+refusal now labels these alternatives by producer; its missing-witness branch
+and the live architecture text also name the resident-only scope.
+
+A resident resume can recover device-only mismatches through the writer's view
+or an NFS client mount by rerunning the resume while its original witness
+records remain on disk. If that resume rendered any fused entry, its sidecar
+rewrite has dropped the unbound records. Switching views cannot restore those
+records; remove those shards and render them again with the matching identity.
+The warning now states both conditions. Witness admission and sidecar rewrite
+behavior are unchanged.
+
+At source `e18ea0388b5f3f0b4c80d04b98eeb5a2b9d44e1e`, the five affected test files passed
+125 tests with one CUDA setup skip; all 126 collected cases completed. Tests
+cover chmod and byte-identical replacement of actual streamed-fill and verified
+two-stripe union caches, full and partial resident resumes with actual witness
+sidecar survival and adoption, and bit-exact exports after the indicated repair.
+Three changed Python files compiled through PrismaBuild. Each accepted action
+was checked against its terminal, CAS result, logs and all 3,720 tracked source
+blobs. The first two union cases used one stripe and failed at the existing
+minimum-two-stripe guard before reaching the export check. That fixture failure
+stays failed; the corrected two-stripe fixture passed.
+
+The improved export device case requires predicate-specific diagnosis text,
+which the wrapper cannot supply. A separately frozen mutation suppressing that
+predicate branch failed the case at the intended assertion. The mutation was
+never integrated or counted as passing evidence. The predicate and export test
+are byte-identical after the union fixture correction, recorded in
+`r9-mutation-applicability.json`.
+
+The evidence remains under `/home/rob/tmp/pq-claude-review-20261016/` in
+`r9-guidance-retry-green-acceptance.json`,
+`r9-guidance-retry-compile-acceptance.json`, `r9-guidance-red-acceptance.json`
+and `r9-guidance-fixture-failure.json`, with action keys and sealed result or
+failed-terminal hashes. Submission arguments are the corresponding
+`r9-guidance-*-command.json` files; `*.log` and `*-pbtest.json` retain results.
+`prove_final_guidance_delta.py` and `final-guidance-delta-*.json` show that the
+production delta after the 960b full/GPU baseline is three diagnostic texts
+and the two previously qualified typing imports. Arithmetic and admission
+remain unchanged. These results compose with the earlier source-specific
+checks; they are not a full-suite or GPU run at the later source. Final
+independent review remains required before the authorized push.
