@@ -2785,9 +2785,9 @@ def main(argv=None) -> int:
     joint.add_argument("--prepared-sha256", default=None)
     joint.add_argument("--head-grace-s", type=int, default=None,
                        help="stall allowance in seconds for the 'head' phase; "
-                            "the default 1800 is sized for a fresh run, and a "
-                            "resume's cell-roster pass commits nothing while it "
-                            "runs (#678), so size this from the observed rate")
+                            "default 1800; size for observed intervals without "
+                            "progress during source authentication, model "
+                            "construction and production-cache loading")
     joint.add_argument("--resume", action="store_true",
                        help="forwarded to the pass, which resumes from its "
                             "identity-bound checkpoints")
