@@ -373,6 +373,10 @@ def compare(
 ) -> tuple[int, list[str]]:
     """Return `(exit_code, lines)` — the whole verdict, no printing."""
     va, vb = float(a[metric]), float(b[metric])
+    if not (math.isfinite(va) and math.isfinite(vb)):
+        return 3, [f"metric: {metric}",
+                   "REFUSED: both decision metrics must be finite; "
+                   "no comparable delta or cross-stack range."]
     delta = vb - va
     rel = (delta / va) if va else float("nan")
 

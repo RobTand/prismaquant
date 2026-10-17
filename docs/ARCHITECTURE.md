@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, finite comparison metrics.
+`tools/kl_ab.py` refuses an explicitly selected nonfinite value in either
+comparison arm before computing a delta or cross-stack range. Finite zero
+remains valid; automatic metric selection retains its existing finite-value
+fallback. `gold-nonfinite-green-v1` passes 69 CPU cases and compiles both
+touched files. Source, logs, terminal outcome and CAS receipt are verified
+against parent `2660c1085dd` plus the recorded overlays. The records are
+fixtures, so this establishes comparison admission, not served quality.
+
 As of: 2026-10-17, architecture audit continuation, netbench tensor ownership.
 The TP netbench driver retains the Torch module returned by its process-group
 initializer. Bandwidth reception reads the supplied tensor after synchronous
