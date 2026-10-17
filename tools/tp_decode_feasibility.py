@@ -563,6 +563,8 @@ def _print_caveats() -> None:
 
 
 def mode_decide(args: argparse.Namespace) -> int:
+    if not math.isfinite(args.link_gbps) or args.link_gbps <= 0:
+        raise SystemExit("--link-gbps must be finite and positive")
     per_size, flat, label = _resolve_decide_latency(args)
     lower_bound = label is LABEL_LOOPBACK
     print("=" * 78)
@@ -664,14 +666,22 @@ def _resolve_decide_latency(
                 raise SystemExit(
                     f"latency JSON result for {result['bytes']}B lacks percentile(s): "
                     + ", ".join(sorted(missing)))
-            per_size[int(result["bytes"])] = {
-                field: float(result[field]) for field in fields}
+            values = {field: float(result[field]) for field in fields}
+            for field, value in values.items():
+                if not math.isfinite(value) or value < 0:
+                    raise SystemExit(
+                        f"latency JSON {field} for {result['bytes']}B "
+                        "must be finite and nonnegative")
+            per_size[int(result["bytes"])] = values
         raw = str(payload.get("label", ""))
         label = LABEL_LOOPBACK if "LOOPBACK" in raw else (
             LABEL_NETBENCH if raw.startswith("MEASURED") else LABEL_ASSUMED)
         return per_size, None, label
     if args.latency_us is not None:
-        return None, float(args.latency_us), LABEL_ASSUMED
+        flat = float(args.latency_us)
+        if not math.isfinite(flat) or flat < 0:
+            raise SystemExit("--latency-us must be finite and nonnegative")
+        return None, flat, LABEL_ASSUMED
     raise SystemExit("decide needs --latency-us N (assumed) or --latency-json FILE (measured)")
 
 

@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, TP physical input domain.
+The standalone TP decision refuses nonfinite or negative flat latency,
+nonfinite or negative displayed/selected JSON latency coordinates, and
+nonfinite or nonpositive link bandwidth. Refusal precedes decision output;
+invalid bandwidth also refuses before latency-file intake. Zero latency
+remains legal, and assumed inputs and unknown TPOT keep their labels.
+`tp-decode-domain-green-v1` passes 71 CPU cases and compiles both touched
+files. Source, logs, terminal outcome and CAS receipt are verified against
+parent `a19784e8e3f` plus the recorded overlays. This validates input and
+arithmetic contracts, with no new network or runtime performance result.
+
 As of: 2026-10-17, architecture audit continuation, teacher dump ownership.
 Stored-dump KL reads the teacher document once, hashes those owned bytes and
 parses the same bytes. Its teacher receipt therefore identifies the input
