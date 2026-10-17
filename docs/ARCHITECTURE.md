@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-004. Artifact registration
+holds a stable sibling file lock while reloading the current registry, checking
+record identity and atomically publishing the next record list. An acknowledged
+registration survives a stale or concurrent writer. The instance snapshot
+changes only after publication succeeds; read methods retain snapshot semantics.
+
 As of: 2026-10-17, architecture audit continuation, RE-05. Sensitivity-card
 admission validates packed expert gradient sums, activation sums, routed token
 counts and optional absolute maxima before pricing. Present expert statistics

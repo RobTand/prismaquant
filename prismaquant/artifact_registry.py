@@ -1,8 +1,10 @@
 """JSON-backed registry for shipped and candidate PrismaQuant artifacts."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import stat
 import uuid
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
@@ -104,10 +106,24 @@ class ArtifactRegistry:
         self._records = self._load()
 
     def add(self, record: ArtifactRecord) -> None:
-        if any(existing.record_id == record.record_id for existing in self._records):
-            raise ValueError(f"duplicate artifact record_id: {record.record_id}")
-        self._records.append(record)
-        self._write()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(lock_path, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError(f"artifact registry lock is not a regular file: {lock_path}")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            records = self._load()
+            if any(existing.record_id == record.record_id for existing in records):
+                raise ValueError(f"duplicate artifact record_id: {record.record_id}")
+            records.append(record)
+            self._write(records)
+            self._records = records
+        finally:
+            os.close(descriptor)
 
     def find_by_layer_config(self, layer_config: dict | str) -> ArtifactRecord | None:
         layer_sha = resolve_layer_config_sha(layer_config)
@@ -198,9 +214,8 @@ class ArtifactRegistry:
             raise ValueError(f"{self.path}: registry JSON must be a list or object")
         return [ArtifactRecord.from_dict(record) for record in raw_records]
 
-    def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"records": [record.to_dict() for record in self._records]}
+    def _write(self, records: list[ArtifactRecord]) -> None:
+        payload = {"records": [record.to_dict() for record in records]}
         tmp = self.path.with_name(
             f".{self.path.name}.{uuid.uuid4().hex}.tmp"
         )
