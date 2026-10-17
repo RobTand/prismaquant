@@ -42,9 +42,7 @@ def test_env_garbage_falls_back_to_default(monkeypatch):
 
 
 def test_joint_mse_rule_uses_the_configured_levels(monkeypatch):
-    """The JOINT_MSE scale rule must select over exactly _NVFP4_JOINT_SCALE_LEVELS.
-    With the {6,4} default it equals the four_over_six rule; with the full grid
-    a group whose optimum is level 3 must select a smaller scale than {6,4}."""
+    """The default grid matches FourOverSix; a larger grid cannot raise MSE."""
     m = _resolve(monkeypatch, None)
     # group of 16 whose magnitudes favor clipping to 4 over 6 is hard to force;
     # instead assert the JOINT default matches FourOverSix exactly.

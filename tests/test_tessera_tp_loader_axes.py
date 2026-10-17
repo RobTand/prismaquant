@@ -10,14 +10,10 @@ answer different questions:
 * **loader axis** -- ``tensor_parallel.units[].loader_axes``: does this
   build's loader accept a cut on this axis at all?
 
-The third is what this file pins. It is a published STATUS, not prose and not
-a bound: the pinned contract refuses ``TESSERA_E2M1_K2`` on the ``row`` axis
-because a row shard begins mid-column and the span-2 decoders supply
-``state_{-1}`` themselves, and it refuses it on every rank, so no world size
-makes it legal. A column-parallel Linear splits vLLM's output features, which
-are this unit's rows, so ``PARALLEL_COLUMN`` is the cut that asks about
-``row`` -- the same mapping the geometry leg uses, and inverting it would gate
-exactly the wrong half of a model.
+These tests read the pinned loader-axis table and separately exercise a
+synthetic historical K2 row-axis refusal. A refused axis is illegal at every
+world size. A column-parallel Linear splits vLLM's output features, which are
+this unit's rows, so ``PARALLEL_COLUMN`` asks about the ``row`` axis.
 """
 from __future__ import annotations
 
@@ -39,7 +35,7 @@ BF16 = "TESSERA_BF16_K1"
 SHAPE = (2048, 1024)
 
 _BOTH_SHARDED = {"row": "sharded", "column": "sharded"}
-#: What the pinned contract publishes for the K2 family.
+#: Historical K2 refusal used by synthetic policy tests.
 _COLUMN_CUT_REFUSED = {"row": "refused", "column": "sharded"}
 
 

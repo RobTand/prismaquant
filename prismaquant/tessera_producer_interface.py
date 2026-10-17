@@ -99,10 +99,6 @@ def producer_authority_argv(tessera_checkout, authority_path,
     """
     contract = json.loads(checkout_contract_path(tessera_checkout).read_text())
     if not advertises_producer_authority(contract, driver):
-        # Reaching here means the block is present and well-formed:
-        # advertises_producer_authority raises on a missing or malformed
-        # block and returns False only when the drivers list omits driver.
-        # Say exactly that, not the vaguer "publishes reuse_authority".
         if contract.get("producer_interface") is not None:
             raise ProducerInterfaceError(
                 f"the Tessera contract's producer_interface.reuse_authority "
