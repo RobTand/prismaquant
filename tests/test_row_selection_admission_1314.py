@@ -1,12 +1,13 @@
 """Check the existing whole-group contract before admitting a campaign row."""
 
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]

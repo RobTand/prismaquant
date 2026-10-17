@@ -1,10 +1,11 @@
 """The actual campaign parser is a cold authority for CLI syntax and defaults."""
-from prismaquant import tessera_campaign_rows as campaign_rows
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 from prismaquant.tessera_campaign_cli import parse_campaign_arguments
 from prismaquant.tessera_campaign_requests import (

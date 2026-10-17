@@ -7,7 +7,6 @@ them durably on disk at the moment the worker signalled them (PrismaBuild
 row walks and the quiet it is allowed in each, and a report the campaign makes
 after every journal flush.
 """
-from prismaquant import tessera_campaign_rows as campaign_rows
 import importlib
 import json
 import os
@@ -16,6 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch

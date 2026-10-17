@@ -10,12 +10,13 @@ sidecar means a pre-guard directory: warn, do not refuse.
 """
 from __future__ import annotations
 
-from prismaquant.render_cache_paths import cache_weight_filename
 
 import json
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant.render_cache_paths import cache_weight_filename
 import torch
 import torch.nn as nn
 

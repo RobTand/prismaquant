@@ -243,7 +243,6 @@ def shared_mount(scratch, monkeypatch):
 
 @pytest.fixture()
 def campaign(scratch, shared_mount, monkeypatch):
-
     return _workspace(scratch)
 
 

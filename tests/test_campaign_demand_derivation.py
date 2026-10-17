@@ -12,11 +12,12 @@ measurement of a real checkpoint.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 import math
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 GIB = 1024 ** 3
 

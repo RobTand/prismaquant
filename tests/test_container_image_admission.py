@@ -26,14 +26,15 @@ apart fail here.
 """
 from __future__ import annotations
 
-from prismaquant import campaign_container_spec as container_spec
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 import sys
 import types
 
 import pytest
+
+from prismaquant import campaign_container_spec as container_spec
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 from prismaquant.joint_campaign_ledger import seal_quantum_record
 

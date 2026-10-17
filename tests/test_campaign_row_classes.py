@@ -17,12 +17,13 @@ Three properties, in the order they matter.
 """
 from __future__ import annotations
 
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 from pathlib import Path
 import sys
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

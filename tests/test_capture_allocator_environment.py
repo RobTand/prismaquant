@@ -1,8 +1,9 @@
 """A bounded capture must release completed CPU allocations before its next layer."""
-from prismaquant import tessera_campaign_rows as campaign_rows
 import json
 
 import pytest
+
+from prismaquant import tessera_campaign_rows as campaign_rows
 
 from test_tessera_campaign_container import dispatch, spec
 
