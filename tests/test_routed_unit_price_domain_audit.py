@@ -43,6 +43,22 @@ def test_public_selector_refuses_negative_exact_wire_bytes(rung):
             costs, {"unit": BASE_FMT}, byte_budget=30)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("predicted_dloss", True),
+    ("wire_bytes", True),
+    ("predicted_dloss", 10 ** 400),
+])
+def test_public_selector_keeps_typed_refusal_for_unusable_numeric_values(field, value):
+    costs = {"unit": {
+        BASE_FMT: {"predicted_dloss": 1.0, "wire_bytes": 10},
+        UP_FMT: {"predicted_dloss": 0.5, "wire_bytes": 20},
+    }}
+    costs["unit"][UP_FMT][field] = value
+    with pytest.raises(projection.ExpertProjectionError, match="unit"):
+        projection.select_priced_unit_upgrades(
+            costs, {"unit": BASE_FMT}, byte_budget=10)
+
+
 @pytest.mark.parametrize("base_loss,up_loss,base_wire", [
     (-1.0, -2.0, 10),
     (1.0, 0.5, 0),

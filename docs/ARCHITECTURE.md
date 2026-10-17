@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, routed price inputs.
+The shared routed-unit price reader refuses nonfinite predicted loss and
+negative or noninteger serialized byte counts before allocation. Finite
+signed losses and zero-byte entries remain valid. The byte-budget algorithm
+and format menu are unchanged; these checks add no measured price evidence.
+
 As of: 2026-10-17, architecture audit continuation, standalone activation tables.
 The GLM dense acquisition adapter uses the existing platform-entry parser and
 passes the declared image to native preparation. Its table retains the same

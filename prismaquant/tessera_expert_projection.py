@@ -39,6 +39,7 @@ RobTand/prismaquant#183.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -717,8 +718,8 @@ WIRE_DIR_KEY = "tessera_expert_wire_dir"
 def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
     """One cost row's ``(predicted_dloss, wire_bytes)``, or refuse by name.
 
-    Exact fields or nothing: a row that carries neither a float-able
-    ``predicted_dloss`` nor an integer ``wire_bytes`` is not a price this
+    Exact fields or nothing: a row needs a finite ``predicted_dloss`` and
+    nonnegative integer ``wire_bytes`` to be a price this
     allocator may spend, and guessing one would spend the byte budget on a
     number nobody measured.
     """
@@ -736,10 +737,21 @@ def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
     if dloss is None or isinstance(dloss, bool) or not isinstance(dloss, (int, float)):
         raise ExpertProjectionError(
             f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not a number")
+    try:
+        dloss = float(dloss)
+    except OverflowError as exc:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not finite") from exc
+    if not math.isfinite(dloss):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not finite")
     if type(wire) is not int:
         raise ExpertProjectionError(
             f"{unit}@{fmt}: priced row wire_bytes {wire!r} is not an integer")
-    return float(dloss), int(wire)
+    if wire < 0:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row wire_bytes {wire!r} is negative")
+    return dloss, wire
 
 
 def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
