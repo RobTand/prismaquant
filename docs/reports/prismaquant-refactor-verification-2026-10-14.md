@@ -1294,3 +1294,11 @@ Full CLI batch/resume parity remains unqualified because the frozen x86 CUDA
 producer environment does not run in this ARM image. No serving, model-quality
 or performance run is claimed. API/serving pins and active installations remain
 unchanged.
+
+
+### Worker freeze reference correction, 2026-10-17
+
+The depth-C import-cleanup freeze `bd80f94c2f` above names its author branch.
+Its equivalent delivered commit is `21ae51c230`, an ancestor of candidate
+`2fbbc70aae`. Both commits carry the identical `tests/test_ship_gates.py` blob
+`a92e79382b3d9beb95a2d60dcf6681ba14b0d812`; the recorded worker run and its counts remain history.

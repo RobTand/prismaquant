@@ -695,10 +695,11 @@ def _surrogate_pairs(
 ) -> tuple[list[tuple[int, float, float]], dict]:
     """``(index, surrogate, kl)`` pairs on one surrogate basis, and a report.
 
-    Values on different bases are different quantities -- the validation row
-    estimate, a pre-label row's recorded sum, an unlabeled historical value --
-    so rows on more than one basis are not ranked together. Every row stays a
-    measurement either way; the report says what was paired and what was not.
+    Distinct recorded basis labels define separate cohorts. Pre-label row
+    sums and explicit historical ``surrogate_loss`` values both lack a label
+    and share the ``None`` cohort. Rows on more than one recorded basis are
+    not ranked together. Every row stays a measurement either way; the report
+    says what was paired and what was not.
     """
     usable: list[tuple[int, float, float]] = []
     counts: dict = {}

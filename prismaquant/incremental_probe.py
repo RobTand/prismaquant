@@ -4322,7 +4322,8 @@ SAMPLE_PARALLEL_RETIRED = (
     "and per-worker source census were built on the strict-Ada FP8-CB "
     "artifact census, archived with the Gridbook lane "
     "(archive/gridbook_lane_2026-09-02/). Run without "
-    "--global-calibration-tensor/--sample-partition-index."
+    "--global-calibration-tensor/--sample-partition-index. Execution snapshot: "
+    "archive/sample_parallel_probe_2026-10-15/."
 )
 SAMPLE_PARALLEL_RETIRED_HELP = (
     "Retired sample-parallel mode; see archive/sample_parallel_probe_2026-10-15/."
