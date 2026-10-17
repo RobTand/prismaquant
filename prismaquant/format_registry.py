@@ -210,7 +210,8 @@ class FormatSpec:
           - For block/group quantization (group_size > 0), groups are taken
             along the innermost dimension and repeated for every outer row.
           - For per-channel formats (group_size == 0), one scale is used per
-            output channel / row, which for Linear weights is shape[0].
+            outer row. Packed tensors include every expert's output rows.
+            Rank-one tensors retain one scale per element.
         """
         if len(shape) == 0:
             return 0
@@ -228,12 +229,14 @@ class FormatSpec:
                 * math.ceil(int(shape[-2]) / rows)
                 * math.ceil(int(shape[-1]) / cols)
             )
-        if self.group_size == 0:
-            return int(shape[0]) if len(shape) >= 1 else 1
         if len(shape) == 1:
             n_params = int(shape[0])
+            if self.group_size == 0:
+                return n_params
             return math.ceil(n_params / self.group_size)
         outer = int(math.prod(shape[:-1]))
+        if self.group_size == 0:
+            return outer
         inner = int(shape[-1])
         return outer * math.ceil(inner / self.group_size)
 

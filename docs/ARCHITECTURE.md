@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-02. `FormatSpec`
+counts per-channel scales over every outer row of a packed tensor, including
+every expert's output rows. The native FP8 codec, footprint accounting and
+allocator candidate prices therefore use the same scale population. Rank-one,
+grouped and two-dimensional block-scale conventions retain their existing
+geometry. This changes byte prices, not format admission or encoded weights.
+
 As of: 2026-10-17, architecture audit continuation, C-002. Campaign attempts
 retain ownership until their entire process group stops, including after a
 successful leader exit. Linux process identity and pidfds protect teardown.
