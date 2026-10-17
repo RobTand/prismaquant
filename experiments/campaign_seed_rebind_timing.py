@@ -9,8 +9,10 @@ checkpoint and wire directory as the seed, and the rollout configuration's
 publication/identity flags -- and records where the time goes: the resident
 prefetch, the identity bind, the adoption (per-anchor identity and wire
 receipt re-verification, wire re-read bytes), and the final journal and cost
-write.  Nothing is encoded when every anchor is adopted, so the elapsed time
-is the rebind cost a rollout pays per row.
+write. Nothing is encoded when every requested anchor is adopted, but this
+driver counts final unit shards rather than proving complete anchor adoption
+or counting encoder calls. Its elapsed time can include recovery of missing
+anchors and does not independently establish pure rebind cost.
 
 ``prepare`` sizes the action through the dispatcher's own plan for the row
 with the extra flags; ``run`` executes it inside the admitted action.
@@ -169,7 +171,7 @@ def run(path, expected):
         raise RuntimeError(f'rebind journalled {adopted} units of {p["seed_unit_shards"]} seeded')
     write(out/'result.json', dict(schema=SCHEMA, plan_sha256=expected, adopted_units=adopted,
         identity_sha256=manifest['identity_sha256'], wall_seconds=elapsed,
-        scope='One completed row re-verified through --seed-checkpoint under a new package source; no anchor encoded.'))
+        scope='Seeded campaign recovery under a new package source; adopted_units is the final journal unit count, not proof of anchor adoption. Encoder calls are not counted; missing-anchor work may be included.'))
 
 
 def main():

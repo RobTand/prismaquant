@@ -101,8 +101,7 @@ def test_the_row_validation_after_the_last_window_runs_under_its_span(
 
 
 def test_a_band_serial_handoff_is_written_under_its_own_span(tmp_path, monkeypatch):
-    """The handoff writes n_probes x n_batches cotangent entries after the
-    last window; they are the one sizable write in the tail."""
+    """The tail finalizes the streamed handoff under its own handoff-out span."""
     calls = []
 
     def emitter(record, adjoint_slice, execution):
