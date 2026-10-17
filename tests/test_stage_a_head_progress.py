@@ -25,8 +25,7 @@ if str(REPO) not in sys.path:
 
 from prismaquant.joint_cost_stage_a import (  # noqa: E402
     run_adjoint_capture_core, stage_a_forward_observer)
-from prismaquant.joint_layer_quanta import (  # noqa: E402
-    adjoint_read_plan_phase_names)
+from prismaquant.joint_quantum_row import (adjoint_read_plan_phase_names)
 from prismaquant.joint_run_progress import JointRunProgress  # noqa: E402
 from test_joint_cost_quantum_runtime import _execution  # noqa: E402
 from test_layer_major_boundary_capture import draw, fixture  # noqa: E402

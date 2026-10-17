@@ -1569,7 +1569,9 @@ def fill_packed_experts_from_source(
         return 0
     # Local import: sensitivity_probe imports from this module, so import the
     # packed-experts detector lazily to avoid a circular import at module load.
-    from .sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
     packed_names = prof.packed_expert_param_names()
     regex = prof.per_expert_moe_regex()
     if not packed_names or not regex:

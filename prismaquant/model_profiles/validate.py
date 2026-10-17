@@ -254,6 +254,8 @@ def _check_name_remap(profile) -> CheckResult:
 
 
 def _check_mtp(profile, cfg: dict, model_path: str) -> CheckResult:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     if not profile.has_mtp():
         return CheckResult("MTP module constructs + loads weights",
                            True, "profile reports no MTP (skipped)")

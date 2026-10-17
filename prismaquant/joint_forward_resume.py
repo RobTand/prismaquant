@@ -511,10 +511,10 @@ continues the imported chain.
             raise ForwardRecoveryRefused('frontier must be an explicit positive integer')
         document['frontier'] = frontier
     if bind_current_implementation:
-        from .aura_cost import _aura_source_sha256
+        from .aura_provenance import producer_package_sha256
         document['implementation_compatibility'] = {
             'original': document['original_bind_identity']['producer_source_sha256'],
-            'recovery': _aura_source_sha256(), 'scope': 'forward-identical-memory-only'}
+            'recovery': producer_package_sha256(), 'scope': 'forward-identical-memory-only'}
     prospective = {**document['original_bind_identity'], 'producer_source_sha256':
                    document['implementation_compatibility']['recovery']}
     validate_forward_state(document, bind_identity=prospective,

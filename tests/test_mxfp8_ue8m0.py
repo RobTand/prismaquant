@@ -38,15 +38,15 @@ import pytest
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.source_format_contracts import (
     PASSTHROUGH_WIRE_FORMAT_IDS,
     REQUANT_WIRE_FORMAT_IDS,
     SOURCE_BPP_EXCEEDED_REASON,
     SOURCE_BPP_UNKNOWN_REASON,
     SOURCE_PASSTHROUGH_CONTRACTS,
     WIRE_FORMAT_IDS,
-    check_format_applicability,
 )
+from prismaquant.allocator_candidates import check_format_applicability
 from prismaquant.layer_config import canonicalize_format
 from prismaquant.mx_formats import (
     E4M3_MAX,
@@ -323,7 +323,7 @@ def test_zero_weight_error_does_not_make_the_layer_output_exact():
     This is the honesty the allocator gates depend on: a block-FP8 source on
     this rung must NOT look free.
     """
-    from prismaquant.allocator_candidates import cost_entry_is_bit_exact
+    from prismaquant.priced_cell import cost_entry_is_bit_exact
 
     spec = fr.get_format(FMT)
     w, _ = _block128_source(n=128, k=128, block=64)
@@ -448,8 +448,8 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
     from prismaquant.allocator_candidates import (
         ACTIVATION_COST_UNMEASURED_REASON,
         build_candidates,
-        cost_entry_prices_unmeasured_activation_at_zero,
     )
+    from prismaquant.priced_cell import cost_entry_prices_unmeasured_activation_at_zero
 
     # The bare predicate: weight-lossless, no measured output side, priced 0.
     assert cost_entry_prices_unmeasured_activation_at_zero(
@@ -461,7 +461,7 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research", mask_records=masks)
+        target_profile="research", mask_records=masks).candidates
     assert FMT not in {c.fmt for c in cands[name]}
     assert any(m["format"] == FMT
                and m["reason"] == ACTIVATION_COST_UNMEASURED_REASON
@@ -478,7 +478,7 @@ def test_a_measured_activation_side_passes_menu_admission():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research")
+        target_profile="research").candidates
     chosen = {c.fmt: c for c in cands[name]}
     assert FMT in chosen
     assert chosen[FMT].predicted_dloss > 0.0

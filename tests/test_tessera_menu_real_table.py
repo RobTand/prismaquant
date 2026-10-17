@@ -109,15 +109,13 @@ def installed_contract(monkeypatch):
     this module reads a serving contract, so substituting it is substituting
     the whole attestation and nothing else: ``route_admission``,
     ``_producer_eligible``, ``expand_menu_tokens`` and the guard all run
-    exactly as production runs them.  ``_load_at`` is the parser
-    ``load_tessera_contract`` itself calls, keyed on the file's sha, so the
-    contract this returns is the same object the pin would return if the pin
-    named this build.
+    exactly as production runs them. ``read_tessera_contract`` verifies the
+    declared bytes and shares the development reader's parsed-snapshot cache.
     """
     path = trc.contract_path()
     raw = path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
-    contract = trc._load_at(str(path), sha, f"installed:{sha[:12]}")
+    contract = trc.read_tessera_contract(str(path), sha, f"installed:{sha[:12]}")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     return contract
 
@@ -479,7 +477,7 @@ def test_the_pin_and_the_one_read_allocate_identically(tmp_path, monkeypatch):
     monkeypatch.delenv(trc.TESSERA_DEV_PIN_ENV)
     path = trc.contract_path()
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    contract = trc._load_at(str(path), sha, f"installed:{sha[:12]}")
+    contract = trc.read_tessera_contract(str(path), sha, f"installed:{sha[:12]}")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     via_read = _allocate(tmp_path / "read", monkeypatch)
 

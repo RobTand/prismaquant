@@ -9,7 +9,7 @@ runs in two phases:
    sealed streamed runner, then the model's own mHC collapse and final norm.
    These are the steps of ``StreamedCausalLM._finish`` before its head.
 2. :class:`MtpCaptureFeed` runs the MTP layer on ``h`` for each calibration
-   sequence. The body campaign's collector (``tessera_campaign._collect_activations``)
+   sequence. The body campaign's collector (``tessera_calibration_forward.capture_activation_statistics``)
    hooks the layer through :class:`~prismaquant.glm_mtp.MtpCheckpointModel`,
    unchanged, so the rows, Hessians, counts and maxima mean what the body's do.
 
@@ -74,7 +74,7 @@ def final_hidden(runner, input_ids, boundary, *, layer: int):
     from the runner's own ``_prepare`` on the same ids, as the quanta rebuild
     it. Refuses any layer but the last, since only the last feeds the norm.
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
     from .layer_streaming import _get_final_norm
 
     if int(layer) != int(runner.num_layers) - 1:
@@ -310,11 +310,11 @@ def capture_mtp_layer(model, embed_tokens, calibration_ids, read_final_hidden, *
 
     Returns the collector's ``(rows, hessians, counts, max_abs)`` for ``units``.
     """
-    from .tessera_campaign import _collect_activations
+    from .tessera_calibration_forward import capture_activation_statistics
 
     feed = MtpCaptureFeed(model, embed_tokens, calibration_ids,
                           read_final_hidden=read_final_hidden)
-    result = _collect_activations(
+    result = capture_activation_statistics(
         model, sorted(units), feed.batches(), int(max_act_rows), device,
         want_hessian=True, profile=profile, forward_batch=feed,
         resource_check=resource_check)

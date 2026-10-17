@@ -278,32 +278,11 @@ def test_no_channel_is_byte_identical_to_this_module_being_absent(monkeypatch, t
     assert not list(tmp_path.iterdir())
 
 
-# -- one definition of the name ---------------------------------------------
-
-def test_the_manifest_and_the_reporter_share_one_layer_phase_name():
-    source = (REPO / "experiments" / "glm_data_manifests.py").read_text()
-    assert "_run_progress_module.layer_phase_name(layer)" in source
-    assert 'f"layer-{layer}"' not in source, (
-        "a second spelling of the phase name is how a consumer commits a name "
-        "the residency plan cannot match")
-    assert jrp.layer_phase_name(7) == "layer-7"
-
-
-def test_the_joint_pass_builder_names_its_layers_through_that_function():
-    """The phase table the window walks, checked where the run is submitted."""
-    import ast
-
-    path = REPO / "experiments" / "glm_data_manifests.py"
-    source = path.read_text()
-    tree = ast.parse(source)
-    builder = next(node for node in tree.body
-                   if isinstance(node, ast.FunctionDef)
-                   and node.name == "build_joint_pass_manifest")
-    body = ast.get_source_segment(source, builder)
-    assert "_run_progress_module.layer_phase_name(layer)" in body
-    assert 'f"layer-' not in body and "'layer-" not in body, (
-        "the builder spells a layer phase name itself; the reporter would then "
-        "commit under the other spelling and the window would match neither")
+# -- submission and reporter phase agreement -------------------------------
+# The read-set builders' use of ``layer_phase_name`` is held where they are
+# built: tests/test_glm_joint_data_manifest_at_submit.py (run and export) and
+# tests/test_aqua_campaign_submit.py replace the function and require the
+# declared phases to follow it.
 
 
 def test_a_joint_run_submission_declares_the_manifest_s_own_phase_names():
@@ -351,8 +330,7 @@ def test_a_container_launch_without_a_channel_forwards_nothing():
 def test_every_published_entry_file_moves_the_count(tmp_path):
     """The hook is at publication, which is where a unit becomes durable."""
     torch = pytest.importorskip("torch")
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
@@ -374,8 +352,7 @@ def test_every_published_entry_file_moves_the_count(tmp_path):
 
 def test_a_storage_with_no_reporter_behaves_exactly_as_before(tmp_path):
     torch = pytest.importorskip("torch")
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),

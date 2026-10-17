@@ -1,11 +1,16 @@
 """Exercise allocator admission using actual streamed joint measurement rows."""
 import copy
+import math
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as ac
+from prismaquant.activation_fair_pricing import (
+    ActivationFairPricing, FamilyCalibration, _family_of)
 from prismaquant.cost_currency import CostCurrencyError, require_run_currency
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from test_joint_aura_streamed import _fixture, _run
 
 
@@ -26,26 +31,46 @@ def test_actual_joint_table_admits_in_one_aura_currency(measured_payload):
     assert report["activation_quantization_included"] is True
 
 
+def _calibrated_transfer(fmt, penalty):
+    """A run calibration whose family penalty for ``fmt`` is ``penalty``."""
+    family = _family_of(fmt)
+    fit = FamilyCalibration(family, 8, penalty, math.log2(penalty), 0.0, 0.0, 0.0, 0.0,
+                            (fmt,), ((fmt, math.log2(penalty), 8),), 0.0, (), "f" * 64)
+    return ActivationFairPricing(True, "synthetic calibration", {family: fit},
+                                 {family: 8}, {family: 8}, ())
+
+
 def test_joint_cost_consumed_without_scalar_sensitivity_or_activation_transfer(measured_payload, monkeypatch):
     _, row = _first(measured_payload)
-    monkeypatch.setattr(ac, "_activation_penalty", lambda *args: 1000.0)
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
-    assert ac.cost_entry_predicted_dloss(
-        {"h_trace": 1e8}, row, format_name="FP8_E4M3") == row["predicted_dloss"]
-    assert ac.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3") == "joint_aura"
+    pricing = _calibrated_transfer("FP8_E4M3", 1000.0)
+    stats = {"h_trace": 1e8}
+    # The trap is armed: under this calibration a weight-only row of the same
+    # format and value IS transferred, so a joint row routed past its branch
+    # would be priced 1000x.
+    assert row["predicted_dloss"] != 0.0, "a zero price cannot show a transfer"
+    weight_only = {"predicted_dloss": row["predicted_dloss"]}
+    assert priced_cell.cost_entry_predicted_dloss(
+        stats, weight_only, format_name="FP8_E4M3", activation_pricing=pricing
+    ) == pytest.approx(1000.0 * row["predicted_dloss"])
+    assert priced_cell.cost_entry_activation_pricing_branch(
+        {}, weight_only, "FP8_E4M3", pricing) != "joint_aura"
+    assert priced_cell.cost_entry_predicted_dloss(
+        stats, row, format_name="FP8_E4M3", activation_pricing=pricing) == row["predicted_dloss"]
+    assert priced_cell.cost_entry_activation_pricing_branch({}, row, "FP8_E4M3", pricing) == "joint_aura"
 
 
 @pytest.mark.parametrize("gain", [0.5, 2.0, float("nan")])
 def test_joint_cost_refuses_second_gain(measured_payload, gain):
     _, row = _first(measured_payload)
     with pytest.raises(ValueError, match="gain"):
-        ac.cost_entry_predicted_dloss({}, row, gain=gain, format_name="FP8_E4M3")
+        priced_cell.cost_entry_predicted_dloss({}, row, gain=gain, format_name="FP8_E4M3")
 
 
 def test_joint_row_cannot_price_another_format(measured_payload):
     _, row = _first(measured_payload)
     with pytest.raises(ValueError, match="different format"):
-        ac.cost_entry_predicted_dloss({}, row, format_name="NVFP4A16")
+        priced_cell.cost_entry_predicted_dloss({}, row, format_name="NVFP4A16")
 
 
 @pytest.mark.parametrize("field,value", [("fisher_application_count", True),
@@ -56,7 +81,7 @@ def test_malformed_joint_claim_never_falls_into_generic_pricing(measured_payload
     row = copy.deepcopy(source)
     row[field] = value
     with pytest.raises(ValueError, match="joint AURA"):
-        ac.cost_entry_predicted_dloss({"h_trace": 1.0}, row, format_name="FP8_E4M3")
+        priced_cell.cost_entry_predicted_dloss({"h_trace": 1.0}, row, format_name="FP8_E4M3")
 
 
 def test_joint_table_refuses_weight_only_control(measured_payload):
@@ -86,24 +111,25 @@ def test_a_joint_row_is_only_its_own_cell(measured_payload):
     with a row that is otherwise valid.
     """
     name, row = _first(measured_payload)
-    assert ac.joint_row_binds_cell(row, name, "FP8_E4M3", where="test") is True
+    assert joint_aura_rows.joint_row_binds_cell(row, name, "FP8_E4M3", where="test") is True
 
     other = next(unit for unit in sorted(measured_payload["costs"])
                  if unit != name)
     # The mismatch is its own error class, not the one a malformed row raises:
     # a caller that turns it into a refusal must not also swallow the
     # malformed-evidence failures `validate_joint_aura_entry` reports.
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
-        ac.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
-        ac.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
-    assert issubclass(ac.JointCellCoordinateError, ValueError)
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
+        joint_aura_rows.joint_row_binds_cell(row, other, "FP8_E4M3", where="test")
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
+        joint_aura_rows.joint_row_binds_cell(row, name, "NVFP4A16", where="test")
+    # Callers that catch ValueError around this predicate still see the mismatch.
+    assert issubclass(joint_aura_rows.JointCellCoordinateError, ValueError)
 
 
 def test_a_row_that_is_not_joint_is_not_this_predicate(measured_payload):
     """Callers ask about every row they hold, so a plain row answers False."""
     name, _ = _first(measured_payload)
-    assert ac.joint_row_binds_cell(
+    assert joint_aura_rows.joint_row_binds_cell(
         {"predicted_dloss": 0.1}, name, "FP8_E4M3", where="test") is False
 
 
@@ -113,7 +139,7 @@ def test_joint_table_refuses_unaligned_probe_population(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["seed_base"] += 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     replacement = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
         signed_components=row["signed_components_per_probe"])
     payload["costs"][operator["qname"]][operator["format"]] = replacement
@@ -134,7 +160,7 @@ def test_single_probe_cannot_claim_zero_sampling_uncertainty(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["n_probes"] = 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     with pytest.raises(ValueError, match="at least two probes"):
         make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
             signed_components=row["signed_components_per_probe"][:1])
@@ -175,7 +201,7 @@ def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
             costs, {name: "FP8_E5M2"}, baseline, profile=DefaultProfile(), ucb_z=1.0)
     other = next(unit for unit in sorted(measured_payload["costs"]) if unit != name)
     donated = {other: dict(costs[name])}
-    with pytest.raises(ac.JointCellCoordinateError, match="produced for"):
+    with pytest.raises(joint_aura_rows.JointCellCoordinateError, match="produced for"):
         ac.price_paired_rate_trade(
             donated, {other: "FP8_DYNAMIC"}, {other: "NVFP4A16"},
             profile=DefaultProfile(), ucb_z=1.0)
@@ -188,7 +214,7 @@ def test_paired_trade_still_refuses_genuine_mismatches(measured_payload):
     probe = copy.deepcopy(row["probe_identity"])
     probe["seed_base"] += 1
     operator = copy.deepcopy(row["joint_operator_identity"])
-    operator["probe_identity_sha256"] = identity_sha256(probe)
+    operator["probe_identity_sha256"] = joint_identity_sha256(probe)
     resampled = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
         signed_components=row["signed_components_per_probe"])
     forked = _paired_costs(measured_payload, name)

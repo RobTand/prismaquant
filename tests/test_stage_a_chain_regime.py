@@ -28,14 +28,15 @@ import pytest
 import torch
 from torch import nn
 
+from prismaquant import aura_provenance
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
-from prismaquant.cost_streaming import (
+from prismaquant.streamed_boundary_artifacts import (
     StreamedBoundaryArtifacts,
-    StreamedCausalLM,
     StreamedForwardBoundaries,
     fused_window_size,
 )
+from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_band import (
     BandRefused,
     build_band_receipt,
@@ -102,7 +103,7 @@ def _legacy_render_free_probe_passes(
     incoming_entries, incoming_tensor, roll, min_free_gib, then=None,
 ) -> int:
     from prismaquant.aura_cost import _free_gib
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     profile = runner.profile
     device, dtype = runner.device, runner.dtype
@@ -475,15 +476,13 @@ def test_the_quantum_chain_runs_the_slice_regime_bitwise(tmp_path, monkeypatch):
     from prismaquant.joint_cost_quantum import QuantumIdentityRefused
     from test_joint_cost_quantum_runtime import _run_quantum, _single_run
 
-    import prismaquant.aura_cost as aura
-
     single_root = tmp_path / "single"
     single = _single_run(single_root, monkeypatch, checkpoint=single_root / "checkpoints")
     output_root = tmp_path / "campaign"
     # The campaign the runtime fixture's quantum record binds.
     campaign = {"plan_sha256": "d" * 64, "prepared_sha256": "e" * 64,
                 "read_manifest_sha256": "f" * 64,
-                "implementation_sha256": aura._aura_source_sha256()}
+                "implementation_sha256": aura_provenance.producer_package_sha256()}
     receipt, planes, _ = _capture(output_root, monkeypatch, batch_size=2, stride=2,
                                   campaign=campaign)
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]

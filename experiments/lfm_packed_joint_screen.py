@@ -21,14 +21,18 @@ def file_sha(path):
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     import transformers
     from safetensors.torch import load_file, save_file
     from transformers import AutoModelForCausalLM
     from prismaquant import pretrained_initialization_contract
     from prismaquant.aura_cost import compute_aura_cost_streamed
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
-    from prismaquant.joint_aura import validate_joint_aura_entry, source_execution_identity
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
+    from prismaquant.joint_aura import source_execution_identity
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from prismaquant.kl_fisher import fisher_probe_scalar
     from prismaquant.model_profiles import detect_profile
     from prismaquant.production_weight_cache import ProductionWeightCache
@@ -174,7 +178,7 @@ def main():
                     'boundary_metadata': raw_boundary['boundary_metadata'],
                     'source_execution_identity': result['reference_source_execution_identity'],
                     'calibration_subset': result['calibration_subset'], 'tensor_comparisons': checks}
-            from prismaquant.measure_quant_cost import derive_per_expert_activations
+            from prismaquant.routed_experts import derive_per_expert_activations
             from torch.nn import functional as F
             derived = derive_per_expert_activations(experts, hidden_states, parent)
             # The shared derivation orders rows by top-k slot then token;

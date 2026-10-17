@@ -25,7 +25,7 @@ from safetensors.torch import save_file
 
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
-from prismaquant.joint_layer_quanta import adjoint_read_plan_phase_names
+from prismaquant.joint_quantum_row import (adjoint_read_plan_phase_names)
 from prismaquant.joint_run_progress import JointRunProgress
 from prismaquant.layer_streaming import LayerCache, _build_install_resolver, _unload
 from prismaquant.model_profiles.default import DefaultProfile

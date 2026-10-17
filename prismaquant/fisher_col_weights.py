@@ -52,7 +52,7 @@ def _log(msg: str) -> None:
 
 
 def _git_commit() -> str | None:
-    from prismaquant.aura_cost import _git_head_commit
+    from prismaquant.aura_provenance import (producer_git_head_commit as _git_head_commit)
 
     return _git_head_commit()
 
@@ -156,6 +156,8 @@ def compute_fisher_col_weights(
     determines the (unused-here) dW rendering the shared harvest also does; the
     column energy is independent of it.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from prismaquant.aura_cost import compute_aura_cost
@@ -184,7 +186,7 @@ def compute_fisher_col_weights(
     model.eval()
 
     if dataset_path:
-        from prismaquant.sensitivity_probe import load_calibration
+        from prismaquant.calibration_data import load_calibration
         calib = load_calibration(
             tok, dataset_path, nsamples, seqlen, calib_seed=seed,
         ).to(device)

@@ -25,7 +25,7 @@ semantics).
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 
@@ -39,6 +39,7 @@ glm5 = pytest.importorskip(
 
 from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant.cost_streaming import StreamedCausalLM  # noqa: E402
+from prismaquant.streaming_model import StreamingContext  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 
 
@@ -112,9 +113,13 @@ def _build_model(config):
     """Construct the reference model with every parameter initialized.
 
     `genuine_weight_initialization` is load-bearing, not decoration.
-    Importing anything from `prismaquant` no-ops
-    `PreTrainedModel._initialize_weights` process-wide
-    (`prismaquant/__init__.py::_polyfill_transformers`), which is sound for
+    Once `prismaquant.model_runtime.initialize_model_runtime()` has run in
+    the process -- PrismaQuant's loaders call it, and so does this context
+    manager -- `PreTrainedModel._initialize_weights` is a no-op except inside
+    checkpoint missing-state finalization or a `genuine_weight_initialization`
+    block, each a context-local flag
+    (`prismaquant/model_runtime.py::_polyfill_transformers`). Importing
+    `prismaquant` alone installs nothing. The no-op is sound for
     PrismaQuant's own loaders -- they overwrite every parameter from a
     checkpoint straight afterwards -- and unsound here, where the
     from-config model IS the subject.  Without the restore, every tensor
@@ -178,6 +183,7 @@ def _streamed_runner(model):
         unload=lambda layer: None,
         schedule_prefetch=lambda layer: None,
     )
+    context.walk_layers = MethodType(StreamingContext.walk_layers, context)
     return StreamedCausalLM(
         context,
         Glm5NextProfile(),

@@ -15,7 +15,16 @@ For each arm this reads files the harness wrote (run_arm.sh, entry.py):
   encode phase runs from the first to the last encode batch line. NFS reads
   are reported as bytes read before that point and after it.
 * ``pyspy.raw.txt``: collapsed stacks. Inclusive samples are counted for each
-  named function, and the top self frames are listed.
+  named function, and the top self frames are listed. A name counts the frames
+  of the code that wrote the stacks: ``_measure_anchor_batch`` and
+  ``_encode_and_render`` read arms profiled before cell measurement moved to
+  ``tessera_cell_measurement`` (2026-10-16), ``measure_cells`` and
+  ``encode_tessera_unit`` read later arms. The pairs are distinct spans, not
+  renames: ``measure_cells`` also wraps one-unit batches, which used to run
+  through ``_measure_anchor``, and the ``encode_tessera_unit`` needle also
+  matches the batched ``encode_tessera_units``, while ``_encode_and_render``
+  was the scalar adapter alone. ``_campaign_checkpoint_identity`` is one
+  function under two spellings and reads both.
 
 Power is reported against the GB10's 140 W envelope. GPU utilization is not
 read; it does not measure GB10 saturation.
@@ -34,7 +43,9 @@ NAMED = ("_campaign_checkpoint_identity", "canonical_hessian_reference_descripto
          "_prefetch_seal_digests", "prefetch_capture", "_verified_capture_entry",
          "tensor_identity", "_stream_unit_identity", "finalize_row_stream", "RowStream",
          "_read ", "admit ", "_measure_anchor_batch", "_encode_and_render",
+         "measure_cells", "encode_tessera_unit",
          "write_export_inputs", "snapshot_selected_weights", "_project_expert_population")
+NAMED_NEEDLES = {"_campaign_checkpoint_identity": "campaign_checkpoint_identity"}
 MILESTONES = (("row_head", "[campaign] row head:"),
               ("prefetched", "[campaign] calibration prefetched"),
               ("activations_ready", "[campaign] activations ready"),
@@ -114,7 +125,7 @@ def profile(arm: Path):
         seen = set()
         for frame in frames:
             for name in NAMED:
-                if name.strip() in frame and name not in seen:
+                if NAMED_NEEDLES.get(name, name).strip() in frame and name not in seen:
                     inclusive[name.strip()] += count
                     seen.add(name)
         self_frames[frames[-1]] += count

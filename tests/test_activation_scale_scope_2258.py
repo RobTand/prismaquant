@@ -4,12 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from test_joint_cost_quantum_runtime import _prefetch_budget, _stage_a_run_stub
+from test_quantum_failure_counters import _Sampler, _record
 
+from prismaquant import aura_provenance
 from prismaquant import joint_cost_quantum as quantum
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
-from test_joint_cost_quantum_runtime import _prefetch_budget, _stage_a_run_stub
-from test_quantum_failure_counters import _Sampler, _record
 
 
 class WorkloadError(RuntimeError):
@@ -31,7 +32,7 @@ def _quantum_run_stub(tmp_path, monkeypatch):
     monkeypatch.setattr(joint_projection_backend, "prewarm_projection_backend",
                         lambda *a, **k: SimpleNamespace(identity=None))
     monkeypatch.setattr(tessera_reader, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: "b" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "b" * 64)
     monkeypatch.setattr(quantum, "GpuPowerSampler", _Sampler)
     monkeypatch.setattr(quantum, "bind_joint_served_quantizer", lambda formats: {})
     monkeypatch.setattr(joint_dispatch_pilot, "pilot_binding", lambda *a, **k: None)

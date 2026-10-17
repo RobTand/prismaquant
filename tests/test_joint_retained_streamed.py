@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import aura_provenance, cost_stage_checkpoint
 import prismaquant.aura_cost as aura
 from prismaquant import io_engine
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget, EXECUTION_SCHEMA
 from prismaquant.streaming_model import StreamingContext
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
@@ -20,7 +21,7 @@ from test_streamed_cost_checkpoints import _model_identity
 
 def _case(tmp_path, monkeypatch, retained, *, checkpoint=None, resume=False, proof_change=None,
           skeleton=None, budget=None, observed=None):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     model, context, runner, cache = fixture()
     if observed is not None:
         observed['context'] = context
@@ -143,7 +144,7 @@ def test_partial_streamed_resume_reads_only_pending_renders(tmp_path, monkeypatc
     first, all_reads, _ = _case(tmp_path / 'same', monkeypatch, True,
                                 checkpoint=tmp_path / 'checkpoint')
     pending_name = sorted(first['stats'])[0]
-    aura._aura_unit_checkpoint_path(tmp_path / 'checkpoint', pending_name).unlink()
+    cost_stage_checkpoint.unit_path(tmp_path / 'checkpoint', pending_name).unlink()
     resumed, reads, context = _case(tmp_path / 'same', monkeypatch, True,
                                    checkpoint=tmp_path / 'checkpoint', resume=True)
     assert resumed['costs'] == first['costs']

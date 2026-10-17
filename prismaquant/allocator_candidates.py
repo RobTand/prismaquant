@@ -1,5 +1,11 @@
 """Candidate construction and coupled-candidate aggregation."""
 from __future__ import annotations
+from prismaquant import joint_aura_rows
+
+from . import priced_cell
+
+from . import source_format_contracts
+
 
 import json
 import math
@@ -60,21 +66,15 @@ from .serving_profiles import (
 # measured cost. It is NOT an estimator name like ``output_mse`` or
 # ``weight_mse``: it says the row was never measured because there is nothing
 # to measure.
-SOURCE_PASSTHROUGH_COST_SOURCE = "source_passthrough"
 
 # ---------------------------------------------------------------------------
 # Anchored-AURA supersurrogate admission (P0)
 #
 # ``anchored_cost`` prices a whole menu from one production-arm render per
 # unit: ``cost(i,K) = predicted_dloss(i,K̂) x [g(K)/g(K̂)]``. Those rows are a
-# distinct provenance from every other weight-only row the allocator reads,
-# and the three stamps below are what identify them. Defined HERE, not in
-# ``anchored_cost``, because that module imports this one — one definition,
-# no cycle.
-ANCHORED_AURA_COST_CURRENCY = "aura_predicted_dloss"
-ANCHORED_AURA_COST_SOURCE = "production_arm_render"
+# distinct provenance from every other weight-only row the allocator reads.
+# ``priced_cell`` owns their stamps independently of candidate assembly.
 # The activation-pricing branch label such a row is stamped with.
-ANCHORED_AURA_BRANCH = "anchored_aura_extrapolation"
 
 # The allocator has an explicit branch for anchored-AURA rows: it reads
 # ``predicted_dloss`` directly, keeps them out of the P5a calibration sample,
@@ -95,390 +95,6 @@ AURA_SUPERSURROGATE_ALLOCATOR_SEMANTICS = True
 
 # Serving-route token for a passthrough whose bytes the model's OWN loader
 # consumes, with no Gridbook codec in the path.
-ROUTE_DELEGATED_NATIVE = "delegated_native"
-# The name of the route that USED to execute a raw-resident block-128 source
-# plane: Gridbook's ``Fp8SourceW8A16LinearMethod``, which consumed BF16
-# activations unchanged.  The lane was retired on 2026-09-02
-# (archive/gridbook_lane_2026-09-02/) and this constant is kept BECAUSE it is
-# retired: it is the ``serving_route`` on the FP8_BLOCK_UE8M0_SOURCE row below,
-# whose ``route_status`` is now BLOCKED, and that row's whole job is to say
-# which route died. Renaming it to something lane-neutral would erase the scope
-# of the measurement the row carries (principle 14's corollary: a recorded
-# capability claim inherits the scope of the artifact it was measured on).
-#
-# ``ROUTE_GRIDBOOK_MXFP8_DENSE = "gridbook_mxfp8_dense"`` sat here until
-# 2026-09-02.  It named ``Mxfp8DenseLinearMethod`` and had no reader anywhere
-# in the tree -- no contract row, no test, no consumer of the string -- so it
-# was a dangling name rather than a record of anything, and it is deleted
-# rather than archived.
-ROUTE_GRIDBOOK_FP8_SOURCE_W8A16 = "gridbook_fp8_source_w8a16"
-
-# What a MEASUREMENT says about serving a passthrough's bytes. These are
-# verdicts from a real serve attempt on real hardware, not design intent —
-# which matters, because on DSv4-Flash/GB10 the measured answers came out the
-# OPPOSITE way round from the obvious guess.
-ROUTE_STATUS_BACKED = "backed"          # measured serving, possibly with a requirement
-ROUTE_STATUS_PENDING = "pending"        # no verdict yet; unaudited
-ROUTE_STATUS_BLOCKED = "blocked"        # measured, every known route dead
-
-
-@dataclass(frozen=True)
-class SourcePassthroughContract:
-    """One native source format the producer can ship back UNCHANGED.
-
-    Keeping a native source format always preserves its stored weight plane;
-    it is an allocator option only when the serving activation contract is
-    also priced honestly. This table records the source/storage contract, one
-    entry per
-    (source format, unit contract) the census finds, so adding a newly
-    encountered native format is a data change rather than a new code path.
-
-    Fields:
-      ``source_kind``  the token ``_scan_source_dtype_manifest`` stamps on a
-        unit whose stored bytes ARE this format. It is the whole legality
-        gate: the format is legal exactly where the source already is it, in
-        both directions — BF16 is masked on mxfp4 experts and MXFP4_SOURCE is
-        masked on the bf16 embedding by the identical rule.
-      ``zero_cost_by_construction`` whether the allocator SYNTHESIZES the
-        candidate rather than requiring a cost-table column. True for formats
-        no cost run will ever have a column for.
-      ``serving_route``  the P5b lane route id.
-      ``wire_format_id``  the closed-enum spelling the artifact declares and
-        the serving side reads (quant_config.json ``source_passthrough``).
-        Distinct from ``format_name``: the producer's registry name is ours to
-        rename, the wire id is a cross-repo contract.
-      ``route_status``  what a MEASUREMENT says about serving these bytes, per
-        ``ROUTE_STATUS_*``. Route status alone never removes an honestly
-        priced rung from the menu — an allocator that wants an unservable
-        passthrough is reporting a serving gap — but anything other than
-        ``backed`` makes export fail closed without an explicit override.
-        This is orthogonal to cost admission: a terminal whose activation-side
-        loss has no currency must stay out of that allocator campaign even if
-        the serving route itself exists.
-      ``route_requirement``  the serving-side condition that makes a BACKED
-        route actually fire (e.g. a non-default vLLM MoE backend). Belongs in
-        the artifact's serving notes; a backed route with an unmet
-        requirement serves no better than a blocked one.
-      ``route_evidence``  what was measured, and on what hardware. A route
-        verdict without its evidence is a rumour.
-      ``detail``  why this entry exists, for the mask/provenance records.
-    """
-
-    format_name: str
-    source_kind: str
-    zero_cost_by_construction: bool
-    serving_route: str
-    route_status: str
-    detail: str
-    wire_format_id: str | None = None
-    route_requirement: str | None = None
-    route_evidence: str | None = None
-
-    @property
-    def route_backed(self) -> bool:
-        """Whether a serve route for these bytes is known to exist."""
-        return self.route_status == ROUTE_STATUS_BACKED
-
-
-SOURCE_PASSTHROUGH_CONTRACTS: dict[str, SourcePassthroughContract] = {
-    contract.format_name: contract
-    for contract in (
-        # Legacy DeepSeek-V3 / MiniMax block-FP8: FP32 ``weight_scale_inv``.
-        # Serves through stock compressed-tensors block-fp8 today.
-        SourcePassthroughContract(
-            format_name="FP8_SOURCE",
-            source_kind="fp8",
-            zero_cost_by_construction=False,
-            serving_route=f"{ROUTE_DELEGATED_NATIVE}_fp8_block",
-            route_status=ROUTE_STATUS_BACKED,
-            detail=(
-                "native block-FP8 with an FP32 weight_scale_inv plane; the "
-                "cost pipeline emits real rows for it, so its candidate is "
-                "not synthesized"
-            ),
-            route_evidence=(
-                "stock compressed-tensors block-fp8; served on the "
-                "checkpoints this format was written for (MiniMax M2, "
-                "DeepSeek-V3)"
-            ),
-        ),
-        # DeepSeek-V3.1/V4 block-FP8: one-byte UE8M0 block exponents. Same
-        # element grid as FP8_SOURCE, different scale plane and different
-        # byte count — see the FormatSpec comment.
-        SourcePassthroughContract(
-            format_name="FP8_BLOCK_UE8M0_SOURCE",
-            source_kind="fp8_ue8m0",
-            wire_format_id="fp8_e4m3_ue8m0_block128",
-            zero_cost_by_construction=True,
-            serving_route=ROUTE_GRIDBOOK_FP8_SOURCE_W8A16,
-            # BLOCKED since 2026-09-02, and by a measurement rather than by an
-            # opinion: the only route that ever executed these bytes was the
-            # Gridbook plugin's Fp8SourceW8A16LinearMethod, and that lane was
-            # retired (archive/gridbook_lane_2026-09-02/). No sanctioned
-            # runtime -- vanilla vLLM, llama.cpp/vLLM-GGUF, the Tessera plugin
-            # -- reads a block-128 UE8M0 source plane. The rung stays PRICED
-            # (principle 1: an allocator that wants it is reporting a serving
-            # gap, and that signal is the point) and the exporter now refuses
-            # a selection containing it without an explicit override, via
-            # ROUTE_PENDING_PASSTHROUGH_FORMATS. The evidence below is kept
-            # verbatim because it is a real measurement whose SCOPE is the
-            # retired runtime -- it says what was true, not what is.
-            route_status=ROUTE_STATUS_BLOCKED,
-            route_requirement=(
-                "a Gridbook release attesting "
-                "abi_features.source_fp8_block128_w8a16=1; first released in "
-                "0.8.5 commit e992e5980c96333a48149f96392d6cff56ae9e3f under "
-                "runtime-contract v3, carried unchanged by 0.8.11 under v4, "
-                "and carried unchanged again by the currently pinned 0.9.1 "
-                "commit 227420f9821bab7089632ee914f0ba050f82b817 under v12 "
-                "(the two packaged contracts' abi_features maps are equal; "
-                "v12 changes formats and adds lane_eligibility, not this)"
-            ),
-            detail=(
-                "block-FP8 with UE8M0 block exponents, consumed by "
-                "Gridbook's dedicated Fp8SourceW8A16LinearMethod. Both "
-                "source planes stay resident and byte-verbatim and BF16 "
-                "activations are unchanged. The numerical terminal is exact "
-                "by construction. Full-artifact served parity remains a "
-                "separate ship gate, not an exporter route override."
-            ),
-            route_evidence=(
-                "measured on Gridbook 0.8.5 commit "
-                "e992e5980c96333a48149f96392d6cff56ae9e3f; "
-                "installed-wheel GPU gate on GB10/sm121: 91 passed, 0 skipped. "
-                "Fp8SourceW8A16LinearMethod keeps raw E4M3/UE8M0 planes "
-                "resident, dispatches decode to native GEMV and prefill to "
-                "the owned grouped BF16 CUTLASS bridge, and attests the exact "
-                "JIT extension identity/capability. Carried forward to the "
-                "pinned 0.9.1 on the packaged contract's unchanged "
-                "source_fp8_block128_w8a16 attestation; the GPU gate has not "
-                "been re-run on 0.8.11 or on 0.9.1, so the measurement's scope "
-                "is still 0.8.5 and this row says so rather than inheriting a "
-                "claim it did not make."
-            ),
-        ),
-        # DeepSeek-V4 routed experts: nibble-packed E2M1 + E8M0 group scales.
-        SourcePassthroughContract(
-            format_name="MXFP4_SOURCE",
-            source_kind="mxfp4",
-            wire_format_id="mxfp4_e2m1_ue8m0_g32",
-            zero_cost_by_construction=True,
-            serving_route=f"{ROUTE_DELEGATED_NATIVE}_mxfp4",
-            route_status=ROUTE_STATUS_BACKED,
-            route_requirement="vllm --moe-backend marlin",
-            detail=(
-                "native packed MXFP4 routed experts, served by the model's "
-                "own path rather than a codebook decoder. BACKED, but only "
-                "off the default: the auto-selected backend is broken on our "
-                "target, so the requirement below is part of the contract, "
-                "not a tuning hint."
-            ),
-            route_evidence=(
-                "sm121 measured 2026-08-03: native-confirmed via vLLM Marlin "
-                "MoE (--moe-backend marlin). The AUTO default DeepGEMM_MXFP4 "
-                "asserts on the SF transformation; FlashInfer is gated to "
-                "capability family 100; the OAI Triton path is hard-excluded "
-                "on SM12x (0/15 kernels)."
-            ),
-        ),
-        # Unquantized passthrough. Not a "source format" in the census sense,
-        # but it obeys the same rule and predates this table.
-        SourcePassthroughContract(
-            format_name="BF16",
-            source_kind="bf16",
-            zero_cost_by_construction=False,
-            serving_route=f"{ROUTE_DELEGATED_NATIVE}_bf16",
-            route_status=ROUTE_STATUS_BACKED,
-            detail="unquantized passthrough on a bf16 source",
-            route_evidence="plain container floats; no kernel required",
-        ),
-    )
-}
-
-# Kept as the flat {format: required_kind} view every existing consumer
-# (allocator promotion legality, export defensive checks, the visual
-# passthrough contract) already imports. DERIVED from the table above so a new
-# census format cannot be legal in one place and unknown in the other.
-PASSTHROUGH_SOURCE_REQUIREMENTS: dict[str, str] = {
-    name: contract.source_kind
-    for name, contract in SOURCE_PASSTHROUGH_CONTRACTS.items()
-}
-
-# An allocator candidate may never carry more serialized tensor payload than
-# the representation already stored for that unit.  Source kinds are resolved
-# through the passthrough contracts rather than through a numeric bpp table:
-# the registered source FormatSpec owns the exact weight/scale footprint.
-SOURCE_BPP_EXCEEDED_REASON = "candidate_exceeds_source_bpp"
-SOURCE_BPP_UNKNOWN_REASON = "source_bpp_unknown"
-SOURCE_BPP_POLICY_SCHEMA = "prismaquant.source_bpp_legality.v1"
-
-_source_kinds = [
-    contract.source_kind
-    for contract in SOURCE_PASSTHROUGH_CONTRACTS.values()
-]
-if len(set(_source_kinds)) != len(_source_kinds):
-    duplicates = sorted(
-        kind for kind, count in Counter(_source_kinds).items() if count > 1
-    )
-    raise RuntimeError(
-        "SOURCE_PASSTHROUGH_CONTRACTS has ambiguous source footprint "
-        f"owners for source kinds {duplicates}"
-    )
-SOURCE_FORMAT_BY_KIND: dict[str, str] = {
-    contract.source_kind: name
-    for name, contract in SOURCE_PASSTHROUGH_CONTRACTS.items()
-}
-
-
-@dataclass(frozen=True)
-class SourceFootprintOwner:
-    """Exact source-payload authority selected by a census kind."""
-
-    source_kind: str
-    format_name: str | None = None
-    safetensors_dtype: str | None = None
-
-
-def source_footprint_owner_for_kind(
-    source_kind: str,
-) -> SourceFootprintOwner | None:
-    """Resolve special scaled formats or an ordinary safetensors dtype.
-
-    Scale-bearing native formats are owned by their registered producer
-    ``FormatSpec``.  Every other supported dtype is derived through
-    ``footprint``'s safetensors storage-width authority.  Sentinels such as
-    ``unknown``/``heterogeneous`` have neither owner and therefore fail closed.
-    """
-    kind = str(source_kind)
-    format_name = SOURCE_FORMAT_BY_KIND.get(kind)
-    if format_name is not None:
-        return SourceFootprintOwner(kind, format_name=format_name)
-    try:
-        item = plain_source_dtype_tensor_payload_breakdown(kind, (1,))
-    except ValueError:
-        return None
-    return SourceFootprintOwner(
-        kind,
-        safetensors_dtype=str(item["source_dtype"]),
-    )
-
-
-def source_format_for_kind(source_kind: str) -> fr.FormatSpec | None:
-    """Resolve a census source kind to its registered footprint owner.
-
-    ``SOURCE_FORMAT_BY_KIND`` is derived from
-    ``SOURCE_PASSTHROUGH_CONTRACTS`` and validated one-to-one at import time.
-    Adding a future source representation to that contract table automatically
-    subjects every candidate to its exact registered footprint; there is no
-    parallel numeric source-bpp lookup to update or drift.
-    """
-    owner = source_footprint_owner_for_kind(source_kind)
-    if owner is None or owner.format_name is None:
-        return None
-    return fr.get_format(owner.format_name)
-
-# Passthrough formats whose Δloss is EXACT BY CONSTRUCTION, so the allocator
-# synthesizes their candidate instead of requiring a cost-table column.
-#
-# Every cost in this pipeline is measured against the DEQUANTIZED SOURCE. A
-# format that ships the source bytes UNCHANGED is therefore the identity
-# transform on the reference: its Δloss is 0.0 as a matter of arithmetic, not
-# of measurement, and no cost run can ever produce a more accurate number for
-# it. FP8_SOURCE and BF16 are deliberately NOT members: the cost pipeline
-# already emits real rows for them on the checkpoints where they are legal,
-# and synthesizing over a table that has an entry would hide a disagreement.
-# A byte-copy contract belongs here only when BOTH its W and A paths are the
-# identity. ``FP8_BLOCK_UE8M0_SOURCE`` qualifies because its contract declares
-# exactly that (resident E4M3 + UE8M0 planes, BF16 activations unchanged);
-# whether any runtime serves it is a separate fact, and since the Gridbook
-# lane's retirement (2026-09-02) none does -- its row below is
-# ``ROUTE_STATUS_BLOCKED`` and stays fail-closed independently of membership.
-#
-# Membership is not self-certifying: ``cost_entry_is_source_passthrough``
-# additionally requires the format to be a registered passthrough format whose
-# activation path is the identity, so a stray ``cost_source`` string in a
-# hand-written table cannot claim exactness for an activation-quantizing rung.
-SOURCE_PASSTHROUGH_FORMATS: frozenset[str] = frozenset(
-    name for name, contract in SOURCE_PASSTHROUGH_CONTRACTS.items()
-    if contract.zero_cost_by_construction
-)
-
-# Passthrough formats with no DEMONSTRATED serve route on the target — either
-# unaudited (pending) or measured dead (blocked). An otherwise honestly priced
-# candidate remains useful serving-gap evidence, but the exporter refuses to
-# ship a selection containing one without an explicit override.  This set does
-# not override independent cost-currency admission for activation-changing
-# re-quantization routes such as direct G32 MXFP8 W8A8; the raw block-128
-# source route is W8A16 and preserves A.
-ROUTE_PENDING_PASSTHROUGH_FORMATS: frozenset[str] = frozenset(
-    name for name, contract in SOURCE_PASSTHROUGH_CONTRACTS.items()
-    if not contract.route_backed
-)
-
-# The closed wire enum the artifact declares and the serving side reads
-# (quant_config.json "source_passthrough"). Registry names are ours to rename;
-# these are a cross-repo contract, so they are declared once here and the
-# exporter maps through this table rather than spelling them again.
-PASSTHROUGH_WIRE_FORMAT_IDS: dict[str, str] = {
-    name: contract.wire_format_id
-    for name, contract in SOURCE_PASSTHROUGH_CONTRACTS.items()
-    if contract.wire_format_id is not None
-}
-
-# The same cross-repo wire enum, for formats this producer RE-ENCODES rather
-# than copies. Kept as its own table beside the passthrough ids rather than
-# folded into SOURCE_PASSTHROUGH_CONTRACTS, because that table means something
-# specific and load-bearing: every member copies the source WEIGHT payload
-# exactly and is source-kind gated. End-to-end Δloss is zero only for the
-# derived ``SOURCE_PASSTHROUGH_FORMATS`` subset whose activation path is also
-# identity. A re-quantization rung has a real weight encoder, so declaring it
-# here would still falsely claim byte-copy provenance
-# (tests/test_source_passthrough_family.py pins that invariant).
-#
-# What the two tables DO share is that the id is a contract with the consumer:
-# the registry name is ours to rename, the wire id is not.
-#
-# NOTE FOR ORCHESTRATOR RECONCILIATION: ``mxfp8_e4m3_e8m0_g32`` is the
-# spelling the Gridbook consumer side proposed before the lane's retirement
-# (2026-09-02; the wire id is kept as the persisted spelling). It diverges from this repo's
-# own convention, which spells the unsigned-E8M0 scale plane ``ue8m0``
-# (``mxfp4_e2m1_ue8m0_g32``, ``fp8_e4m3_ue8m0_block128``). The consumer's
-# spelling is used verbatim here rather than guessed at; if the two repos
-# settle on ``mxfp8_e4m3_ue8m0_g32`` instead, this one string is the only
-# producer-side edit.
-REQUANT_WIRE_FORMAT_IDS: dict[str, str] = {
-    "MXFP8_UE8M0_G32": "mxfp8_e4m3_e8m0_g32",
-}
-
-# Every wire id this producer can declare, from either table. Ids must be
-# globally unique: the consumer dispatches on the id alone and cannot tell
-# which producer-side table it came from.
-WIRE_FORMAT_IDS: dict[str, str] = {
-    **PASSTHROUGH_WIRE_FORMAT_IDS,
-    **REQUANT_WIRE_FORMAT_IDS,
-}
-
-
-def passthrough_serving_notes() -> dict[str, dict[str, str]]:
-    """Per-format serving requirements/evidence for the artifact's notes.
-
-    A BACKED route with an unmet requirement serves no better than a blocked
-    one, so the requirement travels with the artifact rather than living in a
-    run book.
-    """
-    return {
-        name: {
-            key: value
-            for key, value in (
-                ("route_status", contract.route_status),
-                ("route", contract.serving_route),
-                ("requirement", contract.route_requirement),
-                ("evidence", contract.route_evidence),
-            )
-            if value is not None
-        }
-        for name, contract in sorted(SOURCE_PASSTHROUGH_CONTRACTS.items())
-    }
 
 
 def serialized_candidate_payload(
@@ -503,14 +119,14 @@ def serialized_candidate_payload(
 
 
 def _is_passthrough_format(format_name: str) -> bool:
-    return format_name in PASSTHROUGH_SOURCE_REQUIREMENTS
+    return format_name in source_format_contracts.PASSTHROUGH_SOURCE_REQUIREMENTS
 
 
 def _passthrough_source_ok(
     format_name: str,
     source_kind: str | None,
 ) -> bool:
-    required = PASSTHROUGH_SOURCE_REQUIREMENTS.get(format_name)
+    required = source_format_contracts.PASSTHROUGH_SOURCE_REQUIREMENTS.get(format_name)
     if required is None:
         return True
     if source_kind is None:
@@ -543,17 +159,17 @@ def _source_bpp_applicability(
     """
     if source_kind is None:
         return FormatApplicability(True)
-    source_owner = source_footprint_owner_for_kind(source_kind)
+    source_owner = source_format_contracts.source_footprint_owner_for_kind(source_kind)
     if source_owner is None:
         provenance = {
-            "policy_schema": SOURCE_BPP_POLICY_SCHEMA,
+            "policy_schema": source_format_contracts.SOURCE_BPP_POLICY_SCHEMA,
             "source_kind": str(source_kind),
             "candidate_format": fr.canonical_format_name(spec.name),
             "comparison": "candidate_payload_bytes <= source_payload_bytes",
         }
         return FormatApplicability(
             False,
-            SOURCE_BPP_UNKNOWN_REASON,
+            source_format_contracts.SOURCE_BPP_UNKNOWN_REASON,
             f"{qname}: source_kind={source_kind!r} has no exact source "
             "footprint owner (registered scaled format or safetensors dtype); "
             "refusing to admit a candidate whose source bpp cannot be derived",
@@ -591,7 +207,7 @@ def _source_bpp_applicability(
     source_bytes = int(source_item["tensor_payload_bytes"])
     n_params = max(int(math.prod(shape)), 1)
     provenance = {
-        "policy_schema": SOURCE_BPP_POLICY_SCHEMA,
+        "policy_schema": source_format_contracts.SOURCE_BPP_POLICY_SCHEMA,
         "source_kind": str(source_kind),
         **source_owner_provenance,
         "candidate_format": fr.canonical_format_name(spec.name),
@@ -609,7 +225,7 @@ def _source_bpp_applicability(
     if candidate_bytes > source_bytes:
         return FormatApplicability(
             False,
-            SOURCE_BPP_EXCEEDED_REASON,
+            source_format_contracts.SOURCE_BPP_EXCEEDED_REASON,
             f"{qname}: {spec.name} payload {candidate_bytes} bytes "
             f"({provenance['candidate_bpp']:.10g} bpp) exceeds "
             f"source_kind={source_kind!r} / {source_label} payload "
@@ -812,7 +428,7 @@ def check_format_applicability(
         _is_passthrough_format(fmt)
         and not _passthrough_source_ok(fmt, source_kind)
     ):
-        required = PASSTHROUGH_SOURCE_REQUIREMENTS.get(fmt)
+        required = source_format_contracts.PASSTHROUGH_SOURCE_REQUIREMENTS.get(fmt)
         return FormatApplicability(
             False,
             "source_dtype_mismatch",
@@ -919,204 +535,6 @@ def _flashinfer_kernel_accepts(fmt_name: str, in_features: int,
     )
 
 
-def _stats_indicates_packed_expert(stats_entry: dict) -> bool:
-    """True for probe entries representing a 3D packed-expert tensor."""
-    return bool(
-        stats_entry.get("_packed_experts_module")
-        or stats_entry.get("_packed_param")
-        or int(stats_entry.get("num_experts", 0) or 0) > 0
-    )
-
-
-def _has_measured_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
-    """Whether ``output_mse`` is a real joint-output MEASUREMENT.
-
-    Packed experts historically stored ``output_mse=0.0`` as a placeholder
-    because the routed expert forward was not reconstructed offline. That
-    placeholder must not outrank the scalar predicted_dloss / weight_mse path.
-
-    This answers the PROVENANCE question — "was this number observed?" — and
-    is deliberately NOT the question pricing asks. See
-    ``_prices_from_output_mse``.
-    """
-    if "output_mse" not in cost_entry:
-        return False
-    if cost_entry.get("output_mse_measured") is False:
-        return False
-    if (_stats_indicates_packed_expert(stats_entry)
-            and float(cost_entry.get("output_mse", 0.0)) == 0.0
-            and ("predicted_dloss" in cost_entry or "weight_mse" in cost_entry)):
-        return False
-    return True
-
-
-def _has_interpolated_output_mse(cost_entry: dict) -> bool:
-    """Whether this row carries a USABLE interpolated ``output_mse``.
-
-    An interpolated row (``cost_entry_is_band_interpolated``) is stamped
-    ``output_mse_measured=False`` and its ``output_mse`` is a fit over the
-    unit's own measured anchors rather than an observation. It is still an
-    output-space number, which is what makes it usable as a price.
-
-    Strict positivity is load-bearing, not a defensive nicety: a row at
-    exactly 0.0 carries no output-space information, and a 0.0 price would be
-    the DP's global optimum — precisely what
-    ``cost_entry_prices_unmeasured_activation_at_zero`` exists to catch. A
-    non-finite value is rejected for the same reason: it is not a price.
-    """
-    if not cost_entry_is_band_interpolated(cost_entry):
-        return False
-    try:
-        value = float(cost_entry.get("output_mse", 0.0))
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(value) and value > 0.0
-
-
-def _prices_from_output_mse(stats_entry: dict, cost_entry: dict) -> bool:
-    """Whether PRICING should read this row's ``output_mse``.
-
-    Deliberately a different question from ``_has_measured_output_mse``, and
-    the two must not be collapsed back together:
-
-      * *"Is this ``output_mse`` an observation?"* decides whether the row may
-        enter the P5a calibration SAMPLE
-        (``collect_activation_calibration_rows``). A band-interpolated row's
-        output_mse is derived from the family's own measured anchors, so
-        admitting it would fit the transfer constant partly on its own output
-        — circular. It stays out.
-      * *"Is this ``output_mse`` the best price available for this row?"*
-        decides which branch prices it. Here the answer for a band-interpolated
-        row is yes: its value is the tensor's OWN holdout-gated interpolation
-        in output space, while the alternative is its weight_mse scaled by a
-        family-wide geometric-mean constant. The row's own output-space number
-        beats a family aggregate — and, decisively, mixing the two bases
-        WITHIN one family reorders that family's rungs, which is the failure
-        ``activation_fair_pricing``'s design explicitly ruled out and which
-        shipped anyway (see that module's 2026-08-07 correction: NVFP4-CB
-        K13/K14/K17 priced 12x high on down_proj and 1.6x low on gate/up_proj,
-        because the family constant 112.5 spans a per-projection ratio range
-        of 9.4-320).
-
-    Nothing about the row's own claims changes: ``cost_source`` and
-    ``output_mse_measured`` keep their values and their meanings, the
-    candidate is stamped ``BRANCH_INTERPOLATED_OUTPUT`` rather than
-    ``BRANCH_MEASURED``, and ``cost_entry_is_band_interpolated`` /
-    ``drop_interpolated_candidates_dominated_by_measured`` keep full strength
-    as the provenance and noise-band guards. Only the number's USE changes.
-
-    Not gated on ``act_quant_changes_input``: the measured branch is not
-    gated either, and gating this one would re-create exactly the same
-    measured/weight-only basis mix inside an identity-activation family (at
-    penalty 1.0, but weight-space vs output-space all the same). No such row
-    exists: the RD-ladder sites that stamped ``band_interpolated`` served the
-    retired codebook lane (archived 2026-09-25, #1304), whose formats all
-    quantized activations — so this is a statement about the rule, not a live
-    code path.
-    """
-    return (
-        _has_measured_output_mse(stats_entry, cost_entry)
-        or _has_interpolated_output_mse(cost_entry)
-    )
-
-
-def cost_entry_is_bit_exact(
-    cost_entry: dict,
-    format_name: str | None = None,
-) -> bool:
-    """Whether this entry proves a LOSSLESS re-encode end to end: measured
-    ``weight_mse`` of exactly 0.0 AND a format whose activation path is the
-    identity.
-
-    ``weight_mse`` is a mean of squared per-element deltas: it is exactly
-    zero only when the format stores the source weights verbatim (W' == W)
-    — e.g. MXFP8 over an FP8 128-block source, or MXFP4/MXFP8 over
-    an MXFP4-packed QAT source. But W' == W only silences the WEIGHT side.
-    For W·A· formats (``FormatSpec.act_quant_changes_input`` — NVFP4,
-    FP8 dynamic, the MX family, GGUF Q8_1 compute) the cost pipeline
-    applies ``activation_quantize_dequantize(X)`` before measuring
-    ``output_mse`` (measure_quant_cost), so a weight-lossless entry's
-    output_mse is REAL A-side error, not noise — on an MXFP4-packed
-    source, an MXFP4 re-encode priced from weight_mse alone would cost
-    dloss 0.0, the unbeatable global minimum at any budget, while its
-    served activations are still 4-bit. The short-circuit therefore
-    requires the format's activation quantization to be the identity — a
-    dtype-level fact (``FormatSpec.act_quant_changes_input``, i.e. ``act_bits``
-    absent or >= 16: BF16, FP8_SOURCE, NVFP4A16, MXFP8A16, INT-W·A16), not a
-    heuristic. Formats we cannot identify
-    (``format_name`` None or unregistered) never short-circuit.
-
-    For qualifying passthrough-activation formats, measured zero is a
-    valid, indeed optimal, cost (see ``_log_error_values`` in
-    allocator.py): the entry short-circuits to predicted dloss 0.0 ahead
-    of any noisy output_mse measurement.
-
-    Entries that declare an explicit ``cost_source`` (e.g. the
-    production-render score pipeline) carry their own authoritative
-    pricing and default ``weight_mse`` to 0.0 as a placeholder, not a
-    measurement — they are never treated as bit-exact, matching the
-    precedence ``cost_entry_source`` already gives the explicit source.
-    """
-    explicit = cost_entry.get("cost_source")
-    if isinstance(explicit, str) and explicit:
-        return False
-    if format_name is None:
-        return False
-    try:
-        spec = fr.get_format(str(format_name))
-    except KeyError:
-        return False
-    if spec.act_quant_changes_input:
-        return False
-    weight_mse = cost_entry.get("weight_mse")
-    try:
-        return weight_mse is not None and float(weight_mse) == 0.0
-    except (TypeError, ValueError):
-        return False
-
-
-def cost_entry_is_source_passthrough(
-    cost_entry: dict,
-    format_name: str | None = None,
-) -> bool:
-    """Whether this entry ships the SOURCE bytes and is therefore exact.
-
-    The dual of ``cost_entry_is_bit_exact``. That predicate proves exactness
-    from a MEASUREMENT (``weight_mse == 0.0`` recorded by a real cost run);
-    this one proves it from a CONTRACT — the exporter copies the source slice
-    verbatim, so the re-encode error is not small, it does not exist.
-
-    Three independent conditions, all required, so the claim cannot be forged
-    by writing a string into a cost table:
-
-      * the entry declares ``cost_source="source_passthrough"``;
-      * the format is a declared member of ``SOURCE_PASSTHROUGH_FORMATS``;
-      * the format's activation path is the identity
-        (``FormatSpec.act_quant_changes_input`` is False) — the same
-        dtype-level gate ``cost_entry_is_bit_exact`` applies, because
-        shipping the weights verbatim only silences the W side.
-
-    ``cost_entry_is_bit_exact`` deliberately refuses ANY entry carrying an
-    explicit ``cost_source``, since those normally mean "an upstream pipeline
-    priced this row and defaulted weight_mse to a placeholder 0.0". A
-    source-passthrough entry is the one case where the explicit provenance is
-    itself the proof, which is why it gets a predicate of its own rather than
-    a hole punched in that rule.
-    """
-    if cost_entry.get("cost_source") != SOURCE_PASSTHROUGH_COST_SOURCE:
-        return False
-    if format_name is None:
-        return False
-    canonical = fr.canonical_format_name(str(format_name))
-    if canonical not in SOURCE_PASSTHROUGH_FORMATS:
-        return False
-    try:
-        spec = fr.get_format(canonical)
-    except KeyError:
-        return False
-    return not spec.act_quant_changes_input
-
-
 #: The Tessera anchor campaign's fitted rows (``tessera_campaign.py``). Kept
 #: as its own spelling rather than reusing the retired RD ladder's
 #: ``band_interpolated``/``mixed`` (codebook lane, archived 2026-09-25, #1304;
@@ -1132,21 +550,6 @@ def cost_entry_is_source_passthrough(
 #: ``drop_census_interpolated_within_loo``, is what stops an unmeasured rung
 #: displacing a measured one on noise: it reads the campaign's measured
 #: leave-one-anchor-out error per (unit, family) as the band.
-TESSERA_INTERPOLATED_COST_SOURCE = "tessera_campaign_interpolated"
-
-
-def cost_entry_is_band_interpolated(cost_entry: dict) -> bool:
-    """Whether this row's cost was FITTED from anchors, not measured.
-
-    Stamped by the Tessera anchor campaign. Such a row is not a guess — the
-    fit had to clear the campaign's leave-one-anchor-out check — but it IS a
-    prediction, and a shipped artifact must be able to say which of its
-    selected prices were predictions. A row the retired RD ladder stamped
-    (``band_interpolated``/``mixed``, codebook lane archived 2026-09-25,
-    #1304) refuses here instead of being priced.
-    """
-    refuse_retired_ladder_cost_source(cost_entry)
-    return cost_entry.get("cost_source") == TESSERA_INTERPOLATED_COST_SOURCE
 
 
 def drop_interpolated_candidates_dominated_by_measured(
@@ -1183,11 +586,11 @@ def drop_interpolated_candidates_dominated_by_measured(
         rows = costs.get(name, {})
         measured = [
             c for c in cands
-            if not cost_entry_is_band_interpolated(rows.get(c.fmt, {}))
+            if not priced_cell.cost_entry_is_band_interpolated(rows.get(c.fmt, {}))
         ]
         kept = []
         for cand in cands:
-            if not cost_entry_is_band_interpolated(rows.get(cand.fmt, {})):
+            if not priced_cell.cost_entry_is_band_interpolated(rows.get(cand.fmt, {})):
                 kept.append(cand)
                 continue
             scale = max(abs(cand.predicted_dloss), 1e-30)
@@ -1283,11 +686,11 @@ def drop_census_interpolated_within_loo(
             1 for rows in costs.values() if isinstance(rows, Mapping)
             for row in rows.values()
             if isinstance(row, Mapping)
-            and row.get("cost_source") == TESSERA_INTERPOLATED_COST_SOURCE
+            and row.get("cost_source") == priced_cell.TESSERA_INTERPOLATED_COST_SOURCE
         )
         if interpolated_rows:
             raise CensusLooBandError(
-                f"{interpolated_rows} {TESSERA_INTERPOLATED_COST_SOURCE} cost "
+                f"{interpolated_rows} {priced_cell.TESSERA_INTERPOLATED_COST_SOURCE} cost "
                 "row(s) but the cost payload carries no leave_one_anchor_out "
                 "table: the interpolation error that bounds these predictions "
                 "is unknown, so they cannot be told apart from measured rungs. "
@@ -1304,11 +707,11 @@ def drop_census_interpolated_within_loo(
         rows = costs.get(name, {})
         measured = [
             c for c in cands
-            if not cost_entry_is_band_interpolated(rows.get(c.fmt, {}))
+            if not priced_cell.cost_entry_is_band_interpolated(rows.get(c.fmt, {}))
         ]
         for cand in cands:
             row = rows.get(cand.fmt, {})
-            if row.get("cost_source") != TESSERA_INTERPOLATED_COST_SOURCE:
+            if row.get("cost_source") != priced_cell.TESSERA_INTERPOLATED_COST_SOURCE:
                 continue
             interpolated += 1
             family = _census_cell_family(row, cand.fmt)
@@ -1325,7 +728,7 @@ def drop_census_interpolated_within_loo(
                 dominated.setdefault(name, set()).add(cand.fmt)
     if missing:
         raise CensusLooBandError(
-            f"{len(missing)} {TESSERA_INTERPOLATED_COST_SOURCE} candidate(s) "
+            f"{len(missing)} {priced_cell.TESSERA_INTERPOLATED_COST_SOURCE} candidate(s) "
             "have no finite leave_one_anchor_out max_abs_log2_error for their "
             f"(unit, family) (first: {missing[0]}). Without the measured "
             "interpolation error a prediction cannot be told apart from a "
@@ -1385,598 +788,23 @@ def drop_census_interpolated_within_loo(
     return out
 
 
-def cost_entry_is_exact_by_construction(
-    cost_entry: dict,
-    format_name: str | None = None,
-) -> bool:
-    """Whether this row's Δloss is exactly 0.0 with no measurement involved.
-
-    The union of the two ways a row can be free: a measured lossless
-    re-encode (``cost_entry_is_bit_exact``) and a byte-verbatim source
-    passthrough (``cost_entry_is_source_passthrough``). Pricing, the measured
-    branch test and the P5a branch label all key off THIS predicate so the two
-    cannot drift apart; ``cost_entry_source`` still reports which of the two
-    it was.
-    """
-    return (
-        cost_entry_is_bit_exact(cost_entry, format_name)
-        or cost_entry_is_source_passthrough(cost_entry, format_name)
-    )
 
 
-def synthesized_source_passthrough_cost_entry(format_name: str) -> dict:
-    """The cost row for a passthrough candidate the cost table cannot hold.
-
-    Not a placeholder and not an estimate: ``predicted_dloss`` is 0.0 because
-    the exporter ships the source slice unchanged, and the explicit
-    ``cost_source`` records that provenance so no downstream reader mistakes
-    the zero for an unmeasured activation cost (the failure mode
-    ``cost_entry_prices_unmeasured_activation_at_zero`` exists to catch).
-    ``output_mse_measured=False`` states plainly that no output measurement
-    was taken — because none was needed.
-    """
-    return {
-        "cost_source": SOURCE_PASSTHROUGH_COST_SOURCE,
-        "predicted_dloss": 0.0,
-        "weight_mse": 0.0,
-        "output_mse": 0.0,
-        "output_mse_measured": False,
-        "source_passthrough_format": fr.canonical_format_name(
-            str(format_name)
-        ),
-    }
-
-
-def cost_entry_uses_measured_output_mse(
-    stats_entry: dict,
-    cost_entry: dict,
-    format_name: str | None = None,
-) -> bool:
-    """Whether ``cost_entry_predicted_dloss`` will read a MEASURED
-    ``output_mse``.
-
-    Not the same as "will read ``output_mse``": the band-interpolated branch
-    (``_prices_from_output_mse``) reads it too, from a row whose value is a
-    ladder fit rather than an observation. This predicate keeps the narrower,
-    measurement-only meaning its name states — it is what callers asking "does
-    a real output-side observation back this row" want.
-    """
-    if cost_entry_is_exact_by_construction(cost_entry, format_name):
-        return False
-    return _has_measured_output_mse(stats_entry, cost_entry)
-
-
-def cost_entry_source(
-    stats_entry: dict,
-    cost_entry: dict,
-    format_name: str | None = None,
-) -> str:
-    """Return the named cost source the allocator will use for one row."""
-    explicit = cost_entry.get("cost_source")
-    if isinstance(explicit, str) and explicit:
-        return explicit
-    if cost_entry_is_bit_exact(cost_entry, format_name):
-        return "bit_exact"
-    if _has_measured_output_mse(stats_entry, cost_entry):
-        if (
-            _fisher_output_mse_allocator_enabled()
-            and "fisher_output_mse" in cost_entry
-        ):
-            return "fisher_output_mse"
-        return "output_mse"
-    if "predicted_dloss" in cost_entry:
-        return "predicted_dloss"
-    return "weight_mse"
-
-
-def _fisher_output_mse_allocator_enabled() -> bool:
-    value = os.environ.get("PRISMAQUANT_FISHER_OUTPUT_MSE_ALLOCATOR")
-    if value is None:
-        return False
-    return value.strip().lower() not in {"", "0", "false", "no", "off"}
-
-
-def cost_entry_measured_activation_dloss(
-    stats_entry: dict,
-    cost_entry: dict,
-    *,
-    gain: float = 1.0,
-) -> float:
-    """The ACTIVATION-INCLUSIVE price of one row, or 0.0 when unmeasured.
-
-    Split out of ``cost_entry_predicted_dloss`` so the P5a calibration reads
-    exactly the number the measured branch would have priced — one
-    implementation of "what does the output_mse branch say", not a second
-    copy that can drift from the precedence chain it calibrates against.
-    ``measure_quant_cost`` applies ``activation_quantize_dequantize(X)``
-    before measuring ``output_mse``, which is why this branch — and only this
-    branch — carries the A side.
-
-    Both output-space provenances go through here — a measured row and a
-    band-interpolated one (whose fit interpolates between activation-inclusive
-    measured anchors, so it carries the A side too) — so gain, Fisher-variant
-    selection and the ½·h_trace algebra stay in one place. WHICH rows qualify
-    is ``_prices_from_output_mse``'s decision, not this function's; the
-    calibration still admits only measured ones.
-    """
-    if (
-        _fisher_output_mse_allocator_enabled()
-        and "fisher_output_mse" in cost_entry
-    ):
-        return predicted_dloss(
-            stats_entry["h_trace"],
-            float(cost_entry["fisher_output_mse"]),
-            gain=gain,
-        )
-    return predicted_dloss(
-        stats_entry["h_trace"],
-        float(cost_entry.get("output_mse", 0.0)),
-        gain=gain,
-    )
-
-
-def cost_entry_weight_only_dloss(
-    stats_entry: dict,
-    cost_entry: dict,
-    *,
-    gain: float = 1.0,
-) -> float:
-    """The WEIGHT-ONLY price of one row (``predicted_dloss``/``weight_mse``).
-
-    Uncorrected by any activation calibration — this is the number the
-    calibration divides into, and the number the correction multiplies.
-    """
-    if "predicted_dloss" in cost_entry:
-        base = float(cost_entry["predicted_dloss"])
-        # Uncertainty-aware allocation (opt-in): charge z·stderr on top of the
-        # point estimate. The knapsack optimizes over noisy estimates, so it
-        # systematically harvests lucky draws (winner's curse — the observed
-        # ±0.017-KL between-seed allocation lottery). UCB takes an aggressive
-        # format choice only when it is CONFIDENTLY cheap: a non-regressive
-        # bias whose penalty is derived from the measurement's own sampling
-        # noise, not a tuned constant. z=0 (default) is bit-identical to
-        # prior behavior.
-        z = _cost_ucb_z()
-        if z > 0.0:
-            base += z * float(cost_entry.get("predicted_dloss_stderr", 0.0))
-        return base * float(gain)
-    return predicted_dloss(
-        stats_entry["h_trace"],
-        float(cost_entry.get("weight_mse", 0.0)),
-        gain=gain,
-    )
-
-
-def cost_entry_is_joint_aura(cost_entry: dict) -> bool:
-    """Validate any joint claim before interpreting generic cost fields."""
-    from .joint_aura import validate_joint_aura_entry
-    from .rung_allowability import CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE, complete_scientific_price
-    if (cost_entry.get("cost_source") in (CANONICAL_CHORD_SOURCE, CANONICAL_SUM_SOURCE)
-            or "canonical_quality" in cost_entry or "canonical_members" in cost_entry):
-        complete_scientific_price(cost_entry)
-        return False
-    return validate_joint_aura_entry(cost_entry)
-
-
-class JointCellCoordinateError(ValueError):
-    """A joint row found under a key its own operator identity does not name.
-
-    Distinct from the ``ValueError`` ``validate_joint_aura_entry`` raises for a
-    malformed row, so a caller can turn the coordinate mismatch into its own
-    refusal while leaving malformed-evidence failures exactly as they were.
-    """
-
-
-def joint_row_binds_cell(cost_entry: dict, name: str, fmt: str, *, where: str) -> bool:
-    """Whether a joint A-side found at ``name@fmt`` was produced *for* that cell.
-
-    ``cost_entry_is_joint_aura`` validates a row *internally*: its currency, its
-    Fisher application count, and that its operator and probe digests match the
-    objects they name. Every one of those is true of a row correctly produced
-    for one Linear when it is read under another: the row is self-consistent,
-    and nothing in it was ever compared with the key it was found under. The
-    operator identity carries the coordinate the row was produced for, so a
-    coverage decision -- which reads keys -- has to compare the two. Without
-    that comparison a row copied, mis-merged or re-keyed onto another cell
-    reports an A-side nobody measured, and the cell it landed on keeps a
-    weight-only cost that reads as covered.
-
-    Returns False when the entry is not a joint row at all, so a caller can ask
-    about every row it holds. Raises ``JointCellCoordinateError`` on a joint row
-    whose operator identity does not name this cell: a known coordinate
-    mismatch is a refusal, never a row to skip quietly.
-    """
-    if not cost_entry_is_joint_aura(cost_entry):
-        return False
-    operator = cost_entry.get("joint_operator_identity")
-    produced = (f"{operator.get('qname')!r}@{operator.get('format')!r}"
-                if isinstance(operator, Mapping) else "no operator identity")
-    if (not isinstance(operator, Mapping) or operator.get("qname") != name
-            or operator.get("format") != fmt):
-        raise JointCellCoordinateError(
-            f"{where}: the joint A-side at {name}@{fmt} was produced for "
-            f"{produced}. A joint row carries the activation term of the "
-            "operator it measured, so it is only its own cell; a row copied, "
-            "mis-merged or re-keyed onto another (unit, format) is a refusal "
-            "rather than coverage.")
-    return True
-
-
-def cost_entry_is_anchored_aura_supersurrogate(cost_entry: dict) -> bool:
-    """Whether one row was priced by the anchored-AURA campaign.
-
-    Three independent stamps, ALL required, in the same forgery-refusing style
-    as ``cost_entry_is_source_passthrough`` — a hand-written table cannot claim
-    this provenance by writing one string:
-
-      * ``cost_currency`` is the AURA projection currency, so the number is
-        ``0.5*mean_k<gW,dW>^2`` and not an MSE wearing the same field name;
-      * ``cost_source`` says a PRODUCTION-ARM render produced the anchor.
-        RTN-vs-rendered ``dW`` is result-changing (+36% at fp8), and the
-        byte-verbatim terminals carry ``SOURCE_PASSTHROUGH_COST_SOURCE``
-        instead, so they are excluded here and handled by the exact branch;
-      * ``fisher_application_count == 1`` — the h^2 guard. ``predicted_dloss``
-        already contains the KL-Fisher; extrapolation multiplies by a ratio of
-        ``g``, never by a sensitivity a second time.
-
-    **The standing limitation this admission accepts.** Anchored rows price
-    activation-quantizing rungs (``act_quant_changes_input`` is True for NVFP4
-    and FP8, as it was for every rung of the retired codebook lane, archived
-    2026-09-25, #1304), while AURA's ``dW`` is weights-only. So these
-    prices are activation-quantization-blind, and the P5a penalty cannot fix it
-    here: an anchored table carries no measured ``output_mse`` rows at all, so
-    every family is uncalibrated and ``penalty_for`` already returns exactly
-    1.0. Skipping the penalty is a provenance statement, not a number change.
-
-    The exposure remains explicitly bounded by its measurement scope:
-
-      * a constant activation operator across K does not make the joint
-        residual constant: its cross terms depend on each rendered weight and
-        can reorder rungs inside a family. The opt-in joint AURA path prices
-        those terms; these legacy weight-only rows retain that limitation;
-      * AURA's validated wins (-38%/-39.5% @4B, -17.9% @27B on served KL) were
-        measured against ``h_trace x output_mse``, and THAT baseline carried
-        the A side (``measure_quant_cost`` applies
-        ``activation_quantize_dequantize(X)``). The activation-blind projection
-        beat an activation-inclusive cost, on menus already mixing W4A4 NVFP4,
-        W8A8 FP8 and BF16 — the same family-choice margin.
-
-    This is the route-flip pattern (``expert_empirical_cost`` module contract):
-    a named limitation carried forward, with the served A/B as the arbiter.
-    """
-    if not isinstance(cost_entry, dict):
-        return False
-    if cost_entry.get("cost_currency") != ANCHORED_AURA_COST_CURRENCY:
-        return False
-    if cost_entry.get("cost_source") != ANCHORED_AURA_COST_SOURCE:
-        return False
-    applications = cost_entry.get("fisher_application_count")
-    if isinstance(applications, bool):
-        # ``True == 1``; a boolean is not a count and must not forge one.
-        return False
-    try:
-        # ``__index__`` rather than ``int()``: it admits the numpy integers a
-        # pickled cost table really carries, and refuses the string "1" and
-        # the float 1.0, neither of which any writer of this stamp emits.
-        applications = operator.index(applications)
-    except TypeError:
-        return False
-    return applications == 1
-
-
-def cost_entry_activation_pricing_branch(
-    stats_entry: dict,
-    cost_entry: dict,
-    format_name: str | None = None,
-    activation_pricing: ActivationFairPricing | None = None,
-) -> str:
-    """Name the estimator that priced one row's ACTIVATION contract.
-
-    Orthogonal to ``cost_entry_source`` (which names the cost *field*): this
-    answers the audit's question — did this row's price ever see the A side,
-    and if not, was it corrected? Stamped on every ``Candidate`` so the
-    question is answerable from the artifact rather than from the code
-    version that produced it.
-    """
-    from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
-    if complete_scientific_price(entry, format_name=format_name) is not None:
-        return "canonical_qualified_chord" if entry.get("canonical_quality") is not None else "qualified_served_kl"
-    if cost_entry_is_joint_aura(cost_entry):
-        return "joint_aura"
-    if cost_entry_is_source_passthrough(cost_entry, format_name):
-        # Neither measured nor weight-only: the row was never priced from an
-        # error estimate at all. It gets its own label so the artifact can
-        # tell "shipped the source bytes" apart from "measured a lossless
-        # re-encode" — both are free, but only one of them ran an encoder.
-        return BRANCH_SOURCE_PASSTHROUGH
-    if cost_entry_is_bit_exact(cost_entry, format_name):
-        return BRANCH_BIT_EXACT
-    if _has_measured_output_mse(stats_entry, cost_entry):
-        return BRANCH_MEASURED
-    if _has_interpolated_output_mse(cost_entry):
-        # Same output-space branch as BRANCH_MEASURED, different label: the
-        # price is real information in the right units, but it is a PREDICTION,
-        # and "which of the selected prices were predicted" has to survive into
-        # the artifact. Ordered after the measured test, and after the two
-        # exact-by-construction tests above it, so this label is only ever
-        # claimed by a row that nothing stronger already explained — the same
-        # precedence ``cost_entry_predicted_dloss`` applies.
-        return BRANCH_INTERPOLATED_OUTPUT
-    if cost_entry.get(APPLIED_MARKER_KEY) is True:
-        # An aggregated super-item entry: the members' penalties are already
-        # folded into its predicted_dloss (aggregate_* below).
-        return BRANCH_CALIBRATED
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # Its own label rather than BRANCH_UNCALIBRATED: both are priced at a
-        # 1.0 multiplier, but "no calibration sample was found for this family"
-        # and "this row is an anchored KL-adjoint projection that the P5a
-        # transfer does not apply to" are different audit answers, and the
-        # artifact has to be able to tell them apart.
-        return ANCHORED_AURA_BRANCH
-    act_changes = _format_act_quant_changes_input(format_name)
-    if activation_pricing is None:
-        return (
-            BRANCH_ACTIVATION_IDENTITY if not act_changes
-            else BRANCH_UNCALIBRATED
-        )
-    return activation_pricing.penalty_for(format_name, act_changes)[1]
-
-
-def _format_act_quant_changes_input(format_name: str | None) -> bool:
-    if format_name is None:
-        return False
-    try:
-        return bool(fr.get_format(str(format_name)).act_quant_changes_input)
-    except KeyError:
-        return False
-
-
-def _activation_penalty(
-    format_name: str | None,
-    activation_pricing: ActivationFairPricing | None,
-) -> float:
-    if activation_pricing is None:
-        return 1.0
-    return activation_pricing.penalty_for(
-        format_name, _format_act_quant_changes_input(format_name))[0]
-
-
-def cost_entry_predicted_dloss(
-    stats_entry: dict,
-    cost_entry: dict,
-    *,
-    gain: float = 1.0,
-    format_name: str | None = None,
-    activation_pricing: ActivationFairPricing | None = None,
-) -> float:
-    """Return the allocator's authoritative Δloss for one cost entry.
-
-    ``activation_pricing`` (P5a) applies the per-family activation calibration
-    to the WEIGHT-ONLY branches only — the measured branch is already
-    activation-inclusive and the bit-exact branch is, by construction, an
-    identity activation path. ``None`` (the default) is bit-for-bit the
-    pre-P5a precedence, which is what ``kl_measurement`` and every direct
-    caller outside candidate construction still want.
-
-    The correction is multiplicative, so it scales the UCB hedge with the
-    point estimate (both are in the same weight-only units and the transfer
-    to the measured scale applies to both), and it cannot lift an exactly-0.0
-    price off zero — ``cost_entry_prices_unmeasured_activation_at_zero``
-    keeps its full strength.
-    """
-    from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
-    complete = complete_scientific_price(entry, format_name=format_name)
-    if complete is not None:
-        return complete
-    if cost_entry_is_joint_aura(cost_entry):
-        if float(gain) != 1.0 or cost_entry.get(APPLIED_MARKER_KEY) is True:
-            raise ValueError("joint AURA refuses calibrated gain or a second activation transfer")
-        if (format_name is not None and
-                cost_entry["joint_operator_identity"]["format"] != format_name):
-            raise ValueError("joint AURA row cannot price a different format")
-        # Its signed full residual already contains weight, activation and
-        # mixed terms under one downstream KL Fisher. Only probe uncertainty
-        # may change the proposal price; no scalar sensitivity is applied.
-        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0)
-    if cost_entry_is_exact_by_construction(cost_entry, format_name):
-        # Zero cost by construction, in one of two ways: a lossless re-encode
-        # END TO END (weights verbatim AND identity activation path,
-        # ``cost_entry_is_bit_exact``), or a byte-verbatim source passthrough
-        # whose exporter never re-encodes at all
-        # (``cost_entry_is_source_passthrough``). Either way the answer does
-        # not depend on a measurement, so it outranks any noisy output_mse.
-        return 0.0
-    if _prices_from_output_mse(stats_entry, cost_entry):
-        # The row's own OUTPUT-space number, whether measured or the tensor's
-        # band-interpolated fit (``_prices_from_output_mse`` explains why those
-        # two provenances share one branch while only the first may calibrate).
-        # The per-family penalty is NOT applied here: it exists to move a
-        # WEIGHT-space number onto the output scale, and this number is already
-        # on it. Applying it would double-count, and applying it to only some
-        # rungs of a family is the mispricing this branch was split out to fix.
-        return cost_entry_measured_activation_dloss(
-            stats_entry, cost_entry, gain=gain)
-    base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain)
-    if cost_entry.get(APPLIED_MARKER_KEY) is True:
-        # Aggregated super item: its members were penalized individually and
-        # the result summed. Re-applying here would square the correction. The
-        # same reasoning covers the AQUA A-side: a super item prices a format as
-        # the SUM of its members' cost_entry_predicted_dloss, so every member's
-        # act_dloss is already inside ``base``.
-        return base
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # Read the anchored projection directly. The P5a penalty transfers a
-        # weight-SPACE number onto the measured output scale using a constant
-        # fitted from that family's own measured/weight-only row pairs; an
-        # anchored table has no measured rows, so there is no such constant to
-        # apply (``penalty_for`` already returns 1.0 via BRANCH_UNCALIBRATED).
-        # Naming the branch instead of falling through keeps the artifact
-        # honest about WHY the multiplier was 1.0. Numerically identical today
-        # — and it stays correct if a future run mixes an anchored table with a
-        # measured one, where falling through would silently apply another
-        # family's transfer constant to a projection that is not in its units.
-        return base + cost_entry_act_dloss(cost_entry)
-    # The A-side rides the SAME per-family transfer as the W-side. Adding it
-    # OUTSIDE the multiply puts the two halves of one unit's price on two
-    # scales, and P5a's fitted constants are large: measured on Qwen3.8-27B the
-    # NVFP4 family fit was x8103, which diluted an A-side worth 6x the W-side
-    # down to 0.07% of the total and produced an allocation byte-identical to
-    # the weight-only one. Multiplying the sum preserves the A:W ratio, which is
-    # the quantity the DP actually ranks on, and is exactly ``base + act`` when
-    # P5a is inert (penalty 1.0) -- so it cannot change a run that has no
-    # measured rows to calibrate from.
-    return ((base + cost_entry_act_dloss(cost_entry))
-            * _activation_penalty(format_name, activation_pricing))
 
 
 #: AQUA-AURA: the A-side Δloss of a (unit, format), written into the cost row by
 #: ``aqua_activation_cost``. Absent on every pre-AQUA cost artifact, which is
 #: why every read goes through ``cost_entry_act_dloss`` and defaults to 0.0.
-ACT_DLOSS_KEY = "act_dloss"
-
-
-def cost_entry_act_dloss(cost_entry: dict) -> float:
-    """AQUA-AURA: the row's ACTIVATION-side Δloss, or 0.0 when absent.
-
-    WHY THIS IS ADDED, NOT MULTIPLIED, AND ONLY HERE
-    ------------------------------------------------
-    Choosing NVFP4 commits the Linear's ACTIVATIONS to 4 bits as well as its
-    weights; choosing FP8 commits them to 8; BF16 leaves them alone. A
-    weight-only surrogate cannot see any of that -- NVFP4 and NVFP4A16 render
-    weights BIT-IDENTICALLY (T1) -- so the DP was pricing a W4A4 format as if it
-    were weight-only and systematically over-buying 4-bit.
-
-    The term is a diagonal activation Δloss approximation derived from the
-    layer's own activation statistics and is added to the weight estimate.
-    A shared Δloss label does not establish equivalence to AURA's KL-adjoint
-    currency or capture weight/activation cross terms (PrismaQuant #237).
-    It is deliberately not a multiplicative penalty:
-    ``ActivationFairPricing`` (P5a) is the multiplicative, per-FAMILY, fitted
-    transfer of a weight-space number onto the measured output scale, and this
-    is a per-UNIT, mechanistic, already-output-space quantity. The current
-    weight-only branches add this term before applying the family penalty.
-
-    It is added ONLY on the weight-only branches. The ``_prices_from_output_mse``
-    branch is already activation-inclusive by construction (the row's own
-    output-space measurement saw the activation path), and adding here would
-    double-count it. ``cost_entry_is_exact_by_construction`` returns 0.0 for a
-    row whose activation path is an identity, so there is nothing to add there
-    either; a lossless re-encode whose SERVED activations are 4-bit is excluded
-    from the menu by ``cost_entry_prices_unmeasured_activation_at_zero`` rather
-    than priced at all.
-
-    Defaults to 0.0 rather than raising because every cost artifact written
-    before AQUA lacks the key, and those runs must remain bit-for-bit
-    reproducible. An unmeasured A-side on an activation-quantizing format is a
-    HOLE, not a zero, and is reported as such by the writer -- it is not this
-    function's job to guess.
-    """
-    try:
-        return float(cost_entry.get(ACT_DLOSS_KEY, 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 ACTIVATION_COST_UNMEASURED_REASON = "activation_cost_unmeasured"
-
-
-def cost_entry_prices_unmeasured_activation_at_zero(
-    stats_entry: dict,
-    cost_entry: dict,
-    priced_dloss: float,
-    format_name: str | None = None,
-) -> bool:
-    """Whether this row prices a W-and-A format's UNKNOWN cost at the global
-    optimum (Δloss exactly 0.0).
-
-    ``cost_entry_is_bit_exact`` closed this for the ``output_mse`` branch: a
-    weight-lossless entry on an activation-quantizing format keeps its measured
-    A-side output_mse instead of short-circuiting to 0.0. But that branch is
-    only taken when output_mse is a real measurement. Packed-expert rows whose
-    routed forward could not be reconstructed (``can_measure_output`` false),
-    and EVERY row in a run with ``PRISMAQUANT_EXPERT_COST_SAMPLE`` set, are
-    written with ``output_mse_measured=False`` (measure_quant_cost), so pricing
-    falls through to ``predicted_dloss``/``weight_mse`` — both of which are
-    exactly 0.0 for a weight-lossless re-encode (the source is already in that
-    format: MXFP4 over an MXFP4-packed source, NVFP4 over an NVFP4 source).
-    Nothing in that row ever looked at the activation path, yet the DP reads a
-    cost of 0.0: the unbeatable global minimum at any budget, for an assignment
-    whose served activations are 4-bit.
-
-    This is not a mis-estimate to be corrected — a positive weight-side
-    surrogate is the accepted L1 design, biased but tradeable — it is a cost the
-    optimizer CANNOT trade off: zero is the argmin, so the format is selected at
-    every target, unconditionally. The unknown must therefore be excluded from
-    the menu (``build_candidates``, counted and logged like any other
-    inapplicable format) rather than priced.
-
-    The predicate is exact, not thresholded:
-
-      * the format's activation path is provably non-identity
-        (``FormatSpec.act_quant_changes_input`` — a dtype-level fact);
-      * no measured output-side evidence exists for this row
-        (``_has_measured_output_mse``), so the A-side error is unknown
-        whatever produced the number;
-      * the resulting price is exactly 0.0 — the DP's global optimum;
-      * the row's measured sensitivity is POSITIVE. ``h_trace == 0`` prices
-        every format at 0.0 including the passthrough ones, which is a measured
-        statement that no perturbation of this Linear's output moves the loss —
-        W-side or A-side, since the same Fisher expansion multiplies both. A
-        zero-token expert at thin calibration is exactly that row, and it must
-        stay free to take the cheapest format instead of being forced onto
-        BF16.
-    """
-    from .rung_allowability import complete_scientific_price
-    entry = stats_entry.get("_canonical_price_by_format", {}).get(format_name, cost_entry)
-    if complete_scientific_price(entry, format_name=format_name) is not None:
-        return False
-    if cost_entry_is_joint_aura(cost_entry):
-        return False
-    if format_name is None:
-        return False
-    if cost_entry_is_anchored_aura_supersurrogate(cost_entry):
-        # An anchored-AURA zero is a MEASUREMENT, not the absence of one, and
-        # this guard exists for the absence. The zeros it was built to catch
-        # are placeholders — a band-interpolated row that never produced an
-        # output number, a dense-ladder fit that could not be made — and an
-        # anchored table cannot contain those: ``assert_aura_only_cost_table``
-        # refuses any row carrying output_mse/weight_mse/h_trace at all, and
-        # per-unit checkpoint completeness refuses a missing anchor rather than
-        # defaulting it to zero.
-        #
-        # It is also very nearly vacuous, which is the point: 0.5*mean_k<gW,dW>^2
-        # is exactly 0.0 only if dW is exactly zero (a byte-identical render —
-        # the exact-by-construction branch above already owns that) or gW is
-        # exactly zero (h_trace == 0 — the positive-sensitivity condition below
-        # already exempts that). The bypass is scoped to rows this predicate
-        # matches, so every other cost table keeps the guard at full strength.
-        return False
-    try:
-        spec = fr.get_format(str(format_name))
-    except KeyError:
-        return False
-    if not spec.act_quant_changes_input:
-        return False
-    if _has_measured_output_mse(stats_entry, cost_entry):
-        return False
-    try:
-        if float(priced_dloss) != 0.0:
-            return False
-    except (TypeError, ValueError):
-        return False
-    try:
-        h_trace = float(stats_entry.get("h_trace", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return False
-    return h_trace > 0.0
 
 
 def collect_activation_calibration_rows(
     stats: dict,
     costs: dict,
     formats: list[fr.FormatSpec],
+    *, pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[list[CalibrationRow], dict[str, int], dict[str, int]]:
     """Extract the P5a calibration sample from the run's own cost tables.
 
@@ -2016,6 +844,8 @@ def collect_activation_calibration_rows(
     the iteration order is the sorted cost table, so the sample — and its
     digest — is deterministic.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     rows: list[CalibrationRow] = []
     measured_by_family: dict[str, int] = {}
     weight_only_by_family: dict[str, int] = {}
@@ -2029,14 +859,14 @@ def collect_activation_calibration_rows(
             stats_entry = stats.get(name)
             if not isinstance(stats_entry, dict):
                 continue
-            entry, _entry_fmt = _resolve_cost_entry(costs[name], spec.name)
+            entry, _entry_fmt = priced_cell.resolve_cost_row(costs[name], spec.name)
             if entry is None or "error" in entry:
                 continue
-            if cost_entry_is_joint_aura(entry):
+            if joint_aura_rows.cost_entry_is_joint_aura(entry):
                 continue
-            if cost_entry_is_bit_exact(entry, spec.name):
+            if priced_cell.cost_entry_is_bit_exact(entry, spec.name):
                 continue
-            if cost_entry_is_anchored_aura_supersurrogate(entry):
+            if priced_cell.cost_entry_is_anchored_aura_supersurrogate(entry):
                 # Never a calibration observation on either side. The sample
                 # fits a measured-over-weight-only RATIO, and an anchored row
                 # has no measured side to be the numerator; counting it in
@@ -2046,13 +876,13 @@ def collect_activation_calibration_rows(
                 # already excluded (no output_mse), stated explicitly so it
                 # stays excluded if the membership test is ever widened.
                 continue
-            if _has_measured_output_mse(stats_entry, entry):
+            if priced_cell._has_measured_output_mse(stats_entry, entry):
                 measured_by_family[family] += 1
                 if not ("predicted_dloss" in entry or "weight_mse" in entry):
                     continue
-                measured = cost_entry_measured_activation_dloss(
-                    stats_entry, entry)
-                weight_only = cost_entry_weight_only_dloss(stats_entry, entry)
+                measured = priced_cell.cost_entry_measured_activation_dloss(
+                    stats_entry, entry, policy=pricing_policy)
+                weight_only = priced_cell.cost_entry_weight_only_dloss(stats_entry, entry, policy=pricing_policy)
                 if measured > 0.0 and weight_only > 0.0:
                     rows.append(CalibrationRow(
                         qname=str(name),
@@ -2072,6 +902,7 @@ def calibrate_activation_fair_pricing(
     formats: list[fr.FormatSpec],
     *,
     enabled: bool | None = None,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> ActivationFairPricing:
     """Calibrate the per-family activation penalty ONCE for a run.
 
@@ -2080,39 +911,16 @@ def calibrate_activation_fair_pricing(
     menus share one fit (the audit's "calibrated once per model") instead of
     three menu-dependent ones.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     rows, measured, weight_only = collect_activation_calibration_rows(
-        stats, costs, formats)
+        stats, costs, formats, pricing_policy=pricing_policy)
     return _calibrate_activation_pricing(
         rows,
         measured_rows_by_family=measured,
         weight_only_rows_by_family=weight_only,
         enabled=enabled,
     )
-
-
-def _cost_ucb_z() -> float:
-    """PRISMAQUANT_COST_UCB_Z: stderr multiples added to predicted_dloss."""
-    try:
-        return max(0.0, float(os.environ.get("PRISMAQUANT_COST_UCB_Z", "0")))
-    except Exception:
-        return 0.0
-
-
-def _resolve_cost_entry(cost_rows: dict, fmt_name: str, *, stats_entry=None) -> tuple[dict | None, str]:
-    """Resolve one Linear's cost row for ``fmt_name``, alias-aware.
-
-    Returns ``(entry, entry_fmt)`` where ``entry_fmt`` is the alias actually
-    present in the cost table (what ``calibrated_gains`` may be keyed by), or
-    ``(None, fmt_name)`` when the format was never measured.
-    """
-    if stats_entry is not None:
-        cached = stats_entry.get("_canonical_price_by_format", {}).get(fmt_name)
-        if cached is not None:
-            return cached, fmt_name
-    for candidate_name in fr.aliases_for(fmt_name):
-        if candidate_name in cost_rows:
-            return cost_rows[candidate_name], candidate_name
-    return None, fmt_name
 
 
 def price_paired_rate_trade(
@@ -2146,10 +954,10 @@ def price_paired_rate_trade(
         rows = {}
         for name in sorted(formats):
             fmt = formats[name]
-            row, _entry_fmt = _resolve_cost_entry(costs.get(name, {}), fmt)
+            row, _entry_fmt = priced_cell.resolve_cost_row(costs.get(name, {}), fmt)
             if row is None or "error" in row:
                 raise ValueError(f"paired rate trade missing matched cost row: {name}@{fmt}")
-            if not joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
+            if not joint_aura_rows.joint_row_binds_cell(row, name, _entry_fmt, where="paired rate trade"):
                 raise ValueError(f"paired rate trade requires matched joint AURA currency: {name}@{fmt}")
             rows[name] = row
         return rows
@@ -2409,7 +1217,7 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
         from .rung_allowability import complete_scientific_price
         if complete_scientific_price(cost_entry) is not None:
             continue
-        if cost_entry_is_joint_aura(cost_entry):
+        if joint_aura_rows.cost_entry_is_joint_aura(cost_entry):
             # The family transfer never scaled the full-residual member, so
             # it must not scale the hedge removed from that member either.
             gain = 1.0
@@ -2419,7 +1227,7 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
         # from its own output_mse never had a hedge added to its dloss, so
         # subtracting one here would over-subtract the linear hedge this
         # conversion exists to undo.
-        if _prices_from_output_mse(stats_entry, cost_entry):
+        if priced_cell._prices_from_output_mse(stats_entry, cost_entry):
             continue
         if "predicted_dloss" not in cost_entry:
             continue
@@ -2614,6 +1422,12 @@ def refuse_retired_trellis_surface(env: Mapping[str, str] | None = None) -> None
     )
 
 
+@dataclass(frozen=True)
+class CandidateBuild:
+    candidates: dict[str, list[Candidate]]
+    cost_rows: dict[str, dict[str, dict]]
+
+
 def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      calibrated_gains: dict[str, float] | None = None,
                      source_manifest: dict[str, str] | None = None,
@@ -2631,7 +1445,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      rung_allowability: Mapping | None = None,
                      allowability_m: int | None = None,
                      allowability_tensor_parallel: int = 1,
-                     ) -> dict[str, list[Candidate]]:
+                     pricing_policy: priced_cell.CostPricingPolicy | None = None,
+                     ) -> CandidateBuild:
     """Build runtime-legal format candidates for every measured Linear.
 
     This is the optimizer's first legality gate. Export keeps a final
@@ -2658,9 +1473,13 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     scope cannot admit that query merely because it does not require one.
     The existing research menu may still price an unattested writable rung.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     refuse_retired_trellis_surface()
     production_allocation = not load_serving_profile(target_profile).emulation_only
     gains = calibrated_gains or {}
+    cost_rows = {name: {fmt: dict(row) for fmt, row in rows.items()}
+                 for name, rows in costs.items()}
     out: dict[str, list[Candidate]] = {}
     masked: dict[tuple[str, str], list[str]] = {}
     source_counts: Counter[str] = Counter()
@@ -2673,8 +1492,6 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     for name, s in stats.items():
         if name not in costs:
             continue
-        s.pop("_canonical_price_by_format", None)
-        s.pop("_canonical_quality_by_format", None)
         serving_context = (
             context_by_unit.get(name) if context_by_unit is not None else None
         )
@@ -2699,7 +1516,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
             )
         if (
             source_manifest is not None
-            and source_footprint_owner_for_kind(str(source_kind)) is None
+            and source_format_contracts.source_footprint_owner_for_kind(str(source_kind)) is None
         ):
             raise ValueError(
                 f"{name}: source_kind={source_kind!r} has no exact source "
@@ -2727,14 +1544,14 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                         mask_records.append({"qname": name, "format": spec.name,
                             "reason": "canonical_quality_wait",
                             "detail": "qualified neighbour anchors are absent"})
-            if entry is None and spec.name in SOURCE_PASSTHROUGH_FORMATS:
+            if entry is None and spec.name in source_format_contracts.SOURCE_PASSTHROUGH_FORMATS:
                 # No cost table will ever carry a column for a byte-copy
                 # contract. Synthesize the row rather than dropping the
                 # candidate: silently omitting it would take the unit's
                 # CHEAPEST ZERO-ERROR option off the menu and leave the DP
                 # choosing only among lossy re-encodes. The legality gate
                 # below still has to agree the source IS this format.
-                entry = synthesized_source_passthrough_cost_entry(spec.name)
+                entry = priced_cell.synthesized_source_passthrough_cost_entry(spec.name)
                 entry_fmt = spec.name
             if entry is None or "error" in entry:
                 continue
@@ -2806,26 +1623,23 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     masked.setdefault((spec.name, reason), []).append(name)
                     unserved.setdefault(name, []).append(spec.name)
                     continue
-            if entry.get("canonical_quality") is not None:
-                s.setdefault("_canonical_quality_by_format", {})[spec.name] = entry["canonical_quality"]
             if (entry.get("cost_source") == "canonical_qualified_chord"
                     or entry.get("quality_scope", {}).get("currency") == "served_kl"):
                 from .rung_allowability import complete_scientific_price
                 complete_scientific_price(entry, format_name=spec.name)
                 if entry["quality_scope"]["unit"] != name or tuple(entry["quality_scope"]["shape"]) != shape:
                     raise ValueError("canonical scientific price differs from the actual unit or source shape")
-                s.setdefault("_canonical_price_by_format", {})[spec.name] = entry
+            cost_rows[name][entry_fmt] = dict(entry)
             gain = float(gains.get(spec.name, gains.get(entry_fmt, 1.0)))
             # Always use measured joint output perturbation when available.
             # Packed experts can carry an unmeasured output_mse placeholder;
             # cost_entry_predicted_dloss falls back to predicted_dloss or
             # weight_mse for those entries.
-            predicted = cost_entry_predicted_dloss(
+            cell = priced_cell.price_cell(
                 s, entry, gain=gain, format_name=spec.name,
-                activation_pricing=activation_pricing)
-            priced = max(predicted, 0.0)
-            if cost_entry_prices_unmeasured_activation_at_zero(
-                    s, entry, priced, spec.name):
+                activation_pricing=activation_pricing, policy=pricing_policy)
+            priced = cell.candidate_dloss
+            if cell.unmeasured_activation_at_zero:
                 # The A-side cost of this W-and-A format was never measured for
                 # this row, and the W side is lossless, so the only price the
                 # cost table can offer is 0.0 — the DP's global optimum. An
@@ -2844,7 +1658,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     f"price is dloss 0.0 with h_trace={h_trace:.6g} > 0: an "
                     "unmeasured activation cost at the DP's global minimum "
                     f"(cost_source="
-                    f"{cost_entry_source(s, entry, spec.name)})"
+                    f"{cell.source})"
                 )
                 if mask_records is not None:
                     mask_records.append({
@@ -2863,9 +1677,8 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 ).append(name)
                 unpriceable.setdefault(name, []).append(spec.name)
                 continue
-            source_counts[cost_entry_source(s, entry, spec.name)] += 1
-            activation_branch = cost_entry_activation_pricing_branch(
-                s, entry, spec.name, activation_pricing)
+            source_counts[cell.source] += 1
+            activation_branch = cell.activation_branch
             activation_branch_counts[activation_branch] += 1
             (
                 memory_bytes,
@@ -2993,7 +1806,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
         preserve_runtime_frontier=preserve_runtime_frontier,
         defer_reduction=defer_menu_reduction,
     )
-    return out
+    return CandidateBuild(out, cost_rows)
 
 
 def selection_serving_lane_provenance(
@@ -3238,8 +2051,8 @@ def summarize_applicability_masks(
     source_bpp_eliminations = [
         row for row in sorted_records
         if row.get("reason") in {
-            SOURCE_BPP_EXCEEDED_REASON,
-            SOURCE_BPP_UNKNOWN_REASON,
+            source_format_contracts.SOURCE_BPP_EXCEEDED_REASON,
+            source_format_contracts.SOURCE_BPP_UNKNOWN_REASON,
         }
     ]
 
@@ -3257,7 +2070,7 @@ def summarize_applicability_masks(
         },
         "records": sorted_records,
         "source_bpp_legality": {
-            "schema": SOURCE_BPP_POLICY_SCHEMA,
+            "schema": source_format_contracts.SOURCE_BPP_POLICY_SCHEMA,
             "enabled": True,
             "evaluated": (
                 source_census_present
@@ -3743,6 +2556,7 @@ def aggregate_fused_siblings(
     activation_pricing: ActivationFairPricing | None = None,
     preserve_runtime_frontier: bool = False,
     baseline_assignment: Mapping[str, str] | None = None,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate fused siblings into single DP items.
 
@@ -3780,11 +2594,13 @@ def aggregate_fused_siblings(
     whole group from the DP with no error at all. The same argument is written
     out at length in ``aggregate_packed_serving_groups``.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     if profile is None:
         return stats, costs, candidates
 
     gains = calibrated_gains or {}
-    ucb_z = _cost_ucb_z()
+    ucb_z = pricing_policy.ucb_z
     # Principle 14: what one fused module's roles may disagree about is a fact
     # about the serving runtime, so it is read from the table that runtime
     # publishes -- once per aggregation, not once per group, and through the
@@ -3840,8 +2656,8 @@ def aggregate_fused_siblings(
             resolved_entries: list[tuple[str, dict]] = []
             missing = []
             for m in members:
-                entry, entry_fmt = _resolve_cost_entry(
-                    costs.get(m, {}), spec.name, stats_entry=stats[m])
+                entry, entry_fmt = priced_cell.resolve_cost_row(
+                    costs.get(m, {}), spec.name)
                 if entry is None or "error" in entry:
                     missing.append(m)
                 else:
@@ -3865,7 +2681,7 @@ def aggregate_fused_siblings(
             # weight-only branch, so it scales the member dloss and the
             # member stderr identically — passed as the hedge's scale below
             # (the calibrated gain enters once, later).
-            act_penalty = _activation_penalty(spec.name, activation_pricing)
+            act_penalty = priced_cell._activation_penalty(spec.name, activation_pricing)
             for m, (_entry_fmt, c) in zip(members, resolved_entries):
                 # Mirrors build_candidates, including unmeasured packed
                 # output_mse fallback, bit-exact short-circuit, and
@@ -3873,9 +2689,9 @@ def aggregate_fused_siblings(
                 # the summed super-item dloss (below, at candidate build), so
                 # the per-member terms here — and the hedge conversion — are
                 # un-gained.
-                member_pred = cost_entry_predicted_dloss(
+                member_pred = priced_cell.cost_entry_predicted_dloss(
                     stats[m], c, format_name=spec.name,
-                    activation_pricing=activation_pricing)
+                    activation_pricing=activation_pricing, policy=pricing_policy)
                 sum_pred += member_pred
                 member_terms.append((stats[m], c, member_pred, act_penalty))
             # Recover the unhedged sum for weight_mse, and store the shared
@@ -4103,8 +2919,8 @@ def aggregate_fused_siblings(
                 from .rung_allowability import make_scientific_price_sum
                 complete_members = []
                 for member, member_format in member_formats.items():
-                    entry, _entry_format = _resolve_cost_entry(
-                        costs.get(member, {}), member_format, stats_entry=stats[member])
+                    entry, _entry_format = priced_cell.resolve_cost_row(
+                        costs.get(member, {}), member_format)
                     complete_members.append({"unit": member, "format": member_format, "row": entry})
                 complete_sum = make_scientific_price_sum(complete_members, format_name=composite.fmt)
                 if complete_sum is not None:
@@ -4405,6 +3221,7 @@ def aggregate_packed_serving_groups(
     calibrated_gains: dict[str, float] | None = None,
     activation_pricing: ActivationFairPricing | None = None,
     preserve_runtime_frontier: bool = False,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate packed-MoE serving groups into single DP decision units.
 
@@ -4444,13 +3261,15 @@ def aggregate_packed_serving_groups(
     ``expand_packed_group_assignment`` to broadcast a group decision back
     to per-tensor entries for emission.
     """
+    pricing_policy = (priced_cell.CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     group_fn = getattr(profile, "packed_expert_format_group", None) \
         if profile is not None else None
     if not callable(group_fn):
         return stats, costs, candidates
 
     gains = calibrated_gains or {}
-    ucb_z = _cost_ucb_z()
+    ucb_z = pricing_policy.ucb_z
     grouped, ungrouped = _packed_serving_groups(candidates, group_fn)
 
     if not grouped:
@@ -4498,10 +3317,10 @@ def aggregate_packed_serving_groups(
             # P5a: member candidates were priced WITH the family penalty, so
             # the hedge conversion must scale each member's stderr by the same
             # factor or it would over-subtract the linear hedge it is undoing.
-            act_penalty = _activation_penalty(spec.name, activation_pricing)
+            act_penalty = priced_cell._activation_penalty(spec.name, activation_pricing)
             for m in members:
-                entry, entry_fmt = _resolve_cost_entry(
-                    costs.get(m, {}), spec.name, stats_entry=stats[m])
+                entry, entry_fmt = priced_cell.resolve_cost_row(
+                    costs.get(m, {}), spec.name)
                 member_terms.append((
                     stats[m],
                     entry,

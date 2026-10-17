@@ -9,7 +9,7 @@ and scale-sweep candidates.  This module turns those rendered scores into
 allocator-compatible ``predicted_dloss`` entries.
 
 The synthesized entries intentionally set ``output_mse_measured=False`` so
-``allocator_candidates.cost_entry_predicted_dloss`` consumes
+``priced_cell.cost_entry_predicted_dloss`` consumes
 ``predicted_dloss`` directly instead of applying the diagonal-Fisher proxy
 again.
 """

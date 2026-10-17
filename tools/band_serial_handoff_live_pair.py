@@ -106,10 +106,12 @@ def _row(entry: dict) -> dict:
 def prepare(root: Path, tier: str) -> dict:
     """Write the tiny campaign, the producer's template and both readsets."""
     import dispatch_joint_quanta as dispatch
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
-    from prismaquant.joint_layer_quanta import (
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.joint_layer_quanta import seal_manifest_bytes
+    from prismaquant.joint_quantum_row import (
         CHECKPOINT_LOAD_PHASE, executable_bound_phase_name,
-        executable_source_phase_name, seal_manifest_bytes)
+        executable_source_phase_name,
+    )
     from test_quantum_executable_readset import (
         _bind_slice, _tiny_receipt, _tiny_records)
 
@@ -368,8 +370,12 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
 
     from prismaquant.calibration_data import _read_calibration_payload
     from prismaquant.joint_quantum_handoff import (
-        HANDOFF_LOAD_PHASE, handoff_read_entries, load_handoff_inputs,
-        load_quantum_handoff, require_band_serial_readset)
+        handoff_read_entries,
+        load_handoff_inputs,
+        load_quantum_handoff,
+        require_band_serial_readset,
+    )
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
     from prismaquant.prismabuild_progress import report as progress
     from prismaquant.staged_tier_policy import TierPolicyRefused
 

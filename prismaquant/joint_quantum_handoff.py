@@ -81,6 +81,8 @@ fallback stays on it after the default moved to the kernel.
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 from collections.abc import Mapping
 from contextlib import closing, contextmanager
 import json
@@ -113,9 +115,6 @@ HANDOFF_RECORD_BATCH_KIND = "handoff-record"
 #: consumer that declared it has succeeded, or sweeps it once the producer
 #: attempt is dead and no consumer declared it.
 HANDOFF_ORIGIN_LIFETIME = "consumed"
-#: The executable read phase a band-serial quantum stages its handoff under,
-#: in place of the checkpoint load and the chain phases.
-HANDOFF_LOAD_PHASE = "handoff-load"
 #: The ``annotations.band_serial`` block of a derived band-serial readset.
 #: v2 (PQ #1143): a spill-sealed readset stages each probe's incoming plane
 #: in that probe's spill phase and names the moved counts in
@@ -319,7 +318,7 @@ class HandoffEmitter:
 
         Refuses a kernel stamp that is not one before any thread starts.
         """
-        from .cost_streaming import normalize_boundary_storage
+        from .streamed_boundary_artifacts import normalize_boundary_storage
 
         if self.published is not None or self._streamed:
             raise RuntimeError("a quantum emits its handoff once")
@@ -567,7 +566,7 @@ class HandoffStream:
     # -- the writer thread -------------------------------------------------
 
     def _run(self):
-        from .cost_streaming import StreamedBoundaryArtifacts
+        from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
         # The writer drives this owner, so its waits are the writer's own
         # (PQ #1262), not the compute thread's.
@@ -806,7 +805,7 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     #1214).
     """
     from .joint_adjoint_slices import chain_layers_for
-    from .joint_layer_quanta import quantum_id
+    from .joint_campaign_ledger import (quantum_id)
 
     if not is_sha256hex(sha256):
         raise QuantumHandoffRefused("the handoff digest is not a sha256")
@@ -1024,7 +1023,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     incoming rows through :class:`HandoffIncoming`, and the pass's stores
     fill the plane.
     """
-    from .cost_streaming import _state_storage_bytes
+    from .streamed_boundary_artifacts import _state_storage_bytes
     from .io_spans import ReadRateReporter
     from .joint_adjoint_checkpoints import (
         _await_checkpoint_entry,
@@ -1198,10 +1197,9 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     """
     import copy
 
-    from .joint_layer_quanta import (
+    from .joint_layer_quanta import (MANIFEST_SCHEMA_V2, append_read_phase)
+    from prismaquant.joint_quantum_row import (
         CHECKPOINT_LOAD_PHASE,
-        MANIFEST_SCHEMA_V2,
-        append_read_phase,
         executable_bound_phase_name,
         executable_source_phase_name,
         executable_spill_phase_name,
@@ -1285,7 +1283,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
                               for entry in handoff_incoming_entries(handoff, probe)]
     seal("head", [kept(index) for index in phases[0]["entry_indices"]]
          + [take(_handoff_record_read_entry(handoff))])
-    seal(HANDOFF_LOAD_PHASE,
+    seal(quantum_row.HANDOFF_LOAD_PHASE,
          [take(row) for row in handoff_read_entries(
              handoff, checkpoint_record, streamed_incoming=streamed)])
     for phase in phases[len(replaced) + 1:]:

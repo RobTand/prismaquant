@@ -22,6 +22,7 @@ offline from that snapshot + the resident gate weight, exactly as the resident
 packed render does.
 """
 from __future__ import annotations
+from .native_render_levers import NativeRenderLevers
 
 import os
 from collections import defaultdict
@@ -57,10 +58,11 @@ from prismaquant.production_weight_cache import (
     _store_rendered_weight_entry,
     _production_cache_git_commit,
     _production_cache_source_sha256,
+    claim_streamed_cache_directory,
     fill_packed_expert_cache_entries,
     render_production_weight,
-    require_injective_cache_filenames,
 )
+from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_model import _build_streaming_context
 
 
@@ -138,7 +140,8 @@ def _render_dense_layer(
     joint fused-sibling NVFP4 globals (siblings are resident in the same layer),
     fused-group-unified calibrated max_abs, then
     ``render_production_weight`` per (qname, fmt) stored via the shared
-    ``_store_rendered_weight_entry``.
+    ``_store_rendered_weight_entry``, each stored fused NVFP4 entry witnessing
+    its joint global, and the shard it was published as, on ``cache``.
     """
     from prismaquant.decision_units import fused_group_key
     from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
@@ -146,10 +149,11 @@ def _render_dense_layer(
         _render_levers_input_global_scale_policy,
     )
 
-    # The A-side scale policy this stream was resolved under, from the same
-    # levers the resident fill stamps it in (#227): the streamed and resident
-    # renders must price identically, so neither may re-read the environment
-    # per layer.
+    # The recorded recipe and the A-side scale policy this stream was resolved
+    # under, from the same levers the resident fill stamps (#227): the streamed
+    # and resident renders must price identically, so neither may re-read the
+    # environment per layer.
+    render_options = NativeRenderLevers.from_record(levers)
     stream_score_policy = _render_levers_input_global_scale_policy(levers)
     if not retain_rendered and consume_render is None:
         raise ValueError(
@@ -181,13 +185,16 @@ def _render_dense_layer(
 
     # Joint fused-sibling NVFP4 global (max across q/k/v or gate/up). Restricted
     # to this layer's non-BF16 dense qnames; siblings are co-resident. The
-    # synthetic all-NVFP4 assignment matches the resident derivation.
+    # synthetic all-NVFP4 assignment and the recorded recipe match the resident
+    # derivation and the export pre-pass, which re-derives the shipped codes
+    # under this same global.
     joint_globals: dict[str, torch.Tensor] = {}
     if needs_nvfp4:
         joint_globals = _compute_nvfp4_joint_global(
             model,
             {q: "NVFP4" for q in joint_scope},
             profile=profile,
+            levers=render_options,
         )
 
     # Per-Linear calibrated max_abs, unified (max) across fused sibling groups
@@ -258,11 +265,11 @@ def _render_dense_layer(
         # the exporter (the igs convention is a ±14-37% served-KL knob).
         export_scale = None
         if max_abs is not None and max_abs > 0:
-            from prismaquant.export_native_compressed import (
-                _nvfp4_input_global_scale_from_max_abs,
+            from prismaquant.native_render_codec import (
+                nvfp4_input_global_scale_from_max_abs,
             )
-            export_scale = _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=stream_score_policy)
+            export_scale = nvfp4_input_global_scale_from_max_abs(
+                float(max_abs), policy=stream_score_policy, levers=render_options)
         row_weights = (
             fisher_rows.get(qname)
             if (fisher_rows is not None
@@ -295,6 +302,7 @@ def _render_dense_layer(
                 activations=X,
                 activation_max_abs=max_abs,
                 input_global_scale_policy=stream_score_policy,
+                levers=render_options,
             )
             render_score_records[score_key] = render_score
             if not retain_rendered:
@@ -316,7 +324,7 @@ def _render_dense_layer(
                         f"{qname}@{fmt}, got {type(result).__name__}"
                     )
             else:
-                _store_rendered_weight_entry(
+                shard = _store_rendered_weight_entry(
                     weights=cache.weights,
                     cache_dir_path=cache_dir_path,
                     qname=qname,
@@ -324,6 +332,8 @@ def _render_dense_layer(
                     tensor=w_dq,
                     weight_dtype=weight.dtype,
                 )
+                if joint is not None and render_fmt == "NVFP4":
+                    cache.witness_nvfp4_joint_global(qname, fmt, joint, shard)
             rendered += 1
             del w_dq
         del X
@@ -386,7 +396,7 @@ class StreamedProductionAnchorRenderer:
         transient_consumer_identity: Mapping[str, object] | None = None,
     ) -> None:
         from prismaquant.cost_stage_checkpoint import canonical_json
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.routed_experts import (
             profile_declared_routed_expert_targets,
             resolve_routed_expert_profile,
@@ -941,7 +951,9 @@ def _experts_qnames_by_layer(
 ) -> dict[int | None, list[str]]:
     """Group packed-experts module names by decoder-layer index (structure
     only — safe while layers are on meta)."""
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     out: dict[int | None, list[str]] = defaultdict(list)
     for name, mod in model.named_modules():
@@ -1055,6 +1067,18 @@ def run_streaming_render(
         ),
         where="streaming production cache",
     )
+    if cache_dir_path is not None:
+        # #146: this fill never resumes and overwrites every shard in its
+        # scope, so it renders only into a directory no rendering claimed.
+        claim_streamed_cache_directory(
+            cache_dir_path,
+            render_scope=render_scope,
+            requested_formats=requested_formats,
+            levers=levers,
+            calib_hash=calibration_hash,
+            render_formats_by_qname=render_formats_by_qname,
+            max_act_rows=max_act_rows,
+        )
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)
     for qname, mod in dense_modules.items():
         per_layer_dense[_layer_index_of(qname, layers_prefix)][qname] = mod

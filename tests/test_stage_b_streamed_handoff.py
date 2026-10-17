@@ -74,7 +74,7 @@ def _producer(tmp_path):
 
 
 def _storage(tmp_path):
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
     return {"schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
             "max_resident_bytes": 1 << 24, "max_auxiliary_bytes": 1 << 24,
             "max_artifact_bytes": 1 << 20, "prefetch_batches": PREFETCH}
@@ -352,7 +352,7 @@ def test_a_refusal_on_entry_reaches_the_counters(tmp_path, monkeypatch):
     """PQ #1263: the writer's binding refused, so ``__enter__`` raises, and
     ``with`` then runs no ``__exit__``. The refusal must still reach
     ``handoff_emit.error``, which the quantum's counters copy."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     def refuse(self, *args, **kwargs):
         raise RuntimeError("fixture: the handoff generation refused its binding")
@@ -665,7 +665,7 @@ def test_the_handoff_is_written_while_the_final_passes_run(tmp_path, monkeypatch
     it stored, which the writer can only do while the passes are still
     running. The handoff is then the one the chain-equality test checks.
     """
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_adjoint_checkpoints import PlaneHostStaging
 
     band = _band_serial()

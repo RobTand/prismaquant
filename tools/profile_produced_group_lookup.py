@@ -68,8 +68,7 @@ def main() -> int:
     ap.add_argument("--windows", type=int, default=20)
     args = ap.parse_args()
 
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": "/dev/null/unused",

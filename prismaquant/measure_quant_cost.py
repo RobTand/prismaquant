@@ -23,6 +23,9 @@ rel_output_mse}. When h-detail is supplied, entries may also include
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import json
 import math
 import os
@@ -41,12 +44,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import io_spans
+from . import routed_experts
 from . import format_registry as fr
 from .render_score import (
     normalize_clipped_fisher_row_weights,
     resolve_fisher_row_weight_clip,
 )
-from .sensitivity_probe import _packed_expert_parent_for_projection, grouped_linear_groups
+from prismaquant.probe_inventory import (
+    packed_expert_parent_for_projection as _packed_expert_parent_for_projection,
+)
+from prismaquant.sensitivity_probe import grouped_linear_groups
 from .tensor_digests import tensor_identity
 
 
@@ -293,40 +300,6 @@ def _finalize_results(bucket: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def h_detail_expected_norm_tokens(probe: dict | None) -> dict[str, int]:
-    """Per-row Fisher denominator each h-detail blob is required to carry.
-
-    An h-detail blob and the scalar ``h_trace`` for the SAME row must be
-    divided by the SAME token count, or `predicted_dloss` prices that row
-    on a different scale than the rest of the knapsack. The blob records
-    its denominator as ``norm_tokens`` (schema v4) and the probe stat
-    records the scalar's as ``h_trace_norm_tokens``; this builds the
-    row -> expected map so `HDetailIndex` can refuse a mismatch.
-
-    Row stamps win over the probe-wide ``meta.fisher_norm_tokens`` so a
-    MERGED probe validates per row: the multimodal visual pass is
-    finalized at its own (smaller) calibration size, and its blobs are
-    stamped to match, so comparing them against the body's count would
-    reject correct blobs. Rows with neither a stamp nor a usable meta
-    count get no expectation and are left unchecked (nothing to compare).
-    """
-    if not isinstance(probe, dict):
-        return {}
-    meta = probe.get("meta") or {}
-    fallback = int(meta.get("fisher_norm_tokens", 0) or 0)
-    if fallback <= 0:
-        fallback = (int(meta.get("nsamples", 0) or 0)
-                    * int(meta.get("seqlen", 0) or 0))
-    out: dict[str, int] = {}
-    for name, entry in (probe.get("stats") or {}).items():
-        if not isinstance(entry, dict):
-            continue
-        n = int(entry.get("h_trace_norm_tokens", 0) or 0) or fallback
-        if n > 0:
-            out[str(name)] = n
-    return out
-
-
 class HDetailIndex:
     """Disk-backed Fisher H-diagonal cache — the per-weight equivalent
     of `ActivationIndex`.
@@ -439,7 +412,7 @@ class HDetailIndex:
         Both writers (`sensitivity_probe.FisherAccumulator.finalize` and
         `incremental_probe`) normalize by the GLOBAL calib token count —
         the same denominator as the scalar ``h_trace`` — and stamp
-        ``units: "per_token"`` via `sensitivity_probe.h_detail_blob`
+        ``units: "per_token"`` via `probe_statistics.h_detail_blob`
         (audits M9 + the PR #14 global-denominator fix). Legacy blobs:
 
           - v3 ``h_diag`` (or unmarked): still converted here — this
@@ -847,6 +820,8 @@ def _stage_text_only(model_path: str) -> str:
 
 def _load_live_model(model_path: str, device: str, dtype: torch.dtype,
                      device_map: str | None = None) -> nn.Module:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM
 
     staged = _stage_text_only(model_path)
@@ -1009,332 +984,6 @@ def _chunked(seq, size):
         yield seq[i:i + size]
 
 
-def _enumerate_packed_experts(model: nn.Module, target_names: set[str],
-                              profile=None,
-                              ) -> list[tuple[str, nn.Parameter, str, nn.Module]]:
-    """Find every 3D nn.Parameter that lives directly under a module
-    named like an MoE experts container. Uses the same class-name +
-    param-name filters as sensitivity_probe._is_packed_experts_module
-    so we never accidentally treat e.g. a Conv1d weight as a packed
-    expert tensor.
-
-    Returns [(canonical_name, packed_param, module_qname, module), ...]
-    where canonical_name is `<module_qname>.<param_name>` to match the
-    probe's stat keys. Only entries appearing in `target_names` are
-    returned.
-    """
-    from .sensitivity_probe import _is_packed_experts_module, _packed_experts_param_names
-    out = []
-    for qname, mod in model.named_modules():
-        if not _is_packed_experts_module(mod, profile):
-            continue
-        for pn in _packed_experts_param_names(mod, profile):
-            p = getattr(mod, pn)
-            full = f"{qname}.{pn}" if qname else pn
-            if full in target_names:
-                out.append((full, p, qname, mod))
-    return out
-
-
-def _packed_experts_parent_module(model: nn.Module, experts_qname: str) -> nn.Module | None:
-    if not experts_qname:
-        return None
-    if experts_qname.endswith(".experts"):
-        parent_qname = experts_qname[: -len(".experts")]
-    elif ".experts." in experts_qname:
-        parent_qname = experts_qname.rsplit(".experts.", 1)[0]
-    elif "." in experts_qname:
-        parent_qname = experts_qname.rsplit(".", 1)[0]
-    else:
-        return None
-    try:
-        return model.get_submodule(parent_qname)
-    except AttributeError:
-        return None
-
-
-def _packed_experts_router(parent_module: nn.Module | None) -> nn.Module | None:
-    if parent_module is None:
-        return None
-    for attr in ("gate", "router"):
-        router = getattr(parent_module, attr, None)
-        if isinstance(router, nn.Module):
-            return router
-    return None
-
-
-def _packed_router_topk(
-    router: nn.Module,
-    hidden_states: torch.Tensor,
-    e_score_correction_bias: torch.Tensor | None = None,
-    *,
-    expert_bias: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return (top_k_index, top_k_weights) for a Qwen/DeepSeek-style router.
-
-    Some routers (HYV3TopKRouter) take the parent MoE block's
-    e_score_correction_bias buffer as a required positional. Newer LFM routers
-    similarly take the parent's expert_bias. Callers supply the original
-    buffer so capture and replay follow the model's real token assignments.
-    """
-    import inspect
-    try:
-        fwd_params = inspect.signature(router.forward).parameters
-    except (TypeError, ValueError):
-        fwd_params = {}
-    if "e_score_correction_bias" in fwd_params:
-        if e_score_correction_bias is None:
-            raise ValueError(
-                f"{type(router).__name__}.forward requires "
-                "e_score_correction_bias; the parent module must supply it")
-        out = router(
-            hidden_states,
-            e_score_correction_bias.to(hidden_states.device),
-        )
-    elif "expert_bias" in fwd_params:
-        if expert_bias is None and getattr(router, "use_expert_bias", True):
-            raise ValueError(
-                f"{type(router).__name__}.forward requires expert_bias; "
-                "the parent module must supply it")
-        out = router(hidden_states, expert_bias=(
-            expert_bias.to(hidden_states.device) if expert_bias is not None else None))
-    else:
-        out = router(hidden_states)
-    if isinstance(out, (tuple, list)):
-        if len(out) >= 3:
-            second = out[1]
-            third = out[2]
-            if not isinstance(second, torch.Tensor) or not isinstance(third, torch.Tensor):
-                raise ValueError("router tuple entries 1 and 2 must be tensors")
-            if second.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-                indices = second
-                weights = third
-            elif third.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-                weights = second
-                indices = third
-            else:
-                raise ValueError("router tuple does not expose integer top-k indices")
-            if weights.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-                raise ValueError("router top-k weights must be floating point")
-            return indices.to(device=hidden_states.device), weights.to(
-                device=hidden_states.device,
-            )
-        if len(out) >= 2:
-            first, second = out[0], out[1]
-            if isinstance(first, torch.Tensor) and isinstance(second, torch.Tensor):
-                if second.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-                    return second.to(device=hidden_states.device), first.to(
-                        device=hidden_states.device,
-                    )
-                if first.dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
-                    return first.to(device=hidden_states.device), second.to(
-                        device=hidden_states.device,
-                    )
-                raise ValueError("router tuple does not expose integer top-k indices")
-    if not isinstance(out, torch.Tensor):
-        raise ValueError(f"unsupported router output type {type(out)!r}")
-    top_k = int(getattr(router, "top_k", 0) or 0)
-    if top_k <= 0:
-        raise ValueError("router returned logits only and exposes no top_k")
-    probs = torch.softmax(out.float(), dim=-1)
-    weights, indices = torch.topk(probs, top_k, dim=-1)
-    weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-    return indices.to(device=hidden_states.device), weights.to(device=hidden_states.device)
-
-
-def _packed_experts_forward_with_weights(
-    experts_mod: nn.Module,
-    hidden_states: torch.Tensor,
-    top_k_index: torch.Tensor,
-    top_k_weights: torch.Tensor,
-    gate_up_weight: torch.Tensor,
-    down_weight: torch.Tensor,
-    *,
-    input_quantize=None,
-    intermediate_quantize=None,
-) -> torch.Tensor:
-    """Replay the packed-experts forward with explicit packed weights.
-
-    This mirrors the Qwen3.5/DeepSeek-style fused expert module: one
-    packed gate/up tensor, one packed down tensor, and router-provided
-    token-to-expert assignments. Quantization hooks are placed at the
-    same Linear boundaries as the dense measurement path.
-    """
-    num_experts = int(getattr(experts_mod, "num_experts", gate_up_weight.size(0)))
-    act_fn = getattr(experts_mod, "act_fn", None)
-    apply_gate = getattr(experts_mod, "_apply_gate", None)
-    if act_fn is None and not callable(apply_gate):
-        raise ValueError("packed experts module exposes no activation operation")
-    final_hidden_states = torch.zeros_like(hidden_states)
-    with torch.no_grad():
-        expert_mask = F.one_hot(top_k_index.to(torch.long), num_classes=num_experts)
-        expert_mask = expert_mask.permute(2, 1, 0)
-        expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
-
-    for expert_idx_t in expert_hit:
-        expert_idx = int(expert_idx_t[0].item())
-        if expert_idx >= num_experts:
-            continue
-        top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
-        current_state = hidden_states[token_idx]
-        if input_quantize is not None:
-            current_state = input_quantize(current_state)
-        gate_up = F.linear(current_state, gate_up_weight[expert_idx])
-        apply_gate = getattr(experts_mod, "_apply_gate", None)
-        if callable(apply_gate):
-            current_hidden_states = apply_gate(gate_up)
-        else:
-            gate, up = gate_up.chunk(2, dim=-1)
-            current_hidden_states = act_fn(gate) * up
-        if intermediate_quantize is not None:
-            current_hidden_states = intermediate_quantize(current_hidden_states)
-        current_hidden_states = F.linear(
-            current_hidden_states,
-            down_weight[expert_idx],
-        )
-        current_hidden_states = (
-            current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
-        )
-        final_hidden_states.index_add_(
-            0,
-            token_idx,
-            current_hidden_states.to(final_hidden_states.dtype),
-        )
-    return final_hidden_states
-
-
-def derive_per_expert_activations(
-    experts_mod: nn.Module,
-    X: torch.Tensor,
-    parent_mod: nn.Module | None,
-    *,
-    capture_down: bool = True,
-    max_rows_per_expert: int | None = None,
-    subsample_seed: int = 1234,
-) -> dict:
-    """Single source of truth for per-expert GPTQ activations.
-
-    Routes the module-level expert input ``X`` ([*, hidden]) through the MoE
-    block's own router and collects, per expert ``e``, exactly the tensors the
-    per-expert GPTQ Hessian needs — identical to the routed forward in
-    ``_packed_experts_forward_with_weights``, but COLLECTING activations instead
-    of producing the output. Shared by the cost path and the export render path
-    so the routing + SwiGLU derivation lives in ONE place (no duplication).
-
-    Returns a dict of length-E lists:
-      - ``gate_up``: each [n_e, hidden]  — the routed input to ``gate_up_proj``.
-      - ``down``:    each [n_e, inter]   — the post-SwiGLU input to ``down_proj``
-                     (``_apply_gate(gate_up)`` when present, else ``act_fn(gate)*up``).
-                     Empty list when ``capture_down=False``.
-      - ``gate_weights``: each [n_e]     — the router weight per routed token.
-      - ``row_counts``: list[int]        — routed tokens/expert BEFORE subsample
-                     (use for the fail-on-insufficient-routed-rows gate).
-
-    Subsampling (``max_rows_per_expert``) is deterministic (fixed ``subsample_seed``)
-    so the render is reproducible. ``None`` keeps every routed row. Raises (never
-    silently degrades) if the router / act_fn cannot be resolved.
-    """
-    gate_up_w = getattr(experts_mod, "gate_up_proj", None)
-    if gate_up_w is None:
-        raise ValueError("packed experts module lacks gate_up_proj")
-    num_experts = int(getattr(experts_mod, "num_experts", gate_up_w.size(0)))
-    act_fn = getattr(experts_mod, "act_fn", None)
-    apply_gate = getattr(experts_mod, "_apply_gate", None)
-    router = _packed_experts_router(parent_mod)
-    if router is None:
-        raise ValueError("no router found for packed-experts module")
-    Xf = X.reshape(-1, X.size(-1))
-    dev, dt, hidden = Xf.device, Xf.dtype, Xf.size(-1)
-    inter = gate_up_w.size(1) // 2
-    with torch.no_grad():
-        route_fn = getattr(parent_mod, "route_tokens_to_experts", None)
-        if callable(route_fn):
-            top_k_index, top_k_weights = route_fn(router(Xf))
-        else:
-            top_k_index, top_k_weights = _packed_router_topk(
-                router, Xf,
-                e_score_correction_bias=getattr(
-                    parent_mod, "e_score_correction_bias", None),
-                expert_bias=getattr(parent_mod, "expert_bias", None),
-            )
-        top_k_index = top_k_index.to(torch.long)
-        order, counts = _routed_pair_order(top_k_index, num_experts)
-    n_tokens = int(top_k_index.size(0))
-    # ``order`` lists the routed (top-k slot, token) pairs grouped by expert,
-    # each group in the row-major order ``torch.where(one_hot(...)[e])``
-    # yields. Subsampling permutes and truncates a group exactly as the
-    # per-expert loop did: same generator, same seed, same row order.
-    kept = list(counts)
-    if max_rows_per_expert is not None and any(n > max_rows_per_expert for n in counts):
-        pieces = []
-        start = 0
-        for e, n in enumerate(counts):
-            group = order[start:start + n]
-            start += n
-            if n > max_rows_per_expert:
-                gen = torch.Generator(device=dev).manual_seed(subsample_seed + e)
-                keep = torch.randperm(n, device=dev, generator=gen)[:max_rows_per_expert]
-                group = group[keep]
-                kept[e] = int(group.size(0))
-            pieces.append(group)
-        order = torch.cat(pieces)
-    token_idx = order % n_tokens if n_tokens else order
-    top_k_pos = order // n_tokens if n_tokens else order
-    # One gather for every expert's rows and one for their router weights;
-    # the per-expert outputs are views split from them, with no host sync.
-    gate_up_list = list(Xf[token_idx].split(kept))
-    gw_list = list(top_k_weights[token_idx, top_k_pos].split(kept))
-    down_list: list[torch.Tensor] = []
-    for e, n in enumerate(counts):
-        if n == 0:
-            # The empties keep the dtype the per-expert loop gave them.
-            gate_up_list[e] = torch.empty(0, hidden, device=dev, dtype=dt)
-            gw_list[e] = torch.empty(0, device=dev, dtype=dt)
-            if capture_down:
-                down_list.append(torch.empty(0, inter, device=dev, dtype=dt))
-            continue
-        if capture_down:
-            with torch.no_grad():
-                gate_up = F.linear(gate_up_list[e], gate_up_w[e])
-                if callable(apply_gate):
-                    di = apply_gate(gate_up)
-                elif act_fn is not None:
-                    g, u = gate_up.chunk(2, dim=-1)
-                    di = act_fn(g) * u
-                else:
-                    raise ValueError(
-                        "packed experts module exposes neither _apply_gate nor act_fn")
-            down_list.append(di)
-    return {"gate_up": gate_up_list, "down": down_list,
-            "gate_weights": gw_list, "row_counts": counts}
-
-
-def _routed_pair_order(
-    top_k_index: torch.Tensor, num_experts: int,
-) -> tuple[torch.Tensor, list[int]]:
-    """Group the routed (top-k slot, token) pairs by expert in one pass.
-
-    ``top_k_index`` is ``[tokens, top_k]``. Returns ``(order, counts)``:
-    ``order`` holds flat pair indices ``slot * tokens + token``, stably
-    sorted by expert, so expert ``e``'s group is in the row-major (slot,
-    token) order ``torch.where(F.one_hot(top_k_index).permute(2, 1, 0)[e])``
-    yields. ``counts[e]`` is the group size. The only host sync is the one
-    ``.tolist()`` that reads the counts; the per-expert ``torch.where`` this
-    replaces synced once per expert (PQ #1931).
-    """
-    pair_expert = top_k_index.t().reshape(-1)
-    invalid = ((pair_expert < 0) | (pair_expert >= num_experts)).sum().view(1)
-    order = torch.argsort(pair_expert, stable=True)
-    counts_t = torch.zeros(num_experts, dtype=torch.long, device=pair_expert.device)
-    counts_t.index_add_(0, pair_expert.clamp(0, num_experts - 1),
-                        torch.ones_like(pair_expert))
-    host = torch.cat([counts_t, invalid]).tolist()
-    if host[-1]:
-        raise ValueError(
-            f"router returned {host[-1]} expert indices outside [0, {num_experts})")
-    return order, host[:-1]
-
-
 def _packed_expert_activation_quantizer(spec: fr.FormatSpec):
     def _quantize(x: torch.Tensor) -> torch.Tensor:
         return spec.activation_quantize_dequantize(x.clone())
@@ -1369,7 +1018,7 @@ def _measure_packed_experts(
     that the scalar trace loses.
     """
     dev = torch.device(device)
-    entries = _enumerate_packed_experts(model, target_names, profile)
+    entries = routed_experts.enumerate_packed_experts(model, target_names, profile)
     if not entries:
         return
     measured = 0
@@ -1388,8 +1037,8 @@ def _measure_packed_experts(
         parent_mod = None
         can_measure_output = False
         if act_cache is not None and experts_qname in act_cache:
-            parent_mod = _packed_experts_parent_module(model, experts_qname)
-            router = _packed_experts_router(parent_mod)
+            parent_mod = routed_experts.packed_experts_parent_module(model, experts_qname)
+            router = routed_experts.packed_experts_router(parent_mod)
             try:
                 X_cpu = act_cache.load(experts_qname)
                 X = X_cpu.to(device=dev, dtype=dtype).reshape(-1, X_cpu.size(-1))
@@ -1414,13 +1063,13 @@ def _measure_packed_experts(
                     if callable(_route_fn):
                         top_k_index, top_k_weights = _route_fn(router(X))
                     else:
-                        top_k_index, top_k_weights = _packed_router_topk(
+                        top_k_index, top_k_weights = routed_experts.packed_router_topk(
                             router, X,
                             e_score_correction_bias=getattr(
                                 parent_mod, "e_score_correction_bias", None),
                             expert_bias=getattr(parent_mod, "expert_bias", None),
                         )
-                    y_ref = _packed_experts_forward_with_weights(
+                    y_ref = routed_experts.packed_experts_forward_with_weights(
                         experts_mod,
                         X,
                         top_k_index,
@@ -1549,7 +1198,7 @@ def _measure_packed_experts(
                     act_quant = _packed_expert_activation_quantizer(spec)
                     with torch.no_grad():
                         if param_name == "gate_up_proj":
-                            y_q = _packed_experts_forward_with_weights(
+                            y_q = routed_experts.packed_experts_forward_with_weights(
                                 experts_mod,
                                 X,
                                 top_k_index,
@@ -1559,7 +1208,7 @@ def _measure_packed_experts(
                                 input_quantize=act_quant,
                             )
                         elif param_name == "down_proj":
-                            y_q = _packed_experts_forward_with_weights(
+                            y_q = routed_experts.packed_experts_forward_with_weights(
                                 experts_mod,
                                 X,
                                 top_k_index,
@@ -2496,7 +2145,7 @@ def run_cost_pass(model: nn.Module,
         if detail_path.exists():
             h_detail = HDetailIndex(
                 detail_path, target_names,
-                expected_norm_tokens=h_detail_expected_norm_tokens(probe))
+                expected_norm_tokens=probe_statistics.h_detail_expected_norm_tokens(probe))
             print(f"[cost] h-detail cache: {len(h_detail)} / {len(target_names)} "
                   "Linears have h-detail → using per-weight Δloss and "
                   "Fisher row-weighted output MSE when available",

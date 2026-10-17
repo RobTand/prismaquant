@@ -13,6 +13,8 @@ for that to be honest rather than decorative:
 """
 from fractions import Fraction
 
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import torch
 import pytest
 
@@ -847,9 +849,9 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     name = "TESSERA_E4M3_K1_R896"
     control = "TESSERA_E2M1_K2_R896"
-    assert tr.tessera_lane_attested(name, serving_context=routed)
+    assert (tr.tessera_lane_admission(name, serving_context=routed)).admitted
     assert tr.synthesize_tessera_spec(name, serving_context=routed).producer_eligible
-    assert tr.tessera_lane_attested(control, serving_context=context)
+    assert (tr.tessera_lane_admission(control, serving_context=context)).admitted
     assert tr.synthesize_tessera_spec(control, serving_context=context).producer_eligible
 
     without = {digest: grid for digest, grid in alphabet.SERIALISABLE_GRIDS.items()
@@ -895,14 +897,14 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     from prismaquant.tessera_render import synthesize_tessera_spec
 
     # The table is PRESENT and DOES govern both families.
-    table, _formats = tr._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _formats = snapshot.eligibility, snapshot.published_formats
     assert table.present
     assert table.governs("TESSERA_E2M1_K2") and table.governs("TESSERA_E4M3_K1")
 
     from prismaquant.lane_eligibility import ServingContext
 
     pin_module.require_pinned_tessera_runtime()
-    assert tr._release_pin_satisfied() is True
 
     # The installed table is SCOPED (lane schema v6), so admission needs an
     # explicit serving context. Context-free eligibility -- which is what
@@ -911,16 +913,16 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     context = _cell_context("TESSERA_E2M1_K2", "dense")
     # E4M3 asked at its routed scope, which attests q896 since contract v38.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R896", serving_context=routed) is True
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=routed) is True
-    assert tr.tessera_lane_attested("TESSERA_E4M3_K1_R1024") is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R896", serving_context=routed)).admitted is True
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R1024", serving_context=routed)).admitted is True
+    assert (tr.tessera_lane_admission("TESSERA_E4M3_K1_R1024")).admitted is False
     assert not synthesize_tessera_spec("TESSERA_E4M3_K1_R1024").producer_eligible
 
     # A rung no cell names stays False under the very same pin and context.
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K1_R640", serving_context=context) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K1_R640", serving_context=context)).admitted is False
 
 
 def _default_serve_image() -> str:
@@ -934,21 +936,23 @@ def _default_serve_image() -> str:
             "versions"]["default_serve_image"]
 
 
-def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch):
+def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch, tmp_path):
     """The refusal half: a Tessera whose contract is not the pinned bytes."""
     from prismaquant import tessera_render as tr
-    from prismaquant import tessera_serving_runtime_pin as pin_module
-    from prismaquant.lane_eligibility import ServingContext
+    from prismaquant import tessera_runtime_contract as runtime
     from prismaquant.tessera_render import synthesize_tessera_spec
 
-    monkeypatch.setattr(pin_module, "installed_tessera_contract_sha256",
-                        lambda: "c" * 64)
-    assert tr._release_pin_satisfied() is False
+    import json
+    payload = json.loads(runtime.contract_path().read_bytes())
+    payload["contract_version"] += 1
+    path = tmp_path / "unreviewed-contract.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(runtime, "contract_path", lambda: path)
     context = _cell_context("TESSERA_E2M1_K2", "dense")
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024",
                  "TESSERA_E2M1_K1_R640"):
-        assert tr.tessera_lane_attested(name, serving_context=context) is False
-        assert tr.tessera_lane_attested(name) is False
+        assert (tr.tessera_lane_admission(name, serving_context=context)).admitted is False
+        assert (tr.tessera_lane_admission(name)).admitted is False
         assert synthesize_tessera_spec(name).producer_eligible is False
 
 

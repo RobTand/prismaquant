@@ -7,6 +7,9 @@ ordinary streamed joint AURA consumes the exact per-Linear candidate roster.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_table as campaign_table
+
 import argparse
 from collections import defaultdict
 from collections.abc import Mapping
@@ -79,7 +82,7 @@ HISTORICAL_ENCODER_REUSE_ENTRY_FIELDS = frozenset(
     {"encoder_source_sha256", "reason", "evidence", "recorded_unix", "recorded_by"})
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
-STAGE = "Tessera campaign"
+STAGE = campaign_table.STAGE
 # The head walk's own durable journal (#754). Every restart re-paid the whole
 # roster walk -- the withdrawn campaign night paid it three times -- so the
 # walk banks each verified unit under the checkpoint machinery every other
@@ -728,7 +731,7 @@ def _resolve_render_origin(render, *, wire, record, name, fmt, shape, reader, de
     """Name where this rung's decoded PWC shard came from, never guess it.
 
     The campaign journals fresh and resumed wires through one receipt grammar
-    (``_checkpoint_wire_record``), so nothing in the record distinguishes an
+    (``tessera_campaign_wire.checkpoint_wire_record``), so nothing in the record distinguishes an
     adopted rung from an encoded one. The marker beside the shard is the only
     place that fact can live, and its absence beside an existing shard is the
     campaign's own render.
@@ -808,7 +811,7 @@ def _read_campaign_metadata(inputs, reuse_policy):
     runs. The result is the state the walk reads from; a caller that walks
     several scopes in one process keeps it through ``metadata_memo`` (#1492).
     """
-    from tools.dispatch_tessera_campaign import _require_receipts
+    from prismaquant.tessera_campaign_table import (require_campaign_receipts)
 
     paths = {key: _bound(inputs[key], key) for key in HEAD_WALK_INPUT_KEYS}
     census = json.loads(paths["census"].read_text())
@@ -819,7 +822,7 @@ def _read_campaign_metadata(inputs, reuse_policy):
           (paths["campaign_plan"].parent / "receipts.json").resolve(), "campaign receipt path")
     rows = plan["rows"]
     _require(len({row["row_id"] for row in rows}) == len(rows), "duplicate campaign row")
-    _require_receipts(paths["campaign_plan"].parent, len(rows))
+    require_campaign_receipts(paths["campaign_plan"].parent, len(rows))
     owners, groups = {}, {}
     for row in rows:
         for name in row["members"]:
@@ -893,9 +896,8 @@ def _read_campaign_metadata(inputs, reuse_policy):
     # The one encoder identity a run can re-derive is the installed package's
     # own. Refuse anything else here -- before the per-cell origin walk reads
     # or decodes a wire -- unless the plan named that exact digest.
-    from . import tessera_campaign as tc
     encoder_source_reuse = resolve_encoder_source_reuse(
-        identity["encoder_source_sha256"], tc._checkpoint_identity_api().encoder_source_sha256(),
+        identity["encoder_source_sha256"], campaign_wire.require_checkpoint_identity_api().encoder_source_sha256(),
         reuse_policy, where="joint anchor checkpoint encoder source")
     parts = merged_checkpoint_parts(paths["merged_checkpoint"])
     for row in manifest["units"]:
@@ -1088,8 +1090,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     hold (``_campaign_metadata``, #1492). Without it nothing is shared. The
     reused state is read-only for the walk.
     """
-    from .production_weight_cache import (
-        _cache_weight_filename,
+    from .render_cache_paths import (
+        cache_weight_filename,
         require_injective_cache_filenames,
     )
 
@@ -1376,7 +1378,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             _require(not wire.is_symlink(), f"{name}: escaping wire path")
             wire_stat = wire.stat()
             _same(wire_stat.st_size, record["blob_bytes"], f"{name}: wire size")
-            render = owner_roots[str(owners[name])] / "cache" / _cache_weight_filename(name, fmt)
+            render = owner_roots[str(owners[name])] / "cache" / cache_weight_filename(name, fmt)
             # The mirror keeps the render's absolute path under the mirror
             # root so a cell's two copies stay comparable by name and a
             # measuring run can never replace the campaign's own bytes.
@@ -1596,7 +1598,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
     from . import tessera_campaign as tc
     from .production_weight_cache import _cb_cache_tensor_identity
 
-    anchor = tc.CampaignAnchor(**cell["anchor"])
+    anchor = campaign_table.CampaignAnchor(**cell["anchor"])
     name, fmt = anchor.qname, anchor.format_name
     render_origin = cell.get("render_origin")
     _require(render_origin in RENDER_ORIGINS,
@@ -1651,7 +1653,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
                 wire_sha256, f"{name}@{fmt} read-ahead wire digest")
         _same(actual_wire_sha256, cell["record"].get("blob_sha256"),
               f"{name}@{fmt}: read-ahead wire checksum")
-    verifier = tc._checkpoint_identity_api() if reader is None else reader
+    verifier = campaign_wire.require_checkpoint_identity_api() if reader is None else reader
     verifier.verify_cached_unit(blob, cell["record"], expected)
     decoded = _decode_wire(blob, reader=reader,
                            device=str(rendered_weight.device)).to(torch.bfloat16)
@@ -2211,7 +2213,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
                             max_resident_bytes=max_render_bytes, max_workers=file_load_workers))
                     for name in unit_names:
                         source_weight = targets[name].weight.detach()
-                        anchors = [tc.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
+                        anchors = [campaign_table.CampaignAnchor(**data.cells[name, fmt]["anchor"]) for fmt in renders[name]]
                         keys = tuple((name, fmt) for fmt in renders[name])
                         # ONE WINDOW, THE BYTES THE GUARD ALREADY RESERVED.
                         # The reservation above prices this unit's residency at
@@ -2505,7 +2507,7 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
         # is present here and is otherwise refused by the first gate in
         # ``execute`` -- seconds into the pass, before any render is written.
         require_qualified_environment()
-    from .cost_streaming import check_boundary_storage
+    from .streamed_boundary_artifacts import check_boundary_storage
     check_boundary_storage(execution.get("boundary_storage"))
     _operator_window_policy(config)
     if config.get('joint_eval') is not None:
@@ -2647,7 +2649,7 @@ def build_source_digest_cache(model, out):
     ``out`` is read first, so a rerun hashes only shards whose stat
     fingerprint changed. No runner, lease or device is touched.
     """
-    from .cost_streaming import build_source_checkpoint_identity
+    from .streamed_model_identity import build_source_checkpoint_identity
 
     before = _io_counters()
     identity = build_source_checkpoint_identity(model, digest_cache_path=out)
@@ -2855,10 +2857,13 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     import pstats
     import socket
     import torch
-    from .aura_cost import compute_aura_cost_streamed, _aura_source_sha256
+    from .aura_cost import (compute_aura_cost_streamed)
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
-    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
-    from .joint_aura import source_execution_identity, validate_joint_aura_entry
+    from .cost_streaming import build_streamed_causal_lm
+    from .streamed_model_identity import build_streamed_model_identity
+    from .joint_aura import source_execution_identity
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache

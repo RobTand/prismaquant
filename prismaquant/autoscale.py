@@ -200,10 +200,12 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
     # refused before it is handed a plan that silently ignored it.
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     validate_process_baseline_bytes(process_baseline_bytes)
     validate_process_baseline_policy(process_baseline_policy)
     import math
-    from .artifact_completeness import read_artifact_shard_headers
+    from .source_read_plan import read_artifact_shard_headers
     from .model_profiles import detect_profile
     if capture_policy not in ('legacy', 'shared-inputs-release-v1', 'shared-inputs-bounded-v1'):
         raise ValueError('unknown streamed capture resource policy')

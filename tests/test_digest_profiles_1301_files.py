@@ -4,8 +4,12 @@ Each site below hashed a file, a byte string or a text with its own copy of
 one recipe. Each now binds or calls its owner in ``prismaquant.digests``. The
 outcomes of the pre-move code on every input here (the returned digest, or the
 exception type, ``str()`` and chained cause) are frozen in
-``fixtures/digest_profiles_1301_files.json`` (``tests/golden_table.py``), and
-every call goes through the old site's name.
+``fixtures/digest_profiles_1301_files.json`` (``tests/golden_table.py``). Each
+call goes through the site's live name: ``streamed_model_identity._file_sha256``
+is ``cost_streaming._file_sha256`` after its move, and two retired aliases of
+the owner are called as ``digests.file_sha256hex`` with the arguments each one
+bound: ``lane_eligibility._sha256`` with the default block size, and
+``sample_parallel_probe._sha256_file`` with 1 MiB.
 
 File inputs straddle each block size a site reads with (1, 4, 8 and 16 MiB,
 and ``hashlib.file_digest``'s 256 KiB buffer). ``str`` paths are checked only
@@ -55,16 +59,16 @@ def files(tmp_path_factory):
 #: ``(site, takes_str, extra keyword arguments)``.
 FILE_SITES = [
     ("prismaquant.anchored_cost._sha256_file", False, {}),
-    ("prismaquant.cost_streaming._file_sha256", False, {}),
+    ('prismaquant.streamed_model_identity._file_sha256', False, {}),
     ("prismaquant.joint_adjoint_band._sha256_file", True, {}),
     ("prismaquant.joint_projection_backend._sha", True, {}),
     ("prismaquant.joint_quanta_join._sha_file", False, {"where": "w"}),
-    ("prismaquant.lane_eligibility._sha256", False, {}),
+    ("prismaquant.digests.file_sha256hex", False, {}),
     ("prismaquant.native_receipt_table.file_sha256", True, {}),
     ("prismaquant.prismasnap_checkpoint._sha256_file", False, {}),
     ("prismaquant.prismasnap_validation._sha256_file", False, {}),
     ("prismaquant.production_cache_stripes._sha256", False, {}),
-    ("prismaquant.sample_parallel_probe._sha256_file", True, {}),
+    ("prismaquant.digests.file_sha256hex", True, {"block_size": 1024 * 1024}),
     ("prismaquant.stage_a_chain_split._file_sha256", True, {}),
     ("prismaquant.tessera_anchored_surface._sha", True, {}),
     ("prismaquant.tessera_joint_aura._sha", True, {}),
@@ -137,10 +141,8 @@ def test_text_digest_site(name):
 
 @pytest.mark.parametrize("name", list(_TEXT_INPUTS))
 def test_unit_path_site(name):
-    for ref in ["prismaquant.cost_stage_checkpoint.unit_path",
-                "prismaquant.aura_cost._aura_unit_checkpoint_path"]:
-        site = _site(ref)
-        GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
+    site = _site("prismaquant.cost_stage_checkpoint.unit_path")
+    GOLDEN.call(lambda: site(Path("/root"), _TEXT_INPUTS[name]))
 
 
 # --- the owners ---------------------------------------------------------------

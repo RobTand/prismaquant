@@ -334,13 +334,11 @@ _FAKE_COMMIT = "a" * 40
 
 
 def _artifact(tmp_path, *, name="exported"):
-    from prismaquant.shipcard import compute_model_sha
-
     model_dir = tmp_path / name
     model_dir.mkdir()
     (model_dir / "config.json").write_text(json.dumps({"model_type": "qwen3"}))
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"weights")
-    return model_dir, compute_model_sha(model_dir)
+    return model_dir
 
 
 def _ship_gate_record(
@@ -354,7 +352,7 @@ def _ship_gate_record(
     boundary_response_schema="prismaquant.boundary_chat_response/1",
     drop_boundary=False,
 ):
-    from prismaquant.shipcard import make_record
+    from prismaquant.shipcard_slots import make_record
 
     ledger = {name: {"passed": True} for name in _producer_check_names()}
     ledger["perplexity"] = {
@@ -400,13 +398,15 @@ def _ship_gate_record(
 
 def _full_card(tmp_path, **record_kwargs):
     from prismaquant.shipcard import (
-        REQUIRED_SLOTS, build_shipcard, fill_slot, make_record,
-        write_shipcard,
+        REQUIRED_SLOTS,
+        fill_slot,
+        open_shipcard,
     )
+    from prismaquant.shipcard_slots import make_record
 
-    model_dir, sha = _artifact(tmp_path)
+    model_dir = _artifact(tmp_path)
     path = model_dir / "shipcard.json"
-    write_shipcard(path, build_shipcard(model_dir, build={}))
+    sha = open_shipcard(model_dir, build={})["model_sha"]
     for slot in REQUIRED_SLOTS:
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(

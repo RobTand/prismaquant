@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+import prismaquant.native_render_codec as _native_render_codec
+
 torch = pytest.importorskip("torch")
 
 from prismaquant import export_native_compressed as enc  # noqa: E402
@@ -29,12 +31,12 @@ def _fresh(device, dtype=torch.float32):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_cached_codebook_is_bit_identical_to_fresh(dtype):
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    cached = enc._nvfp4_codebook(torch.device(dev), dtype=dtype)
+    cached = _native_render_codec._nvfp4_codebook(torch.device(dev), dtype=dtype)
     assert torch.equal(cached.view(torch.uint8), _fresh(dev, dtype).view(torch.uint8))
     assert cached.dtype == dtype
     # Second call must hand back the SAME object -- otherwise it is not caching
     # and the measured win silently disappears.
-    assert enc._nvfp4_codebook(torch.device(dev), dtype=dtype) is cached
+    assert _native_render_codec._nvfp4_codebook(torch.device(dev), dtype=dtype) is cached
 
 def test_registry_math_codebook_keeps_fifteen_exact_values():
     from prismaquant import format_registry as fr
@@ -55,8 +57,8 @@ def test_all_packed_bytes_keep_signed_zero_and_nibble_order():
     indices = torch.stack(((packed & 15).long(), (packed >> 4).long()),
                           dim=-1).reshape(16, 32)
     expected = levels[indices]
-    assert torch.equal(enc._round_to_codebook(expected), indices)
-    assert torch.equal(enc.pack_fp4_indices(indices, 32), packed)
+    assert torch.equal(_native_render_codec._round_to_codebook(expected), indices)
+    assert torch.equal(_native_render_codec.pack_fp4_indices(indices, 32), packed)
 
 
 def test_export_keeps_ties_range_and_nonfinite_mapping():
@@ -68,15 +70,15 @@ def test_export_keeps_ties_range_and_nonfinite_mapping():
                           dtype=torch.float32)
     expected = torch.tensor([0, 8, 0, 8, 1, 9, 2, 10, 3, 11, 4, 12,
                              5, 13, 6, 14, 7, 15, 7, 15, 7, 15, 7])
-    assert torch.equal(enc._round_to_codebook(values), expected)
+    assert torch.equal(_native_render_codec._round_to_codebook(values), expected)
 
 
 def test_cache_is_keyed_by_device():
     """A cached tensor from the wrong device is a correctness bug, not a slow path."""
     if not torch.cuda.is_available():
         pytest.skip("needs a second device to distinguish")
-    cpu = enc._nvfp4_codebook(torch.device("cpu"))
-    gpu = enc._nvfp4_codebook(torch.device("cuda:0"))
+    cpu = _native_render_codec._nvfp4_codebook(torch.device("cpu"))
+    gpu = _native_render_codec._nvfp4_codebook(torch.device("cuda:0"))
     assert cpu.device.type == "cpu"
     assert gpu.device.type == "cuda"
     assert torch.equal(cpu, gpu.cpu())
@@ -108,13 +110,13 @@ def test_full_render_is_unchanged_by_the_cache():
 
     with_cache = render()
 
-    original = enc._nvfp4_codebook
+    original = _native_render_codec._nvfp4_codebook
     try:
-        enc._nvfp4_codebook = lambda device, dtype=torch.float32: _fresh(
+        _native_render_codec._nvfp4_codebook = lambda device, dtype=torch.float32: _fresh(
             device, dtype)
         without_cache = render()
     finally:
-        enc._nvfp4_codebook = original
+        _native_render_codec._nvfp4_codebook = original
 
     assert torch.equal(with_cache, without_cache), (
         "the codebook cache changed the rendered weight; that is a rendering "

@@ -13,11 +13,16 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
   ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
   is direct JSON, not a round trip; its inherited spaces are identity bytes.
+- ``DIRECT_ASCII_SPACED_LAX_DEFAULT_STR``: the spaced lax encoding with
+  ``default=str`` for campaign metadata comparison and refusal details.
 - ``DIRECT_ASCII_SPACED_STRICT``: the same direct, ASCII-escaped, default-spaced
   recipe with ``allow_nan=False`` and no fallback serializer. Snapshot readers
   retain their own ``json.loads`` round trip and publication writers their LF.
 - ``DIRECT_UTF8_INDENT2_STRICT``: two-space indentation, UTF-8 characters,
   strict nonfinite refusal and no fallback serializer. No final LF is added.
+- ``DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR``: one-space indentation, ASCII,
+  lax nonfinite values and ``default=str`` for reseal reports. Publication
+  retains its final LF.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -308,12 +313,18 @@ DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_SPACED_LAX = JsonProfile(
     "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "))
+DIRECT_ASCII_SPACED_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-spaced-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "), default=str)
 DIRECT_ASCII_SPACED_STRICT = JsonProfile(
     "direct-ascii-spaced-strict", ensure_ascii=True, allow_nan=False,
     separators=(", ", ": "))
 DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
     "direct-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
     separators=(",", ": "), indent=2)
+DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-indent1-lax-default-str", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=1, default=str)
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)

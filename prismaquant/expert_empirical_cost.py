@@ -530,9 +530,9 @@ def measure_expert_unit_costs(
     allocator-payload row dicts keyed by full member names and ``unit_kls``
     maps ``experts_qname -> {fmt: unit_kl}``.
     """
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     profile = resolve_routed_expert_profile(model, profile)
@@ -742,9 +742,9 @@ EXPERT_CHECKPOINT_STAGE = "expert empirical cost"
 
 def _streamed_expert_unit_records(model, profile, *, unit_filter, max_units):
     """Return serving units in the resident measurer's exact order."""
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     packed = [
@@ -814,7 +814,7 @@ def _expert_checkpoint_identity(
     )
 
     calib = calib_ids.detach().to("cpu").contiguous()
-    from prismaquant.cost_streaming import validate_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
     exact_model_identity = validate_streamed_model_identity(
         model_identity, where="expert empirical checkpointing"
@@ -1085,7 +1085,9 @@ def _fork_quantized_unit(
     Also captures ``rows_meta[qn]`` (member names/shapes/metadata) on the
     first call, while the layer is resident.
     """
-    from prismaquant.sensitivity_probe import _packed_experts_param_names
+    from prismaquant.probe_inventory import (
+        packed_experts_param_names as _packed_experts_param_names,
+    )
 
     device = runner.device
     swaps: list[tuple] = []
@@ -1362,54 +1364,46 @@ def measure_expert_unit_costs_forked(
         for f_i, fmt in enumerate(measured_fmts):
             t_pass0 = time.time()
             forks: dict[str, torch.Tensor] = {}
-            for depth in range(runner.prefetch_lookahead):
-                runner.context.schedule_prefetch(depth)
-            for layer in range(num_layers):
-                runner.context.install(
-                    layer,
-                    require_prefetched=runner.require_prefetched_residency,
-                )
-                runner.context.schedule_prefetch(
-                    layer + runner.prefetch_lookahead
-                )
-                try:
-                    # Advance every existing fork through this live layer
-                    # BEFORE forking at it, so a new fork's hidden is not
-                    # double-advanced.
-                    for qn in list(forks):
-                        forks[qn] = runner.isolated_layer(
-                            batch, layer, forks[qn], pass_state=None
-                        )
-                    for qn in pending:
-                        if layer_of[qn] != layer:
-                            continue
-                        forks[qn] = _fork_quantized_unit(
-                            runner,
-                            batch,
-                            layer,
-                            kind_by_qname[qn],
-                            unit_by_qname[qn],
-                            qn,
-                            fmt,
-                            profile=profile,
-                            expert_chunk=expert_chunk,
-                            col_weights=weights,
-                            rows_meta=rows_meta,
-                        )
-                        torch.cuda.empty_cache()
-                finally:
-                    runner.context.unload(layer)
-                if progress and (
-                    layer % 5 == 4 or layer == num_layers - 1
-                ):
-                    avail, swap = _avail_swap_gb()
-                    rate = (time.time() - t_pass0) / (layer + 1)
-                    eta_min = rate * (num_layers - layer - 1) / 60.0
-                    _log(f"fork pass {fmt} ({f_i + 1}/"
-                         f"{len(measured_fmts)}): layer "
-                         f"{layer + 1}/{num_layers}, {len(forks)} forks "
-                         f"live, avail {avail:.0f}G swap {swap:.1f}G, "
-                         f"~{eta_min:.0f} min left in pass")
+            with runner.context.walk_layers(
+                    range(num_layers), prefetch_lookahead=runner.prefetch_lookahead,
+                    require_prefetched=runner.require_prefetched_residency) as walk:
+                for block in walk:
+                    with block:
+                        layer = block.layer
+                        # Advance existing forks before creating this layer's
+                        # fork, so its hidden state is advanced exactly once.
+                        for qn in list(forks):
+                            forks[qn] = runner.isolated_layer(
+                                batch, layer, forks[qn], pass_state=None
+                            )
+                        for qn in pending:
+                            if layer_of[qn] != layer:
+                                continue
+                            forks[qn] = _fork_quantized_unit(
+                                runner,
+                                batch,
+                                layer,
+                                kind_by_qname[qn],
+                                unit_by_qname[qn],
+                                qn,
+                                fmt,
+                                profile=profile,
+                                expert_chunk=expert_chunk,
+                                col_weights=weights,
+                                rows_meta=rows_meta,
+                            )
+                            torch.cuda.empty_cache()
+                    if progress and (
+                        layer % 5 == 4 or layer == num_layers - 1
+                    ):
+                        avail, swap = _avail_swap_gb()
+                        rate = (time.time() - t_pass0) / (layer + 1)
+                        eta_min = rate * (num_layers - layer - 1) / 60.0
+                        _log(f"fork pass {fmt} ({f_i + 1}/"
+                             f"{len(measured_fmts)}): layer "
+                             f"{layer + 1}/{num_layers}, {len(forks)} forks "
+                             f"live, avail {avail:.0f}G swap {swap:.1f}G, "
+                             f"~{eta_min:.0f} min left in pass")
             for qn in pending:
                 logits = runner.tail_logits(batch, forks.pop(qn))
                 total = 0.0
@@ -1591,7 +1585,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dataset", default=None,
         help="Optional calibration source (HF id, .jsonl, .txt) via "
-        "sensitivity_probe.load_calibration; default is the WikiText "
+        "calibration_data.load_calibration; default is the WikiText "
         "windowed loader (matches aura_cost).")
     p.add_argument("--expert-chunk", type=int, default=16,
                    help="Experts quantized per in-place RTN chunk.")
@@ -1658,7 +1652,7 @@ def _streaming_model_identity(
     identity_cache_path: str | Path | None = None,
 ) -> dict[str, object]:
     """Stable source manifest used to bind expert end-to-end KL resumes."""
-    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
 
     return build_streamed_model_identity(
         runner,
@@ -1668,6 +1662,8 @@ def _streaming_model_identity(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     args = _build_parser().parse_args(argv)
     if args.resume and not args.checkpoint_dir:
         raise SystemExit("--resume requires --checkpoint-dir")
@@ -1740,7 +1736,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log(f"filled {filled} packed-expert params from source shards")
 
     if args.dataset:
-        from prismaquant.sensitivity_probe import load_calibration
+        from prismaquant.calibration_data import load_calibration
         calib = load_calibration(
             tok, args.dataset, args.n_calib_samples, args.calib_seqlen,
             calib_seed=args.calib_seed)

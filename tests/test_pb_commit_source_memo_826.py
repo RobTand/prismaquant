@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from prismaquant import aura_provenance
 from prismaquant import prismabuild_progress
 
 
@@ -30,9 +31,7 @@ def test_dev_source_sha256_computed_once_across_many_commits(monkeypatch):
         calls.append(1)
         return "a" * 64
 
-    import prismaquant.aura_cost as aura_cost
-
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", fake_sha, raising=True)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", fake_sha, raising=True)
     monkeypatch.setattr(prismabuild_progress, "_DEV_SOURCE_SHA256_MEMO", None, raising=True)
     try:
         first = prismabuild_progress._progress_dev_source_sha256()

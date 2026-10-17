@@ -15,6 +15,8 @@ the blanket otherwise, like every other compute term.
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import math
 import sys
 from pathlib import Path
@@ -116,7 +118,7 @@ def test_a_tail_measured_outside_the_row_takes_the_blanket(
 def test_the_tail_is_the_last_term_of_the_phase_it_runs_under():
     import dispatch_joint_quanta as dispatch
 
-    work = dispatch.compute_phase_work
+    work = quantum_row.compute_phase_work
     common = {"entries": 512, "n_probes": 4, "capture_batch": 4}
     replay, tail = work("render-14", replay_mode="spill", runs_tail=True,
                         **common)

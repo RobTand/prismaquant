@@ -273,25 +273,26 @@ def test_allocator_climbs_multi_rung_ladders_until_no_single_upgrade_fits():
 
 
 def test_allocator_keeps_stack_only_units_grouped_and_refuses_cross_grid_rows():
-    costs = _fixture_costs()
-    unit = next(iter(costs))
-    other = "model.language_model.layers.4.mlp.experts.0.down_proj"
-    assignment = {u: BASE_FMT for u in costs}
-    assignment[other] = BASE_FMT
-    # A unit priced only at another grid is not an upgrade of this stack's grid.
-    costs[other] = {"TESSERA_E2M1x2_K2_R896": {"predicted_dloss": -1.0, "wire_bytes": 1},
-                    BASE_FMT: {"predicted_dloss": 0.0, "wire_bytes": 4_000_000}}
-    picks, record = tep.select_priced_unit_upgrades(costs, assignment,
-                                                    byte_budget=HEADROOM_BYTES)
-    assert other not in picks
-    assert len(picks) == EXPECTED_PICKS
-    # A BF16 baseline has no priced wire row to upgrade from: left grouped.
-    bf16_unit = "model.language_model.layers.4.mlp.experts.1.up_proj"
-    assignment[bf16_unit] = "BF16"
-    costs[bf16_unit] = {UP_FMT: {"predicted_dloss": -1.0, "wire_bytes": 4_000_000}}
-    picks, _record = tep.select_priced_unit_upgrades(costs, assignment,
-                                                     byte_budget=HEADROOM_BYTES)
-    assert bf16_unit not in picks
+    costs = {
+        "priced": {BASE_FMT: {"predicted_dloss": 3.0, "wire_bytes": 1000},
+                   UP_FMT: {"predicted_dloss": 1.0, "wire_bytes": 1100}},
+        "cross_grid": {BASE_FMT: {"predicted_dloss": 3.0, "wire_bytes": 1000},
+                       "TESSERA_E2M1_K2_R896": {
+                           "predicted_dloss": -100.0, "wire_bytes": 1100}},
+        "stack_only": {BASE_FMT: {"predicted_dloss": 3.0},
+                       UP_FMT: {"predicted_dloss": -100.0, "wire_bytes": 1100}},
+        "bf16": {"BF16": {"predicted_dloss": 3.0, "wire_bytes": 1000},
+                 UP_FMT: {"predicted_dloss": -100.0, "wire_bytes": 1100}},
+    }
+    assignment = {"priced": BASE_FMT, "cross_grid": BASE_FMT,
+                  "stack_only": BASE_FMT, "bf16": "BF16"}
+
+    picks, record = tep.select_priced_unit_upgrades(
+        costs, assignment, byte_budget=100)
+
+    assert picks == {"priced": UP_FMT}
+    assert record["spent_wire_delta_bytes"] == 100
+    assert record["remaining_wire_delta_bytes"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -666,8 +667,8 @@ def _synthetic_two_rung_contract(monkeypatch):
     for cell in parsed.cells:
         if cell.family == "TESSERA_E4M3_K1" and cell.structure == "routed_moe":
             cell = dataclasses.replace(
-                cell, rungs_q256=cell.rungs_q256 | {1088},
-                covered_rungs_q256=cell.covered_rungs_q256 | {1088})
+                cell, rungs_q256=tuple(sorted(set(cell.rungs_q256) | {1088})),
+                covered_rungs_q256=tuple(sorted(set(cell.covered_rungs_q256) | {1088})))
         cells.append(cell)
     extended = dataclasses.replace(
         parsed, cells=tuple(cells),

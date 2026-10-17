@@ -44,7 +44,8 @@ def _journal_identity(checkpoint_dir: Path) -> dict:
 
 
 def _load_unit(checkpoint_dir: Path, qname: str, identity_sha256: str) -> dict:
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path, _load_aura_unit_checkpoint
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
+    from prismaquant.aura_checkpoint_journal import (load_unit as _load_aura_unit_checkpoint)
 
     return _load_aura_unit_checkpoint(
         _aura_unit_checkpoint_path(checkpoint_dir, qname), qname=qname,

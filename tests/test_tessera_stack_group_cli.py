@@ -2,7 +2,7 @@
 
 RobTand/prismaquant#389: every CLI test in this tree drives dense or fused
 anchor groups, so the completed-anchor page release in
-``tessera_campaign._finish_anchor`` had no end-to-end cover.  That branch is
+``tessera_cell_measurement.measure_cell`` had no end-to-end cover.  That branch is
 guarded by the production cache's ``release_completed_anchor_file_pages``
 metadata, which only a selected-source row sets. The branch requests page
 release for the render shard and the ``.tessera`` wire of each completed rung;
@@ -14,6 +14,7 @@ selected-source row of ``prismaquant.tessera_campaign.main`` on the tiny GLM
 checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
 """
+
 import json
 import os
 import pickle
@@ -24,6 +25,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 
@@ -85,7 +91,7 @@ def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
             rows.append((path, selection))
     assert len(rows) == 1, 'the fixture must plan exactly one stack row'
     path, selection = rows[0]
-    assert selection['schema'] == campaign.UNITS_SCHEMA_V2
+    assert selection['schema'] == campaign_selection.UNITS_SCHEMA_V2
     entry, = selection['groups']
     assert entry['sampled'] and set(entry['sampled']) < set(entry['members'])
     return path, selection
@@ -188,7 +194,7 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         pytest.fail('selected anchor reuse repeated calibration')
 
     monkeypatch.setattr(campaign, 'expand_menus_for_targets', two_rungs)
-    monkeypatch.setattr(campaign, '_collect_activations', no_forward)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', no_forward)
 
     # The release path, recorded and called through. The wrapper checks the
     # caller's ``expected_stat`` against the file itself, so a call that names
@@ -212,7 +218,7 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
 
     # Two recorders that carry the reorder diagnostic and assert nothing.
     memo_holder: dict = {}
-    original_memo = campaign._activation_kwargs_memo
+    original_memo = cell_measurement.encoder_kwargs_memo
 
     def memo(*args, **kwargs):
         for_unit = original_memo(*args, **kwargs)
@@ -220,14 +226,14 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         return for_unit
 
     order: list = []
-    original_measure = campaign._measure_anchor
+    original_measure = cell_measurement.measure_cell
 
     def measure(*, qname, format_name, **kwargs):
         order.append((qname, format_name))
         return original_measure(qname=qname, format_name=format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, '_activation_kwargs_memo', memo)
-    monkeypatch.setattr(campaign, '_measure_anchor', measure)
+    monkeypatch.setattr(cell_measurement, "encoder_kwargs_memo", memo)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
 
     selected_out = tmp_path / 'selected-cost.pkl'
     assert campaign.main([*common, '--out', str(selected_out),
@@ -274,12 +280,12 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     # other and were released once, each against its own identity.
     wire_dir = selected_cache / 'wire'
     from prismaquant import format_registry as fr
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     want = set()
     for name, fmt in sorted(expected):
-        wire = campaign._wire_path(wire_dir, name, fmt)
-        rendered = selected_cache / _cache_weight_filename(
+        wire = campaign_wire.wire_path(wire_dir, name, fmt)
+        rendered = selected_cache / cache_weight_filename(
             name, fr.canonical_format_name(fmt.strip().upper()))
         assert wire.is_file() and rendered.is_file()
         want.update({wire.resolve(), rendered.resolve()})

@@ -18,8 +18,9 @@ each off by their own power of two. Nothing raises. On DSv4-Flash that was 43
 So this module asks the question the exporter's own asserts could not: **for
 every scale-bearing weight tensor actually present in the artifact, which
 mechanism decodes it, and is that mechanism complete?** It reads only the
-artifact — safetensors headers and ``quant_config.json``, never the source
-checkpoint — because that is exactly what a consumer has.
+artifact, its safetensors headers and ``config.json.quantization_config``,
+never the source checkpoint. Historical ``quant_config.json`` remains readable;
+contradictory current and historical decoder contracts are refused.
 
 Cheap by construction: safetensors headers only, no tensor data, so it runs on
 a 92 GB artifact in about the time it takes to open the shards.
@@ -34,15 +35,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from prismaquant.source_read_plan import read_safetensors_header
+from prismaquant.source_read_plan import read_artifact_header, read_tensor_header
 
 
 __all__ = [
     "ArtifactIncomplete",
     "CompletenessReport",
     "check_artifact_completeness",
-    "read_artifact_header",
-    "read_artifact_shard_headers",
 ]
 
 #: Element dtypes that CANNOT be read without a scale plane. A tensor stored in
@@ -174,44 +173,6 @@ class CompletenessReport:
                 f"sub-group sums: {self.group_byte_mismatches[:5]}"
             )
         return "; ".join(parts)
-
-
-def _read_safetensors_header(path: Path) -> dict[str, dict]:
-    """Read one safetensors-compatible container header, never its data."""
-
-    header, _base, _size = read_safetensors_header(str(path))
-    return {
-        name: meta for name, meta in header.items() if name != "__metadata__"
-    }
-
-
-def read_artifact_shard_headers(artifact_dir: str | Path) -> dict[str, dict[str, dict]]:
-    """``{shard file name: {tensor name: safetensors metadata}}``. Headers only.
-
-    The shards are the index's ``weight_map`` values, or the one
-    ``model.safetensors`` of an unindexed checkpoint, in sorted order. Each
-    tensor is attributed to the file whose header names it, so a caller that
-    needs to know which file a read opens (source authentication hashes whole
-    files, RobTand/prismaquant#1491) reads it here instead of re-deriving the
-    index rule.
-    """
-
-    root = Path(artifact_dir)
-    index = root / "model.safetensors.index.json"
-    if index.exists():
-        shards = sorted(set(json.loads(index.read_text())["weight_map"].values()))
-    else:
-        shards = ["model.safetensors"]
-    return {shard: _read_safetensors_header(root / shard) for shard in shards}
-
-
-def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
-    """``{tensor name: safetensors metadata}`` across every shard. Headers only."""
-
-    header: dict[str, dict] = {}
-    for shard_header in read_artifact_shard_headers(artifact_dir).values():
-        header.update(shard_header)
-    return header
 
 
 def _checkpoint_spellings(unit: str, profile) -> set[str]:
@@ -501,7 +462,7 @@ def _validate_per_expert_format_groups(
     if codebook_file is not None:
         codebook_path = root / str(codebook_file)
         if codebook_path.exists():
-            codebook_header = _read_safetensors_header(codebook_path)
+            codebook_header = read_tensor_header(codebook_path)
     tensor_sum = 0
     codebook_sum = 0
     tensor_owners: dict[str, str] = {}
@@ -596,6 +557,31 @@ def _validate_per_expert_format_groups(
         )
 
 
+def _read_quantization_config(root: Path) -> dict:
+    """Read the emitted decoder contract, refusing contradictory sidecars."""
+    config_path = root / "config.json"
+    current = None
+    if config_path.exists():
+        config = json.loads(config_path.read_text())
+        if not isinstance(config, dict):
+            raise ValueError("artifact config.json must contain an object")
+        if "quantization_config" in config:
+            current = config["quantization_config"]
+            if current is None:
+                current = {}
+            if not isinstance(current, dict):
+                raise ValueError("artifact quantization_config must be an object")
+    legacy_path = root / "quant_config.json"
+    legacy = None
+    if legacy_path.exists():
+        legacy = json.loads(legacy_path.read_text())
+        if not isinstance(legacy, dict):
+            raise ValueError("artifact quant_config.json must contain an object")
+    if current is not None and legacy is not None and current != legacy:
+        raise ValueError("conflicting quantization configurations in artifact")
+    return current if current is not None else (legacy if legacy is not None else {})
+
+
 def check_artifact_completeness(
     artifact_dir: str | Path,
     *,
@@ -611,7 +597,7 @@ def check_artifact_completeness(
     """
 
     root = Path(artifact_dir)
-    quant_config = json.loads((root / "quant_config.json").read_text())
+    quant_config = _read_quantization_config(root)
     header = read_artifact_header(root)
 
     profile = _detect_profile_quietly(root)

@@ -149,7 +149,7 @@ def _published_pb():
 def test_single_ordered_helper_owns_all_phase_names():
     """One spelling of the consumption order, shared by builder, capture
     and (through the manifest) the dispatch lane."""
-    from prismaquant.joint_layer_quanta import (
+    from prismaquant.joint_quantum_row import (
         ADJOINT_TAIL_PHASE,
         adjoint_chain_phase_name,
         adjoint_forward_phase_name,
@@ -257,7 +257,7 @@ def test_capture_timeline_advances_monotonically_with_exact_units():
     commit carries exactly the entries landed so far -- phases never
     fabricate units, entries never move the phase."""
     from prismaquant.joint_cost_stage_a import stage_a_forward_observer
-    from prismaquant.joint_layer_quanta import adjoint_chain_phase_name
+    from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)
     order = _expected_order()
     recorder, progress = _reporter(order)
     observe = stage_a_forward_observer(progress)

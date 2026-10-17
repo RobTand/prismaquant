@@ -15,11 +15,13 @@ with no Tessera rung on it behaves exactly as it did before any of this
 existed.
 """
 import hashlib
+import json
 from fractions import Fraction
 
 import pytest
 
 from prismaquant import format_registry as fr
+from prismaquant import allocator_solver as solver
 from prismaquant import tessera_menu as tm
 from prismaquant import tessera_runtime_contract as trc
 from prismaquant.tessera_formats import (
@@ -408,16 +410,8 @@ def test_route_admission_never_asserts():
     }
 
 
-def test_attested_menu_is_closed_with_no_tessera_contract_pinned():
-    """A measured fact about the pinned release, recorded as a test.
-
-    The pinned Gridbook contract publishes no Tessera cell, and no Tessera
-    RELEASE tag exists, so with the dev pin unset the DEFAULT menu holds no
-    Tessera rung at all. This is the honest state of the gate, not a bug:
-    principle 9 says a format is production-eligible only when a pinned
-    runtime attests it. A RELEASE tag is what flips this in production; the
-    dev pin below is what flips it here.
-    """
+def test_scoped_attested_menu_requires_an_explicit_serving_context():
+    """The exact pin cannot supply an undeclared image, structure or residency."""
     assert not trc.dev_pin_requested(), "the dev pin must not leak into this test"
     rungs = tm.expand_tessera_menu(SHAPE, mode=tm.MENU_ATTESTED)
     assert rungs == []
@@ -904,81 +898,51 @@ def test_the_licence_and_the_route_admission_come_from_one_read(monkeypatch):
         "fused_module_licence bypassed the module's one read")
 
 
-def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu():
-    """Package data via ``importlib.resources``, and no runtime behind it.
-
-    Locating the packaged contract imports the ``tessera.serving`` package
-    itself -- ``resources.files`` imports it -- but that import is lazy by
-    design (it defines ``register()`` and calls nothing at module scope), so
-    it registers nothing and needs no GPU.
-
-    Until lane schema v9 this also asserted that ``tessera.serving.contract``
-    stayed out of ``sys.modules``, on the stated grounds that "its validator
-    imports the plugin's dispatch tables".  Two things changed.  Reading a v9
-    table REQUIRES that module -- the smoke record's status and attribution
-    are derived by Tessera's own ``derive_smoke_status`` /
-    ``derive_smoke_attribution``, and restating those rules here is the
-    two-homes defect RobTand/tessera#327 was filed about.  And the stated
-    grounds stopped being true: at the pinned commit that module imports only
-    the standard library at module scope and defers every dispatch-table
-    import into a function body (Tessera's own ``test_contract_is_portable``
-    holds it there).
-
-    So the module name was a PROXY for the property, and the proxy no longer
-    tracks it.  This asserts the property in two halves instead.
-
-    First: the read pulls in no vLLM, and its ``tessera.serving`` surface is
-    confined to the portable contract module -- none of the dispatch modules
-    (``ops``, ``native_ops``, ``moe_route``, ``sharding``, ``ext``, ``lane``,
-    ``scheme``) is loaded, which is what "no serving runtime" actually means.
-    Second, checked separately because it is Tessera's claim and not this
-    repository's: importing ``tessera.serving.contract`` on its own pulls in
-    no torch, no Triton and no vLLM.
-
-    The second half is measured in a bare interpreter deliberately.  Torch is
-    already in ``sys.modules`` by the time the first half runs -- ``prismaquant``
-    itself imports it, on this branch and on main alike -- so asserting
-    "no torch" around the read would assert something about this package's
-    own import weight and prove nothing about Tessera.
-    """
+def test_reading_the_contract_needs_no_serving_runtime_and_no_gpu(tmp_path):
+    """The menu reads exact pinned metadata without loading a runtime stack."""
+    from pathlib import Path
     import subprocess
     import sys
 
-    script = (
-        "import sys\n"
-        "from prismaquant import tessera_runtime_contract as trc\n"
-        "import os\n"
-        f"os.environ['{trc.TESSERA_DEV_PIN_ENV}'] = '{trc.TESSERA_DEV_PIN_COMMIT}'\n"
-        "c = trc.load_tessera_contract()\n"
-        "assert c is not None\n"
-        "assert 'vllm' not in sys.modules, sorted(\n"
-        "    m for m in sys.modules if m.startswith('vllm'))\n"
-        "serving = sorted(m for m in sys.modules if m.startswith('tessera.serving'))\n"
-        # Contract v25 added ``activation_attestation``: ``contract`` validates
-        # the published quantiser table through it.  It is portable (stdlib and
-        # ``tessera.alphabet``); the bare-interpreter half below measures that.
-        "assert serving == ['tessera.serving', 'tessera.serving.activation_attestation',"
-        " 'tessera.serving.contract'], serving\n"
-        "print('OK')\n"
+    script = """
+import json
+import os
+import sys
+
+class ForbiddenRuntime:
+    def find_spec(self, name, path=None, target=None):
+        if (name == 'tessera.serving' or name.startswith('tessera.serving.')
+                or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm'}):
+            raise AssertionError('forbidden runtime import: ' + name)
+
+sys.meta_path.insert(0, ForbiddenRuntime())
+sys.path.insert(0, sys.argv[1])
+from prismaquant import tessera_runtime_contract as trc
+
+os.environ[trc.TESSERA_DEV_PIN_ENV] = trc.TESSERA_DEV_PIN_COMMIT
+contract = trc.load_tessera_contract()
+snapshot = trc.installed_runtime_snapshot()
+pin = snapshot.require_exact_pin()
+assert contract is not None
+assert contract.commit == pin.commit == trc.TESSERA_DEV_PIN_COMMIT
+assert contract.sha256 == snapshot.sha256 == pin.contract_sha256 == trc.TESSERA_DEV_PIN_CONTRACT_SHA256
+published = {cell['id'] for cell in json.loads(snapshot.raw)['lane_eligibility']['cells']}
+assert len(published) == 22
+assert {cell.id for cell in contract.cells} == published
+assert {cell.id for cell in snapshot.eligibility.cells} == published
+assert 'tessera.metadata' in sys.modules
+for name in sys.modules:
+    assert name != 'tessera.serving' and not name.startswith('tessera.serving.'), name
+    assert name.split('.')[0] not in {'torch', 'transformers', 'triton', 'vllm'}, name
+print('PINNED-MENU-METADATA-OK')
+"""
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, '-I', '-c', script, str(root)], cwd=tmp_path,
+        capture_output=True, text=True,
     )
-    portable = subprocess.run(
-        [sys.executable, "-c",
-         "import sys\n"
-         "import tessera.serving.contract\n"
-         "heavy = sorted(m for m in sys.modules\n"
-         "               if m.split('.')[0] in ('vllm', 'torch', 'triton'))\n"
-         "assert not heavy, heavy\n"
-         "print('PORTABLE')\n"],
-        capture_output=True, text=True)
-    assert portable.returncode == 0, (
-        "tessera.serving.contract stopped being importable without a GPU "
-        "stack, and the v9 reader derives through it: "
-        + portable.stderr[-2000:])
-    assert "PORTABLE" in portable.stdout
-    out = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True)
-    assert out.returncode == 0, out.stderr[-2000:]
-    assert "OK" in out.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == 'PINNED-MENU-METADATA-OK'
 
 
 def test_tp_above_the_attested_world_size_is_refused_in_the_attested_menu(dev_pin):
@@ -1095,13 +1059,13 @@ def test_prune_dominated_keeps_a_point_inside_the_hull():
     is the optimum -- dropping it would change the DP's answer.
     """
     rows = [(100, 10.0, "a"), (200, 6.0, "b"), (300, 1.0, "c")]
-    kept = [r[2] for r in tm.prune_dominated(rows)]
+    kept = [r[2] for r in solver.prune_dominated(rows)]
     assert kept == ["a", "b", "c"]
 
 
 def test_prune_dominated_drops_only_both_axes_worse():
     rows = [(100, 10.0, "a"), (150, 12.0, "worse-both"), (300, 1.0, "c")]
-    kept = [r[2] for r in tm.prune_dominated(rows)]
+    kept = [r[2] for r in solver.prune_dominated(rows)]
     assert kept == ["a", "c"]
 
 
@@ -1113,7 +1077,7 @@ def test_collapse_to_dp_bins_agrees_with_the_solver():
         (int(bpp * n_params / 8), 1.0 / bpp, f"r{i}")
         for i, bpp in enumerate([3.0, 3.001, 3.5, 4.0])
     ]
-    kept = tm.collapse_to_dp_bins(
+    kept = solver.collapse_to_dp_bins(
         rows, baseline_bits_per_param=3.0, n_params=n_params,
         total_params=total, bit_precision=1e-4)
     bins = {
@@ -1321,7 +1285,7 @@ def test_pre_aggregation_offers_a_fused_group_one_family_and_free_rates():
     }
     options = tessera_group_composites(
         members, candidates, n_params=1000,
-        licence=trc._load_at(
+        licence=trc.read_tessera_contract(
             str(trc.contract_path()),
             hashlib.sha256(trc.contract_path().read_bytes()).hexdigest(),
             "installed").fused_module)
@@ -1450,7 +1414,6 @@ def test_the_allocator_stamps_the_caveat_rather_than_only_printing_it():
     and ``selection.json`` -- whenever a Tessera rung reached the menu, and out
     of neither on a stock run.
     """
-    import inspect
     from prismaquant import tessera_lane
 
     widths = {"tessera_rungs_before_reduction": 3}
@@ -1469,7 +1432,6 @@ def test_the_allocator_stamps_the_caveat_rather_than_only_printing_it():
         menu_report={}, menu_report_agg={}, menu_widths={},
         group_menu_report={}, dev_pin={})
     assert "selection_caveat" not in stock["tessera_menu"]
-    assert "CANDIDATE, not a selection" in inspect.getsource(tessera_lane)
 
 
 # ---------------------------------------------------------------------------
@@ -1597,23 +1559,25 @@ def _synthetic_contract(monkeypatch, *, reader=(256, 2048), attested=(1024,)):
     census that attests one rung of it -- and the three modes are asked to
     disagree in the one direction that proves each read its own field.
     """
-    from types import SimpleNamespace
+    from tests.conftest import down_convert_lane_table, set_cell_census
 
+    payload = json.loads(trc.installed_runtime_snapshot().raw)
+    payload = down_convert_lane_table(payload, "tessera.lane-eligibility.v4")
     family = "TESSERA_E4M3_K1"
-    cell = SimpleNamespace(
-        cell_id="synthetic_cell", route_status=tm.ROUTE_STATUS_BACKED,
-        activation_contract="fp8_per_token_dynamic",
-        requires_serve_flags=(),
-    )
-    contract = SimpleNamespace(
-        commit="synthetic", requires_serving_context=False, lane_schema="legacy",
-        max_world_size={family: 1},
-        reader_rate_range={family: reader},
-        attested_rungs={family: frozenset(attested)},
-        governs=lambda name: name == family,
-        native_cells=lambda name, rate, **_kw: (
-            (cell,) if name == family and rate in attested else ()),
-    )
+    chosen = {}
+    for row in payload["lane_eligibility"]["cells"]:
+        if row["family"] == family and row["regime"] not in chosen:
+            chosen[row["regime"]] = row
+    payload["lane_eligibility"]["cells"] = list(chosen.values())
+    payload["formats"] = [row for row in payload["formats"] if row["family"] == family]
+    payload["formats"][0].pop("allowable_rungs", None)
+    payload["formats"][0]["reader_rate_range_q256"] = list(reader)
+    payload["formats"][0]["attested_rungs_q256"] = list(attested)
+    payload["formats"][0]["candidate_rungs_q256"] = list(attested)
+    for row in chosen.values():
+        row["structure"] = "dense"
+        set_cell_census(payload, row, list(attested))
+    contract = trc._parse(payload, commit="owned-range", sha="owned-range", path="owned-range")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     return contract
 
@@ -1679,9 +1643,13 @@ def test_the_packaged_reader_range_is_read_from_its_own_field():
         "candidate_rungs_q256": [1024],
     }
     formats = {"TESSERA_E4M3_K1": row}
-    assert tm._published_reader_range(formats, "TESSERA_E4M3_K1") == (256, 2048)
-    assert tm._published_reader_range(formats, "TESSERA_E2M1_K1") is None
-    assert tm._published_reader_range({"X": {"family": "X"}}, "X") is None
+    from prismaquant.tessera_runtime_contract import RuntimeContractSnapshot
+    snapshot = RuntimeContractSnapshot(
+        json.dumps({"formats": list(formats.values()) + [{"family": "X"}]}).encode(),
+        "owned-reader-range")
+    assert snapshot.reader_rate_range("TESSERA_E4M3_K1") == (256, 2048)
+    assert snapshot.reader_rate_range("TESSERA_E2M1_K1") is None
+    assert snapshot.reader_rate_range("X") is None
     assert tm._rate_is_readable(256, (256, 2048))
     assert tm._rate_is_readable(2048, (256, 2048))
     assert not tm._rate_is_readable(255, (256, 2048))

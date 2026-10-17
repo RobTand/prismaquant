@@ -57,7 +57,7 @@ from prismaquant.production_recache import _load_assignment
 from prismaquant.production_weight_cache import (
     fill_production_weight_cache,
 )
-from prismaquant.sensitivity_probe import load_calibration
+from prismaquant.calibration_data import load_calibration
 
 
 def _load_col_weights(path, formats) -> dict | None:
@@ -108,7 +108,9 @@ def _load_col_weights(path, formats) -> dict | None:
 
 
 def _model_has_packed_experts(model: nn.Module, profile) -> bool:
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
     return any(
         _is_packed_experts_module(m, profile)
         for _, m in model.named_modules()
@@ -416,6 +418,8 @@ def _run_streaming(args, formats, levers, dtype) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     p = argparse.ArgumentParser(description="Build production δw cache")
     p.add_argument("--model", required=True)
     p.add_argument("--output", required=True)

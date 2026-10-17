@@ -203,16 +203,20 @@ def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str
 
 
 def _replay_slot(stage: dict, context: dict, output: Path, *, produced: bool) -> dict:
-    from prismaquant.shipcard import fill_slot
-    from prismaquant.shipcard_cli import main as card_cli
+    from prismaquant.shipcard import compute_model_sha, fill_slot
+    from prismaquant.shipcard_slots import make_gold_record
     artifact = Path(context["artifact"])
     card_path = artifact / "shipcard.json"
     identity = stage["id"]
     if produced and identity in GOLD_TOOLS:
-        rc = card_cli(["fill", str(card_path), "--slot", identity, "--record", str(output),
-                       "--model-dir", str(artifact), "--tool", GOLD_TOOLS[identity]])
-        if rc:
-            raise ValueError(f"{identity}: gold fill refused with exit {rc}")
+        payload = _read_gate_document(output)
+        draft = make_gold_record(
+            payload, slot=identity, model_sha=compute_model_sha(artifact),
+            record_path=output, model_dir=artifact, tool=GOLD_TOOLS[identity])
+        record = draft.record
+        if draft.problems:
+            record["passed"] = False
+        fill_slot(card_path, identity, record)
     card = load_shipcard(card_path)
     if produced and identity not in GOLD_TOOLS:
         record_path = stage["record"]

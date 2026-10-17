@@ -1,4 +1,5 @@
 """The original encoding draw and diagnostic joint draw have different owners."""
+from prismaquant import aura_provenance
 import copy
 import hashlib
 import json
@@ -132,7 +133,7 @@ def test_pilot_counts_are_per_probe_and_survive_resume(tmp_path, monkeypatch):
     from prismaquant import aura_cost as aura
     from test_joint_aura_streamed import _fixture, _run
     from test_joint_operator_windows import policy
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1'*40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1'*40)
     panel = {'schema': 'prismaquant.tessera_joint_eval_panel.v1', 'status': 'diagnostic_pilot'}
     def run(resume):
         _, _, runner, cache = _fixture()

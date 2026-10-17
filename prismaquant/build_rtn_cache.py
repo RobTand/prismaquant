@@ -42,10 +42,10 @@ from prismaquant.nvfp4_activation_contract import (
     FP4_E2M1_MAX,
     _E2M1_POSITIVE,
 )
-from prismaquant.sensitivity_probe import (
-    _mk_stage_dir,
-    _is_packed_experts_module,
-    _packed_experts_param_names,
+from prismaquant.sensitivity_probe import _mk_stage_dir
+from prismaquant.probe_inventory import (
+    is_packed_experts_module as _is_packed_experts_module,
+    packed_experts_param_names as _packed_experts_param_names,
 )
 
 
@@ -507,6 +507,8 @@ def load_weights_chunked(path_prefix: str) -> Dict[str, torch.Tensor]:
 # ---------------------------------------------------------------------------
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--cache-dir", required=True)

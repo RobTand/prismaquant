@@ -296,6 +296,7 @@ def _observed_derivative():
 def _stub_builder(v1_payload, tmp_path, monkeypatch, *, include_final=True,
                   drift=None, explicit_derivative=False):
     from prismaquant import cost_streaming, gpu_guard, joint_aura, model_profiles
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from transformers import AutoTokenizer
     source = v1_payload["source_model_identity"]
     input_path = tmp_path / "inputs.json"
@@ -375,7 +376,7 @@ def _stub_builder(v1_payload, tmp_path, monkeypatch, *, include_final=True,
     monkeypatch.setattr(builder, "_load_gold_inputs", lambda *a: {"full_kl": {
         "token_ids": v1_payload["calib_ids"].tolist(), "selection": {"starts": v1_payload["starts"]},
         "dataset": dict(v1_payload["calibration_contract"]["dataset"], total_tokens=100_000)}})
-    monkeypatch.setattr(cost_streaming, "validate_cached_streamed_model_identity", identity)
+    monkeypatch.setattr(cost_streaming_identity, "validate_cached_streamed_model_identity", identity)
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build)
     monkeypatch.setattr(joint_aura, "source_execution_identity", observe)
     monkeypatch.setattr(builder, "_source_derivative_policy", policy)

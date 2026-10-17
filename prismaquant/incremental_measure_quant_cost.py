@@ -55,7 +55,7 @@ from .incremental_probe import (
     build_shard_schedule,
     load_num_hidden_layers,
 )
-from .measure_quant_cost import (
+from prismaquant.measure_quant_cost import (
     ActivationIndex,
     HDetailIndex,
     _accumulate_result,
@@ -64,13 +64,13 @@ from .measure_quant_cost import (
     _finalize_results,
     _measure_packed_experts,
     _normalize_fisher_output_mse_row_weights,
-    h_detail_expected_norm_tokens,
     measure_batched_gpu,
     measure_unbatched,
     prepare_cost_context,
     resolve_cost_target_name,
     start_mem_watchdog,
 )
+from prismaquant.probe_statistics import h_detail_expected_norm_tokens
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
@@ -699,14 +699,14 @@ def _run_mtp_cost_shard(
         n for n, m in mtp_wrapper.named_modules()
         if isinstance(m, nn.Linear) and not n.endswith(".mlp.gate")
     }
-    from .sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from .probe_inventory import (
+        is_packed_experts_module,
+        packed_experts_param_names,
     )
     for name, module in mtp_wrapper.named_modules():
-        if not _is_packed_experts_module(module, profile):
+        if not is_packed_experts_module(module, profile):
             continue
-        for pn in _packed_experts_param_names(module, profile):
+        for pn in packed_experts_param_names(module, profile):
             mtp_linears.add(f"{name}.{pn}")
 
     target_names = shard_targets & mtp_linears

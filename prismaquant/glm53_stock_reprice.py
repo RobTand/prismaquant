@@ -59,13 +59,13 @@ import re
 import sys
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
     cost_entry_is_anchored_aura_supersurrogate,
     cost_entry_is_bit_exact,
-    serialized_candidate_payload,
 )
+from prismaquant.allocator_candidates import serialized_candidate_payload
 from prismaquant.anchored_cost import (
     anchors_from_results,
     plan_anchor_requests,
@@ -568,7 +568,7 @@ def inventory_checks(
         "PASS" if not missing_norm else "BLOCK",
         (
             "every row carrying h_trace_raw also carries "
-            "h_trace_norm_tokens, so allocator.renormalize_probe_fisher "
+            "h_trace_norm_tokens, so probe_statistics.renormalize_probe_fisher "
             "cannot SystemExit on a missing norm stamp"
             if not missing_norm
             else f"{len(missing_norm)} row(s) carry h_trace_raw with no "

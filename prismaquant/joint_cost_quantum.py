@@ -40,15 +40,15 @@ from types import SimpleNamespace
 import torch
 
 from .digests import bytes_sha256hex
+from .joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA as QUANTUM_RECORD_SCHEMA,
+                                   require_quantum_identity, require_quantum_campaign)
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
-from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
 from .io_spans import (ExposedWaitLedger, GpuPowerSampler, IoSpanLog,
                        exposed_wait_report, failure_outcome, read_proc_io,
                        stage_span_log)
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
-    QUANTUM_RECORD_SCHEMA,
     QUANTUM_STATUS_SCHEMA,
     KernelTimeProfiler,
     PlaneHostStaging,
@@ -71,17 +71,19 @@ from .joint_adjoint_slices import (
     verify_adjoint_slice,
 )
 from .joint_layer_quanta import (
-    CHECKPOINT_LOAD_PHASE,
     PREPARED_INPUT_SCHEMA,
     check_adjoint_run_identity,
     check_prepared_windows_against_resolved,
+    qname_layer,
+)
+from prismaquant.joint_quantum_row import (
+    CHECKPOINT_LOAD_PHASE,
     executable_bound_phase_name,
     executable_own_source_phase_name,
     executable_render_phase_name,
     executable_replay_phase_name,
     executable_spill_phase_name,
     executable_source_phase_name,
-    qname_layer,
     quantum_source_layer_order,
 )
 from .source_read_plan import chain_prefetch_window
@@ -91,7 +93,6 @@ from .joint_checkpoint_publication import (
     publication_budget, publication_geometry, publication_job_limit, check_construction,
 )
 from .joint_quantum_handoff import (
-    HANDOFF_LOAD_PHASE,
     HANDOFF_TEE_GROUPS,
     HandoffEmitter,
     HandoffIncoming,
@@ -101,6 +102,7 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
@@ -228,7 +230,7 @@ class SpillSequenceAttribution:
         if missing:
             raise QuantumIdentityRefused(
                 f"sequence_attribution missing requested probes {missing} for {key[0]}@{key[1]}")
-        from .joint_aura import sequence_attribution_sidecar
+        from prismaquant.joint_aura_rows import sequence_attribution_sidecar
         return sequence_attribution_sidecar(
             blocks=self.blocks, components_per_probe=per_probe,
             authoritative_totals=signed_totals,
@@ -317,10 +319,8 @@ def verify_quantum_identity(
     that actually ran by rereading them through the bound reader, without
     carrying them over stdout or canonical-reencoding. Raises
     :class:`QuantumIdentityRefused` (the caller exits 3) with nothing written.
-    The producer's
-    ``check_quantum_for_campaign`` runs too when the producer module has
-    landed; until then the same checks run here from the record's own fields,
-    so a record built for another campaign revision refuses the same way.
+    The ledger owns record identity and campaign comparison. This adapter
+    retains authenticated input reads, geometry and output-path checks.
     """
     try:
         _require_hex(quantum_sha256, "--quantum-sha256")
@@ -342,16 +342,7 @@ def verify_quantum_identity(
                 f"quantum record digest mismatch at {quantum_path}")
         record_bytes = raw
         record = json.loads(record_bytes.decode("utf-8"))
-        if record.get("schema") != QUANTUM_RECORD_SCHEMA:
-            raise QuantumIdentityRefused(
-                f"quantum record schema mismatch: {record.get('schema')!r}")
-        body = {key: value for key, value in record.items()
-                if key != "identity_sha256"}
-        recomputed = canonical_json_sha256(body, where="quantum record identity")
-        if recomputed != record.get("identity_sha256"):
-            raise QuantumIdentityRefused(
-                "quantum record identity_sha256 does not bind its own bytes: "
-                f"stored={record.get('identity_sha256')!r} recomputed={recomputed}")
+        require_quantum_identity(record)
         layer = int(record["layer"])
         if record.get("quantum_id") != f"layer-{layer:03d}":
             raise QuantumIdentityRefused(
@@ -452,22 +443,16 @@ def verify_quantum_identity(
                 f"quantum output_space.root {record['output_space']['root']} "
                 f"is not {expected_root}")
         try:
-            from .joint_layer_quanta import check_quantum_for_campaign
-        except ImportError:
-            pass
-        else:  # pragma: no cover - producer-owned check once it lands
-            try:
-                check_quantum_for_campaign(record, {
-                    "plan_sha256": plan_sha256,
-                    "prepared_sha256": prepared_sha256,
-                    "read_manifest_sha256": campaign["read_manifest_sha256"],
-                    "unit_roster_sha256": campaign["unit_roster_sha256"],
-                    "campaign_scope": campaign["campaign_scope"],
-                    "adjoint_slice_sha256": adjoint_slice_sha256(adjoint_slice),
-                })
-            except ValueError as exc:
-                raise QuantumIdentityRefused(
-                    f"producer campaign check refuses: {exc}") from exc
+            require_quantum_campaign(record, {
+                "plan_sha256": plan_sha256,
+                "prepared_sha256": prepared_sha256,
+                "read_manifest_sha256": campaign["read_manifest_sha256"],
+                "unit_roster_sha256": campaign["unit_roster_sha256"],
+                "campaign_scope": campaign["campaign_scope"],
+                "adjoint_slice_sha256": adjoint_slice_sha256(adjoint_slice),
+            })
+        except ValueError as exc:
+            raise QuantumIdentityRefused(f"campaign check refuses: {exc}") from exc
     except QuantumIdentityRefused:
         raise
     except (KeyError, TypeError, ValueError, OSError) as exc:
@@ -593,7 +578,7 @@ class QuantumProgress:
             index = self._phases.index(str(name))
         except ValueError:
             # Chunk names are not staging phases on an executable row
-            # (joint_layer_quanta.quantum_executable_phase_names), so this
+            # (joint_quantum_row.quantum_executable_phase_names), so this
             # fires once per chunk there. commit() keeps reporting under the
             # phase already entered; say that, once per name (PQ #1187).
             if str(name) not in self._undeclared:
@@ -951,7 +936,7 @@ def _install_with_settlement(runner, layer: int, *, operator_windows,
     """Install one layer of the quantum's own walk, then prefetch its next.
 
     ``order`` is the quantum's install order
-    (``joint_layer_quanta.quantum_source_layer_order``), and the executable
+    (``joint_quantum_row.quantum_source_layer_order``), and the executable
     readset declares a source phase for each of its layers (PQ #1095).
 
     The layer is asked for first. ``install(require_prefetched=True)``
@@ -1023,7 +1008,7 @@ def _rebuild_batches(runner, *, partitions, shared_pass):
     shared forward pass state comes from the strided checkpoint.
     ``partitions`` is the capture's own row-sliced batch list, in order.
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
 
     batches = []
     for batch_index, rows in enumerate(partitions):
@@ -1178,7 +1163,7 @@ def quantum_retained_state(execution):
     One normalization shared by window resolution (before any GPU work) and
     the replay core, so both derive the same windows from the same bytes.
     """
-    from .cost_streaming import normalize_boundary_storage
+    from .streamed_boundary_artifacts import normalize_boundary_storage
     from .joint_retained_window_plan import (
         RetainedWindowBudget,
         normalize_retained_execution,
@@ -1632,7 +1617,7 @@ def bind_joint_served_quantizer(formats_by_qname, *,
     A16/dynamic-only rosters do not load the serving extension.
 
     This is the one owner of the rule. Stage B calls it, and so does the
-    Stage A campaign seam (``tessera_campaign._bind_served_quantizer``,
+    Stage A campaign seam (``tessera_cell_measurement._bind_served_quantizer``,
     RobTand/prismaquant#1481), naming its own ``context``.
     """
     from . import format_registry as fr
@@ -1769,36 +1754,24 @@ def run_layer_quantum_core(
     record, the journal identity or the payload.
     """
     from . import format_registry as fr
-    from .aura_cost import (
-        _assemble_streamed_aura_payload,
-        _aura_source_sha256,
-        _aura_unit_state,
-        _build_aura_checkpoint_identity,
-        _checkpoint_git_commit,
-        _free_gib,
-        _prepare_aura_checkpoints,
-        _restore_aura_unit_state,
-        _write_aura_unit_checkpoint,
-        _ZERO_COST_FORMATS,
+    from .aura_cost import _assemble_streamed_aura_payload, _free_gib, _ZERO_COST_FORMATS
+    from .aura_provenance import (
+        producer_package_sha256 as _aura_source_sha256,
+        checkpoint_git_commit as _checkpoint_git_commit,
     )
-    from .cost_streaming import (
-        StreamedBoundaryArtifacts,
-        _state_storage_bytes,
-        normalize_boundary_storage,
-        prefetched_boundary_batches,
-        validate_streamed_model_identity,
+    from .aura_checkpoint_journal import AuraCheckpointJournal, build_checkpoint_identity
+    from .joint_price_step import (
+        AuraUnitMeasurements, JointPriceStep, JointResumeContract,
+        ProbeResumePolicy, RequiredAttribution,
     )
-    from .joint_aura import (
-        JointOperatorStatisticsLease,
-        activation_identity,
-        identity_sha256,
-        make_joint_aura_entry,
-        normalize_sequence_attribution,
-        source_execution_identity,
-        squared_signed,
-        validate_joint_aura_entry,
-        validated_probe_identity,
+
+    from .streamed_boundary_artifacts import (
+        StreamedBoundaryArtifacts, _state_storage_bytes,
+        normalize_boundary_storage, prefetched_boundary_batches,
     )
+    from .streamed_model_identity import validate_streamed_model_identity
+    from .joint_aura import JointOperatorStatisticsLease, activation_identity, make_joint_probe_identity, normalize_sequence_attribution, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, validate_joint_aura_entry, validated_probe_identity
     from .joint_adjoint_checkpoints import (
         load_adjoint_checkpoint,
         reference_from_record,
@@ -1981,7 +1954,7 @@ def run_layer_quantum_core(
     sealed_spill = False
     sealed_block = record.get("executable_readset")
     if isinstance(sealed_block, dict):
-        from .joint_layer_quanta import normalize_replay_mode
+        from prismaquant.joint_quantum_row import (normalize_replay_mode)
         try:
             sealed_mode = normalize_replay_mode(sealed_block.get("replay_mode"))
         except ValueError as exc:
@@ -2103,20 +2076,15 @@ def run_layer_quantum_core(
 
     model_identity = validate_streamed_model_identity(
         production_cache.metadata["source_model_identity"], where="layer quantum")
-    joint_probe_identity = {
-        "schema": "prismaquant.joint_aura.probes.v2",
-        "source_model": model_identity,
-        "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": list(calib_ids.shape),
-        "calibration_dtype": str(calib_ids.dtype),
-        "n_probes": n_probes, "seed_base": seed_base,
-        "token_scope": token_scope, "temperature": temperature,
-        "distribution": "rademacher", "normalization": "global_kl_fisher",
-        "producer_source_sha256": _aura_source_sha256(),
-        "source_execution": source_execution_identity(runner.model),
-        "arithmetic": statistics_arithmetic_identity(runner.dtype, projection_backend,
-                                                     replay_regime=replay_regime),
-    }
+    joint_probe_identity = make_joint_probe_identity(
+        calibration_ids=calib_ids, source_model=model_identity,
+        n_probes=n_probes, seed_base=seed_base,
+        token_scope=token_scope, temperature=temperature,
+        producer_source_sha256=_aura_source_sha256(),
+        source_execution=source_execution_identity(runner.model),
+        arithmetic=statistics_arithmetic_identity(runner.dtype, projection_backend,
+                                                 replay_regime=replay_regime),
+    )
     joint_probe_identity["arithmetic"]["operator_windows"] = operator_windows
     joint_probe_identity["arithmetic"]["gradient_diagnostics"] = (
         "sum_output_operators_fp32_before_norm")
@@ -2166,7 +2134,11 @@ def run_layer_quantum_core(
                 f"{_render_proof_sides(value, source, side='skeleton')}")
         joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
     pilot_panel = execution.get("joint_eval")
-    from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    from .joint_eval_observation import (
+        new_observation_counts,
+        observe_probe,
+        stamp_observations,
+    )
     observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
     joint_run_identity = {
         "schema": "prismaquant.joint_aura.run.v2",
@@ -2224,7 +2196,7 @@ def run_layer_quantum_core(
                    forward_recovery=adjoint_slice["boundary_storage"].get("forward_recovery"))
     extra["streamed_boundary_storage"] = storage.identity
 
-    identity = _build_aura_checkpoint_identity(
+    identity = build_checkpoint_identity(
         model=runner.model, calib_ids=calib_ids, names=names, linears=linears,
         formats=fmts, chunks=[names], n_probes=n_probes, token_scope=token_scope,
         temperature=temperature, seed_base=seed_base, dw_dtype="float32",
@@ -2234,68 +2206,27 @@ def run_layer_quantum_core(
         production_cache=production_cache,
         git_commit=checkpoint_git_commit, extra_identity=extra,
     )
-    checkpoint_root, checkpoint_identity_sha256, completed_states = (
-        _prepare_aura_checkpoints(checkpoint_dir, resume=resume, identity=identity,
-                                  names=names))
-
-    s2: dict[tuple[str, str], float] = {}
-    s4: dict[tuple[str, str], float] = {}
-    x2_probe: dict[tuple[str, str], list[float]] = {}
-    dw_src: dict[tuple[str, str], str] = {}
-    g_trace: dict[str, float] = {}
-    joint_rows: dict[str, dict[str, dict]] = {}
-    joint_components: dict[tuple[str, str], list[dict]] = {}
-    joint_operators: dict[tuple[str, str], dict] = {}
+    checkpoint_journal = AuraCheckpointJournal.open(
+        checkpoint_dir, resume=resume, identity=identity, names=names)
+    measurements = AuraUnitMeasurements(
+        n_probes=n_probes, render_formats=render_formats,
+        diagnostic_weight_mse_pairs=set(), observation_counts=observation_counts)
+    s2, s4 = measurements.s2, measurements.s4
+    x2_probe, dw_src = measurements.x2_probe, measurements.dw_src
+    g_trace = measurements.g_trace
+    required_attribution = (None if attribution_config is None else RequiredAttribution(
+        attribution_keys, lambda name, fmt: QuantumIdentityRefused(
+            f"quantum {quantum_id}: sequence_attribution cannot resume committed "
+            f"no-attribution rows for {name}@{fmt}")))
+    price = JointPriceStep(measurements, probe_identity=joint_probe_identity,
+        validated_probe=joint_probe, formats_by_qname=unit_formats,
+        zero_cost_formats=_ZERO_COST_FORMATS, rendered_identities=joint_cache_renders,
+        resume_contract=JointResumeContract(ProbeResumePolicy.RUN_SEALS,
+                                            attribution=required_attribution))
+    joint_rows, joint_components, joint_operators = price.rows, price.components, price.operators
     joint_source_tensors: dict[str, dict] = {}
     operator_window_receipts: list[dict] = []
-    completed_units: set[str] = set()
-    for name in names:
-        state = completed_states.get(name)
-        if state is None:
-            continue
-        _restore_aura_unit_state(
-            name, state, nonzero_formats=render_formats[name], n_probes=n_probes,
-            collect_col_energy=False, s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src,
-            g_trace=g_trace, col_energy={}, diagnostic_weight_mse_pairs=set(),
-            weight_mse_diagnostic={}, require_source_weight_identity=False,
-            source_weight_identity={}, observation_counts=observation_counts)
-        rows = state.get("joint_aura_rows")
-        if not isinstance(rows, Mapping) or set(rows) != set(unit_formats[name]):
-            raise RuntimeError(f"joint AURA checkpoint row scope mismatch for {name}")
-        for fmt, row in rows.items():
-            try:
-                if not validate_joint_aura_entry(row):
-                    raise ValueError("not a joint row")
-                if (attribution_config is not None
-                        and (attribution_keys is None or (name, fmt) in attribution_keys)
-                        and "sequence_attribution" not in row
-                        and fmt not in _ZERO_COST_FORMATS):
-                    raise QuantumIdentityRefused(
-                        f"quantum {quantum_id}: sequence_attribution cannot "
-                        f"resume committed no-attribution rows for {name}@{fmt}")
-                operator = row["joint_operator_identity"]
-                if operator["qname"] != name or operator["format"] != fmt:
-                    raise ValueError("probe/operator alignment mismatch")
-                # Stored row coordinates, tokens and units must align. Only
-                # producer/arithmetic/source provenance is a D32 stamp.
-                if probe_identity_walls_differ(joint_probe_identity, row["probe_identity"]):
-                    raise ValueError("probe/operator alignment mismatch")
-                seal_check("joint probe identity", probe_identity_seals(joint_probe_identity),
-                           probe_identity_seals(row["probe_identity"]),
-                           where=f"joint AURA checkpoint {name}@{fmt}",
-                           same=row["probe_identity"] == joint_probe_identity,
-                           refusal=lambda: ValueError("probe/operator alignment mismatch"))
-                if fmt in render_formats[name]:
-                    if operator["rendered_weight"] != joint_cache_renders[name][fmt]:
-                        raise ValueError("actual rendered-weight identity mismatch")
-                    if row["x2_per_probe"] != x2_probe[(name, fmt)]:
-                        raise ValueError("legacy/joint sample alignment mismatch")
-            except (ValueError, KeyError, TypeError) as exc:
-                raise RuntimeError(
-                    f"joint AURA checkpoint identity mismatch for {name}@{fmt}: "
-                    f"{exc}") from exc
-        joint_rows[name] = dict(rows)
-        completed_units.add(name)
+    completed_units = checkpoint_journal.resume_units(price)
 
     progress.enter_head(len(completed_units))
 
@@ -2821,7 +2752,7 @@ def run_layer_quantum_core(
                 "rendered_weight": rendered_identity,
                 "activation": activation,
                 "arithmetic": joint_probe_identity["arithmetic"],
-                "probe_identity_sha256": identity_sha256(joint_probe),
+                "probe_identity_sha256": joint_identity_sha256(joint_probe),
             }
             if activation_policy is not None and fmt != "BF16":
                 policy_record = operator_policy_record(
@@ -2857,59 +2788,27 @@ def run_layer_quantum_core(
                     guard, "before_stage_b_checkpoint_staging",
                     reserve_bytes=checkpoint_budget)
             publication = CheckpointPublicationLedger(
-                checkpoint_root=checkpoint_root,
-                identity_sha256=checkpoint_identity_sha256,
+                checkpoint_writer=checkpoint_journal.writer,
                 windows=resolved_windows, completed=completed_units,
                 acknowledge=acknowledge_units, window_done=durable_window,
                 budget_bytes=checkpoint_budget, max_jobs=checkpoint_jobs)
 
+        def completed_sidecar(name, fmt, components):
+            if attribution_collector is None or fmt in _ZERO_COST_FORMATS:
+                return None
+            sidecar = attribution_collector.row_sidecar(
+                (name, fmt), [value["total"] for value in components])
+            if sidecar is None and (attribution_keys is None or (name, fmt) in attribution_keys):
+                raise QuantumIdentityRefused(
+                    f"sequence_attribution required sidecar missing for {name}@{fmt}")
+            return sidecar
+
         def checkpoint_state(name, max_staging_bytes=None):
             if max_staging_bytes is not None:
-                # Inspect resident inputs before allocating rows, copied probe
-                # vectors or their serialization. The list holds only refs.
-                references = [joint_probe_identity, g_trace[name]]
-                for fmt in unit_formats[name]:
-                    references.extend((fmt, joint_operators[(name, fmt)]))
-                    if fmt not in _ZERO_COST_FORMATS:
-                        references.append(joint_components[(name, fmt)])
-                for fmt in render_formats[name]:
-                    key = (name, fmt)
-                    if key in s2:
-                        references.extend((x2_probe[key], dw_src[key]))
-                check_construction(
-                    references=references, rows=len(unit_formats[name]),
-                    probes=n_probes, seed_base=seed_base, limit=max_staging_bytes)
-            rows = {}
-            for fmt in unit_formats[name]:
-                if fmt in _ZERO_COST_FORMATS:
-                    components = [{"weight": 0.0, "activation": 0.0,
-                                   "mixed": 0.0, "total": 0.0}
-                                  for _ in range(n_probes)]
-                else:
-                    components = joint_components[(name, fmt)]
-                sidecar = None
-                if attribution_collector is not None and fmt not in _ZERO_COST_FORMATS:
-                    sidecar = attribution_collector.row_sidecar(
-                        (name, fmt), [value["total"] for value in components])
-                    if sidecar is None and (attribution_keys is None
-                            or (name, fmt) in attribution_keys):
-                        raise QuantumIdentityRefused(
-                            f"sequence_attribution required sidecar missing for {name}@{fmt}")
-                row = make_joint_aura_entry(
-                    operator_identity=joint_operators[(name, fmt)],
-                    probe_identity=joint_probe,
-                    signed_components=components,
-                    sequence_attribution=sidecar,
-                )
-                row["probe_identity"] = joint_probe_identity
-                rows[fmt] = row
-            joint_rows[name] = rows
-            return {**_aura_unit_state(
-                name, render_formats[name], s2=s2, s4=s4,
-                x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
-                col_energy={}, weight_mse_diagnostic={},
-                source_weight_identity={}, observation_counts=observation_counts),
-                "joint_aura_rows": joint_rows[name]}
+                check_construction(references=price.construction_references(name),
+                    rows=len(unit_formats[name]), probes=n_probes, seed_base=seed_base,
+                    limit=max_staging_bytes)
+            return price.complete_unit(name, sidecar=completed_sidecar)
 
         def commit_streamed_units(targets):
             targets = [name for name in targets if name not in completed_units]
@@ -2925,11 +2824,7 @@ def run_layer_quantum_core(
                     submitted += int(publication.submit(
                         name, partial(checkpoint_state, name)))
                 else:
-                    _write_aura_unit_checkpoint(
-                        checkpoint_root, qname=name,
-                        identity_sha256=checkpoint_identity_sha256,
-                        state=checkpoint_state(name))
-                    completed_units.add(name)
+                    checkpoint_journal.publish_state(name, checkpoint_state(name))
                     submitted += 1
             if publication is not None:
                 publication.poll()
@@ -3191,16 +3086,7 @@ def run_layer_quantum_core(
             operator_window_receipts.append(dict(layer=layer,
                                                  probe_index=probe_index,
                                                  **window_receipt))
-            for name, diagnostic in diagnostics.items():
-                g_trace[name] += diagnostic["g_trace"]
-                if observation_counts is not None:
-                    observe_probe(observation_counts, name, probe_index, diagnostic)
-            for key, components in terms.items():
-                joint_components[key].append(components)
-                value = squared_signed(components["total"])
-                s2[key] += value
-                s4[key] += value * value
-                x2_probe[key].append(value)
+            price.consume_probe(probe_index, terms, diagnostics)
 
         measured = {name: linears[name] for name in names if render_formats[name]}
         source_seal = {name: JointOperatorStatisticsLease._source_fingerprint(
@@ -3719,14 +3605,14 @@ def run_layer_quantum_core(
     payload["costs"] = joint_rows
     if observation_counts is not None:
         stamp_observations(payload, observation_counts, pilot_panel)
-    probe_identity_sha256 = identity_sha256(joint_probe_identity)
-    if probe_identity_sha256 != identity_sha256(joint_probe):
+    probe_identity_sha256 = joint_identity_sha256(joint_probe_identity)
+    if probe_identity_sha256 != joint_identity_sha256(joint_probe):
         raise RuntimeError("joint probe identity changed after it was validated")
     payload["provenance"].update({
         "cost_mode": "aura", "joint_activation": True,
         "cost_currency": "joint_aura_predicted_dloss",
         "joint_aura_identity": joint_run_identity,
-        "joint_aura_identity_sha256": identity_sha256(joint_run_identity),
+        "joint_aura_identity_sha256": joint_identity_sha256(joint_run_identity),
         "probe_identity": joint_probe_identity,
         "probe_identity_sha256": probe_identity_sha256,
         "joint_operator_windows": operator_window_receipts,
@@ -3741,7 +3627,7 @@ def run_layer_quantum_core(
             "unit_roster_sha256": record["campaign"].get("unit_roster_sha256"),
         },
         "adjoint_slice_sha256": record["adjoint"]["slice_sha256"],
-        "checkpoint_identity_sha256": checkpoint_identity_sha256,
+        "checkpoint_identity_sha256": checkpoint_journal.identity_sha256,
         **({"catalog_extension": record["catalog_extension"]}
            if record.get("catalog_extension") is not None else {}),
         **({"served_activation_policy": activation_policy[0]} if activation_policy is not None else {}),
@@ -3906,7 +3792,7 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
     and the digest proof is staged into the run directory, because the
     digest reader takes a path.
     """
-    from .cost_streaming import build_streamed_model_identity
+    from .streamed_model_identity import build_streamed_model_identity
     from .tessera_joint_aura import (
         seed_source_identity_cache,
         source_identity_proof_kwargs,
@@ -3947,7 +3833,7 @@ def run_layer_quantum(
     """
     import torch
 
-    from .aura_cost import _aura_source_sha256
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .gpu_guard import require_cuda_hot_path
@@ -4452,7 +4338,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "handoff.json; replaces the checkpoint load and "
                              "the render-free chain")
     parser.add_argument("--adjoint-handoff-sha256", default=None)
-    parser.add_argument("--progress-grace-derivation", default=None,
+    parser.add_argument(PROGRESS_GRACE_FLAG, default=None,
                         help="the dispatcher's load-phase grace stamps (JSON "
                              "list): copied into results.json and "
                              "counters.json, never read as a setting")

@@ -26,11 +26,8 @@ import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_adjoint_slices import adjoint_slice_sha256, stage_a_slice
-from prismaquant.joint_aura import (
-    arithmetic_identity,
-    identity_sha256,
-    make_joint_aura_entry,
-)
+from prismaquant.joint_aura import arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.joint_quanta_join import (
     JOINED_RESULTS_SCHEMA,
     JoinRefused,
@@ -81,7 +78,7 @@ def _row(qname, fmt, probe, sign=0.1):
                 "format": fmt, "source_weight": weight,
                 "rendered_weight": weight, "activation": activation,
                 "arithmetic": probe["arithmetic"],
-                "probe_identity_sha256": identity_sha256(probe)}
+                "probe_identity_sha256": joint_identity_sha256(probe)}
     steps = [sign * (i + 1) * (1 if i % 2 == 0 else -1) for i in range(3)]
     return make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,
@@ -474,7 +471,7 @@ def test_roster_digest_is_the_768_construction(tmp_path, campaign, probe):
         ("\n".join(campaign["roster"]) + "\n").encode()).hexdigest()
     for layer in range(N_LAYERS):
         _write_quantum(root, campaign, probe, layer, roster_digest=wrong)
-    with pytest.raises(JoinRefused, match="roster digest"):
+    with pytest.raises(JoinRefused, match="roster"):
         join_joint_quanta(receipts=None, campaign=campaign,
                           output_dir=tmp_path / "joined", input_root=root)
 
@@ -853,15 +850,15 @@ def test_join_validates_each_payloads_probe_identity_once(
     GLM-5.3 that identity is 8.9 MB of model weight map. The join validated
     it once per ROW (119 ms each, about 14 h for 45 layers); it validates it
     once per PAYLOAD, and the joined bytes still carry the plain probe."""
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     calls = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get("where"))
         return validate(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity",
                         counted)
     root = tmp_path / "campaign"
     _seal_inputs(root, campaign)

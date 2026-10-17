@@ -1,4 +1,5 @@
 """GLM MLA's absorbed kv_b projection prices BF16 activations only (#2096)."""
+from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
 
 import pytest
@@ -48,7 +49,7 @@ def test_absorbed_projection_keeps_t16_while_equal_shape_q_retains_full_menu(exp
     (["TESSERA_E4M3_K1"], []),
 ])
 def test_structural_restriction_intersects_unit_policy_without_reopening(expanded, dense, expected):
-    policy = {"schema": campaign.FAMILY_RESTRICTION_SCHEMA, "dense": dense,
+    policy = {"schema": campaign_table.FAMILY_RESTRICTION_SCHEMA, "dense": dense,
               "routed_moe": ["TESSERA_E4M3_K1"]}
     rows = campaign.expand_menus_for_targets({KV: SimpleNamespace(shape=(512, 256))}, [KV],
         mode="readable", tp_degree=1, parallel_kind="none", profile=Glm5NextProfile(),
@@ -134,8 +135,11 @@ def test_streamed_capture_uses_the_profile_unit_menu(expanded, monkeypatch):
 
     monkeypatch.setattr(campaign, "expand_menus_for_targets", stop_after_menu)
     with pytest.raises(MenuPlanned):
-        campaign._run_streamed_calibration(SimpleNamespace(tp_degree=1), runner, profile,
-            mode="readable", population=campaign.ExpertPopulation(members=(), declared={},
+        campaign.run_streamed_calibration(
+            campaign.CensusRequest(model='/source', nsamples=1, seqlen=4, seed=0,
+                layer_stride=1, calibration_input_receipt=None, cache_dir='/cache',
+                census_out='/census', tp_degree=1, family_restriction=None), runner, profile,
+            mode="readable", population=campaign_table.ExpertPopulation(members=(), declared={},
                 packed_in_scope={}, omitted_outside_layer_stride={}),
             dense_targets=[name], expert_targets=[], scope_groups={name: [name]},
             tokens=[], corpus_text="", census=None, context_by_unit=None,

@@ -38,8 +38,7 @@ def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     (model / "tokenizer_config.json").write_text('{"tokenizer_class":"TokenizersBackend"}')
     save_file({"model.embed_tokens.weight": torch.zeros((8, 4), dtype=torch.bfloat16)},
               str(model / "model.safetensors"))
-    card = shipcard.build_shipcard(model, build={})
-    shipcard.write_shipcard(model / "shipcard.json", card)
+    card = shipcard.open_shipcard(model, build={})
     teacher = root / "teacher.pt"
     torch.save({"calib_ids": torch.tensor([[1, 2, 3, 1]], dtype=torch.long),
                 "teacher_logprobs": torch.log_softmax(torch.zeros((1, 8)), dim=-1),
@@ -235,7 +234,7 @@ def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
 
 def _task_replay_job(root):
     from test_task_quality_replay import make_task_replay_fixture
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     job_path = job_config(root / "job")
     job = json.loads(job_path.read_text())
     config, result, raw = make_task_replay_fixture(root / "quality")
@@ -357,7 +356,7 @@ def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypa
 
 @pytest.mark.parametrize("dev", [False, True])
 def test_task_replay_consumer_refuses_declared_tessera_bytes(tmp_path, monkeypatch, dev):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     job, config, result, _, output = _task_replay_job(tmp_path)
     model = Path(config["backend"]["pretrained"])

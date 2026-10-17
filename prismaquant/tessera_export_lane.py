@@ -203,7 +203,7 @@ def export_setup(model_path: str | Path, plan: Mapping[str, Any]) -> dict:
 def require_release_pin() -> None:
     """Refuse unless the INSTALLED Tessera is the exact pinned runtime.
 
-    This is the same conjunct ``tessera_render.tessera_lane_attested`` ANDs
+    This is the same conjunct ``tessera_render.tessera_lane_admission`` ANDs
     into producer eligibility, called here so the driver's refusal and the
     allocator's refusal are the same fact rather than two.
 

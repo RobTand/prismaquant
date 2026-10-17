@@ -86,11 +86,11 @@ MAX_ARTIFACT_BYTES = 4 << 30
 
 #: The functions each row of the profile is read from (file, name).
 ROWS = {
-    "owner.write": ("cost_streaming.py", "write"),
-    "owner.prefetch": ("cost_streaming.py", "prefetch"),
-    "owner.retire": ("cost_streaming.py", "_retire"),
-    "owner.progress": ("cost_streaming.py", "_commit_local_output_progress"),
-    "owner.flush_unlinks": ("cost_streaming.py", "_produced_flush_deferred_unlinks"),
+    "owner.write": ("streamed_boundary_artifacts.py", "write"),
+    "owner.prefetch": ("streamed_boundary_artifacts.py", "prefetch"),
+    "owner.retire": ("streamed_boundary_artifacts.py", "_retire"),
+    "owner.progress": ("streamed_boundary_artifacts.py", "_commit_local_output_progress"),
+    "owner.flush_unlinks": ("streamed_boundary_artifacts.py", "_produced_flush_deferred_unlinks"),
     "entry.write": ("perturbed_x_cache.py", "write_exact_activation_cache_entry"),
     "entry.read": ("perturbed_x_cache.py", "_read_exact_entry"),
     "spool.durable_entries": ("produced_output_spool.py", "durable_entries"),
@@ -145,7 +145,7 @@ class ThreadedExport(spool_tests.ControlledExport):
 
 def _pinned_session(monkeypatch):
     """Pin the generation id the owner draws at bind, and nothing else."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     bind = StreamedBoundaryArtifacts.bind
 
@@ -202,7 +202,7 @@ def _chain(storage, written, profiler):
 
 
 def _roll_chain(storage, batches, grad_outs, final, write):
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     for layer in range(TOP - 1, -1, -1):
         for probe in range(N_PROBES):
@@ -308,6 +308,11 @@ def test_chain_profile_and_manifest(tmp_path, monkeypatch):
         },
     }
     (out / "chain.json").write_text(json.dumps(record, indent=1, sort_keys=True))
+    # This chain exercises every owner operation in the table. A stale
+    # filename must fail instead of publishing zero calls for real work.
+    for label in ROWS:
+        if label.startswith("owner."):
+            assert rows[label]["calls"] > 0, f"profile missed {label}"
 
 
 def _without_telemetry(value):

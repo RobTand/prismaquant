@@ -223,6 +223,8 @@ def _canonical_shipcard_problem(
 def check_shipcard(
     artifact_dir: Path,
     shipcard_path: Path,
+    *,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Return ``(card, problems)``; malformed input is not forceable."""
     if not shipcard_path.is_file():
@@ -235,7 +237,8 @@ def check_shipcard(
         structural = _shipcard_structure_problems(card, artifact_dir)
         if structural:
             return None, structural
-        problems = verify(card, model_dir=artifact_dir)
+        problems = verify(card, model_dir=artifact_dir,
+                          observed_weight_content=observed_weight_content)
     except Exception as exc:
         return None, [f"{shipcard_path} is not a readable shipcard: {exc!r}"]
     return card, problems
@@ -842,22 +845,18 @@ def _freeze_artifact(
                 os.close(fd)
 
 
-def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> None:
-    """Bind the one-pass frozen hashes to a CB exporter content manifest."""
-    quant_path = snapshot.root / "quant_config.json"
-    if not quant_path.is_file():
-        return
+def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> Mapping[str, Any] | None:
+    """Bind frozen weight hashes to the artifact's immutable content claim."""
+    from prismaquant.shipcard import read_weight_content_manifest
     try:
-        quant = json.loads(quant_path.read_text(encoding="utf-8"))
+        manifest = read_weight_content_manifest(snapshot.root)
     except Exception as exc:
         raise FrozenSnapshotError(
-            f"frozen quant_config.json is unreadable: {exc}"
+            f"frozen weight content manifest is unreadable: {exc}"
         ) from exc
-    provenance = quant.get("provenance") if isinstance(quant, Mapping) else None
-    manifest = provenance.get("weight_content_manifest") if isinstance(
-        provenance, Mapping
-    ) else None
     if manifest is None:
+        if tuple(snapshot.root.glob("*.safetensors")):
+            raise FrozenSnapshotError("native artifact carries no exact weight content manifest")
         return
     declared = manifest.get("files") if isinstance(manifest, Mapping) else None
     if not isinstance(declared, Mapping):
@@ -882,6 +881,7 @@ def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> None:
             raise FrozenSnapshotError(
                 f"frozen bytes differ from declared weight hash: {name}"
             )
+    return manifest
 
 
 def _replay_frozen_digests(snapshot: _FrozenSnapshot) -> None:
@@ -1433,9 +1433,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[publish] ERROR: frozen {license_problem}; nothing was uploaded", file=sys.stderr)
             return 2
         frozen_card_path = snapshot.root / SHIPCARD_FILENAME
+        try:
+            observed_weight_content = _verify_declared_weight_hashes(snapshot)
+        except FrozenSnapshotError as exc:
+            print(f"[publish] REFUSED: {exc}", file=sys.stderr)
+            return 1
         frozen_card, frozen_problems = check_shipcard(
             snapshot.root,
             frozen_card_path,
+            observed_weight_content=observed_weight_content,
         )
         if frozen_card is None:
             print(
@@ -1449,11 +1455,6 @@ def main(argv: list[str] | None = None) -> int:
         # Gridbook lane retired 2026-09-02 (see
         # archive/gridbook_lane_2026-09-02/). Every publication now takes the
         # declared-weight-hash replay that used to be the non-strict branch.
-        try:
-            _verify_declared_weight_hashes(snapshot)
-        except FrozenSnapshotError as exc:
-            print(f"[publish] REFUSED: {exc}", file=sys.stderr)
-            return 1
         if frozen_problems and not forced_override_confirmed:
             print(
                 "[publish] REFUSED: frozen snapshot failed authoritative "

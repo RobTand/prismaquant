@@ -190,6 +190,8 @@ def final_hidden_phase(args):
 
 
 def _text_config(model_path):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     config = AutoConfig.from_pretrained(model_path)

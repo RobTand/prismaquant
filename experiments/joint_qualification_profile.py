@@ -9,6 +9,9 @@ full-GLM fit or production throughput.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
+
 import argparse
 from collections import Counter
 from contextlib import ExitStack
@@ -135,7 +138,7 @@ def build_fixture(root):
         groups = select_groups(census)
         selected = sorted(name for group in groups for name in group['members'])
         selection = root / 'selected-units.json'
-        write_json(selection, dict(schema=campaign.UNITS_SCHEMA, model=str(source),
+        write_json(selection, dict(schema=campaign_selection.UNITS_SCHEMA, model=str(source),
                                    layer_stride=1, groups=groups))
         original_menus = campaign.expand_menus_for_targets
         def exact_menu(weights, targets, **kwargs):
@@ -150,7 +153,7 @@ def build_fixture(root):
         stack.enter_context(patch.object(campaign, 'expand_menus_for_targets', exact_menu))
         def no_capture(*_args, **_kwargs):
             raise RuntimeError('selected anchor reuse attempted a new calibration forward')
-        stack.enter_context(patch.object(campaign, '_collect_activations', no_capture))
+        stack.enter_context(patch.object(calibration_forward, 'capture_activation_statistics', no_capture))
         output = root / 'selected-cost.pkl'
         if campaign.main([*common, '--out', str(output), '--cache-dir', str(root / 'selected-cache'),
                 '--units', str(selection), '--calibration-census', str(census_path),
@@ -181,7 +184,7 @@ def build_fixture(root):
 def measured_input(fixture):
     """Read actual selected journals; make no whole-campaign completion claim."""
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path, canonical_json_sha256
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import MeasuredAnchorInput
 
     for key in ('census', 'capture', 'selected_cost', 'selected_checkpoint'):
@@ -215,7 +218,7 @@ def measured_input(fixture):
                 raise RuntimeError(f'{name}@{fmt}: actual measured cost/journal mismatch')
             record = state['wire_records'][fmt]
             wire = Path(payload['provenance']['wire_dir']) / record['file']
-            render = Path(payload['provenance']['cache_dir']) / _cache_weight_filename(name, fmt)
+            render = Path(payload['provenance']['cache_dir']) / cache_weight_filename(name, fmt)
             if sha(wire) != record['blob_sha256'] or wire.stat().st_size != record['blob_bytes']:
                 raise RuntimeError(f'{name}@{fmt}: actual wire differs from its journal')
             cells[name, fmt] = dict(anchor=anchor, record=record, wire=str(wire),

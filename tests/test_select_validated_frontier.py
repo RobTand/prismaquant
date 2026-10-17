@@ -242,6 +242,104 @@ def test_measured_frontier_top_level_surrogate_loss_takes_precedence():
     assert frontier[0]["surrogate_loss"] == 9.0
 
 
+_ROW_ESTIMATE = "unadjusted_cost_row_estimate"
+
+
+def _validation_row(label, bpp, kl, predicted, basis=_ROW_ESTIMATE, path=None):
+    mse = {"predicted_dloss_sum": predicted, "output_mse_sum": 1.0}
+    if basis is not None:
+        mse["predicted_dloss_basis"] = basis
+    return {"label": label, "path": str(path or f"{label}.json"), "bpp": bpp,
+            "last_token_kl": kl, "mse": mse}
+
+
+def _mixed_era_results(paths=None):
+    paths = paths or {}
+    return [
+        _validation_row("a", 4.5, 0.30, 3.0, path=paths.get("a")),
+        _validation_row("b", 5.0, 0.20, 2.0, path=paths.get("b")),
+        _validation_row("c", 5.5, 0.10, 1.0, path=paths.get("c")),
+        # Written before validation labelled its estimate: this number is the
+        # allocator's recorded sum, a different quantity under the same key.
+        _validation_row("legacy", 6.0, 0.09, 40.0, basis=None, path=paths.get("legacy")),
+    ]
+
+
+def test_measured_rows_carry_the_surrogate_basis():
+    rows = {row["label"]: row for row in measured_rows(_mixed_era_results())}
+    assert rows["a"]["surrogate_loss"] == 3.0
+    assert rows["a"]["surrogate_basis"] == _ROW_ESTIMATE
+    assert rows["legacy"]["surrogate_loss"] == 40.0
+    assert rows["legacy"]["surrogate_basis"] is None
+    explicit = measured_rows([{**_validation_row("x", 4.5, 0.3, 3.0), "surrogate_loss": 9.0}])
+    assert explicit[0]["surrogate_loss"] == 9.0
+    assert explicit[0]["surrogate_basis"] is None
+
+
+def test_mixed_era_surrogates_are_not_pooled_but_stay_measurements():
+    from prismaquant import select_validated_frontier as svf
+
+    results = _mixed_era_results()
+    rows = measured_rows(results)
+    assert [row["label"] for row in rows] == ["a", "b", "c", "legacy"]
+    assert [row["label"] for row in measured_frontier(results)] == ["a", "b", "c", "legacy"]
+    assert rows[-1]["mse"]["predicted_dloss_sum"] == 40.0
+    assert spearman_rank_correlation(rows) is None
+    assert worst_rank_inversion(rows) is None
+    assert svf.surrogate_pairing(rows) == {
+        "pooled": False, "basis": None,
+        "bases": [{"basis": None, "rows": 1}, {"basis": _ROW_ESTIMATE, "rows": 3}],
+        "n_paired": 0, "n_without_surrogate": 0,
+    }
+    # One era alone still ranks.
+    assert spearman_rank_correlation(rows[:3]) == pytest.approx(1.0)
+
+
+def test_rows_without_a_row_estimate_are_counted_not_silently_dropped():
+    from prismaquant import select_validated_frontier as svf
+
+    rows = measured_rows([
+        _validation_row("a", 4.5, 0.30, 3.0),
+        _validation_row("b", 5.0, 0.20, 2.0),
+        _validation_row("c", 5.5, 0.10, 1.0),
+        _validation_row("unpriced", 6.0, 0.09, None),
+    ])
+    assert svf.surrogate_pairing(rows) == {
+        "pooled": True, "basis": _ROW_ESTIMATE,
+        "bases": [{"basis": _ROW_ESTIMATE, "rows": 3}],
+        "n_paired": 3, "n_without_surrogate": 1,
+    }
+    assert spearman_rank_correlation(rows) == pytest.approx(1.0)
+
+
+def test_selector_cli_reports_mixed_era_surrogates_without_pooling(tmp_path):
+    paths = {}
+    for label in ("a", "b", "c", "legacy"):
+        paths[label] = tmp_path / f"{label}.json"
+        paths[label].write_text(json.dumps({
+            "assignment": {"model.layers.0.self_attn.q_proj": "BF16"}}))
+    validation_path = tmp_path / "validation.json"
+    validation_path.write_text(json.dumps({"results": _mixed_era_results(paths)}))
+    summary_path = tmp_path / "selection.json"
+    completed = subprocess.run(
+        [sys.executable, "-m", "prismaquant.select_validated_frontier",
+         "--validation-json", str(validation_path), "--mode", "best-kl",
+         "--output-layer-config", str(tmp_path / "layer_config.json"),
+         "--output-assignment", str(tmp_path / "selected_assignment.json"),
+         "--output-summary", str(summary_path)],
+        cwd=Path(__file__).resolve().parents[1], check=True,
+        capture_output=True, text=True)
+    summary = json.loads(summary_path.read_text())
+    assert summary["selected"]["label"] == "legacy"
+    assert summary["n_frontier"] == 4
+    assert summary["surrogate_spearman"] is None
+    assert summary["surrogate_worst_rank_inversion"] is None
+    assert summary["surrogate_pairing"]["pooled"] is False
+    assert summary["surrogate_pairing"]["bases"] == [
+        {"basis": None, "rows": 1}, {"basis": _ROW_ESTIMATE, "rows": 3}]
+    assert "surrogate bases differ" in completed.stdout
+
+
 def test_worst_rank_inversion_detects_mispredicted_pair():
     # 'a' is predicted best (lowest surrogate) but measured worst (highest KL).
     frontier = [

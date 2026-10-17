@@ -164,7 +164,7 @@ def test_production_render_cost_bypasses_h_trace_proxy_in_allocator():
         stats,
         cost["costs"],
         [fr.get_format("NVFP4"), fr.get_format("BF16")],
-    )
+    ).candidates
     by_fmt = {cand.fmt: cand for cand in candidates["layers.0.q_proj"]}
 
     assert by_fmt["NVFP4"].predicted_dloss == 12.0

@@ -854,7 +854,7 @@ def child_stage_a(args, slice_doc) -> dict:
 
 def _counters():
     try:
-        from prismaquant.perturbed_x_cache import exact_lease_counters
+        from prismaquant.staged_lease import exact_lease_counters
     except ImportError:
         return None
     return exact_lease_counters()

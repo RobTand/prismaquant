@@ -300,10 +300,6 @@ def test_the_live_seam_finds_no_attesting_cell_on_gfx1151():
     """
     from prismaquant.lane_eligibility import ServingContext
 
-    # Other files in this process repoint ``tessera_runtime_contract.
-    # contract_path`` to a rewritten copy; the table behind this seam is
-    # ``lru_cache``d, so read it fresh rather than inherit what ran first.
-    tr._pinned_serving_table.cache_clear()
     image = str(_packaged()["versions"]["default_serve_image"])
     assert _packaged()["lane_eligibility"]["platforms"]["gfx1151"][
         "serve_image"] is None
@@ -332,7 +328,6 @@ def test_the_live_seam_finds_no_attesting_cell_on_gfx1201_either():
     """
     from prismaquant.lane_eligibility import ServingContext
 
-    tr._pinned_serving_table.cache_clear()
     image = str(_packaged()["versions"]["default_serve_image"])
     assert _packaged()["lane_eligibility"]["platforms"]["gfx1201"][
         "serve_image"] is None
@@ -355,7 +350,6 @@ def test_the_live_seam_still_attests_a_sm121_rung():
     """
     from prismaquant.lane_eligibility import ServingContext
 
-    tr._pinned_serving_table.cache_clear()
     dense = next(c for c in _cells_on("sm_121")
                  if c["family"] == "TESSERA_E2M1_K2"
                  and c["structure"] == "dense" and c["regime"] == "decode")

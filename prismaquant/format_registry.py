@@ -163,9 +163,9 @@ class FormatSpec:
         This is the single predicate for that question. Consumers must use
         it rather than re-deriving it from ``act_bits``: the allocator's
         bit-exact cost short-circuit
-        (``allocator_candidates.cost_entry_is_bit_exact``), the KL
-        validator's activation-quant assignment, ``layer_state_cache`` and
-        ``perturbed_x_cache`` all key off this one property, so a format's
+        (``priced_cell.cost_entry_is_bit_exact``), the KL
+        validator's activation-quant assignment and ``perturbed_x_cache``
+        all key off this one property, so a format's
         activation semantics cannot drift between pricing and emulation.
         Registry consistency between this declaration and the actual
         activation callable is pinned by
@@ -829,6 +829,20 @@ def _plain_fp8_autoround(elt="fp8_e4m3", act_bits=8):
     )
 
 
+def registry_rtn_levers():
+    """The native recipe the registry's NVFP4 RTN adapters render under.
+
+    Registry quantize/dequantize is the format-menu screen, not a recorded
+    production render: it honours the process numerical controls (for example
+    ``PRISMAQUANT_NVFP4_SCALE_RULE``), resolved once per adapter call.  Every
+    registry adapter that renders through the native codec uses this one
+    resolution so their bytes cannot diverge.
+    """
+    from .native_render_levers import NativeRenderLevers
+
+    return NativeRenderLevers.resolve()
+
+
 def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     """NVFP4 WEIGHT RTN matching the export/compressed-tensors convention.
 
@@ -845,7 +859,7 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     stays on the per-group dynamic RTN (see the registration below) until
     a static-scale-aware emulation exists.
     """
-    from . import export_native_compressed as enc
+    from . import native_render_codec as _native_render_codec
 
     orig_shape = x.shape
     in_features = int(orig_shape[-1])
@@ -853,7 +867,8 @@ def _nvfp4_export_aligned_rtn(x: torch.Tensor) -> torch.Tensor:
     pad = (-in_features) % 16
     if pad:
         flat = torch.nn.functional.pad(flat, (0, pad))
-    out = enc._rtn_dequant_nvfp4(flat, group_size=16)
+    out = _native_render_codec.rtn_dequant_nvfp4(
+        flat, group_size=16, levers=registry_rtn_levers())
     if pad:
         out = out[:, :in_features]
     return out.reshape(orig_shape).to(x.dtype)
@@ -1358,10 +1373,10 @@ def require_producer_formats(
 def format_family_of(name: object):
     """The lane format family that owns ``name``, **without importing it**.
 
-    Four consumers ask only "whose format is this?" before deciding whether to
-    take a lane's path: ``render_production_weight`` and the three
-    production-cache miss fallbacks (``weight_session``, ``perturbed_x_cache``,
-    ``aura_cost``). All four are on the hot path of every stock format too,
+    Consumers ask only "whose format is this?" before deciding whether to
+    take a lane's path: ``render_production_weight`` and the
+    production-cache miss fallbacks in ``perturbed_x_cache`` and
+    ``aura_cost``. These are on the hot path of every stock format too,
     so the question must not drag in the answer's dependencies -- a lane's
     code can require a package an NVFP4-only pipeline does not have.
 

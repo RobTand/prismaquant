@@ -55,9 +55,11 @@ from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 #: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
-#: tensor per unit.  Pinned to ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` by
-#: ``tests/test_tessera_expert_projection.py``; spelled here so the export gate
-#: can refuse without importing the producer package.
+#: tensor per unit.  The public ``tessera.metadata`` API does not publish it, so
+#: ``tests/test_tessera_expert_projection.py`` cross-checks it against
+#: ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` where that package is
+#: installed beside the tests; spelled here so the export gate can refuse
+#: without importing the producer package.
 SOURCE_LAYOUT_UNPACKED = "unpacked_per_expert"
 #: The producer's whole-tensor selector for an unpacked unit.
 WHOLE_SELECTOR = "whole"

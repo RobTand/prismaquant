@@ -12,8 +12,8 @@ Lane-scoped slots (``shipcard.lane_scoped_slots()``, read as
 :data:`LANE_SCOPED_SLOTS`) are opened by the lane's own
 ``lane_specs/<lane>.json`` ``gates[]`` and are required of cards stamped with
 that ``lane``.  The vocabulary is derived from every lane spec, and each
-derived slot names its replay in ``shipcard.lane_slot_verifiers()`` (#162):
-core's own ``LANE_SLOT_VERIFIERS`` plus the replays a lane's plugin registers
+derived slot names its adapter in ``shipcard_slots.ship_slot_registry()`` (#162):
+core's own slots plus the replays a lane's plugin registers
 (``shipcard_slot_verifiers``, PQ #1553).  This module imports no lane module.
 
 Base slots (required for every artifact):
@@ -77,42 +77,25 @@ import math
 import os
 import stat
 import re
-import statistics
 import subprocess
 import time
-from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 
 from .source_read_plan import safetensors_prefix_length
-
-SCHEMA = "prismaquant.shipcard/1"
-
-#: Every slot all serving lanes must close before an artifact is shippable.
-#: Keep this base tuple stable: no container inherits a plugin-only gate
-#: merely because one lane adds one.
-REQUIRED_SLOTS: tuple[str, ...] = (
-    "native_export.eager",
-    "native_export.graph",
-    "ship_gate",
-    "gold.kl",
-    "gold.ppl",
+from .digests import file_sha256hex
+from .shipcard_slots import (
+    GOLD_SLOTS,
+    OPTIONAL_SLOTS,
+    REQUIRED_SLOTS,
+    UNIFORM_CONTROL_OVERRIDE_SCHEMA,
+    UNIFORM_CONTROL_SLOT,
+    lane_slot_verifiers,
+    ship_slot_registry,
+    verify_gold_record,
 )
 
-#: The byte-matched uniform control's verdict (RobTand/prismaquant#121).
-UNIFORM_CONTROL_SLOT = "uniform_control"
-
-#: Principle 14's serve-side leg on the COMPRESSED-TENSORS lane (#631).  Stock
-#: vLLM emits no route telemetry, so this lane's served side is read off the
-#: running engine through vLLM's own ``LLM.apply_model`` by
-#: ``validate_native_export --route-sweep-out``: the resolved quantization
-#: method, scheme, scheme attributes and forward-dispatch count per module.
-#: A separate slot from `route.trace` because it is a different observation
-#: from a different producer -- a resolved-state sweep, not the serve's own
-#: counters -- and reading the two through one verifier would hide which one
-#: an artifact actually closed.  The record carries the sweeps and the config
-#: text, and `verify` replays the comparison (`compressed_route_sweep_gate`).
-ROUTE_SWEEP_SLOT = "route.sweep"
+SCHEMA = "prismaquant.shipcard/1"
 
 #: Claims that can be attached to an already exported artifact.  Missing/null
 #: claims remain non-blocking for target-only artifacts, but every non-null
@@ -123,7 +106,6 @@ ROUTE_SWEEP_SLOT = "route.sweep"
 #: ``uniform_control`` is optional only in the sense that a format-menu
 #: artifact has no rate axis for it to be about; on a rate-axis artifact
 #: :func:`required_slots` makes it mandatory and its absence is UNFILLED.
-OPTIONAL_SLOTS: tuple[str, ...] = (UNIFORM_CONTROL_SLOT,)
 
 #: Slots a LANE opens beyond the base set, because its own declaration names a
 #: gate the base set has nowhere to put.  Precedent: the retired Gridbook
@@ -145,7 +127,7 @@ OPTIONAL_SLOTS: tuple[str, ...] = (UNIFORM_CONTROL_SLOT,)
 #: from :func:`lane_slot_verifiers` -- the verifier :func:`verify` replays for
 #: it, registered by the lane's plugin (``route.census``'s is the #136
 #: priced-vs-served replay, in ``tessera_shipcard``) or, for a data-only lane,
-#: in :data:`LANE_SLOT_VERIFIERS`.  A lane that declares a slot with no
+#: in ``shipcard_slots.ship_slot_registry``. A lane that declares a slot with no
 #: verifier is REFUSED at parse time -- a slot with no verifier is a slot any
 #: record closes -- so adding a fourth lane with a novel gate is one spec
 #: file plus one verifier entry, and there is no second list to forget.
@@ -208,13 +190,13 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | {"LANE_SCOPED_SLOTS", "ALL_SLOTS"})
 
 #: Slots whose number is invalid if it was produced against a spec-decode serve.
-GOLD_SLOTS: frozenset[str] = frozenset({"gold.kl", "gold.ppl"})
 
 SHIPCARD_FILENAME = "shipcard.json"
 
 
 SHIPCARD_RESERVED_BYTES = 256 * 1024
 WEIGHT_CONTENT_MANIFEST_SCHEMA = "prismaquant.weight_content_manifest/1"
+WEIGHT_CONTENT_MANIFEST_FILENAME = "weight_content_manifest.json"
 WEIGHT_STAT_ATTESTATION_SCHEMA = "prismaquant.weight_stat_attestation/1"
 # Orphaned 2026-09-02, kept deliberately. `SAFETENSORS_CONTENT_RECEIPT_SCHEMA`,
 # `validate_safetensors_content_receipt` and
@@ -275,60 +257,6 @@ GOLD_PRODUCER_RECORD_SCHEMAS = frozenset({
     GOLD_PRODUCER_RECORD_SCHEMA, "prismaquant.glm_tr3_gold_record.v1",
 })
 TOPK_COVERAGE_POLICY_SCHEMA = "prismaquant.topk_tail_coverage_policy/1"
-
-
-
-def uniform_control_schemas() -> tuple[str, ...]:
-    """The uniform-control block schemas a ship record accepts.
-
-    A rate-axis format family names the block its producer emits
-    (``uniform_control_schema`` in its lane spec; the Tessera lane's is
-    ``tessera.control.control_block()``'s).  The block is carried verbatim.
-    The shipcard never imports the producer, so the schema string is the whole
-    of what is taken on trust: every number in the block is replayed here from
-    integers.
-    """
-    from prismaquant.lane_spec import rate_axis_lanes
-
-    return tuple(dict.fromkeys(
-        family.uniform_control_schema
-        for spec in rate_axis_lanes()
-        for family in spec.format_families
-        if family.rate_axis and family.uniform_control_schema))
-
-
-def _schema_names(schemas: Sequence[str]) -> str:
-    return " or ".join(repr(schema) for schema in schemas) or "(no rate-axis lane)"
-
-
-#: The override that lets a measured loss ship anyway.
-UNIFORM_CONTROL_OVERRIDE_SCHEMA = "prismaquant.uniform_control_override/1"
-#: The widest a control's bytes may miss the candidate's and still be a
-#: control, as a :class:`~fractions.Fraction` of the candidate's own bits.
-#: This is ``tessera.control.DEFAULT_MAX_RELATIVE_SLACK``, restated here
-#: because a block that widened its own tolerance would otherwise certify
-#: itself: the carried ``max_relative_slack`` is checked against this ceiling
-#: before it is used.  Zero slack is unreachable -- the rate axis is discrete,
-#: one rung quantum is ~0.0039 bpp (~0.1% at 4 bpp) -- so "exact" here means
-#: exact integer arithmetic against an explicit ceiling, not zero slack.
-MAX_CONTROL_RELATIVE_SLACK = Fraction(1, 1000)
-#: Measurement-contract keys the two arms must agree on when the candidate's
-#: own ``gold.kl`` record carries them.  Driven by the candidate rather than
-#: by a fixed list so the control cannot dodge a key by omitting it: the
-#: candidate side is the card's published gold number and is gated separately.
-UNIFORM_CONTROL_EXACT_CONTRACT_KEYS = (
-    "measurement_fidelity", "calibration_contract_sha256", "teacher_evidence",
-)
-UNIFORM_CONTROL_CONTRACT_KEYS = (
-    "n_samples",
-    "seqlen",
-    "n_positions",
-    "score_positions",
-    "corpus_sha256",
-) + UNIFORM_CONTROL_EXACT_CONTRACT_KEYS
-#: Which gold metric the two arms are compared on.  Both must quote the same
-#: one, and it must be a KL: the gate's whole point is the serving metric.
-UNIFORM_CONTROL_METRIC_KEYS = ("kl_mean", "kl_confident_mean")
 WIKITEXT_REVISION = "b08601e04326c79dfdd32d625aee71d232d685c3"
 _CB_FORMAT_RE = re.compile(r"^(?:NVFP4_CB|FP8_CB)_[KS][0-9]+$")
 _FP8_SOURCE_W8A16_WIRE_IDS = frozenset({
@@ -364,11 +292,12 @@ def compute_model_sha(
     weight check sees. Demonstrated 2026-08-15 on the published Qwen3.8-27B
     native artifact: tampering with its chat template moved nothing.
 
-    Both lanes now hash auxiliary content. ``legacy_native_scope=True``
-    reproduces the pre-fix native identity so cards written under it still
-    verify -- see :func:`verify`, which tries the current scope first and
-    falls back. New cards are always written with the current scope, and the
-    legacy scope cannot produce one, so the fallback never weakens a new card.
+    Both lanes hash auxiliary content. Native exports persist an exact weight
+    content manifest before opening the card. Verification checks its stat
+    attestation, or rehashes an exact historical claim when no stat cache exists.
+    ``legacy_native_scope=True`` reproduces the old size-only scope for diagnosis;
+    publication no longer accepts that scope. Re-attestation gives such an
+    artifact a fresh content identity and leaves its old measurements stale.
     ``legacy_readme_hashed=True`` is the same tolerance for the one other
     scope change: cards stamped while ``README.md`` was still hashed.
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
@@ -408,6 +337,15 @@ def compute_model_sha(
             for p in sorted(root.glob("*.gguf"))
         }
     payload["weights"] = weights
+    manifest = read_weight_content_manifest(root)
+    embedded_manifest = ((raw_quant_cfg.get("provenance") or {}).get("weight_content_manifest")
+                         if raw_quant_cfg is not None and isinstance(raw_quant_cfg.get("provenance"), Mapping)
+                         else None)
+    if manifest is not None and embedded_manifest is None:
+        # Every identity scope binds the exact weight claim, including the
+        # historical auxiliary scopes. Size-only historical cards cannot use
+        # those fallbacks to preserve unproved measurements.
+        payload["weight_content_manifest"] = manifest
     if raw_quant_cfg is not None and canonical_quant_cfg is not None:
         manifest = (raw_quant_cfg.get("provenance") or {}).get(
             "weight_content_manifest"
@@ -420,7 +358,7 @@ def compute_model_sha(
     codebooks = {
         p.name: {
             "bytes": p.stat().st_size,
-            "sha256": _file_content_sha256(p),
+            "sha256": file_sha256hex(p),
         }
         for p in sorted(root.glob("*.pqcb"))
     }
@@ -473,7 +411,7 @@ def compute_model_sha(
         auxiliary = {
             path.relative_to(root).as_posix(): {
                 "bytes": int(path.stat().st_size),
-                "sha256": _file_content_sha256(path),
+                "sha256": file_sha256hex(path),
             }
             for path in sorted(root.rglob("*"))
             if path.is_file()
@@ -486,18 +424,13 @@ def compute_model_sha(
 
 
 def accepted_model_shas(model_dir: str | os.PathLike) -> tuple[str, ...]:
-    """Current identity first, then each superseded scope as a fallback.
+    """Current identity and historical scopes that bind at least as much.
 
-    A card describes its artifact faithfully under the rules it was computed
-    with, so a scope change must not declare every published artifact changed.
-    Each fallback is strictly narrower than the current scope (it attests MORE,
-    or the same), and no legacy scope can produce a current-scope sha, so a
-    card written today is never checked the weak way.
+    The old native size-only scope cannot demonstrate weight or auxiliary
+    integrity. README and figure scopes retain their stronger content claims.
     """
     return (
         compute_model_sha(model_dir),
-        # Pre-2026-08-15 native cards: auxiliary files were unattested.
-        compute_model_sha(model_dir, legacy_native_scope=True),
         # Cards stamped while `README.md` was still hashed.
         compute_model_sha(model_dir, legacy_readme_hashed=True),
         # Cards stamped while the card figures were still hashed.
@@ -515,31 +448,48 @@ def artifact_bytes(model_dir: str | os.PathLike) -> int:
     return int(total)
 
 
-def _file_content_sha256(path: str | os.PathLike) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def build_weight_content_manifest(model_dir: str | os.PathLike) -> dict[str, Any]:
     """Hash each finished safetensors container once at the export boundary."""
     root = Path(model_dir)
     files = sorted(root.glob("*.safetensors"))
     if not files:
         raise FileNotFoundError(f"no safetensors weights to attest under {root}")
-    return {
+    before = weight_stat_attestation(root)
+    manifest = {
         "schema": WEIGHT_CONTENT_MANIFEST_SCHEMA,
         "algorithm": "sha256",
         "files": {
             path.name: {
                 "bytes": int(path.stat().st_size),
-                "sha256": _file_content_sha256(path),
+                "sha256": file_sha256hex(path),
             }
             for path in files
         },
     }
+    if weight_stat_attestation(root) != before:
+        raise ValueError("weight files changed while building their content manifest")
+    return manifest
+
+
+def read_weight_content_manifest(model_dir: str | os.PathLike) -> Mapping[str, Any] | None:
+    """Read an exact claim from the native sidecar or existing export metadata."""
+    root = Path(model_dir)
+    embedded = None
+    quant_path = root / "quant_config.json"
+    if quant_path.is_file():
+        quant = _strict_json_object(quant_path.read_bytes(), where=str(quant_path))
+        provenance = quant.get("provenance")
+        if isinstance(provenance, Mapping):
+            embedded = provenance.get("weight_content_manifest")
+    sidecar = root / WEIGHT_CONTENT_MANIFEST_FILENAME
+    manifest = _strict_json_object(sidecar.read_bytes(), where=str(sidecar)) if sidecar.is_file() else embedded
+    if sidecar.is_file() and embedded is not None and manifest != embedded:
+        raise ValueError("native and embedded weight content manifests conflict")
+    if manifest is not None:
+        _validate_weight_content_manifest(
+            manifest, {path.name: path.stat().st_size for path in sorted(root.glob("*.safetensors"))},
+            where=root)
+    return manifest
 
 
 def _validate_weight_content_manifest(
@@ -1250,60 +1200,83 @@ def weight_stat_attestation(model_dir: str | os.PathLike) -> dict[str, Any]:
 def assert_weight_stat_attestation(
     card: Mapping[str, Any],
     model_dir: str | os.PathLike,
+    *,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> None:
     """Fail if a weight changed after the card bound its exact content claim."""
+    root = Path(model_dir)
+    manifest = read_weight_content_manifest(root)
+    if manifest is None and tuple(root.glob("*.safetensors")):
+        raise ValueError("artifact carries no exact weight content manifest; re-attest and replay measurements")
+    if observed_weight_content is not None:
+        if observed_weight_content != manifest:
+            raise ValueError("observed weight content differs from the immutable export manifest")
+        return
     expected = card.get("weight_stat_attestation")
     if expected is None:
-        return  # Backward-compatible verification of historical cards.
+        if manifest is not None and build_weight_content_manifest(root) != manifest:
+            raise ValueError("weight content differs from the immutable export manifest")
+        return
     if not isinstance(expected, Mapping) or expected.get(
         "schema"
     ) != WEIGHT_STAT_ATTESTATION_SCHEMA:
         raise ValueError("shipcard carries an invalid weight stat attestation")
     observed = weight_stat_attestation(model_dir)
     if observed != expected:
-        raise ValueError(
-            "weight file stats changed after export; refusing cached content "
-            "identity (run shipcard_cli reattest after a legitimate "
-            "cross-filesystem copy)"
-        )
+        if manifest is None or build_weight_content_manifest(root) != manifest:
+            raise ValueError("weight file stats changed and content differs from the immutable export manifest")
 
 
 def reattest_weight_stats(
     shipcard_path: str | os.PathLike,
     model_dir: str | os.PathLike | None = None,
 ) -> dict[str, Any]:
-    """Full-hash a copied CB artifact, then refresh only its cheap stat cache."""
+    """Rehash a copy, or give an unproved historical artifact a fresh identity.
+
+    An identity upgrade leaves historical slot records intact but stale. Their
+    old model_sha cannot close the fresh card until measurements are replayed.
+    """
     path = Path(shipcard_path)
     root = Path(model_dir) if model_dir is not None else path.resolve().parent
     card = load_shipcard(path)
-    quant_path = root / "quant_config.json"
-    if not quant_path.is_file():
-        raise ValueError("weight re-attestation requires a CB quant_config.json")
-    quant_config = json.loads(quant_path.read_text(encoding="utf-8"))
-    provenance = quant_config.get("provenance")
-    expected = provenance.get("weight_content_manifest") if isinstance(
-        provenance, Mapping
-    ) else None
-    if expected is None:
-        raise ValueError("CB artifact has no immutable weight content manifest")
+    before = weight_stat_attestation(root)
+    expected = read_weight_content_manifest(root)
     observed = build_weight_content_manifest(root)
-    if observed != expected:
+    if expected is not None and observed != expected:
         raise ValueError(
             "weight content differs from the immutable export manifest; "
             "refusing to refresh the stat attestation"
         )
     expected_model_sha = card.get("model_sha")
-    if expected_model_sha not in set(accepted_model_shas(root)):
+    accepted = set(accepted_model_shas(root))
+    if expected is None:
+        accepted.add(compute_model_sha(root, legacy_native_scope=True))
+    if expected_model_sha not in accepted:
         raise ValueError("copied artifact model_sha differs from the shipcard")
-    card["weight_stat_attestation"] = weight_stat_attestation(root)
+    if expected is None:
+        _write_weight_content_manifest(root, observed)
+        card["model_sha"] = compute_model_sha(root)
+        card["weight_identity_upgrade"] = {
+            "previous_model_sha": expected_model_sha,
+            "model_sha": card["model_sha"], "measurements_require_replay": True,
+        }
+    if weight_stat_attestation(root) != before:
+        raise ValueError("weight files changed during re-attestation")
+    card["weight_stat_attestation"] = before
     card["updated"] = _now()
     write_shipcard(path, card)
     return card
 
 
+def _write_weight_content_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
+    from .cost_stage_checkpoint import atomic_write_bytes
+    from .digests import indent2_json_file_bytes
+    atomic_write_bytes(root / WEIGHT_CONTENT_MANIFEST_FILENAME, indent2_json_file_bytes(manifest))
+
+
 def file_sha256(path: str | os.PathLike) -> str | None:
     try:
-        return _file_content_sha256(path)
+        return file_sha256hex(path)
     except Exception:
         return None
 
@@ -1393,6 +1366,47 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
 
 
+def artifact_lane(card: Mapping[str, Any], *, model_dir=None) -> str | None:
+    """Resolve one lane from independently retained card, build and config facts."""
+    from .lane_spec import all_lane_specs, lane_spec_for_container, load_lane_spec
+
+    facts = [("card.lane", card.get("lane"))]
+    build = card.get("build")
+    if isinstance(build, Mapping):
+        facts.extend((f"build.{key}", build.get(key)) for key in ("export_container", "quant_method"))
+    if model_dir is not None:
+        path = Path(model_dir) / "config.json"
+        if path.is_file():
+            config = _strict_json_object(path.read_bytes(), where=str(path))
+            quant = config.get("quantization_config")
+            if quant is not None:
+                if not isinstance(quant, Mapping):
+                    raise ValueError("artifact quantization_config is not an object")
+                facts.append(("config.quantization_config.quant_method", quant.get("quant_method")))
+    found: dict[str, list[str]] = {}
+    for source, raw in facts:
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError(f"{source} declares an invalid lane {raw!r}")
+        name = raw.strip().lower()
+        try:
+            spec = lane_spec_for_container(name)
+        except KeyError:
+            try:
+                spec = load_lane_spec(name)
+            except KeyError:
+                matches = [item for item in all_lane_specs()
+                           if item.quant_method and item.quant_method.strip().lower() == name]
+                if len(matches) != 1:
+                    raise ValueError(f"{source} declares an unknown or ambiguous lane {raw!r}") from None
+                spec = matches[0]
+        found.setdefault(spec.export_container, []).append(source)
+    if len(found) > 1:
+        raise ValueError(f"artifact lane facts conflict: {found}")
+    return next(iter(found), None)
+
+
 # ---------------------------------------------------------------------------
 # Build lane
 # ---------------------------------------------------------------------------
@@ -1400,10 +1414,9 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     """The shipcard slots ``lane``'s own declaration says its gates close.
 
     Read from ``lane_specs/<lane>.json``, so a lane that declares a gate opens
-    that gate's slot without an edit here.  An unknown or absent lane resolves
-    to ``()`` -- historical cards carry no ``lane`` and must keep verifying
-    against exactly the base set they were opened with.  It is not a widening
-    to answer ``()``: :func:`required_slots` UNIONS this with
+    that gate's slot without an edit here. An absent lane resolves to ``()``;
+    an unknown declaration refuses. :func:`required_slots` derives the lane
+    from the artifact, build block and card, then UNIONS its obligations with
     :data:`REQUIRED_SLOTS` and never replaces it, so no lane can subtract a
     base requirement by under-declaring (the GGUF lane declares no
     ``native_export.graph`` gate and is still required to close that slot).
@@ -1427,11 +1440,8 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     # silently answered with "no slots".
     try:
         spec = lane_spec_for_container(str(lane))
-    except Exception:
-        try:
-            spec = load_lane_spec(str(lane))
-        except Exception:
-            return ()
+    except KeyError:
+        spec = load_lane_spec(str(lane))
     declared = spec.shipcard_slots()
     # FAIL CLOSED, not filter. A lane that declares a slot with no verifier
     # is a repository defect, and the two ways of meeting it are not
@@ -1464,18 +1474,23 @@ def build_shipcard(
     *,
     build: Mapping[str, Any] | None = None,
     lane: str | None = None,
+    attested_weight_stats: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open a fresh record: build-lane facts filled, every slot empty.
 
-    ``lane`` is the ``EXPORT_CONTAINER`` this artifact was built for.  It is
-    stamped on the card and it decides which lane-scoped slots the card opens,
-    so the gates a lane DECLARES and the slots its artifact must CLOSE are one
-    object.  Omitting it reproduces the historical card exactly (base slots,
-    no ``lane`` key) -- which is what every pre-2026-09-03 native card is.
+    The artifact, build block and optional ``lane`` must agree on one container.
+    This constructor reads metadata without writing the artifact. Exporters use
+    ``open_shipcard`` to persist the content claim and canonical card together.
     """
     root = Path(model_dir)
-    from prismaquant.export_output_safety import directory_publication_target
+    build_payload, resolved_lane = _resolved_build(root, build, lane)
+    return _assemble_shipcard(root, build_payload, resolved_lane, attested_weight_stats)
 
+
+def _resolved_build(
+    root: Path, build: Mapping[str, Any] | None, lane: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    """The build block with its recipe's replay claim, and the one lane it names."""
     build_payload = dict(build or {})
     from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
 
@@ -1490,8 +1505,19 @@ def build_shipcard(
                 if key in build_payload and build_payload[key] != value:
                     raise ValueError(f"prefill frontier replay build.{key} differs from recipe")
             build_payload.update(claim)
+    return build_payload, artifact_lane({"lane": lane, "build": build_payload}, model_dir=root)
+
+
+def _assemble_shipcard(
+    root: Path,
+    build_payload: dict[str, Any],
+    resolved_lane: str | None,
+    attested_weight_stats: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    from prismaquant.export_output_safety import directory_publication_target
+
     slots = list(REQUIRED_SLOTS) + [
-        slot for slot in lane_gate_slots(lane) if slot not in REQUIRED_SLOTS
+        slot for slot in lane_gate_slots(resolved_lane) if slot not in REQUIRED_SLOTS
     ]
     # A rate-axis artifact owes the byte-matched uniform control's verdict, so
     # open the slot at export time.  `required_slots` re-derives the
@@ -1510,8 +1536,8 @@ def build_shipcard(
         "build": build_payload,
         "slots": {slot: None for slot in slots},
     }
-    if lane:
-        card["lane"] = str(lane)
+    if resolved_lane:
+        card["lane"] = resolved_lane
     quant_path = root / "quant_config.json"
     if quant_path.is_file():
         try:
@@ -1521,10 +1547,6 @@ def build_shipcard(
         provenance = quant_config.get("provenance") if isinstance(
             quant_config, Mapping
         ) else None
-        if isinstance(provenance, Mapping) and provenance.get(
-            "weight_content_manifest"
-        ) is not None:
-            card["weight_stat_attestation"] = weight_stat_attestation(root)
         # Principle 9 requires the artifact's route disposition -- a declared
         # non-native target or an explicit override -- to be stamped on the
         # card, and principle 12 requires the route census to travel with the
@@ -1534,6 +1556,37 @@ def build_shipcard(
         # ``archive/gridbook_lane_2026-09-02/`` with them.  The live stamp is
         # ``build.route_histogram`` (``route_histogram_claim``, #1377), which
         # the exporter writes into the build block beside ``achieved_bpp``.
+    if attested_weight_stats is not None:
+        if read_weight_content_manifest(root) is None:
+            raise ValueError("a stat attestation requires an exact weight content manifest")
+        if weight_stat_attestation(root) != attested_weight_stats:
+            raise ValueError("weight files changed while opening the shipcard")
+        card["weight_stat_attestation"] = dict(attested_weight_stats)
+    return card
+
+
+def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overwrite=False):
+    """Seal finished weight content and write a fresh canonical shipcard.
+
+    The build claims and lane resolve before anything is written. Conflicting
+    build or lane claims therefore leave the artifact directory untouched.
+    """
+    root = Path(model_dir)
+    path = Path(shipcard_path) if shipcard_path is not None else root / SHIPCARD_FILENAME
+    if (path.exists() or path.is_symlink()) and not overwrite:
+        raise ValueError("a ship record already exists; reopening would discard its measurements")
+    build_payload, resolved_lane = _resolved_build(root, build, lane)
+    attestation = None
+    if tuple(root.glob("*.safetensors")):
+        attestation = weight_stat_attestation(root)
+        expected = read_weight_content_manifest(root)
+        observed = build_weight_content_manifest(root)
+        if expected is not None and observed != expected:
+            raise ValueError("weight content differs from the immutable export manifest")
+        if expected is None:
+            _write_weight_content_manifest(root, observed)
+    card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
+    write_shipcard(path, card)
     return card
 
 
@@ -1576,46 +1629,6 @@ def load_shipcard(path: str | os.PathLike) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Serve lane
 # ---------------------------------------------------------------------------
-def make_record(
-    *,
-    slot: str,
-    tool: str,
-    passed: bool,
-    model_sha: str | None,
-    metrics: Mapping[str, Any] | None = None,
-    detail: str = "",
-    spec_decode_detected: bool | None = None,
-    serve_fingerprint: str | None = None,
-    git_commit: str | None = None,
-    extra: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """One serve-lane verdict block.
-
-    The vocabulary is derived (:func:`all_slots`): base slots plus every
-    lane-declared slot with a registered verifier.  The check here reads the
-    live base set plus :func:`lane_slot_verifiers` rather than a roster, so a
-    fourth lane's verified slot is fillable with no edit here.
-    """
-    known = (set(REQUIRED_SLOTS) | set(OPTIONAL_SLOTS)
-             | set(lane_slot_verifiers()))
-    if slot not in known:
-        raise KeyError(
-            f"unknown shipcard slot {slot!r}; known: {sorted(known)}")
-    record: dict[str, Any] = {
-        "slot": slot,
-        "tool": tool,
-        "filled_at": _now(),
-        "passed": bool(passed),
-        "model_sha": model_sha,
-        "spec_decode_detected": spec_decode_detected,
-        "serve_fingerprint": serve_fingerprint,
-        "git_commit": git_commit,
-        "detail": detail,
-        "metrics": dict(metrics or {}),
-    }
-    if extra:
-        record.update(dict(extra))
-    return record
 
 
 def fill_slot(
@@ -1685,14 +1698,20 @@ def verify(
     *,
     model_dir: str | os.PathLike | None = None,
     required: Iterable[str] | None = None,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """Return the list of reasons this artifact is not shippable (empty = OK)."""
     problems: list[str] = []
     expected_sha = card.get("model_sha")
+    try:
+        artifact_lane(card, model_dir=model_dir)
+    except (KeyError, ValueError, OSError) as exc:
+        problems.append(f"artifact lane is not resolvable: {exc}")
 
     if model_dir is not None:
         try:
-            assert_weight_stat_attestation(card, model_dir)
+            assert_weight_stat_attestation(card, model_dir,
+                                           observed_weight_content=observed_weight_content)
             accepted = accepted_model_shas(model_dir)
             on_disk = accepted[0]
             if expected_sha and on_disk != expected_sha:
@@ -1739,8 +1758,11 @@ def verify(
     problems.extend(_verify_research_route_override(card))
 
     if required is None:
-        required = required_slots(card, model_dir=model_dir)
-    plugin_verifiers = lane_plugin_slot_verifiers()
+        try:
+            required = required_slots(card, model_dir=model_dir)
+        except (KeyError, ValueError, OSError):
+            required = REQUIRED_SLOTS
+    registry = ship_slot_registry()
     for slot in required:
         record = slots.get(slot)
         if not record:
@@ -1760,81 +1782,11 @@ def verify(
             problems.append(
                 f"{slot}: record model_sha {str(got)[:12]} != artifact "
                 f"{str(expected_sha)[:12]} (record belongs to another build)")
-        if slot == UNIFORM_CONTROL_SLOT:
-            # Routed PAST the generic `passed` check, not around it: the
-            # verdict lives in the two KLs, and this slot's verifier is the
-            # one that understands the (deliberate, stamped, bound) override.
-            # It re-derives `passed` from those KLs itself, so nothing is lost
-            # by not testing the flag here.
-            problems.extend(_verify_uniform_control_record(
-                slot, record, card=card, model_dir=model_dir))
-            continue
-        if slot in plugin_verifiers:
-            # Routed PAST the generic `passed` check for the same reason: a
-            # lane plugin's replay owns its slot's whole verdict.  The
-            # Tessera lane's `route.census` and `route.trace` carry their
-            # route records or route traces, and the replay recomputes the
-            # priced-vs-served comparison from them, so a hand-set flag buys
-            # nothing.  Dispatched through the lane-slot registry (#162) so
-            # the admission invariant and the replay read the same entry.
-            problems.extend(plugin_verifiers[slot](
-                slot, record, card=card, model_dir=model_dir))
-            continue
-        if record.get("passed") is not True:
-            problems.append(
-                f"{slot}: FAILED — {record.get('detail') or 'no detail'}")
-        if slot == "ship_gate":
-            # Every lane. This replay ran only behind the retired Gridbook
-            # codebook lane's `is_gridbook_cb` flag until 2026-09-02, which
-            # meant a NATIVE card -- the default lane, and the one shipping
-            # artifacts today -- closed its one universal slot on a bare
-            # `passed` flag while the producer filed a threshold contract, a
-            # check ledger, token evidence and an endpoint binding nobody
-            # read (#156). None of that evidence was ever CB-specific: the
-            # catastrophic bounds, the four checks and the validator's tool
-            # identity are the same program on every lane, so generalising
-            # the replay is a REMOVAL of the flag, not a new refusal.
-            problems.extend(_verify_ship_gate_record(slot, record))
-        if slot in GOLD_SLOTS:
-            # Every lane. This ran under a Gridbook-CB flag until 2026-08-15,
-            # which meant a NATIVE card -- the default lane, and the one
-            # shipping artifacts today -- had its gold slots checked for
-            # nothing but spec-decode: no finite metric, no serve fingerprint,
-            # no producer commit, no position count. The generic evidence
-            # requirements were never CB-specific and should never have been
-            # behind it.
-            problems.extend(_verify_gold_record(
-                slot,
-                record,
-                model_dir=model_dir,
-                require_current_artifact_path=False,
-            ))
-        if slot in GOLD_SLOTS:
-            spec = record.get("spec_decode_detected")
-            if spec is None:
-                problems.append(
-                    f"{slot}: spec_decode_detected is unknown — a gold number "
-                    "measured against a spec-decode serve is the draft model's "
-                    "NLL, so 'unknown' is not acceptable (§7.5)")
-            elif spec:
-                problems.append(
-                    f"{slot}: spec_decode_detected is TRUE — this is draft-model "
-                    "NLL, not the artifact's; re-measure on a no-spec serve")
-        if slot.startswith("native_export."):
-            # The slot-name check above compares `record["slot"]` to the slot
-            # key; nothing compared `metrics.arm` to the slot suffix, so a
-            # fabricated or mislabeled arm record passed. Replay it here.
-            problems.extend(_verify_native_export_record(slot, record))
-        # Lane-scoped slots whose replay core owns run through the verifier
-        # the slot names in LANE_SLOT_VERIFIERS (#162): a fourth lane's novel
-        # slot is replayed the moment its verifier is registered, and a
-        # derived slot with no verifier never reaches here because
-        # lane_gate_slots / make_record / lane_scoped_slots refuse it.  These
-        # verifiers take ``(slot, record)``, the same convention as the
-        # base-slot replays.
-        verifier = LANE_SLOT_VERIFIERS.get(slot)
-        if verifier is not None:
-            problems.extend(verifier(slot, record))
+        adapter = registry.get(slot)
+        if adapter is None:
+            problems.append(f"{slot}: no registered replay")
+        else:
+            problems.extend(adapter.replay(record, card=card, model_dir=model_dir))
     return problems
 
 
@@ -2006,78 +1958,6 @@ def _verify_gold_producer_identity(
     return problems
 
 
-def _verify_gold_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    model_dir: str | os.PathLike | None = None,
-    require_current_artifact_path: bool = True,
-) -> list[str]:
-    """Require a slot-specific finite gold metric plus measurement identity."""
-    problems: list[str] = []
-    metrics = record.get("metrics")
-    if not isinstance(metrics, Mapping):
-        return [f"{slot}: missing structured gold metrics"]
-    allowed = (
-        ("kl_confident_mean", "kl_mean")
-        if slot == "gold.kl"
-        else ("ppl", "mean_nll")
-    )
-    finite = [
-        key for key in allowed
-        if key in metrics
-        and not isinstance(metrics[key], bool)
-        and isinstance(metrics[key], (int, float))
-        and math.isfinite(float(metrics[key]))
-        and float(metrics[key]) >= 0
-    ]
-    if not finite:
-        problems.append(
-            f"{slot}: carries no finite non-negative slot-specific metric "
-            f"from {allowed}"
-        )
-    fingerprint = record.get("serve_fingerprint")
-    if not isinstance(fingerprint, str) or re.fullmatch(
-        r"[0-9a-f]{64}", fingerprint
-    ) is None:
-        problems.append(f"{slot}: missing exact serve fingerprint")
-    commit = record.get("git_commit")
-    if not isinstance(commit, str) or re.fullmatch(
-        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit
-    ) is None:
-        problems.append(f"{slot}: missing full producer git commit")
-    tool = record.get("tool")
-    if not isinstance(tool, str) or not tool:
-        problems.append(f"{slot}: missing measurement tool identity")
-    if slot == "gold.kl":
-        if not any(
-            isinstance(metrics.get(key), int)
-            and not isinstance(metrics.get(key), bool)
-            and metrics.get(key, 0) > 0
-            for key in ("n_positions", "n_samples")
-        ):
-            problems.append(f"{slot}: missing positive KL sample/position count")
-        # A positive count was never enough. `--score-positions final` scores
-        # ONE position per sequence -- the window-final context -- which is the
-        # cheap last-token "hook KL" screen that is triage-only and must never
-        # be a promotion number (§5). It reports n_samples=8 and sails through
-        # the count check above, so the card could not tell an 8-position screen
-        # from a 4088-position gold measurement. Caught 2026-08-14 on the
-        # Qwen3.8-27B lane, where the driver simply omitted the flag and the
-        # tool's default is `final`.
-        if metrics.get("score_positions") != "all":
-            problems.append(
-                f"{slot}: score_positions={metrics.get('score_positions')!r} — "
-                "the gold KL contract is every prompt position "
-                "(--score-positions all, n_positions = n_samples*(seqlen-1)). "
-                "'final' is the last-token hook screen: triage only, never a "
-                "promotion metric."
-            )
-    elif not isinstance(metrics.get("n_tokens_scored"), int) or isinstance(
-        metrics.get("n_tokens_scored"), bool
-    ) or metrics.get("n_tokens_scored", 0) <= 0:
-        problems.append(f"{slot}: missing positive scored-token count")
-    return problems
 
 
 def verify_gold_producer_record(
@@ -2096,116 +1976,14 @@ def verify_gold_producer_record(
     measured = record.get("measured_model")
     if not isinstance(measured, str) or Path(measured).resolve() != Path(model_dir).resolve():
         problems.append("gold producer record measured_model differs from the control path")
-    problems.extend(_verify_gold_record(slot, record, model_dir=model_dir))
-    return problems
-
-
-
-def _verify_native_export_record(
-    slot: str,
-    record: Mapping[str, Any],
-) -> list[str]:
-    """Replay the smoke arm's own stamped metrics against the slot it closes.
-
-    `validate_native_export._record_arm` stamps the arm it actually ran
-    (`metrics.arm`), the residency it ran under (`enforce_eager`), and how
-    much it generated (`generated_chars`) — but `verify` compared only the
-    slot key against `record["slot"]`, so an eager receipt closed the graph
-    slot and a pass that generated nothing verified clean. The only site
-    that knows the truth already writes it; this reads it.
-    """
-    problems: list[str] = []
-    arm = slot.split(".", 1)[1] if "." in slot else slot
-    metrics = record.get("metrics")
-    if not isinstance(metrics, Mapping):
-        return [f"{slot}: missing structured arm metrics"]
-    if metrics.get("arm") != arm:
-        problems.append(
-            f"{slot}: metrics.arm={metrics.get('arm')!r} does not match the "
-            f"slot arm {arm!r} — a mislabeled receipt, not a result"
-        )
-    # `validate_native_export._run_arm`: `arm = "eager" if enforce_eager else
-    # "graph"`. The two residencies are different numeric objects on the
-    # Tessera lane, exercised by separate gates.
-    expected_eager = {"eager": True, "graph": False}.get(arm)
-    if (
-        expected_eager is not None
-        and metrics.get("enforce_eager") is not expected_eager
-    ):
-        problems.append(
-            f"{slot}: enforce_eager={metrics.get('enforce_eager')!r} "
-            f"disagrees with the {arm} arm — this receipt ran under the "
-            "other residency"
-        )
-    produced = metrics.get("generated_chars")
-    if record.get("passed") is True:
-        if (
-            isinstance(produced, bool)
-            or not isinstance(produced, int)
-            or produced <= 0
-        ):
-            problems.append(
-                f"{slot}: passed but generated_chars={produced!r} — a smoke "
-                "pass that generated nothing is not evidence"
-            )
-    elif (
-        not isinstance(produced, bool)
-        and isinstance(produced, int)
-        and produced > 0
-    ):
-        problems.append(
-            f"{slot}: failed yet claims generated_chars={produced!r}"
-        )
-    max_new_tokens = metrics.get("max_new_tokens")
-    if max_new_tokens is not None and (
-        isinstance(max_new_tokens, bool)
-        or not isinstance(max_new_tokens, int)
-        or max_new_tokens <= 0
-    ):
-        problems.append(
-            f"{slot}: max_new_tokens={max_new_tokens!r} is not a positive "
-            "integer"
-        )
+    problems.extend(verify_gold_record(slot, record))
     return problems
 
 
 # ---------------------------------------------------------------------------
-# The byte-matched uniform control (#121, closing prismaquant#117 / tessera#1)
+# The uniform-control obligation (#121). The slot's record contract -- its
+# constructor and replay -- lives with the other slots in ``shipcard_slots``.
 # ---------------------------------------------------------------------------
-# An allocation over a rate *axis* is a claim: that choosing a rung per Linear
-# beats spending the same bytes everywhere.  On 2026-09-02 that claim was
-# measured and it was false -- a PrismaQuant-allocated Tessera checkpoint
-# served 2.00x worse KL than a byte-matched uniform arm at 4.0 bpp (0.3485 vs
-# 0.1746; 2.33x at 3.0, 2.88x at 5.0) while every other check the pipeline
-# owns passed: 196/196 units matched the plan's bytes, a layer-0 re-encode was
-# byte-identical, census read 112/112.  The pipeline computed one artifact
-# correctly.  It was the wrong artifact.
-#
-# On 2026-09-03 an ORACLE handed the measured per-unit KL table reached only
-# 0.941x the uniform control at 4.0 bpp, P(worse) = 0.075 -- not significant.
-# So the closure is a REFUSAL, not a better cost model: there is no prize at
-# that rung to fund one with.  Below the knee the axis is real (3.0 bpp:
-# oracle 0.748x, AURA 0.780x, both P = 0.000), which is why this is a gate on
-# the claim and not a verdict on allocation.
-#
-# Principle 3 applied to allocation itself: an allocation that cannot beat its
-# byte-matched uniform control has not earned its allocation, and does not
-# ship.  The lesson this is written against is that provenance nothing
-# consumes is a confession log -- 73.7% of a 92 GB body once rode an
-# `arch::Sm80` fallback on Blackwell, recorded in its own selection.json,
-# refused by nothing.  So this REFUSES, in `verify`, at publication.
-#
-# How the record gets here:
-#   1. Tessera builds and prices the control:
-#        python -m tessera.uniform_control plan <candidate plan> --model <source>
-#      then serves it, and `verify` re-asserts the byte match on the two
-#      exported manifests.
-#   2. The SAME KL tool that filled `gold.kl` is run on the control checkpoint
-#      -- the control arm's record is gold-record shaped and is replayed
-#      through `_verify_gold_record` below, so a last-token or weight-space
-#      number cannot close this slot.
-#   3. `python -m prismaquant.shipcard_cli fill-control` writes both, plus the
-#      `tessera.control.control_block()` JSON, into the slot.
 def _is_rate_axis_artifact(
     card: Mapping[str, Any],
     *,
@@ -2252,449 +2030,6 @@ def _is_rate_axis_artifact(
     if isinstance(quant, Mapping):
         return str(quant.get("quant_method") or "").strip().lower() in methods
     return False
-
-
-def _positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return value
-
-
-def _finite_float(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    out = float(value)
-    return out if math.isfinite(out) else None
-
-
-def _close(a: float, b: float, *, rel: float = 1e-9) -> bool:
-    return math.isclose(a, b, rel_tol=rel, abs_tol=0.0)
-
-
-def _replay_byte_match(
-    slot: str,
-    match: Any,
-) -> tuple[list[str], bool]:
-    """Recompute the byte match from the integers the block carries.
-
-    "Byte-matched" is checked here, never read: a boolean the producer wrote
-    is exactly the kind of claim principle 14 refuses to consume.  Everything
-    below is exact :class:`~fractions.Fraction` arithmetic on integer bit
-    totals, and the carried ``byte_matched`` flag has to agree with it.
-    """
-    problems: list[str] = []
-    if not isinstance(match, Mapping):
-        return [f"{slot}: the control block carries no byte match"], False
-    candidate = _positive_int(match.get("candidate_bits"))
-    control = _positive_int(match.get("control_bits"))
-    params = _positive_int(match.get("varying_params"))
-    if candidate is None or control is None or params is None:
-        return [
-            f"{slot}: byte match needs positive integer candidate_bits, "
-            f"control_bits and varying_params; got "
-            f"{match.get('candidate_bits')!r}, {match.get('control_bits')!r}, "
-            f"{match.get('varying_params')!r}"
-        ], False
-
-    tolerance = match.get("max_relative_slack")
-    if (
-        not isinstance(tolerance, (list, tuple))
-        or len(tolerance) != 2
-        or any(_positive_int(part) is None for part in tolerance)
-    ):
-        return [
-            f"{slot}: byte match declares no [numerator, denominator] "
-            f"max_relative_slack; got {tolerance!r}"
-        ], False
-    tolerance = Fraction(int(tolerance[0]), int(tolerance[1]))
-    if tolerance > MAX_CONTROL_RELATIVE_SLACK:
-        problems.append(
-            f"{slot}: the control widened its own tolerance to "
-            f"{float(tolerance) * 100:.4f}%, over the "
-            f"{float(MAX_CONTROL_RELATIVE_SLACK) * 100:.4f}% a control may be. "
-            "Two arms that differ by more than that are two products, not an "
-            "arm and its control."
-        )
-        tolerance = MAX_CONTROL_RELATIVE_SLACK
-
-    slack_bits = control - candidate
-    relative = Fraction(abs(slack_bits), candidate)
-    matched = relative <= tolerance
-    carried = match.get("byte_matched")
-    if carried is not None and bool(carried) is not matched:
-        problems.append(
-            f"{slot}: the block claims byte_matched={carried!r} but its own "
-            f"integers replay to {matched} "
-            f"({int(slack_bits)} bits apart, {float(relative) * 1e6:.1f} ppm)"
-        )
-    carried_slack = match.get("slack_bits")
-    if carried_slack is not None and (
-        isinstance(carried_slack, bool)
-        or not isinstance(carried_slack, int)
-        or carried_slack != slack_bits
-    ):
-        problems.append(
-            f"{slot}: slack_bits={carried_slack!r} but control_bits - "
-            f"candidate_bits = {int(slack_bits)}"
-        )
-    for key, bits in (("candidate_bpp", candidate), ("control_bpp", control)):
-        reported = _finite_float(match.get(key))
-        if reported is not None and not _close(reported, bits / params):
-            problems.append(
-                f"{slot}: {key}={reported!r} but {bits} bits over {params} "
-                f"parameters is {bits / params!r}"
-            )
-    if not matched:
-        problems.append(
-            f"{slot}: the arms are NOT byte-matched — the control weighs "
-            f"{control} bits against the candidate's {candidate}, "
-            f"{float(relative) * 100:.4f}% apart, over the "
-            f"{float(tolerance) * 100:.4f}% a control may be. The "
-            f"{'control' if slack_bits > 0 else 'candidate'} arm is the fatter "
-            "one, so the comparison would price those bytes as quality."
-        )
-    return problems, matched
-
-
-def _replay_control_arms(
-    slot: str,
-    record: Mapping[str, Any],
-    verdict: Mapping[str, Any],
-    *,
-    card: Mapping[str, Any],
-) -> list[str]:
-    """Bind both arms to the serving metric, structurally.
-
-    The candidate arm is not accepted as a number at all: it must BE the
-    card's own ``gold.kl``, which is already gated to served KL
-    with ``score_positions=all`` on a no-spec-decode serve. So a
-    last-token hook screen or a weight-space error cannot reach this slot
-    through the candidate leg, and a block measured on some other allocation
-    cannot be pasted onto this artifact -- its candidate KL would not be this
-    card's gold number.
-
-    The control arm carries its own gold-shaped record and is replayed through
-    the same :func:`_verify_gold_record`, then held to the candidate's
-    measurement contract key by key.
-    """
-    problems: list[str] = []
-    metrics = record.get("metrics")
-    key = (metrics or {}).get("gold_metric_key") if isinstance(
-        metrics, Mapping) else None
-    if key not in UNIFORM_CONTROL_METRIC_KEYS:
-        return [
-            f"{slot}: metrics.gold_metric_key={key!r} — the record must name "
-            f"which of {list(UNIFORM_CONTROL_METRIC_KEYS)} both arms are "
-            "compared on, so the comparison is not a choice made after the "
-            "fact"
-        ]
-
-    gold = ((card.get("slots") or {}).get("gold.kl"))
-    if not isinstance(gold, Mapping):
-        return [
-            f"{slot}: the card carries no gold.kl record, so the candidate "
-            "arm has nothing to be. The candidate leg of this comparison is "
-            "the artifact's own gold KL, not a number handed to the card."
-        ]
-    gold_metrics = gold.get("metrics")
-    if not isinstance(gold_metrics, Mapping):
-        return [f"{slot}: the card's gold.kl record carries no metrics"]
-    gold_value = _finite_float(gold_metrics.get(key))
-    candidate = _finite_float(verdict.get("candidate"))
-    if gold_value is None:
-        problems.append(
-            f"{slot}: the card's gold.kl carries no finite {key}, so the "
-            "candidate arm cannot be bound to it"
-        )
-    elif candidate is None or not _close(candidate, gold_value):
-        problems.append(
-            f"{slot}: the verdict's candidate {verdict.get('candidate')!r} is "
-            f"not the card's own gold.kl {key}={gold_value!r}. The candidate "
-            "arm must be the artifact's served gold KL — a comparison against "
-            "some other measurement of some other artifact is not this "
-            "artifact's control."
-        )
-
-    arm = record.get("control_arm")
-    if not isinstance(arm, Mapping):
-        return problems + [
-            f"{slot}: carries no control_arm record. The control's KL needs "
-            "the same evidence the candidate's does: it is a second served "
-            "checkpoint, not a number."
-        ]
-    problems.extend(
-        f"{slot}: control arm: {item.split(': ', 1)[-1]}"
-        for item in _verify_gold_record(
-            "gold.kl", arm, model_dir=None, require_current_artifact_path=False,
-        )
-    )
-    spec = arm.get("spec_decode_detected")
-    if spec is None:
-        problems.append(
-            f"{slot}: control arm: spec_decode_detected is unknown — a gold "
-            "number measured against a spec-decode serve is the draft model's "
-            "NLL (§7.5)"
-        )
-    elif spec:
-        problems.append(
-            f"{slot}: control arm: spec_decode_detected is TRUE — that is "
-            "draft-model NLL, not the control's"
-        )
-
-    arm_metrics = arm.get("metrics")
-    arm_metrics = arm_metrics if isinstance(arm_metrics, Mapping) else {}
-    arm_value = _finite_float(arm_metrics.get(key))
-    control_kl = _finite_float(verdict.get("control"))
-    if arm_value is None:
-        problems.append(
-            f"{slot}: control arm: carries no finite {key}, the metric this "
-            "verdict is stated on"
-        )
-    elif control_kl is None or not _close(arm_value, control_kl):
-        problems.append(
-            f"{slot}: the verdict's control {verdict.get('control')!r} is not "
-            f"the control arm's own {key}={arm_value!r}"
-        )
-
-    arm_sha = arm.get("model_sha")
-    if not isinstance(arm_sha, str) or re.fullmatch(
-        r"[0-9a-f]{64}", arm_sha
-    ) is None:
-        problems.append(
-            f"{slot}: control arm: model_sha is not one lowercase SHA-256 — "
-            "the control is a checkpoint that was built and served, and it is "
-            "identified like one"
-        )
-    elif arm_sha == card.get("model_sha"):
-        problems.append(
-            f"{slot}: control arm: model_sha equals the candidate's — an arm "
-            "compared against itself is not a control"
-        )
-
-    gold_tool = gold.get("tool")
-    if arm.get("tool") != gold_tool:
-        problems.append(
-            f"{slot}: control arm: measured by {arm.get('tool')!r} but the "
-            f"candidate by {gold_tool!r} — two evaluators are two metrics"
-        )
-    for contract_key in UNIFORM_CONTROL_CONTRACT_KEYS:
-        if contract_key not in gold_metrics:
-            continue
-        want = gold_metrics.get(contract_key)
-        got = arm_metrics.get(contract_key)
-        same = got == want
-        if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
-            from .digests import DIRECT_ASCII_STRICT
-
-            try:
-                same = (contract_key in arm_metrics
-                        and DIRECT_ASCII_STRICT.text(got) == DIRECT_ASCII_STRICT.text(want))
-            except (TypeError, ValueError):
-                same = False
-        if not same:
-            if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
-                problems.append(
-                    f"{slot}: control arm: missing or different {contract_key}; "
-                    "the arms did not run the same measurement contract")
-                continue
-            problems.append(
-                f"{slot}: control arm: {contract_key}={got!r} but the "
-                f"candidate's gold.kl says {want!r} — the arms did not run "
-                "the same measurement contract"
-            )
-    return problems
-
-
-def _verify_uniform_control_override(
-    slot: str,
-    override: Any,
-    *,
-    card: Mapping[str, Any],
-    model_dir: str | os.PathLike | None,
-    ratio: float | None,
-) -> tuple[bool, list[str]]:
-    """Is this override a deliberate act, bound to this artifact and verdict?
-
-    Same bar as ``publish_artifact.py --force-unverified``: the artifact
-    directory's basename has to have been re-typed, and the act is stamped
-    into the bytes that get uploaded.  Two bindings on top of it, because this
-    override outlives the command that made it: it names the artifact's
-    ``model_sha`` and the exact ratio it forgives, so a re-export or a
-    re-measurement voids it rather than inheriting it.
-    """
-    if not isinstance(override, Mapping):
-        return False, [
-            f"{slot}: override is not an object ({type(override).__name__})"
-        ]
-    problems: list[str] = []
-    if override.get("schema") != UNIFORM_CONTROL_OVERRIDE_SCHEMA:
-        return False, [
-            f"{slot}: override schema {override.get('schema')!r} != "
-            f"{UNIFORM_CONTROL_OVERRIDE_SCHEMA!r}"
-        ]
-    for key in ("reason", "authorized_by", "stamped_at"):
-        value = override.get(key)
-        if not isinstance(value, str) or not value.strip():
-            problems.append(f"{slot}: override {key} is empty")
-    sha = override.get("model_sha")
-    if sha != card.get("model_sha"):
-        problems.append(
-            f"{slot}: override names model_sha {str(sha)[:12]} but this card "
-            f"is {str(card.get('model_sha'))[:12]} — an override does not "
-            "survive a re-export"
-        )
-    typed = override.get("confirmed_artifact_name")
-    if not isinstance(typed, str) or not typed.strip():
-        problems.append(
-            f"{slot}: override records no re-typed artifact directory name"
-        )
-    # The re-typed name is checked against the directory ONCE, when it is
-    # typed (``shipcard_cli override-control``), exactly as ``--force-unverified``
-    # checks its re-type at publish time.  It is not re-checked here: ``verify``
-    # runs on the publisher's snapshot copy under a randomised basename and on
-    # downloaded artifacts wherever they land, and a stamp that stops verifying
-    # when the directory moves is a stamp bound to a path, not to the card.
-    # What binds the override to THIS card is below: model_sha and the ratio.
-    forgiven = _finite_float(override.get("candidate_over_control"))
-    if forgiven is None or ratio is None or not _close(forgiven, ratio):
-        problems.append(
-            f"{slot}: override forgives a "
-            f"{override.get('candidate_over_control')!r}x loss but the record "
-            f"states {ratio!r}x — an override does not survive a "
-            "re-measurement"
-        )
-    return (not problems), problems
-
-
-def _verify_uniform_control_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    card: Mapping[str, Any],
-    model_dir: str | os.PathLike | None = None,
-) -> list[str]:
-    """Refuse an allocation that lost to spending the same bytes uniformly."""
-    problems: list[str] = []
-    block = record.get("uniform_control")
-    schemas = uniform_control_schemas()
-    if not isinstance(block, Mapping):
-        return [
-            f"{slot}: carries no uniform_control block "
-            f"(the rate-axis producer's control block, schema "
-            f"{_schema_names(schemas)}), so there is nothing to replay"
-        ]
-    if block.get("schema") not in schemas:
-        return [
-            f"{slot}: block schema {block.get('schema')!r} != "
-            f"{_schema_names(schemas)}"
-        ]
-
-    control = block.get("control")
-    control = control if isinstance(control, Mapping) else {}
-    byte_problems, byte_matched = _replay_byte_match(slot, control.get("match"))
-    problems.extend(byte_problems)
-    dominated = control.get("dominated_by")
-    if dominated is not None:
-        problems.append(
-            f"{slot}: the control sits on R{control.get('q256')} while "
-            f"R{dominated} weighs no more on this plan's shapes — a "
-            "handicapped uniform arm. Beating a rung the allocator should not "
-            "have been offered either is not beating the control "
-            "(tessera#43)."
-        )
-
-    verdict = block.get("verdict")
-    if not isinstance(verdict, Mapping):
-        return problems + [f"{slot}: the block carries no verdict"]
-    if verdict.get("metric") != "kl_vs_bf16":
-        problems.append(
-            f"{slot}: verdict metric {verdict.get('metric')!r} — this gate is "
-            "on the serving metric, exact full-vocab vLLM KL-vs-BF16 "
-            "('kl_vs_bf16'), and on nothing else"
-        )
-    if verdict.get("measured") is not True:
-        # Deliberately NOT overridable, and deliberately not silence: this is
-        # the `{"measured": false}` variant `control_block()` emits for a
-        # control that was built and priced but never served.  A built control
-        # is not a passed gate.
-        return problems + [
-            f"{slot}: the uniform control was built and priced but never "
-            f"SERVED ({verdict.get('detail') or 'no detail'}). Missing is not "
-            "passing: serve the control checkpoint on the same corpus that "
-            "produced this card's gold.kl and fill the verdict, or the "
-            "allocation's claim to be worth allocating is untested."
-        ]
-
-    candidate = _finite_float(verdict.get("candidate"))
-    control_kl = _finite_float(verdict.get("control"))
-    if candidate is None or candidate < 0 or control_kl is None or (
-        control_kl <= 0
-    ):
-        return problems + [
-            f"{slot}: verdict needs a finite non-negative candidate KL and a "
-            f"finite positive control KL; got {verdict.get('candidate')!r} and "
-            f"{verdict.get('control')!r}"
-        ]
-    ratio = candidate / control_kl
-    beat = candidate < control_kl
-    reported_ratio = _finite_float(verdict.get("candidate_over_control"))
-    if reported_ratio is None or not _close(reported_ratio, ratio):
-        problems.append(
-            f"{slot}: candidate_over_control="
-            f"{verdict.get('candidate_over_control')!r} but "
-            f"{candidate!r} / {control_kl!r} = {ratio!r}"
-        )
-    if verdict.get("beat_control") is not None and bool(
-        verdict.get("beat_control")
-    ) is not beat:
-        problems.append(
-            f"{slot}: the block claims beat_control="
-            f"{verdict.get('beat_control')!r} but its own two KLs replay to "
-            f"{beat}"
-        )
-    if record.get("passed") is not beat:
-        # The flag is not the gate -- the two KLs are -- but a record whose
-        # flag disagrees with its own numbers is lying, and saying so is
-        # cheaper than letting a hand-edited `passed: true` look ordinary.
-        problems.append(
-            f"{slot}: record says passed={record.get('passed')!r} while its "
-            f"own KLs say the candidate {'beat' if beat else 'did NOT beat'} "
-            "the control"
-        )
-
-    problems.extend(_replay_control_arms(slot, record, verdict, card=card))
-
-    if beat:
-        return problems
-
-    losing = (
-        f"{slot}: the allocation LOST to its byte-matched uniform control — "
-        f"{candidate:.6g} against {control_kl:.6g} KL-vs-BF16 at matched "
-        f"bytes ({ratio:.4g}x worse) on {control.get('grid')} "
-        f"R{control.get('q256')}. An allocation that cannot beat spending the "
-        "same bytes at one rung has not earned its allocation and does not "
-        "ship (prismaquant#117, tessera#1)."
-    )
-    override = record.get("override")
-    if override is None:
-        return problems + [losing]
-    if problems or not byte_matched:
-        # An override forgives a MEASURED loss on a REAL control.  It does not
-        # forgive a control that was not byte-matched or a record that does
-        # not replay -- those are not results to accept, they are results that
-        # do not exist yet.  `--force-unverified` is the (stamped) instrument
-        # for those, and it is meant to feel heavier than this.
-        return problems + [
-            losing + " The override on this record does not apply: an "
-            "override forgives a measured loss on a byte-matched control, and "
-            "this record has unresolved problems above."
-        ]
-    ok, override_problems = _verify_uniform_control_override(
-        slot, override, card=card, model_dir=model_dir, ratio=ratio,
-    )
-    if not ok:
-        return problems + override_problems + [losing]
-    return problems
 
 
 def uniform_control_summary(
@@ -2767,57 +2102,6 @@ def uniform_control_summary(
     return summary
 
 
-def make_uniform_control_record(
-    *,
-    tool: str,
-    model_sha: str | None,
-    control_block: Mapping[str, Any],
-    control_arm: Mapping[str, Any],
-    gold_metric_key: str,
-    git_commit: str | None = None,
-    detail: str | None = None,
-) -> dict[str, Any]:
-    """One byte-matched-uniform-control verdict block.
-
-    ``control_block`` is stored verbatim -- it is Tessera's accountant's
-    output and this module does not import Tessera -- and every number in it
-    is replayed by :func:`verify`.  ``control_arm`` is the gold-shaped record
-    of the CONTROL checkpoint's own served KL, produced by the same tool that
-    filled ``gold.kl`` on this artifact.
-    """
-    if gold_metric_key not in UNIFORM_CONTROL_METRIC_KEYS:
-        raise ValueError(
-            f"gold_metric_key must be one of {list(UNIFORM_CONTROL_METRIC_KEYS)}"
-        )
-    block = json.loads(json.dumps(dict(control_block)))
-    schemas = uniform_control_schemas()
-    if block.get("schema") not in schemas:
-        raise ValueError(
-            f"control block schema {block.get('schema')!r} != "
-            f"{_schema_names(schemas)}"
-        )
-    verdict = block.get("verdict") or {}
-    beat = bool(verdict.get("measured")) and bool(verdict.get("beat_control"))
-    if detail is None:
-        detail = str(
-            verdict.get("detail")
-            or "the control was built and priced; neither arm was served"
-        )
-    return make_record(
-        slot=UNIFORM_CONTROL_SLOT,
-        tool=tool,
-        passed=beat,
-        model_sha=model_sha,
-        metrics={"gold_metric_key": gold_metric_key},
-        detail=detail,
-        git_commit=git_commit,
-        extra={
-            "uniform_control": block,
-            "control_arm": json.loads(json.dumps(dict(control_arm))),
-        },
-    )
-
-
 def record_uniform_control_override(
     card: dict[str, Any],
     *,
@@ -2865,173 +2149,6 @@ def record_uniform_control_override(
     return card
 
 
-def _verify_ship_gate_record(
-    slot: str,
-    record: Mapping[str, Any],
-) -> list[str]:
-    """Replay the fixed catastrophic-quality thresholds, the check ledger
-    with its token evidence, and the endpoint binding.
-
-    The binding half is presence-and-shape, stated honestly: an offline
-    `verify` has no live session to compare against, so it refuses a record
-    that names no server, no served model and no artifact path -- but a
-    well-formed binding to the WRONG server still passes here. Catching that
-    needs the nonce-bound live-session check (the retired CB eager driver
-    did exactly that before teardown); see the `ship_gate` paragraph in
-    §7.2 of docs/ARCHITECTURE.md.
-    """
-    problems: list[str] = []
-    if record.get("tool") != "validate_quantized_model.py":
-        problems.append(f"{slot}: not filled by validate_quantized_model.py")
-    commit = record.get("git_commit")
-    if not isinstance(commit, str) or re.fullmatch(
-        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit
-    ) is None:
-        problems.append(f"{slot}: missing full producer git commit")
-    endpoint = record.get("base_url")
-    if (
-        not isinstance(endpoint, str)
-        or not endpoint.startswith(("http://", "https://"))
-    ):
-        problems.append(f"{slot}: missing endpoint binding (base_url)")
-    served = record.get("served_model_name")
-    if not isinstance(served, str) or not served.strip():
-        problems.append(
-            f"{slot}: missing served-model binding (served_model_name)")
-    source = record.get("model_sha_source")
-    if not isinstance(source, str) or not source.strip():
-        problems.append(
-            f"{slot}: missing artifact-path binding (model_sha_source)")
-    metrics = record.get("metrics")
-    thresholds = record.get("thresholds")
-    expected_checks = {
-        "serve_ready", "generation_sanity", "perplexity", "mtp_acceptance",
-        "boundary_behavior",
-    }
-    if not isinstance(metrics, Mapping) or set(metrics) != expected_checks:
-        return problems + [f"{slot}: validation check ledger is incomplete"]
-    for name, row in metrics.items():
-        if not isinstance(row, Mapping) or row.get("passed") is not True:
-            problems.append(f"{slot}: check {name} is not a structured pass")
-    expected_thresholds = {
-        "max_ppl": 25.0,
-        "max_mean_nll": 3.0,
-        "max_p99_nll": 6.0,
-        "min_gen_len": 30,
-        "min_mtp_accept_p0": 0.60,
-        "max_boundary_defects": 0,
-        "boundary_temperature": 1.0,
-        "boundary_max_tokens": 64,
-        "boundary_reps": 6,
-    }
-    if not isinstance(thresholds, Mapping):
-        problems.append(f"{slot}: missing threshold contract")
-    else:
-        for key, expected in expected_thresholds.items():
-            value = thresholds.get(key)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                or float(value) != float(expected)
-            ):
-                problems.append(
-                    f"{slot}: threshold {key}={value!r}, expected {expected!r}"
-                )
-    perplexity = metrics.get("perplexity")
-    if isinstance(perplexity, Mapping):
-        numeric = {
-            "perplexity": ("max_ppl", 25.0),
-            "mean_nll_per_tok": ("max_mean_nll", 3.0),
-            "max_nll_per_tok": ("max_p99_nll", 6.0),
-        }
-        for key, (_threshold_key, limit) in numeric.items():
-            value = perplexity.get(key)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                or float(value) < 0
-                or float(value) > limit
-            ):
-                problems.append(
-                    f"{slot}: perplexity metric {key} does not clear {limit}"
-                )
-        tokens = perplexity.get("n_tokens")
-        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
-            problems.append(f"{slot}: perplexity check scored no tokens")
-        if perplexity.get("spec_decode_detected") is True:
-            problems.append(f"{slot}: perplexity ran under speculative decode")
-        elif perplexity.get("spec_decode_detected") is not False:
-            problems.append(
-                f"{slot}: perplexity speculative-decode state is unknown"
-            )
-    else:
-        problems.append(f"{slot}: missing structured perplexity evidence")
-    boundary = metrics.get("boundary_behavior")
-    if isinstance(boundary, Mapping):
-        # The behavioral replay: raw `/v1/completions` never applies the chat
-        # template, so a clean-looking count from that endpoint is not
-        # boundary evidence.  Pin the producer's request and extraction
-        # schemas independently here, alongside the numerical replay below.
-        endpoint = boundary.get("endpoint")
-        if endpoint != "/v1/chat/completions":
-            problems.append(
-                f"{slot}: boundary endpoint={endpoint!r}, expected "
-                "'/v1/chat/completions'"
-            )
-        request_schema = boundary.get("request_schema")
-        if request_schema != "prismaquant.boundary_chat_request/1":
-            problems.append(
-                f"{slot}: boundary request schema={request_schema!r}, "
-                "expected 'prismaquant.boundary_chat_request/1'"
-            )
-        response_schema = boundary.get("response_schema")
-        if response_schema != "prismaquant.boundary_chat_response/1":
-            problems.append(
-                f"{slot}: boundary response schema={response_schema!r}, "
-                "expected 'prismaquant.boundary_chat_response/1'"
-            )
-
-        # A sampled check with no generations, run at temp 0, or with defects
-        # over the zero-tolerance bound is not evidence — it is the old
-        # argmax-blind gate wearing the new name.  The zero/64 values remain
-        # fail-closed historical defaults pending #87's paired-control policy;
-        # replaying them here does not claim they are calibrated universally.
-        generations = boundary.get("n_generations")
-        if (
-            isinstance(generations, bool)
-            or not isinstance(generations, int)
-            or generations <= 0
-        ):
-            problems.append(
-                f"{slot}: boundary check sampled no generations")
-        defects = boundary.get("n_defects")
-        if (
-            isinstance(defects, bool)
-            or not isinstance(defects, int)
-            or defects < 0
-            or defects > 0
-        ):
-            problems.append(
-                f"{slot}: boundary check reports {defects!r} defective "
-                "generations — the historical bound is zero; "
-                "its control-relative replacement remains pending #87"
-            )
-        temperature = boundary.get("temperature")
-        if (
-            isinstance(temperature, bool)
-            or not isinstance(temperature, (int, float))
-            or not math.isfinite(float(temperature))
-            or float(temperature) <= 0
-        ):
-            problems.append(
-                f"{slot}: boundary check temperature={temperature!r} is not "
-                "sampling — the defect is invisible at temp 0"
-            )
-    else:
-        problems.append(f"{slot}: missing structured boundary evidence")
-    return problems
 
 
 def unfilled_slots(
@@ -3047,165 +2164,6 @@ def unfilled_slots(
     ]
 
 
-def make_route_sweep_record(
-    *,
-    tool: str,
-    model_sha: str | None,
-    sweeps: Sequence[tuple[str, Any]],
-    expected_ranks: int,
-    config_json: str,
-    serve_fingerprint: str | None = None,
-    git_commit: str | None = None,
-) -> dict[str, Any]:
-    """Close `route.sweep` from every rank's served route sweep (#631).
-
-    Raises ``RouteSweepNotVerified`` when no usable observation exists and
-    ``CompressedRouteSweepError`` when the observation disagrees with the
-    price.  Neither produces a record, so the slot stays unfilled and
-    publication refuses; only an agreeing verdict is written, and `verify`
-    replays it from the carried bytes.
-    """
-    from copy import deepcopy
-
-    from prismaquant import compressed_route_sweep_gate as gate
-
-    try:
-        config = json.loads(config_json)
-    except ValueError as exc:
-        raise gate.CompressedRouteSweepError(
-            f"config.json is not JSON: {exc}") from exc
-    verdict = gate.compare_route_sweeps(
-        list(sweeps), expected_ranks=expected_ranks, config=config)
-    if verdict["status"] == gate.NOT_VERIFIED:
-        raise gate.RouteSweepNotVerified(verdict["detail"])
-    if verdict["status"] != gate.AGREE:
-        raise gate.CompressedRouteSweepError(verdict["detail"])
-    carried = []
-    for label, payload in sweeps:
-        if isinstance(payload, (str, bytes)):
-            payload = json.loads(payload)
-        carried.append({"rank": label, "sweep": deepcopy(payload)})
-    return make_record(
-        slot=ROUTE_SWEEP_SLOT,
-        tool=tool,
-        passed=True,
-        model_sha=model_sha,
-        metrics={
-            "n_sweeps": len(carried),
-            "n_priced_modules": sum(verdict["histogram"].values()),
-            "activation_contracts": verdict["histogram"],
-        },
-        detail=verdict["detail"],
-        serve_fingerprint=serve_fingerprint,
-        git_commit=git_commit,
-        extra={
-            "route_sweeps": carried,
-            "expected_ranks": expected_ranks,
-            "config_json": config_json,
-            "sweep_verdict": verdict,
-        },
-    )
-
-
-def _verify_route_sweep_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    card: Mapping[str, Any] | None = None,
-    model_dir: str | os.PathLike | None = None,
-) -> list[str]:
-    """Replay the served-vs-priced module comparison from the carried sweeps."""
-    from prismaquant import compressed_route_sweep_gate as gate
-
-    sweeps = record.get("route_sweeps")
-    config_json = record.get("config_json")
-    expected = record.get("expected_ranks")
-    problems: list[str] = []
-    if not isinstance(sweeps, list) or not sweeps or not all(
-            isinstance(row, Mapping) and isinstance(row.get("rank"), str)
-            for row in sweeps):
-        problems.append(
-            f"{slot}: record carries no route_sweeps; an absent observation is "
-            "not a clean bill")
-    if not isinstance(config_json, str) or not config_json:
-        problems.append(f"{slot}: record carries no config_json to price against")
-    if type(expected) is not int:
-        problems.append(f"{slot}: record carries no expected_ranks")
-    if problems:
-        return problems
-    if model_dir is not None:
-        try:
-            on_disk = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
-        except (OSError, ValueError) as exc:
-            return [f"{slot}: cannot read the artifact's config.json: {exc}"]
-        if on_disk != config_json:
-            problems.append(
-                f"{slot}: carried config_json differs from the artifact's "
-                "config.json; the sweeps were compared against another price")
-    try:
-        verdict = gate.compare_route_sweeps(
-            [(row["rank"], json.dumps(row.get("sweep"))) for row in sweeps],
-            expected_ranks=expected, config=json.loads(config_json))
-    except (gate.CompressedRouteSweepError, ValueError) as exc:
-        return problems + [f"{slot}: REFUSED on replay: {exc}"]
-    if verdict["status"] != gate.AGREE:
-        problems.append(f"{slot}: {verdict['detail']}")
-    if record.get("passed") is not True:
-        problems.append(f"{slot}: record carries passed={record.get('passed')!r}")
-    if record.get("sweep_verdict") != verdict:
-        problems.append(
-            f"{slot}: carried sweep_verdict differs from the replay against "
-            "the carried sweeps and the artifact's own config.json")
-    return problems
-
-
-#: The replays core itself owns for lane-declared slots, keyed by slot name.
-#: ``route.sweep`` is here because the compressed-tensors lane is data only
-#: and its sweep gate is a core module.  A lane with a plugin registers its
-#: slots' replays there instead (``shipcard_slot_verifiers``, decoupling step
-#: 6, PQ #1553), and :func:`lane_slot_verifiers` is the merged view every
-#: check reads.  The slot's vocabulary membership is derived from the lane's
-#: own spec (:func:`lane_scoped_slots`); a derived slot with no replay in the
-#: merged view is REFUSED wherever it is declared, filled, or verified
-#: (RobTand/prismaquant#162).
-#:
-#: Entries here take ``(slot, record)`` after the generic ``passed`` check.
-#: A plugin's replays take ``(slot, record, *, card, model_dir)`` and own the
-#: slot's whole verdict, so :func:`verify` routes them past that check.
-LANE_SLOT_VERIFIERS: dict[str, Callable[..., list[str]]] = {
-    ROUTE_SWEEP_SLOT: _verify_route_sweep_record,
-}
-
-
-def lane_plugin_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
-    """The slot replays lane plugins register, keyed by slot name.
-
-    Each lane plugin that provides ``shipcard_slot_verifiers`` answers with
-    ``{slot: replay}``.  A slot two owners claim -- two plugins, or a plugin
-    and :data:`LANE_SLOT_VERIFIERS` -- RAISES: choosing one replay would be a
-    guess about which lane's evidence the slot holds.
-    """
-    from prismaquant.lane_spec import lane_hooks
-
-    found: dict[str, Callable[..., list[str]]] = {}
-    owners: dict[str, str] = {slot: "shipcard" for slot in LANE_SLOT_VERIFIERS}
-    for lane, hook in lane_hooks("shipcard_slot_verifiers"):
-        for slot, replay in dict(hook()).items():
-            if slot in owners:
-                raise KeyError(
-                    f"shipcard slot {slot!r} has two replays, from "
-                    f"{owners[slot]!r} and lane {lane!r}; one slot has one "
-                    "verifier")
-            owners[slot] = lane
-            found[slot] = replay
-    return found
-
-
-def lane_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
-    """Every lane-declared slot's replay: core's own plus each plugin's."""
-    return {**LANE_SLOT_VERIFIERS, **lane_plugin_slot_verifiers()}
-
-
 def required_slots(
     card: Mapping[str, Any],
     *,
@@ -3213,7 +2171,7 @@ def required_slots(
 ) -> tuple[str, ...]:
     """Return every slot default verification must replay.
 
-    Container-required slots, then whatever the card's own ``lane`` declares,
+    Container-required slots, then the artifact-derived lane's declared slots,
     then recognized optional claims that are present and non-null.
 
     Until 2026-09-02 the retired Gridbook codebook lane added three lane-scoped
@@ -3235,7 +2193,7 @@ def required_slots(
     # can subtract nothing: the GGUF lane declares no `native_export.graph`
     # gate and is still required to close that slot, so lane-derivation cannot
     # be used to shrink a bar.
-    required.extend(lane_gate_slots(card.get("lane")))
+    required.extend(lane_gate_slots(artifact_lane(card, model_dir=model_dir)))
     if _is_rate_axis_artifact(card, model_dir=model_dir):
         required.append(UNIFORM_CONTROL_SLOT)
     slots = card.get("slots")

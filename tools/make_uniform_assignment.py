@@ -55,8 +55,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
     _scan_source_dtype_manifest,
     check_format_applicability,
 )
@@ -340,6 +340,8 @@ def _meta_skeleton(model_path: str):
     ``AutoModelForCausalLM.from_config``); no weights are read, so this is
     CPU/RAM-free and scales to any model size.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig, AutoModelForCausalLM
 
     from prismaquant.sensitivity_probe import stage_text_only

@@ -1165,7 +1165,7 @@ def _apply_probabilities(
 
 
 def _source_passthrough_formats() -> frozenset[str]:
-    from prismaquant.allocator_candidates import SOURCE_PASSTHROUGH_FORMATS
+    from prismaquant.source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
     return frozenset(SOURCE_PASSTHROUGH_FORMATS)
 
 

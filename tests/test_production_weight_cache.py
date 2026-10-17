@@ -7,10 +7,13 @@ import torch
 import torch.nn as nn
 import pytest
 
-from prismaquant.export_native_compressed import (
-    _resolve_gptq_fixed_damp,
+from prismaquant.render_cache_paths import cache_weight_filename
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.native_render_codec import (
+    resolve_gptq_fixed_damp,
     gptq_damp_sweep_enabled,
 )
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.production_weight_cache import _resolve_production_render_levers
 from prismaquant.build_production_cache import (
     validate_render_assignment_cache_coverage,
@@ -319,11 +322,10 @@ def test_cache_fill_refuses_a_retired_codebook_rung(tmp_path):
     # existing shard without rendering. A retired codebook rung (archived
     # 2026-09-25, #1304) must refuse before either, even with a stale shard
     # for it already on disk.
-    import prismaquant.production_weight_cache as pwc
     from prismaquant import format_registry as fr
 
     model = _TinyL1()
-    shard = tmp_path / pwc._cache_weight_filename("l1", "NVFP4_CB_K16")
+    shard = tmp_path / cache_weight_filename("l1", "NVFP4_CB_K16")
     torch.save(model.l1.weight.detach(), shard)
     with pytest.raises(fr.RetiredFormatError, match="gridbook_lane"):
         fill_production_weight_cache(
@@ -407,12 +409,15 @@ def test_production_cache_records_damp_sweep_lever(monkeypatch):
     assert off["gptq_damp_sweep"] is False
     # Sweep-off renders must record WHICH fixed damp they used, or two
     # fixed-damp caches are metadata-indistinguishable.
-    assert off["gptq_fixed_damp"] == _resolve_gptq_fixed_damp()
+    assert off["gptq_fixed_damp"] == resolve_gptq_fixed_damp(
+        levers=NativeRenderLevers.resolve())
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "1")
     on = _normalized_production_cache_levers("gptq,scale_sweep")
     assert on["gptq_damp_sweep"] is True
-    assert "gptq_fixed_damp" not in on
+    assert on["gptq_fixed_damp"] == resolve_gptq_fixed_damp(
+        levers=NativeRenderLevers.resolve())
+    # The complete recipe retains both fixed and swept choices.
 
     # The probe's provenance must follow the production policy default
     # (sweep OFF since 2026-06-12, f2363e2) — it kept a stale sweep-ON
@@ -420,7 +425,8 @@ def test_production_cache_records_damp_sweep_lever(monkeypatch):
     monkeypatch.delenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", raising=False)
     assert _normalized_production_cache_levers(
         "gptq,scale_sweep"
-    )["gptq_damp_sweep"] is gptq_damp_sweep_enabled() is False
+    )["gptq_damp_sweep"] is gptq_damp_sweep_enabled(
+        levers=NativeRenderLevers.resolve(gptq_default=True)) is False
 
 
 def test_production_cache_none_lever_disables_defaults(monkeypatch):
@@ -508,7 +514,7 @@ def test_render_score_clips_nvfp4_but_not_dynamic_mxfp8(monkeypatch):
         reference_weight=reference,
         rendered_weight=rendered,
         activations=activations,
-        activation_max_abs=0.5,
+        activation_max_abs=0.5, levers=NativeRenderLevers.resolve(gptq_default=True),
     )
     mxfp8 = _render_score_record(
         qname="layer",
@@ -517,7 +523,7 @@ def test_render_score_clips_nvfp4_but_not_dynamic_mxfp8(monkeypatch):
         reference_weight=reference,
         rendered_weight=rendered,
         activations=activations,
-        activation_max_abs=0.5,
+        activation_max_abs=0.5, levers=NativeRenderLevers.resolve(gptq_default=True),
     )
 
     assert nvfp4["activation_clipped"] is True
@@ -805,8 +811,6 @@ def test_fisher_row_cache_uses_configured_fused_sibling_mapping(tmp_path):
 
 
 def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -820,7 +824,7 @@ def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
             weight.detach().to(torch.float32) + 2.0,
         )
 
-    monkeypatch.setattr(enc, "_mxfp8_scale_sweep_quantize", fake_mxfp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "mxfp8_scale_sweep_quantize", fake_mxfp8_scale_sweep)
 
     cache = fill_production_weight_cache(
         model,
@@ -845,8 +849,6 @@ def test_production_cache_mxfp8_uses_activation_scale_sweep(monkeypatch):
 
 
 def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -860,7 +862,7 @@ def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
             weight.detach().to(torch.float32) + 2.0,
         )
 
-    monkeypatch.setattr(enc, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
 
     cache = fill_production_weight_cache(
         model,
@@ -883,8 +885,6 @@ def test_production_cache_fp8_uses_activation_scale_sweep(monkeypatch):
 
 
 def test_production_cache_fp8_e4m3_uses_gptq(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -904,7 +904,7 @@ def test_production_cache_fp8_e4m3_uses_gptq(monkeypatch):
         )
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "gptq_obs_rounding_fp8_like", fake_fp8_gptq)
 
     fill_production_weight_cache(
         model,
@@ -935,7 +935,6 @@ def test_format_gate_disables_joint_scale_opt_for_mxfp8():
 
 
 def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -969,8 +968,8 @@ def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch)
         return 1.0, "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_fp8_gptq)
-    monkeypatch.setattr(enc, "_fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
+    monkeypatch.setattr(_native_render_codec, "gptq_obs_rounding_fp8_like", fake_fp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "fp8_dynamic_scale_sweep_quantize", fake_fp8_scale_sweep)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     fill_production_weight_cache(
@@ -991,8 +990,6 @@ def test_production_cache_non_nv_scale_sweep_refines_current_render(monkeypatch)
 
 
 def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     calls = []
@@ -1012,7 +1009,7 @@ def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
         )
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
 
     fill_production_weight_cache(
         model,
@@ -1036,7 +1033,6 @@ def test_production_cache_mxfp8_e5m2_uses_gptq_without_joint_scale(monkeypatch):
 
 
 def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -1063,7 +1059,7 @@ def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
         return float((rendered_weight.to(torch.float32) - target).pow(2).sum()), "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
+    monkeypatch.setattr(_native_render_codec, "gptq_obs_rounding_fp8_like", fake_mxfp8_gptq)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     cache = fill_production_weight_cache(
@@ -1087,7 +1083,6 @@ def test_production_cache_mxfp8_static_act_order_do_no_harm(monkeypatch):
 
 
 def test_production_cache_mxfp4_static_act_order_do_no_harm(monkeypatch):
-    import prismaquant.export_native_compressed as enc
     import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
@@ -1114,7 +1109,7 @@ def test_production_cache_mxfp4_static_act_order_do_no_harm(monkeypatch):
         return float((rendered_weight.to(torch.float32) - target).pow(2).sum()), "output_mse"
 
     monkeypatch.setenv("PRISMAQUANT_GPTQ_DAMP_SWEEP", "0")
-    monkeypatch.setattr(enc, "_gptq_obs_rounding_mxfp4", fake_mxfp4_gptq)
+    monkeypatch.setattr(_native_render_codec, "gptq_obs_rounding_mxfp4", fake_mxfp4_gptq)
     monkeypatch.setattr(pwc, "_render_score_for_gate", fake_gate_score)
 
     cache = fill_production_weight_cache(
@@ -1218,13 +1213,11 @@ def test_production_cache_records_render_scores(monkeypatch, tmp_path):
 
 
 def test_resume_collects_activations_when_render_scores_missing(tmp_path):
-    import prismaquant.production_weight_cache as pwc
-
     model = _TinyChain()
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
 
     cache = fill_production_weight_cache(
@@ -1270,7 +1263,7 @@ def test_render_score_record_raises_on_activation_score_failure(monkeypatch):
             reference_weight=torch.eye(4),
             rendered_weight=torch.eye(4),
             activations=torch.randn(2, 4),
-            activation_max_abs=None,
+            activation_max_abs=None, levers=NativeRenderLevers.resolve(gptq_default=True),
         )
 
 
@@ -1295,12 +1288,11 @@ class _TinyChain(nn.Module):
 
 def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):
     import json
-    import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     (tmp_path / "render_scores.json").write_text(json.dumps({
         "schema": "prismaquant.production_render_scores.v1",
@@ -1326,12 +1318,11 @@ def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):
 
 def test_resume_loads_existing_activation_max_abs_sidecar(tmp_path):
     import json
-    import prismaquant.production_weight_cache as pwc
 
     model = _TinyChain()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     (tmp_path / "render_scores.json").write_text(json.dumps({
         "schema": "prismaquant.production_render_scores.v1",
@@ -1561,7 +1552,6 @@ def test_render_gate_scores_on_gptq_clipped_activations():
     capture — otherwise accept-vs-RTN decisions near ties are biased by the
     outlier rows."""
     import prismaquant.production_weight_cache as pwc
-    from prismaquant import export_native_compressed as enc
     from prismaquant.render_score import score_render_error
 
     torch.manual_seed(0)
@@ -1582,14 +1572,15 @@ def test_render_gate_scores_on_gptq_clipped_activations():
         gate_trace=trace,
     )
 
-    X = enc._activation_matrix_for_gptq(
+    X = _native_render_codec.activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
+        levers=NativeRenderLevers.resolve({"gptq": True}),
     )
 
     # Baseline candidate = static_6 RTN; its recorded gate score must be the
     # shared scorer evaluated on the CLIPPED matrix, not on raw acts.
-    with pwc._temporary_nvfp4_scale_rule(enc.NVFP4_SCALE_RULE_STATIC_6):
-        baseline = enc._rtn_dequant_nvfp4(weight.float(), group_size=16)
+    baseline = _native_render_codec.rtn_dequant_nvfp4(
+        weight.float(), group_size=16, levers=NativeRenderLevers())
     expected_clipped = score_render_error(weight.float(), baseline, X)
     raw_score = score_render_error(weight.float(), baseline, acts.float())
     assert trace[0]["mechanism"] == "baseline"
@@ -1613,7 +1604,6 @@ def test_render_gate_scores_on_gptq_clipped_activations():
 def test_non_nv_render_gate_scores_on_gptq_clipped_activations():
     """Same clip-consistency contract for the non-NVFP4 (FP8) gate path."""
     import prismaquant.production_weight_cache as pwc
-    from prismaquant import export_native_compressed as enc
     from prismaquant import format_registry as fr
     from prismaquant.render_score import score_render_error
 
@@ -1634,8 +1624,9 @@ def test_non_nv_render_gate_scores_on_gptq_clipped_activations():
         gate_trace=trace,
     )
 
-    X = enc._activation_matrix_for_gptq(
+    X = _native_render_codec.activation_matrix_for_gptq(
         acts.float(), 32, clip_threshold=clip, clip_rescale="none",
+        levers=NativeRenderLevers.resolve({"gptq": True}),
     )
     baseline = fr.get_format("FP8_E4M3").quantize_dequantize(
         weight.detach().clone()
@@ -1684,7 +1675,7 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
 
 
 # ------------------------------------------------------------------ #2219 --
-# ``_cache_weight_filename`` is not injective in the qualified name: the
+# ``cache_weight_filename`` is not injective in the qualified name: the
 # mangled leaf aliases ``.`` with ``_`` (and ``/`` with ``__``), and the
 # stored payload is the bare tensor, so a colliding pair reads and overwrites
 # each other's shard with no refusal anywhere. These tests pin the
@@ -1699,9 +1690,7 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
 
 def test_require_injective_cache_filenames_refuses_colliding_pair():
     # The issue's own example pair: `a.b` and `a_b` mangle to one leaf.
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
@@ -1718,9 +1707,7 @@ def test_require_injective_cache_filenames_refuses_colliding_pair():
 
 
 def test_require_injective_cache_filenames_refuses_slash_alias_pair():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
@@ -1737,9 +1724,7 @@ def test_require_injective_cache_filenames_refuses_slash_alias_pair():
 
 
 def test_require_injective_cache_filenames_allows_one_qname_two_formats():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     # One qname at two formats is two filenames (`...__BF16.pt` vs
     # `...__NVFP4.pt`), not a collision; only two distinct coordinates that
@@ -1758,9 +1743,7 @@ def test_require_injective_cache_filenames_admits_cross_format_alias_pair():
     # two different files (`...__BF16.pt` vs `...__FP8_E4M3.pt`), so the
     # coordinate set is admitted; the same pair at one format refuses (the
     # colliding-pair tests above).
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     require_injective_cache_filenames(
         [("layer.a", "BF16"), ("layer_a", "FP8_E4M3")],
@@ -1769,9 +1752,7 @@ def test_require_injective_cache_filenames_admits_cross_format_alias_pair():
 
 
 def test_require_injective_cache_filenames_accepts_realistic_roster():
-    from prismaquant.production_weight_cache import (
-        require_injective_cache_filenames,
-    )
+    from prismaquant.render_cache_paths import require_injective_cache_filenames
 
     # A GLM-5.3-shaped dense + packed-expert roster: every real model the
     # issue checked (GLM-5.3-Flash, DeepSeek-V4.1-Flash, Qwen3.8-Flash-Next)

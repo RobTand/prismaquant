@@ -21,6 +21,7 @@ Nothing here touches the shared mount: the campaign, its captures, its shard
 and its seed wire directory are all built under ``tmp_path``.
 """
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
 import json
 import struct
 import sys
@@ -31,8 +32,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # noqa: E402
 
-from experiments import glm_data_manifests  # noqa: E402
-from experiments.glm_arc_prewarm import RECORD_SIZE  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
+from prismaquant.campaign_data_manifests import RECORD_SIZE
 
 MEMBER = "model.layers.0.mlp.experts.0.down_proj"
 TENSOR_BYTES = 4 * RECORD_SIZE
@@ -125,7 +126,7 @@ def test_seed_entries_come_from_the_rows_seed_wire_dir_argv(
     campaign = glm_data_manifests.Campaign(str(workspace))
     row = _row(units, seed_dir)
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, row["argv"])
 
     declared = {entry["path"]: entry["bytes"] for entry in manifest["entries"]}
@@ -139,7 +140,7 @@ def test_seed_entries_come_from_the_rows_seed_wire_dir_argv(
 
     # And this is the defect: the plan names no seed for this row, so a
     # manifest built without the argv declares none of those bytes.
-    blind = glm_data_manifests.build_manifest(
+    blind = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"})
     assert blind["annotations"]["counts"]["seeds"] == 0
     assert blind["total_bytes"] < manifest["total_bytes"]
@@ -158,7 +159,7 @@ def test_the_seed_wire_is_declared_last_so_a_short_warm_keeps_the_captures(
     workspace, units, seed_dir = _workspace(tmp_path)
     campaign = glm_data_manifests.Campaign(str(workspace))
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, seed_dir)["argv"])
 
     seeds = {str(seed_dir / name) for name in SEED_WIRE}
@@ -301,7 +302,7 @@ def test_a_seed_wire_directory_reached_through_a_symlink_is_still_declared(
     link.symlink_to(seed_dir)
     campaign = glm_data_manifests.Campaign(str(workspace))
 
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, link)["argv"])
 
     assert manifest["annotations"]["counts"]["seeds"] == len(SEED_WIRE)
@@ -329,12 +330,12 @@ def test_a_row_whose_named_seed_wire_yields_nothing_is_refused(
     named = ["--seed-checkpoint", str(checkpoint)]
 
     absent = _row(units, tmp_path / "never-written", extra=named)
-    with pytest.raises(SystemExit, match="no readable file was found"):
+    with pytest.raises(ReadsetRefused, match="no readable file was found"):
         dispatch.attach_data_manifests(workspace, [absent])
 
     empty = tmp_path / "empty-wire"
     empty.mkdir()
-    with pytest.raises(SystemExit, match="no readable file was found"):
+    with pytest.raises(ReadsetRefused, match="no readable file was found"):
         dispatch.attach_data_manifests(workspace, [_row(units, empty, extra=named)])
 
     # The checkpoint on its own is still declared when the wire directory has
@@ -359,15 +360,55 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
 
     workspace, units, seed_dir = _workspace(tmp_path)
     campaign = glm_data_manifests.Campaign(str(workspace))
-    manifest = glm_data_manifests.build_manifest(
+    manifest = glm_data_manifests.build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test"}, _row(units, seed_dir)["argv"])
 
     # The real ceilings are far above any GLM row, so the refusal is exercised
     # by lowering them rather than by building a million entries.
     monkeypatch.setattr(glm_data_manifests, "MAX_ENTRIES", 1)
-    with pytest.raises(SystemExit, match="entries exceed 1"):
+    with pytest.raises(ReadsetRefused, match="entries exceed 1"):
         glm_data_manifests.check_manifest(manifest)
-    with pytest.raises(SystemExit, match="over the"):
+    with pytest.raises(ReadsetRefused, match="over the"):
         glm_data_manifests.check_manifest_bytes(
             b"x" * (glm_data_manifests.MAX_MANIFEST_BYTES + 1))
     assert glm_data_manifests.check_manifest_bytes(b"{}") == b"{}"
+
+
+def test_seed_readset_uses_the_last_equal_or_abbreviated_directory(tmp_path, shared_mount):
+    workspace, units, seed_dir = _workspace(tmp_path)
+    campaign = glm_data_manifests.Campaign(str(workspace))
+    row = _row(units, tmp_path / 'unused-first-seed', extra=[
+        '--seed-wire-d=' + str(seed_dir)])
+    manifest = glm_data_manifests.build_campaign_row_manifest(
+        campaign, 'row-0000', {'tool': 'test'}, row['argv'])
+    declared = {entry['path']: entry['bytes'] for entry in manifest['entries']}
+    assert manifest['annotations']['seed_wire_dir'] == str(seed_dir)
+    for name, size in SEED_WIRE.items():
+        assert declared[str(seed_dir / name)] == size
+    assert not any('unused-first-seed' in path for path in declared)
+
+
+def test_the_dispatcher_ends_a_producer_refusal_with_its_reason(monkeypatch):
+    """The producer raises a domain error; only the CLI main turns it into an exit."""
+    reason = "row-0001: zero-length entry: /mnt/shared/x"
+
+    def refuse(_args):
+        raise ReadsetRefused(reason)
+
+    monkeypatch.setattr(dispatch, "cmd_check", refuse)
+    with pytest.raises(SystemExit) as exit_info:
+        dispatch.main(["check", "--workspace", "/nowhere"])
+    assert exit_info.value.code == reason
+    assert isinstance(exit_info.value.__cause__, ReadsetRefused)
+
+
+def test_the_producer_reads_declared_paths_and_spells_no_host_layout():
+    """Host mount facts belong to the boundaries that measure them, not the producer."""
+    import ast
+    from tests.boundary_gate import code_strings
+
+    source = Path(glm_data_manifests.__file__).read_text()
+    assert not [text for _node, text in code_strings(ast.parse(source))
+                if "/storage_pool" in text]
+    assert not hasattr(glm_data_manifests, "to_pool")
+    assert issubclass(ReadsetRefused, RuntimeError)

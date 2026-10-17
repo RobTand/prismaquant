@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-from prismaquant.tessera_campaign import draw_stack_sample, _horvitz_thompson_stack
+from prismaquant.tessera_campaign_table import (draw_stack_sample, _horvitz_thompson_stack)
 
 
 def test_real_stack_fixed_size_pps_point_estimate_and_paired_rungs():

@@ -6,17 +6,15 @@ No tensors, model files or GPU are allocated by this 864-unit geometry fixture.
 """
 from __future__ import annotations
 
-import ast
 import json
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant import autoscale
 from prismaquant.tessera_row_stream import (
     MEMORY_PLANS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM,
-    checkpoint_present, stream_head_dependency,
+    checkpoint_present,
 )
 from tools import dispatch_tessera_campaign as dispatch
 
@@ -30,25 +28,43 @@ REFERENCE_POLICY = {"schema": "tessera.hessian_reference_load.v1",
                     "max_metadata_bytes": 134217728}
 
 
-def _campaign_dependency(checkpoint, *, extra=None):
-    # Execute the real call site rather than adapting the function signature:
-    # ff0b43a5 passes checkpoint_exists, while #1613 removes that dependency.
-    path = Path(__file__).parents[1] / "prismaquant" / "tessera_campaign.py"
-    tree = ast.parse(path.read_text())
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Name) and node.func.id == "stream_head_dependency"]
-    assert len(calls) == 1, "the campaign must have one checked head-selection rule"
-    args = SimpleNamespace(row_head=ROW_HEAD_STREAM, capture_load_policy=LOAD_POLICY,
-                           export_hessian_reference_policy=REFERENCE_POLICY,
-                           max_rounds=1, seed_checkpoint=None)
-    for key, value in (extra or {}).items():
-        setattr(args, key, value)
-    expression = ast.Expression(body=calls[0])
-    return eval(compile(expression, str(path), "eval"), {
-        "args": args, "selected_source": True, "checkpoint": checkpoint,
-        "checkpoint_present": checkpoint_present,
-        "stream_head_dependency": stream_head_dependency,
-    })
+def _campaign_runtime_head(checkpoint, argv, monkeypatch):
+    """Run the real CLI through head selection, stopping at source custody."""
+    from prismaquant import tessera_campaign as campaign
+    from prismaquant import tessera_calibration_cache as capture
+
+    class BeforeSourceRead(BaseException):
+        pass
+
+    attempted = []
+    def stop_at_source(*args, **kwargs):
+        attempted.append((args, kwargs))
+        raise BeforeSourceRead('head decision observed before source authentication')
+
+    output = checkpoint.parent / 'actual-head.pkl'
+    cache_dir = checkpoint.parent / 'actual-head-cache'
+    missing_model = checkpoint.parent / 'never-opened-model'
+    missing_selection = checkpoint.parent / 'never-opened-units.json'
+    missing_census = checkpoint.parent / 'never-opened-census.json'
+    missing_capture = checkpoint.parent / 'never-opened-capture.json'
+    with monkeypatch.context() as scoped:
+        scoped.setattr(capture, 'authenticate_selected_capture_source', stop_at_source)
+        with pytest.raises(BeforeSourceRead):
+            campaign.main([*argv, '--model', str(missing_model), '--out', str(output),
+                '--cache-dir', str(cache_dir), '--checkpoint', str(checkpoint),
+                '--units', str(missing_selection), '--calibration-census', str(missing_census),
+                '--calibration-cache', str(missing_capture), '--calibration-cache-sha256', 'a'*64,
+                '--attention-implementation', 'eager'])
+    assert len(attempted) == 1
+    assert attempted[0][1]['model'] == str(missing_model)
+    assert all(not path.exists() for path in (
+        missing_model, missing_selection, missing_census, missing_capture))
+    assert not output.exists()
+    assert not (cache_dir / 'row-head-execution.json').exists()
+    record = json.loads(output.with_suffix('.waits.json').read_text())
+    assert record['passed'] is False
+    assert record['failure'].startswith('BeforeSourceRead:')
+    return record['row_head']
 
 
 @pytest.fixture
@@ -99,19 +115,19 @@ def test_runtime_and_planner_keep_the_stream_plan_for_checkpoint_resume(
         (units / "unit.pkl").write_bytes(b"presence only")
     assert checkpoint_present(checkpoint) == (checkpoint_kind != "absent")
     members = sorted(census["unit_shapes"])
-    plans = dispatch._streamed_resource_plan(spec, census, members, selected_source=True)
+    plans = campaign_rows.streamed_resource_plan(spec, census, members, selected_source=True)
     stream_bytes = plans[MEMORY_PLANS[ROW_HEAD_STREAM]]
     load_all_bytes = plans[MEMORY_PLANS[ROW_HEAD_LOAD_ALL]]
     assert isinstance(stream_bytes, int) and isinstance(load_all_bytes, int)
     assert stream_bytes + BASELINE_BYTES < CAP_BYTES
     assert load_all_bytes + BASELINE_BYTES > CAP_BYTES
-    dependency = _campaign_dependency(checkpoint)
-    runtime_bytes = stream_bytes if dependency is None else load_all_bytes
+    head = _campaign_runtime_head(checkpoint, spec['campaign_argv'], monkeypatch)
+    runtime_bytes = plans[MEMORY_PLANS[head]]
     assert runtime_bytes + BASELINE_BYTES <= CAP_BYTES, (
-        "a checkpoint changed the runtime head after stream-sized admission: " + str(dependency))
-    assert dependency is None
-    assert dispatch._row_head_dependency(spec["campaign_argv"]) is None
-    demand = dispatch._row_memory_demand(spec, members, census, selected_source=True)
+        "a checkpoint changed the runtime head after stream-sized admission: " + str(head))
+    assert head == ROW_HEAD_STREAM
+    assert campaign_rows.row_head_dependency(spec["campaign_argv"]) is None
+    demand = campaign_rows.row_memory_demand(spec, members, census, selected_source=True)
     assert demand["plan_bytes"] == runtime_bytes
     assert demand["mem_gb"] <= 69
 
@@ -129,7 +145,7 @@ def test_genuine_load_all_dependencies_are_refused_before_submission(
         argv[argv.index(extra[0]) + 1] = extra[1]
     else:
         argv.extend(extra)
-    assert words in dispatch._row_head_dependency(argv)
+    assert words in campaign_rows.row_head_dependency(argv)
     selection = tmp_path / "units.json"
     selection.write_text(json.dumps({"schema": "prismaquant.tessera_campaign_units.v1",
                                     "groups": [{"key": "s:stack", "members": sorted(census["counts"])}]}))

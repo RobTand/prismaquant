@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Mapping
 
 from . import record_fields
-from .joint_aura import identity_sha256, validate_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
 from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, is_sha256hex
 
@@ -53,7 +53,7 @@ def _sha(value, name):
 
 
 def _equal(actual, expected, name):
-    if identity_sha256(actual) != identity_sha256(expected):
+    if joint_identity_sha256(actual) != joint_identity_sha256(expected):
         raise ValueError(f"native panel {name} differs from independently frozen input")
 
 
@@ -465,10 +465,10 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     _equal(operator["input_global_scale"], joint["activation"]["input_global_scale"], "native input scale")
     _equal(operator["clip_enabled"], False, "native clip")
     _equal(operator["wire_sha256"], inputs["wire"]["blob_sha256"], "native wire")
-    _equal(operator["wire_record_sha256"], identity_sha256(inputs["wire"]["record"]), "native wire record")
-    _equal(preflight["runtime_sha256"], identity_sha256(preflight["runtime"]), "runtime digest")
-    _equal(preflight["native_tensors_sha256"], identity_sha256(operator["native_tensors"]), "native tensors")
-    _equal(preflight["scheme_sha256"], identity_sha256(operator["scheme"]), "native scheme")
+    _equal(operator["wire_record_sha256"], joint_identity_sha256(inputs["wire"]["record"]), "native wire record")
+    _equal(preflight["runtime_sha256"], joint_identity_sha256(preflight["runtime"]), "runtime digest")
+    _equal(preflight["native_tensors_sha256"], joint_identity_sha256(operator["native_tensors"]), "native tensors")
+    _equal(preflight["scheme_sha256"], joint_identity_sha256(operator["scheme"]), "native scheme")
     execution = require_native_execution(inputs, preflight)
     _equal(preflight["runtime"]["image"], inputs["runtime_image"], "native image reference")
     route = operator["declared_route"]
@@ -502,7 +502,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_dense_late_binding.v1":
-        from .native_execution_binding import resolve_execution_binding
+        from .native_panel_kind import resolve_execution_binding
         receipt = resolve_execution_binding(receipt, expected_panel)
     if receipt.get("schema") != "tessera.native_dense_operator_receipt.v1" or receipt.get("status") != "timing_admissible":
         raise ValueError("native receipt has no admitted numerical/timing observation")
@@ -513,9 +513,9 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     _admit(receipt["operator"], "receipt operator", OPERATOR_FIELDS,
            ("declared_route", "activation_contract"))
     _admit(receipt["resources"], "receipt resources", RESOURCE_FIELDS, RESOURCE_OPTIONAL_FIELDS)
-    _equal(receipt["panel_sha256"], identity_sha256(expected_panel), "receipt panel digest")
+    _equal(receipt["panel_sha256"], joint_identity_sha256(expected_panel), "receipt panel digest")
     _equal(receipt["runtime"], expected_panel["runtime"], "receipt runtime")
-    _equal(receipt["runtime_sha256"], identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
+    _equal(receipt["runtime_sha256"], joint_identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
     operator = receipt["operator"]
     joint = expected_panel["joint_operator_identity"]
     for key in ("source_weight", "rendered_weight"):
@@ -523,16 +523,16 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     _equal(operator["input_global_scale"], joint["activation"]["input_global_scale"], "receipt activation scale")
     _equal(operator["clip_enabled"], False, "receipt activation clip")
     _equal(operator["wire_sha256"], expected_panel["wire"]["blob_sha256"], "receipt wire")
-    _equal(operator["wire_record_sha256"], identity_sha256(expected_panel["wire"]["record"]), "receipt wire record")
-    _equal(identity_sha256(operator["native_tensors"]), expected_panel["native_tensors_sha256"], "receipt native tensors")
-    _equal(identity_sha256(operator["scheme"]), expected_panel["scheme_sha256"], "receipt scheme")
+    _equal(operator["wire_record_sha256"], joint_identity_sha256(expected_panel["wire"]["record"]), "receipt wire record")
+    _equal(joint_identity_sha256(operator["native_tensors"]), expected_panel["native_tensors_sha256"], "receipt native tensors")
+    _equal(joint_identity_sha256(operator["scheme"]), expected_panel["scheme_sha256"], "receipt scheme")
     resources = receipt["resources"]
     complete = resources.get("status") == "complete_operator_bound"
     if complete:
         if memory_trace_path is None:
             raise ValueError("complete native resource bound requires its actual memory trace")
         trace = json.loads(Path(memory_trace_path).read_text())
-        _equal(identity_sha256(trace), resources["trace_sha256"], "memory trace")
+        _equal(joint_identity_sha256(trace), resources["trace_sha256"], "memory trace")
         _equal(trace["capture"]["collector_library_sha256"],
                expected_panel["runtime"]["resource_collector"]["library_sha256"], "resource collector")
     quantizes_input = bool(
@@ -578,7 +578,7 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
                                "output_bytes": expected["reference_output"]["logical_bytes"],
                                "kernel_schedule": schedule, "kernel_arch": arch}
     return {"schema": "prismaquant.native_dense_observation.v1", "status": "operator_evidence",
-            "panel_sha256": identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
+            "panel_sha256": joint_identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
             "unit": expected_panel["unit"], "format": expected_panel["format"],
             "cost_sha256": expected_panel["cost_sha256"], "phases": observations,
             "activation_scope": activation_scope,

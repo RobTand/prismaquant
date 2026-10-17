@@ -91,30 +91,47 @@ import sys
 from pathlib import Path, PurePosixPath
 
 if __package__:
-    from .tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
-        DEV_MODE_ENV,
-        admission_image_reference,
-        container_memory_budget_gb,
-        validate_container,
-    )
+    from .tessera_campaign_container import DEV_MODE_ENV
 else:
     # Direct script execution puts only tools/ on sys.path. Planning also
     # reads the shared calibration contract from the sibling package.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
-        DEV_MODE_ENV,
-        admission_image_reference,
-        container_memory_budget_gb,
-        validate_container,
-    )
+    from tessera_campaign_container import DEV_MODE_ENV
 
 from tools.tessera_campaign_namespace import (
     establish_namespace_temporaries, namespace_path, namespace_publication_record,
     prepare_namespace_requests,
     validate_namespace_request,
 )
+from prismaquant import campaign_data_manifests
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant.campaign_container_spec import (
+    BOUNDED_CAPTURE_ENV,
+    CONTAINER_IMAGE_FLAG,
+    admission_image_reference,
+    container_memory_budget_gb,
+    validate_container,
+)
+from prismaquant.tessera_campaign_cli import campaign_action_arguments, explicit_campaign_options
+from prismaquant.tessera_campaign_table import (
+    CAMPAIGN_IDENTITY_SCHEMA,
+    CAMPAIGN_SCOPE_KINDS,
+    MergeRefused,
+    PLAN_SCHEMA,
+    bound_joint_cells,
+    check_acquisition_identity,
+    hessian_identities,
+    merge_acquisition_rows,
+    payload_acquisition_records,
+    require_equal,
+    require_campaign_receipts,
+    aqua_requested_cells,
+    merge_checkpoint,
+    merge_payloads,
+    verify_joint_campaign_scope,
+)
+
+from prismaquant.digests import file_sha256hex
 
 PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
 
@@ -156,602 +173,12 @@ def publish_namespace_requests(rows: list[dict]) -> None:
         establish_namespace_temporaries(row)
 
 
-#: What ``plan`` writes beside the manifest, so ``merge`` reads the row layout
-#: from the plan rather than from the directory listing it happens to find.
-PLAN_SCHEMA = "prismaquant.tessera_campaign_plan.v1"
-
 #: The plan key that declares a census scope deliberately left partly unpriced:
 #: the rows the plan dropped and why.  ``merge`` reads only this declaration
 #: to expect less than the scope -- never which row directories happen to hold
 #: a ``cost.pkl`` -- and writes what it read into the merged table under
 #: ``provenance.coverage``.  A plan without it claims the whole scope.
 DENSE_ROWS_EXCLUDED_KEY = "dense_rows_excluded"
-COVERAGE_SCHEMA = "prismaquant.tessera_campaign_coverage.v1"
-
-#: Provenance fields every row must agree on before a merge is possible.  Each
-#: one describes the run, not the selection, so a disagreement means two
-#: campaigns are being merged into one table.
-SHARED_PROVENANCE = (
-    "menu_mode", "tp_degree", "model", "nsamples", "seqlen", "max_act_rows",
-    "layer_stride", "anchors_round_one", "max_rounds", "anchor_budget",
-    "loo_gate", "max_artifact_bpp", "cost_mode", "rate_band", "calibration_cache",
-)
-
-#: Hessian identity fields every row must already agree on.  ``capture_sha256``
-#: is deliberately absent: it is the digest of the capture a row wrote for its
-#: own units, and reconciling it is what the merge is for.
-SHARED_HESSIAN = (
-    "supplied", "text_sha", "token_count", "text_sha256", "fit_ids_sha256",
-    "fit_tokens", "kwarg", "reference_binding",
-)
-
-
-#: Checkpoint-identity keys the merge RECONCILES instead of requiring equal.
-#: Every one of them is per-selection: it describes the units this row was
-#: given, not the campaign. Everything outside this set must already agree,
-#: because a difference there means the rows priced two different campaigns.
-RECONCILED_IDENTITY_KEYS = frozenset({
-    "units", "serving_scope", "expert_projection", "stack_sampling_identity",
-    "family_restriction",
-})
-
-
-class MergeRefused(RuntimeError):
-    """The rows do not describe one campaign."""
-
-
-class RowClassRefused(RuntimeError):
-    """The spec asks for a row this fleet cannot place, or must not place."""
-
-
-# ---------------------------------------------------------------------------
-# Row classes
-# ---------------------------------------------------------------------------
-
-#: The class every subcommand builds today, and the one a spec that declares no
-#: ``classes`` block is entirely made of.  Naming it does not change a row: the
-#: default class resolves to exactly the spec-level ``python`` / ``env`` /
-#: ``tags`` / ``cpus`` / ``container`` a row has always been built from, so the
-#: row dict -- and therefore the action key a finished row is memoized under --
-#: is byte-identical to what the same spec produced before classes existed.
-DEFAULT_ROW_CLASS = "default"
-
-#: What a class may declare.  ``python``/``env``/``tags``/``cpus``/``container``
-#: override the spec-level value of the same name; ``env`` merges over the
-#: spec's rather than replacing it, so a class states only what differs.
-ROW_CLASS_FIELDS = frozenset({
-    "python", "env", "tags", "cpus", "container",
-    "wire_shared", "weights_only", "_why",
-})
-
-#: Where the placement facts live: ISA, container GPU runtime and the host
-#: interpreters actually observed running work under each tag, each with the
-#: PrismaBuild action key that ran it.
-FLEET_INTERPRETERS = Path(__file__).resolve().parent / "fleet_interpreters.json"
-FLEET_INTERPRETERS_SCHEMA = "prismaquant.fleet_interpreters.v1"
-
-#: Campaign flags that make a row's bytes depend on a Hessian.  A weights-only
-#: class may not carry one: the Hessian-aware wire is NOT bit-comparable across
-#: ISAs (RobTand/tessera#472 -- ``torch.linalg.cholesky`` diverges between
-#: cuSOLVER and rocSOLVER by one fp32 epsilon, ``ldl`` explains 53.78% of the
-#: differing rendered elements and the encoder's own consumption of it a
-#: further 15.28%), so such a row encoded off-ISA would not be this campaign's
-#: bytes.  ``--seed-checkpoint`` / ``--seed-wire-dir`` are here for the same
-#: reason: they adopt anchors another box measured under its own Hessian.
-HESSIAN_AWARE_FLAGS = (
-    "--calibration-census", "--calibration-cache", "--calibration-cache-sha256",
-    "--capture-calibration-out", "--seed-checkpoint", "--seed-wire-dir",
-)
-
-#: Modules a weights-only class may never run.  ``tessera_campaign`` is the
-#: whole campaign: its ``census`` row runs a calibration forward over the scope,
-#: its ``capture`` row writes the calibration cache and its pricing rows fit and
-#: consume a Hessian, so every one of its row kinds is either Hessian-aware or
-#: needs the census environment (a resident model, transformers, a PrismaQuant
-#: install).  Listing the module rather than trusting the flags is what makes
-#: the refusal hold for a row kind that has not been written yet.
-WEIGHTS_ONLY_FORBIDDEN_MODULES = frozenset({"prismaquant.tessera_campaign"})
-
-
-def load_fleet_interpreters(path=None) -> dict:
-    """Validate active placement attestations and separately retained history."""
-
-    source = Path(path) if path is not None else FLEET_INTERPRETERS
-    table = json.loads(source.read_text())
-    if not isinstance(table, dict) or table.get("schema") != FLEET_INTERPRETERS_SCHEMA:
-        raise RowClassRefused(
-            f"{source}: not a {FLEET_INTERPRETERS_SCHEMA} document")
-    tags = table.get("tags")
-    if not isinstance(tags, dict) or not tags:
-        raise RowClassRefused(f"{source}: declares no tags")
-    for tag, shape in tags.items():
-        if not isinstance(shape, dict):
-            raise RowClassRefused(f"{source}: tag {tag!r} is not an object")
-        for field in ("isa", "gpu_runtime"):
-            if not isinstance(shape.get(field), str) or not shape[field]:
-                raise RowClassRefused(f"{source}: tag {tag!r} declares no {field}")
-        for field in ("interpreters", "retired_interpreters"):
-            interpreters = shape.get(field, {} if field == "retired_interpreters" else None)
-            if not isinstance(interpreters, dict):
-                raise RowClassRefused(
-                    f"{source}: tag {tag!r} declares no {field} mapping")
-            for interpreter, record in interpreters.items():
-                if not isinstance(record, dict) or not isinstance(
-                        record.get("attested_by"), str) or not record["attested_by"]:
-                    raise RowClassRefused(
-                        f"{source}: interpreter {interpreter} on tag {tag!r} names no "
-                        "PrismaBuild action key that ran it")
-        overlap = shape["interpreters"].keys() & shape.get("retired_interpreters", {}).keys()
-        if overlap:
-            raise RowClassRefused(
-                f"{source}: tag {tag!r} lists interpreters as both active and retired: "
-                f"{sorted(overlap)}")
-    return table
-
-
-def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
-    """Resolve one class against the spec-level values it inherits.
-
-    A spec with no ``classes`` block has exactly one class, the default, and it
-    IS the spec: same interpreter, same environment, same tags, same container.
-    That is the property the action key depends on, so it is stated here rather
-    than left to the caller. A portable admission reference belongs to that
-    container: a class replacing the container does not inherit its reference.
-    """
-
-    base = {
-        "name": name,
-        "python": spec["python"],
-        "env": dict(spec["env"]),
-        "tags": list(spec.get("tags", ["gb10"])),
-        "cpus": int(spec.get("cpus", 4)),
-        "wire_shared": True,
-        "weights_only": False,
-    }
-    if "container" in spec:
-        base["container"] = spec["container"]
-    if "container_admission_reference" in spec:
-        base["container_admission_reference"] = spec["container_admission_reference"]
-    declared = spec.get("classes") or {}
-    if name not in declared:
-        if name != DEFAULT_ROW_CLASS:
-            raise RowClassRefused(
-                f"the spec declares no row class {name!r}; it has "
-                f"{sorted(declared) or [DEFAULT_ROW_CLASS]}")
-        return base
-    override = declared[name]
-    if not isinstance(override, dict):
-        raise RowClassRefused(f"row class {name!r} is not an object")
-    unknown = set(override) - ROW_CLASS_FIELDS
-    if unknown:
-        raise RowClassRefused(
-            f"row class {name!r} declares {sorted(unknown)}, which a class does "
-            f"not own; a class may set {sorted(ROW_CLASS_FIELDS - {'_why'})}")
-    resolved = {**base, **{k: v for k, v in override.items() if k != "_why"}}
-    if "container" in override:
-        resolved.pop("container_admission_reference", None)
-    if "env" in override:
-        if not isinstance(override["env"], dict):
-            raise RowClassRefused(f"row class {name!r} env is not an object")
-        resolved["env"] = {**spec["env"], **override["env"]}
-    resolved["tags"] = list(resolved["tags"])
-    resolved["cpus"] = int(resolved["cpus"])
-    for flag in ("wire_shared", "weights_only"):
-        if not isinstance(resolved[flag], bool):
-            raise RowClassRefused(f"row class {name!r} {flag} must be a boolean")
-    if not resolved["tags"]:
-        raise RowClassRefused(f"row class {name!r} names no placement tag")
-    return resolved
-
-
-def _class_isa(resolved: dict, fleet: dict) -> str:
-    """The one ISA this class's tags place it on, or a refusal naming why not."""
-
-    tags = fleet["tags"]
-    found = {}
-    for tag in resolved["tags"]:
-        shape = tags.get(tag)
-        if shape is None:
-            raise RowClassRefused(
-                f"row class {resolved['name']!r} names tag {tag!r}, which "
-                f"{FLEET_INTERPRETERS.name} does not attest; add the tag with "
-                "its ISA, its container GPU runtime and the interpreters "
-                "observed running there")
-        found.setdefault(shape["isa"], []).append(tag)
-    if len(found) != 1:
-        raise RowClassRefused(
-            f"row class {resolved['name']!r} spans {len(found)} instruction "
-            f"sets ({', '.join(sorted(found))}); a row is placed on one of its "
-            "tags and the wire it writes is not the same object on both")
-    return next(iter(found))
-
-
-def _attest_placement(resolved: dict, fleet: dict) -> None:
-    """Check device capability; stamp or refuse recorded host attestation."""
-
-    tags = fleet["tags"]
-    container = resolved.get("container")
-    for tag in resolved["tags"]:
-        shape = tags[tag]
-        if container is not None:
-            declared = container.get("gpu_runtime", "nvidia")
-            if declared != shape["gpu_runtime"]:
-                raise RowClassRefused(
-                    f"row class {resolved['name']!r} declares container GPU "
-                    f"runtime {declared!r}, and tag {tag!r} attaches its GPU "
-                    f"with {shape['gpu_runtime']!r}; the container would start "
-                    "without the device it was admitted for")
-            continue
-        if resolved["python"] not in shape["interpreters"]:
-            from prismaquant.dev_mode import seal_check
-
-            attested = sorted(shape["interpreters"])
-            history = (" This interpreter is retired; its retained receipt is history, "
-                       "not placement admission."
-                       if resolved["python"] in shape.get("retired_interpreters", {})
-                       else "")
-            seal_check(
-                "host interpreter placement attestation", attested, resolved["python"],
-                where=f"row class {resolved['name']!r} on tag {tag!r}", same=False,
-                refusal=lambda: RowClassRefused(
-                    f"row class {resolved['name']!r} runs {resolved['python']}, "
-                    f"which is not attested on tag {tag!r}; that tag attests "
-                    f"{attested or 'no host interpreter'}. Run it there once and "
-                    f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                    f"action key, or give the class a container.{history}"))
-
-
-def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
-    """Check every declared class against the fleet, and say what each one is.
-
-    A spec that declares no ``classes`` block is not checked: it is the shape
-    every campaign in flight already has, and refusing it here would refuse
-    specs this tool accepts today for a reason that has nothing to do with
-    them.  A spec that DOES declare classes is checked in full, because the
-    only reason to declare one is to place a row somewhere new.
-
-    Two refusals carry the measurement rather than a taste.  A class whose
-    bytes must equal the campaign's (``wire_shared``, the default) may not sit
-    on an ISA other than the default class's: the Hessian-aware wire is not
-    bit-comparable across ISAs, so such a row would merge foreign bytes into
-    one table.  And a class that declares it does NOT share the wire must
-    declare ``weights_only``, because weights-only is the only encode measured
-    byte-identical across the two.
-    """
-
-    declared = spec.get("classes")
-    if declared is None:
-        return []
-    if not isinstance(declared, dict) or not declared:
-        raise RowClassRefused(f"{where}: classes must be a non-empty object")
-    fleet = load_fleet_interpreters() if fleet is None else fleet
-    default = row_class(spec, DEFAULT_ROW_CLASS)
-    default_isa = _class_isa(default, fleet)
-    _attest_placement(default, fleet)
-    records = []
-    for name in sorted(declared):
-        resolved = default if name == DEFAULT_ROW_CLASS else row_class(spec, name)
-        isa = default_isa if name == DEFAULT_ROW_CLASS else _class_isa(resolved, fleet)
-        if name != DEFAULT_ROW_CLASS:
-            _attest_placement(resolved, fleet)
-        if resolved["wire_shared"]:
-            if isa != default_isa:
-                raise RowClassRefused(
-                    f"{where}: row class {name!r} is placed on {isa} while this "
-                    f"campaign's default class is on {default_isa}, and it "
-                    "declares its bytes are the campaign's. A Hessian-aware "
-                    "Tessera wire is not bit-comparable across those two "
-                    "(RobTand/tessera#472). Declare wire_shared false and "
-                    "weights_only true, or keep the class on one ISA")
-        elif not resolved["weights_only"]:
-            raise RowClassRefused(
-                f"{where}: row class {name!r} declares wire_shared false "
-                "without weights_only; the only encode measured byte-identical "
-                "across instruction sets is the weights-only one")
-        records.append({
-            "class": name, "isa": isa, "tags": list(resolved["tags"]),
-            "python": resolved["python"], "cpus": resolved["cpus"],
-            "wire_shared": resolved["wire_shared"],
-            "weights_only": resolved["weights_only"],
-            "containerized": "container" in resolved,
-        })
-    return records
-
-
-# ---------------------------------------------------------------------------
-# The run spec
-# ---------------------------------------------------------------------------
-
-def load_spec(path: Path) -> dict:
-    """Read the shared half of every row: model, campaign flags, fleet demand.
-
-    Everything a row does *not* share -- its selection, its output paths -- is
-    computed here, so the spec cannot accidentally pin two rows to one file.
-    """
-    spec = json.loads(Path(path).read_text())
-    for field in ("model", "campaign_argv", "cwd", "python", "env"):
-        if field not in spec:
-            raise RuntimeError(f"{path}: spec has no {field!r}")
-    forbidden = {"--model", "--out", "--cache-dir", "--checkpoint", "--units",
-                 "--calibration-census", "--census-out", "--seed-checkpoint",
-                 "--seed-wire-dir", "--capture-calibration-out",
-                 "--calibration-cache", "--calibration-cache-sha256",
-                 "--source-identity-cache", "--source-identity-cache-sha256"}
-    named = forbidden.intersection(spec["campaign_argv"])
-    if named:
-        raise RuntimeError(
-            f"{path}: campaign_argv names {sorted(named)}, which this tool "
-            "owns per row")
-    if "--deadline-seconds" in spec["campaign_argv"]:
-        # The in-process deadline stops a run mid-round, in the sorted-key
-        # order the round's pending list happens to have; two rows stopped that
-        # way price different anchor sets than one run would have. A row's
-        # deadline is PrismaBuild's ``timeout_s`` and its retry, which restarts
-        # the row against its own journal.
-        raise RuntimeError(
-            f"{path}: campaign_argv sets --deadline-seconds; a fanned-out row "
-            "takes its deadline from the fleet, not from inside the round loop")
-    if "container" in spec:
-        validate_container(spec)
-    for name in sorted(spec.get("classes") or {}):
-        resolved = row_class(spec, name)
-        if "container" in resolved:
-            # The bounded-capture environment contract is stated by the row
-            # that is actually bounded: a class whose argv asks for the
-            # bounded policy has it here, and a legacy class that declares its
-            # own purge delay is not refused for a rule it does not fall under.
-            validate_container({"container": resolved["container"],
-                                "env": resolved["env"]},
-                               bounded=_row_is_bounded(resolved.get("argv") or []))
-    validate_row_classes(spec, where=str(path))
-    _process_baseline_bytes(spec, where=str(path))
-    return spec
-
-
-#: The process floor a row reserves when its spec declares none, in bytes.
-#:
-#: Measured, not invented.  Every completed row of the GLM-5.3
-#: ``extension-r1024-02`` campaign stamps the floor its own
-#: ``CaptureMemoryGuard`` read at its first check onto its ``cost.pkl``
-#: (``selected_source_preparation.memory_guard.baseline.bytes``).  Read on
-#: 2026-09-12 across rows 0058, 0061, 0062, 0063, 0066, 0074 and 0079, those
-#: readings span 0.88-1.15 GB, and this is the top of that range: a
-#: reservation is only worth the demand it moves if it covers the worst floor
-#: observed, not the average one.  The 1,062,359,040 bytes the
-#: ``_row_memory_gb`` docstring cites is an earlier reading, recorded on the
-#: RobTand/prismaquant#390 receipt rather than traced to one of these rows; it
-#: sits inside this range.
-#:
-#: Session note: ``pb_mem_gb_must_track_the_checked_phase_plan``, and
-#: RobTand/prismaquant#522, which records the three rows this default exists
-#: to stop losing.  It is a fleet number with a date on it, so a spec that
-#: knows its own box overrides it and says so in ``baseline_policy``.
-DEFAULT_PROCESS_BASELINE_BYTES = 1_150_000_000
-
-
-def _process_baseline(spec: dict, *, where="spec") -> "tuple[int, str]":
-    """The per-row process floor this recipe reserves, and where it came from.
-
-    A spec that declares ``process_baseline_bytes`` owns the number, including
-    a declared zero, which reserves nothing.  A spec that declares nothing gets
-    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
-    The two are reported under different ``baseline_policy`` values, so a
-    reader of a plan can tell a number an operator chose from a number this
-    tool supplied.
-
-    No universal torch-plus-CUDA constant is invented here: the default is a
-    reading taken on the boxes these rows run on, and it stays a reservation
-    rather than a measurement.  The row still measures its own floor at its
-    first ``CaptureMemoryGuard.check`` and stamps it on its receipt.
-    """
-    from prismaquant.autoscale import (BASELINE_POLICY_EXPLICIT_RESERVATION,
-                                       BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION,
-                                       validate_process_baseline_bytes)
-    declared = "process_baseline_bytes" in spec
-    value = validate_process_baseline_bytes(
-        spec.get("process_baseline_bytes", DEFAULT_PROCESS_BASELINE_BYTES),
-        where=f"{where}: process_baseline_bytes")
-    return value, (BASELINE_POLICY_EXPLICIT_RESERVATION if declared
-                   else BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION)
-
-
-def _process_baseline_bytes(spec: dict, *, where="spec") -> int:
-    """The reservation alone, for callers that do not record its origin."""
-    return _process_baseline(spec, where=where)[0]
-
-
-def _guard_margin_bytes() -> int:
-    """The physical safety margin the row's own guard holds back from the cap.
-
-    Read from ``CaptureMemoryGuard`` rather than restated.  The guard refuses
-    at ``cap - margin``, so a demand that does not carry the margin buys an
-    admission the guard then declines, which is the failure this derivation
-    exists to stop.
-    """
-    from prismaquant.memory_management import CaptureMemoryGuard
-    return int(CaptureMemoryGuard.MARGIN_BYTES)
-
-
-def _model_bytes(model: str) -> int:
-    root = Path(model)
-    return sum(path.stat().st_size for path in root.glob("*.safetensors"))
-
-
-def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_source=False) -> int:
-    """The row's memory demand, from what the row actually holds.
-
-    Streaming rows use the phase resource plan, including the selected-source
-    plan when requested. These are derived byte bounds, not measured peaks.
-    The resident-source fallback charges three quantities:
-
-    * the checkpoint, which is loaded whole in ``bfloat16`` and is the same for
-      every row;
-    * the selection's Hessians, ``in x in`` in fp32 per member, which is the
-      accumulator ``_collect_activations`` keeps;
-    * the selection's retained scoring rows, ``max_act_rows x in`` in fp32.
-
-    plus the spec's declared headroom for the forward pass and the encoder.
-
-    **The spec's process baseline is charged here, once, outside the deltas.**
-    A phase plan states deltas, and the floor those deltas sit on --
-    interpreter, torch, the CUDA runtime, the pages the row's process has
-    touched -- is a property of the box the row lands on, which this planner
-    never enters. So it is still never derived here; it is *reserved*. A spec
-    that declares ``process_baseline_bytes`` owns the number, including a
-    declared zero; a spec that declares nothing gets
-    ``DEFAULT_PROCESS_BASELINE_BYTES``, the worst floor measured on this fleet.
-    ``baseline_policy`` records which of the two a plan used. Either way the
-    scope travels with the number: it is this fleet's or this recipe's
-    reservation, not a universal maximum.
-
-    It is added to the demand and never to ``memory_bytes``, because the
-    demand becomes a cgroup cap of exactly that many GiB
-    (``prismabuild/pool.py:2850``) while the row refuses unless its plan fits
-    under that cap *less* the floor it measures for itself
-    (``prismaquant/tessera_campaign.py``). Fold the reservation into the
-    plan instead and the predicate compares an inflated delta against an
-    inflated cap and nets to zero -- which is exactly why the spec's declared
-    headroom, a term inside ``memory_bytes``, could never close this gap.
-
-    Both branches charge it. A process floor exists whether or not a row
-    streams, so leaving the resident-source branch out would make the key mean
-    one thing on one path and nothing on the other.
-
-    Rounding is not a reservation. ``ceil`` leaves at most one GiB of slack,
-    and the floor on the #390 receipt is 1,062,359,040 bytes -- 0.9894 GiB,
-    less than the most ``ceil`` can leave -- so before this key a row admitted
-    according to where its ``memory_bytes`` landed modulo one GiB, which both
-    inspected example rows lost. The row
-    still measures its own floor at its first ``CaptureMemoryGuard.check`` and
-    stamps it on its receipt (RobTand/prismaquant#390); that reading, not this
-    declaration, remains the measured number.
-
-    **The guard's own margin is charged here too.** The row is refused not at
-    its cap but at ``cap - margin``: ``CaptureMemoryGuard.check`` compares its
-    absolute reading against ``cap_bytes - margin_bytes``
-    (``prismaquant/memory_management.py``). A demand that covers the plan and
-    the floor but not the margin therefore buys an admission the row's own
-    first check declines. The number is read from the guard, never restated,
-    so the two cannot drift apart.
-    """
-    return _row_memory_demand(spec, members, census,
-                              selected_source=selected_source)["mem_gb"]
-
-
-def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
-                       selected_source=False) -> dict:
-    """The row's demand and every term it is made of.
-
-    ``_row_memory_gb`` is this, reduced to its GiB. The terms are kept because
-    a refusal has to name them: a row that dies on the admission predicate is
-    diagnosable from the plan, the floor and the margin, and before this they
-    were reachable only by unpickling a completed row's ``cost.pkl``
-    (RobTand/prismaquant#522).
-    """
-    gib = 1024 ** 3
-    baseline, policy = _process_baseline(spec)
-    margin = _guard_margin_bytes()
-    if "--streaming" in spec['campaign_argv']:
-        resource = _streamed_resource_plan(spec, census, members,
-                                           selected_source=selected_source)
-        # A selected row that runs the streaming row head holds a window, not
-        # the population, and is admitted against the window's plan
-        # (RobTand/prismaquant#640).
-        from prismaquant.tessera_row_stream import MEMORY_PLANS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM
-        stream = bool(selected_source and MEMORY_PLANS[ROW_HEAD_STREAM] in resource
-                      and _row_head_dependency(spec['campaign_argv']) is None)
-        plan_bytes = int(resource[MEMORY_PLANS[ROW_HEAD_STREAM if stream else ROW_HEAD_LOAD_ALL]])
-        headroom_gb = 0
-    else:
-        shapes = census.get("unit_shapes") or {}
-        hessian = sum(int(shapes.get(name, [0, 0])[1]) ** 2 * 4 for name in members)
-        rows = sum(int(shapes.get(name, [0, 0])[1]) * int(spec.get("max_act_rows", 512)) * 4
-                   for name in members)
-        plan_bytes = _model_bytes(spec["model"]) + hessian + rows
-        headroom_gb = int(spec.get("headroom_gb", 24))
-    demand_bytes = plan_bytes + baseline + margin
-    return {
-        "plan_bytes": int(plan_bytes),
-        "process_baseline_bytes": int(baseline),
-        "process_baseline_policy": policy,
-        "guard_margin_bytes": int(margin),
-        "demand_bytes": int(demand_bytes),
-        "headroom_gb": headroom_gb,
-        "mem_gb": int(math.ceil(demand_bytes / gib)) + headroom_gb,
-    }
-
-
-def _streamed_resource_plan(spec, census, members, *, selected_source=False):
-    from prismaquant.autoscale import streamed_calibration_resources, selected_anchor_resources
-    argv = spec['campaign_argv']
-    baseline_bytes, baseline_policy = _process_baseline(spec)
-    def argument(name, default, convert=int):
-        return campaign_argv_argument(argv, name, default, convert)
-    shapes = census.get('unit_shapes') or {}
-    counts = census.get('counts') or {}
-    options = dict(
-        unit_shapes={n: shapes[n] for n in members}, counts=counts,
-        max_act_rows=argument('--max-act-rows', int(spec.get('max_act_rows', 512))),
-        cache_slots=argument('--streaming-cache-slots', 2),
-        prefetch_workers=argument('--streaming-prefetch-workers', 1),
-        headroom_gb=max(float(spec.get('headroom_gb', 24)),
-                        argument('--streaming-cache-headroom-gb', 24., float)),
-        # Recorded beside ``memory_bytes``, never summed into it: the plan
-        # stays pure phase deltas and the reservation is charged once, in
-        # ``_row_memory_demand``, on the demand.
-        process_baseline_bytes=baseline_bytes,
-        process_baseline_policy=baseline_policy)
-    if selected_source:
-        return selected_anchor_resources(spec['model'], **options,
-            anchor_batch_size=argument('--anchor-batch-size', 1),
-            source_snapshot_policy=argument('--source-snapshot-policy', 'whole-layer-v1', str),
-            # A scoped row (``--source-scope mtp``) is planned over its own
-            # source, as its runner reads it (PQ #1316).
-            **({'source_scope': argument('--source-scope', None, str)}
-               if '--source-scope' in argv else {}),
-            # The row's own campaign will hold this many host bytes of staged
-            # artifacts, so the box that admits the row has to be told. A
-            # dispatcher that planned without it would size a worker for a
-            # campaign it is not about to run.
-            publication_overlap_bytes=argument('--publication-overlap-bytes', 0),
-            campaign_identity_bytes=argument('--campaign-identity-bytes', 0),
-            # The campaign's default is the CPUs the row is admitted with,
-            # which is the class's declared ``cpus`` demand.
-            campaign_identity_threads=argument('--campaign-identity-threads',
-                                               int(spec.get('cpus', 4))),
-            **(dict(capture_load_policy=argument('--capture-load-policy', None, json.loads))
-               if '--capture-load-policy' in argv else {}))
-    return streamed_calibration_resources(spec['model'], **options,
-        nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
-        capture_policy=argument('--streaming-capture-policy', 'legacy', str),
-        # A streamed capture reads its source through a recording owner; the
-        # plan reports the owner's retained clean pages beside, not in, its
-        # memory demand (PQ #1896).
-        source_recording='--capture-calibration-out' in argv)
-
-
-def campaign_argv_argument(argv, name, default=None, convert=str):
-    """Read a row's explicit option, shared by admission and partition gates."""
-    return convert(argv[argv.index(name) + 1]) if name in argv else default
-
-
-def _row_head_dependency(argv):
-    """What makes a selected row's argv run the load-all head, or ``None``.
-
-    The campaign's own rule (``tessera_row_stream.stream_head_dependency``)
-    applied to what argv can say. A checkpoint an earlier attempt leaves
-    behind is not a dependency: the row resumes it on the stream head, under
-    the same window plan this demand is derived from (PQ #1613).
-    """
-    from prismaquant.tessera_row_stream import stream_head_dependency
-
-    def value(name, default=None):
-        return campaign_argv_argument(argv, name, default)
-    return stream_head_dependency(
-        row_head=value('--row-head', 'stream'), selected_source=True,
-        capture_load_policy='--capture-load-policy' in argv,
-        export_hessian_reference_policy='--export-hessian-reference-policy' in argv,
-        max_rounds=int(value('--max-rounds', 0)), seed_checkpoint=value('--seed-checkpoint'))
 
 
 class DemandRefused(RuntimeError):
@@ -769,36 +196,35 @@ def _inner_campaign_argv(row: dict) -> list:
     the manifest while the spec that planned it did not
     (RobTand/prismaquant#522).
     """
-    argv = list(row.get("argv") or [])
-    if "-m" not in argv:
-        raise DemandRefused("row argv runs no python module, so its demand "
-                            "cannot be derived")
-    index = len(argv) - 1 - argv[::-1].index("-m")
-    return argv[index + 2:]
+    try:
+        return campaign_action_arguments(row.get('argv') or [])
+    except ValueError as error:
+        raise DemandRefused(str(error)) from error
 
 
 def _row_label(inner_argv: list, index: int) -> str:
     """The row id, taken from the selection file it names."""
-    if "--units" in inner_argv:
-        return Path(inner_argv[inner_argv.index("--units") + 1]).stem
+    options = explicit_campaign_options(inner_argv)
+    if options.get('units'):
+        return Path(options['units']).stem
     return f"row-{index:04d}"
 
 
 def _units_members(inner_argv: list, *, census: dict, where: str) -> list:
-    from prismaquant.tessera_campaign import (
-        UNITS_SCHEMA_V3, expert_partition_members, load_unit_selection,
-        select_anchor_groups, selection_priced_units)
+    from prismaquant.tessera_campaign_table import (select_anchor_groups)
+    from prismaquant.tessera_campaign_selection import UNITS_SCHEMA_V3, load_unit_selection, selection_priced_units
+    from prismaquant.tessera_campaign_table import expert_partition_members
 
-    selection = load_unit_selection(inner_argv[inner_argv.index("--units") + 1])
+    options = explicit_campaign_options(inner_argv)
+    selection = load_unit_selection(options['units'])
     select_anchor_groups(selection, census["anchor_groups"], where=where)
     if selection["schema"] == UNITS_SCHEMA_V3:
         from prismaquant.tessera_expert_projection import carried_units
         _source, records, stacks = carried_units(census["expert_projection"])
         expert_partition_members(selection, unit_records=records, stack_of=stacks,
-            rate_band=campaign_argv_argument(inner_argv, "--rate-band"),
-            max_rounds=campaign_argv_argument(inner_argv, "--max-rounds", 0, int),
-            seeded=any(flag in inner_argv for flag in (
-                "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+            rate_band=options.get('rate_band'),
+            max_rounds=options.get('max_rounds', 0),
+            seeded=any(options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member')))
     return sorted(selection_priced_units(selection)[0])
 
 
@@ -820,16 +246,16 @@ def verify_row_demand(spec: dict, census: dict, row: dict, *,
     """
     inner = _inner_campaign_argv(row)
     label = label or "row"
-    model = (inner[inner.index("--model") + 1] if "--model" in inner
-             else spec["model"])
+    options = explicit_campaign_options(inner)
+    model = options.get('model', spec['model'])
     row_spec = {**spec, "model": model, "campaign_argv": inner}
     try:
         members = (_units_members(inner, census=census, where=label)
-                   if "--units" in inner else sorted(census.get("counts") or {}))
+                   if options.get('units') else sorted(census.get("counts") or {}))
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:
         raise DemandRefused(f"{label}: invalid unit selection: {exc}") from exc
-    demand = _row_memory_demand(row_spec, members, census,
-                                selected_source="--streaming" in inner)
+    demand = campaign_rows.row_memory_demand(row_spec, members, census,
+                                selected_source=options.get('streaming', False))
     gib = 1024 ** 3
     declared_gb = int(row["demand"]["mem_gb"])
     record = {"row": label, "declared_mem_gb": declared_gb,
@@ -976,86 +402,6 @@ def verify_joint_submission_demand(spec: dict, plan: dict, demand: str, *,
 #: declared count cannot read as complete.  Two rosters of equal length with
 #: different members are different scopes; so are two window sets of equal size
 #: with different membership.
-CAMPAIGN_SCOPE_SCHEMA = "prismaquant.tessera_joint_campaign_scope.v1"
-COMPLETE_CAMPAIGN_SCOPE = "complete_campaign"
-DIAGNOSTIC_SCOPE = "diagnostic_window_subset"
-CAMPAIGN_SCOPE_KINDS = (COMPLETE_CAMPAIGN_SCOPE, DIAGNOSTIC_SCOPE)
-
-CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
-PANEL_SCHEMA = "prismaquant.tessera_joint_eval_panel.v1"
-PANEL_STATUS = "diagnostic_pilot"
-
-
-class ScopeRefused(RuntimeError):
-    """A joint row's evaluated scope is not the scope it is submitted for."""
-
-
-def _bound_json(plan: dict, key: str, *, label: str) -> dict:
-    """The JSON artifact a joint plan binds by path and sha256, re-checked."""
-    declared = (plan.get("inputs") or {}).get(key)
-    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
-            or not isinstance(declared.get("sha256"), str)):
-        raise ScopeRefused(f"{label}: joint plan inputs.{key} is not a bound artifact")
-    path = Path(declared["path"])
-    actual = _sha256_of(path)
-    if actual != declared["sha256"]:
-        raise ScopeRefused(
-            f"{label}: plan inputs.{key} is {path}, which hashes to {actual}, "
-            f"not the bound {declared['sha256']}")
-    return json.loads(path.read_text())
-
-
-def _bound_digest(container: dict, key: str, *, label: str, where: str) -> str:
-    """One artifact a plan binds by path and sha256, re-checked, as its digest.
-
-    The same check ``_bound_json`` makes, for the artifacts a scope *names* but
-    never parses: the calibration tokens, the canonical capture manifest and the
-    merged campaign checkpoint are large or non-JSON, and a digest is all the
-    identity needs.  Omitting the check would let a plan bind a digest it does
-    not hold.
-    """
-    declared = (container or {}).get(key)
-    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
-            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
-        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
-    path = Path(declared["path"])
-    actual = _sha256_of(path)
-    if actual != declared["sha256"]:
-        raise ScopeRefused(
-            f"{label}: {where} is {path}, which hashes to {actual}, not the "
-            f"bound {declared['sha256']}")
-    return actual
-
-
-def _bound_pickle(container: dict, key: str, *, label: str, where: str) -> dict:
-    """The pickled artifact a plan binds by path and sha256, re-read and checked.
-
-    ``_bound_json``'s check and then the object itself, for the campaign cost
-    table: the plan's own record of which ``(unit, format)`` cells the campaign
-    priced.  The digest is what makes that record the plan's rather than the
-    caller's -- an edited table no longer hashes to what the plan declares --
-    and reading it is one sequential pass over a few hundred MiB, not the
-    multi-GiB candidate roster a per-cell re-derivation from the checkpoint
-    would need.
-    """
-    import pickle
-
-    declared = (container or {}).get(key)
-    if (not isinstance(declared, dict) or not isinstance(declared.get("path"), str)
-            or not isinstance(declared.get("sha256"), str) or not declared["sha256"]):
-        raise ScopeRefused(f"{label}: {where} is not a bound artifact")
-    path = Path(declared["path"])
-    actual = _sha256_of(path)
-    if actual != declared["sha256"]:
-        raise ScopeRefused(
-            f"{label}: {where} is {path}, which hashes to {actual}, not the "
-            f"bound {declared['sha256']}; the campaign cost table the plan names "
-            "is not the one on disk, so the cells it priced are not the plan's")
-    with path.open("rb") as handle:
-        blob = pickle.load(handle)
-    if not isinstance(blob, dict):
-        raise ScopeRefused(f"{label}: {where} ({path}) is not a cost payload")
-    return blob
 
 
 #: The census fields that identify the DRAW, not merely its size. ``nsamples``
@@ -1069,158 +415,6 @@ CENSUS_DRAW_FIELDS = ("model", "text_sha256", "fit_ids_sha256",
                       "seed", "layer_stride")
 
 
-def _census_draw(census: dict, *, label: str) -> dict:
-    """The frozen draw a census was taken on, or a refusal naming the field."""
-    draw: dict = {}
-    for field in ("model", "text_sha256", "fit_ids_sha256"):
-        value = census.get(field)
-        if not isinstance(value, str) or not value:
-            raise ScopeRefused(
-                f"{label}: the census declares no {field}, so the calibration "
-                "draw it was taken on is unidentified; a roster and a window "
-                "count are not a draw")
-        draw[field] = value
-    for field in ("seed", "layer_stride"):
-        value = census.get(field)
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ScopeRefused(
-                f"{label}: the census declares no integer {field}, so the "
-                "calibration draw it was taken on is unidentified")
-        draw[field] = value
-    return draw
-
-
-def joint_campaign_scope(plan: dict, *, label: str = "joint row") -> dict:
-    """The exact roster and window identity one joint plan evaluates.
-
-    Read from the plan's own bound census and campaign plan.  A plan whose
-    census roster is not the campaign plan's roster, whose ``calib_seqlen`` is
-    not the census ``seqlen``, or whose declared unit/group tallies do not
-    equal the roster it actually bound refuses here -- the counts are checked
-    against the identity, not accepted in place of it.
-    """
-    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-
-    inputs = plan.get("inputs")
-    if not isinstance(inputs, dict):
-        raise ScopeRefused(f"{label}: the joint plan declares no inputs block")
-    census = _bound_json(plan, "census", label=label)
-    campaign = _bound_json(plan, "campaign_plan", label=label)
-    if census.get("schema") != CENSUS_SCHEMA:
-        raise ScopeRefused(
-            f"{label}: census schema is {census.get('schema')!r}, expected {CENSUS_SCHEMA}")
-    if Path(campaign["census"]).resolve() != Path(inputs["census"]["path"]).resolve():
-        raise ScopeRefused(
-            f"{label}: the campaign plan and the joint plan name different censuses")
-    roster = census.get("unit_shapes")
-    groups = census.get("anchor_groups")
-    if (not isinstance(roster, dict) or not roster
-            or not isinstance(groups, dict) or not groups):
-        raise ScopeRefused(f"{label}: the census carries no exact roster")
-    owners: set = set()
-    for row in campaign.get("rows") or []:
-        owners.update(row.get("members") or [])
-    if owners != set(roster):
-        raise ScopeRefused(
-            f"{label}: the census roster is not the campaign plan's roster "
-            f"({len(owners)} campaign members, {len(roster)} census units)")
-    # The census is the window authority: a plan that narrows its own
-    # ``n_calib_samples`` is a narrower scope, not the campaign's.
-    campaign_windows = census.get("nsamples")
-    seqlen = census.get("seqlen")
-    if (isinstance(campaign_windows, bool) or not isinstance(campaign_windows, int)
-            or campaign_windows <= 0 or not isinstance(seqlen, int) or seqlen <= 0):
-        raise ScopeRefused(
-            f"{label}: the census declares no window count or sequence length")
-    execution = plan.get("execution") or {}
-    if execution.get("calib_seqlen") != seqlen:
-        raise ScopeRefused(
-            f"{label}: plan calib_seqlen {execution.get('calib_seqlen')!r} is not "
-            f"the census seqlen {seqlen!r}")
-    evaluated = execution.get("n_calib_samples")
-    panel = plan.get("joint_eval")
-    if panel is None:
-        kind, selection = COMPLETE_CAMPAIGN_SCOPE, None
-        windows = evaluated
-    else:
-        kind = DIAGNOSTIC_SCOPE
-        if (not isinstance(panel, dict) or panel.get("schema") != PANEL_SCHEMA
-                or panel.get("status") != PANEL_STATUS):
-            raise ScopeRefused(
-                f"{label}: a narrow scope needs an explicit {PANEL_SCHEMA} "
-                f"panel with status {PANEL_STATUS!r}")
-        selected = panel.get("selection")
-        windows = selected.get("size") if isinstance(selected, dict) else None
-        if (isinstance(windows, bool) or not isinstance(windows, int)
-                or not 0 < windows < campaign_windows):
-            raise ScopeRefused(
-                f"{label}: a diagnostic scope selects a strict, sized subset of the "
-                f"{campaign_windows}-window campaign, got {windows!r}")
-        if panel.get("shape") != [windows, seqlen]:
-            raise ScopeRefused(
-                f"{label}: the diagnostic panel shape {panel.get('shape')!r} is not "
-                f"[{windows}, {seqlen}]")
-        selection = canonical_json_sha256(panel, where=f"{label} joint evaluation panel")
-    if isinstance(windows, bool) or not isinstance(windows, int) or windows <= 0:
-        raise ScopeRefused(f"{label}: the plan evaluates no windows")
-    if kind == COMPLETE_CAMPAIGN_SCOPE and windows != campaign_windows:
-        raise ScopeRefused(
-            f"{label}: a campaign-scoped plan evaluates all {campaign_windows} "
-            f"windows, got {windows}; freeze the subset as an explicit diagnostic panel")
-    declared = (inputs.get("required_source_units"),
-                inputs.get("required_campaign_groups"))
-    if declared != (len(roster), len(groups)):
-        raise ScopeRefused(
-            f"{label}: the plan declares {declared[0]!r}/{declared[1]!r} units/groups "
-            f"but bound {len(roster)}/{len(groups)}; a count is not the roster")
-    # The draw and the capture are the other half of "the same calibration
-    # contract": the roster says which Linears were priced, this says over which
-    # windows, which corpus revision and which tokenizer ids, and which captured
-    # activations were read. Read from the plan's own bound artifacts, so a plan
-    # cannot restate one it does not hold.
-    calibration_sha256 = canonical_json_sha256({
-        "census_draw": _census_draw(census, label=label),
-        "window_count": campaign_windows,
-        "calib_seqlen": seqlen,
-        "calibration_input_sha256": _bound_digest(
-            plan, "calibration_input", label=label,
-            where="joint plan calibration_input"),
-        "canonical_capture_sha256": _bound_digest(
-            plan, "canonical_capture", label=label,
-            where="joint plan canonical_capture"),
-    }, where=f"{label} calibration identity")
-    # The candidate roster is `identity.units[unit].menu` inside the campaign's
-    # merged checkpoint, and the joint loader refuses any priced rung outside
-    # it. Binding that artifact binds the exact (unit, format) roster the pass
-    # is admitted against: a reduced or substituted menu is different bytes, so
-    # it is a different campaign. The bind costs ONE sequential read of the
-    # artifact per submission (``_bound_digest`` hashes it rather than trusting
-    # the plan's own number); what it avoids is parsing the identity into the
-    # graph, which is the memory the joint loader's streaming seal exists to
-    # remove.
-    campaign_checkpoint_sha256 = _bound_digest(
-        inputs, "merged_checkpoint", label=label,
-        where="joint plan inputs.merged_checkpoint")
-    return {
-        "schema": CAMPAIGN_SCOPE_SCHEMA,
-        "kind": kind,
-        "source_roster_sha256": canonical_json_sha256(
-            sorted(roster), where=f"{label} source roster"),
-        "source_unit_count": len(roster),
-        "campaign_group_roster_sha256": canonical_json_sha256(
-            groups, where=f"{label} campaign group roster"),
-        "campaign_group_count": len(groups),
-        "window_count": windows,
-        "campaign_window_count": campaign_windows,
-        "calib_seqlen": seqlen,
-        "selection_sha256": selection,
-        "calibration_sha256": calibration_sha256,
-        "campaign_checkpoint_sha256": campaign_checkpoint_sha256,
-    }
-
-
-CAMPAIGN_IDENTITY_SCHEMA = "prismaquant.tessera_joint_campaign_identity.v1"
-
 #: The fields of the frozen campaign identity a submission has to reproduce.
 #: ``window_count`` is deliberately absent: the campaign identity names the
 #: campaign's own window total, and whether a plan evaluates all of it is the
@@ -1231,306 +425,6 @@ CAMPAIGN_IDENTITY_SCHEMA = "prismaquant.tessera_joint_campaign_identity.v1"
 #: absent: the pilot and the full continuation read one draw and one capture, so
 #: both have to reproduce it, and it deliberately excludes the panel so that
 #: they can.
-CAMPAIGN_IDENTITY_FIELDS = (
-    "source_unit_count", "source_roster_sha256",
-    "campaign_group_count", "campaign_group_roster_sha256",
-    "campaign_window_count", "calib_seqlen",
-    "calibration_sha256", "campaign_checkpoint_sha256")
-
-
-def campaign_identity(scope: dict) -> dict:
-    """The frozen identity of the campaign a scope belongs to.
-
-    Derived from a plan's bound census so that the pilot and the full
-    continuation can be held to one roster and one window total without either
-    of them restating it.  An operator seals this once and passes it to every
-    joint submission; the generic path never hardcodes the numbers.
-    """
-    record = {"schema": CAMPAIGN_IDENTITY_SCHEMA,
-              **{field: scope[field] for field in CAMPAIGN_IDENTITY_FIELDS}}
-    return record
-
-
-def verify_joint_campaign_scope(plan: dict, *, require_scope: str,
-                                campaign: dict, label: str = "joint row") -> dict:
-    """Refuse a joint submission whose scope is not the scope it claims.
-
-    ``require_scope`` is what the caller is submitting *for*, and a diagnostic
-    subset is not the campaign's score: asking for ``complete_campaign`` and
-    handing it a plan that evaluates 16 of 512 windows refuses here, before the
-    read set is built, rather than surfacing as a shortfall in the merged cost
-    after the GPU window has closed.
-
-    ``campaign`` is the frozen campaign identity the submission belongs to.  It
-    is required: a plan is self-consistent with whatever census it binds, so
-    without an identity that is fixed *outside* the plan a coherently narrowed
-    roster would still read as the whole campaign.  Every identity field is
-    compared exactly -- the counts are a convenience of the record, not the
-    acceptance.
-    """
-    if require_scope not in CAMPAIGN_SCOPE_KINDS:
-        raise ScopeRefused(
-            f"{label}: unknown required scope {require_scope!r}; expected one of "
-            f"{', '.join(CAMPAIGN_SCOPE_KINDS)}")
-    if not isinstance(campaign, dict) or campaign.get("schema") != CAMPAIGN_IDENTITY_SCHEMA:
-        raise ScopeRefused(
-            f"{label}: a joint submission must bind a {CAMPAIGN_IDENTITY_SCHEMA} "
-            "campaign identity; a plan's own census cannot show its own scope is "
-            "the campaign's")
-    # A field the identity does not carry cannot be compared, and "absent"
-    # compares unequal to every value -- which is how an identity sealed before
-    # the calibration and candidate-roster binding would refuse the *right*
-    # plan with a message about the wrong thing. Name the re-seal instead.
-    absent = [field for field in CAMPAIGN_IDENTITY_FIELDS if field not in campaign]
-    if absent:
-        raise ScopeRefused(
-            f"{label}: the frozen campaign identity carries no "
-            f"{', '.join(absent)}; it predates binding the calibration draw, the "
-            "capture and the campaign's candidate roster, and must be re-sealed "
-            "from a campaign-scoped plan before it can stand for the campaign")
-    scope = joint_campaign_scope(plan, label=label)
-    for field in CAMPAIGN_IDENTITY_FIELDS:
-        declared = campaign.get(field)
-        if declared != scope[field]:
-            raise ScopeRefused(
-                f"{label}: the plan's {field} is {scope[field]!r}, not the frozen "
-                f"campaign identity's {declared!r}; a roster of equal length with "
-                "different members is a different campaign")
-    if scope["kind"] != require_scope:
-        raise ScopeRefused(
-            f"{label}: this submission requires a {require_scope} scope, but the "
-            f"plan evaluates {scope['kind']} ({scope['window_count']} of "
-            f"{scope['campaign_window_count']} windows over "
-            f"{scope['source_unit_count']} units, selection "
-            f"{scope['selection_sha256']}). A diagnostic subset is its own "
-            "evidence; submit the campaign-scoped plan for the campaign's score.")
-    return scope
-
-
-def _joint_row_binds_cell(row: dict, name: str, fmt: str, *, label: str) -> bool:
-    """Whether this row is a joint A-side **for this cell**.
-
-    The predicate itself is the shared one
-    (:func:`prismaquant.allocator_candidates.joint_row_binds_cell`) so that the
-    submission-time gate and the stage that computes coverage cannot drift; the
-    only thing added here is this tool's own refusal type and label.
-    """
-    from prismaquant.allocator_candidates import joint_row_binds_cell
-
-    try:
-        return joint_row_binds_cell(row, name, fmt, where=label)
-    except ValueError as error:
-        raise ScopeRefused(str(error)) from error
-
-
-def _bound_joint_cells(costs: dict, *, label: str) -> set:
-    """The ``(unit, format)`` cells whose own joint A-side is bound to them.
-
-    One walk, one answer, for both readers of "this artifact already carries an
-    activation term at this cell": the coverage roster below, and ``submit-aqua``
-    deciding whether a stage would add anything. A row that does not bind its own
-    key is a refusal here rather than a cell either reader may count, so the two
-    cannot disagree about which cells are covered.
-    """
-    bound: set = set()
-    for name, entry in costs.items():
-        if not isinstance(entry, dict):
-            continue
-        for fmt, row in entry.items():
-            if not isinstance(row, dict):
-                continue
-            if _joint_row_binds_cell(row, name, fmt, label=label):
-                bound.add((name, fmt))
-    return bound
-
-
-def aqua_requested_cells(plan: dict, payload: dict, formats: "list[str]",
-                         *, label: str = "aqua row",
-                         accept_joint_cells_outside_plan: bool = False,
-                         ) -> "tuple[dict, frozenset]":
-    """The exact ``(unit, format)`` roster AQUA is asked to price, from the plan.
-
-    Returns ``(record, cells)``. ``cells`` is the requested roster itself; the
-    record is the same thing as counts and a digest, so a submission can stamp
-    it without carrying hundreds of thousands of tuples in its summary.
-
-    The roster is the **plan's**, read from the cost table the plan binds at
-    ``inputs.merged_cost`` and re-checked against the sha256 it declares there.
-    That table is the campaign's own priced surface: the cells the allocation is
-    allowed to select from. ``--cost-in`` -- the weight-only or joint-merged
-    table the stage merges an A-side into -- has to reproduce it unit for unit.
-
-    Deriving the requested set from the artifact under test is the hole this
-    closes. The stage states its acceptance against the cells it is given, so a
-    table narrowed to the cells that already carry a price leaves the gate
-    holding a denominator that the narrowing moved: deleting one unit's cell
-    while another unit still carries that format leaves the unit roster exact
-    and the carried-format union exact, and if the remainder is joint-priced the
-    run reads as complete coverage while a planned cell has no A-side at all.
-    Binding to the plan's own table makes that case a refusal, and makes a cost
-    table edited after the plan was sealed a refusal of its own.
-
-    ``formats`` is the campaign's menu and has to be exactly the union of the
-    plan's cells. Naming a subset would move the denominator the same way: the
-    cells it left out are exactly the ones whose A-side would then go unchecked.
-
-    Extra cells are read the same way round. A cell the plan never priced that
-    is *not* already joint-priced would be priced by this stage, which makes the
-    gate stricter rather than narrower -- but it is still a row the campaign's
-    own table does not have, so it refuses.
-
-    A cell the plan never priced that already carries its own joint A-side is a
-    joint pass's addition. Being joint-priced is not by itself evidence that the
-    row belongs to *this* plan: the row is internally valid and its own cell is
-    the one it names, but nothing in it was compared with the plan's draw, its
-    capture or its candidate menu, so a pass over a wider roster would place
-    prices this campaign never priced beside the plan's own table and the
-    artifact would read as the plan's surface. It refuses, naming the re-seal
-    instead, unless the caller passes
-    ``accept_joint_cells_outside_plan`` -- which is how an operator reusing an
-    artifact sealed against an older roster keeps that reuse explicit and
-    recorded as unverified rather than silent. A row whose operator coordinate
-    is not the key it was found under is a refusal either way.
-    """
-    from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-
-    census = _bound_json(plan, "census", label=label)
-    roster = census.get("unit_shapes")
-    if not isinstance(roster, dict) or not roster:
-        raise ScopeRefused(f"{label}: the plan's bound census carries no roster")
-    planned = _bound_pickle(
-        plan.get("inputs") or {}, "merged_cost", label=label,
-        where="joint plan inputs.merged_cost")
-    planned_costs = planned.get("costs")
-    if not isinstance(planned_costs, dict) or not planned_costs:
-        raise ScopeRefused(
-            f"{label}: the cost table the plan binds carries no 'costs' table, "
-            "so it does not say which cells the campaign priced")
-    costs = payload.get("costs")
-    if not isinstance(costs, dict) or not costs:
-        raise ScopeRefused(f"{label}: the cost artifact carries no 'costs' table")
-    # One walk, before anything is counted: every joint row has to be its own
-    # cell. A row that is not raises here, so no later reader sees a set with a
-    # row whose coordinate this function never checked.
-    bound_joints = _bound_joint_cells(costs, label=f"{label} cost artifact")
-    # The unit roster is checked on BOTH tables against the plan's bound census.
-    # A unit the plan priced and the artifact lacks would leave the campaign
-    # short an A-side while reading as complete; a unit the artifact carries
-    # that the plan never priced is not the campaign's cell at all.
-    for what, table in (("the cost table the plan binds", planned_costs),
-                        ("the cost artifact", costs)):
-        missing = sorted(set(roster) - set(table))
-        extra = sorted(set(table) - set(roster))
-        if missing or extra:
-            raise ScopeRefused(
-                f"{label}: {what} is not the plan's roster -- "
-                f"{len(missing)} unit(s) the plan priced are absent (e.g. "
-                f"{missing[:3]}) and {len(extra)} unit(s) it never priced are "
-                f"carried (e.g. {extra[:3]}).")
-    wanted = [str(item) for item in formats]
-    if len(set(wanted)) != len(wanted) or not wanted:
-        raise ScopeRefused(f"{label}: --formats must name each format once")
-
-    cells: set = set()
-    planned_formats: set = set()
-    units_missing: list = []
-    missing_total = 0
-    units_extra: list = []
-    extra_total = 0
-    joint_extra = 0
-    for name in sorted(roster):
-        planned_entry = planned_costs[name]
-        if not isinstance(planned_entry, dict):
-            raise ScopeRefused(
-                f"{label}: the cost table the plan binds has no per-format row "
-                f"for {name}")
-        entry = costs[name]
-        if not isinstance(entry, dict):
-            raise ScopeRefused(f"{label}: {name} has no per-format row")
-        expected = {fmt for fmt, row in planned_entry.items()
-                    if isinstance(row, dict)}
-        carried = {fmt for fmt, row in entry.items() if isinstance(row, dict)}
-        planned_formats |= expected
-        # The requested roster is the plan's cells, so it is the same digest for
-        # the same plan whether or not a joint pass has since added rows of its
-        # own.
-        cells.update((name, fmt) for fmt in expected)
-        gone = sorted(expected - carried)
-        if gone:
-            missing_total += len(gone)
-            units_missing.append(
-                # An empty entry is named as such rather than by one of the
-                # cells it lost: it is the shape a truncating write or a
-                # dropped merge produces, and the unit is present exactly as
-                # the roster demands.
-                f"{name}@<entry empty>" if not carried else f"{name}@{gone[0]}")
-        outside = carried - expected
-        invented = []
-        outside_joints = []
-        for fmt in sorted(outside):
-            if (name, fmt) in bound_joints:
-                outside_joints.append(fmt)
-                joint_extra += 1
-            else:
-                invented.append(fmt)
-        if outside_joints and not accept_joint_cells_outside_plan:
-            joints = ", ".join(f"{name}@{fmt}" for fmt in outside_joints[:5])
-            raise ScopeRefused(
-                f"{label}: the cost artifact carries {len(outside_joints)} "
-                f"joint-priced cell(s) the plan's own cost table never priced "
-                f"(e.g. {joints}). A joint row is bound to the coordinate it "
-                "names and to nothing else -- it is not compared with this "
-                "plan's draw, capture or candidate menu -- so a pass over a "
-                "wider roster would place this campaign's table beside prices "
-                "it never priced. Seal a requested roster that names them, or "
-                "pass --accept-joint-cells-outside-plan to reuse the artifact "
-                "as unverified.")
-        if invented:
-            extra_total += len(invented)
-            units_extra.append(f"{name}@{invented[0]}")
-    if missing_total or extra_total:
-        # Bounded, like every other refusal here: a campaign has tens of
-        # thousands of units, and naming each one floods the log the operator
-        # has to read. The totals are the contract; the sample is what makes
-        # them checkable.
-        missing_units, extra_units = len(units_missing), len(units_extra)
-        units_missing, units_extra = units_missing[:5], units_extra[:5]
-        raise ScopeRefused(
-            f"{label}: the cost artifact is not the plan's priced surface -- it "
-            f"does not carry {missing_total} planned (unit, format) cell(s) "
-            f"across {missing_units} unit(s) (e.g. "
-            f"{', '.join(units_missing) or 'none'}) and carries {extra_total} "
-            f"cell(s) the plan's cost table never priced across "
-            f"{extra_units} unit(s) (e.g. "
-            f"{', '.join(units_extra) or 'none'}). The stage states its "
-            "acceptance against the requested cells, so an artifact that drops "
-            "one unit's cell while another unit still carries that format would "
-            "narrow the denominator instead of filling the hole.")
-    unnamed = sorted(planned_formats - set(wanted))
-    absent = sorted(set(wanted) - planned_formats)
-    if unnamed or absent:
-        raise ScopeRefused(
-            f"{label}: --formats {sorted(wanted)} is not the menu the plan "
-            f"prices -- the plan's cost table holds {unnamed} that are unnamed "
-            f"and none of {absent}. The requested set is the denominator the "
-            "coverage gate reads, so it is bound to the plan's cells rather "
-            "than narrowed to the ones that already have a price.")
-    record = {"requested_cells": len(cells),
-              "requested_units": len(roster),
-              "formats": sorted(wanted),
-              # Joint rows a joint pass added beyond the plan's own table. They
-              # are not part of the requested roster, and they are accepted only
-              # when the caller asked for that reuse explicitly: the flag is
-              # recorded here so an artifact holding cells this campaign never
-              # priced carries that fact into every receipt that stamps this
-              # record rather than reading as the plan's own surface.
-              "joint_cells_outside_plan": joint_extra,
-              "joint_cells_outside_plan_accepted_unverified": bool(
-                  joint_extra and accept_joint_cells_outside_plan),
-              "roster_sha256": canonical_json_sha256(
-                  {"units": sorted(roster), "cells": sorted(cells)},
-                  where=f"{label} requested roster")}
-    return record, frozenset(cells)
 
 
 def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
@@ -1583,163 +477,33 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
     return admissible, declined
 
 
-#: The quiet a pricing row is allowed in each phase, in the order it walks
-#: them. Chosen with margin from a least-squares fit of ``elapsed_s`` against
-#: committed batches over the 23 completed 864-unit GLM pricing rows in the
-#: fleet's terminal records (2026-09-10) gives 18.6728 s of wall clock per
-#: committed batch and an 836.1 s non-pricing intercept; the greatest absolute
-#: residual is 160.5 s. The retained-record extraction and its exact row and
-#: terminal hashes are committed in ``docs/measurements/pq480_progress_grace_fit_2026-09-10.md``.
-#:
-#: So: ``pricing`` permits 48.2 fitted commit intervals, and ``startup`` and
-#: ``finalize`` each exceed the fitted non-pricing interval including its
-#: greatest residual (996.6 s). The sum, 6300 s, is the longest a row can
-#: run having committed nothing -- less than half the 14,400 s that killed
-#: row-0050 and row-0065 while they were committing anchors every 18 s.
-#:
-#: There is no flag to override this, on purpose: the number is a measurement
-#: of one workload and a flag would invite a guess.  A campaign whose rows
-#: measurably behave differently edits its planned manifest -- ``plan`` writes
-#: ``progress_phases`` into every row and ``submit`` reads it back -- or
-#: re-fits this constant against its own terminal records.
-CAMPAIGN_PROGRESS_PHASES = (("startup", 3600), ("pricing", 900), ("finalize", 1800))
-
-
-def _row_is_bounded(argv: list[str]) -> bool:
-    """Whether this row runs the bounded capture path.
-
-    One predicate, two readers: the row builder that merges the bounded
-    capture environment, and the container validation that holds a spec to the
-    SAME environment. A legacy row that declares its own purge delay is not a
-    bounded row and is not refused for a contract it does not fall under.
-    """
-    policy_flag = '--streaming-capture-policy'
-    # ``--streaming-capture-policy`` takes a value, and a malformed argv that
-    # ends on the flag has no next element: reading it blindly raised
-    # IndexError, which is a crash rather than the refusal a malformed flag
-    # deserves. A flag with no value is not the bounded policy.
-    index = argv.index(policy_flag) if policy_flag in argv else None
-    named = (argv[index + 1] if index is not None and index + 1 < len(argv)
-             else None)
-    bounded = (policy_flag + '=shared-inputs-bounded-v1' in argv
-               or named == 'shared-inputs-bounded-v1')
-    return bounded or all(flag in argv for flag in
-        ('--streaming', '--units', '--calibration-cache', '--calibration-cache-sha256'))
-
-
-def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
-         progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
-         module: str = "prismaquant.tessera_campaign",
-         row_class_name: str = DEFAULT_ROW_CLASS) -> dict:
-    """One PrismaBuild row, built for one class of the spec.
-
-    The class supplies the interpreter, the environment, the placement tags,
-    the CPU count and the container; the default class supplies exactly the
-    spec-level values, so a row built for it is byte-identical to the row this
-    function returned before classes existed.  Nothing about the class is
-    written INTO the row: ``submit`` re-run is the resume, a finished row is a
-    CAS hit on its action key, and a key that moved is a row that re-runs.
-    Nothing records the class either: every subcommand today builds the
-    ``default`` class, so there is no second class in any plan to record, and
-    the first row kind that is built for another one records it in its own
-    plan entry when it lands.
-    """
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
-    resolved = row_class(spec, row_class_name)
-    if resolved["weights_only"]:
-        if module in WEIGHTS_ONLY_FORBIDDEN_MODULES:
-            raise RowClassRefused(
-                f"row class {row_class_name!r} is weights-only and {module} is "
-                "not: its census row runs a calibration forward over the whole "
-                "scope, its capture row writes the calibration cache, and its "
-                "pricing rows fit and consume a Hessian, whose wire is not "
-                "bit-comparable across instruction sets (RobTand/tessera#472)")
-        named = [flag for flag in HESSIAN_AWARE_FLAGS
-                 if any(arg == flag or arg.startswith(flag + "=")
-                        for arg in argv)]
-        if named:
-            raise RowClassRefused(
-                f"row class {row_class_name!r} is weights-only and this row's "
-                f"argv names {named}; those bytes depend on a Hessian this "
-                "class may not have measured or adopted")
-    env = dict(resolved['env'])
-    bounded = _row_is_bounded(argv)
-    if bounded:
-        from prismaquant.autoscale import BOUNDED_CAPTURE_ENV, require_bounded_capture_environment
-        env = {**BOUNDED_CAPTURE_ENV, **env}
-        require_bounded_capture_environment(env)
-    command = [resolved["python"], "-u", "-m", module, *argv]
-    container_image = None
-    if "container" in resolved:
-        container_spec = {"container": resolved["container"], "env": env}
-        if resolved.get("container_admission_reference") is not None:
-            container_spec["container_admission_reference"] = resolved["container_admission_reference"]
-        validate_container(container_spec, bounded=bounded)
-        command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
-        # The class owns the image: whatever container this row resolved runs
-        # is what PrismaBuild must find on the claiming box before the claim
-        # (RobTand/prismabuild#714). Without an explicit portable override,
-        # an archive-backed class declares nothing: its loader establishes
-        # the image inside the action rather than requiring local presence.
-        container_image = admission_image_reference(container_spec)
-    row = {
-        "argv": command,
-        "cwd": spec["cwd"],
-        "demand": {"gpu": 1, "cpu": int(resolved["cpus"]), "mem_gb": int(mem_gb)},
-        "env": env,
-        "tags": list(resolved["tags"]),
-        # A row is one memoized action and a retry re-runs the same argv over
-        # the same checkpoint, which is exactly what the journal is for.  The
-        # policy is sealed into the action key, so it is spelled even though
-        # pbcampaign submits every row detached and cannot retry one itself.
-        "retry_safe": True,
-    }
-    if container_image is not None:
-        row["container_images"] = [container_image]
-    if progress_phases:
-        # What bounds this row is whether it is still committing anchors, not
-        # how long it has been running.  ``tessera_campaign`` reports each
-        # journal flush through ``prismaquant.prismabuild_progress``; PB then
-        # applies no total-duration limit while the count advances, and ends
-        # the row within the declared allowance when it stops.
-        row["progress_phases"] = [f"{name}={grace}" for name, grace in progress_phases]
-    if timeout_s is not None:
-        # Only when somebody asked for one.  A blanket default here is what
-        # sealed 14,400 s into every pricing row and killed two of them mid
-        # round (PB #480); the ceiling a row needs is not a property of the
-        # dispatcher.
-        row["timeout_s"] = int(timeout_s)
-    return row
-
-
 # ---------------------------------------------------------------------------
 # census
 # ---------------------------------------------------------------------------
 
 def cmd_census(args) -> int:
-    spec = load_spec(Path(args.spec))
+    spec = campaign_rows.load_spec(Path(args.spec))
     workspace = Path(args.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     census_path = workspace / "census.json"
     manifest = workspace / "census-manifest.json"
-    row = _row(
+    row = campaign_rows.prismabuild_row(
         spec,
         ["--model", spec["model"],
          "--out", str(workspace / "census-unused.pkl"),
          "--cache-dir", str(workspace / "census-cache"),
          "--census-out", str(census_path),
          *spec["campaign_argv"]],
-        mem_gb=_row_memory_gb(spec, [], {}),
+        mem_gb=campaign_rows.row_memory_gb(spec, [], {}),
         timeout_s=int(args.timeout_s),
         # Census exits before the pricing journal/reporter exists.  Its
         # explicit wall-clock deadline is the only bound it declares.
         progress_phases=(),
     )
     manifest.write_text(json.dumps([row], indent=2) + "\n")
-    if '--streaming' in spec['campaign_argv']:
+    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
         (workspace/'census-resources.json').write_text(json.dumps(
-            _streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)+'\n')
+            campaign_rows.streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)+'\n')
     print(f"[dispatch] census manifest {manifest}")
     if args.submit:
         return _pbcampaign(manifest, wait_s=args.wait_s,
@@ -1749,28 +513,28 @@ def cmd_census(args) -> int:
 
 def cmd_capture(args) -> int:
     """Submit one dependent full-scope capture through the existing PB adapter."""
-    spec = load_spec(Path(args.spec))
+    spec = campaign_rows.load_spec(Path(args.spec))
     workspace = Path(args.workspace)
     census_path = workspace / "census.json"
     census = json.loads(census_path.read_text())
     if census.get("model") != spec["model"]:
         raise RuntimeError("capture census and spec name different models")
     manifest = workspace / "capture-manifest.json"
-    row = _row(spec, ["--model", spec["model"],
+    row = campaign_rows.prismabuild_row(spec, ["--model", spec["model"],
         "--out", str(workspace / "capture-unused.pkl"),
         "--cache-dir", str(workspace / "capture-cache"),
         "--calibration-census", str(census_path),
         "--capture-calibration-out", str(workspace / "calibration-cache"),
         *spec["campaign_argv"]],
-        mem_gb=_row_memory_gb(spec, sorted(census["counts"]), census),
+        mem_gb=campaign_rows.row_memory_gb(spec, sorted(census["counts"]), census),
         timeout_s=int(args.timeout_s),
         # Capture is likewise not an anchor-pricing row and makes no durable
         # anchor-counter reports.
         progress_phases=())
     manifest.write_text(json.dumps([row], indent=2) + "\n")
-    if '--streaming' in spec['campaign_argv']:
+    if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
         (workspace/'capture-resources.json').write_text(json.dumps(
-            _streamed_resource_plan(spec, census, sorted(census['counts'])),
+            campaign_rows.streamed_resource_plan(spec, census, sorted(census['counts'])),
             indent=2, sort_keys=True)+'\n')
     if args.submit:
         return _pbcampaign(manifest, wait_s=args.wait_s,
@@ -1890,10 +654,8 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
     carries the size vector and its digest, so nothing has to infer from an
     inclusion probability which vector produced it.
     """
-    from prismaquant.tessera_campaign import (
-        STACK_SAMPLE_COUNTS_SUFFIX, STACK_SAMPLE_SIZE_SOURCES,
-        audit_subsample, draw_stack_sample, stack_sample_from_probe,
-        _validate_stack_sample, selection_stack_samples)
+    from prismaquant.tessera_campaign_table import STACK_SAMPLE_COUNTS_SUFFIX, STACK_SAMPLE_SIZE_SOURCES, draw_stack_sample, stack_sample_from_probe, validate_stack_sample, selection_stack_samples
+    from prismaquant.tessera_campaign_table import audit_subsample
 
     if sizes not in STACK_SAMPLE_SIZE_SOURCES:
         raise RuntimeError(
@@ -1915,7 +677,7 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
                 name, row, profile, sampled_experts=range(int(row["num_experts"])),
                 inclusion_prob={e: 1.0 for e in range(int(row["num_experts"]))},
                 seed=seed, design="census")
-            _validate_stack_sample(frame)
+            validate_stack_sample(frame)
             if sizes == "counts":
                 size_vector = stack_expert_counts(census, frame)
             else:
@@ -2034,17 +796,15 @@ def _source_identity_cache_binding(path, model, calibration_cache=None):
     return dict(path=str(path), sha256=proof_sha256)
 
 
-def _row_is_selected_source(inner_argv: list) -> bool:
+def _row_is_selected_source(options: dict[str, object]) -> bool:
     """Whether a campaign row reuses a hash-bound selected capture.
 
     ``tessera_campaign``'s own ``selected_source``: streaming, a unit
     selection and a bound capture, and neither census nor capture output.
     """
-    return ("--streaming" in inner_argv and "--units" in inner_argv
-            and "--calibration-cache" in inner_argv
-            and "--calibration-cache-sha256" in inner_argv
-            and "--census-out" not in inner_argv
-            and "--capture-calibration-out" not in inner_argv)
+    return bool(options.get('streaming') and options.get('units')
+                and options.get('calibration_cache') and options.get('calibration_cache_sha256')
+                and not (options.get('census_out') or options.get('capture_calibration_out')))
 
 
 def require_source_identity_proofs(rows: list) -> None:
@@ -2057,7 +817,8 @@ def require_source_identity_proofs(rows: list) -> None:
     missing = []
     for index, row in enumerate(rows):
         inner = _inner_campaign_argv(row)
-        if _row_is_selected_source(inner) and "--source-identity-cache" not in inner:
+        options = explicit_campaign_options(inner)
+        if _row_is_selected_source(options) and not options.get('source_identity_cache'):
             missing.append(_row_label(inner, index))
     if missing:
         raise DemandRefused(
@@ -2202,20 +963,14 @@ def _campaign_acquisition_argv(argv):
         raise RuntimeError("acquisition flags must use their complete declared names")
     if not any(token in names for token in tokens):
         return None
-    parser = argparse.ArgumentParser(add_help=False)
-    for name in ("acquisition-request", "acquisition-request-sha256", "menu-mode", "rate-band",
-                 "census-out", "capture-calibration-out", "capture-chain", "research-exact-member"):
-        parser.add_argument("--" + name, default=None)
-    parser.add_argument("--max-rounds", type=int, default=0)
-    parser.add_argument("--exhaustive-rate-grid", action="store_true")
-    options, _ = parser.parse_known_args(argv)
-    binding = (options.acquisition_request, options.acquisition_request_sha256)
+    values = explicit_campaign_options(argv)
+    binding = (values.get('acquisition_request'), values.get('acquisition_request_sha256'))
     if all(value is None for value in binding):
         return None
-    if (not all(binding) or options.menu_mode != "research" or options.max_rounds != 1
-            or options.rate_band is not None or options.exhaustive_rate_grid
-            or options.census_out or options.capture_calibration_out or options.capture_chain
-            or options.research_exact_member is not None):
+    if (not all(binding) or values.get('menu_mode', None) != "research" or values.get('max_rounds', 0) != 1
+            or values.get('rate_band', None) is not None or values.get('exhaustive_rate_grid', False)
+            or values.get('census_out', None) or values.get('capture_calibration_out', None) or values.get('capture_chain', None)
+            or values.get('research_exact_member', None) is not None):
         raise RuntimeError("acquisition rows require paired binding, explicit research/max-rounds=1 and no band/exhaustive/capture/partial modes")
     return {"path": binding[0], "sha256": binding[1]}
 
@@ -2247,14 +1002,14 @@ def _planned_campaign_acquisition(spec, args, census):
     if getattr(args, "experts_per_row", 0) or args.stack_sample is not None:
         raise RuntimeError("acquisition refuses sampled/audited or partial expert rows")
     from prismaquant.tessera_full_domain_acquisition import load_joint_campaign_acquisition
-    from prismaquant.tessera_campaign import _campaign_acquisition_scope
+    from prismaquant.tessera_campaign_table import campaign_acquisition_scope
     acquisition = load_joint_campaign_acquisition(binding)
-    _campaign_acquisition_scope(acquisition, census["anchor_groups"])
+    campaign_acquisition_scope(acquisition, census["anchor_groups"])
     return acquisition, binding
 
 
 def cmd_plan(args) -> int:
-    spec = load_spec(Path(args.spec))
+    spec = campaign_rows.load_spec(Path(args.spec))
     workspace = Path(args.workspace)
     census = json.loads((workspace / "census.json").read_text())
     if census.get("model") != spec["model"]:
@@ -2264,7 +1019,8 @@ def cmd_plan(args) -> int:
     acquisition, acquisition_binding = _planned_campaign_acquisition(spec, args, census)
     calibration_cache = _calibration_cache_binding(
         getattr(args, "calibration_cache", None), workspace / "census.json")
-    selected_source = '--streaming' in spec['campaign_argv']
+    spec_options = explicit_campaign_options(spec['campaign_argv'])
+    selected_source = spec_options.get('streaming', False)
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
     proof = _planned_source_identity_cache(
@@ -2287,8 +1043,8 @@ def cmd_plan(args) -> int:
 
     acquisition_plan = None
     if acquisition is not None:
-        from prismaquant.tessera_campaign import _campaign_acquisition_scope
-        requested_keys, _ = _campaign_acquisition_scope(acquisition, groups)
+        from prismaquant.tessera_campaign_table import campaign_acquisition_scope
+        requested_keys, _ = campaign_acquisition_scope(acquisition, groups)
         active = [key for key in requested_keys if any(
             qs for name in groups[key] for qs in acquisition["requests"][name].values())]
         deferred = [key for key in requested_keys if key not in active]
@@ -2301,16 +1057,15 @@ def cmd_plan(args) -> int:
     experts_per_row = getattr(args, "experts_per_row", 0)
     partition_records, partition_stacks = {}, {}
     if experts_per_row:
-        from prismaquant.tessera_campaign import parse_rate_band
-        band = parse_rate_band(campaign_argv_argument(spec["campaign_argv"], "--rate-band"))
+        from prismaquant.tessera_campaign_table import parse_rate_band
+        band = parse_rate_band(spec_options.get('rate_band'))
         if (type(experts_per_row) is not int or experts_per_row <= 0
                 or args.groups_per_row != 1 or getattr(args, "row_work_profile", None)
                 or args.stack_sample is not None or getattr(args, "seed_workspace", None)
                 or args.seed_checkpoint or args.seed_wire_dir
-                or any(flag in spec["campaign_argv"] for flag in (
-                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member"))
+                or any(spec_options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member'))
                 or band is None or band[0] != band[1]
-                or campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int) != 1):
+                or spec_options.get('max_rounds', 0) != 1):
             raise RuntimeError("expert partition requires positive size, groups-per-row=1, pinned band, max-rounds=1, no sampling/seeds/work-profile")
         from prismaquant.tessera_expert_projection import carried_units
         _source, partition_records, partition_stacks = carried_units(census["expert_projection"])
@@ -2348,7 +1103,7 @@ def cmd_plan(args) -> int:
     expanded_bundles = []
     for index, bundle in bundles:
         if experts_per_row and bundle[0].startswith("s:"):
-            from prismaquant.tessera_campaign import EXPERT_PARTITION_SCHEMA
+            from prismaquant.tessera_campaign_selection import EXPERT_PARTITION_SCHEMA
             by_expert = {}
             for name in groups[bundle[0]]:
                 if name not in partition_records:
@@ -2390,15 +1145,16 @@ def cmd_plan(args) -> int:
         units_path = units_dir / f"{row_id}.json"
         selection_writes.append((units_path, json.dumps(selection, indent=2, sort_keys=True) + "\n"))
         row_dir = workspace / "rows" / row_id
-        from prismaquant.tessera_campaign import expert_partition_members, selection_priced_units
+        from prismaquant.tessera_campaign_table import expert_partition_members
+        from prismaquant.tessera_campaign_selection import selection_priced_units
         if part is not None:
             expert_partition_members(selection, unit_records=partition_records,
-                stack_of=partition_stacks, rate_band=campaign_argv_argument(spec["campaign_argv"], "--rate-band"),
-                max_rounds=campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int))
+                stack_of=partition_stacks, rate_band=spec_options.get('rate_band'),
+                max_rounds=spec_options.get('max_rounds', 0))
         members = sorted(selection_priced_units(selection)[0])
         if acquisition is not None:
-            from prismaquant.tessera_campaign import _campaign_acquisition_row_scope
-            _campaign_acquisition_row_scope(acquisition, census["anchor_groups"], selected=members)
+            from prismaquant.tessera_campaign_table import campaign_acquisition_row_scope
+            campaign_acquisition_row_scope(acquisition, census["anchor_groups"], selected=members)
         argv = [
             "--model", spec["model"],
             "--out", str(row_dir / "cost.pkl"),
@@ -2429,16 +1185,16 @@ def cmd_plan(args) -> int:
         # spec's argv alone priced that row at its stream window instead
         # (PQ #1686).
         row_spec = {**spec, "campaign_argv": argv}
-        row = _row(spec, argv,
-                   mem_gb=_row_memory_gb(row_spec, members, census, selected_source=selected_source),
+        row = campaign_rows.prismabuild_row(spec, argv,
+                   mem_gb=campaign_rows.row_memory_gb(row_spec, members, census, selected_source=selected_source),
                    timeout_s=(None if args.timeout_s is None else int(args.timeout_s)))
         if part is not None:
             effective_argv = _inner_campaign_argv(row)
+            effective_options = explicit_campaign_options(effective_argv)
             expert_partition_members(selection, unit_records=partition_records,
-                stack_of=partition_stacks, rate_band=campaign_argv_argument(effective_argv, "--rate-band"),
-                max_rounds=campaign_argv_argument(effective_argv, "--max-rounds", 0, int),
-                seeded=any(flag in effective_argv for flag in (
-                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+                stack_of=partition_stacks, rate_band=effective_options.get('rate_band'),
+                max_rounds=effective_options.get('max_rounds', 0),
+                seeded=any(effective_options.get(field) for field in ('seed_checkpoint', 'seed_wire_dir', 'research_exact_member')))
         if acquisition is not None:
             _check_acquisition_binding(_campaign_acquisition_argv(_inner_campaign_argv(row)),
                 acquisition_binding, refusal=RuntimeError, where="acquisition row argv")
@@ -2456,7 +1212,7 @@ def cmd_plan(args) -> int:
                         **predicted_work,
                         **({'expert_partition_selection': selection} if part is not None else {}),
                         **({'seed': row_seed} if row_seed is not None else {}),
-                        **({'resources': _streamed_resource_plan(row_spec, census, members,
+                        **({'resources': campaign_rows.streamed_resource_plan(row_spec, census, members,
                             selected_source=True)} if selected_source else {})})
 
     # PB alone admits and places these independently retryable rows according
@@ -2500,12 +1256,12 @@ def cmd_plan(args) -> int:
         # means the spec declared none, and every row's phase plan records the
         # same thing in its own ``baseline_policy``, so a reader cannot
         # mistake an absent reservation for a covered one.
-        "process_baseline_bytes": _process_baseline(spec)[0],
-        "process_baseline_policy": _process_baseline(spec)[1],
+        "process_baseline_bytes": campaign_rows.process_baseline(spec)[0],
+        "process_baseline_policy": campaign_rows.process_baseline(spec)[1],
         # The other term outside the phase deltas: the margin the row's own
         # guard holds back from the cap. Recorded because a demand that does
         # not carry it is admitted and then refused.
-        "guard_margin_bytes": _guard_margin_bytes(),
+        "guard_margin_bytes": campaign_rows.guard_margin_bytes(),
         # The rows the manifest does not hold, at the demand they were derived
         # at. A reader of the plan sees the whole layout; a reader of the
         # manifest sees only what was submitted.
@@ -2577,7 +1333,7 @@ def _checked_manifest(args, *, manifest: Path) -> list:
         raise DemandRefused(
             f"{manifest} cannot be checked: neither --spec nor a 'spec' field "
             f"in {plan_path}. Pass the spec these rows were planned from.")
-    spec = load_spec(Path(spec_path))
+    spec = campaign_rows.load_spec(Path(spec_path))
     census_path = getattr(args, "census", None) or plan.get("census") or (
         workspace / "census.json")
     census = json.loads(Path(census_path).read_text())
@@ -2623,21 +1379,6 @@ class DataManifestRefused(RuntimeError):
     """A row would reach PrismaBuild without the read set it is warmed from."""
 
 
-def _manifest_producer():
-    """The campaign's data-manifest producer, imported from ``experiments/``.
-
-    It is imported here rather than at module load because it reads the
-    campaign's plan and capture manifest, which only ``plan``, ``check`` and
-    ``submit`` need.
-    """
-    root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from experiments import glm_data_manifests
-
-    return glm_data_manifests
-
-
 def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
                             out_dir: Path) -> list[tuple[str, Path, bytes]]:
     """Each row's id, manifest path and manifest bytes, or a refusal.
@@ -2645,7 +1386,7 @@ def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
     Writes nothing, so a caller can refuse the whole set before any byte of it
     is published.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     provenance = producer.deterministic_provenance(
         str(workspace), campaign, "stat")
     derived = []
@@ -2659,7 +1400,7 @@ def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
         if row_id not in campaign.rows:
             raise RuntimeError(
                 f"{row_id} is not a row of {workspace}/plan.json")
-        manifest = producer.build_manifest(
+        manifest = producer.build_campaign_row_manifest(
             campaign, row_id, provenance, row.get("argv"))
         blob = producer.check_manifest_bytes(
             json.dumps(manifest, indent=1, sort_keys=False).encode() + b"\n",
@@ -2679,7 +1420,7 @@ def planned_data_manifests(workspace: Path, plan: dict,
     are the row's action identity and are returned byte-identical; the only
     change to a row is ``data_manifest``, appended last.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     campaign = producer.Campaign(str(workspace), plan=plan,
                                  selections=selections)
     derived = _derived_data_manifests(workspace, rows, campaign,
@@ -2701,7 +1442,7 @@ def require_data_manifests(rows: list[dict], *, where) -> None:
     and holds it to the rules PrismaBuild applies, and to belonging to the row
     that names it; it does not re-derive the read set, which ``submit`` does.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     refusals = []
     for index, row in enumerate(rows):
         label = _row_label(_inner_campaign_argv(row), index)
@@ -2714,7 +1455,7 @@ def require_data_manifests(rows: list[dict], *, where) -> None:
             manifest = producer.check_manifest(
                 json.loads(producer.check_manifest_bytes(blob, where=label)),
                 where=label)
-        except (OSError, ValueError, SystemExit) as error:
+        except (OSError, ValueError, producer.ReadsetRefused) as error:
             refusals.append(f"{label}: {named}: {error}")
             continue
         owner = manifest["annotations"].get("row_id")
@@ -2754,7 +1495,7 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     the same row submitted under different bytes would run twice.  A row
     planned before ``plan`` attached manifests names none, and gets one here.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     campaign = producer.Campaign(str(workspace))
     out_dir = out_dir or workspace / DATA_MANIFEST_DIR
     derived = _derived_data_manifests(workspace, rows, campaign, out_dir=out_dir)
@@ -2817,7 +1558,6 @@ def cmd_submit(args) -> int:
                        receipts=workspace / "receipts.json")
 
 
-
 # ---------------------------------------------------------------------------
 # post-campaign GPU submissions
 # ---------------------------------------------------------------------------
@@ -2833,12 +1573,6 @@ AQUA_ENTRY_POINT = "prismaquant.aqua_activation_cost"
 EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
 
 
-def _sha256_of(path: Path) -> str:
-    from prismaquant.digests import file_sha256hex
-
-    return file_sha256hex(path)
-
-
 def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     """The file's digest, checked against what the caller declared.
 
@@ -2851,7 +1585,7 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     The pass's own gates -- not the submitter -- decide what runs, and a dev
     submission's argv already names the environment it ran under.
     """
-    actual = _sha256_of(path)
+    actual = file_sha256hex(path)
     if declared is not None:
         from prismaquant.dev_mode import seal_check
         seal_check(f"{label} declared digest", declared, actual, where=str(path),
@@ -2993,7 +1727,6 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if (entry_point == JOINT_ENTRY_POINT
             and (plan.get("qualification_window") is not None
                  or plan.get("execution", {}).get("retained_operator_windows") is not None)):
-        from tools.tessera_campaign_container import BOUNDED_CAPTURE_ENV, validate_container
         validate_container(container_spec, bounded=True)
         container_spec = {**container_spec,
                           "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
@@ -3135,10 +1868,10 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         # Checked after the summary is printed, so a read set the fleet would
         # refuse still reports the size and the phase boundaries that make the
         # refusal readable.
-        _manifest_producer().check_manifest_bytes(
+        campaign_data_manifests.check_manifest_bytes(
             blob, where=f"{entry_point}:{command}")
         return 0
-    _manifest_producer().check_manifest_bytes(blob, where=f"{entry_point}:{command}")
+    campaign_data_manifests.check_manifest_bytes(blob, where=f"{entry_point}:{command}")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = manifest_path.with_name(manifest_path.name + ".tmp")
     temporary.write_bytes(blob)
@@ -3153,7 +1886,7 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
 
 
 def cmd_submit_joint(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -3168,7 +1901,7 @@ def cmd_submit_joint(args) -> int:
     scope = verify_joint_campaign_scope(
         plan, require_scope=args.require_scope, campaign=campaign,
         label=f"joint {args.command}: {plan_path.name}")
-    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
+    scope = {**scope, "campaign_identity_sha256": file_sha256hex(identity_path)}
     inner = ["python3", "-u", "-m", JOINT_ENTRY_POINT, args.command,
              "--plan", str(plan_path), "--plan-sha256", plan_sha256]
     prepared = None
@@ -3238,7 +1971,7 @@ def cmd_submit_aqua(args) -> int:
     artifact, not a nearly-empty run: nothing is submitted and the caller is
     told which payload already carries the A-side.
     """
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -3249,7 +1982,7 @@ def cmd_submit_aqua(args) -> int:
     scope = verify_joint_campaign_scope(
         plan, require_scope=args.require_scope, campaign=campaign,
         label=f"aqua {args.require_scope}: {plan_path.name}")
-    scope = {**scope, "campaign_identity_sha256": _sha256_of(identity_path)}
+    scope = {**scope, "campaign_identity_sha256": file_sha256hex(identity_path)}
 
     cost_in = Path(args.cost_in).resolve()
     cost_sha256 = _bound_sha256(cost_in, args.cost_in_sha256,
@@ -3286,7 +2019,7 @@ def cmd_submit_aqua(args) -> int:
     # The fulfilled-artifact shortcut reads the same bound set the roster above
     # validated, so a joint row that names another cell can neither short-circuit
     # this submission nor be reported as one of the campaign's priced cells.
-    joint_cells = _bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
+    joint_cells = bound_joint_cells(costs, label=f"aqua: {plan_path.name}")
     summary = {
         "entry_point": f"{AQUA_ENTRY_POINT}:{args.require_scope}",
         "plan": str(plan_path),
@@ -3345,7 +2078,7 @@ def cmd_submit_aqua(args) -> int:
 
 
 def cmd_submit_allocation(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -3507,7 +2240,7 @@ def _module_checkout(mounts: list, *, cwd: str):
 
 
 def cmd_submit_export(args) -> int:
-    producer = _manifest_producer()
+    producer = campaign_data_manifests
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
     plan_sha256 = _bound_sha256(plan_path, args.plan_sha256, label="joint plan")
@@ -3585,206 +2318,6 @@ def _add_submission_arguments(parser) -> None:
 # merge
 # ---------------------------------------------------------------------------
 
-def _require_equal(field: str, values: dict) -> object:
-    distinct = {json.dumps(value, sort_keys=True, default=str) for value in values.values()}
-    if len(distinct) != 1:
-        detail = ", ".join(f"{row}={json.dumps(value, sort_keys=True, default=str)[:160]}"
-                           for row, value in sorted(values.items()))
-        raise MergeRefused(f"rows disagree on {field}: {detail}")
-    return next(iter(values.values()))
-
-
-def _hessian_identities(payload: dict) -> list[dict]:
-    return [row["hessian_identity"]
-            for rows in payload["costs"].values() for row in rows.values()
-            if "hessian_identity" in row]
-
-
-def _check_acquisition_identity(actual, expected, *, where):
-    """Authenticate control comparability before stamping only raw request provenance."""
-    from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_comparable_identity
-    from prismaquant.dev_mode import seal_check
-
-    try:
-        actual_control_identity = joint_campaign_acquisition_comparable_identity(actual)
-        expected_control_identity = joint_campaign_acquisition_comparable_identity(expected)
-    except ValueError as exc:
-        raise MergeRefused(f"{where}: acquisition global control identity malformed: {exc}") from exc
-    if actual_control_identity != expected_control_identity or set(actual) != set(expected):
-        raise MergeRefused(f"{where}: acquisition global authenticated control/cost/run/probe/regime identity differs")
-    seal_check("acquisition request byte identity", expected["request_sha256"],
-        actual["request_sha256"], where=where,
-        refusal=lambda: MergeRefused(f"{where}: acquisition request byte identity differs"))
-
-
-def _merge_acquisition_rows(records, *, acquisition, scope_groups):
-    """Strict disjoint complete requested-work union; no exemption for settings.
-
-    Original intake authenticates raw joint rows. This compares their global
-    identity and the rows' actual source proofs/schedules, never creates a
-    Fisher/native price or interprets an unsupported empty family as priced.
-    """
-    present = [record.get("origin") is not None for record in records.values()]
-    if not any(present):
-        if any(record.get("schedule") is not None or any(
-                proof is not None for proof in (record.get("sources") or {}).values())
-               for record in records.values()):
-            raise MergeRefused("acquisition schedule/source proof lacks its global origin")
-        if acquisition is not None:
-            raise MergeRefused("acquisition plan has rows without acquisition identity")
-        return None
-    if not all(present) or acquisition is None or scope_groups is None:
-        raise MergeRefused("acquisition merge requires the original authenticated request and actual scope")
-    from prismaquant.tessera_campaign import (
-        CURRENCY, _campaign_acquisition_scope, _campaign_acquisition_row_scope,
-        _campaign_acquisition_deferred_families, _requested_acquisition_schedule)
-    from prismaquant.tessera_formats import parse_tessera_format_name
-    try:
-        keys, _ = _campaign_acquisition_scope(acquisition, scope_groups)
-    except (ValueError, KeyError, TypeError) as exc:
-        raise MergeRefused(f"acquisition original scope refuses: {exc}") from exc
-    active = {key for key in keys if any(qs for name in scope_groups[key]
-              for qs in acquisition["requests"][name].values())}
-    expected_units = {name for key in active for name in scope_groups[key]}
-    schedule, sources, deferred = {}, {}, {}
-    common = {**acquisition["identity"],
-        "purpose": "actual_scalar_render_journal_and_wire_preparation", "currency": CURRENCY}
-    for row_id, record in sorted(records.items()):
-        members = set(record["units"])
-        if members.intersection(schedule):
-            raise MergeRefused(f"{row_id}: acquisition units overlap another row")
-        try:
-            projected, row_keys, _ = _campaign_acquisition_row_scope(
-                acquisition, scope_groups, selected=members)
-        except (ValueError, KeyError, TypeError) as exc:
-            raise MergeRefused(f"{row_id}: acquisition partial/unknown row scope: {exc}") from exc
-        if not set(row_keys) <= active:
-            raise MergeRefused(f"{row_id}: acquisition row includes an all-deferred atomic group")
-        expected_schedule = _requested_acquisition_schedule(
-            {key: scope_groups[key] for key in row_keys}, projected["requests"])
-        if record.get("schedule") != expected_schedule:
-            raise MergeRefused(f"{row_id}: acquisition requested schedule differs")
-        if record.get("sources") != projected["source_weights"]:
-            raise MergeRefused(f"{row_id}: acquisition source weight proof differs")
-        origin = record["origin"]
-        if (not isinstance(origin, dict) or set(origin) != set(common) | {
-                "expanded_actual_work_count", "deferred_domain"}):
-            raise MergeRefused(f"{row_id}: acquisition global request/cost/run/probe/regime identity differs")
-        _check_acquisition_identity({key: origin[key] for key in common}, common, where=row_id)
-        count = sum(len(qs) for families in expected_schedule.values() for qs in families.values())
-        domain = origin["deferred_domain"]
-        if type(origin["expanded_actual_work_count"]) is not int or origin["expanded_actual_work_count"] != count:
-            raise MergeRefused(f"{row_id}: acquisition expanded work count differs")
-        if not isinstance(domain, dict) or set(domain) != members:
-            raise MergeRefused(f"{row_id}: acquisition deferred domain scope differs")
-        for name, families in expected_schedule.items():
-            unit = record["units"][name]
-            if not isinstance(unit, dict) or not isinstance(unit.get("menu"), list):
-                raise MergeRefused(f"{row_id}: acquisition requires bound checkpoint menu for {name}")
-            source = unit.get("weight")
-            expected_source = projected["source_weights"][name]
-            if (unit.get("acquisition_source_weight") != expected_source
-                    or not isinstance(source, dict) or source.get("shape") != expected_source["shape"]
-                    or source.get("dtype") != expected_source["dtype"]):
-                raise MergeRefused(f"{row_id}: acquisition checkpoint source proof differs for {name}")
-            menu_families = set()
-            try:
-                for fmt in unit["menu"]:
-                    parsed = parse_tessera_format_name(fmt)
-                    if parsed is None:
-                        raise ValueError("not a canonical Tessera menu format")
-                    menu_families.add(parsed[0].name)
-            except (ValueError, TypeError) as exc:
-                raise MergeRefused(f"{row_id}: acquisition checkpoint menu malformed for {name}") from exc
-            expected_deferred = _campaign_acquisition_deferred_families(families, menu_families)
-            if domain[name] != expected_deferred:
-                raise MergeRefused(f"{row_id}: acquisition exact deferred families differ for {name}")
-            expected_formats = {f"{family}_R{q}" for family, qs in families.items() for q in qs}
-            if not expected_formats <= set(unit["menu"]):
-                raise MergeRefused(f"{row_id}: acquisition requested menu missing for {name}")
-            if "cells" in record and (set(record["cells"].get(name, [])) != expected_formats
-                    or len(record["cells"].get(name, [])) != len(expected_formats)):
-                raise MergeRefused(f"{row_id}: acquisition missing/extra measured cells for {name}")
-        if "cells" in record and set(record["cells"]) != members:
-            raise MergeRefused(f"{row_id}: acquisition measured cell scope differs")
-        schedule.update(expected_schedule)
-        sources.update(projected["source_weights"])
-        deferred.update(domain)
-    if set(schedule) != expected_units:
-        raise MergeRefused("acquisition active atomic group coverage incomplete")
-    return {"origin": {**common,
-                "expanded_actual_work_count": sum(len(qs) for families in schedule.values() for qs in families.values()),
-                "deferred_domain": dict(sorted(deferred.items()))},
-            "schedule": dict(sorted(schedule.items())), "sources": dict(sorted(sources.items()))}
-
-
-def _payload_acquisition_records(payloads, *, unit_identities):
-    """Join payload rows to the existing authenticated checkpoint menu owner."""
-    from prismaquant.tessera_campaign import CURRENCY, selection_priced_units
-    if not isinstance(unit_identities, dict):
-        raise MergeRefused("acquisition payload merge requires bound checkpoint unit identities")
-    selected = {row: selection_priced_units(payload["provenance"]["unit_selection"])[0]
-                for row, payload in payloads.items()}
-    if set(unit_identities) != {name for names in selected.values() for name in names}:
-        raise MergeRefused("acquisition checkpoint/payload unit scope differs")
-    records = {}
-    for row, payload in payloads.items():
-        prov = payload["provenance"]
-        if prov.get("menu_mode") != "research" or prov.get("max_rounds") != 1 or prov.get("rate_band") is not None:
-            raise MergeRefused(f"{row}: acquisition payload regime differs")
-        for name, formats in payload["costs"].items():
-            for fmt, price in formats.items():
-                value = price.get("output_mse")
-                if (price.get("currency") != CURRENCY or price.get("output_mse_measured") is not True
-                        or price.get("cost_source") != "tessera_campaign_measured"
-                        or type(value) not in (int, float) or not math.isfinite(value) or value < 0
-                        or fmt != f"{price.get('tessera_family')}_R{price.get('tessera_body_rate_q256')}"):
-                    raise MergeRefused(f"{row}: acquisition scalar render measurement missing/foreign for {name}@{fmt}")
-        records[row] = {"origin": prov.get("acquisition"),
-            "schedule": prov.get("acquisition_schedule"), "sources": prov.get("acquisition_source_weights"),
-            "units": {name: unit_identities[name] for name in selected[row]},
-            "cells": {name: list(formats) for name, formats in payload["costs"].items()}}
-    return records
-
-
-def _merge_acquisition_settings(identities, states_by_row, *, acquisition, scope_groups):
-    if acquisition is None and not any(
-            "acquisition_origin" in (identity.get("settings") or ())
-            or "acquisition_schedule" in (identity.get("settings") or ())
-            or any("acquisition_source_weight" in unit
-                   for unit in (identity.get("units") or {}).values())
-            for identity in identities.values()):
-        return None
-    from prismaquant.tessera_campaign import CampaignAnchor, _require_campaign_acquisition_anchor
-    records = {}
-    for row, identity in identities.items():
-        settings = identity.get("settings") or {}
-        if (settings.get("menu_mode") != "research" or settings.get("max_rounds") != 1
-                or settings.get("rate_band") is not None or settings.get("exhaustive_rate_grid")):
-            raise MergeRefused(f"{row}: acquisition checkpoint regime differs")
-        for name, state in states_by_row[row].items():
-            for anchor in state["anchors"]:
-                _require_campaign_acquisition_anchor(CampaignAnchor(**anchor), settings["acquisition_schedule"])
-                record = state["wire_records"].get(anchor["format_name"], {})
-                if record.get("identity", {}).get("source") != identity["units"][name]["weight"]:
-                    raise MergeRefused(f"{row}: acquisition wire source differs from checkpoint unit {name}")
-            if state.get("unservable") or set(state["wire_records"]) != {
-                    anchor["format_name"] for anchor in state["anchors"]}:
-                raise MergeRefused(f"{row}: acquisition has unservable/extra wire work for {name}")
-        records[row] = {"origin": settings.get("acquisition_origin"),
-            "schedule": settings.get("acquisition_schedule"), "units": identity["units"],
-            "sources": {name: unit.get("acquisition_source_weight") for name, unit in identity["units"].items()},
-            "cells": {name: [anchor["format_name"] for anchor in state["anchors"]]
-                      for name, state in states_by_row[row].items()}}
-    merged = _merge_acquisition_rows(records, acquisition=acquisition, scope_groups=scope_groups)
-    if merged is None:
-        return None
-    common = _require_equal("checkpoint settings outside exact acquisition scope", {
-        row: {key: value for key, value in identity["settings"].items()
-              if key not in {"acquisition_origin", "acquisition_schedule"}}
-        for row, identity in identities.items()})
-    return {**common, "acquisition_origin": merged["origin"], "acquisition_schedule": merged["schedule"]}
-
 
 def _plan_acquisition(plan, census):
     declared = plan.get("acquisition")
@@ -3792,14 +2325,14 @@ def _plan_acquisition(plan, census):
         return None
     from prismaquant.tessera_full_domain_acquisition import load_joint_campaign_acquisition
     acquisition = load_joint_campaign_acquisition(declared["binding"])
-    _check_acquisition_identity(acquisition["identity"], declared.get("identity"), where="plan acquisition")
+    check_acquisition_identity(acquisition["identity"], declared.get("identity"), where="plan acquisition")
     _acquisition_plan_coverage(plan, census, acquisition)
     return acquisition
 
 
 def _acquisition_plan_coverage(plan, census, acquisition):
-    from prismaquant.tessera_campaign import _campaign_acquisition_scope
-    keys, _ = _campaign_acquisition_scope(acquisition, census["anchor_groups"])
+    from prismaquant.tessera_campaign_table import campaign_acquisition_scope
+    keys, _ = campaign_acquisition_scope(acquisition, census["anchor_groups"])
     active = [key for key in keys if any(qs for name in census["anchor_groups"][key]
               for qs in acquisition["requests"][name].values())]
     deferred = [{"key": key, "members": sorted(census["anchor_groups"][key]),
@@ -3818,7 +2351,7 @@ def _acquisition_plan_coverage(plan, census, acquisition):
 def _check_acquisition_manifest(rows, plan, census, acquisition):
     expected = None if acquisition is None else plan["acquisition"]["binding"]
     seen = set()
-    from prismaquant.tessera_campaign import _campaign_acquisition_row_scope
+    from prismaquant.tessera_campaign_table import campaign_acquisition_row_scope
     for index, row in enumerate(rows):
         argv = _inner_campaign_argv(row)
         binding = _campaign_acquisition_argv(argv)
@@ -3827,7 +2360,7 @@ def _check_acquisition_manifest(rows, plan, census, acquisition):
         if acquisition is None:
             continue
         members = _units_members(argv, census=census, where=f"acquisition row {index}")
-        _campaign_acquisition_row_scope(acquisition, census["anchor_groups"], selected=members)
+        campaign_acquisition_row_scope(acquisition, census["anchor_groups"], selected=members)
         if seen.intersection(members):
             raise DemandRefused("manifest acquisition atomic units overlap")
         seen.update(members)
@@ -3855,7 +2388,7 @@ def declared_coverage(plan: dict, *, acquisition=None, census=None) -> dict | No
         if acquisition is None:
             acquisition = _plan_acquisition(plan, census)
         return _acquisition_plan_coverage(plan, census, acquisition)
-    from prismaquant.tessera_campaign import UNITS_SCHEMA_V3, load_unit_selection, validate_unit_selection
+    from prismaquant.tessera_campaign_selection import UNITS_SCHEMA_V3, load_unit_selection, validate_unit_selection
     partitions = {}
     for entry in plan["rows"]:
         selection = entry.get("expert_partition_selection")
@@ -3891,425 +2424,11 @@ def declared_coverage(plan: dict, *, acquisition=None, census=None) -> dict | No
             **({"expected_partitions": partitions} if partitions else {})}
 
 
-def expected_expert_partition_coverage(census: dict, plan_coverage, *, rate_band, max_rounds) -> dict:
-    """Derive complete expert coverage from the plan, never surviving outputs."""
-    expected = {} if plan_coverage is None else plan_coverage.get("expected_partitions", {})
-    if not isinstance(expected, dict):
-        raise MergeRefused("expert partition plan is not a row-selection mapping")
-    if not expected:
-        return {}
-    from prismaquant.tessera_campaign import (
-        UNITS_SCHEMA_V3, expert_partition_members, select_anchor_groups, validate_unit_selection,
-    )
-    from prismaquant.tessera_expert_projection import carried_units
-    _source, records, stack_of = carried_units(census["expert_projection"])
-    covered, indices, counts = {}, {}, {}
-    try:
-        for row_id, selection in expected.items():
-            validate_unit_selection(selection, path=row_id)
-            if selection["schema"] != UNITS_SCHEMA_V3:
-                raise RuntimeError("partition plan carries a legacy selection")
-            select_anchor_groups(selection, census["anchor_groups"], where=row_id)
-            subsets = expert_partition_members(selection, unit_records=records,
-                stack_of=stack_of, rate_band=rate_band, max_rounds=max_rounds)
-            entry = selection["groups"][0]
-            key, part = entry["key"], entry["partition"]
-            members = set(subsets[key])
-            if covered.setdefault(key, set()) & members:
-                raise RuntimeError(f"expert partition overlap for {key}")
-            covered[key].update(members)
-            if part["index"] in indices.setdefault(key, set()):
-                raise RuntimeError(f"expert partition repeats an index for {key}")
-            indices[key].add(part["index"])
-            counts.setdefault(key, set()).add(part["count"])
-        for key, members in covered.items():
-            if members != set(census["anchor_groups"][key]) or len(counts[key]) != 1:
-                raise RuntimeError(f"expert partition incomplete roster for {key}")
-            if indices[key] != set(range(next(iter(counts[key])))):
-                raise RuntimeError(f"expert partition incomplete index coverage for {key}")
-    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
-        raise MergeRefused(f"invalid expert partition plan: {exc}") from exc
-    return expected
-
-
-def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
-                   plan_coverage: dict | None = None, acquisition=None,
-                   acquisition_unit_identities=None) -> dict:
-    """One cost payload from N rows, refusing anything they do not share.
-
-    The merged table is the monolith's on every field the monolith's rows would
-    carry: the union of the per-unit prices, one Hessian identity, and a
-    coverage block rebuilt over the **scope** rather than over any one row's
-    selection.
-
-    ``plan_coverage`` is what :func:`declared_coverage` read from the plan.
-    Without it the rows must price every anchor group of the scope; with it
-    they must price exactly the groups the plan declares, and the merged table
-    says which scope groups it leaves unpriced and why under
-    ``provenance.coverage``, with ``unit_selection.selected`` True.
-
-    An acquisition also requires ``acquisition_unit_identities`` from the
-    authenticated checkpoint merge. Its existing full producer menus bind
-    exact deferred-domain claims; payload provenance alone cannot supply them.
-    """
-    from prismaquant.tessera_campaign import (
-        SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
-        parse_family_restriction, select_anchor_groups, selection_priced_units,
-        UNITS_SCHEMA_V3, validate_unit_selection)
-    from prismaquant.tessera_campaign import ExpertPopulation
-    # The keys a merged payload must land under are the ones the campaign and
-    # the allocation share.  Spelling them here as literals is how a merge
-    # writes a block nothing reads: POPULATION_KEY is "population", not
-    # "tessera_population", and the allocation reads only the former.
-    from prismaquant.tessera_expert_projection import (
-        EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY)
-
-    for row_id, payload in row_payloads.items():
-        if payload.get("schema") != SCHEMA:
-            raise MergeRefused(f"{row_id}: not a {SCHEMA} payload")
-
-    provenances = {row: payload["provenance"] for row, payload in row_payloads.items()}
-    acquisition_union = None
-    if acquisition is not None or any(any(key in prov for key in (
-            "acquisition", "acquisition_schedule", "acquisition_source_weights")) for prov in provenances.values()):
-        acquisition_union = _merge_acquisition_rows(_payload_acquisition_records(
-            row_payloads, unit_identities=acquisition_unit_identities),
-            acquisition=acquisition, scope_groups=census.get("anchor_groups"))
-    for row_id, provenance in provenances.items():
-        if provenance.get("research_exact_member_scope") is not None:
-            raise MergeRefused(
-                f"{row_id}: research exact-member scalar cannot be merged as a full group or stack estimate")
-    reference = next(iter(provenances.values()))
-    expected_partitions = expected_expert_partition_coverage(census, plan_coverage,
-        rate_band=reference.get("rate_band"), max_rounds=reference.get("max_rounds", 0))
-    actual_partitions = set()
-    for row_id, prov in provenances.items():
-        units = prov.get("unit_selection")
-        try:
-            validate_unit_selection(units, path=row_id)
-            select_anchor_groups(units, census.get("anchor_groups", reference["campaign_scope"]["anchor_groups"]), where=row_id)
-        except (RuntimeError, ValueError, KeyError, TypeError) as exc:
-            raise MergeRefused(f"{row_id}: invalid bound selection: {exc}") from exc
-        if units["schema"] == UNITS_SCHEMA_V3:
-            declared = expected_partitions.get(row_id)
-            if (declared is None or prov.get("seed_checkpoint") is not None
-                    or units.get("selected", True) is not True
-                    or {key: value for key, value in units.items() if key != "selected"}
-                    != {key: value for key, value in declared.items() if key != "selected"}):
-                raise MergeRefused(f"{row_id}: expert partition differs from its declared plan")
-            if set(row_payloads[row_id]["costs"]) != selection_priced_units(units)[0]:
-                raise MergeRefused(f"{row_id}: expert partition prices differ from its members")
-            from prismaquant.tessera_formats import parse_tessera_format_name
-            rate = units["groups"][0]["partition"]["rate_q256"]
-            priced_formats = set()
-            for name, prices in row_payloads[row_id]["costs"].items():
-                if not isinstance(prices, dict) or not prices:
-                    raise MergeRefused(f"{row_id}: expert partition has no prices for {name}")
-                for fmt in prices:
-                    try:
-                        parsed = parse_tessera_format_name(fmt)
-                    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
-                        raise MergeRefused(f"{row_id}: invalid expert partition format {fmt!r}") from exc
-                    if parsed is None or parsed[1] != rate:
-                        raise MergeRefused(f"{row_id}: expert partition price {fmt!r} is not its pinned rung")
-                    priced_formats.add(fmt)
-            if set(row_payloads[row_id]["formats"]) != priced_formats:
-                raise MergeRefused(f"{row_id}: expert partition format roster differs from its prices")
-            actual_partitions.add(row_id)
-    if actual_partitions != set(expected_partitions):
-        raise MergeRefused("expert partition row coverage incomplete")
-    family_policies, restricted_structures = {}, {}
-    for row_id, prov in provenances.items():
-        restriction = prov.get("family_restriction")
-        if restriction is None:
-            family_policies[row_id] = None
-            continue
-        if not isinstance(restriction, dict) or set(restriction) != {"policy", "structure_by_unit"}:
-            raise MergeRefused(f"{row_id}: invalid family restriction provenance")
-        try:
-            policy = parse_family_restriction(restriction["policy"])
-        except (ValueError, TypeError) as exc:
-            raise MergeRefused(f"{row_id}: invalid family restriction policy: {exc}") from exc
-        structures = restriction["structure_by_unit"]
-        members = selection_priced_units(prov["unit_selection"])[0]
-        if (policy is None or not isinstance(structures, dict) or set(structures) != members
-                or any(s not in ("dense", "routed_moe") for s in structures.values())):
-            raise MergeRefused(f"{row_id}: family restriction must cover exact selected unit structures")
-        for name, structure in structures.items():
-            if name in restricted_structures:
-                raise MergeRefused(f"{row_id}: family restriction repeats selected unit {name}")
-            if name in prov["campaign_scope"]["expert_targets"] and structure != "routed_moe":
-                raise MergeRefused(f"{row_id}: family restriction contradicts projected expert {name}")
-            restricted_structures[name] = structure
-        family_policies[row_id] = policy
-    family_policy = _require_equal("provenance.family_restriction.policy", family_policies)
-    for field in SHARED_PROVENANCE:
-        _require_equal(f"provenance.{field}",
-                       {row: prov.get(field) for row, prov in provenances.items()})
-    _require_equal("provenance.hessian.calibration_identity",
-                   {row: prov["hessian"]["calibration_identity"]
-                    for row, prov in provenances.items()})
-    _require_equal("provenance.activation_static_scales.policy",
-                   {row: prov["activation_static_scales"]["policy"]
-                    for row, prov in provenances.items()})
-    _require_equal("currency", {row: payload["currency"]
-                                for row, payload in row_payloads.items()})
-    scope = _require_equal(
-        "provenance.campaign_scope",
-        {row: {key: value for key, value in prov["campaign_scope"].items()}
-         for row, prov in provenances.items()})
-
-    # One Hessian identity across every priced row, on every field but the
-    # capture digest the merge is about to replace.
-    for row_id, payload in row_payloads.items():
-        for field in SHARED_HESSIAN:
-            _require_equal(
-                f"hessian_identity.{field}",
-                {f"{row_id}:{index}": identity.get(field)
-                 for index, identity in enumerate(_hessian_identities(payload))}
-                or {row_id: None})
-    for field in SHARED_HESSIAN:
-        _require_equal(
-            f"hessian_identity.{field} across rows",
-            {row: (_hessian_identities(payload)[0].get(field)
-                   if _hessian_identities(payload) else None)
-             for row, payload in row_payloads.items()})
-
-    # Coverage: every expected group priced exactly once.  The expectation is
-    # the scope, or the groups the plan declares when it declares fewer.
-    selected: dict[str, str] = {}
-    selection_entries = {}
-    for row_id, prov in provenances.items():
-        for entry in prov["unit_selection"]["groups"]:
-            key = entry["key"]
-            if key in selected and not (row_id in expected_partitions and selected[key] in expected_partitions):
-                raise MergeRefused(
-                    f"anchor group {key!r} is priced by both {selected[key]} and {row_id}")
-            if key not in scope["anchor_groups"] or sorted(entry["members"]) != sorted(scope["anchor_groups"][key]):
-                raise MergeRefused(f"{row_id}: selection {key!r} differs from campaign scope")
-            selected[key] = row_id
-            selection_entries[key] = entry
-    if plan_coverage is None:
-        expected = set(scope["anchor_groups"])
-        expected_by = "scope"
-    else:
-        expected = set(plan_coverage["expected_groups"])
-        expected_by = "plan"
-        outside = sorted(expected - set(scope["anchor_groups"]))
-        if outside:
-            raise MergeRefused(
-                f"the plan declares {len(outside)} anchor group(s) outside the campaign "
-                "scope: " + ", ".join(outside[:8]))
-    missing = sorted(expected - set(selected))
-    if missing:
-        raise MergeRefused(
-            f"the rows do not cover {len(missing)} anchor group(s) of the {expected_by}: "
-            + ", ".join(missing[:8]))
-    undeclared = sorted(set(selected) - expected)
-    if undeclared:
-        raise MergeRefused(
-            f"the rows price {len(undeclared)} anchor group(s) the plan does not declare: "
-            + ", ".join(undeclared[:8]))
-    unpriced = sorted(set(scope["anchor_groups"]) - expected)
-
-    sampled = any("stack_samples" in entry or entry.get("sampled")
-                  for entry in selection_entries.values())
-    merged_selection = {
-        "schema": "prismaquant.tessera_campaign_units.v2" if sampled else "prismaquant.tessera_campaign_units.v1",
-        # False is the whole-scope claim a monolith writes; a table the plan
-        # left partly unpriced is a selection and says so.
-        "selected": bool(unpriced),
-        "groups": [selection_entries[key] if sampled else
-                   {"key": key, "members": list(scope["anchor_groups"][key])}
-                   for key in sorted(selection_entries)],
-    }
-    stack_samples, profile = {}, None
-    if sampled:
-        from prismaquant.model_profiles import detect_profile
-        profile = detect_profile(next(iter(provenances.values()))["model"])
-        stack_samples = selection_stack_samples(merged_selection, profile)
-    costs: dict[str, dict] = {}
-    loo: dict[str, dict] = {}
-    surfaces: dict[str, dict] = {}
-    anchor_counts: dict[str, dict] = {}
-    menu_sizes: dict[str, int] = {}
-    anchor_groups: dict[str, list] = {}
-    non_interpolable: list[dict] = []
-    expert_wires: dict[str, dict] = {}
-    # Evidence, not prices: rows a shard adopted from another campaign whose
-    # rungs its menu does not admit.  The union is taken here for the same
-    # reason the prices are -- the reference row's block describes one slice.
-    unservable: dict[str, dict] = {}
-    formats: set[str] = set()
-    stopped_early = False
-    wall_seconds = 0.0
-    rounds_run = 0
-    seeds: list[dict] = []
-    projection_block = None
-    serving_by_unit: dict[str, dict] = {}
-    serving_target = None
-    for row_id in sorted(row_payloads):
-        payload = row_payloads[row_id]
-        prov = payload["provenance"]
-        for qname, rows in payload["costs"].items():
-            if qname in costs:
-                raise MergeRefused(f"unit {qname} is priced by more than one row")
-            costs[qname] = {
-                fmt: {**row, "hessian_identity": {**row["hessian_identity"],
-                                                  "capture_sha256": capture_sha256}}
-                if "hessian_identity" in row else row
-                for fmt, row in rows.items()
-            }
-        formats.update(payload["formats"])
-        loo.update(payload["leave_one_anchor_out"])
-        non_interpolable.extend(payload["non_interpolable"])
-        surfaces.update(prov["surfaces"])
-        if row_id in expected_partitions:
-            expected_groups = {entry["key"]: entry["partition"]["members"]
-                               for entry in expected_partitions[row_id]["groups"]}
-            if prov["anchor_groups"] != expected_groups:
-                raise MergeRefused(f"{row_id}: expert partition anchor groups differ from its declared keys/members")
-            for key, names in prov["anchor_groups"].items():
-                anchor_groups[key] = sorted(set(anchor_groups.get(key, ())) | set(names))
-        else:
-            anchor_groups.update(prov["anchor_groups"])
-        anchor_counts.update(payload["anchor_counts"])
-        menu_sizes.update(payload["menu_sizes"])
-        expert_wires.update(payload.get(EXPERT_WIRES_KEY, {}))
-        for qname, rungs in (prov.get("unservable") or {}).items():
-            held = unservable.setdefault(qname, {})
-            for fmt, record in rungs.items():
-                if fmt in held and held[fmt] != record:
-                    raise MergeRefused(
-                        f"{row_id}: it carries different unservable evidence for "
-                        f"{qname} {fmt} than an earlier row")
-                held[fmt] = record
-        stopped_early = stopped_early or bool(prov["stopped_early"])
-        wall_seconds += float(prov["wall_seconds"])
-        rounds_run = max(rounds_run, int(prov["rounds_run"]))
-        if prov.get("seed_checkpoint"):
-            seeds.append({"row": row_id, **prov["seed_checkpoint"]})
-        projection = prov.get(PROJECTION_KEY)
-        if projection is not None:
-            # Every row carries the SCOPE's projection block, because the
-            # allocation rebinds the producer's answer over every stack the
-            # block names. Two different blocks would be two producer answers.
-            if projection_block is None:
-                projection_block = projection
-            elif projection_block != projection:
-                raise MergeRefused(
-                    f"{row_id}: its producer expert projection differs from the "
-                    "other rows'; they did not read one census projection")
-        serving = prov.get("tessera_serving_scope")
-        if serving:
-            serving_target = serving["target"] if serving_target is None else serving_target
-            if serving["target"] != serving_target:
-                raise MergeRefused("rows disagree on the serving target")
-            serving_by_unit.update(serving["by_unit"])
-
-    reference = provenances[sorted(provenances)[0]]
-    provenance = {key: value for key, value in reference.items()}
-    provenance.pop("identity_migration", None)
-    if acquisition_union is not None:
-        provenance.update(acquisition=acquisition_union["origin"],
-            acquisition_schedule=acquisition_union["schedule"],
-            acquisition_source_weights=acquisition_union["sources"])
-    carried_migration = merge_identity_migrations(
-        {row: prov.get("identity_migration") for row, prov in provenances.items()})
-    if carried_migration is not None:
-        provenance["identity_migration"] = carried_migration
-    if family_policy is not None:
-        provenance["family_restriction"] = {"policy": family_policy,
-            "structure_by_unit": dict(sorted(restricted_structures.items()))}
-    provenance.update({
-        "surfaces": dict(sorted(surfaces.items())),
-        "anchor_groups": dict(sorted(anchor_groups.items())),
-        "unservable": {name: {fmt: rungs[fmt] for fmt in sorted(rungs)}
-                       for name, rungs in sorted(unservable.items())},
-        "stopped_early": stopped_early,
-        "wall_seconds": wall_seconds,
-        "rounds_run": rounds_run,
-        "unit_selection": merged_selection,
-        "activation_static_scales": dict(reference["activation_static_scales"]),
-        "hessian": {**reference["hessian"], "capture_sha256": capture_sha256},
-        "campaign_fanout": {
-            "schema": PLAN_SCHEMA,
-            "rows": {row_id: sorted(
-                entry["key"] for entry in provenances[row_id]["unit_selection"]["groups"])
-                for row_id in sorted(provenances)},
-            "seed_checkpoints": seeds,
-        },
-    })
-    if plan_coverage is not None:
-        provenance["coverage"] = {
-            "schema": COVERAGE_SCHEMA,
-            "scope_groups": len(scope["anchor_groups"]),
-            "priced_groups": len(expected),
-            "unpriced_groups": unpriced,
-            "excluded_rows": list(plan_coverage["excluded_rows"]),
-            "reason": plan_coverage["reason"],
-            **({"deferred_acquisition_groups": plan_coverage["deferred_acquisition_groups"],
-                "requested_groups": plan_coverage["requested_groups"]}
-               if "deferred_acquisition_groups" in plan_coverage else {}),
-        }
-    if any("no_admitted_rung" in prov for prov in provenances.values()):
-        provenance["no_admitted_rung"] = sorted({name for prov in provenances.values()
-                                               for name in prov.get("no_admitted_rung", [])})
-    if any("unit_selection_sample" in prov for prov in provenances.values()):
-        audit, probabilities = set(), {}
-        for row_id, prov in provenances.items():
-            sample = prov.get("unit_selection_sample", {})
-            audit.update(sample.get("audit_units", []))
-            for name, probability in sample.get("inclusion_probability", {}).items():
-                if name in probabilities and probabilities[name] != probability:
-                    raise MergeRefused(f"{row_id}: different inclusion probability for {name}")
-                probabilities[name] = probability
-        provenance["unit_selection_sample"] = {
-            "audit_units": sorted(audit), "inclusion_probability": dict(sorted(probabilities.items()))}
-    if serving_target is not None:
-        provenance["tessera_serving_scope"] = {
-            "target": serving_target, "by_unit": dict(sorted(serving_by_unit.items()))}
-
-    payload = {
-        **{key: value for key, value in row_payloads[sorted(row_payloads)[0]].items()
-           if key not in {"costs", "formats", "leave_one_anchor_out",
-                          "non_interpolable", "menu_sizes", "anchor_counts",
-                          "provenance", EXPERT_WIRES_KEY}},
-        "schema": SCHEMA,
-        "costs": dict(sorted(costs.items())),
-        "formats": sorted(formats),
-        "leave_one_anchor_out": dict(sorted(loo.items())),
-        "non_interpolable": canonical_refusals(non_interpolable),
-        "menu_sizes": dict(sorted(menu_sizes.items())),
-        "anchor_counts": dict(sorted(anchor_counts.items())),
-        "provenance": provenance,
-    }
-    if expert_wires:
-        payload[EXPERT_WIRES_KEY] = dict(sorted(expert_wires.items()))
-    population = ExpertPopulation(
-        members=(),
-        declared={stack: {name: tuple(shape) for name, shape in units.items()}
-                  for stack, units in scope["declared_stacks"].items()},
-        packed_in_scope={name: tuple(shape) for name, shape
-                         in scope["packed_in_scope"].items()},
-        omitted_outside_layer_stride={
-            name: tuple(shape) for name, shape
-            in scope["packed_outside_layer_stride"].items()},
-    )
-    # Overwrites the reference row's block, which describes that row's slice.
-    payload["provenance"][POPULATION_KEY] = campaign_population_block(
-        dense_targets=scope["dense_targets"], expert_targets=scope["expert_targets"],
-        dense_all=scope["dense_all"], pinned=scope["pinned"],
-        population=population, layer_stride=int(reference["layer_stride"]),
-        costs=payload["costs"], menus=menu_sizes,
-        stack_samples=stack_samples, profile=profile)
-    return payload
-
-
 def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
                                      policy, static_scales, census):
     from prismaquant import tessera_calibration_cache as store
-    from prismaquant.tessera_campaign import write_export_inputs, selection_priced_units
+    from prismaquant.tessera_campaign import write_export_inputs
+    from prismaquant.tessera_campaign_selection import selection_priced_units
 
     def accepted_rows():
         for row_id in sorted(row_dirs):
@@ -4324,7 +2443,7 @@ def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
                     raise MergeRefused(f'{row_id}: reference does not bind the row canonical capture')
                 if provenance['hessian'].get('reference_binding') != owner.binding():
                     raise MergeRefused(f'{row_id}: reference binding differs from the row provenance')
-                identities = _hessian_identities(payload)
+                identities = hessian_identities(payload)
                 if (not identities or any(row.get('capture_sha256') != descriptor['capture_sha256'] or
                         row.get('reference_binding') != owner.binding() for row in identities)):
                     raise MergeRefused(f'{row_id}: reference commitments do not bind the exact priced row seals')
@@ -4435,221 +2554,6 @@ def merge_export_inputs(row_dirs: dict, payloads: dict, *, out_cache: Path,
     return capture_path, scales_path, capture_sha256
 
 
-def merge_checkpoint(row_dirs: dict, out_manifest: Path, *, acquisition=None, scope_groups=None) -> dict:
-    """One journal from the rows', under the identity their union describes.
-
-    The rows' identities differ only where the selection does: the ``units``
-    map, the serving scope's ``by_unit`` and the producer's projected stacks.
-    Everything else must already be equal, and the union of the three is what a
-    whole-scope run of this code computes -- so the merged journal is one a
-    later whole-scope invocation can resume, and refuses by field if it is not.
-    """
-    from prismaquant.cost_stage_checkpoint import (
-        atomic_write_bytes, canonical_json, canonical_json_sha256, unit_path,
-        MANIFEST_SCHEMA, prepare_journal, write_unit,
-    )
-
-    identities = {}
-    migrations = {}
-    states: dict[str, dict] = {}
-    states_by_row = {}
-    stage = "Tessera campaign"
-    for row_id in sorted(row_dirs):
-        manifest_path = Path(row_dirs[row_id]) / "cost.anchors.json"
-        manifest = json.loads(manifest_path.read_text())
-        identities[row_id] = manifest["identity"]
-        migrations[row_id] = manifest.get("identity_migration")
-        parts = manifest_path.with_name(manifest_path.name + ".parts")
-        listed: list[str] = []
-        for entry in manifest["units"]:
-            qname = entry["qname"]
-            listed.append(qname)
-            shard = parts / entry["file"]
-            if not shard.is_file():
-                raise MergeRefused(
-                    f"{row_id}: its journal names {qname} and the shard "
-                    f"{shard} is not there; the row's anchors would be "
-                    "dropped from the merged journal")
-            if shard != unit_path(parts, qname):
-                raise MergeRefused(f"{row_id}: unit {qname} names a noncanonical shard")
-        expected = set(manifest["identity"]["units"])
-        if len(listed) != len(set(listed)) or set(listed) != expected:
-            raise MergeRefused(
-                f"{row_id}: manifest units differ from its checkpoint identity units")
-        # Reuse the journal's reader: it validates the manifest and every
-        # envelope before returning state. Rehashing unchecked payload bytes
-        # here would turn corrupt or foreign shards into a trusted journal.
-        try:
-            _, _, completed = prepare_journal(
-                parts, stage=stage, resume=True, identity=manifest["identity"],
-                qnames=sorted(expected), manifest_path=manifest_path)
-        except RuntimeError as exc:
-            raise MergeRefused(f"{row_id}: {exc}") from exc
-        states_by_row[row_id] = completed
-        for qname, state in completed.items():
-            if qname in states:
-                raise MergeRefused(f"unit {qname} has a journal shard in two rows")
-            states[qname] = state
-
-    acquisition_settings = _merge_acquisition_settings(identities, states_by_row,
-        acquisition=acquisition, scope_groups=scope_groups)
-    if acquisition_settings is not None:
-        identities = {row: {**identity, "settings": acquisition_settings}
-                      for row, identity in identities.items()}
-    merged_identity = None
-    for row_id, identity in sorted(identities.items()):
-        if merged_identity is None:
-            merged_identity = {key: value for key, value in identity.items()}
-            merged_identity["units"] = dict(identity["units"])
-            continue
-        for key in sorted(set(merged_identity) | set(identity)):
-            if key in RECONCILED_IDENTITY_KEYS:
-                continue
-            if (key not in merged_identity or key not in identity
-                    or merged_identity[key] != identity[key]):
-                raise MergeRefused(
-                    f"{row_id}: checkpoint identity differs at {key!r}")
-        for name, unit in identity["units"].items():
-            if name in merged_identity["units"] and merged_identity["units"][name] != unit:
-                raise MergeRefused(f"{row_id}: two rows bind different inputs for {name}")
-            merged_identity["units"][name] = unit
-        if "stack_sampling_identity" in merged_identity or "stack_sampling_identity" in identity:
-            combined = dict(merged_identity.get("stack_sampling_identity", {}))
-            for name, sample in identity.get("stack_sampling_identity", {}).items():
-                if name in combined and combined[name] != sample:
-                    raise MergeRefused(f"{row_id}: different stack_sampling_identity for {name}")
-                combined[name] = sample
-            merged_identity["stack_sampling_identity"] = dict(sorted(combined.items()))
-        merged_identity["serving_scope"] = _merge_scope(
-            merged_identity.get("serving_scope"), identity.get("serving_scope"), row_id)
-        merged_identity["expert_projection"] = _merge_projection(
-            merged_identity.get("expert_projection"), identity.get("expert_projection"),
-            row_id)
-        merged_identity["family_restriction"] = _merge_family_restriction(
-            merged_identity.get("family_restriction"),
-            identity.get("family_restriction"), row_id)
-        if merged_identity["family_restriction"] is None:
-            del merged_identity["family_restriction"]
-    merged_identity["units"] = dict(sorted(merged_identity["units"].items()))
-
-    canonical = canonical_json(merged_identity, where="merged campaign identity")
-    identity_sha256 = canonical_json_sha256(canonical, where="merged campaign identity")
-    parts = out_manifest.with_name(out_manifest.name + ".parts")
-    for qname, state in sorted(states.items()):
-        write_unit(parts, stage=stage, qname=qname,
-                   identity_sha256=identity_sha256, state=state)
-    manifest = {
-        "schema": MANIFEST_SCHEMA, "stage": stage,
-        "identity_sha256": identity_sha256, "identity": canonical,
-        "units": [{"qname": qname,
-                   "file": str(unit_path(parts, qname).relative_to(parts))}
-                  for qname in sorted(merged_identity["units"])],
-    }
-    carried = merge_identity_migrations(migrations)
-    if carried is not None:
-        manifest["identity_migration"] = carried
-    atomic_write_bytes(out_manifest, json.dumps(
-        manifest, indent=2, sort_keys=True, ensure_ascii=False,
-        allow_nan=False).encode("utf-8"))
-    return manifest
-
-
-def merge_identity_migrations(per_row: dict) -> "list | None":
-    """The rows' ``identity_migration`` records, merged by
-    ``cost_stage_checkpoint.merge_identity_migrations``."""
-    from prismaquant.cost_stage_checkpoint import merge_identity_migrations as merge
-    return merge(per_row, error=MergeRefused)
-
-
-def _merge_family_restriction(left, right, row_id):
-    """One policy, and the union of the rows' per-unit structure maps.
-
-    ``structure_by_unit`` is keyed by the row's OWN selected units, so a dense
-    row and a routed row of one campaign never carry the same map. Comparing
-    the whole restriction for equality therefore refuses every census that
-    fans dense and routed units onto different rows, which is every GLM census
-    (RobTand/prismaquant#487). ``merge_payloads`` already reconciles the same
-    field this way; this is the journal side of it.
-    """
-    if left is None or right is None:
-        if left != right:
-            raise MergeRefused(
-                f"{row_id}: one row restricts families and another does not")
-        return left
-    if left["policy"] != right["policy"]:
-        raise MergeRefused(f"{row_id}: rows disagree on the family restriction policy")
-    for name in left["structure_by_unit"].keys() & right["structure_by_unit"].keys():
-        if left["structure_by_unit"][name] != right["structure_by_unit"][name]:
-            raise MergeRefused(
-                f"{row_id}: different restricted structure for {name}")
-    return {"policy": left["policy"],
-            "structure_by_unit": dict(sorted(
-                {**left["structure_by_unit"], **right["structure_by_unit"]}.items()))}
-
-
-def _merge_scope(left, right, row_id):
-    if left is None or right is None:
-        if left != right:
-            raise MergeRefused(f"{row_id}: one row has a serving scope and another does not")
-        return left
-    if left["target"] != right["target"]:
-        raise MergeRefused(f"{row_id}: rows disagree on the serving target")
-    for name in left["by_unit"].keys() & right["by_unit"].keys():
-        if left["by_unit"][name] != right["by_unit"][name]:
-            raise MergeRefused(f"{row_id}: different serving context for {name}")
-    return {"target": left["target"],
-            "by_unit": dict(sorted({**left["by_unit"], **right["by_unit"]}.items()))}
-
-
-def _merge_projection(left, right, row_id):
-    if left is None:
-        return right
-    if right is None:
-        return left
-    if left["source"] != right["source"]:
-        raise MergeRefused(f"{row_id}: rows projected different source checkpoints")
-    for name in left["stacks"].keys() & right["stacks"].keys():
-        if left["stacks"][name] != right["stacks"][name]:
-            raise MergeRefused(f"{row_id}: different producer projection for stack {name}")
-    stacks = {**left["stacks"], **right["stacks"]}
-    return {"source": left["source"], "stacks": dict(sorted(stacks.items()))}
-
-
-def _require_receipts(workspace: Path, expected: int) -> None:
-    """Refuse to merge a row the fleet did not report as executed.
-
-    A ``cost.pkl`` on disk says a process wrote a file; the fleet's row table
-    says which action it was, where it ran and what it exited with.  Both, or
-    neither.
-    """
-    path = workspace / "receipts.json"
-    if not path.is_file():
-        raise MergeRefused(
-            f"no fleet receipts at {path}; submit the manifest before merging")
-    receipts = json.loads(path.read_text())
-    rows = receipts.get("rows") or []
-    if len(rows) != expected:
-        raise MergeRefused(
-            f"{path} reports {len(rows)} rows and the plan has {expected}")
-    # ``pbwait.verdict`` is the fleet's own reading of the table: 0 when every
-    # row's work is done, and a memoized ``cache_hit`` counts as done there.
-    # It is the gate, because a re-submitted row that was already priced
-    # reports no launcher status of its own and renders ``rc`` as ``-``.
-    if receipts.get("returncode") not in {0, "0"}:
-        raise MergeRefused(
-            f"{path} records pbcampaign exit {receipts.get('returncode')!r}; "
-            "not every row is done")
-    failed = [row for row in rows
-              if row.get("rc") not in {"0", 0, "-", ""}]
-    if failed:
-        raise MergeRefused(
-            "the fleet reports a non-zero exit for "
-            + ", ".join(f"{row.get('key')} (rc={row.get('rc')})" for row in failed))
-    where = sorted({f"{row.get('host') or '?'} ({row.get('status')})"
-                    for row in rows})
-    print(f"[dispatch] {len(rows)} rows: " + ", ".join(where))
-
-
 def cmd_merge(args) -> int:
     workspace = Path(args.workspace)
     plan = json.loads((workspace / "plan.json").read_text())
@@ -4662,7 +2566,8 @@ def cmd_merge(args) -> int:
     if missing:
         raise MergeRefused(
             f"{len(missing)} planned row(s) wrote no cost.pkl: " + ", ".join(missing[:8]))
-    _require_receipts(workspace, len(row_dirs))
+    receipt_summary = require_campaign_receipts(workspace, len(row_dirs))
+    print(f"[dispatch] {len(row_dirs)} rows: " + ", ".join(receipt_summary))
     payloads = {}
     for row_id, path in row_dirs.items():
         with open(Path(path) / "cost.pkl", "rb") as handle:
@@ -4672,14 +2577,14 @@ def cmd_merge(args) -> int:
     if acquisition is not None:
         acquisition_manifest = merge_checkpoint(row_dirs, Path(args.out).with_suffix(".anchors.json"),
             acquisition=acquisition, scope_groups=census["anchor_groups"])
-        _merge_acquisition_rows(_payload_acquisition_records(payloads,
+        merge_acquisition_rows(payload_acquisition_records(payloads,
             unit_identities=acquisition_manifest["identity"]["units"]),
             acquisition=acquisition, scope_groups=census["anchor_groups"])
     reference = payloads[sorted(payloads)[0]]["provenance"]
     # Under a census every row calibrated the SCOPE's static scales, so this is
     # an equality check and not a union: two rows that disagree here priced two
     # different A-side contracts for one fused module.
-    static_scales = _require_equal(
+    static_scales = require_equal(
         "provenance.activation_static_scales.units",
         {row: payload["provenance"]["activation_static_scales"]["units"]
          for row, payload in payloads.items()})
@@ -4800,7 +2705,7 @@ def main(argv=None) -> int:
                            "are allowed in each instead, so a row that keeps "
                            "committing anchors keeps running and one that "
                            "stops ends within "
-                           f"{sum(g for _, g in CAMPAIGN_PROGRESS_PHASES)}s. "
+                           f"{sum(g for _, g in campaign_rows.CAMPAIGN_PROGRESS_PHASES)}s. "
                            "Set it only to cap a row's cost deliberately")
     plan.add_argument("--stack-sample", type=int, default=None,
                       help="price each routed stack from this many experts "
@@ -5004,7 +2909,12 @@ def main(argv=None) -> int:
     merge.set_defaults(func=cmd_merge)
 
     args = ap.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except campaign_data_manifests.ReadsetRefused as refusal:
+        # The readset producer's refusal ends the command with its reason and
+        # exit status 1, exactly as the producer's own SystemExit used to.
+        raise SystemExit(str(refusal)) from refusal
 
 
 if __name__ == "__main__":

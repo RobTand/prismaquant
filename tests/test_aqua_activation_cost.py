@@ -30,8 +30,10 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from prismaquant.allocator_candidates import (  # noqa: E402
-    ACT_DLOSS_KEY, cost_entry_act_dloss, cost_entry_predicted_dloss,
+from prismaquant.priced_cell import (
+    ACT_DLOSS_KEY,
+    cost_entry_act_dloss,
+    cost_entry_predicted_dloss,
 )
 
 STATS = {"n_params": 4096, "in_features": 64, "out_features": 64,
@@ -113,7 +115,7 @@ def test_it_is_not_added_to_an_activation_inclusive_measurement():
     would mis-rank rungs within one family, which is the failure mode this
     branch was split out to fix in the first place.
     """
-    from prismaquant.allocator_candidates import _prices_from_output_mse
+    from prismaquant.priced_cell import _prices_from_output_mse
     measured = {"output_mse": 0.5, "output_mse_measured": True,
                 ACT_DLOSS_KEY: ACT}
     if not _prices_from_output_mse(STATS, measured):

@@ -351,7 +351,7 @@ def profile_capture_workspace(request, *, storage, batches, layer, run_group, ob
     """
     import torch
 
-    from .cost_streaming import prefetched_boundary_batches
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
 
     if guard is None:
         raise RuntimeError("the capture workspace profile needs the live capture guard")

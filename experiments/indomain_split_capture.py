@@ -9,7 +9,7 @@ One runnable experiment entry with four modes over ONE capture root:
   admission call is made or patched.
 * ``quantum``  -- builds the existing streamed runner through
   :func:`prismaquant.capture_layer_chain.authenticate_quantum_source` and
-  drives ``_collect_activations`` with ``want_hessian=False, max_rows=0,
+  drives ``capture_activation_statistics`` with ``want_hessian=False, max_rows=0,
   shared_packed_inputs=True, row_consumer=moments.consume`` so both split
   roles accumulate in the SAME forward pass. Every source layer in the
   range forwards, even a layer with no selected unit. Both roles are
@@ -42,6 +42,9 @@ checkout, so PrismaBuild carries the complete runnable research source.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
+
 import argparse
 import hashlib
 import json
@@ -63,10 +66,8 @@ from prismaquant import capture_layer_chain as chain  # noqa: E402
 from prismaquant import tessera_campaign as campaign  # noqa: E402
 from prismaquant import tessera_calibration_cache as store  # noqa: E402
 from prismaquant import tessera_hessian as th  # noqa: E402
-from prismaquant.cost_streaming import (  # noqa: E402
-    build_streamed_causal_lm,
-    check_boundary_storage,
-)
+from prismaquant.cost_streaming import build_streamed_causal_lm
+from prismaquant.streamed_boundary_artifacts import check_boundary_storage
 from prismaquant.routed_experts import (  # noqa: E402
     declared_shared_capture_groups,
     ProfileRoutedExpertClassifier,
@@ -197,7 +198,7 @@ def load_census(args, capture_root):
     """Load and draw-check the census through the existing loader."""
     path = effective_census_path(args, capture_root)
     namespace = campaign_args(args, json.loads(path.read_text()))
-    census = campaign.load_calibration_census(path, args=namespace)
+    census = campaign.load_calibration_census(path, request=namespace)
     return path, census, namespace
 
 
@@ -245,9 +246,9 @@ def load_draw(args, census):
 
 def selected_units(args, census, namespace) -> list:
     """The parent's selected capture targets, through the existing authority."""
-    selection = campaign.load_unit_selection(args.units)
+    selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
-        selection, args=namespace, resolved=census["anchor_groups"])
+        selection, request=namespace, resolved=census["anchor_groups"])
     missing = sorted(set(names) - set(census["counts"]))
     if missing:
         raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")
@@ -764,7 +765,7 @@ def _run_prepared_quantum(args, guard, *, recompute=False) -> dict:
             records = None
             try:
                 checked = indexer.wrapper(layer, forward_batch)
-                _acts, _hessians, rows, _amax = campaign._collect_activations(
+                _acts, _hessians, rows, _amax = calibration_forward.capture_activation_statistics(
                     runner.model, names, tokens, 0, runner.device,
                     want_hessian=False, profile=runner.profile, forward_batch=checked,
                     shared_packed_inputs=True, expected_shared_input_groups=expected,
@@ -1004,10 +1005,10 @@ def _real_metadata_preflight(args, guard) -> dict:
     path = Path(args.calibration_census)
     census = json.loads(path.read_text())
     namespace = campaign_args(args, census)
-    checked = campaign.load_calibration_census(path, args=namespace)
-    selection = campaign.load_unit_selection(args.units)
+    checked = campaign.load_calibration_census(path, request=namespace)
+    selection = campaign_selection.load_unit_selection(args.units)
     names = campaign.selected_capture_unit_names(
-        selection, args=namespace, resolved=checked["anchor_groups"])
+        selection, request=namespace, resolved=checked["anchor_groups"])
     missing = sorted(set(names) - set(checked["counts"]))
     if missing:
         raise ResearchRefused(f"the selection prices units outside the census: {missing[:8]}")
