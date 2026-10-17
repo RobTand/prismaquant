@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-002. Campaign attempts
+retain ownership until their entire process group stops, including after a
+successful leader exit. Linux process identity and pidfds protect teardown.
+Ambiguous teardown quarantines the existing worker lock and refuses probes,
+retries and recovery admission until ownership is resolved.
+
 As of: 2026-10-17, architecture audit continuation, C-001. Aggregate ship
 qualification refuses non-preflight offline G3 evidence because the current
 G3 input contracts cannot independently bind that evidence to the exported
@@ -21685,7 +21691,14 @@ working directories, closed environments, expected receipt hashes, timeouts, ret
 maximum parallelism. Workers execute with `shell=False`; host-local locks, PID/start-time/owner
 checks, fsynced self-hashed compare-and-swap state, sealed-stage receipts, and dependency barriers
 make restart decisions mechanical and ambiguous ownership a refusal
-(`cluster_campaign.run_campaign_v2`). For the two-Spark dense campaign, workers plan disjoint
+(`cluster_campaign.run_campaign_v2`). The existing lock inode records launching,
+running or quarantined ownership. `_OwnedProcessGroup` checks the whole group
+before receipt success or lock release, sends TERM then KILL through pidfds,
+and waits for surviving members even after the leader exits. Unknown ownership
+does not authorize a signal. A retained running lock clears only after group
+absence is established; launching, quarantined or malformed records refuse
+probes and retries. Live-group teardown requires Linux procfs and pidfd support.
+For the two-Spark dense campaign, workers plan disjoint
 layer sets, `merge-plans --resume` accepts only their exact layer union, workers materialize
 disjoint original shard sets, and `merge-checkpoint-parts --resume` accepts only an exact
 non-overlapping source-shard union. The remote part is transferred as an explicit
