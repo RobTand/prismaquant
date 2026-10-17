@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, CR-005. Packed cache fill
+releases a module's captured and derived activation references after its last
+selected parameter, including fully resumed and score-only resumed entries.
+Fresh rendering and resume share the existing cleanup owner. Reference-lifetime
+regressions establish this ownership behavior, not a measured peak-memory or
+throughput improvement.
+
 As of: 2026-10-17, architecture audit continuation, C-005. Validation records
 the effective evaluation settings once and registration preserves them.
 Registry comparison refuses missing, invalid or different model identities,

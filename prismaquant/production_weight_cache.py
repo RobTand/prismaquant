@@ -8136,6 +8136,18 @@ def fill_packed_expert_cache_entries(
     last_idx_by_module: dict[str, int] = {}
     for _i, (_q, _m, _p, _pn, _full, _fmt) in enumerate(in_scope):
         last_idx_by_module[_q] = _i
+    derived = gate_derived = None
+
+    def release_completed_module(index: int, qname: str) -> None:
+        nonlocal derived, gate_derived
+        if index != last_idx_by_module[qname]:
+            return
+        derived = gate_derived = None
+        derived_by_module.pop(qname, None)
+        module_acts.pop(qname, None)
+        gate_derived_by_module.pop(qname, None)
+        gate_module_acts.pop(qname, None)
+
     weights = cache.weights
     t0 = _time.monotonic()
     for idx, (experts_qname, mod, parent, pn, full, fmt) in enumerate(in_scope):
@@ -8168,6 +8180,7 @@ def fill_packed_expert_cache_entries(
                     coverage.get(full) or existing_coverage_records.get(full)
                 ),
             )
+            release_completed_module(idx, experts_qname)
             continue
 
         X = module_acts.get(experts_qname)
@@ -8280,6 +8293,7 @@ def fill_packed_expert_cache_entries(
                     coverage.get(full) or existing_coverage_records.get(full)
                 ),
             )
+            release_completed_module(idx, experts_qname)
             continue
 
         # Per-expert global: for split gate/up the joint is max over slices so
@@ -8517,15 +8531,7 @@ def fill_packed_expert_cache_entries(
         )
         coverage[full] = coverage_record
         del rendered, packed_param, proj_split
-        # Free this module's GPU-resident derived activations + captured X once
-        # its last param is rendered (bounds peak to ~one module's working set).
-        if idx == last_idx_by_module.get(experts_qname):
-            derived = None
-            gate_derived = None
-            derived_by_module.pop(experts_qname, None)
-            module_acts.pop(experts_qname, None)
-            gate_derived_by_module.pop(experts_qname, None)
-            gate_module_acts.pop(experts_qname, None)
+        release_completed_module(idx, experts_qname)
         if device.type == "cuda":
             torch.cuda.empty_cache()
         if progress:

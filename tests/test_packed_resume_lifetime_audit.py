@@ -12,7 +12,9 @@ from test_packed_expert_hook_scope import (
 )
 
 
-@pytest.mark.parametrize("arm", ["fresh", "full_resume", "render_gate_up", "score_down"])
+@pytest.mark.parametrize("arm", [
+    "fresh", "full_resume", "render_gate_up", "score_down", "render_down", "score_gate_up",
+])
 def test_packed_resume_releases_previous_module_routed_state(monkeypatch, arm):
     model = TwoLayerMoe().eval()
     model.load_state_dict(frozen_state())
@@ -34,14 +36,16 @@ def test_packed_resume_releases_previous_module_routed_state(monkeypatch, arm):
             progress=False,
         )
 
-    if arm == "render_gate_up":
-        fill({name: fmt for name, fmt in assignment.items() if name.endswith(".down_proj")})
+    if arm.startswith("render_"):
+        warm_projection = ".down_proj" if arm == "render_gate_up" else ".gate_up_proj"
+        fill({name: fmt for name, fmt in assignment.items() if name.endswith(warm_projection)})
     elif arm != "fresh":
         fill(assignment)
-        if arm == "score_down":
+        if arm.startswith("score_"):
+            missing_projection = ".down_proj" if arm == "score_down" else ".gate_up_proj"
             scores = cache.metadata["render_scores"]
             for name, fmt in assignment.items():
-                if name.endswith(".down_proj"):
+                if name.endswith(missing_projection):
                     scores["records"].pop(pwc._render_score_record_key(name, fmt))
             scores["entries"] = len(scores["records"])
 
