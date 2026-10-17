@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, shipcard assurance wording.
+The retained CB recipe comparison reports a priced-subset blend, which does
+not bound the whole recipe's rate. Its historical tolerance and unit-coverage
+heuristic remain unchanged. Eager/graph labels describe execution modes.
+
 As of: 2026-10-17, architecture audit continuation, routed price inputs.
 The shared routed-unit price reader refuses nonfinite predicted loss and
 negative or noninteger serialized byte counts before allocation. Finite
@@ -19953,7 +19958,7 @@ card a ten-key build forensic block — and `verify` read one key of the third
 block and none of the other two, so a wrong-server receipt, a mislabeled arm,
 a lowered threshold, an empty ledger, or an unvalidated Fisher correction all
 verified clean. `verify` now replays all three: the `ship_gate` threshold
-contract against the fixed catastrophic bounds, the exact four-check ledger,
+contract against the fixed catastrophic bounds, the exact five-check ledger,
 positive scored-token evidence and the endpoint binding's presence-and-shape;
 the `native_export` arm, residency and generation evidence against the slot;
 and the build block's Fisher policy bit (refusal) plus the forensic hashes'
@@ -29035,9 +29040,11 @@ validated 4.7496.
 right field naming the wrong point.** `shipcard.recipe_priced_bpp` sums
 `cb_serialized_identity.tensor_payload_bytes` and `.params` over the units that declare them,
 so numerator and denominator come from the same recipe entries and the result is scope-matched
-by construction — no probe, no source manifest, no header or sidecar estimate. It is a **lower
-bound**: units carrying no per-unit price (FP8_SOURCE passthrough Linears) leave both sums, and
-they can only add bytes. `allocator_achieved_bpp` attaches the comparison as a `cross_check`
+by construction — no probe, no source manifest, no header or sidecar estimate. This retained
+historical CB reader reports a priced-subset blend, not an arithmetic lower bound:
+unpriced units contribute neither bytes nor parameters to it, and can move the complete
+rate in either direction. Unit coverage does not establish parameter coverage.
+`allocator_achieved_bpp` attaches the comparison as a `cross_check`
 block on the card (advisory at export, so a gate bug can never strand a finished export), and
 `shipcard.verify` **refuses** on `verdict == "DISAGREE"` — publication is the blocking point,
 per R16. Tolerance is `RECIPE_BPP_CROSS_CHECK_TOLERANCE = 0.10`, far wider than label-scope
@@ -29202,7 +29209,7 @@ card's parent directory (an explicit `--model-dir` remains available) and exits 
 every slot holds a *passing* record whose `model_sha` matches the artifact. The flag is not
 the whole gate: `verify` replays each slot's stamped evidence. `ship_gate` replays the
 threshold contract against the fixed catastrophic bounds (a validator that silently lowers
-`max_ppl` no longer closes the card), the exact four-check ledger, positive scored-token
+`max_ppl` no longer closes the card), the exact five-check ledger, positive scored-token
 evidence with known spec-decode state, and the endpoint binding's presence-and-shape
 (#156). Each `native_export.*` slot replays its arm identity, residency
 (`enforce_eager`), and generation evidence (`generated_chars > 0` on a pass) against the

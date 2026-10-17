@@ -145,7 +145,7 @@ def _verify_native_export_record(
     """Replay the smoke arm's own stamped metrics against the slot it closes.
 
     `validate_native_export._record_arm` stamps the arm it actually ran
-    (`metrics.arm`), the residency it ran under (`enforce_eager`), and how
+    (`metrics.arm`), its execution mode (`enforce_eager`), and how
     much it generated (`generated_chars`) — but `verify` compared only the
     slot key against `record["slot"]`, so an eager receipt closed the graph
     slot and a pass that generated nothing verified clean. The only site
@@ -162,8 +162,7 @@ def _verify_native_export_record(
             f"slot arm {arm!r} — a mislabeled receipt, not a result"
         )
     # `validate_native_export._run_arm`: `arm = "eager" if enforce_eager else
-    # "graph"`. The two residencies are different numeric objects on the
-    # Tessera lane, exercised by separate gates.
+    # "graph"`. The two execution modes have separate Tessera smoke gates.
     expected_eager = {"eager": True, "graph": False}.get(arm)
     if (
         expected_eager is not None
@@ -172,7 +171,7 @@ def _verify_native_export_record(
         problems.append(
             f"{slot}: enforce_eager={metrics.get('enforce_eager')!r} "
             f"disagrees with the {arm} arm — this receipt ran under the "
-            "other residency"
+            "other execution mode"
         )
     produced = metrics.get("generated_chars")
     if record.get("passed") is True:

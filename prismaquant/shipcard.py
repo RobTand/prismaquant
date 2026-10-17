@@ -2633,14 +2633,11 @@ def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-# A claimed bpp may legitimately sit a few percent above the priced floor
-# below (the floor omits whatever units carry no per-unit price, and those
-# only ever ADD bytes), and label scope differs by a pin or two. 10% is far
-# wider than any such drift and far narrower than the 57% error this exists
-# to catch, so a trip is a defect and never a convention argument.
+# Retained CB recipe cross-check tolerance. The priced subset omits both bytes
+# and parameters of unpriced units, so it does not bound the complete rate.
 RECIPE_BPP_CROSS_CHECK_TOLERANCE = 0.10
 
-# The floor is only a useful bound when it covers most of the recipe. Only CB
+# The comparison is used only when it covers most recipe units. Only CB
 # units declare a per-unit serialized price, so a recipe that mixes CB with
 # plain NVFP4 / FP8 / passthrough prices only part of itself and its true rate
 # can sit far from the covered blend in EITHER direction. Measured on the real
@@ -2664,10 +2661,9 @@ def recipe_priced_bpp(
     entries and the result is scope-matched *by construction* — no probe, no
     source manifest, no sidecar or header estimate.
 
-    The result is a **lower bound** on the recipe's true rate: units without a
-    per-unit price (FP8_SOURCE passthrough Linears, for instance) are excluded
-    from both sums, and they can only add bytes. ``coverage_units`` reports how
-    much of the recipe was priced so a caller can judge the bound's tightness.
+    The result is the priced subset's blend. Units without a per-unit price
+    are excluded from both sums, so the complete rate can be above or below
+    it. ``coverage_units`` measures unit coverage, not parameter coverage.
 
     Returns ``value=None`` with a ``reason`` when nothing is priceable, which
     is the normal case for a non-CB recipe. That is a "not applicable", not a
@@ -2687,9 +2683,9 @@ def recipe_priced_bpp(
         out["reason"] = "recipe is not a mapping"
         return out
 
-    # Two recipe layouts carry these prices, and both are production. The body
-    # allocator writes per-unit mappings with `cb_serialized_identity` inside
-    # each record; the DSpark CB sidecar builder writes a flat
+    # Two historical CB recipe layouts carried these prices. The body
+    # allocator wrote per-unit mappings with `cb_serialized_identity` inside
+    # each record; the DSpark CB sidecar builder wrote a flat
     # `name -> "FORMAT"` map with the identities collected under
     # `__prismaquant__.cb_serialized_identities`. Reading only the first shape
     # silently downgraded the whole sidecar lane to "not applicable", which
@@ -2746,8 +2742,8 @@ def recipe_priced_bpp(
         tensor_payload_bytes=total_bytes,
         params=total_params,
         note=(
-            "lower bound: summed over the units that declare a per-unit "
-            "serialized price; unpriced units only add bytes"
+            "priced-subset blend: summed over units that declare a per-unit "
+            "serialized price; unpriced bytes and parameters are excluded"
         ),
     )
     return out
@@ -2864,13 +2860,12 @@ def allocator_achieved_bpp(
     the recipe holds. A false public bpp silently breaks every matched-bpp
     comparison built on it, so it is worth a gate rather than a convention.
 
-    The check is a **floor test**, not an equality test. The priced value is a
-    lower bound (see :func:`recipe_priced_bpp`), so a claim below it is
-    impossible and a claim far above it is describing something else. It is
-    advisory here — :func:`verify` is where it refuses — so that a gate bug can
-    never strand a finished export at card-writing time.
+    The retained check compares the claim with the priced-subset blend within
+    a fixed tolerance. That blend is not an arithmetic bound on the full
+    recipe. This function records the comparison; :func:`verify` applies the
+    existing refusal policy.
 
-    The floor only bounds the claim when it covers nearly the whole recipe, so
+    The existing policy requires nearly complete unit coverage, so
     a mismatch under ``RECIPE_BPP_CROSS_CHECK_MIN_COVERAGE`` is reported as
     ``inconclusive_low_coverage`` and does **not** refuse. This is not
     timidity: the real ``allocation-112p69-raw`` recipe prices 70% of its units
@@ -2915,8 +2910,8 @@ def allocator_achieved_bpp(
         # blend. The sound bound would be blend x parameter-coverage, and
         # parameter coverage is not computable here: a non-CB unit records no
         # shape in the recipe, so only UNIT coverage is observable. Rather than
-        # assert a bound the data cannot support, the floor is trusted in
-        # either direction only when it is nearly complete.
+        # assert a mathematical bound, retain the existing unit-coverage
+        # heuristic for this historical CB comparison.
         below = float(claimed) < floor
         loose = (
             coverage is None
@@ -2957,7 +2952,7 @@ def allocator_achieved_bpp(
             )
         elif not agree:
             cross["detail"] = (
-                ("claim is BELOW an arithmetic lower bound: " if below else "")
+                ("claim is BELOW the priced-subset blend: " if below else "")
                 + (
                 f"claimed {float(claimed):.4f} bpp from "
                 f"{claim.get('source')!r}, but the recipe's own per-unit "
@@ -2967,9 +2962,8 @@ def allocator_achieved_bpp(
                 f"{priced.get('params')} params = {floor:.4f} bpp "
                 f"({rel:.1%} apart, tolerance "
                 f"{RECIPE_BPP_CROSS_CHECK_TOLERANCE:.0%}). The priced value is "
-                "a LOWER bound, so the claim is describing a different "
-                "assignment than the recipe holds — most likely a stale "
-                "Pareto point or a superseded selection."
+                "a subset blend, not an arithmetic bound. Check the assignment "
+                "and unpriced parameter coverage before interpreting the gap."
                 )
             )
     return {**claim, "cross_check": cross}
