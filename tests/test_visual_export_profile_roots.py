@@ -1,5 +1,6 @@
 """Profile-owned visual assignments must agree with emitted native bytes."""
 import json
+import re
 
 import pytest
 import torch
@@ -17,6 +18,15 @@ PROJECTOR = "model.embed_vision.projection"
 def _weight():
     values = torch.arange(32 * 32).reshape(32, 32) % 31 - 15
     return values.to(torch.bfloat16) / 64
+
+
+def _matches_name(name, targets):
+    # vLLM checks exact names or re.match after the compressed-tensors re: prefix.
+    return any(
+        re.match(target[3:], name) is not None
+        if target.startswith("re:") else target == name
+        for target in targets
+    )
 
 
 @pytest.mark.parametrize("fmt", ["FP8_E4M3", "NVFP4"])
@@ -57,7 +67,8 @@ def test_native_main_emits_gemma_visual_recipe_and_matching_config(
 
     emitted = load_file(str(output / "model.safetensors"))
     config = json.loads((output / "config.json").read_text())
-    groups = config["quantization_config"]["config_groups"]
+    quantization = config["quantization_config"]
+    groups = quantization["config_groups"]
     profile = Gemma4Profile()
     for name in (VISION, PROJECTOR):
         assert name + ".weight_scale" in emitted
@@ -71,12 +82,17 @@ def test_native_main_emits_gemma_visual_recipe_and_matching_config(
             assert name + ".weight_global_scale" in emitted
             assert name + ".input_global_scale" in emitted
         target = profile.to_vllm_internal_name(name)
-        matched = [group for group in groups.values() if target in group["targets"]]
+        matched = [group for group in groups.values()
+                   if _matches_name(target, group["targets"])]
         assert len(matched) == 1
         assert matched[0]["weights"]["num_bits"] == (8 if fmt == "FP8_E4M3" else 4)
+        assert not _matches_name(target, quantization["ignore"])
     for name in (bf16, unassigned, audio):
         assert torch.equal(emitted[name + ".weight"], tensors[name + ".weight"])
         assert name + ".weight_scale" not in emitted
+        target = profile.to_vllm_internal_name(name)
+        assert not any(_matches_name(target, group["targets"])
+                       for group in groups.values())
     assert torch.equal(emitted[VISION + ".bias"], tensors[VISION + ".bias"])
 
 
