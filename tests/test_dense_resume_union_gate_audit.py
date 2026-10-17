@@ -56,6 +56,18 @@ def test_dense_producer_preserves_gate_coverage_for_exact_union(
         cache = pickle.loads(cache_path.read_bytes())
         assert set(cache.weights) == {(selected, "NVFP4")}
         assert cache.metadata["render_scores"]["entries"] == 1
+        if resume:
+            gates = cache.metadata["render_gates"]
+            assert gates["entries"] == 1
+            assert gates["mechanisms"] == {}
+            assert gates["records"] == [{
+                "qname": selected,
+                "format": "NVFP4",
+                "render_format": "NVFP4",
+                "trace": [],
+                "progressive_gate": "not-run",
+                "mechanism": "resumed_shard",
+            }]
         manifest = bundle / "shard_manifest.json"
         union.create_shard_manifest(
             cache_path=cache_path,

@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, CR-006. A resumed dense
+cache shard contributes its per-key render-gate record to the existing cache
+metadata, so fresh and resumed stripe outputs satisfy exact-union coverage.
+The record declares `resumed_shard`, an empty trace and `not-run`; it does not
+invent successful mechanism evidence for rendering skipped by this invocation.
+
 As of: 2026-10-17, architecture audit continuation, C-006. Artifact completeness
 retains the persisted-scale requirement when decoding supported static
 compressed-tensors config groups. Direct targets, profile aliases and fused

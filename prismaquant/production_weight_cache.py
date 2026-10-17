@@ -6688,6 +6688,14 @@ def fill_production_weight_cache(
                             del cached
                         except Exception:
                             pass
+                    render_gate_records.append({
+                        "qname": qname,
+                        "format": fmt_key,
+                        "render_format": render_fmt,
+                        "trace": [],
+                        "progressive_gate": "not-run",
+                        "mechanism": "resumed_shard",
+                    })
                     # Do NOT pop activations_local[qname] here: this
                     # loop iterates through every format for this
                     # Linear, and a later format in the same outer
