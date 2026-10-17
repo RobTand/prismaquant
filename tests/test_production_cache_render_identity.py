@@ -186,7 +186,9 @@ def test_fresh_directory_writes_validated_sidecar(tmp_path, monkeypatch):
     assert identity["rendered_pairs"] == ["l1|NVFP4", "l2|NVFP4"]
 
 
-@pytest.mark.parametrize("first_writer", ["streamed", "different-resident", "same-resident"])
+@pytest.mark.parametrize("first_writer", [
+    "streamed", "different-resident", "same-resident", "pre_guard_resident",
+])
 def test_first_published_render_identity_survives_a_concurrent_resident_start(
     first_writer, tmp_path, monkeypatch,
 ):
@@ -195,6 +197,8 @@ def test_first_published_render_identity_survives_a_concurrent_resident_start(
     _fake_render_env(monkeypatch)
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     sidecar = _sidecar(tmp_path)
+    if first_writer == "pre_guard_resident":
+        torch.save(torch.eye(32), tmp_path / cache_weight_filename("l1", "NVFP4"))
     injected = False
     first_bytes = None
 
@@ -213,10 +217,15 @@ def test_first_published_render_identity_survives_a_concurrent_resident_start(
                     )
                 else:
                     first_ids = (
-                        calib_ids if first_writer == "same-resident"
+                        calib_ids if first_writer in {"same-resident", "pre_guard_resident"}
                         else torch.tensor([[2, 3]], dtype=torch.long)
                     )
-                    _fill(_TinyTwoLinear(), first_ids, tmp_path)
+                    with monkeypatch.context() as listing:
+                        if first_writer == "pre_guard_resident":
+                            # The two starts observe different unregistered
+                            # shard listings, but the same rendering inputs.
+                            listing.setattr(pwc, "_pre_guard_trusted_shards", lambda _path: [])
+                        _fill(_TinyTwoLinear(), first_ids, tmp_path)
                 first_bytes = sidecar.read_bytes()
             return publish(path, payload, **kwargs)
 
@@ -226,7 +235,7 @@ def test_first_published_render_identity_survives_a_concurrent_resident_start(
     # the oracle covers the old replace and the corrected no-clobber publish.
     monkeypatch.setattr(pwc, "atomic_write_bytes", interleave(pwc.atomic_write_bytes))
     monkeypatch.setattr(pwc, "publish_new_bytes", interleave(pwc.publish_new_bytes))
-    if first_writer == "same-resident":
+    if first_writer in {"same-resident", "pre_guard_resident"}:
         _fill(_TinyTwoLinear(), calib_ids, tmp_path)
     else:
         with pytest.raises(ValueError, match="streamed fill|calib_hash"):

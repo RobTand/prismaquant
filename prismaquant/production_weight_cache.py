@@ -5793,6 +5793,7 @@ def _check_production_cache_render_identity(
     }
     sidecar_path = cache_dir_path / RENDER_IDENTITY_SIDECAR_FILENAME
     if not sidecar_path.is_file():
+        publication_identity = current_identity
         trusted_shards = _pre_guard_trusted_shards(cache_dir_path)
         if trusted_shards:
             print(
@@ -5806,7 +5807,7 @@ def _check_production_cache_render_identity(
                 "the trusted shards; future mismatches refuse.",
                 flush=True,
             )
-            current_identity = {
+            publication_identity = {
                 **current_identity,
                 PRE_GUARD_ADMISSION_SIDECAR_KEY: build_pre_guard_admission(
                     trusted_shards
@@ -5814,7 +5815,7 @@ def _check_production_cache_render_identity(
             }
         if publish_new_bytes(
             sidecar_path,
-            DIRECT_ASCII_INDENT2_LAX.encoded(current_identity),
+            DIRECT_ASCII_INDENT2_LAX.encoded(publication_identity),
         ):
             return
         # Another fill published first. Read and compare that complete
