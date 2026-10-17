@@ -2784,16 +2784,7 @@ def _run_body_streaming_shard(
         cache_dir.mkdir(parents=True, exist_ok=True)
     act_fname_sub = re.compile(r"[^A-Za-z0-9_-]")
 
-    # v22 Fix C: async + batched activation cache writes.
-    #
-    # PRISMAQUANT_ACT_CACHE_ASYNC=1 (default off) defers per-Linear
-    # torch.save calls to a small thread pool so the main probe thread
-    # doesn't pay the file-write latency between layers. Each write is
-    # short (~1-5 ms) but ~770 writes per layer × 62 layers per phase-3
-    # = 47k synchronous file ops, roughly 50-200 s of wall time we
-    # don't need to spend in the foreground. Pool size defaults to 4
-    # workers — enough to keep up with the layer flush rate without
-    # piling on the IO subsystem.
+    # PRISMAQUANT_ACT_CACHE_ASYNC=0 keeps per-Linear writes synchronous.
     _act_async = _env_flag("PRISMAQUANT_ACT_CACHE_ASYNC", default=True)
     _act_pool = None
     _act_pending: list = []
