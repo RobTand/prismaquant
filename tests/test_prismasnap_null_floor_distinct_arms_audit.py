@@ -99,3 +99,37 @@ def test_attestation_accepts_distinct_arm_evidence_on_same_serving_stack(
         source_identity,
         null_floor_receipt_path=receipt_path,
     ) == result
+
+
+@pytest.mark.parametrize(
+    "reused_field", ["arm", "student_result_sha256", "splice_receipt_sha256"]
+)
+def test_persisted_derivation_refuses_reused_identity_or_evidence(
+    tmp_path: Path, validation_fixture: ModuleType, reused_field: str
+) -> None:
+    checkpoint, student, teacher, source_identity, receipt_path = _attestation_inputs(
+        tmp_path, validation_fixture
+    )
+    validation_fixture.attest_fold_fidelity(
+        checkpoint,
+        student,
+        teacher,
+        source_identity,
+        null_floor_receipt_path=receipt_path,
+    )
+    provenance_path = checkpoint / validation_fixture.PROVENANCE_JSON
+    payload = json.loads(provenance_path.read_text(encoding="utf-8"))
+    arms = payload["fold_fidelity"]["threshold_derivation"]["arms"]
+    arms[1][reused_field] = arms[0][reused_field]
+    payload["provenance_sha256"] = validation_fixture.validation._provenance_digest(
+        payload
+    )
+
+    with pytest.raises(RuntimeError, match="independent|duplicate|distinct"):
+        validation_fixture.validate_prismasnap_provenance_payload(
+            payload, require_verified=True, where="persisted null-arm audit"
+        )
+
+    validation_fixture._write_json(provenance_path, payload)
+    with pytest.raises(RuntimeError, match="independent|duplicate|distinct"):
+        validation_fixture.require_verified_prismasnap_if_present(checkpoint)

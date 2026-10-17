@@ -383,6 +383,9 @@ def _validated_null_floor_arms(
         raise RuntimeError(f"{where} needs at least two independent null arms")
     validated: list[Mapping[str, object]] = []
     kls: list[float] = []
+    distinct: dict[str, set[str]] = {
+        key: set() for key in ("arm", "student_result_sha256", "splice_receipt_sha256")
+    }
     for index, raw in enumerate(arms):
         arm = _require_exact_mapping(
             raw, _NULL_FLOOR_ARM_KEYS, where=f"{where}.arms[{index}]"
@@ -403,6 +406,14 @@ def _validated_null_floor_arms(
             raise RuntimeError(f"{where}.arms[{index}] is malformed")
         for key in ("student_result_sha256", "serve_fingerprint", "splice_receipt_sha256"):
             _require_sha256(arm.get(key), where=f"{where}.arms[{index}].{key}")
+        for key, seen in distinct.items():
+            value = str(arm[key])
+            if value in seen:
+                raise RuntimeError(
+                    f"{where}.arms[{index}] repeats {key}; independent null arms "
+                    "require distinct identities and measurement evidence"
+                )
+            seen.add(value)
         validated.append(arm)
         kls.append(float(kl))
     if max(kls) / min(kls) > _NULL_FLOOR_ARM_AGREEMENT_MAX_RATIO:

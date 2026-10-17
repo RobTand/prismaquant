@@ -400,13 +400,15 @@ def _null_floor_receipt(
                 "magnitude": magnitude,
                 "perturbed_2d_tensors": 496,
                 "kl_mean": value,
-                "student_result_sha256": "3" * 64,
+                "student_result_sha256": f"{index + 1:064x}",
                 "serve_fingerprint": "4" * 64,
-                "splice_receipt_sha256": "5" * 64,
+                "splice_receipt_sha256": f"{index + 3:064x}",
             }
-            for name, magnitude, value in (
-                ("half_ulp", 2.0**-8, kls[0]),
-                ("full_ulp", 2.0**-7, kls[1]),
+            for index, (name, magnitude, value) in enumerate(
+                (
+                    ("half_ulp", 2.0**-8, kls[0]),
+                    ("full_ulp", 2.0**-7, kls[1]),
+                )
             )
         ],
     }

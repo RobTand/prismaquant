@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-008. A PrismaSnap
+null-floor receipt requires distinct arm names, student-result digests and
+splice-receipt digests before it can relax the fold-fidelity threshold. The
+same validator checks a persisted VERIFIED derivation. Arms may share their
+serving-stack fingerprint; magnitude, agreement-ratio and threshold rules are
+unchanged. Distinct evidence is necessary, not proof of statistical independence.
+
 As of: 2026-10-17, architecture audit continuation, RE-08. Batched plain
 FP8 weight-cost measurement uses the same format-registry reconstruction as
 individual measurement and export. FP8_E4M3 and FP8_E5M2 retain their row scales
