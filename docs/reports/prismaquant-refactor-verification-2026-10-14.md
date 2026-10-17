@@ -1249,3 +1249,48 @@ No GPU, serving, model-quality or performance run was needed or made, and
 none of these small fixtures qualifies full CLI batch/resume parity. The
 final compile check and documentation-guard run of the last commit are
 recorded in `fix-depth-c-r3/report.md`.
+
+
+### Parent combined candidate qualification, 2026-10-17
+
+Source `dd746e5cb3592429d1ee25e365c5381701ed9880` combines the returned depth-C
+and native shard-binding fixes with the parent's restored assertions and
+CPU-affinity test repair. Each arm used a separate frozen checkout. All three
+actions ran through PrismaBuild and returned zero. The parent re-hashed their
+CAS receipts, result blobs and stdout/stderr logs, then read the sealed Git
+bundles and compared every candidate file's Git mode/blob identity. All 3,720
+tracked files match the candidate in every bundle. Extra files are only PB
+closure metadata and the recorded compile/GPU drivers.
+
+| Arm | Action | Actual result |
+| --- | --- | --- |
+| CPU, one CPU and one native thread | `697d36abf050978856fb38a2be3987347f30d3e552790301dc8743812f2e4253` | Eight files, 196 passed, 2 CUDA observer skips. All 198 collected cases completed. |
+| Compile, one CPU | `842a3d3ed63206648f4c245ef348a72c7535ec4d314f4fe51b592b3576ee335a` | All 315 changed or new Python files compiled after exact per-file SHA-256 checks. |
+| CUDA, two CPUs, 16 GiB host RAM and 6 GiB GPU reservation | `98da27aa28a7dbb9d2fc8cbc70f19cc6af8f67b8ebc6b71461116e22f980858c` | 120 tests passed, zero skipped, one wrapper deselected; both actual fresh-process bodies passed separately. |
+
+The CPU arm includes the affinity resolver file, lane-v9 plus actual scalar and
+batched cell measurement in one process, the cold serving-import check, current
+campaign-row source inventory, coordinator import without Tessera, GLM anchor
+profiling and the documentation guards. The two skips require native CUDA
+observer events. They are recorded as skips, not passes.
+
+The CUDA arm ran on sparklina in the known-good image
+`sha256:44426342348a2fb1ae1191e09e5d4e19ab1231ab6dbdf0e17e8192bfdbeff025`,
+content identity
+`ac918444aa2d16d1d19771510963d138981fdd468db44a2bf10f9d627b3af12a`, with
+PyTorch `2.13.0+cu130`, CUDA `13.0` and an NVIDIA GB10. The standalone checks
+execute the resident/streamed equivalence body and the inline expert export
+body, including the parent's fixture cleanup. The pytest cohort includes the
+new shard binding and CUDA streaming-export oracles. It uses actual imported
+candidate files, not the older installed source; the container's checkout and
+import source identities match. PB-assigned affinity is preserved.
+
+Commands, complete outcomes, skips, receipt/log checks and all sealed-source
+comparisons are in `/home/rob/tmp/pq-claude-review-20261016/composed-r4-acceptance.json`
+and adjacent `composed-r4-*` files. This qualification covers the stated source;
+this appended record changes documentation only. It does not replace final
+independent review or the forthcoming official status-only full-suite batch.
+Full CLI batch/resume parity remains unqualified because the frozen x86 CUDA
+producer environment does not run in this ARM image. No serving, model-quality
+or performance run is claimed. API/serving pins and active installations remain
+unchanged.

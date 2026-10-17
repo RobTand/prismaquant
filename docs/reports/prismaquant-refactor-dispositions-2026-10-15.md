@@ -895,3 +895,66 @@ resident-fill to CUDA streaming-export case. PrismaBuild compiled every touched
 Python file. Full CLI batch/resume parity remains unqualified, because its frozen
 x86 CUDA producer environment does not run in the ARM container, and no serving
 run was made.
+
+
+### Parent composition decisions, 2026-10-17
+
+The parent integrated the returned depth-C and native-binding fixes at
+`dd746e5cb3`. Their author reports above remain history. This section records
+the parent choices and the combined qualification; final independent Claude
+Standards and Spec reviews and a fresh official status-only batch remain.
+Neither the draft delivery PR nor any original source PR has been merged.
+
+**C-PRV-01, prose correction chosen (`279abb82c2`).** The parent did not take
+the worker's `a830487f5d` alternative. That commit adds four COST planner files
+to the campaign-row source inventory and adds new refusal cases. Reading the
+actual callers shows that `producer_source_sha256` feeds
+`deterministic_provenance` for campaign rows; later passes record their Git
+commit separately. `build_joint_cost_v2_manifest` has no production caller.
+The original finding permitted either adding missing owners or narrowing the
+claim. The parent chose the latter, corrected the source and ARCHITECTURE prose,
+and renamed the inventory test honestly. The inventory and executable AST are
+unchanged. The existing conservative entries can still refuse a row after an
+unrelated owner edit. Narrowing that existing policy was not done. The worker's
+objection remains in its report and the full findings ledger.
+
+**ENV-CPU-01, encountered test assumption fixed (`eabbad7896`).** The positive
+worker-count resolver tests assumed at least three PB-assigned CPUs. Their
+unchanged base failed under two CPUs. The parent now supplies an affinity input
+only to those pure resolver and fake-builder forwarding cases. No pool is
+started and process affinity is unchanged. The actual environment/default and
+out-of-affinity refusal tests remain intact. The complete file passed in the
+combined run with one admitted CPU. This was an off-task test repair found
+during required qualification.
+
+**C-COLD-01, encountered guard defect fixed (`f35c31856b`).** The old serving
+import check could pass after prior imports populated `sys.modules`, and its
+prefix check also blocked the public `tessera.serving_parts` module. Both were
+demonstrated through PB. The new fresh-process check installs an exact
+`tessera.serving` package/submodule blocker before imports, records swallowed
+attempts, and runs actual scalar and batched measurement. This supplements the
+package-wide static guard. No serving runtime was installed or imported.
+
+Depth-C composition preserves the AST-proven 107-file import cleanup, one
+duplicate-write removal, the restored owner/delegation/count assertions, actual
+batched GLM direct-consumer measurement, migrated regret-study sampler calls and
+honest old/new profile span labels. The four extra planner inventory entries and
+their tests were excluded with the `a830487f5d` alternative. The parent audited
+25 successful receipts and 16 negative terminal/log chains from the worker,
+107 exact cleanup blob/AST comparisons and the append-only conflict resolutions.
+The older 218-file cleanup run remains 4,650 passes, 131 skips and one failure;
+ENV-CPU-01 explains and repairs that failure, without relabeling the old run.
+
+The native integration preserves every source/test blob from the returned fix;
+only the current ARCHITECTURE composition and appended report differ. The parent
+audited 14 successful receipt/result/log chains and six negative terminal/log
+chains. N3-01 and NATIVE-LEGACY-01 are fixed pending the final independent review,
+not closed by the author's report. The stat binding and its timestamp/network
+limits above remain explicit. Final review must assess the actual shared/NFS
+loader path. N3-06 remains an optional source-based maintenance judgment; its
+cost was not measured and is not claimed negligible. Rob's #2697 decision stays
+unchanged, with the historical warning recorded and the P2 follow-up open.
+
+The combined CPU, compile and CUDA qualification is appended to
+`prismaquant-refactor-verification-2026-10-14.md`. No full CLI batch/resume,
+serving, model-quality or performance promotion follows from these small tests.
