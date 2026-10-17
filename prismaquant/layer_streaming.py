@@ -3170,15 +3170,9 @@ def _compute_attention_mask(
         masks["sliding_attention"] = create_sliding_window_causal_mask(
             **sliding_mask_kwargs
         )
-        # DSv4-Flash: the compress-ratio ladder yields layer types beyond
-        # the Gemma pair — compressed_sparse_attention (ratio 4) and
-        # heavily_compressed_attention (ratio 128). In probe mode every
-        # compressed variant degrades to sliding-window-only attention
-        # (the vendored layer stubs out the compressor and skips the
-        # long-range branch), and the vendored root feeds one
-        # sliding-window mask to all layers. Alias exactly those two types
-        # to the sliding mask; any other unknown layer type still fails
-        # loudly downstream.
+        # DSv4 compressed attention shares the sliding-window key mask.
+        # The faithful compressor/indexer constructs pooled-key visibility
+        # separately inside the vendored attention layer.
         for lt in ("compressed_sparse_attention", "heavily_compressed_attention"):
             if lt in layer_types and lt not in masks:
                 masks[lt] = masks["sliding_attention"]
