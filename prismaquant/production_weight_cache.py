@@ -4829,10 +4829,9 @@ def build_mtp_append_identity(
     here: the activation-source content hash (what the probe rows contain,
     not the directory path that held them), the per-module row counts, the
     reservoir size, and the profile/source binding the synthesized module
-    came from. Deliberately NOT bound: the render narrowing (which
-    ``mtp.*`` subset this call appends) — the append replaces its scope, so
-    consecutive stripes stay legal exactly as
-    ``test_mtp_append_replaces_prior_scope_without_double_counting`` pins.
+    came from. The selected MTP population is bound by its activation hash
+    and per-module row counts. Disk-backed repeats require that same
+    population; in-memory appends can replace their scope.
     """
     rows = int(max_act_rows)
     if rows < 1:

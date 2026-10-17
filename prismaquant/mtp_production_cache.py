@@ -450,9 +450,9 @@ def fill_profile_mtp_production_cache(
             # Compare-or-write this append's own sidecar section BEFORE any
             # render, so a hand-mixed append configuration refuses instead
             # of landing in one directory under a still-matching sidecar.
-            # The render narrowing (which mtp.* subset this call appends)
-            # is deliberately NOT bound: the append replaces its scope, so
-            # consecutive stripes stay legal.
+            # The activation hash and row counts bind this selected MTP
+            # population. A disk-backed repeat requires the same inputs;
+            # changing the population requires a fresh cache directory.
             _check_and_record_append_identity(
                 cache_dir_path,
                 MTP_APPEND_SIDECAR_KEY,

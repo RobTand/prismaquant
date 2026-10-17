@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit documentation correction. MTP append
+identity binds the selected population through its activation hash and row
+counts. A different disk-backed population requires a fresh directory;
+in-memory append scope replacement does not establish disk resume support.
+The identity and rendering implementations are unchanged.
+
 As of: 2026-10-17, architecture audit documentation correction. The Tessera
 producer-checkout predicate verifies its packaged contract SHA-256. It does
 not attest the checkout commit, working tree or encoder bytes. Installed
@@ -19476,9 +19482,11 @@ sidecar. Each append now compare-or-writes its own `mtp_append` /
 `packed_expert_append` section of `render_identity.json` (budgets, gate
 corpus, MTP activation source, hooked enumeration) before any capture or
 render, and refuses naming the field on mismatch; the base fill compares
-its base projection only and preserves both sections. Deliberately unbound:
-the render narrowing (MTP stripes replace scope; the M4 lazy gap-fill
-renders disjoint subsets with identical bytes) and the packed fit corpus
+its base projection only and preserves both sections. MTP selected populations
+are bound by their activation hash and row counts, so a different disk-backed
+population needs a fresh directory. In-memory MTP appends can replace scope.
+Packed-expert render narrowing remains unbound: the M4 lazy gap-fill renders
+disjoint subsets with identical bytes. The packed fit corpus is also unbound
 (existing shards are never re-rendered, and the sanctioned gap-fill runs on
 the render-split calib). Gates:
 `tests/test_production_cache_append_identity.py` (8, each refusal shown
