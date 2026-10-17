@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, C-001. Aggregate ship
+qualification refuses non-preflight offline G3 evidence because the current
+G3 input contracts cannot independently bind that evidence to the exported
+artifact. Standalone G3 screening and aggregate preflight remain available.
+Full aggregate runtime qualification is unavailable until that binding exists.
+
 As of: 2026-10-17, architecture audit continuation, C-003. Campaign memory
 admission takes `max_act_rows` from the effective `campaign_argv` and the
 execution parser's default for both resident and streamed rows. A top-level
@@ -27978,6 +27984,15 @@ The streamed candidate reuses the model profile, source prefetch,
 from served `gold.kl`. Missing criteria allow measurement but give `not_evaluated`.
 `quality_stage.verify_result` replays criteria. The job requires a passed replay,
 not a written pass flag.
+
+Aggregate acceptance also requires evidence for the configured artifact.
+`_require_quality_artifact_binding` checks the task backend's artifact path
+and refuses non-preflight `offline.g3` acceptance. Neither retained-logit nor
+streamed-assignment G3 inputs currently prove equivalence to exported artifact
+bytes. This refusal applies in certified and dev modes. Standalone G3 remains
+an offline screen, and preflight remains available, but the required G3 stage
+prevents full aggregate runtime qualification until an independently verifiable
+artifact binding is implemented.
 
 `g3_v2.verify_g3_result` verifies owned KL and Boolean agreement arrays through `read_bound`.
 The producer and replay use `g3_numerics.g3_summary` for all four metrics, counts and per-window summaries.

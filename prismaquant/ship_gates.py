@@ -179,14 +179,24 @@ def _command(stage: dict, context: dict, output: Path, image: str,
     return command
 
 
+def _require_quality_artifact_binding(identity: str, config: dict, artifact: str,
+                                      *, preflight: bool) -> None:
+    """Own the extra proof needed to use a standalone screen for this artifact."""
+    if identity == "task_suite":
+        measured = config.get("backend", {}).get("pretrained")
+        if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
+            raise ValueError("task backend must measure the configured current artifact")
+    elif identity == "offline.g3" and not preflight:
+        raise ValueError(
+            "offline G3 cannot qualify the configured current artifact: no independently "
+            "verifiable exported-artifact binding is defined for its retained-logit or "
+            "streamed-assignment inputs; the standalone offline screen remains valid evidence")
+
+
 def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str) -> dict:
     from prismaquant.quality_stage import verify_result
     config_path = Path(stage["config"])
     config = _read_gate_document(config_path)
-    if stage["id"] == "task_suite":
-        measured = config.get("backend", {}).get("pretrained")
-        if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
-            raise ValueError("task backend must measure the configured current artifact")
     result = _read_gate_document(output)
     gate = verify_result(result, config, config_sha256=file_sha256hex(config_path))
     if result.get("stage") != QUALITY_STAGES[stage["id"]]:
@@ -199,6 +209,7 @@ def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str
         raise ValueError("replayed quality criteria did not pass")
     if result["measurement"]["status"] != expected_measurement or result["gate"]["status"] != expected_gate:
         raise ValueError(f"quality measurement/gate must be {expected_measurement}/{expected_gate}")
+    _require_quality_artifact_binding(stage["id"], config, artifact, preflight=preflight)
     return result
 
 
