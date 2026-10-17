@@ -500,6 +500,32 @@ def test_export_refuses_legacy_resident_joint_mse_caches(rendered, monkeypatch):
         _pack_fused(name, globals_by_name[name])
 
 
+@pytest.mark.parametrize("change", ["chmod", "copy"])
+def test_streamed_export_refusal_scopes_repair_to_the_cache_producer(
+    change, rendered, tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("PRISMAQUANT_NVFP4_SCALE_RULE", raising=False)
+    cache_dir = tmp_path / "streamed"
+    cache = _streamed_fill(rendered, cache_dir)
+    name = sorted(FUSED)[0]
+    shard = cache_dir / cache_weight_filename(name, "NVFP4")
+    before = shard.read_bytes()
+    if change == "copy":
+        _replace_by_copy(shard)
+    else:
+        mode = shard.stat().st_mode & 0o777
+        shard.chmod(0o600 if mode != 0o600 else 0o644)
+    assert shard.read_bytes() == before
+    _options, globals_by_name, _whole = _export_globals(rendered, cache, monkeypatch)
+    with pytest.raises(RuntimeError, match=UNBOUND) as refusal:
+        _pack_fused(name, globals_by_name[name])
+    message = str(refusal.value)
+    assert "Only resident-fill directories support removing the affected shard" in message
+    assert "Streamed fills cannot resume" in message
+    assert "For a copied cache, export from the original directory" in message
+    assert cache.metadata["streaming"] is True
+
+
 def test_export_refuses_a_witness_of_another_global(rendered, monkeypatch):
     cache = copy.copy(rendered["streamed"])
     witnesses = nvfp4_joint_global_witnesses(cache.metadata, where="test")
@@ -650,7 +676,8 @@ def test_export_witness_refusal_distinguishes_view_and_metadata_changes(
     assert "serves are not the render" not in message
     assert "For a device-only mismatch, read through the writer's view" in message
     assert "otherwise re-render the production cache into a fresh --cache-dir" in message
-    assert "remove only the affected shard and resume with the matching render_identity.json" in message
+    assert "Only resident-fill directories support removing the affected shard" in message
+    assert "resuming with the matching render_identity.json" in message
     if cause == "device":
         assert "device-only mismatch" in message
     else:

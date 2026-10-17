@@ -1829,7 +1829,7 @@ class ProductionWeightCache:
                 "covers caches built before shard-bound witnesses, shards "
                 "resumed or appended without one, and witnesses a resume "
                 "could not bind to the shard on disk. Re-render the production "
-                "cache into a fresh --cache-dir. If a current fill was "
+                "cache into a fresh --cache-dir. If a current resident fill was "
                 "interrupted after publishing this shard, remove only that "
                 "unwitnessed shard and resume with the matching "
                 "render_identity.json. Resuming without removing it keeps "
@@ -1851,10 +1851,12 @@ class ProductionWeightCache:
                 "these bytes are the render its producer witnessed. For a "
                 "device-only mismatch, read through the writer's view or an "
                 "NFS client mount; otherwise re-render the production cache "
-                "into a fresh --cache-dir, or remove only the affected shard "
-                "and resume with the matching render_identity.json. A copied "
-                "cache directory does not "
-                "retain its fused witnesses."
+                "into a fresh --cache-dir. Only resident-fill directories "
+                "support removing the affected shard and resuming with the "
+                "matching render_identity.json. Streamed fills cannot resume. "
+                "Rebuild an exact union from its verified input stripes at "
+                "the final export location. For a copied cache, export from "
+                "the original directory; copies do not retain fused witnesses."
             )
         return witness.joint_global
 

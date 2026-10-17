@@ -723,6 +723,40 @@ def test_union_merges_each_shards_own_joint_global_witnesses(tmp_path):
     }
 
 
+@pytest.mark.parametrize("change", ["chmod", "copy"])
+def test_union_export_refusal_names_rebuild_instead_of_unscoped_resume(change, tmp_path):
+    assignment = {"model.a": "NVFP4"}
+    manifest = _make_shard(
+        tmp_path, shard_id="a", assignment=assignment,
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        witnesses={("model.a", "NVFP4"): 0.25},
+    )
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        [manifest], assignment=assignment, output_bundle=output)
+    _payload, cache = union.verify_union_manifest(
+        output / "union_manifest.json", assignment=assignment)
+    assert not (output / "render_identity.json").exists()
+    assert not (output / "weights/render_identity.json").exists()
+    shard = output / "weights" / cache.weights[("model.a", "NVFP4")]
+    before = shard.read_bytes()
+    if change == "copy":
+        copied = shard.with_name(shard.name + ".copy")
+        shutil.copy2(shard, copied)
+        os.replace(copied, shard)
+    else:
+        mode = shard.stat().st_mode & 0o777
+        shard.chmod(0o600 if mode != 0o600 else 0o644)
+    assert shard.read_bytes() == before
+    cache.get("model.a", "NVFP4")
+    with pytest.raises(RuntimeError) as refusal:
+        cache.witnessed_nvfp4_joint_global("model.a", "NVFP4", where="export")
+    message = str(refusal.value)
+    assert "Only resident-fill directories support removing the affected shard" in message
+    assert "Rebuild an exact union from its verified input stripes at the final export location" in message
+    assert "For a copied cache, export from the original directory" in message
+
+
 def test_union_refuses_a_shard_witnessing_another_shards_entry(tmp_path):
     assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
     legacy = _make_shard(
