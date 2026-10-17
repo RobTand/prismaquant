@@ -831,7 +831,8 @@ class StagedShardReader:
     shapes and dtypes come from the existing bounded header reader
     (``_read_shard_header``); payload comes from staged ranges or refuses.
 
-    Concurrency is threads, never fork: payload and lifecycle operations
+    Under active allowed-tier policy, concurrency is threads, never fork:
+    payload and lifecycle operations
     (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) reject
     inherited handle operations in a forked child, so a child cannot
     drive reads through state the parent's release retires. ``keys``/
@@ -1252,8 +1253,8 @@ def staged_shard_opener(declared, pool_open):
 
     Under the active allowed-tier policy there is no unwrapped path: a file
     the map never names (or no map at all) still opens through a reader
-    whose header/keys/metadata come from the pool handle — bounded header
-    bytes, allowed — but whose payload reads refuse with
+    whose header/keys/metadata come from the bounded header reader,
+    but whose payload reads refuse with
     ``readset-not-staged`` instead of serving pool bytes.
     """
     resolver = residency_resolver()
