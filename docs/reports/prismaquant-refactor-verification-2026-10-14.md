@@ -1302,3 +1302,94 @@ The depth-C import-cleanup freeze `bd80f94c2f` above names its author branch.
 Its equivalent delivered commit is `21ae51c230`, an ancestor of candidate
 `2fbbc70aae`. Both commits carry the identical `tests/test_ship_gates.py` blob
 `a92e79382b3d9beb95a2d60dcf6681ba14b0d812`; the recorded worker run and its counts remain history.
+
+
+## Native witness and final review follow-up, 2026-10-17
+
+The full CPU population ran at `960b700b28c895ce588c6f306dca656a9e1c541d`. Across 1,158 files,
+**20,137 tests passed**, with 521 skip records, one unchanged
+expected failure and 114 passing subtests. All
+20,656 collected cases completed. Three skip
+records came from collection and are outside that collected-case count.
+The six declared fleet-data files remain excluded and byte-identical to the
+earlier qualified source. The opt-in companion passed all 76 tests without
+skips; its node IDs exactly match the full population's 76 task-suite skips.
+Those original skip records remain in the full-run result.
+
+The parent checked all 16 terminal and CAS receipt chains, every tracked
+candidate blob in each sealed source bundle, actual sealed stdout outcomes
+and test completion. This is direct PrismaBuild evidence. The status-only
+merge queue skipped the draft PR; these results do not post or replace an
+official `pb-tests` status. Earlier full populations at `5bddb69057` and
+`bbbb8ea35d` remain evidence for their own revisions.
+
+The same full-population source passed 135 CUDA pytest cases and two actual
+fresh-process GPU bodies. No CUDA case skipped. The wrapper
+`tests/test_streaming_production_cache.py::test_streaming_render_matches_resident`
+was deselected once because its fixed scratch root is unavailable inside the
+container. Its `_equivalence_body` ran separately in a fresh process with
+temporary scratch and the same deterministic CUDA settings. The other body
+was the inline expert export check. All 20 Python files changed since the
+published `5bddb69057` candidate compiled through PrismaBuild.
+
+The later source `f9e02841081b4a6921563445aebbefe615aadd04` changes diagnostic messages, typing imports,
+test oracles and documentation. It restores the codec's missing `Callable`
+annotation binding, removes three unused imports, gives invalidated fused
+shards the targeted removal-and-resume remedy, and limits the no-clobber
+identity guarantee to resident-fill and streamed-claim creation. Append
+creation, section merges and append-only adoption still replace sidecars;
+appends must follow their base fill, with one writer per directory.
+
+The eight affected test files passed 162 cases at that later source;
+one CUDA leg skipped in this CPU cohort. Both device-only and ctime-only
+export refusal cases passed. Six changed Python files compiled, and the
+admitted action evaluated `_gptq_columnwise_update` annotations successfully.
+The first annotation helper failed because it omitted the checkout root
+from `sys.path`. That failed action is retained as
+`r8-standards-compile-failure.json`; a separately frozen corrected helper
+passed. No failed action is counted as passing evidence.
+
+Four strengthened identity-drift cases reject a device-only diagnosis when
+another field also changed. An isolated mutation from exact `["device"]`
+comparison to device membership failed all four at the intended assertion.
+The unmutated cases passed. The mutation was never integrated and its failed
+terminal, stdout and source snapshot remain expected-failure evidence.
+
+Static Git and AST analysis compares the later source with the full/GPU
+baseline. All production control and numerical AST is identical after
+normalizing exactly two diagnostic texts and the two declared typing-import
+changes. Annotation evaluation intentionally changes from the restored
+`Callable` binding. This is composed qualification, not an exact-head full
+suite or GPU pass at the later source. The report append itself changes no
+production source. Final independent review remains required before push.
+
+The immutable evidence is retained under
+`/home/rob/tmp/pq-claude-review-20261016/`:
+
+- `full-r7-acceptance.json`, `full-r7-cas-outcomes.json` and
+  `task-suite-r7-acceptance.json` record the full population and exact companion.
+- `r7-gpu-acceptance.json`, `r7-compile-acceptance.json` and
+  `gpu-deselection-clarifications.json` record device checks, compilation and
+  the separately executed wrapper body.
+- `r8-standards-green-acceptance.json`,
+  `r8-annotation-compile-acceptance.json` and
+  `r8-standards-red-acceptance.json` record the final positive checks,
+  annotation check and intended mutation failures. Each records its action key.
+- `final-review-delta-f9e0284108.json` and
+  `prove_final_review_delta.py` record and reproduce the bounded source proof.
+- Submission arguments are retained in `r8-standards-*-command.json` and
+  `r8-annotation-compile-command.json`; full-suite arguments are in
+  `run_full_r7_pb.py`. All use the published PB clients and frozen checkouts.
+  The corresponding `*.log`, `*-pbtest.json` and receipt files retain outputs.
+
+The witness remains stat schema v2 and admits only the shared `exact|mount`
+predicate. Device-only drift on a local filesystem remains refused; retry
+through the writer's view or an NFS client mount. Combined identity changes
+still require a fresh render or targeted shard repair. Server-local ZFS versus
+NFS-client inode/time equality remains unmeasured. This work grants no new
+two-host, CLI batch/resume, serving, model-quality or performance qualification.
+The API pin, serving pin, format menu and lane admission remain unchanged.
+The earlier broad producer delivery with two baseline failures stays failed.
+Rob left historical warning #2697 open without a retained-artifact audit;
+no affected shipped artifact has been established. A1/S2 remain accepted
+partial scopes, and parent #1295 remains open.
