@@ -44,7 +44,10 @@ FP8 weight-cost measurement uses the same format-registry reconstruction as
 individual measurement and export. FP8_E4M3 and FP8_E5M2 retain their row scales
 and dtype; the generic codebook midpoint rule no longer prices these formats.
 CPU tests cover midpoint and batched geometry parity. CUDA cases remain a
-separate qualification requirement; no serving or performance claim follows.
+separate qualification surface: four CUDA cases passed on GB10 in admitted
+action `28b749a2b9fc6639b1a1bfb0f5f9b370b1d893e06c9ad19338c4bf486441280e`.
+See [the qualification record](results/2026-10-17_architecture_fp8_cuda.md).
+No serving or performance claim follows.
 
 As of: 2026-10-17, architecture audit continuation, RE-10. The native dense
 experiment launcher obtains image metadata through PrismaQuant's existing
