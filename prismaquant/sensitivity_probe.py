@@ -3519,19 +3519,11 @@ def run_streaming_multimodal_visual_probe_pass(
             text_embeds = base_model.embed_tokens(input_ids).to(dtype)
             image_embeds = image_embeds.to(text_embeds.device,
                                            dtype=text_embeds.dtype)
-            try:
-                image_mask, _vmask = get_placeholder_mask(
-                    input_ids, inputs_embeds=text_embeds,
-                    image_features=image_embeds)
-                inputs_embeds = text_embeds.masked_scatter(
-                    image_mask, image_embeds)
-            except Exception:
-                # Processor didn't put image tokens in input_ids, or
-                # shape mismatch. Skip merge — body will still see text
-                # embeds; visual grad flows via a reconstruction path.
-                # Use a fallback that sums visual features into the
-                # first-image-token position, preserving a grad edge.
-                inputs_embeds = text_embeds + 0.0 * image_embeds.sum()
+            image_mask, _vmask = get_placeholder_mask(
+                input_ids, inputs_embeds=text_embeds,
+                image_features=image_embeds)
+            inputs_embeds = text_embeds.masked_scatter(
+                image_mask, image_embeds)
 
             # ---- Streaming body forward (Phase 1) ----------------------
             # Save per-layer CPU activations for the reverse sweep.

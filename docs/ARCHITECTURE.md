@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, RE-09. The streamed
+visual sensitivity probe counts a sample only after image features merge
+into text embeddings and the backward pass completes. A placeholder or merge
+failure uses the existing sample cleanup path. If no sample succeeds, the
+probe returns false so the caller can use its existing fallback. A synthetic
+zero-gradient connection no longer produces an accepted visual measurement.
+
 As of: 2026-10-17, architecture audit continuation, C-004. Artifact registration
 holds a stable sibling file lock while reloading the current registry, checking
 record identity and atomically publishing the next record list. An acknowledged
