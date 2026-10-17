@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, native card lane wording.
+Native export opens a lane-bound card through the existing shipcard owner.
+This correction records the implemented gate derivation; it adds no new gate.
+
 As of: 2026-10-17, architecture audit continuation, retained-budget sizes.
 Budget derivation measures the current prepared cache's selected candidate
 files on every invocation. `--render-size-cache` refreshes an optional size
@@ -28552,19 +28556,13 @@ required to close that slot. The vocabulary is derived from every lane spec
 `shipcard_slots.CORE_LANE_SLOTS` plus the replays a lane plugin registers, PQ #1553;
 dispatched by registry, #162 closed). The fourth link is `publish_artifact`, above.
 
-One lane holds all four links, and it is Tessera. Native
-compressed-tensors holds the first, third and fourth but not the second:
-`export_native_compressed._write_shipcard` calls `build_shipcard(out_dir,
-build=build)` (`export_native_compressed.py:8422`) with no `lane=`, so a native
-card carries no `lane` key and `required_slots` derives nothing from the lane.
-That omission is deliberate -- `build_shipcard`'s own docstring says omitting
-the argument reproduces the historical card exactly -- and a native artifact is
-held to the same bar anyway, but **by coincidence rather than by derivation**:
-`lane_gate_slots("compressed-tensors")` returns exactly `REQUIRED_SLOTS`, the
-same five slots, so the lane-gated card and the base card are one card on this
-lane. Read that as an equality that happens to hold today, not as a link. Add a
-sixth gate to `lane_specs/compressed-tensors.json` and the native card will not
-open its slot. **The GGUF arm opens no card at all**, so every gate
+Tessera and native compressed-tensors hold all four links. Native export
+calls `open_shipcard(..., lane=_default_export_lane())`, so its card opens
+every gate declared by `lane_specs/compressed-tensors.json`. Artifact config
+and build claims also determine lane obligations; deleting the card lane stamp
+does not remove those requirements.
+
+**The GGUF arm opens no card at all**, so every gate
 `lane_specs/gguf.json` declares is still enforced by nothing — `publish_artifact` refuses a GGUF artifact for
 *absence* of a card, which an operator dissolves by writing a base card by
 hand, and a hand-written base card never carries the lane's own gates. That is
