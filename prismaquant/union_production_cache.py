@@ -4,18 +4,26 @@ This module is deliberately unrelated to the archived ``smart union``
 research path.  It never selects candidates or prunes a format menu.  Its
 only operation is the set union of disjoint, already-rendered cache keys.
 
-The portable workflow has three steps::
+Transfer input stripe bundles to the final export filesystem before union::
 
     python -m prismaquant.union_production_cache manifest ...
     python -m prismaquant.union_production_cache union ...
     python -m prismaquant.union_production_cache verify ...
 
-Each input shard is a self-contained bundle.  Its manifest binds the cache
+Each input shard is a self-contained, portable bundle. Its manifest binds the cache
 pickle and every backing tensor by SHA-256, plus value-bearing identities for
 the source checkpoint, calibration corpus, producer code, common settings,
 and exact render coverage.  Union refuses overlaps, failed renders,
 identity drift, missing or modified files, incomplete expected coverage,
 and cache metadata it cannot merge without changing semantics.
+
+The union binds fused NVFP4 witnesses to its published copies. A completed
+union carrying those witnesses can be read through another NFS mount of the
+same files or renamed within one filesystem, but copying it voids its fused
+witnesses. Verification and export refuse that copy. Rebuild the union from
+its verified input stripe bundles at the final location; no weight re-render
+is needed. Bundles without fused witnesses retain their byte-verification
+transfer behavior.
 """
 from __future__ import annotations
 
@@ -1625,7 +1633,7 @@ def union_shard_manifests(
     output_bundle: str | Path,
     require_current_code: bool = True,
 ) -> dict[str, object]:
-    """Union verified disjoint shards into one atomic, portable cache bundle."""
+    """Union verified disjoint shards into one atomic bundle at its final location."""
     expected = _coerce_coverage(assignment=assignment, coverage=coverage)
     if len(manifest_paths) < 2:
         raise ValueError("exact cache union requires at least two shard manifests")
@@ -1821,7 +1829,12 @@ def verify_union_manifest(
     coverage: Mapping[str, object] | None = None,
     require_current_code: bool = True,
 ) -> tuple[dict[str, object], ProductionWeightCache]:
-    """Verify a canonical union bundle after publication or transfer."""
+    """Verify a union's bytes, coverage and recorded fused witness bindings.
+
+    Transfer stripe bundles before building the union at the final export
+    location. A copy of a completed union has new file identities and cannot
+    retain its fused witnesses merely by passing the byte checks here.
+    """
     expected = _coerce_coverage(assignment=assignment, coverage=coverage)
     path = Path(manifest_path)
     payload, _ = _load_manifest_envelope(
@@ -1913,6 +1926,14 @@ def verify_union_manifest(
         or exact_union.get("entries") != len(cache)
     ):
         raise ValueError("union cache exact-union metadata is inconsistent")
+    _require_witnesses_bind_hashed_files(
+        cache, cache_dir=cache_dir, where="union cache",
+        remedy=(
+            "rebuild the union from the verified input stripe bundles at the "
+            "final export location; copying a completed union does not "
+            "transfer its fused witnesses"
+        ),
+    )
     return payload, cache
 
 

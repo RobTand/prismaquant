@@ -773,7 +773,7 @@ def test_shard_manifest_refuses_a_witness_its_hashed_file_breaks(tmp_path):
         )
 
 
-def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path):
+def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path, monkeypatch):
     """A transferred shard's files are other files; its manifest's SHA-256,
     taken while its witnesses bound them, carries the witnesses to the
     union's copies. A copy of the union bundle binds none of them."""
@@ -811,8 +811,8 @@ def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path):
 
     copied = tmp_path / "copied-union"
     shutil.copytree(output, copied)
-    _payload, copy_cache = union.verify_union_manifest(
-        copied / "union_manifest.json", assignment=assignment)
+    copy_cache = union._load_cache(copied / "production_weight_cache.pkl")
+    copy_cache.relocate(copied / "weights")
     for key, witness in nvfp4_joint_global_witnesses(
         copy_cache.metadata, where="test"
     ).items():
@@ -820,3 +820,37 @@ def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path):
         assert "is not the file its producer published" in (
             nvfp4_joint_global_witness_problem(
                 witness, served=served, path=copied / "weights" / served))
+
+    import prismaquant.export_native_compressed as exporter
+    from prismaquant.native_render_levers import NativeRenderLevers
+
+    monkeypatch.setattr(exporter, "_PRODUCTION_WEIGHT_CACHE", copy_cache)
+    monkeypatch.setattr(exporter, "_RENDER_LEVERS", NativeRenderLevers())
+
+    def no_unwitnessed_repack(*args, **kwargs):
+        raise AssertionError("a copied union reached the codec before witness refusal")
+
+    monkeypatch.setattr(
+        exporter._native_render_codec, "quantize_dequantize_nvfp4", no_unwitnessed_repack)
+    with pytest.raises(RuntimeError, match="is not the file its producer published"):
+        exporter._pack_production_cached_2d(
+            "model.a", "NVFP4", nvfp4_global_real_override=torch.tensor(0.25),
+            device=torch.device("cpu"),
+        )
+    with pytest.raises(ValueError, match="rebuild the union.*input stripe bundles"):
+        union.verify_union_manifest(copied / "union_manifest.json", assignment=assignment)
+
+    # The portable input stripes can build a new union at the final location
+    # without re-rendering any weights. Its new copies carry bound witnesses.
+    rebuilt = tmp_path / "export-union"
+    union.union_shard_manifests(
+        [transferred / path.relative_to(built) for path in manifests],
+        assignment=assignment, output_bundle=rebuilt,
+    )
+    _payload, rebuilt_cache = union.verify_union_manifest(
+        rebuilt / "union_manifest.json", assignment=assignment,
+    )
+    assert _bound_witnesses(rebuilt / "weights", rebuilt_cache) == {
+        ("model.a", "NVFP4"): 0.25,
+        ("model.c", "NVFP4"): 0.5,
+    }
