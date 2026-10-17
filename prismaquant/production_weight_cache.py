@@ -1851,7 +1851,9 @@ class ProductionWeightCache:
                 "these bytes are the render its producer witnessed. For a "
                 "device-only mismatch, read through the writer's view or an "
                 "NFS client mount; otherwise re-render the production cache "
-                "into a fresh --cache-dir. A copied cache directory does not "
+                "into a fresh --cache-dir, or remove only the affected shard "
+                "and resume with the matching render_identity.json. A copied "
+                "cache directory does not "
                 "retain its fused witnesses."
             )
         return witness.joint_global

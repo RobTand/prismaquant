@@ -650,6 +650,7 @@ def test_export_witness_refusal_distinguishes_view_and_metadata_changes(
     assert "serves are not the render" not in message
     assert "For a device-only mismatch, read through the writer's view" in message
     assert "otherwise re-render the production cache into a fresh --cache-dir" in message
+    assert "remove only the affected shard and resume with the matching render_identity.json" in message
     if cause == "device":
         assert "device-only mismatch" in message
     else:
