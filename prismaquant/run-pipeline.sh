@@ -2162,9 +2162,9 @@ fi
 # AURA's one structural assumption is that per-Linear KL contributions ADD.
 # This stage turns that assumption into a per-artifact NUMBER —
 #   residual = measured_end_KL(assignment) - sum_i predicted_dloss_i
-# with an honest stderr (exact per-probe when the cost rows carry
-# x2_per_probe, else the independence lower bound) — instead of a two-model
-# memory. It is a REPORT: it never fails the run, and it never changes an
+# with per-probe stderr when the cost rows carry x2_per_probe, otherwise
+# an estimate that assumes independence. Unmeasured covariance can have
+# either sign, so the latter is not a lower bound. It is a REPORT: it never fails the run, and it never changes an
 # allocation.
 #
 # WHY IT IS HERE AND NOT AT [2d]. The residual needs a concrete assignment,
