@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, standalone activation tables.
+The GLM dense acquisition adapter uses the existing platform-entry parser and
+passes the declared image to native preparation. Its table retains the same
+platform/image/contract structure as the activation oracle. CPU adapter checks
+add no CUDA preparation, kernel, or serving qualification.
+
 As of: 2026-10-17, architecture audit continuation, reseal request binding.
 Bundle reuse checks every arm's dropped settings against the current migration
 request before planning or rewriting rows. Pin-only catalog adoption makes no
