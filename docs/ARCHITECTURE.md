@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, shipcard transactions.
+Supported card mutations reload, validate and publish under one directory lock.
+Publication fsyncs a complete stage, atomically replaces the card and fsyncs the
+directory. Concurrent initial opens cannot discard an acknowledged card.
+Canonical publication stages cause an explicit incomplete-publication refusal
+for artifact identity and subsequent card mutations. Interrupted residue needs
+explicit repair after confirming its writer has stopped; it is not auto-deleted.
+
 As of: 2026-10-17, architecture audit continuation, LFM launcher affinity.
 The LFM native preflight launcher passes its inherited CPU set to Docker and
 records that same set in its receipt. The four-CPU quota, native thread bounds
@@ -28596,11 +28604,28 @@ hand, and a hand-written base card never carries the lane's own gates. That is
 the same defect on the remaining lane, recorded here rather than presented as
 closed.
 
-with the wrong schema, missing identity/build fields or required slot keys, or non-object slot
+A card with the wrong schema, missing identity/build fields or required slot keys, or non-object slot
 records is structurally malformed and is likewise never force-overrideable; force applies only
 to a structurally valid card's unfilled or failed evidence. Allow/ignore
 filters are forbidden because excluding a claimed artifact member or the shipcard would make
 the uploaded model a different object, and model publication is repository-root only.
+
+Shipcard persistence uses one lock around each read, mutation and publication.
+Initial open and weight re-attestation hold the artifact-root and card-parent
+directory locks in canonical order, including for an external card. Slot fills,
+optional-slot creation, control overrides and forced-publication stamps reload
+the current card under the same owner. Overrides recheck eligibility after
+confirmation. `write_shipcard` remains an explicit complete-card replacement.
+
+The existing atomic byte writer preserves reserved card length. Readers see a
+complete old or new card. File-fsync or replace failure leaves the old card;
+directory-fsync failure reports unacknowledged durability after replacement.
+Root canonical `shipcard.json` staging names are explicit publication state,
+never auxiliary model inputs: identity computation refuses while one exists.
+A killed writer can leave that refusal in place until explicit residue repair.
+Generic temporary names and nested stage-like files remain content-bound.
+Noncanonical cards placed inside an artifact retain their existing auxiliary
+identity semantics; this change does not add support for that placement.
 
 The publication authority is a **frozen snapshot**, not a final check followed by a live path.
 The preflight shipcard replay is payload-cheap: it rejects failed slots and stat/model-identity

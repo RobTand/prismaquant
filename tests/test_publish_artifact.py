@@ -939,3 +939,42 @@ def test_ship_gate_ledger_follows_the_producer_not_a_roster(monkeypatch):
     assert "mtp_acceptance_v2" in ledger
     assert "mtp_acceptance" not in ledger
 
+
+def test_force_stamp_preserves_measurement_written_during_confirmation(tmp_path, monkeypatch):
+    model_dir = _artifact(tmp_path)
+    path = model_dir / "shipcard.json"
+    slot = "native_export.eager"
+    record = make_record(
+        slot=slot, tool="persistence audit", passed=False,
+        model_sha=load_shipcard(path)["model_sha"],
+        metrics={"arm": "eager", "enforce_eager": True},
+        detail="Recorded refusal; no serve performed",
+    )
+
+    def confirm(*args):
+        fill_slot(path, slot, record)
+        return True
+
+    monkeypatch.setattr(publisher, "_confirm_forced", confirm)
+    assert publish_cli(_argv(model_dir, "--force-unverified")) == 0
+
+    stored = load_shipcard(path)
+    assert stored["slots"][slot] == record
+    assert slot not in stored["forced_unverified_history"][-1]["unfilled_slots"]
+
+
+def test_force_stamp_rechecks_structural_refusal_after_confirmation(tmp_path, monkeypatch):
+    model_dir = _artifact(tmp_path)
+    path = model_dir / "shipcard.json"
+
+    def confirm(*args):
+        card = load_shipcard(path)
+        card["slots"].pop("ship_gate")
+        write_shipcard(path, card)
+        return True
+
+    monkeypatch.setattr(publisher, "_confirm_forced", confirm)
+    assert publish_cli(_argv(model_dir, "--force-unverified")) == 2
+    stored = load_shipcard(path)
+    assert "ship_gate" not in stored["slots"]
+    assert "forced_unverified" not in stored

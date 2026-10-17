@@ -36,7 +36,7 @@ from prismaquant.shipcard import (
     reattest_weight_stats,
     uniform_control_summary,
     verify,
-    write_shipcard,
+    update_shipcard,
     verify_gold_producer_record,
 )
 from prismaquant.shipcard_slots import (
@@ -348,40 +348,54 @@ def _confirm_artifact_name(model_dir: str, typed: str | None) -> str | None:
     return expected
 
 
-def _cmd_override_control(args: argparse.Namespace) -> int:
-    """Ship an allocation that lost to its control — deliberately, and stamped."""
-    card = load_shipcard(args.shipcard)
-    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
+def _override_control_summary(card, model_dir):
     summary = uniform_control_summary(card, model_dir=model_dir)
     if not summary["filled"]:
-        print("[shipcard] REFUSED: no uniform_control record to override; "
-              "fill the slot first (fill-control)", file=sys.stderr)
-        return 2
+        raise ValueError("no uniform_control record to override; fill the slot first (fill-control)")
     if not summary["measured"]:
-        print("[shipcard] REFUSED: this control was never SERVED. An override "
-              "forgives a measured loss; it is not a way to skip the "
-              "measurement. Serve the control arm, or publish with "
-              "--force-unverified and wear that stamp instead.",
-              file=sys.stderr)
-        return 2
+        raise ValueError(
+            "this control was never SERVED. An override forgives a measured loss; "
+            "it is not a way to skip the measurement. Serve the control arm, or "
+            "publish with --force-unverified and wear that stamp instead."
+        )
     if summary["beat_control"]:
-        print("[shipcard] REFUSED: this allocation BEAT its uniform control "
-              f"({summary['candidate_over_control']!r}x); there is nothing to "
-              "override.", file=sys.stderr)
+        raise ValueError(
+            "this allocation BEAT its uniform control "
+            f"({summary['candidate_over_control']!r}x); there is nothing to override."
+        )
+    return summary
+
+
+def _cmd_override_control(args: argparse.Namespace) -> int:
+    """Ship an allocation that lost to its control — deliberately, and stamped."""
+    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
+    try:
+        _override_control_summary(load_shipcard(args.shipcard), model_dir)
+    except ValueError as exc:
+        print(f"[shipcard] REFUSED: {exc}", file=sys.stderr)
         return 2
 
     typed = _confirm_artifact_name(model_dir, args.confirm_name)
     if typed is None:
         return 1
-    if card.get("weight_stat_attestation") is not None:
-        assert_weight_stat_attestation(card, model_dir)
-    record_uniform_control_override(
-        card,
-        reason=args.reason,
-        authorized_by=args.authorized_by,
-        confirmed_artifact_name=typed,
-    )
-    write_shipcard(args.shipcard, card)
+
+    def override(card):
+        _override_control_summary(card, model_dir)
+        if card.get("weight_stat_attestation") is not None:
+            assert_weight_stat_attestation(card, model_dir)
+        record_uniform_control_override(
+            card,
+            reason=args.reason,
+            authorized_by=args.authorized_by,
+            confirmed_artifact_name=typed,
+        )
+
+    try:
+        card = update_shipcard(args.shipcard, override)
+    except ValueError as exc:
+        print(f"[shipcard] REFUSED: {exc}", file=sys.stderr)
+        return 2
+    summary = uniform_control_summary(card, model_dir=model_dir)
     print(f"[shipcard] stamped uniform_control_override=true into "
           f"{args.shipcard}: this artifact ships an allocation "
           f"{summary['candidate_over_control']!r}x worse than spending the "

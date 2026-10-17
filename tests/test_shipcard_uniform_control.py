@@ -961,3 +961,41 @@ def test_generic_control_producer_refuses_invalid_evidence_without_writing(tmp_p
     ]) == 2
     assert path.read_bytes() == before
 
+
+def test_override_preserves_measurement_written_during_confirmation(tmp_path, monkeypatch):
+    import prismaquant.shipcard_cli as cli
+
+    model_dir, path = _built(tmp_path)
+    slot = "native_export.graph"
+    record = copy.deepcopy(load_shipcard(path)["slots"][slot])
+    record["detail"] = "Acknowledged during override confirmation"
+
+    def confirm(*args):
+        fill_slot(path, slot, record)
+        return model_dir.name
+
+    monkeypatch.setattr(cli, "_confirm_artifact_name", confirm)
+    assert shipcard_cli([
+        "override-control", str(path), "--reason", "r", "--authorized-by", "a",
+    ]) == 0
+    stored = load_shipcard(path)
+    assert stored["slots"][slot] == record
+    assert stored["uniform_control_override"] is True
+
+
+def test_override_rechecks_current_measurement_after_confirmation(tmp_path, monkeypatch):
+    import prismaquant.shipcard_cli as cli
+
+    model_dir, path = _built(tmp_path)
+
+    def confirm(*args):
+        _fill_control(path, model_dir, block=_block(measured=False))
+        return model_dir.name
+
+    monkeypatch.setattr(cli, "_confirm_artifact_name", confirm)
+    assert shipcard_cli([
+        "override-control", str(path), "--reason", "r", "--authorized-by", "a",
+    ]) == 2
+    stored = load_shipcard(path)
+    assert not uniform_control_summary(stored, model_dir=model_dir)["measured"]
+    assert "uniform_control_override" not in stored

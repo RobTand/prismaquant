@@ -60,7 +60,7 @@ from prismaquant.shipcard import (  # noqa: E402
     unfilled_slots,
     uniform_control_summary,
     verify,
-    write_shipcard,
+    update_shipcard,
 )
 REPO_TYPES = ("model", "dataset", "space")
 SNAPSHOT_BLOCK_BYTES = 8 * 1024 * 1024
@@ -362,24 +362,47 @@ def _confirm_forced(artifact_dir: Path, confirm_name: str | None) -> bool:
     return True
 
 
+def _research_standing_problems(card: Mapping[str, Any]) -> list[str]:
+    problems = []
+    build_block = card.get("build") or {}
+    if build_block.get("research_only") is True:
+        source = (
+            "prefill_frontier_replay_claim (prefill-frontier replay stamp)"
+            if "prefill_frontier_replay" in build_block
+            else "the card's build block"
+        )
+        problems.append(
+            f"build.research_only is True, stamped by {source}: a "
+            "research-standing artifact is not releasable; promote the "
+            "assignment out of research or re-run with --force-unverified "
+            "to publish it UNVERIFIED"
+        )
+
+    return problems
+
+
 def stamp_forced(
     shipcard_path: Path,
-    card: dict[str, Any],
     artifact_dir: Path,
-    problems: list[str],
     repo_id: str,
 ) -> None:
-    """Record on the artifact that it was published without a closed card."""
-    card["forced_unverified"] = True
-    history = list(card.get("forced_unverified_history") or [])
-    history.append({
-        "repo_id": repo_id,
-        "model_sha": compute_model_sha(artifact_dir),
-        "problems": list(problems),
-        "unfilled_slots": unfilled_slots(card, model_dir=artifact_dir),
-    })
-    card["forced_unverified_history"] = history
-    write_shipcard(shipcard_path, card)
+    """Record the current card's unverified publication without erasing measurements."""
+    def stamp(card):
+        structural = _shipcard_structure_problems(card, artifact_dir)
+        if structural:
+            raise ValueError("; ".join(structural))
+        problems = verify(card, model_dir=artifact_dir) + _research_standing_problems(card)
+        card["forced_unverified"] = True
+        history = list(card.get("forced_unverified_history") or [])
+        history.append({
+            "repo_id": repo_id,
+            "model_sha": compute_model_sha(artifact_dir),
+            "problems": problems,
+            "unfilled_slots": unfilled_slots(card, model_dir=artifact_dir),
+        })
+        card["forced_unverified_history"] = history
+
+    update_shipcard(shipcard_path, stamp)
     print(f"[publish] stamped forced_unverified=true into {shipcard_path}")
 
 
@@ -1317,27 +1340,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {problem}", file=sys.stderr)
         return 2
 
-    # Issue #1586 (research half): research standing is not releasable
-    # standing.  ``prefill_frontier_replay_claim`` stamps
-    # ``build.research_only: True`` onto a prefill-frontier replay card's
-    # build anchor (``shipcard.build_shipcard``), and before this gate
-    # nothing that refused ever read it.  The refusal is forceable like any
-    # other evidence failure: ``--force-unverified`` re-types the basename
-    # and stamps the recorded override, so a research artifact reaches the
-    # Hub only as a declared UNVERIFIED publication.
-    build_block = card.get("build") or {}
-    if build_block.get("research_only") is True:
-        source = (
-            "prefill_frontier_replay_claim (prefill-frontier replay stamp)"
-            if "prefill_frontier_replay" in build_block
-            else "the card's build block"
-        )
-        problems.append(
-            f"build.research_only is True, stamped by {source}: a "
-            "research-standing artifact is not releasable; promote the "
-            "assignment out of research or re-run with --force-unverified "
-            "to publish it UNVERIFIED"
-        )
+    problems.extend(_research_standing_problems(card))
 
     _print_bpp_claim_with_control(card, artifact_dir)
 
@@ -1368,9 +1371,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             stamp_forced(
                 shipcard_path,
-                card,
                 artifact_dir,
-                problems,
                 args.repo_id,
             )
         except Exception as exc:

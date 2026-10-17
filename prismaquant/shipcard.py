@@ -71,6 +71,7 @@ Stdlib only, no torch: the CLI must run anywhere the artifact is reachable.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import math
@@ -79,8 +80,9 @@ import stat
 import re
 import subprocess
 import time
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .source_read_plan import safetensors_prefix_length
 from .digests import file_sha256hex
@@ -268,6 +270,31 @@ _MXFP8_DENSE_WIRE_IDS = frozenset({"mxfp8_e4m3_e8m0_g32"})
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
+def _require_not_shipcard_stage(path: Path, root: Path) -> None:
+    if path.parent != root:
+        return
+    suffix = path.name.removeprefix(SHIPCARD_FILENAME + ".tmp")
+    if (suffix != path.name and suffix.isalnum() and suffix[-1:].isdigit()):
+        raise ValueError(
+            f"shipcard publication incomplete at {path}; publication may be ongoing "
+            "or interrupted. Retry after the writer finishes; interrupted residue "
+            "needs explicit removal after confirming no writer is active"
+        )
+
+
+def _require_no_shipcard_stages(root: Path) -> None:
+    for path in root.glob(SHIPCARD_FILENAME + ".tmp*"):
+        _require_not_shipcard_stage(path, root)
+
+
+def _auxiliary_files(root: Path, excluded: set[str]):
+    for path in sorted(root.rglob("*")):
+        _require_not_shipcard_stage(path, root)
+        if (path.is_file() and path.name not in excluded
+                and path.suffix not in {".safetensors", ".pqcb"}):
+            yield path
+
+
 def compute_model_sha(
     model_dir: str | os.PathLike,
     *,
@@ -302,12 +329,17 @@ def compute_model_sha(
     scope change: cards stamped while ``README.md`` was still hashed.
     ``legacy_figures_hashed=True`` likewise reproduces identities stamped
     before the card figures (``CARD_FIGURE_FILENAMES``) joined the exclusion.
+
+    Canonical shipcard publication stages cause an explicit incomplete-publication
+    refusal. Interrupted residue requires explicit repair after the writer stops;
+    it is never omitted from identity or automatically deleted.
     """
     from .digests import bytes_sha256hex, text_sha256hex
 
     root = Path(model_dir)
     if not root.is_dir():
         raise FileNotFoundError(f"model dir does not exist: {root}")
+    _require_no_shipcard_stages(root)
     payload: dict[str, Any] = {}
     cfg = root / "config.json"
     if cfg.is_file():
@@ -413,10 +445,7 @@ def compute_model_sha(
                 "bytes": int(path.stat().st_size),
                 "sha256": file_sha256hex(path),
             }
-            for path in sorted(root.rglob("*"))
-            if path.is_file()
-            and path.name not in excluded
-            and path.suffix not in {".safetensors", ".pqcb"}
+            for path in _auxiliary_files(root, excluded)
         }
         if auxiliary:
             payload["auxiliary_files"] = auxiliary
@@ -1238,34 +1267,35 @@ def reattest_weight_stats(
     """
     path = Path(shipcard_path)
     root = Path(model_dir) if model_dir is not None else path.resolve().parent
-    card = load_shipcard(path)
-    before = weight_stat_attestation(root)
-    expected = read_weight_content_manifest(root)
-    observed = build_weight_content_manifest(root)
-    if expected is not None and observed != expected:
-        raise ValueError(
-            "weight content differs from the immutable export manifest; "
-            "refusing to refresh the stat attestation"
-        )
-    expected_model_sha = card.get("model_sha")
-    accepted = set(accepted_model_shas(root))
-    if expected is None:
-        accepted.add(compute_model_sha(root, legacy_native_scope=True))
-    if expected_model_sha not in accepted:
-        raise ValueError("copied artifact model_sha differs from the shipcard")
-    if expected is None:
-        _write_weight_content_manifest(root, observed)
-        card["model_sha"] = compute_model_sha(root)
-        card["weight_identity_upgrade"] = {
-            "previous_model_sha": expected_model_sha,
-            "model_sha": card["model_sha"], "measurements_require_replay": True,
-        }
-    if weight_stat_attestation(root) != before:
-        raise ValueError("weight files changed during re-attestation")
-    card["weight_stat_attestation"] = before
-    card["updated"] = _now()
-    write_shipcard(path, card)
-    return card
+
+    def reattest(card):
+        before = weight_stat_attestation(root)
+        expected = read_weight_content_manifest(root)
+        observed = build_weight_content_manifest(root)
+        if expected is not None and observed != expected:
+            raise ValueError(
+                "weight content differs from the immutable export manifest; "
+                "refusing to refresh the stat attestation"
+            )
+        expected_model_sha = card.get("model_sha")
+        accepted = set(accepted_model_shas(root))
+        if expected is None:
+            accepted.add(compute_model_sha(root, legacy_native_scope=True))
+        if expected_model_sha not in accepted:
+            raise ValueError("copied artifact model_sha differs from the shipcard")
+        if expected is None:
+            _write_weight_content_manifest(root, observed)
+            card["model_sha"] = compute_model_sha(root)
+            card["weight_identity_upgrade"] = {
+                "previous_model_sha": expected_model_sha,
+                "model_sha": card["model_sha"], "measurements_require_replay": True,
+            }
+        if weight_stat_attestation(root) != before:
+            raise ValueError("weight files changed during re-attestation")
+        card["weight_stat_attestation"] = before
+        card["updated"] = _now()
+
+    return update_shipcard(path, reattest, artifact_dir=root)
 
 
 def _write_weight_content_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
@@ -1570,29 +1600,72 @@ def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overw
 
     The build claims and lane resolve before anything is written. Conflicting
     build or lane claims therefore leave the artifact directory untouched.
+    Artifact-manifest and card publication hold the artifact root and card parent
+    directories in canonical order, including when the card is external.
     """
     root = Path(model_dir)
     path = Path(shipcard_path) if shipcard_path is not None else root / SHIPCARD_FILENAME
-    if (path.exists() or path.is_symlink()) and not overwrite:
-        raise ValueError("a ship record already exists; reopening would discard its measurements")
     build_payload, resolved_lane = _resolved_build(root, build, lane)
-    attestation = None
-    if tuple(root.glob("*.safetensors")):
-        attestation = weight_stat_attestation(root)
-        expected = read_weight_content_manifest(root)
-        observed = build_weight_content_manifest(root)
-        if expected is not None and observed != expected:
-            raise ValueError("weight content differs from the immutable export manifest")
-        if expected is None:
-            _write_weight_content_manifest(root, observed)
-    card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
-    write_shipcard(path, card)
-    return card
+    with _shipcard_directory_lock(path, artifact_dir=root):
+        if (path.exists() or path.is_symlink()) and not overwrite:
+            raise ValueError("a ship record already exists; reopening would discard its measurements")
+        attestation = None
+        if tuple(root.glob("*.safetensors")):
+            attestation = weight_stat_attestation(root)
+            expected = read_weight_content_manifest(root)
+            observed = build_weight_content_manifest(root)
+            if expected is not None and observed != expected:
+                raise ValueError("weight content differs from the immutable export manifest")
+            if expected is None:
+                _write_weight_content_manifest(root, observed)
+        card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
+        _publish_shipcard(path, card)
+        return card
+
+
+@contextmanager
+def _shipcard_directory_lock(path: Path, *, artifact_dir: Path | None = None):
+    """Keep stable lock inodes without adding files to the artifact identity."""
+    directories = {path.parent.resolve()}
+    if artifact_dir is not None:
+        directories.add(artifact_dir.resolve())
+    with ExitStack() as locks:
+        for directory in sorted(directories):
+            directory.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            locks.callback(os.close, descriptor)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            locks.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
+        if path.name == SHIPCARD_FILENAME:
+            _require_no_shipcard_stages(path.parent)
+        if artifact_dir is not None:
+            _require_no_shipcard_stages(artifact_dir)
+        yield
 
 
 def write_shipcard(path: str | os.PathLike, card: Mapping[str, Any]) -> Path:
+    """Deliberately replace the complete card; use update_shipcard for mutations."""
     out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    with _shipcard_directory_lock(out):
+        return _publish_shipcard(out, card)
+
+
+def update_shipcard(
+    path: str | os.PathLike,
+    mutate: Callable[[dict[str, Any]], bool | None],
+    *,
+    artifact_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Reload and publish under one lock; a mutation returning False skips writing."""
+    out = Path(path)
+    with _shipcard_directory_lock(out, artifact_dir=artifact_dir):
+        card = load_shipcard(out)
+        if mutate(card) is not False:
+            _publish_shipcard(out, card)
+        return card
+
+
+def _publish_shipcard(out: Path, card: Mapping[str, Any]) -> Path:
     encoded = (json.dumps(card, indent=2, default=str) + "\n").encode("utf-8")
     reserved = card.get("reserved_file_bytes")
     if reserved is not None:
@@ -1615,7 +1688,13 @@ def write_shipcard(path: str | os.PathLike, card: Mapping[str, Any]) -> Path:
                 f"is {reserved} bytes; refusing to invalidate the artifact inventory"
             )
         encoded += b" " * (reserved - len(encoded))
-    out.write_bytes(encoded)
+    from .cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
+
+    temporary = out.with_name(out.name + unique_temp_suffix())
+    try:
+        atomic_write_bytes(out, encoded)
+    finally:
+        temporary.unlink(missing_ok=True)
     return out
 
 
@@ -1637,18 +1716,18 @@ def fill_slot(
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Append a verdict block to `slot` in the shipcard at `path` (in place)."""
-    card = load_shipcard(path)
-    card_model_dir = Path(path).resolve().parent
-    if card.get("weight_stat_attestation") is not None:
-        assert_weight_stat_attestation(card, card_model_dir)
-    if slot not in card["slots"]:
-        raise KeyError(
-            f"shipcard {path} has no slot {slot!r}; known: "
-            f"{sorted(card['slots'])}")
-    card["slots"][slot] = dict(record)
-    card["updated"] = _now()
-    write_shipcard(path, card)
-    return card
+    def fill(card):
+        card_model_dir = Path(path).resolve().parent
+        if card.get("weight_stat_attestation") is not None:
+            assert_weight_stat_attestation(card, card_model_dir)
+        if slot not in card["slots"]:
+            raise KeyError(
+                f"shipcard {path} has no slot {slot!r}; known: "
+                f"{sorted(card['slots'])}")
+        card["slots"][slot] = dict(record)
+        card["updated"] = _now()
+
+    return update_shipcard(path, fill)
 
 
 def ensure_optional_slot(
@@ -1662,12 +1741,14 @@ def ensure_optional_slot(
             f"{slot!r} is not an optional shipcard slot; "
             f"known={list(OPTIONAL_SLOTS)}"
         )
-    card = load_shipcard(path)
-    if slot not in card["slots"]:
+
+    def ensure(card):
+        if slot in card["slots"]:
+            return False
         card["slots"][slot] = None
         card["updated"] = _now()
-        write_shipcard(path, card)
-    return card
+
+    return update_shipcard(path, ensure)
 
 
 def fill_if_requested(
