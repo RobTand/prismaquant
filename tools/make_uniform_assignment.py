@@ -334,11 +334,11 @@ def layer_config_payload(
 # ---------------------------------------------------------------------------
 
 def _meta_skeleton(model_path: str):
-    """A meta-device skeleton of the model: names + shapes + module types, 0 bytes.
+    """Construct names, shapes and module types without reading checkpoint weights.
 
-    Same idiom as ``export_native_compressed`` (``init_empty_weights`` +
-    ``AutoModelForCausalLM.from_config``); no weights are read, so this is
-    CPU/RAM-free and scales to any model size.
+    Meta initialization avoids parameter storage when accelerate is available.
+    Model/config metadata still uses host memory; the fallback also allocates
+    ordinary parameter storage.
     """
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
