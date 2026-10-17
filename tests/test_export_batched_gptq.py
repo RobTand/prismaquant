@@ -393,19 +393,12 @@ def test_gptq_batched_realistic_moe_shape(seeded):
 
 
 def test_quantize_2d_nvfp4_group_batched_integration(seeded):
-    """End-to-end integration test for the batched-NVFP4 group path
-    used by the export hot loop. Builds a small synthetic group of
-    same-shape Linears, runs `quantize_2d_nvfp4_group_batched`, and
-    verifies that each compressed dict has the expected keys + shapes
-    and that values are bit-finite (no NaN/Inf).
+    """Exercise grouped codec plumbing with explicit activations and levers.
 
-    This does NOT compare to per-Linear `quantize_2d` because that
-    function reads from the module-level `_CACHED_ACTIVATIONS` /
-    `_INPUT_GLOBAL_SCALES` globals; recreating
-    that side-channel state in a unit test is more invasive than the
-    test itself. The math is already covered by the per-function
-    equivalence tests above; this test just exercises the integration
-    plumbing."""
+    The numerical equivalence tests above compare the batched algorithms
+    with their per-Linear counterparts. This case checks each compressed
+    payload and its per-Linear activation-scale metadata.
+    """
     import torch.nn as nn
     from prismaquant.native_render_codec import quantize_2d_nvfp4_group_batched
 
@@ -421,36 +414,21 @@ def test_quantize_2d_nvfp4_group_batched_integration(seeded):
         cached[recipe_key] = torch.randn(64, in_features, dtype=torch.float32)
         items.append((recipe_key, recipe_key, recipe_key, mod))
 
-    # Stub the module-level activation cache for the duration of the
-    # call. Restored after.
-    saved_cache = _test_exporter._CACHED_ACTIVATIONS
-    saved_flags = dict({key: (_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()).record()[key] for key in ("gptq", "scale_sweep", "static_act_order", "joint_scale_opt")})
-    saved_input_scales = _test_exporter._INPUT_GLOBAL_SCALES
-    try:
-        _test_exporter._CACHED_ACTIVATIONS = type("Idx", (), {
-            "get": lambda self, name: cached.get(name)})()
-        _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"gptq": True})
-        _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **{"scale_sweep": False})
-        _test_exporter._INPUT_GLOBAL_SCALES = {
-            k: 1.0 for k, _, _, _ in items
-        }
-
-        compressed_per_linear = quantize_2d_nvfp4_group_batched(
-            items, joint_globals={}, device=torch.device("cpu"),
-            expert_chunk=2,
-         levers=(_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), activations=_test_exporter._CACHED_ACTIVATIONS, input_global_scales=_test_exporter._INPUT_GLOBAL_SCALES)
-    finally:
-        _test_exporter._CACHED_ACTIVATIONS = saved_cache
-        _test_exporter._RENDER_LEVERS = NativeRenderLevers.resolve()
-        _test_exporter._RENDER_LEVERS = replace((_test_exporter._RENDER_LEVERS or NativeRenderLevers.resolve()), **saved_flags)
-        _test_exporter._INPUT_GLOBAL_SCALES = saved_input_scales
+    activation_index = type("Idx", (), {"get": lambda self, name: cached.get(name)})()
+    levers = replace(NativeRenderLevers.resolve(), gptq=True, scale_sweep=False)
+    input_scales = {key: float(index + 1) for index, (key, _, _, _) in enumerate(items)}
+    compressed_per_linear = quantize_2d_nvfp4_group_batched(
+        items, joint_globals={}, device=torch.device("cpu"), expert_chunk=2,
+        levers=levers, activations=activation_index, input_global_scales=input_scales,
+    )
 
     assert len(compressed_per_linear) == E
     expected_keys = {
         "weight_packed", "weight_scale",
         "weight_global_scale", "input_global_scale",
     }
-    for c in compressed_per_linear:
+    for (key, _, _, _), c in zip(items, compressed_per_linear):
+        assert float(c["input_global_scale"]) == input_scales[key]
         assert set(c.keys()) >= expected_keys
         for k, v in c.items():
             # weight_scale is stored as fp8_e4m3fn; isfinite isn't
