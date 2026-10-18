@@ -310,9 +310,9 @@ def _pass_groups(events, *, threshold):
 
 
 @pytest.mark.parametrize("capture_batch", [1, 2], ids=["capture-b1", "capture-b2"])
-def test_capture_groups_allocate_no_host_memory_per_group(staging_campaign, monkeypatch,
+def test_capture_groups_allocate_no_slot_sized_host_memory(staging_campaign, monkeypatch,
                                                           tmp_path, capture_batch):
-    """A capture group reuses the pass's held buffer: no host allocation per group.
+    """A capture group makes no host allocation as large as a cotangent slot.
 
     Counts, per capture group of each probe's capture pass, the host
     allocations of at least one cotangent slot that the capture's thread

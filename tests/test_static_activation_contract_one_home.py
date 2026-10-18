@@ -9,8 +9,8 @@ question by comparing the route's *source-format name* against ``"NVFP4"``:
 ``_format_executes_static_nvfp4``, and ``tessera_export_lane``'s
 ``--input-scales`` gate.
 
-Nothing moves today, and the first test below is the proof: over all 80
-registry rows the two predicates coincide exactly, and ``NVFP4`` is the only
+The first test compares every retained registry row: the two predicates
+coincide exactly, and ``NVFP4`` is the only
 row carrying a contract.  The rest of the file is the failure that is one
 registry line away.  ``StaticActivationContract`` is a general dataclass with
 ``execution``/``group_size`` fields, and ``FormatSpec`` types the field as a

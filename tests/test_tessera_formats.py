@@ -1,15 +1,9 @@
-"""The Tessera grid-space seam, pinned against the rungs that were measured.
+"""Tessera schedules, byte accounting and pinned route admission.
 
-The point of this file is not coverage.  ``tessera_formats`` exists to let
-PrismaQuant's allocator price Tessera continuously, and two things have to hold
-for that to be honest rather than decorative:
-
-1. The rungs with published weight-space numbers must be namable, and must
-   price at the bpp those numbers were published at.  An allocator addressing
-   rungs nobody measured is addressing fiction.
-2. Every rung the module offers must hand the encoder a schedule it will
-   accept.  "Continuous" is a claim about realisability, so it is tested by
-   realising, not by asserting a range.
+Published ladder entries retain their measured wire and accounting domain.
+Schedule checks span the offered rungs; encoder checks use representative
+rungs, recipes and shapes. They do not measure quality or serving at every
+offered rung.
 """
 from fractions import Fraction
 
@@ -961,10 +955,8 @@ def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch, tmp_path):
 # ``tessera.export.wire_recipe`` is the single statement of which body, span,
 # scale plane and window the exporter writes for a grid at a rung.  Everything
 # below is written against *explicitly constructed* recipes rather than the
-# current default, because the default is going to move -- the window body over
-# a CHANNEL plane is measured better on E4M3 and is held behind a kernel gate,
-# not a doubt -- and a test that only exercises today's wire would go quiet on
-# the day the flip happens, which is the day it is needed.
+# current default. The default changed on 2026-09-02; explicit recipes retain
+# coverage of the other supported wire geometries.
 
 # ------------------------------------------------------------------ the sweep
 #
@@ -1376,9 +1368,8 @@ def test_the_route_is_a_property_of_the_grid_and_the_plane_together():
         assert spec.act_quant_changes_input is False, name
         assert spec.min_capability_sm == 80, name
 
-    # And none of it is a serving claim (principle 9 / 14): a layout that
-    # *would* materialise is still not a route a pinned runtime was measured
-    # taking, so nothing is producer-eligible.
+    # These calls omit the serving context required for producer admission.
+    # A materialisable layout alone does not establish that admission.
     for name, wire in [("TESSERA_E2M1_K2_R896", None),
                        ("TESSERA_E4M3_K1_R1024", channel)]:
         spec = synthesize_tessera_spec(

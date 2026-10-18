@@ -386,11 +386,10 @@ def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
         monkeypatch, tmp_path):
     """Overlap plus a bound identity, on the selected-source path, vs neither.
 
-    This is the configuration the pipelined arm runs.  The bound identity is
-    derived on the writer (the thread name is asserted), and everything a
-    resume or an export reads -- the journal identity, each unit's envelope
-    digest, its anchor rows, its wire receipt and the wire bytes -- is the
-    synchronous path's, byte for byte.
+    The bound identity is derived on the writer thread. The two arms compare
+    journal and envelope identities, wire receipts and wire bytes. Anchor
+    rows exclude seconds and encoding_batch_size; costs exclude encode_seconds.
+    Envelope payload digests are not compared.
     """
     import json
     import threading
@@ -432,9 +431,8 @@ def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
         wires = {name: (root / "cache" / "wire" / name).read_bytes()
                  for name in (record["file"] for record in state["wire_records"].values())}
         costs = _payload(root)["costs"][UNIT]
-        # The envelope's payload digest binds the anchor rows' wall-clock
-        # ``seconds``, so two runs never share it; everything else in the
-        # unit state is compared by value below.
+        # Payload digests include run-dependent anchor fields. Compare their
+        # stable fields and the envelope's identity below.
         runs[label] = dict(
             identity_sha256=manifest["identity_sha256"],
             envelope_identity=envelope["identity_sha256"],
