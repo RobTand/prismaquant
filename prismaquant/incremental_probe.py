@@ -4784,25 +4784,7 @@ def main():
     # different shard groupings on disk, and we can synthesize the new
     # shard pickle from that cache rather than recompute.
     content_meta_anchor = {
-        "model": args.model,
-        "dataset": args.dataset,
-        "nsamples": args.nsamples,
-        "seqlen": args.seqlen,
-        "dtype": args.dtype,
-        "requested_device": args.device,
-        "requested_device_map": str(args.device_map),
-        "importance_weighting": args.importance_weighting,
-        "activation_cache_dir": str(Path(args.activation_cache_dir)),
-        "linear_exclude": resolve_linear_exclude(args.model),
-        "h_detail_dir": (str(Path(args.h_detail_dir))
-                         if args.h_detail_dir else None),
-        "activation_rows_limit": int(args.activation_rows_limit),
-        "router_coverage_version": _ROUTER_COVERAGE_VERSION,
-        "emit_marginals": _marginals_enabled(),
-        "sample_parallel": None,
-        "sample_parallel_importance": None,
-        "sample_parallel_activation_scope": None,
-        "sample_parallel_execution_identity": None,
+        key: expected_metas[0].get(key) for key in _CONTENT_META_KEYS
     }
     linear_cache = scan_cached_linear_stats(shard_dir, content_meta_anchor)
     if linear_cache:
