@@ -14,10 +14,13 @@ served by launch-minimax-v21-vllm-serve.sh.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sys
 import time
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from prismaquant.validate_quantized_model import scored_echo_logprobs
 
@@ -94,18 +97,26 @@ def main() -> int:
 
     print("\n[1] Perplexity on wikitext-style sample ...")
     t0 = time.time()
-    ppl, n_tok = perplexity_on_text(SMOKE_TEXTS[0])
+    try:
+        ppl, n_tok = perplexity_on_text(SMOKE_TEXTS[0])
+    except Exception as e:
+        print(f"[bench] FAILED perplexity response: {e!r}")
+        return 1
     print(f"  ppl={ppl:.3f} on {n_tok} tokens ({time.time()-t0:.1f}s)")
 
     print("\n[2] Sample generations:")
-    samples = sample_generations(
-        [PROMPT_AGENTIC, PROMPT_MATH, PROMPT_CODE],
-        max_tokens=256,
-    )
-    for label, text in zip(["AGENTIC", "MATH", "CODE"], samples):
-        print(f"\n--- {label} ---")
-        print(text.strip()[:600])
-        print("---")
+    try:
+        samples = sample_generations(
+            [PROMPT_AGENTIC, PROMPT_MATH, PROMPT_CODE],
+            max_tokens=256,
+        )
+        for label, text in zip(["AGENTIC", "MATH", "CODE"], samples):
+            print(f"\n--- {label} ---")
+            print(text.strip()[:600])
+            print("---")
+    except Exception as e:
+        print(f"[bench] FAILED generation response: {e!r}")
+        return 1
 
     # This smoke report applies no quality acceptance threshold.
     print(f"\n[summary] ppl={ppl:.3f}  generations={len(samples)} OK")

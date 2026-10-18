@@ -120,12 +120,11 @@ def test_real_main_cannot_emit_a_metric_or_success_from_invalid_population(
     example, monkeypatch, capsys, values,
 ):
     calls = _http(monkeypatch, example, values)
-    try:
-        result = example.main()
-    except REFUSALS:
-        result = 1
+    result = example.main()
     output = capsys.readouterr().out
-    assert result != 0, "the example accepted an incomplete or nonfinite metric population"
+    assert result == 1
+    assert "FAILED" in output
+    assert "perplexity response" in output
     assert "[summary]" not in output
     assert "  ppl=" not in output
     assert len(calls) == 1, "generation samples ran after invalid perplexity evidence"
@@ -254,3 +253,56 @@ def test_real_validator_main_cannot_report_pass_from_invalid_population(
     assert ("✅ PASS" in output) is expected_pass
     if not expected_pass:
         assert "❌ FAIL" in output
+
+
+def test_example_imports_from_checkout_without_pythonpath(tmp_path):
+    import subprocess
+
+    path = Path(__file__).resolve().parents[1] / "examples/launchers/bench-quality.py"
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import runpy, sys; runpy.run_path(sys.argv[1])", str(path)],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("body", [None, [], {}, {"choices": []}, {"choices": [None]}])
+def test_example_main_refuses_malformed_response_body(example, monkeypatch, capsys, body):
+    _http(monkeypatch, example, [None, -0.25])
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return body
+
+    monkeypatch.setattr(example.requests, "post", lambda *args, **kwargs: Response())
+    assert example.main() == 1
+    output = capsys.readouterr().out
+    assert "FAILED" in output
+    assert "[summary]" not in output
+
+
+def test_example_main_refuses_invalid_generation_text(example, monkeypatch, capsys):
+    _http(monkeypatch, example, [None, -0.25])
+    real_post = example.requests.post
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"text": None}]}
+
+    def post(url, *, json, timeout):
+        if json["max_tokens"] == 0:
+            return real_post(url, json=json, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr(example.requests, "post", post)
+    assert example.main() == 1
+    output = capsys.readouterr().out
+    assert "FAILED generation response" in output
+    assert "[summary]" not in output
