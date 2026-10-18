@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, physical container ownership.
+The PQ87 physical and paired drivers share one container-ownership check in
+`pq87_physical_ab`. Cleanup requires the created container ID, expected name,
+PrismaBuild action label and fresh campaign nonce. Failed preflight never
+cleans a name; failed creation without an owned ID remains inconclusive.
+Removing or replacing that name cannot redirect cleanup to another container.
+`physical-host-owned-green-v1` passes 49 CPU cases and compiles three files,
+with verified source, terminal logs and CAS receipt against parent
+`373fc6362d6` plus the recorded overlays. Real CLI, bootstrap, Git and source
+capture run with Docker and telemetry adapters. No Docker daemon, live server,
+GPU interference or throughput qualification is claimed by these checks.
+
 As of: 2026-10-17, architecture audit continuation, staged-read reports.
 The staged-read comparison serializes the existing `MountFacts` fields and
 copies its options into a JSON object. A discovered mount no longer prevents
