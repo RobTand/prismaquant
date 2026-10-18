@@ -223,7 +223,7 @@ def test_a_scheme_missing_the_attributes_the_descriptor_reads_is_not_verified():
 
 
 def test_a_moe_method_with_no_scheme_is_not_verified_rather_than_passed():
-    """No packed-MoE artifact has been swept; the gap refuses, it does not pass."""
+    """The gate cannot verify a method with no observed activation contract."""
     sweep = _sweep()
     row = _first_quantized(sweep)
     row["scheme"] = None
@@ -231,7 +231,10 @@ def test_a_moe_method_with_no_scheme_is_not_verified_rather_than_passed():
     row["quant_method"] = "CompressedTensorsW4A4MoeMethod"
     verdict = _compare(sweep)
     assert verdict["status"] == gate.NOT_VERIFIED
-    assert "no packed-MoE artifact has been swept" in verdict["detail"]
+    assert row["name"] in verdict["detail"]
+    assert row["quant_method"] in verdict["detail"]
+    assert "observed no activation contract for that method class" in verdict["detail"]
+    assert "METHOD_ACTIVATION" in verdict["detail"]
 
 
 def test_an_artifact_that_prices_nothing_is_refused():
