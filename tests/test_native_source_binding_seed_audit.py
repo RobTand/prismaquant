@@ -180,7 +180,7 @@ def test_real_harvest_binds_native_before_numerical_measurement(
         tmp_path, monkeypatch, native, legacy_resume):
     from prismaquant import aura_cost, calibration_data, glm53_stock_harvest as harvest, gpu_guard
     from prismaquant.perturbed_x_cache import calibration_data_hash
-    from tests.test_stock_retained_source_identity_audit import _source as glm_source
+    from tests.native_source_contract_fixtures import _source as glm_source
     from transformers import AutoTokenizer
 
     source, probe, census = glm_source(tmp_path, native=native)

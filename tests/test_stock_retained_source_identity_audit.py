@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
-from pathlib import Path
 import pickle
 import shutil
 
@@ -18,16 +17,9 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from prismaquant import glm53_stock_reprice as stock
-from prismaquant.cost_streaming import build_streamed_causal_lm
-from prismaquant.model_profiles.glm5_next import Glm5NextProfile
-from prismaquant.streamed_model_identity import (
-    build_source_model_binding, build_streamed_model_identity,
-    source_model_decode_contract, validate_streamed_model_identity,
-)
-from test_glm5_next_streamed_forward_parity import _tiny_config, _build_model
-from tests.test_glm_campaign_streaming import write_original_layout_checkpoint
-from tests.test_glm53_stock_campaign import (
-    CALIB_HASH, _expert_payload, _harvest, _probe_unit,
+from prismaquant.streamed_model_identity import build_source_model_binding
+from tests.native_source_contract_fixtures import (
+    _source, _actual_streamed_identity, _expert_payload, _harvest,
 )
 from tests.test_resident_source_decode_audit import _cpu_guard, _load
 
@@ -35,100 +27,6 @@ from tests.test_resident_source_decode_audit import _cpu_guard, _load
 CASES = ["unmarked", "legacy-v1", "same-source-v2", "foreign-source-v2",
          "config-only-v2", "root-code-metadata-v2", "legacy-native-harvest",
          "missing-harvest-identity", "corrupt-harvest-identity"]
-
-
-def _source(tmp_path, *, native=True):
-    config = _tiny_config()
-    config.text_config.hidden_size = 128
-    config.text_config.intermediate_size = 256
-    config.text_config.moe_intermediate_size = 128
-    config.vision_config.out_hidden_size = 128
-    config = type(config).from_dict(config.to_dict())
-    model = _build_model(config).to(torch.bfloat16)
-    source = tmp_path / "glm-source"
-    write_original_layout_checkpoint(model, source)
-    names = dict(model.named_parameters())
-    selected = [
-        "model.language_model.layers.0.mlp.gate_proj.weight",
-        "model.language_model.layers.0.mlp.down_proj.weight",
-        "model.language_model.layers.1.mlp.experts.gate_up_proj",
-        "lm_head.weight",
-    ]
-    assert all(name in names for name in selected), sorted(names)
-    units = {}
-    for name in selected:
-        shape = tuple(names[name].shape)
-        packed = len(shape) == 3
-        qname = name.removesuffix(".weight")
-        units[qname] = _probe_unit(
-            shape[-2], shape[-1], experts=shape[0] if packed else None,
-            packed=packed)
-    probe = {"schema": stock.PROBE_CENSUS_SCHEMA,
-             "meta": {"calib_hash": CALIB_HASH},
-             "n_stats": len(units), "units": units}
-    if native:
-        raw = {name: value.clone() for name, value in
-               load_file(str(source / "model.safetensors")).items()}
-        encoded = []
-        for name, value in list(raw.items()):
-            if (".mlp." not in name or not name.endswith(".weight")
-                    or not name.endswith(("gate_proj.weight", "up_proj.weight",
-                                          "down_proj.weight"))):
-                continue
-            assert value.ndim == 2, (name, value.shape)
-            rows, cols = value.shape
-            raw[name] = torch.full(value.shape, 0.5).to(torch.float8_e4m3fn)
-            raw[name + "_scale_inv"] = torch.full(
-                ((rows + 127) // 128, (cols + 127) // 128), 2.003)
-            encoded.append(name)
-        assert encoded and any(".experts." in name for name in encoded)
-        fresh = source / "replacement.safetensors"
-        save_file(raw, str(fresh))
-        fresh.replace(source / "model.safetensors")
-        document = json.loads((source / "config.json").read_text())
-        document["quantization_config"] = {
-            "quant_method": "fp8", "weight_block_size": [128, 128]}
-        (source / "config.json").write_text(json.dumps(document))
-    else:
-        raw = load_file(str(source / "model.safetensors"))
-    (source / "model.safetensors.index.json").write_text(json.dumps({
-        "weight_map": {name: "model.safetensors" for name in raw}}))
-    census = stock.build_checkpoint_census(source)
-    assert set(units) <= set(census["units"])
-    for qname in units:
-        expected = "fp8" if native and ".mlp." in qname else "bf16"
-        assert census["units"][qname]["source_kind"] == expected
-    assert bool(source_model_decode_contract(source)) is native
-    return source, probe, census
-
-
-def _actual_streamed_identity(source, tmp_path):
-    runner = build_streamed_causal_lm(
-        str(source), device=torch.device("cpu"), dtype=torch.bfloat16,
-        offload_folder=str(tmp_path / "identity-offload"),
-        profile=Glm5NextProfile(), max_cache_slots=2, prefetch_workers=1,
-        prefetch_min_available_gb=0, cache_headroom_gb=0,
-        prefetch_lookahead=1, require_prefetched_residency=True,
-        attn_implementation="eager")
-    try:
-        runner.context.begin_source_initialization_audit()
-        for layer in range(runner.num_layers):
-            runner.context.schedule_prefetch(layer)
-            runner.context.install(layer, require_prefetched=True,
-                                   prefetch_following=False)
-            assert all(not value.is_meta and torch.isfinite(value).all()
-                       for value in runner.layers[layer].parameters())
-        witness = runner.context.source_initialization_contract()
-        assert witness["schema"] == "prismaquant.streaming_initialization.v1"
-        # Build through the actual owner rather than hand-serializing a hash.
-        identity = build_streamed_model_identity(runner, str(source))
-        assert identity == validate_streamed_model_identity(
-            identity, where="actual stock harvest identity fixture")
-        assert identity["checkpoint_weight_map"]
-        assert identity["weight_map"]
-        return identity
-    finally:
-        runner.shutdown()
 
 
 def _actual_resident_binding(source, tmp_path, monkeypatch):
