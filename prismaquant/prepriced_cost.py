@@ -108,11 +108,8 @@ def _model_binding(payload: Mapping, model: str) -> dict[str, Any]:
     }
 
 
-def _native_cost_bindings(payload: Mapping, *, where: str, independent: bool):
+def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
     from .joint_aura_rows import validate_joint_aura_entry
-    from .streamed_model_identity import (
-        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
-    )
 
     anchor = None
     provenance = payload.get("provenance") or {}
@@ -132,6 +129,7 @@ def _native_cost_bindings(payload: Mapping, *, where: str, independent: bool):
                 operator = entry["joint_operator_identity"]
                 if operator["qname"] != qname or operator["format"] != fmt:
                     raise ValueError(f"{cell}: joint source identity names another cell")
+                yield cell, entry.get("source_binding"), True, False
                 continue
             if independent and entry.get("production_anchor_measured") is True:
                 from .streaming_production_cache import validate_completed_production_anchor_identity
@@ -143,9 +141,22 @@ def _native_cost_bindings(payload: Mapping, *, where: str, independent: bool):
                         or entry.get("dw_source") != "production_render"
                         or entry.get("cost_source") != "aura"):
                     raise ValueError(f"{cell}: production-anchor source identity does not cover the cell")
+                yield cell, entry.get("source_binding"), True, False
                 continue
+            yield cell, entry.get("source_binding"), True
+
+
+def _native_cost_bindings(cells):
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+    )
+
+    validated = {}
+    for cell, raw in cells:
+        key = id(raw)
+        if key not in validated:
             try:
-                binding = validate_source_model_binding(entry.get("source_binding"), where=cell)
+                binding = validate_source_model_binding(raw, where=cell)
                 if binding["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
                     raise ValueError("legacy decoder identity cannot qualify native costs")
             except ValueError as exc:
@@ -153,7 +164,8 @@ def _native_cost_bindings(payload: Mapping, *, where: str, independent: bool):
                     f"{cell}: native source binding is unqualified: {exc}; "
                     "recompute/reprice this cell with the current source decoder; "
                     "do not restamp retained costs") from exc
-            yield cell, binding
+            validated[key] = (raw, binding)
+        yield cell, validated[key][1]
 
 
 def require_native_cost_source_binding(
@@ -170,7 +182,8 @@ def require_native_cost_source_binding(
             raise ValueError("native source requires a complete v2 decoder binding")
     except ValueError as exc:
         raise ValueError(f"{where}: unqualified native harvest source binding: {exc}; run a fresh harvest and reprice") from exc
-    for cell, binding in _native_cost_bindings(payload, where=where, independent=False):
+    cells = _native_cost_cells(payload, where=where, independent=False)
+    for cell, binding in _native_cost_bindings((cell, raw) for cell, raw, _ in cells):
         if binding != expected:
             raise ValueError(f"{cell}: native source binding differs from the harvest; rebuild/reprice for this source")
     return expected
@@ -187,13 +200,24 @@ def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where
         source_model_decode_contract,
     )
 
-    root = resolve_source_checkpoint_path(model)
-    if source_model_decode_contract(root) is None:
+    cells = list(_native_cost_cells(payload, where=where, independent=True))
+    if not cells:
         return
-    expected = None
-    for cell, binding in _native_cost_bindings(payload, where=where, independent=True):
-        if expected is None:
-            expected = build_source_model_binding(root, dtype=binding["effective_dtype"])
+    root = resolve_source_checkpoint_path(model, local_files_only=True)
+    if source_model_decode_contract(root) is None:
+        from .streamed_model_identity import NATIVE_SOURCE_MODEL_BINDING_SCHEMA
+
+        for cell, raw, _ in cells:
+            if isinstance(raw, Mapping) and raw.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+                raise ValueError(f"{cell}: native source binding cannot qualify costs when the current source is not native; rebuild/reprice")
+        return
+    bindings = list(_native_cost_bindings(
+        (cell, raw) for cell, raw, required in cells if required))
+    if not bindings:
+        return
+    expected = build_source_model_binding(
+        root, dtype=bindings[0][1]["effective_dtype"], local_files_only=True)
+    for cell, binding in bindings:
         if binding != {**expected, "effective_dtype": binding["effective_dtype"]}:
             raise ValueError(f"{cell}: native source binding differs from the current checkpoint/decoder; rebuild/reprice")
 

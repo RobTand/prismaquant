@@ -133,6 +133,8 @@ ALLOWLIST = {
         1, STRUCTURE, "the attached forward recovery is the session it records"),
     ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts._entry_identity"): (
         1, STRUCTURE, "a boundary reference names a live generation"),
+    ('prismaquant/streamed_model_identity.py', "_strict_streamed_digest_entries"): (
+        1, INTEGRITY, "an explicit streamed proof's recorded checkpoint map against the live index"),
     ('prismaquant/streamed_model_identity.py', "_hash_one_source_shard"): (
         1, INTEGRITY, "a source shard changed while it was hashed"),
     ('prismaquant/streamed_model_identity.py', "build_source_checkpoint_identity"): (

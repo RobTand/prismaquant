@@ -948,10 +948,18 @@ def run_campaign_from_artifacts(
         from .prepriced_cost import require_native_cost_source_binding
         from .streamed_model_identity import validate_streamed_model_identity
 
-        validate_streamed_model_identity(
+        model_identity = validate_streamed_model_identity(
             harvest.get("model_identity"), where="native stock harvest model identity")
         source_binding = require_native_cost_source_binding(
             expert_payload, harvest.get("source_binding"), where="native stock expert input")
+        recorded_shards = sorted((row["size"], row["sha256"])
+                                 for row in model_identity["shards"])
+        bound_shards = sorted((row["size"], row["sha256"])
+                              for row in source_binding["checkpoint"]["shards"])
+        if bound_shards != recorded_shards:
+            raise Glm53StockError(
+                "native harvest source binding shard digests differ from its model identity; "
+                "run a fresh harvest and reprice")
     empirical = expert_empirical_rows(expert_payload)
     plugin = StockAnchoredFormatPlugin(
         arm_identity=arm_identity,
