@@ -77,6 +77,8 @@ from prismaquant_source_bootstrap import activate_prismaquant_source
 
 activate_prismaquant_source()
 
+from prismaquant.digests import bytes_sha256hex
+
 try:  # package mode (`python -m tools.measure_served_gold`)
     from .serve_fingerprint import gold_producer_identity
     from .spec_decode_guard import spec_decode_from_metrics
@@ -420,7 +422,7 @@ def _tail_logprob(row: Mapping[str, float], vocab_size: int) -> float:
 
 def _cmd_kl(args: argparse.Namespace) -> int:
     teacher_raw = Path(args.teacher).read_bytes()
-    teacher_sha256 = hashlib.sha256(teacher_raw).hexdigest()
+    teacher_sha256 = bytes_sha256hex(teacher_raw)
     teacher_payload = json.loads(teacher_raw)
     del teacher_raw
     student_payload = json.loads(Path(args.student).read_text(encoding="utf-8"))
