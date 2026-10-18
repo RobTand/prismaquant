@@ -53,11 +53,23 @@ def _reseal(record):
 @pytest.mark.parametrize('change', [
     'none', 'stat-drift', 'missing-fingerprint', 'duplicate-fingerprint',
     'wrong-size', 'bool-size', 'wrong-map', 'foreign-source',
+    'missing-shard-and-fingerprint',
 ])
 def test_strict_streamed_seed_requires_current_complete_correspondence(
         tmp_path, monkeypatch, mode, change):
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
     source, _expected = _source(tmp_path)
+    if change == 'missing-shard-and-fingerprint':
+        from safetensors.torch import load_file, save_file
+
+        raw = load_file(str(source / 'model.safetensors'))
+        head = raw.pop('lm_head.weight')
+        save_file(raw, str(source / 'model.safetensors'))
+        save_file({'lm_head.weight': head}, str(source / 'head.safetensors'))
+        index = source / 'model.safetensors.index.json'
+        document = json.loads(index.read_text())
+        document['weight_map']['lm_head.weight'] = 'head.safetensors'
+        index.write_text(json.dumps(document))
     path = _proof(source, tmp_path)
     expected = identity.build_source_model_binding(source, dtype=torch.bfloat16)
     record = json.loads(path.read_text())
@@ -81,6 +93,11 @@ def test_strict_streamed_seed_requires_current_complete_correspondence(
         _reseal(record)
     elif change == 'foreign-source':
         record['source'] = str(tmp_path / 'foreign')
+    elif change == 'missing-shard-and-fingerprint':
+        missing = record['identity']['shards'].pop()['path']
+        record['fingerprints'] = [row for row in record['fingerprints'] if row['path'] != missing]
+        assert record['identity']['shards'] and record['fingerprints']
+        _reseal(record)
     path.write_text(json.dumps(record))
     before = path.read_bytes()
     bulk_reads = []
@@ -96,7 +113,17 @@ def test_strict_streamed_seed_requires_current_complete_correspondence(
         assert identity.build_source_model_binding(
             source, dtype=torch.bfloat16, streamed_identity_cache_path=path) == expected
     else:
-        with pytest.raises(RuntimeError, match='(?i)(source|proof|cache)'):
+        messages = {
+            'stat-drift': 'current shard/stat correspondence differs',
+            'missing-fingerprint': 'has no fingerprints',
+            'duplicate-fingerprint': 'repeats shard path',
+            'wrong-size': 'current shard/stat correspondence differs',
+            'bool-size': 'current shard/stat correspondence differs',
+            'wrong-map': 'complete checkpoint roster differs',
+            'foreign-source': 'source root differs' if mode == '1' else 'does not bind source',
+            'missing-shard-and-fingerprint': 'complete checkpoint roster differs',
+        }
+        with pytest.raises(RuntimeError, match=messages[change]):
             identity.build_source_model_binding(
                 source, dtype=torch.bfloat16, streamed_identity_cache_path=path)
     assert bulk_reads == []

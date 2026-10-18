@@ -1,78 +1,16 @@
 """Real resident source delivery uses the published decoder and memory guard."""
 from __future__ import annotations
 
-import json
 import os
 
 import pytest
 import torch
-from safetensors.torch import save_file
 
 from prismaquant import memory_management as memory
 from prismaquant import streaming_model as owner
-from prismaquant.model_runtime import initialize_model_runtime
-from test_mtp_module_arch import _minimal_moe_text_config
-
-
-def _source(tmp_path, *, native=True, tied=False, omit_projection=False):
-    initialize_model_runtime()
-    from transformers import AutoModelForCausalLM
-
-    config = _minimal_moe_text_config()
-    config.architectures = ["Qwen3_5MoeForCausalLM"]
-    config.tie_word_embeddings = tied
-    template = AutoModelForCausalLM.from_config(config, torch_dtype=torch.bfloat16)
-    raw, expected = {}, {}
-    block = 48
-
-    def encoded(key, shape, code, base):
-        weight = torch.full(shape, code).to(torch.float8_e4m3fn)
-        rows, cols = ((size + block - 1) // block for size in shape)
-        scale = torch.arange(rows * cols, dtype=torch.float32).reshape(rows, cols) * 0.51 + base + 0.003
-        expanded = scale.to(torch.bfloat16).repeat_interleave(block, 0)[:shape[0]]
-        expanded = expanded.repeat_interleave(block, 1)[:, :shape[1]]
-        decoded = weight.to(torch.bfloat16) * expanded
-        raw[key] = weight if native else decoded
-        if native:
-            raw[key + "_scale_inv"] = scale
-        return decoded
-
-    for name, tensor in template.state_dict().items():
-        if name.endswith((".experts.gate_up_proj", ".experts.down_proj")):
-            prefix, leaf = name.rsplit(".", 1)
-            wanted = torch.empty_like(tensor)
-            for expert in range(tensor.shape[0]):
-                if leaf == "gate_up_proj":
-                    half = tensor.shape[1] // 2
-                    parts = [("gate_proj", wanted[expert, :half], 0.5, 2),
-                             ("up_proj", wanted[expert, half:], 1.875, 6)]
-                else:
-                    parts = [("down_proj", wanted[expert], 0.25, 10)]
-                for projection, target, code, base in parts:
-                    key = f"{prefix}.{expert}.{projection}.weight"
-                    target.copy_(encoded(key, tuple(target.shape), code, base + expert))
-                    if omit_projection and expert == 0 and projection == "up_proj":
-                        raw.pop(key)
-                        raw.pop(key + "_scale_inv", None)
-            expected[name] = wanted
-        elif name.endswith(".self_attn.o_proj.weight"):
-            expected[name] = encoded(name, tuple(tensor.shape), 1.875, 1)
-        else:
-            raw[name] = torch.full_like(tensor, 0.125)
-            expected[name] = raw[name]
-    if tied:
-        raw.pop("lm_head.weight")
-    root = tmp_path / "source"
-    root.mkdir()
-    document = config.to_dict()
-    if native:
-        document["quantization_config"] = {"quant_method": "fp8", "weight_block_size": [block, block]}
-    (root / "config.json").write_text(json.dumps(document))
-    save_file(raw, root / "model.safetensors")
-    (root / "model.safetensors.index.json").write_text(json.dumps({
-        "weight_map": {name: "model.safetensors" for name in raw},
-    }))
-    return root, expected
+from tests.native_source_contract_fixtures import (
+    producer_source as _source, producer_cpu_guard as _cpu_guard,
+)
 
 
 def _cpu_guard(tmp_path, monkeypatch, *, capacity=4 << 30):

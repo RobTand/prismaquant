@@ -143,7 +143,16 @@ def test_real_offline_stock_source_identity_admission(tmp_path, monkeypatch, cas
             assert actual["costs"][name] == rows
     else:
         with pytest.raises((ValueError, RuntimeError, stock.Glm53StockError),
-                           match="(?i)(native|decode|source|model.identity)"):
+                           match={
+                               "unmarked": "native source binding is unqualified",
+                               "legacy-v1": "legacy decoder identity cannot qualify native costs",
+                               "foreign-source-v2": "differs from the harvest",
+                               "config-only-v2": "differs from the harvest",
+                               "root-code-metadata-v2": "differs from the harvest",
+                               "legacy-native-harvest": "unqualified native harvest source binding",
+                               "missing-harvest-identity": "requires a full streamed model identity object",
+                               "corrupt-harvest-identity": "model content_sha256 does not match",
+                           }[case]):
             stock.main(arguments)
         assert not output.exists()
     assert {name: path.read_bytes() for name, path in paths.items()} == before

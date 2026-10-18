@@ -34,13 +34,11 @@ CASES = ["native-unmarked", "native-v1", "native-stream-label-only",
 
 
 def _qualified_binding(root, expected, tmp_path, monkeypatch):
-    # Baseline-compatible: v1 builders lack the new schema, but the resident
-    # owner already delivers this representation. Only this fresh control
-    # constructs the proposed marker, after its actual value/witness checks.
     model = _load(root, tmp_path, _cpu_guard(tmp_path, monkeypatch))
     _check_values(model, expected, torch.bfloat16, False)
     binding = build_source_model_binding(root, dtype=torch.bfloat16)
-    return {**binding, "schema": V2, "source_decode": DECODE}
+    assert binding["schema"] == V2 and binding["source_decode"] == DECODE
+    return binding
 
 
 def _decorate(provenance, case, root, expected, tmp_path, monkeypatch):

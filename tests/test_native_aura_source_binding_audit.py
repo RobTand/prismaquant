@@ -24,7 +24,7 @@ from tests.native_source_contract_fixtures import (
 @pytest.mark.parametrize('streaming,dtype', [
     (False, torch.bfloat16), (True, torch.bfloat16), (False, torch.float32),
     pytest.param(True, torch.float32, marks=pytest.mark.xfail(
-        strict=True, reason='base native streamed FP32 delivery keeps decoded FP8 weights in BF16')),
+        strict=True, raises=RuntimeError, reason='base native streamed FP32 delivery keeps decoded FP8 weights in BF16')),
 ])
 def test_ordinary_aura_final_cells_retain_qualified_source(tmp_path, monkeypatch, streaming, dtype):
     source, _expected = producer_source(tmp_path)
@@ -61,8 +61,6 @@ def test_ordinary_aura_final_cells_retain_qualified_source(tmp_path, monkeypatch
 
 @pytest.mark.parametrize('streaming,native,dtype', [
     (False, True, 'bfloat16'), (True, True, 'bfloat16'), (False, True, 'float32'),
-    pytest.param(True, True, 'float32', marks=pytest.mark.xfail(
-        strict=True, reason='base native streamed FP32 delivery keeps decoded FP8 weights in BF16')),
     (False, False, 'bfloat16'), (True, False, 'bfloat16'),
     (False, False, 'float32'), (True, False, 'float32'),
 ])
@@ -190,3 +188,58 @@ def test_native_streamed_fp32_refuses_before_load(tmp_path, monkeypatch, capsys,
     assert refused.value.code == 2
     assert 'native FP8 streaming requires --dtype bfloat16' in capsys.readouterr().err
     assert not (tmp_path / 'fp32.pkl').exists()
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError,
+                   reason='native streamed FP32 delivery keeps decoded FP8 weights in BF16')
+def test_direct_native_streamed_fp32_delivery_limit(tmp_path):
+    source, expected = producer_source(tmp_path)
+    runner = build_streamed_causal_lm(
+        str(source), device=torch.device('cpu'), dtype=torch.float32,
+        profile=detect_profile(str(source)), offload_folder=str(tmp_path / 'direct-fp32'),
+        max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0,
+        cache_headroom_gb=0, attn_implementation='eager')
+    try:
+        for layer in range(runner.num_layers):
+            runner.context.schedule_prefetch(layer)
+            runner.context.install(layer, require_prefetched=True, prefetch_following=False)
+        plan = _model_tensor_dtypes(runner.model, torch.float32)
+        for name, parameter in runner.model.named_parameters():
+            wanted = expected[name].to(dtype=plan.get(name, torch.float32))
+            assert torch.equal(parameter.to(torch.float32), wanted.to(torch.float32)), name
+            assert parameter.dtype == wanted.dtype, name
+    finally:
+        runner.shutdown()
+
+
+def test_ordinary_aura_main_resumes_a_bound_journal(tmp_path, monkeypatch):
+    source, _expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    checkpoint = tmp_path / 'bound-journal'
+    binding = build_source_model_binding(source, dtype=torch.bfloat16)
+    seen = []
+
+    class Prices:
+        def restore_unit(self, name, state):
+            assert name == 'unit' and state == {'scalar': [1.25]}
+            seen.append('restored')
+
+    def measurement(_runner, *_args, **kwargs):
+        extra = kwargs['checkpoint_identity_extra']
+        assert extra['source_binding'] == binding
+        current = journal.AuraCheckpointJournal.open(
+            kwargs['checkpoint_dir'], resume=kwargs['resume'],
+            identity={'extra': extra}, names=['unit'])
+        if kwargs['resume']:
+            assert current.resume_units(Prices()) == {'unit'}
+        else:
+            current.publish_state('unit', {'scalar': [1.25]})
+        return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
+
+    monkeypatch.setattr(aura, 'compute_aura_cost_streamed', measurement)
+    args = ['--model', str(source), '--output', str(tmp_path / 'bound.pkl'), '--device', 'cpu',
+            '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw', '--streaming',
+            '--checkpoint-dir', str(checkpoint)]
+    assert aura.main(args) == 0
+    assert aura.main(args + ['--resume']) == 0
+    assert seen == ['restored']

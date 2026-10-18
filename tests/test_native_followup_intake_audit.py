@@ -3,7 +3,6 @@
 CUDA admission, tokenizer and calibration sampling use the shared CPU doubles.
 These checks make no served quality, full-model or performance claim.
 """
-from copy import deepcopy
 import pickle
 import re
 import sys
@@ -71,14 +70,25 @@ def test_shared_binding_is_canonicalized_once_per_intake(tmp_path, monkeypatch):
     assert len(calls) == 2, 'validate the expected binding and the shared cell object once each'
 
 
-def test_native_binding_refuses_current_bf16_source(tmp_path):
+@pytest.mark.parametrize('joint', [False, True], ids=['ordinary', 'joint'])
+def test_native_binding_refuses_current_bf16_source(tmp_path, joint):
     original = tmp_path / 'original'
     original.mkdir()
     native, _ = producer_source(original)
     binding = identity.build_source_model_binding(native, dtype=torch.bfloat16)
     source, _ = producer_source(tmp_path, native=False)
+    payload = _payload(binding)
+    if joint:
+        from tests.test_joint_aura_streamed import _fixture, _run
+
+        _, _, runner, cache = _fixture()
+        result = _run(runner, cache)
+        name = next(iter(result['costs']))
+        row = result['costs'][name]['FP8_E4M3']
+        row['source_binding'] = binding
+        payload = {'costs': {name: {'FP8_E4M3': row}}}
     with pytest.raises(ValueError, match='native source binding.*current source is not native'):
-        intake.validate_native_cost_source_for_model(_payload(binding), model=str(source), where='replaced-source')
+        intake.validate_native_cost_source_for_model(payload, model=str(source), where='replaced-source')
 
 
 @pytest.mark.parametrize('change', ['same', 'qname', 'format'])
