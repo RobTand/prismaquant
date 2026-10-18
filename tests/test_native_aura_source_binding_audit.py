@@ -110,7 +110,7 @@ def test_ordinary_aura_main_supplies_binding_before_journal_restore(tmp_path, mo
     producer_cli_inputs(monkeypatch)
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
     checkpoint = tmp_path / 'journal'
-    old = journal.AuraCheckpointJournal.open(checkpoint, resume=False, identity={'extra': {}}, names=['unit'])
+    old = journal.AuraCheckpointJournal.open(checkpoint, resume=False, identity={'extra': {'streaming': True}}, names=['unit'])
     old.publish_state('unit', {'scalar': [1.25]})
     before = {str(p.relative_to(checkpoint)): p.read_bytes() for p in checkpoint.rglob('*') if p.is_file() and p.name != 'streamed_model_identity.json'}
     reads = []
