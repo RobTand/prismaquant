@@ -2221,19 +2221,10 @@ fi
 # first point where layer_config.json is final under both selection modes.
 #
 # AURA_ADDITIVITY_GATE:
-#   measure (DEFAULT, ruled 2026-07-30) — report from a measured KL this run
-#                    already produced when there is one (validated-surrogate's
-#                    frontier JSON, free), and otherwise run ONE bounded KL
-#                    measurement of the final assignment against the SAME
-#                    format-menu dW cache AURA costed on (AURA_COST_NSAMPLES x
-#                    AURA_COST_SEQLEN). Robert's ruling on the R2 residue: the
-#                    wiring's weak spot was that under SELECTION_MODE=surrogate
-#                    an artifact carried a *prediction* and no residual, so
-#                    AURA's one structural assumption stayed a two-model memory
-#                    instead of a per-artifact number. Every AURA-default run
-#                    now performs the eval and every artifact carries a real
-#                    residual. It is still a REPORT — non-blocking, and it never
-#                    changes an allocation.
+#   measure (DEFAULT) — reuse a KL bound to the final assignment and AURA draw,
+#                    or measure that draw with the format-menu cache AURA used.
+#                    This in-sample diagnostic compares realized KL with the
+#                    additive prediction. It does not select an assignment.
 #   auto           — reuse a bound measurement on the same draw, or report only
 #                    the predicted sum when no matching measurement exists.
 #   0              — off.
@@ -2277,6 +2268,7 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
         --n-calib-samples "$AURA_COST_NSAMPLES" \
         --calib-seqlen "$AURA_COST_SEQLEN" \
         --calib-seed "$AURA_COST_CALIB_SEED" \
+        --measurement-purpose additivity \
         --kl-scope full_sequence \
         --assignment-materialization inplace \
         --production-weight-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \

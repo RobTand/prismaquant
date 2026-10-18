@@ -214,3 +214,92 @@ def test_bound_record_rejects_changed_inputs(tmp_path, drift):
         settings["PRISMAQUANT_GPTQ_DAMP"] = "new-render"
         document = pipeline.stage_settings_document(settings)
     assert pipeline.assignment_kl_measurement(record, assignment, document, **kwargs) is None
+
+
+@pytest.mark.parametrize("purpose", ["additivity", "selection", "held-out-selection",
+                                     "changed-additivity", "many-additivity"])
+def test_additivity_request_runs_real_validator_intake(tmp_path, monkeypatch, capsys, purpose):
+    import pickle
+    import torch
+    import transformers
+    from safetensors.torch import save_file
+    from prismaquant import model_runtime, validate_assignments_kl as validator
+    from prismaquant.pipeline import assignment_kl_measurement, stage_settings_document
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.streamed_model_identity import build_source_model_binding
+    from tests.test_run_pipeline_consumed_positions_audit import Tokenizer
+
+    values, settings = measurement_environment(tmp_path)
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    (model_path / "config.json").write_text('{"model_type": "test"}')
+    save_file({"q.weight": torch.ones(32, 32)}, str(model_path / "model.safetensors"))
+    values.update(MODEL_PATH=str(model_path), FORMATS="BF16",
+                  PROBE_PATH=str(tmp_path / "probe.pkl"), COST_PATH=str(tmp_path / "cost.pkl"))
+    settings.update(MODEL_PATH=values["MODEL_PATH"], FORMATS=values["FORMATS"])
+    Path(values["STAGE_SETTINGS_PATH"]).write_text(json.dumps(stage_settings_document(settings)))
+    assignment = tmp_path / "artifacts/layer_config.json"
+    assignment.write_text('{"q": "BF16"}')
+    Path(values["PROBE_PATH"]).write_bytes(pickle.dumps({"stats": {
+        "q": {"shape": (32, 32), "n_params": 1024}}}))
+    Path(values["COST_PATH"]).write_bytes(pickle.dumps({
+        "costs": {"q": {"BF16": {"weight_mse": 0.0}}},
+        "provenance": {"calib_hash": values["AUDIT_DRAW_HASH"]}}))
+    cache = ProductionWeightCache(weights={}, levers={}, metadata={
+        "source_binding": build_source_model_binding(model_path, dtype=torch.bfloat16)})
+    Path(values["PRODUCTION_RENDER_COST_CACHE_PATH"]).write_bytes(pickle.dumps(cache))
+    block = section('  AURA_ADDITIVITY_JSON=', '  if [[ -n "$AURA_MEASURED_KL" ]]; then')
+    result = run_shell(tmp_path, block, values)
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "calls.txt").read_text().splitlines()
+    assert len(calls) == 1
+    argv = shlex.split(calls[0])[2:]
+    if purpose in {"selection", "held-out-selection"} and "--measurement-purpose" in argv:
+        index = argv.index("--measurement-purpose")
+        del argv[index:index + 2]
+    if purpose == "held-out-selection":
+        argv.extend(["--calib-skip-first", "8"])
+    if purpose == "changed-additivity":
+        candidate = tmp_path / "candidate.json"
+        candidate.write_text('{"q": "FP8_DYNAMIC"}')
+        argv[argv.index("--assignment") + 1] = f"selected={candidate}"
+    elif purpose == "many-additivity":
+        argv.extend(["--assignment", f"duplicate={assignment}"])
+    output = Path(argv[argv.index("--output") + 1])
+    output.unlink()
+    monkeypatch.setattr(model_runtime, "initialize_model_runtime", lambda: None)
+    monkeypatch.setattr(validator, "require_cuda_hot_path", lambda *a: torch.device("cpu"))
+    monkeypatch.setattr(validator, "detect_profile_with_warning", lambda *a, **k: None)
+    monkeypatch.setattr(validator, "stage_multimodal", lambda path: (path, None))
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: Tokenizer())
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained",
+                        lambda *a, **k: torch.nn.Linear(32, 32, bias=False))
+    monkeypatch.setattr(validator, "prefetch_safetensors_checkpoint", lambda *a, **k: {})
+    monkeypatch.setattr(validator, "cache_reference_log_probs", lambda *a, **k: None)
+    monkeypatch.setattr(validator, "_measure_inplace_assignment_kl",
+                        lambda *a, **k: (0.125, [0.125] * 8, {}))
+    monkeypatch.setattr(validator.read_traffic, "assignment_read_traffic_claim", lambda *a, **k: {})
+    if purpose in {"changed-additivity", "many-additivity"}:
+        with pytest.raises(SystemExit) as error:
+            validator.main(argv)
+        assert error.value.code == 2
+        assert "one current base assignment" in capsys.readouterr().err
+        assert not output.exists()
+    elif purpose == "selection":
+        with pytest.raises(ValueError, match="held-out violation"):
+            validator.main(argv)
+        assert not output.exists()
+    else:
+        assert validator.main(argv) == 0
+        measured = json.loads(output.read_text())
+        assert measured["results"][0]["kl_mean"] == 0.125
+        if purpose == "additivity":
+            assert measured["calibration"]["measurement_purpose"] == "additivity"
+            assert measured["calibration"]["in_sample"] is True
+            assert measured["calibration"]["held_out_check"]["cost"]["overlap"] == [values["AUDIT_DRAW_HASH"]]
+            assert assignment_kl_measurement(output, assignment, stage_settings_document(settings),
+                draw_digest=values["AUDIT_DRAW_HASH"], cache_path=values["PRODUCTION_RENDER_COST_CACHE_PATH"],
+                record=True) == (0.125, 0.0)
+        else:
+            assert measured["calibration"]["in_sample"] is False
+            assert measured["calibration"]["held_out_check"]["cost"]["overlap"] == []

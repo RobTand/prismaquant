@@ -399,8 +399,9 @@ def _upstream_calibration_hashes(payload: object) -> set[str]:
 def _assert_calibration_disjoint(
     calib_repeat_hashes: Sequence[str],
     upstream: Mapping[str, set[str]],
+    *, purpose: str = "selection",
 ) -> dict[str, object]:
-    """Refuse to select on text an upstream cost/probe stage already consumed.
+    """Refuse selection overlap; report overlap for labelled additivity measurements.
 
     R14: held-out disjointness was a *convention* enforced only by the driver
     passing ``--calib-skip-first``; a hash intersection makes it an explicit.
@@ -415,7 +416,7 @@ def _assert_calibration_disjoint(
             "upstream_hashes": len(hashes),
             "overlap": overlap,
         }
-        if overlap:
+        if overlap and purpose != "additivity":
             raise ValueError(
                 f"held-out violation: the selection calibration shares "
                 f"{len(overlap)} calibration draw(s) with the {source} "
@@ -993,6 +994,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calib-split", default="train")
     parser.add_argument("--calib-seed", type=int, default=42)
     parser.add_argument(
+        "--measurement-purpose", choices=("selection", "additivity"), default="selection",
+        help="Selection requires a held-out draw. Additivity measures the current "
+             "base assignment on its cost draw and records it as in-sample.",
+    )
+    parser.add_argument(
         "--calib-skip-first", type=int, default=0,
         help="Withhold K fit windows after checking the requested fit prefix "
         "against the captured dataset draw. Use matching source, seed and "
@@ -1158,6 +1164,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         (label, load_assignment_json(path, base=base_assignment), str(path))
         for label, path in labeled_paths
     ]
+    if args.measurement_purpose == "additivity" and (
+        len(assignments) != 1 or assignments[0][1] != base_assignment
+    ):
+        parser.error("additivity requires one current base assignment")
     assignment_budget_metadata: dict[tuple[str, str], Mapping | None] = {}
     for (label, assignment, path), (_path_label, raw_path) in zip(
         assignments, labeled_paths
@@ -1275,9 +1285,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             tokenizer, calibration_data.CalibrationRequest.from_namespace(args))
         calib_repeats = calibration_draw.selection_repeats
         calib_provenance = _calibration_provenance(calib_repeats)
+        calib_provenance["measurement_purpose"] = args.measurement_purpose
+        calib_provenance["in_sample"] = args.measurement_purpose == "additivity"
         calib_provenance["held_out_check"] = _assert_calibration_disjoint(
             calib_provenance["calib_repeat_hashes"],
             {"probe": probe_calib_hashes, "cost": cost_calib_hashes},
+            purpose=args.measurement_purpose,
         )
         if native_source:
             from prismaquant.memory_management import CaptureMemoryGuard
