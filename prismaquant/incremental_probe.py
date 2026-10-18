@@ -1312,10 +1312,10 @@ def scan_cached_linear_stats(
     content_meta_anchor: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     """Scan `shard_dir/probe_shard_*.pkl`. Return a flat map
-    `{linear_name: stats_dict}` pooled across all shards whose meta is
-    content-compatible with `content_meta_anchor` (matches on model,
-    dataset, nsamples, seqlen, etc — but NOT on linear_include or
-    shard_idx). First-seen wins on duplicates.
+    `{linear_name: stats_dict}` pooled across shards whose meta matches
+    `content_meta_anchor`: content keys (model, dataset, nsamples, seqlen,
+    etc; NOT linear_include or shard_idx) plus `_CAPTURE_META_KEYS`.
+    First-seen wins on duplicates.
 
     Used for LPS-invariant shard reuse: Fisher stats are intrinsic to
     each Linear, so a shard at lps=5 (L0-L4) and a shard at lps=3
@@ -4875,8 +4875,8 @@ def main():
     # Linear-level reuse cache (LPS-invariant): union of per-Linear
     # Fisher stats from all existing shards that share the same
     # content-level meta (model, dataset, nsamples, seqlen, dtype,
-    # importance_weighting, activation_cache_dir). This lets the probe
-    # resume cleanly even when LAYERS_PER_SHARD changes between runs:
+    # importance_weighting, activation_cache_dir) and _CAPTURE_META_KEYS.
+    # This lets the probe resume cleanly when LAYERS_PER_SHARD changes:
     # a new shard's regex-matched Linears may already exist under
     # different shard groupings on disk, and we can synthesize the new
     # shard pickle from that cache rather than recompute.
