@@ -1040,7 +1040,13 @@ def main():
     global _PIPELINE_COST_MODE
     _PIPELINE_COST_MODE = str(getattr(args, "cost_mode", "") or "")
 
-    n_layers = load_num_hidden_layers(args.model)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(args.model)
+    n_layers = load_num_hidden_layers(str(source_root))
     start = max(0, args.start_layer)
     end = n_layers if args.end_layer is None else min(args.end_layer, n_layers)
     if start >= end:
@@ -1061,7 +1067,7 @@ def main():
         _nsamples = int(_probe_meta.get("nsamples", 32))
         _seqlen = int(_probe_meta.get("seqlen", 1024))
         lps, lps_diag = pick_layers_per_shard(
-            args.model, nsamples=_nsamples, seqlen=_seqlen,
+            str(source_root), nsamples=_nsamples, seqlen=_seqlen,
         )
         print(f"[cost] layers_per_shard=auto -> {lps} "
               f"(nsamples={_nsamples}, seqlen={_seqlen}, "
@@ -1073,7 +1079,7 @@ def main():
         args.layers_per_shard = int(lps_arg)
 
     schedule = build_shard_schedule(
-        model_path=args.model,
+        model_path=str(source_root),
         num_body_layers=n_layers,
         body_layers_per_shard=args.layers_per_shard,
         body_layer_range=(start, end),
@@ -1099,12 +1105,6 @@ def main():
              "fp32": torch.float32}[args.dtype]
     if args.threads > 0:
         torch.set_num_threads(args.threads)
-    from .streamed_model_identity import (
-        build_source_model_binding, resolve_source_checkpoint_path,
-        source_model_decode_contract,
-    )
-
-    source_root = resolve_source_checkpoint_path(args.model)
     source_binding = (build_source_model_binding(source_root, dtype=dtype)
                       if source_model_decode_contract(source_root) is not None else None)
 
