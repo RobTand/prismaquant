@@ -89,7 +89,7 @@ def _fixture_costs() -> dict:
     """The campaign-table shape the allocator consumes, from the real rows.
 
     Only the price deltas are load-bearing: the absolute wire bytes are set to
-    the R1024 rate the CSV's own ``n_params`` column implies (q256/8 bytes per
+    the R1024 rate the CSV's own ``n_params`` column implies (q256/256/8 bytes per
     parameter), and the R1088 row adds the row's real ``byte_delta``, so every
     upgrade costs exactly the priced 262,144 B wire delta.
     """
@@ -434,7 +434,7 @@ def test_mixed_allocation_block_without_the_installed_capability_refuses(
         tep.allocation_expert_projection_block(payload, mixed)
 
 
-def test_uniform_allocation_block_is_byte_identical_to_the_stack_uniform_artifact(
+def test_uniform_allocation_block_preserves_stack_uniform_metadata(
         tmp_path):
     payload = _alloc_cost_payload(tmp_path)
     block = tep.allocation_expert_projection_block(payload, _alloc_assignment())
