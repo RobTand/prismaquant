@@ -3883,6 +3883,12 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                     continue
                 if wanted and quantum_id not in wanted:
                     continue
+                previous = last_submission.get(quantum_id)
+                if (previous is not None and
+                        previous.get("identity_sha256") != record["identity_sha256"]):
+                    raise DispatchRefused(
+                        f"quantum {quantum_id}: recorded request identity differs; "
+                        "use a new --state/output-root for a changed request")
                 key = submitted_keys.get(quantum_id)
                 if key is not None and gateway.is_terminal_executed(key):
                     continue
