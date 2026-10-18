@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, MTP projection publication.
+The initial MTP projection uses the existing create-only byte writer with its
+own temporary file. A concurrent publication refuses, including an identical
+winner, and leaves the published bytes intact. Parent aliases and relative
+paths retain their existing meaning. The admitted
+`mtp-projection-create-only-green-v1` action passes 30 CPU cases and compiles
+both touched files, with source, terminal logs and CAS receipt verified against
+parent `78ce9041a47` plus the frozen overlays. Tiny capture and publication
+checks do not establish full-model quality or served MTP qualification.
+
 As of: 2026-10-18, architecture audit continuation, surface replay publication.
 Surface replay publishes through the existing create-only byte writer with an
 owned temporary file. A concurrent winner keeps its bytes; identical replay

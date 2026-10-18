@@ -221,9 +221,11 @@ def projection_phase(args):
     if path.exists():
         raise RuntimeError(f"{path} exists; the projection publishes once")
     raw = (json.dumps(carried, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
 
-    atomic_write_bytes(path, raw)
+    destination = path.parent.resolve(strict=False) / path.name
+    if not publish_new_bytes(destination, raw, nofollow=True):
+        raise RuntimeError(f"{path} exists; the projection publishes once")
     return {
         "phase": "projection",
         "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
