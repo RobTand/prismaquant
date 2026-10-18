@@ -425,11 +425,9 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         *_CB_SERIALIZATION_SETTINGS,
     ),
     # --- validated frontier ------------------------------------------------
-    # One JSON per Pareto point; the point's identity is in the filename, so
-    # the manifest keys the measurement conditions and the render env behind
-    # the weights being measured.
+    # Pareto labels can survive a changed allocation. Bind the request bytes.
     "frontier-kl-point": _key_pairs(
-        "MODEL_PATH", "FORMATS",
+        "MODEL_PATH", "FORMATS", "FRONTIER_REQUEST_DIGEST",
         "DATASET<-VALIDATED_FRONTIER_DATASET",
         "NS<-VALIDATED_FRONTIER_NSAMPLES",
         "SL<-VALIDATED_FRONTIER_SEQLEN",
@@ -456,6 +454,16 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
                                "PLAN_ASSIGNMENT_DIGEST",
                                *_TESSERA_SCOPE_SETTINGS),
 }
+
+
+def frontier_request_digest(paths: Iterable[str | Path]) -> str:
+    """Bind the base, candidate, probe, costs, cache and local corpus bytes."""
+    from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
+
+    *files, dataset = paths
+    inputs = [file_sha256hex(path) for path in files]
+    inputs.append(file_sha256hex(dataset) if Path(dataset).is_file() else str(dataset))
+    return DIRECT_UTF8_STRICT.sha256(inputs)
 
 
 def parse_settings(pairs: Iterable[str]) -> dict[str, str]:
@@ -674,6 +682,13 @@ def check_stage_settings(
             legacy = stored.get("legacy")
             if isinstance(legacy, Mapping) and set(legacy) == set(declared):
                 prev = dict(legacy)
+        if stage == "frontier-kl-point" and (
+            prev is None or _unverified_reuse_record(prev) is not None
+        ):
+            return 2, [
+                f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
+                "measurement input binding; rebuild this point before reuse."
+            ]
         if stage == "tessera-plan":
             # Tessera's gate is an allocation-content BINDING, never an
             # admission. A plan has already been translated, so nothing
