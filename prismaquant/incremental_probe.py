@@ -1217,8 +1217,6 @@ _CONTENT_META_KEYS: tuple[str, ...] = (
     "requested_device", "requested_device_map",
     "importance_weighting", "activation_cache_dir",
     "linear_exclude", "h_detail_dir", "activation_rows_limit",
-    "router_coverage_version",
-    "packed_input_capture",
     # Marginal emission changes WHICH KEYS a stats entry carries, not
     # just its grouping, so a flag-off shard is not poolable into a
     # flag-on run — it would contribute entries with no marginals and
@@ -1240,18 +1238,18 @@ def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
     return meta
 
 
-def _content_meta_compatible(data: Mapping,
+def _content_meta_compatible(raw_meta: dict[str, Any],
                              anchor: dict[str, Any]) -> bool:
-    probe_meta = _probe_meta_flat(data.get("meta") or {})
+    probe_meta = _probe_meta_flat(raw_meta)
     reason = _probe_reuse_inputs_mismatch(
         probe_meta.get("probe_reuse_inputs"), anchor.get("probe_reuse_inputs")
     )
     if reason is not None:
         print(f"[incremental] refuse cached Linear stats: {reason}", flush=True)
         return False
-    return _probe_capture_compatible(data, anchor) and all(
+    return all(
         probe_meta.get(k) == anchor.get(k)
-        for k in _CONTENT_META_KEYS if k not in _CAPTURE_META_KEYS
+        for k in _CONTENT_META_KEYS
     )
 
 
@@ -1329,7 +1327,8 @@ def scan_cached_linear_stats(
             continue
         if not isinstance(data, dict):
             continue
-        if not _content_meta_compatible(data, content_meta_anchor):
+        if (not _content_meta_compatible(data.get("meta") or {}, content_meta_anchor)
+                or not _probe_capture_compatible(data, content_meta_anchor)):
             continue
         stats = data.get("stats") or {}
         if not isinstance(stats, dict):
