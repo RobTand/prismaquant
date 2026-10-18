@@ -1149,6 +1149,9 @@ RENDER_ENV_SETTINGS=(
 STAGE_SETTINGS_PATH="${WORK_DIR}/artifacts/stage_settings.json"
 STAGE_SETTINGS_ENV=(
   "MODEL_PATH=$MODEL_PATH"
+  "DRAW_DIGEST="
+  "MEASUREMENT_DIGEST="
+  "MEASUREMENT_CACHE_DIGEST="
   "DATASET=$DATASET"
   "NSAMPLES=$NSAMPLES"
   "SEQLEN=$SEQLEN"
@@ -2061,6 +2064,11 @@ PY
       --output-summary "${WORK_DIR}/artifacts/validated_frontier_selection.json" \
       2>&1 | tee "${WORK_DIR}/logs/validated_frontier_select.log"
 
+    python3 -m prismaquant.pipeline --assignment-kl "$VALIDATION_JSON" \
+      --assignment-path "${WORK_DIR}/artifacts/layer_config.json" \
+      --measurement-cache "$PROD_CACHE_RAW" \
+      --assignment-kl-mode bind --stage-settings "$STAGE_SETTINGS_PATH" >/dev/null
+
     if [[ "$PRODUCTION_RECACHE" != "0" && "$PRODUCTION_RECACHE" != "false" && "$PRODUCTION_RECACHE" != "False" ]]; then
       SELECTED_DIGEST="$(python3 - "${WORK_DIR}/artifacts/layer_config.json" <<'PY'
 import hashlib
@@ -2224,8 +2232,8 @@ fi
 #                    now performs the eval and every artifact carries a real
 #                    residual. It is still a REPORT — non-blocking, and it never
 #                    changes an allocation.
-#   auto           — record only the predicted sum. Reused frontier measurements
-#                    can use a different assignment or calibration contract.
+#   auto           — reuse a bound measurement on the same draw, or report only
+#                    the predicted sum when no matching measurement exists.
 #   0              — off.
 # -----------------------------------------------------------------------
 : "${AURA_ADDITIVITY_GATE:=measure}"
@@ -2235,7 +2243,25 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
   AURA_MEASURED_KL=""
   AURA_MEASURED_KL_STDERR="0"
   AURA_MEASURED_SOURCE="none"
-  if [[ "$AURA_ADDITIVITY_GATE" == "measure" ]]; then
+  AURA_DRAW_DIGEST="$(python3 -m prismaquant.pipeline --calibration-hash \
+    "$MODEL_PATH" "$DATASET" "$AURA_COST_NSAMPLES" "$AURA_COST_SEQLEN" \
+    "$AURA_COST_CALIB_SEED" || true)"
+  aura_assignment_kl() {
+    python3 -m prismaquant.pipeline --assignment-kl "$1" \
+      --assignment-kl-mode "$2" --draw-digest "$AURA_DRAW_DIGEST" \
+      --measurement-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \
+      --assignment-path "${WORK_DIR}/artifacts/layer_config.json" \
+      --stage-settings "$STAGE_SETTINGS_PATH"
+  }
+  for AURA_KL_RECORD in "${WORK_DIR}/artifacts/validated_frontier_kl.json" \
+                        "${WORK_DIR}/artifacts/aura_additivity_kl.json"; do
+    read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(aura_assignment_kl "$AURA_KL_RECORD" reuse)"
+    [[ -z "$AURA_MEASURED_KL" ]] || {
+      AURA_MEASURED_SOURCE="${AURA_KL_RECORD##*/}"
+      break
+    }
+  done
+  if [[ -z "$AURA_MEASURED_KL" && "$AURA_ADDITIVITY_GATE" == "measure" ]]; then
     AURA_ADDITIVITY_KL_JSON="${WORK_DIR}/artifacts/aura_additivity_kl.json"
     echo "[pipeline] [3c] measuring end-KL for the additivity report (AURA_ADDITIVITY_GATE=measure) ..."
     if python3 -m prismaquant.validate_assignments_kl \
@@ -2257,24 +2283,8 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
         --dtype bf16 --device "$DEVICE" \
         --output "$AURA_ADDITIVITY_KL_JSON" \
         2>&1 | tee "${WORK_DIR}/logs/aura_additivity_kl.log"; then
-      if [[ -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
-      read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(
-        python3 - "$AURA_ADDITIVITY_KL_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-results = json.loads(Path(sys.argv[1]).read_text()).get("results", [])
-if not results:
-    print("")
-else:
-    row = results[0]
-    print(f"{float(row.get('kl_mean', row.get('kl', 0.0)))} "
-          f"{float(row.get('kl_stderr', 0.0) or 0.0)}")
-PY
-      )"
+      read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(aura_assignment_kl "$AURA_ADDITIVITY_KL_JSON" bind)"
       [[ -n "$AURA_MEASURED_KL" ]] && AURA_MEASURED_SOURCE="aura_additivity_kl.json"
-      fi
     fi
   fi
   if [[ -n "$AURA_MEASURED_KL" ]]; then

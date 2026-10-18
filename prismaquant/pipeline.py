@@ -435,6 +435,10 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         *_RENDER_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),
+    "assignment-kl": _key_pairs(
+        "MODEL_PATH", "FORMATS", "ASSIGNMENT_DIGEST", "DRAW_DIGEST", "MEASUREMENT_DIGEST", "MEASUREMENT_CACHE_DIGEST",
+        *_HEAD_SETTINGS, *_RENDER_SETTINGS, *_CB_SERIALIZATION_SETTINGS,
+    ),
     # --- GGUF lane ---------------------------------------------------------
     # llama.cpp's converter reads only the checkpoint.
     "gguf-skeleton": _key_pairs("MODEL_PATH"),
@@ -487,6 +491,78 @@ def held_out_calibration_skip(
             "use one local corpus and skip its complete cost prefix"
         )
     return skip
+
+
+def calibration_draw_digest(model: str, source: str, samples: int, seqlen: int, seed: int) -> str:
+    from contextlib import redirect_stdout
+    from transformers import AutoTokenizer
+    from prismaquant.calibration_data import load_calibration
+    from prismaquant.perturbed_x_cache import calibration_data_hash
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model, trust_remote_code=True, local_files_only=Path(model).exists())
+    with redirect_stdout(sys.stderr):
+        ids = load_calibration(tokenizer, source, samples, seqlen, calib_seed=seed)
+    return calibration_data_hash(ids)
+
+
+def assignment_kl_measurement(
+    record_path: str | Path, assignment_path: str | Path, document: Mapping[str, Any],
+    *, draw_digest: str | None, cache_path: str | Path, record: bool = False,
+) -> tuple[float, float] | None:
+    """Read only a measurement bound to these assignment, draw and result bytes."""
+    from prismaquant.digests import bytes_sha256hex, file_sha256hex
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import canonicalize_assignment
+    from prismaquant.schemas import validate_layer_config_payload
+
+    path = Path(record_path)
+    if not path.is_file():
+        return None
+    record_bytes = path.read_bytes()
+    payload = json.loads(record_bytes)
+    if not isinstance(payload, Mapping):
+        return None
+    calibration = payload.get("calibration", {})
+    if not isinstance(calibration, Mapping):
+        return None
+    measured_draw = calibration.get("calib_hash")
+    if calibration.get("kl_scope") != "full_sequence" or not measured_draw:
+        return None
+    if record and draw_digest is None:
+        draw_digest = measured_draw
+    if measured_draw != draw_digest:
+        return None
+    assignment_bytes = Path(assignment_path).read_bytes()
+    assignment_payload = json.loads(assignment_bytes)
+    validate_layer_config_payload(assignment_payload, str(assignment_path))
+    assignment_digest = assignment_serialization_sha256(canonicalize_assignment(assignment_payload))
+    results = payload.get("results", [])
+    if not isinstance(results, list):
+        return None
+    rows = [row for row in results if isinstance(row, Mapping)
+            and row.get("assignment_sha256") == assignment_digest]
+    if not rows:
+        return None
+    kl, stderr = rows[0].get("kl_mean"), rows[0].get("kl_stderr", 0.0)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value < 0 for value in (kl, stderr)):
+        return None
+    projection, missing = _stage_request_projection("assignment-kl", document, overrides={
+        "ASSIGNMENT_DIGEST": bytes_sha256hex(assignment_bytes),
+        "DRAW_DIGEST": draw_digest,
+        "MEASUREMENT_DIGEST": bytes_sha256hex(record_bytes),
+        "MEASUREMENT_CACHE_DIGEST": file_sha256hex(cache_path),
+    })
+    if missing:
+        raise ValueError(f"assignment KL binding lacks settings: {missing}")
+    manifest = Path(str(path) + ".settings.json")
+    if record:
+        _record_stage_settings(manifest, "assignment-kl", projection)
+    elif (not manifest.is_file()
+          or _load_stage_manifest(manifest).get("stages", {}).get("assignment-kl") != projection):
+        return None
+    return float(kl), float(stderr)
 
 
 def frontier_request_digest(paths: Iterable[str | Path]) -> str:
@@ -1770,6 +1846,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Guard one skip-if-exists artifact against its recorded "
              "settings. Requires --stage-settings/--artifact/--stage.",
     )
+    ap.add_argument("--calibration-hash", nargs=5, metavar=("MODEL", "DATASET", "N", "SL", "SEED"))
+    ap.add_argument("--assignment-kl")
+    ap.add_argument("--assignment-path")
+    ap.add_argument("--measurement-cache")
+    ap.add_argument("--assignment-kl-mode", choices=("bind", "reuse"), default="reuse")
+    ap.add_argument("--draw-digest")
     ap.add_argument("--held-out-calibration-skip", action="store_true")
     ap.add_argument("--calibration-draw", nargs=3, type=int, action="append", default=[])
     ap.add_argument("--stage-settings", metavar="PATH", default=None,
@@ -1777,6 +1859,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--artifact", metavar="PATH", default=None)
     ap.add_argument("--stage", metavar="ID", default=None)
     args = ap.parse_args(argv)
+
+    if args.calibration_hash:
+        model, source, samples, seqlen, seed = args.calibration_hash
+        print(calibration_draw_digest(model, source, int(samples), int(seqlen), int(seed)))
+        return 0
+
+    if args.assignment_kl:
+        try:
+            document = json.loads(Path(args.stage_settings).read_text())
+            measured = assignment_kl_measurement(
+                args.assignment_kl, args.assignment_path, document,
+                draw_digest=args.draw_digest, cache_path=args.measurement_cache,
+                record=args.assignment_kl_mode == "bind")
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print(f"[pipeline] additivity measurement has no matching binding: {exc}", file=sys.stderr)
+            return 0
+        if measured is not None:
+            print(*measured)
+        return 0
 
     if args.held_out_calibration_skip:
         settings = parse_settings(args.setting)
