@@ -3438,10 +3438,17 @@ class PerturbedActivationCache:
                 return orig_linear(input, weight, bias)
 
             F.linear = _intercepting_linear
+            config = getattr(module, "config", None)
+            implementation = getattr(config, "_experts_implementation", None)
             try:
+                # HF's batched dispatch bypasses the projection QDQ boundary.
+                if implementation is not None:
+                    config._experts_implementation = "eager"
                 return original_forward(*args, **kwargs)
             finally:
                 F.linear = orig_linear
+                if implementation is not None:
+                    config._experts_implementation = implementation
 
         module.forward = _forward
         self._fused_forward_originals.append((module, original_forward))
