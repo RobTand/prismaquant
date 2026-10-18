@@ -926,6 +926,7 @@ def _expected_probe_shard_meta(args, *,
         "activation_rows_limit": int(args.activation_rows_limit),
         "shard_idx": shard_idx,
         "router_coverage_version": _ROUTER_COVERAGE_VERSION,
+        "packed_input_capture": "module_once.v1",
         # Not a grouping axis: it decides whether the shard's stats
         # carry per-channel marginals at all. Reusing a flag-off shard
         # in a flag-on run would silently ship marginal-less entries.
@@ -1190,6 +1191,7 @@ _CONTENT_META_KEYS: tuple[str, ...] = (
     "importance_weighting", "activation_cache_dir",
     "linear_exclude", "h_detail_dir", "activation_rows_limit",
     "router_coverage_version",
+    "packed_input_capture",
     # Marginal emission changes WHICH KEYS a stats entry carries, not
     # just its grouping, so a flag-off shard is not poolable into a
     # flag-on run — it would contribute entries with no marginals and
@@ -3460,14 +3462,17 @@ def _run_body_streaming_shard(
             ) if layer_in_scope else {}
             layer_prefix = f"{layers_prefix}{L}."
             layer_packed_handles: list = []
+            packed_input_modules: set[str] = set()
             for key, md in packed_meta.items():
                 full_key = f"{layer_prefix}{key}"
                 experts_qname_rel = md["_packed_experts_module"]
                 md["_packed_experts_module"] = f"{layer_prefix}{experts_qname_rel}"
                 acc_stats[full_key] = md
+                packed_input_modules.add(experts_qname_rel)
+            if cache_dir is not None:
                 # Capture activations for the packed-experts module so the
                 # allocator can use the same input cache as nn.Linear entries.
-                if cache_dir is not None:
+                for experts_qname_rel in sorted(packed_input_modules):
                     try:
                         experts_mod = layers[L].get_submodule(experts_qname_rel)
                     except AttributeError:

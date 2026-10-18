@@ -2421,6 +2421,7 @@ class FisherAccumulator:
                 marginal_accumulator=self._packed_marginal_acc,
                 profile=self.model_profile,
             )
+            packed_input_members: dict[str, list[str]] = defaultdict(list)
             for full_name, meta in packed_meta.items():
                 # Filter against the tracked set when tracked is a regex
                 # match; here we accept any packed param under a tracked
@@ -2438,35 +2439,30 @@ class FisherAccumulator:
                 parent_layer = self._name_projection.block_id(experts_qname)
                 if any(t.startswith(parent_layer + ".") for t in self.tracked):
                     self.stats[full_name] = meta
-                    # Register a forward hook on the experts module to
-                    # bump the per-backward sample count (used to keep
-                    # n_tokens_seen aligned with the Linear path's
-                    # accounting).
-                    try:
-                        experts_mod = model.get_submodule(experts_qname)
-                    except AttributeError:
-                        continue
+                    packed_input_members[experts_qname].append(full_name)
+            for experts_qname, full_names in packed_input_members.items():
+                experts_mod = model.get_submodule(experts_qname)
 
-                    def _exp_fwd(_mod, inp, _out, _qn=experts_qname,
-                                 _full=full_name, _x_acc=self._packed_act_snaps,
-                                 _r=self._packed_act_rows):
-                        x = inp[0] if isinstance(inp, tuple) else inp
-                        if isinstance(x, torch.Tensor):
-                            self._packed_sample_count[_full] += int(
-                                x.detach().reshape(-1, x.size(-1)).size(0))
-                            if act_cache_dir is not None:
-                                need = self.input_rows - _r[_qn]
-                                if need > 0:
-                                    flat = x.detach().reshape(-1, x.size(-1))
-                                    if flat.size(0) > need:
-                                        idx = torch.randperm(flat.size(0),
-                                                             device=flat.device)[:need]
-                                        flat = flat.index_select(0, idx)
-                                    _x_acc[_qn].append(flat.to("cpu"))
-                                    _r[_qn] += flat.size(0)
+                def _exp_fwd(_mod, inp, _out, _qn=experts_qname,
+                             _fulls=tuple(full_names), _x_acc=self._packed_act_snaps,
+                             _r=self._packed_act_rows):
+                    x = inp[0] if isinstance(inp, tuple) else inp
+                    if isinstance(x, torch.Tensor):
+                        flat = x.detach().reshape(-1, x.size(-1))
+                        for full_name in _fulls:
+                            self._packed_sample_count[full_name] += int(flat.size(0))
+                        if act_cache_dir is not None:
+                            need = self.input_rows - _r[_qn]
+                            if need > 0:
+                                if flat.size(0) > need:
+                                    idx = torch.randperm(flat.size(0),
+                                                         device=flat.device)[:need]
+                                    flat = flat.index_select(0, idx)
+                                _x_acc[_qn].append(flat.to("cpu"))
+                                _r[_qn] += flat.size(0)
 
-                    self._fwd_handles.append(
-                        experts_mod.register_forward_hook(_exp_fwd))
+                self._fwd_handles.append(
+                    experts_mod.register_forward_hook(_exp_fwd))
 
     _dense_marginal_chunk = staticmethod(dense_marginal_chunk)
 
