@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, research padding counts.
+The block-schedule summary requires an explicit nonnegative integer padding
+count before checking serialized totals. Negative padding and coerced values
+cannot reduce the reported stored bytes. Real unpadded and padded packer
+outputs retain their exact totals. `block-padding-green-v1` passes 38 CPU
+cases and compiles both touched files; source, terminal logs and CAS receipt
+are verified against parent `f8d9c9c15a3` plus the recorded overlays. This
+qualifies research accounting, without native-reader or serving qualification.
+
 As of: 2026-10-17, architecture audit continuation, complete GOLD populations.
 Served-logprob dump and PPL intake require one complete response for each
 requested window. Only each window's first token is unscored. Every later
