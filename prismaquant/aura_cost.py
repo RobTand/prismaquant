@@ -3235,7 +3235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if native_source and args.streaming and dt == torch.float32:
         p.error("native FP8 streaming requires --dtype bfloat16; float32 source delivery "
                 "is unsupported, including when --dtype auto selects float32. "
-                "Use --dtype bfloat16 or the resident route.")
+                "Set --dtype bfloat16 or AURA_COST_DTYPE=bfloat16, or use the resident route.")
     local_only = Path(staged).exists()
     _log(f"loading {args.model} (staged={staged}) dtype={args.dtype}")
     tok = AutoTokenizer.from_pretrained(
