@@ -129,7 +129,7 @@ def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
                 operator = entry["joint_operator_identity"]
                 if operator["qname"] != qname or operator["format"] != fmt:
                     raise ValueError(f"{cell}: joint source identity names another cell")
-                yield cell, entry.get("source_binding"), True, False
+                yield cell, entry.get("source_binding"), False
                 continue
             if independent and entry.get("production_anchor_measured") is True:
                 from .streaming_production_cache import validate_completed_production_anchor_identity
@@ -141,7 +141,7 @@ def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
                         or entry.get("dw_source") != "production_render"
                         or entry.get("cost_source") != "aura"):
                     raise ValueError(f"{cell}: production-anchor source identity does not cover the cell")
-                yield cell, entry.get("source_binding"), True, False
+                yield cell, entry.get("source_binding"), False
                 continue
             yield cell, entry.get("source_binding"), True
 
