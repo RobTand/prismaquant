@@ -38,7 +38,7 @@ def test_grouped_activation_rows_match_expert_reference(name, width):
     x = torch.randn(13, width)
     x[0].zero_()
     x[1].mul_(100)
-    scales = {"projection": 2.0}
+    scales = {}
     grouped = owner._activation_qdq(x, spec, scales, "projection")
     reference = torch.cat([owner._activation_qdq(part, spec, scales, "projection")
                            for part in x.split([3, 1, 9])])
@@ -220,6 +220,14 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
     inputs = torch.randn(32, 2048, device="cuda", dtype=torch.bfloat16)
     indices = torch.arange(32 * 8, device="cuda").reshape(32, 8) % count
     weights = torch.full((32, 8), 1 / 8, device="cuda", dtype=torch.bfloat16)
+    grouped = F.grouped_mm
+    calls = []
+
+    def observe(x, weight, **kwargs):
+        calls.append(tuple(x.shape))
+        return grouped(x, weight, **kwargs)
+
+    monkeypatch.setattr(F, "grouped_mm", observe)
     with torch.no_grad():
         cache.install()
         try:
@@ -229,7 +237,9 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
                 for _ in range(3):
                     model.experts(inputs, indices, weights)
             torch.cuda.current_stream().wait_stream(stream)
+            calls.clear()
             uncaptured = model.experts(inputs, indices, weights)
+            assert calls == [(256, 2048), (256, intermediate)]
             torch.cuda.synchronize()
             model.experts.config._experts_implementation = "eager"
             reference = model.experts(inputs, indices, weights)
