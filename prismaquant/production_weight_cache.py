@@ -403,10 +403,15 @@ class ProductionWeightCache:
             validate_source_model_binding,
         )
 
-        producer = validate_source_model_binding(
-            (self.metadata or {}).get("source_binding"),
-            where=f"{where} production cache",
-        )
+        try:
+            producer = validate_source_model_binding(
+                (self.metadata or {}).get("source_binding"),
+                where=f"{where} production cache",
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc}; rebuild the production cache into a fresh --cache-dir"
+            ) from exc
         root = resolve_source_checkpoint_path(
             source_model, local_files_only=local_files_only,
         )
@@ -427,9 +432,14 @@ class ProductionWeightCache:
                 f"{where}: production cache has no source binding; rebuild "
                 "the production cache from the current source into a fresh --cache-dir"
             )
-        stored = validate_source_model_binding(
-            metadata["source_binding"], where=f"{where} production cache",
-        )
+        try:
+            stored = validate_source_model_binding(
+                metadata["source_binding"], where=f"{where} production cache",
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc}; rebuild the production cache into a fresh --cache-dir"
+            ) from exc
         difference = first_identity_difference(stored, expected)
         if difference is not None:
             field, cached, current = difference
@@ -441,6 +451,12 @@ class ProductionWeightCache:
             )
         if PRE_GUARD_ADMISSION_SIDECAR_KEY in metadata:
             validate_pre_guard_admission(metadata[PRE_GUARD_ADMISSION_SIDECAR_KEY])
+            if "source_decode" in expected:
+                raise ValueError(
+                    f"{where}: native decode binding cannot verify pre_guard_admission "
+                    "shards admitted on trust; rebuild the production cache into "
+                    "a fresh --cache-dir"
+                )
             print(
                 f"[prod-cache] WARNING: {where} uses pre_guard_admission "
                 "shards admitted on trust; their original source is unverified.",
@@ -5899,12 +5915,14 @@ def _check_production_cache_render_identity(
     conditions. The first fill writes its render identity into
     ``render_identity.json``; every later fill compares and refuses on the
     first differing field. A missing sidecar means a pre-guard directory:
-    warn and admit its shards on trust (refusing would strand existing work),
+    warn and admit ordinary-source shards on trust,
     then write the current identity so later mismatches refuse. The admission
     itself is recorded in the sidecar as ``pre_guard_admission`` — the
     trusted shard count plus their sorted shard names — so a downstream
     artifact can read that part of the directory rests on unverified shards.
     A fresh directory (no shards) carries no such record.
+    Native decoded-source bindings require verified history: unbound or
+    previously trusted shards refuse with a fresh-directory rebuild remedy.
 
     Append sections (#170, #172) are compared by their own writers, never
     here: the stored base projection is compared against the current base
@@ -5935,11 +5953,18 @@ def _check_production_cache_render_identity(
             PACKED_STREAMING_APPEND_SIDECAR_KEY,
         )
     }
+    native_decode = "source_decode" in current_identity.get("source_binding", {})
     sidecar_path = cache_dir_path / RENDER_IDENTITY_SIDECAR_FILENAME
     if not sidecar_path.is_file():
         publication_identity = current_identity
         trusted_shards = _pre_guard_trusted_shards(cache_dir_path)
         if trusted_shards:
+            if native_decode:
+                raise ValueError(
+                    f"production cache directory {cache_dir_path} has unbound "
+                    "pre-guard shards; native decode cannot admit them on trust — "
+                    "rebuild into a fresh --cache-dir"
+                )
             print(
                 "[prod-cache] WARNING: cache directory "
                 f"{cache_dir_path} holds rendered shards but no "
@@ -5981,6 +6006,12 @@ def _check_production_cache_render_identity(
             "instead of mixing renders"
         )
     stored_raw = dict(stored_raw)
+    if native_decode and PRE_GUARD_ADMISSION_SIDECAR_KEY in stored_raw:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} has pre_guard_admission "
+            "history; native decode cannot verify trusted shards — rebuild "
+            "into a fresh --cache-dir"
+        )
     if STREAMED_FILL_SIDECAR_KEY in stored_raw:
         raise ValueError(
             f"production cache directory {cache_dir_path} holds a streamed "
@@ -6029,6 +6060,12 @@ def _check_production_cache_render_identity(
                     and PRE_GUARD_ADMISSION_SIDECAR_KEY not in stored_raw):
                 trusted = _pre_guard_trusted_shards(cache_dir_path)
                 if trusted:
+                    if native_decode:
+                        raise ValueError(
+                            f"production cache directory {cache_dir_path} holds "
+                            "unbound append shards; native decode cannot admit "
+                            "them on trust — rebuild into a fresh --cache-dir"
+                        )
                     stored_raw[PRE_GUARD_ADMISSION_SIDECAR_KEY] = (
                         build_pre_guard_admission(trusted)
                     )

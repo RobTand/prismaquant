@@ -1678,8 +1678,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from prismaquant.build_rtn_cache import stage_multimodal
     from prismaquant.model_profiles import detect_profile
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
 
-    staged, _cleanup = stage_multimodal(args.model)
+    source_root = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source_root) is not None
+    source_binding = (
+        build_source_model_binding(source_root, dtype=torch.bfloat16)
+        if native_source else None
+    )
+    staged, _cleanup = stage_multimodal(str(source_root))
     # Detection is the authority for routed-expert membership and also
     # installs any architecture-owned vendored modelling override. Resolve it
     # before constructing the model; a fallback-after-load would recreate the
@@ -1699,13 +1709,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             anchor = Path(args.checkpoint_dir or args.output).parent
             offload_dir = str(anchor / "expert-cost-streaming-offload")
         streamed_runner = build_streamed_causal_lm(
-            staged,
+            str(source_root) if native_source else staged,
             device=torch.device(args.device),
             dtype=torch.bfloat16,
             offload_folder=offload_dir,
             profile=profile,
         )
         model = streamed_runner.model
+    elif native_source:
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        device = torch.device(args.device)
+        model = load_resident_source_model(
+            str(source_root), device=device, dtype=torch.bfloat16,
+            offload_folder=str(Path(args.output).parent / "expert-cost-resident-offload"),
+            resource_check=CaptureMemoryGuard(device).check,
+            attn_implementation="eager",
+        ).eval()
     else:
         model = AutoModelForCausalLM.from_pretrained(
             staged, dtype=torch.bfloat16, trust_remote_code=True,
@@ -1726,10 +1747,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     # source_tensor_name keeps the checkpoint's own nesting
     # (`model.language_model.*`), so against the staged index the fill's
     # prefix filter silently matches nothing (how production_recache calls it).
-    fill_src = args.model if Path(args.model).exists() else staged
+    fill_src = str(source_root)
     filled = (
         0
-        if streamed_runner is not None
+        if streamed_runner is not None or native_source
         else fill_packed_experts_from_source(
             model, fill_src, profile, progress=True
         )
@@ -1848,6 +1869,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "max_units": int(args.max_units),
         "unit_filter": args.unit_filter,
     }
+    if source_binding is not None:
+        provenance["source_binding"] = source_binding
 
     if args.merge_base:
         with open(args.merge_base, "rb") as fh:
@@ -1877,6 +1900,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         prov = dict(payload.get("provenance", {}) or {})
         prov["backfilled_from_base"] = added
         prov["backfill_base"] = args.backfill_base
+        if added and source_binding is not None:
+            # The current native binding qualifies newly measured rows only.
+            # Preserve old rows' separate provenance instead of restamping it.
+            prov["backfill_provenance"] = base_cost.get("provenance")
         payload["provenance"] = prov
         if added:
             _log(f"backfilled {len(added)} sidecar rows from "

@@ -1,5 +1,32 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, native source callers.
+Resident RTN, production-cache, expert-cost, Fisher and validation callers use
+the shared resident source owner for actual mapped block-scaled FP8 text
+weights. Header classification uses the existing profile and scale-grid
+rules; malformed native pairs refuse before an ordinary HF load. Ordinary
+floating-point sources retain that load path. Fisher keeps FP32 gradients;
+validation keeps its effective evaluation dtype.
+
+Native source bindings use `prismaquant.source_model_binding.v2` and bind the
+existing checkpoint identity, effective dtype and
+`prismaquant.native_fp8_source_decode.v1`. They cover text heads and body,
+not MTP or visual delivery. Old native cache directories and trusted shards
+require a fresh build. Ordinary-source v1 bindings retain their trust policy.
+Fresh expert provenance identifies its new measurements; it does not qualify
+copied legacy rows or close retained final-cost reuse, which remains open.
+
+Admitted CPU cohorts pass 44 new cases and 83, 140, 154 and six existing cases.
+The 154-case cohort skips CUDA graphs and optional real-HF validation. A fresh
+GPU action passes streaming equivalence and three checks, including CUDA
+graphs, without skips. The optional real-HF test remains unrun. Twelve touched
+files have admitted compile coverage. Source seals, terminal logs and CAS
+receipts are verified for `native-caller-binding-green-v1`,
+`native-caller-existing-green-v2-1`, the other recorded existing cohorts and
+`native-caller-gpu-green-v1`. The corrected fixture uses an owned local model;
+the preceding fake-Hub-name failure remains recorded. These are correctness
+checks on small fixtures, not serving, model-quality or performance evidence.
+
 As of: 2026-10-17, architecture audit continuation, physical container ownership.
 The PQ87 physical and paired drivers share one container-ownership check in
 `pq87_physical_ab`. Cleanup requires the created container ID, expected name,
@@ -27465,7 +27492,7 @@ requires agreeing packed digests while tolerating dense-only shards. Resume is n
 by `render_identity.json` (#146): the base fill and packed append writers compare their
 respective identity sections before admitting file-presence reuse. A changed hook scope
 refuses and requires a fresh cache directory. A pre-guard directory can still be admitted
-on trust, but its existing shard names and count are recorded as `pre_guard_admission`;
+on trust for ordinary sources, but its existing shard names and count are recorded as `pre_guard_admission`;
 that history is not evidence that those old shards had a verified render identity. The
 streamed fill never resumes and overwrites every shard in its scope, so it claims only a
 directory no rendering has claimed (`claim_streamed_cache_directory`): it refuses one that
@@ -27474,19 +27501,24 @@ holds a `render_identity.json`, a fused-witness sidecar or a rendered shard, and
 resident fill refuses a directory carrying that section, and the same streamed build's MTP
 and packed appends add their sections beside it. Re-running a streamed build, after a crash
 too, needs a fresh `--cache-dir`. Directories streamed builds wrote before this claim carry
-no section, so a resident fill still admits them on trust as pre-guard directories.
+no section, so an ordinary-source resident fill still admits them on trust as
+pre-guard directories. Native decoded sources require a fresh directory.
 
-Source-aware producers also bind the original checkpoint's safetensors, source
-metadata and effective load dtype through `prismaquant.source_model_binding.v1`.
+Source-aware producers bind the original checkpoint's safetensors, source
+metadata and effective load dtype. Ordinary sources use
+`prismaquant.source_model_binding.v1`; actual mapped block-scaled FP8 text
+sources use v2 with `prismaquant.native_fp8_source_decode.v1`.
 The existing checkpoint identity owner uses mutation-sensitive stat reuse for
 this binding, even in dev mode; recorded-provenance callers keep their existing
 policy. The resident base sidecar owns the binding for dense and packed-only
 builds, and each exported pickle carries it in `metadata["source_binding"]`.
 A bound directory cannot be resumed without a binding, and an older guarded
 base sidecar without one requires a fresh directory. A no-sidecar or append-only
-legacy adoption retains `pre_guard_admission` in both sidecar and pickle and
-warns on attachment: its original source remains unverified. This preserves the
-explicit trust exception without describing old shards as byte-verified.
+legacy adoption for ordinary sources retains `pre_guard_admission` in both
+sidecar and pickle and warns on attachment: its original source remains
+unverified. Native v2 refuses unbound, old-v1 and previously trusted shards
+with a fresh-directory rebuild remedy. The ordinary-source trust exception
+does not describe old shards as byte-verified.
 Independent native export, assignment-KL validation, the metric harness and
 recache compare the current source binding before cache relocation, prefetch or
 weight installation. The metric harness uses its effective evaluation dtype,

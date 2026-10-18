@@ -522,14 +522,43 @@ def main():
 
     t_start = time.time()
 
-    staged, cleanup = stage_multimodal(args.model)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source_root) is not None
+    source_binding = None
+    if native_source:
+        cache_root = Path(args.cache_dir)
+        if cache_root.exists() and any(cache_root.iterdir()):
+            raise ValueError(
+                f"native FP8 RTN output {cache_root} is not empty; rebuild into "
+                "a fresh --cache-dir instead of adopting old decoded products"
+            )
+        source_binding = build_source_model_binding(source_root, dtype=torch.bfloat16)
+    staged, cleanup = stage_multimodal(str(source_root))
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         print(f"[rtn-cache] loading {staged}", flush=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            staged, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True,
-        )
+        def load_model():
+            if native_source:
+                from .memory_management import CaptureMemoryGuard
+                from .streaming_model import load_resident_source_model
+
+                device = torch.device("cuda")
+                return load_resident_source_model(
+                    str(source_root), device=device, dtype=torch.bfloat16,
+                    offload_folder=str(Path(args.cache_dir) / "resident-source-offload"),
+                    resource_check=CaptureMemoryGuard(device).check,
+                )
+            return AutoModelForCausalLM.from_pretrained(
+                staged, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True,
+            )
+
+        model = load_model()
         tokenizer = AutoTokenizer.from_pretrained(staged, trust_remote_code=True)
         device = next(model.parameters()).device
         from prismaquant.model_profiles import (
@@ -537,7 +566,7 @@ def main():
             detect_profile,
         )
         try:
-            profile = detect_profile(args.model)
+            profile = detect_profile(str(source_root))
         except DeadVendoredOverrideError:
             # This profile is handed straight to `iter_quantizable_tensors`
             # below, so a dead override here decides what the whole RTN cache
@@ -639,9 +668,7 @@ def main():
 
         # Stage 2b: RTN-FP8 — reload model fresh, then same flow
         print(f"[rtn-cache] reloading fresh model for FP8 pass", flush=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            staged, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True,
-        )
+        model = load_model()
         print(f"[rtn-cache]   {sum(p.numel() for p in model.parameters()):,} params", flush=True)
         rtn_fp8_kl = run_pass("fp8", rtn_fp8_any_shape)
 
@@ -655,6 +682,8 @@ def main():
             "autoround_fp8_kl": rtn_fp8_kl,
             "elapsed_sec": time.time() - t_start,
         }
+        if source_binding is not None:
+            manifest["source_binding"] = source_binding
         with open(Path(args.cache_dir) / "cache_manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
 

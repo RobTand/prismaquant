@@ -1182,16 +1182,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     dtype = _dtype_from_name(args.dtype)
     production_cache = None
     pristine_cache_dir: object = "__unset__"
-    if args.production_weight_cache:
-        from prismaquant.streamed_model_identity import (
-            build_source_model_binding, resolve_source_checkpoint_path,
-        )
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
 
+    args.model = str(resolve_source_checkpoint_path(
+        args.model, local_files_only=args.local_files_only,
+    ))
+    native_source = source_model_decode_contract(args.model) is not None
+    if args.production_weight_cache:
         with Path(args.production_weight_cache).open("rb") as fh:
             production_cache = pickle.load(fh)
-        args.model = str(resolve_source_checkpoint_path(
-            args.model, local_files_only=args.local_files_only,
-        ))
         expected_source_binding = build_source_model_binding(
             args.model, dtype=dtype, local_files_only=args.local_files_only,
         )
@@ -1277,33 +1279,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             calib_provenance["calib_repeat_hashes"],
             {"probe": probe_calib_hashes, "cost": cost_calib_hashes},
         )
-        source_prefetch_stats = prefetch_safetensors_checkpoint(
-            staged,
-            mode=args.source_prefetch,
-            max_resident_bytes=(
-                int(float(args.source_prefetch_max_gb) * 1024**3)
-                if float(args.source_prefetch_max_gb) > 0
-                else None
-            ),
-            headroom_gb=float(args.source_prefetch_headroom_gb),
-            workers=int(args.source_prefetch_workers),
-            progress=True,
-            log_prefix="[validate-kl/source]",
-        )
-        try:
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-        except ValueError as exc:
-            if (
-                "requires `accelerate`" not in str(exc)
-                and "requires accelerate" not in str(exc)
-            ):
-                raise
-            load_kwargs.pop("device_map", None)
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-            if device.type == "cuda":
+        if native_source:
+            from prismaquant.memory_management import CaptureMemoryGuard
+            from prismaquant.streaming_model import load_resident_source_model
+
+            model = load_resident_source_model(
+                args.model, device=device, dtype=dtype,
+                offload_folder=str(work_root / "resident-source-offload"),
+                resource_check=CaptureMemoryGuard(device).check,
+            )
+            source_prefetch_stats = {
+                "skipped": True,
+                "reason": "native FP8 uses the resident source owner's bounded prefetch",
+            }
+        else:
+            source_prefetch_stats = prefetch_safetensors_checkpoint(
+                staged,
+                mode=args.source_prefetch,
+                max_resident_bytes=(
+                    int(float(args.source_prefetch_max_gb) * 1024**3)
+                    if float(args.source_prefetch_max_gb) > 0
+                    else None
+                ),
+                headroom_gb=float(args.source_prefetch_headroom_gb),
+                workers=int(args.source_prefetch_workers),
+                progress=True,
+                log_prefix="[validate-kl/source]",
+            )
+            try:
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+            except ValueError as exc:
+                if (
+                    "requires `accelerate`" not in str(exc)
+                    and "requires accelerate" not in str(exc)
+                ):
+                    raise
+                load_kwargs.pop("device_map", None)
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+                if device.type == "cuda":
+                    model.to(device)
+            if not args.device_map and device.type != "cuda":
                 model.to(device)
-        if not args.device_map and device.type != "cuda":
-            model.to(device)
         model.eval()
         model_device = next(model.parameters()).device
         materialization_mode = args.assignment_materialization

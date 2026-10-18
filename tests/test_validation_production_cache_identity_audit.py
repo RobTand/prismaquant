@@ -162,13 +162,17 @@ def test_real_validation_without_production_cache_preserves_rtn_and_teacher(
     _install_local_inputs(monkeypatch, model, tokenizer)
     original = model.proj.weight.detach().clone()
     fmt = "INT8_W8A16"
+    model_dir = tmp_path / "source"
+    model_dir.mkdir()
+    save_file(model.state_dict(), str(model_dir / "model.safetensors"))
+    (model_dir / "config.json").write_text(json.dumps(vars(model.config)))
     ids = validation_harness._fixed_calib_ids(
         tokenizer, _dataset, cache_dir=tmp_path, n_samples=2, seqlen=8,
         split="test", seed=42)
     rtn_weight = format_registry.get_format(fmt).quantize_dequantize(original)
     expected = _expected_last_token_kl(model, ids, rtn_weight)
     result = validation_harness.validate_artifact(
-        "local-toy-model", {"proj": fmt}, cache_dir=tmp_path, device="cpu",
+        str(model_dir), {"proj": fmt}, cache_dir=tmp_path, device="cpu",
         dtype="fp32", n_wikitext_tokens=32, n_mmlu_questions=1,
         calib_seqlen=8, calib_n_samples=2, progress=False,
     )

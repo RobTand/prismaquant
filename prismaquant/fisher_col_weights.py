@@ -163,8 +163,13 @@ def compute_fisher_col_weights(
     from prismaquant.aura_cost import compute_aura_cost
     from prismaquant.build_rtn_cache import stage_multimodal
     from prismaquant.calibration_data import load_wikitext_calibration_windowed
+    from prismaquant.streamed_model_identity import (
+        resolve_source_checkpoint_path, source_model_decode_contract,
+    )
 
-    staged, _cleanup = stage_multimodal(model_path)
+    source_root = resolve_source_checkpoint_path(model_path)
+    native_source = source_model_decode_contract(source_root) is not None
+    staged, _cleanup = stage_multimodal(str(source_root))
     local_only = Path(staged).exists()
     _log(f"loading {model_path} (staged={staged}) dtype=float32")
     tok = AutoTokenizer.from_pretrained(
@@ -175,14 +180,28 @@ def compute_fisher_col_weights(
     )
     if device.startswith("cuda"):
         load_kwargs["device_map"] = device
-    try:
-        model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-    except ValueError as exc:
-        if "accelerate" not in str(exc):
-            raise
-        load_kwargs.pop("device_map", None)
-        model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-        model.to(device)
+    if native_source:
+        from tempfile import TemporaryDirectory
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        target = torch.device(device)
+        with TemporaryDirectory(prefix="prismaquant_fisher_source_") as offload:
+            model = load_resident_source_model(
+                str(source_root), device=target, dtype=torch.float32,
+                offload_folder=offload,
+                resource_check=CaptureMemoryGuard(target).check,
+                attn_implementation="eager", requires_grad=True,
+            )
+    else:
+        try:
+            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+        except ValueError as exc:
+            if "accelerate" not in str(exc):
+                raise
+            load_kwargs.pop("device_map", None)
+            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+            model.to(device)
     model.eval()
 
     if dataset_path:
@@ -231,8 +250,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "'provenance': {...}}")
     args = p.parse_args(argv)
 
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source_root) is not None
+    source_binding = (
+        build_source_model_binding(source_root, dtype=torch.float32)
+        if native_source else None
+    )
     col_weights = compute_fisher_col_weights(
-        args.model, args.dataset,
+        str(source_root), args.dataset,
         nprobes=args.nprobes, nsamples=args.nsamples, seqlen=args.seqlen,
         seed=args.seed, device=args.device,
         formats=[f.strip() for f in args.formats.split(",") if f.strip()],
@@ -251,6 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "git_commit": _git_commit(),
         },
     }
+    if source_binding is not None:
+        payload["provenance"]["source_binding"] = source_binding
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "wb") as fh:

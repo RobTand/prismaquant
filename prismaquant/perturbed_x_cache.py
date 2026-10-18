@@ -3608,8 +3608,28 @@ def load_text_model_under_work_root(
     from prismaquant.model_runtime import initialize_model_runtime
     initialize_model_runtime()
     from transformers import AutoModelForCausalLM
+    from prismaquant.streamed_model_identity import (
+        resolve_source_checkpoint_path, source_model_decode_contract,
+    )
 
-    staged = stage_text_only_under_work_root(model_path, work_root)
+    source_root = resolve_source_checkpoint_path(model_path)
+    if source_model_decode_contract(source_root) is not None:
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        if device_map not in (None, "cuda", device):
+            raise ValueError(
+                f"native FP8 source loading requires a resident device, not "
+                f"device_map={device_map!r}"
+            )
+        target = torch.device(device)
+        return load_resident_source_model(
+            str(source_root), device=target, dtype=dtype,
+            offload_folder=str(Path(work_root) / "resident-source-offload"),
+            resource_check=CaptureMemoryGuard(target).check,
+        ).eval()
+
+    staged = stage_text_only_under_work_root(str(source_root), work_root)
     load_device_map = device_map if device_map is not None else device
     load_kwargs = {
         "torch_dtype": dtype,

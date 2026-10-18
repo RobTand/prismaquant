@@ -626,6 +626,8 @@ def build_source_checkpoint_identity(
 
 
 SOURCE_MODEL_BINDING_SCHEMA = "prismaquant.source_model_binding.v1"
+NATIVE_SOURCE_MODEL_BINDING_SCHEMA = "prismaquant.source_model_binding.v2"
+NATIVE_FP8_SOURCE_DECODE = "prismaquant.native_fp8_source_decode.v1"
 _SOURCE_MODEL_DTYPES = frozenset({
     "torch.bfloat16", "torch.float16", "torch.float32",
 })
@@ -645,6 +647,82 @@ def resolve_source_checkpoint_path(
     ))
 
 
+def source_model_decode_contract(original_checkpoint_root: str | Path) -> str | None:
+    """Classify actual text weight headers using the source decoder's facts.
+
+    Ordinary floating-point checkpoints retain their v1 binding, including a
+    BF16 checkpoint with stale FP8 config. Actual mapped float8 weights must
+    have the declared block grid and every scale sibling; they cannot fall
+    through to an HF load because their quantization metadata is incomplete.
+    No tensor payload is read here.
+    """
+    from .source_read_plan import live_weight_map, read_safetensors_header
+
+    root = Path(original_checkpoint_root)
+    raw, shards = _local_checkpoint_shards(root)
+    if raw is None or shards is None:
+        return None
+    headers = {
+        str(path.resolve()): read_safetensors_header(str(path))[0]
+        for path in shards
+    }
+
+    def row(shard, name):
+        value = headers[str(Path(shard).resolve())].get(name)
+        if not isinstance(value, dict):
+            raise ValueError(f"source header {shard} is missing tensor {name!r}")
+        return value
+
+    if not any(str(row(root / shard, name).get("dtype", "")).startswith("F8_")
+               for name, shard in raw.items()):
+        return None
+
+    # Keep heavy model/profile imports out of the ordinary v1 metadata path.
+    from .layer_streaming import (
+        _build_fp8_scale_inv_map, _check_fp8_scale_grid,
+        _declared_weight_block_size, construction_multimodal,
+    )
+    from .model_profiles import detect_profile
+    from .staged_whole_file import read_source_metadata_text
+
+    config = json.loads(read_source_metadata_text(
+        root / "config.json", label="native FP8 source config"))
+    profile = detect_profile(str(root), config=config)
+    profile._declare_checkpoint_index({"weight_map": raw})
+    multimodal = construction_multimodal(profile, False)
+    live_shards, live_names = live_weight_map(
+        raw, str(root),
+        lambda name: profile.checkpoint_to_live_name(name, multimodal=multimodal),
+    )
+    native = {
+        name: row(live_shards[name], checkpoint_name)
+        for name, checkpoint_name in live_names.items()
+        if (profile.checkpoint_to_live_name(checkpoint_name, multimodal=False) is not None
+            and str(row(live_shards[name], checkpoint_name).get("dtype", "")).startswith("F8_"))
+    }
+    if not native:
+        return None
+    block = _declared_weight_block_size(str(root), config=config)
+    scales = _build_fp8_scale_inv_map(
+        str(root), multimodal=multimodal, raw_weight_map=raw,
+        profile=profile, config=config,
+    )
+    for name, weight in native.items():
+        if name not in scales or name in scales.mxfp4_names:
+            raise ValueError(
+                f"native FP8 source weight {name!r} has no supported block-scale "
+                "pair; rebuild from a supported block-scaled FP8 checkpoint"
+            )
+        shape = tuple(weight.get("shape", ()))
+        if len(shape) != 2:
+            raise ValueError(f"native FP8 source weight {name!r} is not a matrix: {shape}")
+        scale_shard, scale_name = scales[name]
+        _check_fp8_scale_grid(
+            name, shape, tuple(row(scale_shard, scale_name).get("shape", ())), block,
+        )
+    return NATIVE_FP8_SOURCE_DECODE
+
+
 def build_source_model_binding(
     original_checkpoint_root: str | Path,
     *,
@@ -654,8 +732,9 @@ def build_source_model_binding(
 ) -> dict[str, object]:
     """Bind checkpoint bytes and effective load dtype for cache reuse.
 
-    The checkpoint is the original source, before text-only staging. Live
-    model mutation after loading is outside this file-source contract.
+    The checkpoint is the original source, before text-only staging. Native
+    v2 also binds the text-head/body decoder; it does not attest MTP or visual
+    delivery. Live model mutation after loading is outside this contract.
     """
     effective_dtype = str(dtype)
     if effective_dtype not in _SOURCE_MODEL_DTYPES:
@@ -663,13 +742,17 @@ def build_source_model_binding(
     root = resolve_source_checkpoint_path(
         original_checkpoint_root, local_files_only=local_files_only,
     )
-    return {
-        "schema": SOURCE_MODEL_BINDING_SCHEMA,
+    decode = source_model_decode_contract(root)
+    binding = {
+        "schema": NATIVE_SOURCE_MODEL_BINDING_SCHEMA if decode else SOURCE_MODEL_BINDING_SCHEMA,
         "checkpoint": build_source_checkpoint_identity(
             root, digest_cache_path=digest_cache_path, current_bytes=True,
         ),
         "effective_dtype": effective_dtype,
     }
+    if decode is not None:
+        binding["source_decode"] = decode
+    return binding
 
 
 def validate_source_model_binding(
@@ -679,9 +762,14 @@ def validate_source_model_binding(
     from collections.abc import Mapping
     from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
 
+    fields = {"schema", "checkpoint", "effective_dtype"}
+    if isinstance(value, Mapping) and value.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+        fields.add("source_decode")
+        valid_decode = value.get("source_decode") == NATIVE_FP8_SOURCE_DECODE
+    else:
+        valid_decode = isinstance(value, Mapping) and value.get("schema") == SOURCE_MODEL_BINDING_SCHEMA
     if (not isinstance(value, Mapping)
-            or set(value) != {"schema", "checkpoint", "effective_dtype"}
-            or value.get("schema") != SOURCE_MODEL_BINDING_SCHEMA
+            or set(value) != fields or not valid_decode
             or not isinstance(value.get("effective_dtype"), str)
             or value.get("effective_dtype") not in _SOURCE_MODEL_DTYPES):
         raise ValueError(f"{where} has an invalid source model binding")

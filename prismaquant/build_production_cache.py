@@ -713,16 +713,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         if device.type == "cuda":
             load_kwargs["device_map"] = "cuda"
-        try:
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-        except ValueError as exc:
-            if "requires `accelerate`" not in str(exc) and "requires accelerate" not in str(exc):
-                raise
-            load_kwargs.pop("device_map", None)
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-            model.to(device)
-        if device.type != "cuda":
-            model.to(device)
+        native_source = "source_decode" in source_binding
+        if native_source:
+            from .memory_management import CaptureMemoryGuard
+            from .streaming_model import load_resident_source_model
+
+            model = load_resident_source_model(
+                args.model, device=device, dtype=dtype,
+                offload_folder=str((Path(args.cache_dir) if args.cache_dir
+                                    else output_path.parent) / "resident-source-offload"),
+                resource_check=CaptureMemoryGuard(device).check,
+            )
+        else:
+            try:
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+            except ValueError as exc:
+                if "requires `accelerate`" not in str(exc) and "requires accelerate" not in str(exc):
+                    raise
+                load_kwargs.pop("device_map", None)
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+                model.to(device)
+            if device.type != "cuda":
+                model.to(device)
         model.eval()
         profile = detect_profile_with_warning(
             args.model,
@@ -735,7 +747,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # scale, derived from the expert weights) sees the real experts.
         # No-op when experts already loaded correctly.
         from .layer_streaming import fill_packed_experts_from_source
-        fill_packed_experts_from_source(model, args.model, profile, progress=True)
+        if not native_source:
+            fill_packed_experts_from_source(model, args.model, profile, progress=True)
         skip_tokens = list(
             args.skip_qnames
             if args.skip_qnames is not None

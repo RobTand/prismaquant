@@ -219,23 +219,24 @@ def _compute_metrics(
     torch_device = _resolve_torch_device(torch, device)
     torch_dtype = _torch_dtype(torch, dtype, torch_device)
     assignment = _layer_config_to_assignment(layer_config)
-    loading_path = model_path
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(model_path)
+    loading_path = str(source_root)
+    native_source = source_model_decode_contract(source_root) is not None
     production_cache = None
     if _active_assignment(assignment) and os.environ.get(
         "PRISMAQUANT_VALIDATION_PROD_CACHE"
     ):
-        from .streamed_model_identity import (
-            build_source_model_binding, resolve_source_checkpoint_path,
-        )
-
-        source_root = resolve_source_checkpoint_path(model_path)
         expected_source_binding = build_source_model_binding(
             source_root, dtype=torch_dtype,
         )
         production_cache = _load_validation_production_cache(
             expected_source_binding=expected_source_binding,
         )
-        loading_path = str(source_root)
     tokenizer = AutoTokenizer.from_pretrained(
         loading_path,
         cache_dir=str(cache_dir / "hf"),
@@ -244,13 +245,23 @@ def _compute_metrics(
     if tokenizer.pad_token_id is None and tokenizer.eos_token is not None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        loading_path,
-        cache_dir=str(cache_dir / "hf"),
-        torch_dtype=torch_dtype,
-        trust_remote_code=True,
-    )
-    model.to(torch_device)
+    if native_source:
+        from .memory_management import CaptureMemoryGuard
+        from .streaming_model import load_resident_source_model
+
+        model = load_resident_source_model(
+            loading_path, device=torch_device, dtype=torch_dtype,
+            offload_folder=str(cache_dir / "resident-source-offload"),
+            resource_check=CaptureMemoryGuard(torch_device).check,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            loading_path,
+            cache_dir=str(cache_dir / "hf"),
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+        model.to(torch_device)
     model.eval()
 
     cal_hash = hashlib.blake2b(
