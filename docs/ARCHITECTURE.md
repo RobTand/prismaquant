@@ -1,12 +1,12 @@
 # PrismaQuant Architecture
 
-As of: 2026-10-18, architecture audit resume.
-Source commit: `2e8798f1bb7af719d1c300853ca78aa09f773217`. Documentation branch: `claude/w/docs`.
-This stamp covers the integrated resume changes and the retained-source draft.
-Sections 3.4, 4.1, 4.3, 4.6, 4.10, 7.1, 7.2 and 10 describe the affected contracts.
+As of: 2026-10-18, architecture audit resume, documentation Revision 1.
+Source commit: `28469f5278f6774530dd95748917fb627ab6a08a`. Documentation branch: `claude/w/docs`.
+Sections 3.4, 4.1, 4.3 and 4.6 describe the revised reuse, source and calibration contracts.
+Section 4.1 records bounded GB10 module measurements and their runtime limits.
 Earlier dated entries below retain their historical scope and open-work state.
 For these contracts, the current sections supersede earlier open-work statements.
-These edits state no new served quality, speed or peak-memory result.
+These edits establish no served quality, full-model speed or peak-memory result.
 The stage graph, serving lanes and runtime pin do not change.
 
 As of: 2026-10-18, architecture audit continuation, retention accounting.
@@ -23119,26 +23119,44 @@ semantics; §4 owns the cost-mode semantics; §5 owns the lever semantics.
 
 ### 3.4 Reuse guards and the silent-reuse class
 
-The current inplace frontier guard binds the base and candidate assignment bytes.
-It also binds the probe, costs, cache index and local calibration bytes.
-A stable Pareto label cannot establish this identity.
-A point without the request binding requires a rebuild.
-Stage settings also bind the measurement and render options
+Inplace frontier reuse binds assignment identity (canonical assignment), draw
+geometry and corpus bytes.
+The base and candidate choices supply the assignment identity.
+The point settings bind draw geometry and render options.
+The frontier-cache guard owns the cache-build identity.
+Probe provenance, cost provenance and cache-index metadata do not enter the point digest.
+An assignment or corpus change prevents reuse.
+A point without the request binding requires a rebuild
 (`pipeline.frontier_request_digest`, `pipeline.STAGE_SETTINGS_KEYS`,
-`run-pipeline.sh`, `FRONTIER_REQUEST_DIGEST`).
+`footprint.assignment_serialization_sha256`, `layer_config.canonicalize_assignment`).
+Older point manifests can refuse once after this identity change.
+The operator must rebuild those parts. The guard does not silently adopt them
+(`pipeline.check_stage_settings`).
 
+The AURA settings projection canonicalizes the execution switch spellings that
+the shell accepts.
 Resident AURA reuse includes `AURA_COST_PROBE_MICROBATCH`.
-The streamed projection omits that unused resident option.
+Both streamed AURA projections omit that unused resident option.
 Raw and hybrid stages share the raw measurement projection.
 The hybrid stage also binds the raw cost bytes
 (`pipeline.stage_settings_projection`, `pipeline.STAGE_SETTINGS_KEYS`,
 `run-pipeline.sh`, `aura-hybrid-cost`).
 
 Native retained-cost admission remains strict in dev mode.
-For a native source, each usable ordinary cost cell requires `source_model_binding.v2`.
+For a native source, ordinary text cost cells require `source_model_binding.v2`.
 The binding covers shards, config, index, root Python metadata, effective dtype
 and `prismaquant.native_fp8_source_decode.v1`.
+Profile-declared MTP and visual rows carry checkpoint-and-dtype evidence.
+Each sidecar row carries one evidence form, as stated by the intake owner.
+That evidence does not qualify native MTP or visual decoding.
+Text decoder evidence cannot attest those sidecars
+(`prepriced_cost.validate_native_cost_source_for_model`,
+`prepriced_cost._native_cost_bindings`).
 Intake validates the cell contracts before it hashes source shards.
+Joint and anchor structure checks also apply to non-native tables.
+Malformed structure forces a rebuild there too
+(`prepriced_cost._native_cost_cells`,
+`prepriced_cost.validate_native_cost_source_for_model`).
 It resolves the current source locally and observes its binding once.
 Canonicalization reuses the same binding object within that intake.
 A native binding cannot qualify costs against an ordinary source
@@ -23153,7 +23171,8 @@ A joint row must name the same qname and format.
 An anchor row must belong to the completed renderer's format map
 (`prepriced_cost._native_cost_cells`,
 `streaming_production_cache.validate_completed_production_anchor_identity`).
-Offline native stock intake instead requires exact per-cell harvest binding equality.
+Offline native stock intake instead requires exact v2 per-cell harvest binding equality.
+It does not admit checkpoint-only sidecar evidence.
 It also compares the binding's shard digests with the harvest model identity.
 This check does not reopen the source
 (`prepriced_cost.require_native_cost_source_binding`,
@@ -23439,38 +23458,106 @@ allocator-consumable cost table falls out of it for free — §6.5.2.
 
 ### 4.1 Stages that always run
 
-Ordinary incremental probe reuse binds the calibration seed, checkpoint content
-identity and local dataset byte digest before model setup.
+Ordinary incremental probe reuse binds the calibration seed, checkpoint content,
+local dataset bytes, tokenizer bytes and chat-template bytes before model setup.
 One input record controls shard, pooled Linear and precompute reuse.
 Missing or changed evidence causes recomputation.
 A remote dataset without a local byte identity cannot use persistent reuse.
-The optional context key also binds checkpoint content.
-Tokenizer and chat-template bytes remain outside this reuse identity
+The optional context key also binds checkpoint and tokenizer content
 (`incremental_probe.main`, `incremental_probe._probe_reuse_inputs_mismatch`,
 `incremental_probe._compute_precompute_key`).
 
-Precompute reuse restores the saved routing maps.
-Route coverage version 3 rejects affected old routed shards.
-Packed records require `module_once.v1` because capture records each module input
-once per forward.
-Pooled reuse derives content metadata from the shard contract
-(`incremental_probe._load_precompute_cache`,
-`incremental_probe.probe_shard_is_reusable`,
-`incremental_probe._CONTENT_META_KEYS`,
-`incremental_probe._run_body_streaming_shard`).
+`tokenizer_identity.build_tokenizer_identity` is the package owner of the file roster
+and digest.
+The teacher adapter and probe use this owner.
+The roster includes separate `chat_template.json` and `chat_template.jinja` files.
+It also includes regular files under `chat_templates/` and `additional_chat_templates/`.
+This directory rule is conservative. Even an unused file changes the identity.
+The schema remains `prismaquant.tokenizer_identity/1`.
+Models with separate template files get a new digest.
+Their stored teacher, task or WikiText identities can need fresh qualification.
+Models with only the former roster keep their old digest
+(`tokenizer_identity.build_tokenizer_identity`,
+`tools/full_kl_teacher_payload.py`, `tokenizer_identity`,
+`task_suite._task_tokenizer_files`).
+WikiText tokenizer descriptors accept normalized relative POSIX file paths.
+Absolute paths, parent components, the current-directory name and alternate spellings refuse.
+Byte counts must remain positive. Digest checks still apply
+(`tools/dsv4_wikitext_inputs.py`, `_validate_tokenizer_identity`).
 
-The packed activation QDQ hook uses the HF eager expert reference for the hooked call.
-Each projection applies its own activation quantizer.
-The hook restores the previous expert implementation when the call ends.
-This route has CPU contract qualification.
-GB10 capture, performance and power qualification remain open
-(`perturbed_x_cache.PerturbedActivationCache._install_packed_expert_activation_quant`).
+Precompute reuse restores the saved routing maps.
+Valid v2 precompute payloads remain reusable because their writer saved those maps.
+Coverage-version refusal applies to affected routed records, including packed experts.
+Dense v2 shards remain reusable.
+Only packed records require `module_once.v1`.
+Capture records each module input once per forward.
+Pooled reuse carries route and expert metadata through the fresh-shard projection.
+Conflicting route records refuse pooled reuse.
+A routed synthesized shard without its route population also refuses reuse
+(`incremental_probe._load_precompute_cache`,
+`incremental_probe._probe_capture_compatible`,
+`incremental_probe._shard_routing_payload`,
+`incremental_probe.synthesize_shard_from_linear_cache`).
+
+For HF batched or grouped dispatch, the packed activation hook applies proven
+row-local QDQ at each grouped-matmul input.
+Unknown or batch-dependent QDQ uses the per-expert eager reference.
+Explicit eager configuration retains that reference.
+Each projection uses its own quantizer and scale.
+Each forward refreshes the active projections after a format override.
+The hook restores dispatch and global operators when the call ends
+(`perturbed_x_cache._packed_activation_qdq_is_row_local`,
+`perturbed_x_cache.PerturbedActivationCache._install_packed_expert_activation_quant`).
+
+GB10 module checks used synthetic BF16 Qwen3-MoE and Qwen3.5-MoE fixtures.
+Each fixture used 32 tokens, top-k 8 and hidden width 2048.
+Intermediate widths were 768 and 512. Expert counts were 128 and 256.
+Both grouped projection outputs matched separate expert GEMMs bit-for-bit.
+Full expert outputs differed because HF grouped dispatch sums contributions in FP32.
+HF eager dispatch accumulates those same contributions in BF16.
+The reduction control accounts for the full difference in these fixtures.
+It does not establish full-output bit parity
+(`tests/test_packed_grouped_qdq_audit.py`, `test_gb10_qdq_rows_and_grouped_graph`,
+[reduction controls](/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/claude-resume/workers/probe-followups/r1-reduction-control-results.json)).
+
+The paired Sparklina profile compared the old eager hook with the grouped hook.
+Both arms kept the same resident inputs, weights, routes and scales.
+Three rounds per arm ran for at least 30 seconds each.
+The wall medians exclude profiler instrumentation.
+
+| Module fixture | Wall ms per call, eager to grouped | Wall ratio | Kernels per call, eager to grouped | Estimated GPU work per joule ratio |
+|---|---:|---:|---:|---:|
+| Qwen3-MoE | 31.665 to 6.333 | 5.00x | 2568 to 286 | 3.11x |
+| Qwen3.5-MoE | 64.126 to 9.347 | 6.86x | 5128 to 542 | 3.92x |
+
+The evidence includes before/after `torch.profiler` traces and Netdata series on both boxes.
+The GPU energy estimates use 10-second interior power buckets and exclude host energy.
+Each arm has three retained buckets.
+The grouped API still launches separate expert GEMM kernels in this runtime.
+These are module measurements, not served throughput, full-model speed or peak memory
+([profile summary](/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/claude-resume/workers/probe-followups/r1-profile-summary.json),
+[power summary](/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/claude-resume/workers/probe-followups/r1-power-summary.json)).
+
+CUDA graph capture failed with the hook and in the unhooked HF grouped control.
+The measured stack was Torch 2.11.0+cu130 with Transformers 5.6.0 on GB10.
+`torch._grouped_mm` refused a copy between CPU and CUDA tensors during capture.
+The CPU tensor was not pinned.
+Removing the hook did not restore capture.
+A passing refusal-control test does not establish graph replay
+(`tests/test_packed_grouped_qdq_audit.py`, `test_gb10_qdq_rows_and_grouped_graph`,
+[GPU log](/mnt/shared/prismaquant-architecture-audit/20261017/e2effc2f3c/claude-resume/workers/probe-followups/r1-parity-v3-stdout.log)).
 The per-expert AQUA reader checks each sibling's configured rows and columns
 before concatenation (`aqua_activation_cost.packed_act_dloss_per_expert`).
 
-Fresh native baseline shards bind measured cells before shard publication.
-Shard reuse checks the same binding.
-Body, MTP and visual loads use the resolved original source root
+Fresh native baseline shards attach source evidence to measured cells.
+Shard reuse checks the same evidence form.
+Every baseline table passes source admission before reuse in every cost mode.
+A separate baseline keeps its stored estimator mode for that check.
+Metadata, autoscale, scheduling and body, MTP and visual loads use one resolved
+original root, including Hub snapshots
+(`run-pipeline.sh`, `BASE_COST_REUSABLE`,
+`prepriced_cost.validate_native_cost_source_for_model`).
+Text cells carry the v2 decoder binding. Sidecars carry checkpoint-and-dtype evidence
 (`incremental_measure_quant_cost.main`,
 `incremental_measure_quant_cost._expected_cost_shard_meta`,
 `incremental_measure_quant_cost.cost_shard_is_reusable`).
@@ -23698,7 +23785,7 @@ The decoder multiplies on the declared block grid in BF16 arithmetic.
 An FP32 request casts that decode to FP32.
 It does not produce an exact FP32 block decode.
 Native streaming refuses FP32 before loading, including an automatic FP32 choice.
-The operator must choose BF16 streaming or the resident route.
+The operator must set `AURA_COST_DTYPE=bfloat16` or choose the resident route.
 There is no implicit route fallback (`aura_cost.main`,
 `streaming_model.load_resident_source_model`).
 
@@ -23721,6 +23808,13 @@ Its binding covers the exact assignment, actual calibration draw hash, result by
 cache index bytes and render settings.
 A matching frontier or single-assignment result can supply the measurement.
 On a miss, `measure` calls KL on the configured AURA draw.
+This call passes `--measurement-purpose additivity`.
+The validator requires one assignment equal to the supplied current base assignment.
+It records `measurement_purpose=additivity`, `in_sample=true` and observed upstream overlaps.
+The diagnostic compares realized KL with the additive prediction on the same draw.
+Selection remains the default purpose and enforces R14 held-out separation.
+A default held-out frontier therefore cannot supply a same-draw AURA residual
+(`validate_assignments_kl.main`, `validate_assignments_kl._assert_calibration_disjoint`).
 `auto` reuses a match or reports only the predicted sum.
 A failed measurement cannot supply an old scalar.
 The report remains non-blocking and does not change allocation
@@ -24868,8 +24962,10 @@ It supports JSONL, text and recognized extensionless corpora.
 Identical local copies share the domain.
 Different corpus bytes, nonlocal corpora and unsupported formats require another proof.
 The pipeline refuses an unprovable bound or an insufficient safe-window population.
-Explicit zero skip retains the historical in-sample override.
-That override establishes no held-out split
+For a shared corpus, explicit zero skip retains the historical in-sample override.
+For an independent held-out corpus, set `VALIDATED_FRONTIER_SKIP_CALIB=0`.
+This override assumes corpus independence. It does not prove it.
+The shared local corpus path instead uses the consumed-position bound
 (`pipeline.held_out_calibration_skip`, `calibration_data.load_calibration`).
 
 `SELECTION_MODE` defaults to `surrogate` (§3.3): `layer_config.json` straight from the DP at
