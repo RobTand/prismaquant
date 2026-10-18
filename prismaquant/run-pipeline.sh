@@ -755,25 +755,7 @@ else
 fi
 : "${VALIDATED_FRONTIER_NSAMPLES:=$NSAMPLES}"
 : "${VALIDATED_FRONTIER_SEQLEN:=$SEQLEN}"
-# Held-out selection (review criticals C3/C5): the frontier-selecting KL
-# must be measured on text disjoint from probe/cost/render calibration
-# (house rule: "held-out split is disjoint from cost generation"). The
-# loader is prefix-stable, so skipping the first NSAMPLES windows makes
-# the validation windows token-disjoint by construction. Default ON —
-# the prior in-sample wiring was a bug, not a behavior. Set
-# VALIDATED_FRONTIER_SKIP_CALIB=0 only to reproduce historical runs.
-: "${VALIDATED_FRONTIER_SKIP_CALIB:=$NSAMPLES}"
-# Optional fully separate validation corpus (overrides skip-first
-# disjointness with corpus-level disjointness when provided).
 : "${VALIDATED_FRONTIER_DATASET:=$DATASET}"
-# The effective skip-first: corpus-level disjointness (a separate validation
-# dataset) supersedes prefix-skip disjointness. Computed once so the stage
-# settings hash and the CLI cannot disagree.
-if [[ "$VALIDATED_FRONTIER_DATASET" == "$DATASET" ]]; then
-  VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$VALIDATED_FRONTIER_SKIP_CALIB"
-else
-  VALIDATED_FRONTIER_CALIB_SKIP_FIRST=0
-fi
 # M26: final selection scores full-sequence KL (the gold-metric scope, §5),
 # not the last_token triage screen. Selection is still re-validated on the
 # served metric before ship, but aligning the selection scope with the gold
@@ -848,6 +830,29 @@ fi
 # measured end-to-end, FP8 kept in the menu (real-KL rejects it, no bans).
 : "${AURA_EXPERT_NSAMPLES:=16}"
 : "${AURA_EXPERT_SEQLEN:=512}"
+# Held-out calibration boundary. All fit producers must share the prefix.
+FRONTIER_CALIBRATION_ARGS=(--calibration-draw "$NSAMPLES" "$SEQLEN" 42)
+case "$COST_MODE" in
+  aura)
+    FRONTIER_CALIBRATION_ARGS+=(
+      --calibration-draw "$AURA_COST_NSAMPLES" "$AURA_COST_SEQLEN" "$AURA_COST_CALIB_SEED"
+      --calibration-draw "$AURA_EXPERT_NSAMPLES" "$AURA_EXPERT_SEQLEN" 42
+    )
+    ;;
+  production-render-score|production-render)
+    FRONTIER_CALIBRATION_ARGS+=(--calibration-draw "$PRODUCTION_RENDER_COST_NSAMPLES"
+      "$PRODUCTION_RENDER_COST_SEQLEN" "$PRODUCTION_RENDER_COST_SEED")
+    ;;
+esac
+VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$(python3 -m prismaquant.pipeline \
+  --held-out-calibration-skip "${FRONTIER_CALIBRATION_ARGS[@]}" \
+  --setting "DATASET=$DATASET" \
+  --setting "VALIDATED_FRONTIER_DATASET=$VALIDATED_FRONTIER_DATASET" \
+  --setting "VALIDATED_FRONTIER_SEQLEN=$VALIDATED_FRONTIER_SEQLEN" \
+  --setting "VALIDATED_FRONTIER_SKIP_CALIB=${VALIDATED_FRONTIER_SKIP_CALIB:-}" \
+  --setting "SELECTION_MODE=$SELECTION_MODE")"
+# Explicit zero remains the historical in-sample reproduction override.
+VALIDATED_FRONTIER_SKIP_CALIB="$VALIDATED_FRONTIER_CALIB_SKIP_FIRST"
 # Imatrix (column-weight) harvest. CB_COL_WEIGHTS is named for the lane that
 # first needed it; the harvest is what the GGUF lane and every imatrix-weighted
 # cost cache read, so it stays. `CB_EXPERT_EMPIRICAL` went with the Gridbook

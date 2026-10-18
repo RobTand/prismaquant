@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -451,6 +452,41 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
                                "PLAN_ASSIGNMENT_DIGEST",
                                *_TESSERA_SCOPE_SETTINGS),
 }
+
+
+def held_out_calibration_skip(
+    *, source: str, validation_source: str, validation_seqlen: int,
+    draws: Iterable[tuple[int, int, int]], requested_skip: int | None,
+    enforce: bool,
+) -> int:
+    """Skip every fit draw when the local loader has one shared prefix."""
+    draws = tuple(draws)
+    if not draws or any(min(count, length) <= 0 for count, length, _seed in draws):
+        raise ValueError("calibration draw sizes must be positive")
+    minimum = max(count for count, _length, _seed in draws)
+    skip = minimum if requested_skip is None else requested_skip
+    if skip < 0:
+        raise ValueError("held-out skip must be nonnegative")
+    if not enforce or skip == 0:
+        return skip
+    if skip < minimum:
+        raise ValueError(f"held-out skip {skip} does not cover the cost draw of {minimum} windows")
+    if any(length != validation_seqlen or seed != 42 for _count, length, seed in draws):
+        raise ValueError(
+            "held-out prefix needs the same sequence length and seed 42 for every "
+            "probe, cost and selection draw; align these inputs before selection"
+        )
+    from prismaquant.digests import file_sha256hex
+
+    if not Path(source).is_file() or not Path(validation_source).is_file():
+        raise ValueError("held-out prefix needs a local calibration corpus with a stable prefix")
+    if (Path(source).resolve() != Path(validation_source).resolve()
+            and file_sha256hex(source) != file_sha256hex(validation_source)):
+        raise ValueError(
+            "different corpus paths do not prove held-out disjointness; "
+            "use one local corpus and skip its complete cost prefix"
+        )
+    return skip
 
 
 def frontier_request_digest(paths: Iterable[str | Path]) -> str:
@@ -1734,11 +1770,31 @@ def main(argv: list[str] | None = None) -> int:
         help="Guard one skip-if-exists artifact against its recorded "
              "settings. Requires --stage-settings/--artifact/--stage.",
     )
+    ap.add_argument("--held-out-calibration-skip", action="store_true")
+    ap.add_argument("--calibration-draw", nargs=3, type=int, action="append", default=[])
     ap.add_argument("--stage-settings", metavar="PATH", default=None,
                     help="Path written by --write-stage-settings.")
     ap.add_argument("--artifact", metavar="PATH", default=None)
     ap.add_argument("--stage", metavar="ID", default=None)
     args = ap.parse_args(argv)
+
+    if args.held_out_calibration_skip:
+        settings = parse_settings(args.setting)
+        try:
+            skip = held_out_calibration_skip(
+                source=settings["DATASET"],
+                validation_source=settings["VALIDATED_FRONTIER_DATASET"],
+                validation_seqlen=int(settings["VALIDATED_FRONTIER_SEQLEN"]),
+                draws=args.calibration_draw,
+                requested_skip=(int(settings["VALIDATED_FRONTIER_SKIP_CALIB"])
+                                if settings.get("VALIDATED_FRONTIER_SKIP_CALIB") else None),
+                enforce=settings["SELECTION_MODE"] == "validated-surrogate",
+            )
+        except (KeyError, ValueError) as exc:
+            print(f"[pipeline] ERROR: {exc}", file=sys.stderr)
+            return 2
+        print(skip)
+        return 0
 
     if args.check_frontier_materialization:
         if args.frontier_materialization is None:
