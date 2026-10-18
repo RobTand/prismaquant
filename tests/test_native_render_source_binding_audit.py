@@ -58,7 +58,9 @@ def test_actual_render_synthesis_binds_only_scored_cells(
     validate_native_cost_source_for_model(result, model=str(source), where='actual scored cells')
 
 
-def test_native_render_sidecars_reuse_their_own_production_score_table(tmp_path, monkeypatch):
+@pytest.mark.parametrize('foreign_region', ['all', 'mtp', 'visual'])
+def test_native_render_sidecars_reuse_their_own_production_score_table(
+        tmp_path, monkeypatch, foreign_region):
     """Render real body, MTP and visual matrices. Check source evidence only."""
     from safetensors.torch import load_file, save_file
     from transformers import AutoConfig
@@ -149,6 +151,19 @@ def test_native_render_sidecars_reuse_their_own_production_score_table(tmp_path,
     cache_path.write_bytes(pickle.dumps(cache))
     assert render.main(arguments) == 0
     foreign = pickle.loads(output.read_bytes())
+    if foreign_region != 'all':
+        foreign_name = mtp_name if foreign_region == 'mtp' else visual_name
+        current = pickle.loads(original_output)
+        for name in names:
+            if name != foreign_name:
+                foreign['costs'][name] = deepcopy(current['costs'][name])
+        for name in names:
+            for fmt, row in foreign['costs'][name].items():
+                if name == foreign_name:
+                    assert row['source_binding']['checkpoint'] != binding['checkpoint']
+                else:
+                    assert row['source_binding'] == current['costs'][name][fmt]['source_binding']
+        output.write_bytes(pickle.dumps(foreign))
     with pytest.raises(ValueError, match='differs from the current checkpoint/decoder'):
         validate_native_cost_source_for_model(foreign, model=str(source), where='foreign render sidecars')
     reused = _pipeline_reusable(output, source, cost_mode='production-render-score')
