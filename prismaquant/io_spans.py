@@ -789,12 +789,14 @@ class GpuPowerSampler:
             except Exception as exc:  # noqa: BLE001 - measurement failure only
                 self.error = self.error or f"sampler reader teardown failed: {exc}"
         watts = sorted(self.samples)
+        # Empirical inverse CDF (nearest rank): the first observed value
+        # whose cumulative fraction reaches the requested percentile.
         block = {
             "sample_count": len(watts),
             "interval_s": self.interval_s,
             "gpu_joules": sum(watts) * self.interval_s if watts else None,
-            "gpu_power_w_p50": watts[len(watts) // 2] if watts else None,
-            "gpu_power_w_p95": watts[max(0, int(0.95 * len(watts)) - 1)] if watts else None,
+            "gpu_power_w_p50": watts[math.ceil(0.50 * len(watts)) - 1] if watts else None,
+            "gpu_power_w_p95": watts[math.ceil(0.95 * len(watts)) - 1] if watts else None,
             "gpu_power_w_max": watts[-1] if watts else None,
         }
         if self.error:

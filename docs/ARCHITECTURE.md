@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, power sample percentiles.
+`GpuPowerSampler` reports both p50 and p95 using nearest-rank empirical
+quantiles. Short windows cannot report p95 below p50; even-sized windows use
+the lower observed median. Energy totals, maximum power and sampler lifetime
+remain unchanged. `power-percentile-green-v1` passes 52 CPU cases and compiles
+three files, with source, terminal logs and CAS receipt verified against
+parent `f8d9c9c15a3` plus the recorded overlays. The tests replace the external
+power process and establish summary arithmetic, not a GPU measurement.
+
 As of: 2026-10-17, architecture audit continuation, research padding counts.
 The block-schedule summary requires an explicit nonnegative integer padding
 count before checking serialized totals. Negative padding and coerced values
