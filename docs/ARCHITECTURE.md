@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, retention accounting.
+The telemetry retention command counts a CSV as removed only after successful
+unlink. A failed unlink reports the error and returns nonzero while preserving
+successful deletion counts. Dry runs retain their labeled planned-removal
+behavior. Four real temporary-file cases are part of the verified 17-case
+`telemetry-boundaries-green-v1` cohort; one exact unlink is denied by a test
+adapter. No real recorder files or services are changed by these checks.
+
 As of: 2026-10-18, architecture audit continuation, health response intake.
 The Netdata health boundary requires a JSON object and validates supplied
 mirrored-host metadata. Invalid local observations produce a defect row;
