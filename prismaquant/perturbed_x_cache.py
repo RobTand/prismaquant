@@ -3413,6 +3413,8 @@ class PerturbedActivationCache:
         Row-local QDQ runs once on each sorted grouped-matmul input. A
         batch-dependent or unknown quantizer uses the per-expert eager
         reference. The module pre-hook skips these plans to avoid double QDQ.
+        A hooked batched_mm call uses grouped_mm. Its unhooked reference
+        keeps batched_mm.
         """
         if self._packed_act_plan(plan, active_only=False) is None:
             return
@@ -3454,6 +3456,9 @@ class PerturbedActivationCache:
             original_grouped = getattr(F, "grouped_mm", None)
             config = getattr(module, "config", None)
             implementation = getattr(config, "_experts_implementation", None)
+            use_grouped = (row_local and original_grouped is not None
+                           and implementation in ("batched_mm", "grouped_mm"))
+            grouped_calls = dict.fromkeys(targets, 0)
 
             def _intercepting_grouped(input, weight, *, offs=None, **kwargs):
                 base = weight._base if weight._is_view() else weight
@@ -3473,6 +3478,7 @@ class PerturbedActivationCache:
                     input = _activation_qdq(
                         input, member.spec, owner._activation_scales,
                         member.name, owner._priced_input_global_scales)
+                    grouped_calls[id(base)] += 1
                 return original_grouped(input, weight, offs=offs, **kwargs)
 
             try:
@@ -3480,12 +3486,15 @@ class PerturbedActivationCache:
                 if original_grouped is not None:
                     F.grouped_mm = _intercepting_grouped
                 if implementation is not None:
-                    if (row_local and original_grouped is not None
-                            and implementation in ("batched_mm", "grouped_mm")):
-                        config._experts_implementation = "grouped_mm"
-                    else:
-                        config._experts_implementation = "eager"
-                return original_forward(*args, **kwargs)
+                    config._experts_implementation = "grouped_mm" if use_grouped else "eager"
+                result = original_forward(*args, **kwargs)
+                if use_grouped:
+                    for parameter_id, count in grouped_calls.items():
+                        if count != 1:
+                            raise RuntimeError(
+                                "packed activation QDQ grouped dispatch must quantize "
+                                f"{targets[parameter_id].name} exactly once; saw {count} calls")
+                return result
             finally:
                 F.linear = orig_linear
                 if original_grouped is not None:
