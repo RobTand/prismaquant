@@ -615,6 +615,13 @@ def check_perplexity(base_url: str, model_name: str,
     without --speculative-config; see the module docstring for the
     standard two-serve workflow.
     """
+    invalid = [f"{name}={value!r} must be a finite numeric threshold"
+               for name, value in (("max_ppl", max_ppl),
+                                   ("max_p99_nll", max_p99_nll),
+                                   ("max_mean_nll", max_mean_nll))
+               if type(value) not in (int, float) or not math.isfinite(value)]
+    if invalid:
+        return CheckResult(name="perplexity", passed=False, detail="; ".join(invalid))
     try:
         spec_on = _spec_decode_on(base_url)
     except SpecDecodeUndetermined as exc:
@@ -716,6 +723,10 @@ def check_mtp_acceptance(base_url: str, min_p0: float) -> CheckResult:
     """Scrape /metrics for spec-decode acceptance rates. Passes if
     position-0 acceptance fraction exceeds `min_p0`. If no spec-decode
     metrics are exposed (spec-decode not enabled), passes with 'skipped'."""
+    if (type(min_p0) not in (int, float) or not math.isfinite(min_p0)
+            or not 0 <= min_p0 <= 1):
+        return CheckResult(name="mtp_acceptance", passed=False,
+                           detail="min_p0 must be finite and between 0 and 1")
     try:
         text = _get_text(f"{_server_root(base_url)}/metrics")
     except Exception as e:
