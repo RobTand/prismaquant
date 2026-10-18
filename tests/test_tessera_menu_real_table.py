@@ -58,6 +58,8 @@ The allocation fixture uses the five units with a real E4M3 R1024 price.
 The historical table has no R1024 price for layer 0's query and key units.
 The campaign covers one layer. The source probe covers the full model.
 The allocator requires costs for every mutable unit in its input population.
+The full-population refusal is covered in
+``tests/test_allocator_body_candidate_coverage_audit.py``.
 """
 from __future__ import annotations
 

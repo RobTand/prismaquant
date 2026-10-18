@@ -4,8 +4,8 @@ A selected-source row reads a few tensors from a few shards. Before this
 change it hashed each of those shards whole, on its GPU reservation, before
 its first encode. The row now adopts the campaign's streamed identity proof
 through ``CaptureSourceAuthentication.adopt_streamed_identity_cache``, the
-same check the joint pass uses (#1374), and a proof that refuses leaves every
-read to hash fresh.
+same check the joint pass uses (#1374), and in certified mode a proof that
+refuses leaves every read to hash fresh.
 """
 import hashlib
 import json
