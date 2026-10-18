@@ -2,7 +2,7 @@
 """Quality benchmark for the v22/v23 MiniMax-M2.7 artifact.
 
 Runs:
-  1. Perplexity on a held-out wikitext-2 sample (no spec-decode per
+  1. Perplexity on the embedded illustrative text (no spec-decode per
      `validator_spec_decode_caveat` memory — echo+logprobs returns the
      DRAFT model's NLL with spec-decode on).
   2. Sample generations on agentic / math / code prompts to verify
@@ -106,7 +106,7 @@ def main() -> int:
         print(text.strip()[:600])
         print("---")
 
-    # Summary line for ship/no-ship gate
+    # This smoke report applies no quality acceptance threshold.
     print(f"\n[summary] ppl={ppl:.3f}  generations={len(samples)} OK")
     return 0
 

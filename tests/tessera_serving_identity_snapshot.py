@@ -51,7 +51,7 @@ TRACE_M44E1_FILES = ("routes-rank0-sparky.json", "routes-rank1-sparklina.json")
 _GRIDS = {"TESSERA_E2M1_K2": "E2M1x2", "TESSERA_E4M3_K1": "E4M3",
           "TESSERA_BF16_K1": "BF16"}
 
-#: A digest no tree hashes to, stamped into a copy of each trace header to
+#: A chosen foreign fixture digest, stamped into a copy of each trace header to
 #: show what a v2 pin does with a header key it does not read.
 FOREIGN_DIGEST = "ab" * 32
 
