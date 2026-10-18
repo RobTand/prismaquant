@@ -53,6 +53,10 @@ copy with that missing metadata reconstructed from the committed producer.
 The source hash and the evidence commits accompany the reconstruction; no
 cost value or campaign artifact is changed, and the production gate still
 refuses an unstamped table.
+
+The allocation fixture uses only the probe units that the campaign priced.
+The campaign covers one layer. The source probe covers the full model.
+The allocator requires costs for every mutable unit in its input population.
 """
 from __future__ import annotations
 
@@ -248,13 +252,25 @@ def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
     so these tests passed on an allocation Tessera could not build.
     """
     from prismaquant import allocator
+    import pickle
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     costs = _historical_cost_fixture(tmp_path)
+    probe_bytes = PROBE.read_bytes()
+    original_probe = pickle.loads(probe_bytes)
+    priced_units = set(pickle.loads(costs.read_bytes())["costs"])
+    assert priced_units and priced_units < set(original_probe["stats"])
+    probe = {**original_probe, "stats": {
+        name: entry for name, entry in original_probe["stats"].items()
+        if name in priced_units}}
+    assert set(probe["stats"]) == priced_units
+    probe_path = tmp_path / "campaign-population-probe.pkl"
+    probe_path.write_bytes(pickle.dumps(probe))
+    assert PROBE.read_bytes() == probe_bytes, "historical campaign probe changed"
     layer_config = tmp_path / "layer_config.json"
     monkeypatch.setattr("sys.argv", [
         "allocator",
-        "--probe", str(PROBE),
+        "--probe", str(probe_path),
         "--costs", str(costs),
         "--formats", "TESSERA",
         "--target-bits", target_bits,
