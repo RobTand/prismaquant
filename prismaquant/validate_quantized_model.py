@@ -664,7 +664,7 @@ def check_perplexity(base_url: str, model_name: str,
             )
             valid = scored_echo_logprobs(
                 r["choices"][0]["logprobs"].get("token_logprobs"),
-                where=f"prompt {i}",
+                where="perplexity response",
             )
         except Exception as e:
             return CheckResult(

@@ -306,3 +306,13 @@ def test_example_main_refuses_invalid_generation_text(example, monkeypatch, caps
     output = capsys.readouterr().out
     assert "FAILED generation response" in output
     assert "[summary]" not in output
+
+
+def test_validator_error_has_one_prompt_label(monkeypatch):
+    validator, _calls, _echoes = _validator_http(
+        monkeypatch, [[None, -0.25], [None, -0.25], [None, None]],
+    )
+    result = _check(validator)
+    assert not result.passed
+    assert result.detail.count("prompt 3") == 1
+    assert "invalid token_logprobs at position 1" in result.detail
