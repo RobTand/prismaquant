@@ -1517,11 +1517,36 @@ def build_shipcard(
     return _assemble_shipcard(root, build_payload, resolved_lane, attested_weight_stats)
 
 
+def _claimed_bpp(value: Any, *, where: str) -> float | None:
+    if value is None:
+        return None
+    error = f"{where} bpp must be a finite, positive, non-boolean number"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(error)
+    try:
+        rate = float(value)
+    except OverflowError as exc:
+        raise ValueError(error) from exc
+    if not math.isfinite(rate) or rate <= 0:
+        raise ValueError(error)
+    return rate
+
+
+def _validate_build_bpp(build: Mapping[str, Any]) -> None:
+    claim = build.get("achieved_bpp")
+    if claim is None:
+        return
+    if not isinstance(claim, Mapping):
+        raise ValueError("build.achieved_bpp must be a mapping")
+    _claimed_bpp(claim.get("value"), where="build.achieved_bpp.value")
+
+
 def _resolved_build(
     root: Path, build: Mapping[str, Any] | None, lane: str | None,
 ) -> tuple[dict[str, Any], str | None]:
     """The build block with its recipe's replay claim, and the one lane it names."""
     build_payload = dict(build or {})
+    _validate_build_bpp(build_payload)
     from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
 
     # Validate a supplied marker before adding claims; do not silently repair
@@ -2561,6 +2586,10 @@ def _verify_build_block(card: Mapping[str, Any]) -> list[str]:
     from .layer_config import prefill_frontier_replay_claim
 
     try:
+        _validate_build_bpp(build)
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
         prefill_frontier_replay_claim(build)
     except ValueError as exc:
         problems.append(str(exc))
@@ -2810,7 +2839,7 @@ def _allocator_achieved_bpp_claim(
                 "source": f"layer_config.json:{selected_by} (no bpp stamped)",
             }
         return {
-            "value": float(value),
+            "value": _claimed_bpp(value, where="layer_config.json:selected_achieved_bits"),
             "source": f"layer_config.json:{selected_by}",
             "selected_label": meta.get("selected_label"),
             "scope": meta.get("achieved_bits_scope"),
@@ -2822,7 +2851,7 @@ def _allocator_achieved_bpp_claim(
         }
     if meta.get("achieved_bits") is not None:
         return {
-            "value": float(meta["achieved_bits"]),
+            "value": _claimed_bpp(meta["achieved_bits"], where="layer_config.json:achieved_bits"),
             "source": "layer_config.json:achieved_bits",
             "target_bits": meta.get("target_bits"),
             "scope": meta.get("achieved_bits_scope"),
@@ -2839,19 +2868,19 @@ def _allocator_achieved_bpp_claim(
         mode = payload.get("primary") or "log_error"
         entry = payload.get(mode) or {}
         value = entry.get("achieved_bits")
-        if value is None:
-            return {"value": None, "source": None}
-        return {
-            "value": float(value),
-            "source": f"pareto.knees.json:{mode}",
-            "target_bits": entry.get("target_bits"),
-            "note": (
-                "the allocator's achieved bpp for the knee it selected; it "
-                "describes the recipe, not the exported bytes"
-            ),
-        }
     except Exception:
         return {"value": None, "source": None}
+    if value is None:
+        return {"value": None, "source": None}
+    return {
+        "value": _claimed_bpp(value, where=f"pareto.knees.json:{mode}:achieved_bits"),
+        "source": f"pareto.knees.json:{mode}",
+        "target_bits": entry.get("target_bits"),
+        "note": (
+            "the allocator's achieved bpp for the knee it selected; it "
+            "describes the recipe, not the exported bytes"
+        ),
+    }
 
 
 def allocator_achieved_bpp(
