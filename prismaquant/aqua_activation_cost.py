@@ -536,12 +536,18 @@ def packed_act_dloss_per_expert(unit, keys: list[list[str]], model_path: str,
     total = 0.0
     for e, row in enumerate(keys):
         parts = [handles(k) for k in row]
-        w_e = parts[0] if len(parts) == 1 else torch.cat(parts, dim=0)
-        if tuple(w_e.shape) != (unit.out_features, unit.in_features):
+        if not parts or unit.out_features % len(parts):
             raise RuntimeError(
-                f"{unit.topology.name}: expert {e} materialized "
-                f"{tuple(w_e.shape)}, expected "
-                f"{(unit.out_features, unit.in_features)}")
+                f"{unit.topology.name}: expert {e} projection rows cannot "
+                f"split output shape {(unit.out_features, unit.in_features)}")
+        projection_shape = (unit.out_features // len(parts), unit.in_features)
+        for key, part in zip(row, parts):
+            if tuple(part.shape) != projection_shape:
+                raise RuntimeError(
+                    f"{unit.topology.name}: expert {e} projection {key} "
+                    f"materialized shape {tuple(part.shape)}, expected "
+                    f"{projection_shape}")
+        w_e = parts[0] if len(parts) == 1 else torch.cat(parts, dim=0)
         w_e = w_e.to(torch.float32)
         g_e, v_e = g_all[e], var[e]
         for lo in range(0, unit.out_features, rows_per_chunk):
