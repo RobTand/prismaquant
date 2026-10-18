@@ -61,9 +61,52 @@ def test_routed_pool_cannot_publish_a_shard_with_empty_maps(tmp_path):
     cached = probe.scan_cached_linear_stats(tmp_path, expected)
     output = tmp_path / "regrouped.pkl"
     reused = probe.synthesize_shard_from_linear_cache(r"model\.layers\.0\.", "", cached, expected, output)
-    if reused:
-        result = pickle.loads(output.read_bytes())
-        assert result["router_counts"] == data["router_counts"]
-        assert result["router_totals"] == data["router_totals"]
-    else:
-        assert not output.exists()
+    assert reused
+    result = pickle.loads(output.read_bytes())
+    assert result["router_counts"] == data["router_counts"]
+    assert result["router_totals"] == data["router_totals"]
+
+
+def test_regrouped_route_maps_merge_without_loss_or_duplication(tmp_path):
+    originals = []
+    for layer in (0, 1):
+        inputs = tmp_path / f"input{layer}"
+        inputs.mkdir()
+        path, expected, data = _shard(inputs, packed=True, routed=True, version=3)
+        data["meta"].update(expected)
+        name = f"model.layers.{layer}.mlp.experts.gate_up_proj"
+        row = next(iter(data["stats"].values()))
+        row["_packed_experts_module"] = name.rsplit(".", 1)[0]
+        data["stats"] = {name: row}
+        router = f"model.layers.{layer}.mlp.gate"
+        data.update(router_counts={router: {"0": 3.0}}, router_totals={router: 8},
+                    router_active_counts={router: {"0": 5}})
+        data["expert_route_stats"] = probe._route_stats_from_counts(
+            data["router_counts"], data["router_totals"], data["router_active_counts"])
+        target = tmp_path / f"probe_shard_{layer:03d}.pkl"
+        target.write_bytes(pickle.dumps(data))
+        originals.append(target)
+    cached = probe.scan_cached_linear_stats(tmp_path, expected)
+    combined = tmp_path / "combined.pkl"
+    assert probe.synthesize_shard_from_linear_cache(r"model\.layers\.", "", cached, expected, combined)
+    regrouped = pickle.loads(combined.read_bytes())
+    original = probe.merge_probe_pickles(originals, tmp_path / "old.pkl", write_output=False)
+    for field in probe._ROUTING_FIELDS:
+        assert regrouped[field] == original[field]
+
+
+def test_conflicting_duplicate_router_refuses_pooled_reuse(tmp_path):
+    path, expected, data = _shard(tmp_path, packed=True, routed=True, version=3)
+    data["meta"].update(expected)
+    path.write_bytes(pickle.dumps(data))
+    data["router_totals"]["model.layers.0.mlp.gate"] += 1
+    (tmp_path / "probe_shard_001.pkl").write_bytes(pickle.dumps(data))
+    assert not probe.scan_cached_linear_stats(tmp_path, expected)
+
+
+def test_old_synthesized_packed_shard_with_empty_maps_refuses(tmp_path):
+    path, expected, data = _shard(tmp_path, packed=True, version=3)
+    data["meta"].update(expected, synthesized_from_cache=True)
+    path.write_bytes(pickle.dumps(data))
+    assert not probe.probe_shard_is_reusable(path, expected)
+    assert not probe.scan_cached_linear_stats(tmp_path, expected)

@@ -1086,12 +1086,16 @@ def _has_packed_stats(stats: Mapping) -> bool:
 def _probe_capture_compatible(data: Mapping, expected_meta: Mapping) -> bool:
     meta = _probe_meta_flat(data.get("meta") or {})
     stats = data.get("stats") or {}
+    if not isinstance(stats, Mapping) or any(not isinstance(row, Mapping) for row in stats.values()):
+        return False
     packed = _has_packed_stats(stats)
     routed = packed or any(data.get(field) for field in _ROUTING_FIELDS)
     routed = routed or any(row.get("router_path") is not None for row in stats.values())
     recorded = meta.get("router_coverage_version")
     expected = expected_meta.get("router_coverage_version")
     if recorded != expected and not (recorded == 2 and expected == 3 and not routed):
+        return False
+    if routed and meta.get("synthesized_from_cache") and not data.get("router_counts"):
         return False
     return not packed or meta.get("packed_input_capture") == expected_meta.get("packed_input_capture")
 
@@ -1476,8 +1480,11 @@ def synthesize_shard_from_linear_cache(
             return False
 
     routing = _shard_routing_payload(selected, inc, getattr(cache, "routing", {}))
-    if _has_packed_stats(selected) and not routing["router_counts"]:
-        print("[incremental] synthesize refused: packed stats have no route maps",
+    requires_routes = _has_packed_stats(selected) or any(
+        row.get("router_path") is not None for row in selected.values()
+    )
+    if requires_routes and not routing["router_counts"]:
+        print("[incremental] synthesize refused: routed stats have no route maps",
               flush=True)
         return False
     payload = {
