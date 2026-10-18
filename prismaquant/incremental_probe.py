@@ -1229,6 +1229,14 @@ _CONTENT_META_KEYS: tuple[str, ...] = (
 )
 
 
+def _content_meta_anchor(expected_meta: Mapping) -> dict[str, Any]:
+    """Keep both content and capture contracts when pooling shards."""
+    return {
+        key: expected_meta.get(key)
+        for key in (*_CONTENT_META_KEYS, *_CAPTURE_META_KEYS)
+    }
+
+
 def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
     """Flatten `{meta, meta.incremental_shard}` into one dict. Shards
     written by this module stash extra fields under
@@ -4872,9 +4880,7 @@ def main():
     # a new shard's regex-matched Linears may already exist under
     # different shard groupings on disk, and we can synthesize the new
     # shard pickle from that cache rather than recompute.
-    content_meta_anchor = {
-        key: expected_metas[0].get(key) for key in _CONTENT_META_KEYS
-    }
+    content_meta_anchor = _content_meta_anchor(expected_metas[0])
     linear_cache = scan_cached_linear_stats(shard_dir, content_meta_anchor)
     if linear_cache:
         print(f"[incremental] linear cache: {len(linear_cache)} stats pooled "
