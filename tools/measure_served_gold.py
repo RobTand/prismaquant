@@ -207,6 +207,10 @@ def _calibration_contract(
     n_tokens_requested: int,
 ) -> dict[str, Any]:
     """Bind the exact text, tokenizer and window geometry that produced this."""
+    starts, _ = _window_geometry(len(token_ids), seqlen)
+    if (type(n_tokens_requested) is not int or n_tokens_requested <= 0
+            or len(token_ids) > n_tokens_requested):
+        raise ValueError("invalid calibration token request")
     tokenizer_files = {
         name: _sha256_file(tokenizer_dir / name)
         for name in ("tokenizer.json", "tokenizer_config.json")
@@ -222,7 +226,7 @@ def _calibration_contract(
         "n_tokens_requested": n_tokens_requested,
         "n_tokens_selected": len(token_ids),
         "seqlen": seqlen,
-        "n_windows": math.ceil(len(token_ids) / seqlen) if token_ids else 0,
+        "n_windows": len(starts),
         "window_overlap": 0,
         "calib_ids_sha256": hashlib.sha256(
             ",".join(str(i) for i in token_ids).encode("utf-8")
@@ -297,11 +301,8 @@ def recorded_calibration_contract(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _windows(token_ids: list[int], seqlen: int) -> list[list[int]]:
-    return [
-        token_ids[i:i + seqlen]
-        for i in range(0, len(token_ids), seqlen)
-        if len(token_ids[i:i + seqlen]) >= 2
-    ]
+    starts, _ = _window_geometry(len(token_ids), seqlen)
+    return [token_ids[start:start + seqlen] for start in starts]
 
 
 def _vocab_size(artifact_dir: Path) -> int:
@@ -330,7 +331,37 @@ def _post_completion(base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+def _logprob_row(entry: Any, *, where: str) -> dict[str, float]:
+    if not isinstance(entry, Mapping) or not entry:
+        raise SystemExit(f"REFUSING: missing logprob row at {where}")
+    row: dict[str, float] = {}
+    for token, value in entry.items():
+        logprob = value.get("logprob") if isinstance(value, Mapping) else value
+        if (not isinstance(token, str) or type(logprob) not in (int, float)
+                or not math.isfinite(logprob) or logprob > 0):
+            raise SystemExit(f"REFUSING: invalid logprob at {where}")
+        row[token] = float(logprob)
+    return row
+
+
+def _scored_prompt_rows(
+    response: Mapping[str, Any], window: list[int],
+) -> list[dict[str, float]]:
+    choices = response.get("choices")
+    if (not isinstance(choices, list) or len(choices) != 1
+            or not isinstance(choices[0], Mapping)):
+        raise SystemExit("REFUSING: incomplete prompt logprob response")
+    entries = choices[0].get("prompt_logprobs")
+    if not isinstance(entries, list) or len(entries) != len(window):
+        raise SystemExit("REFUSING: prompt position count differs from requested window")
+    # Only the window's first token has no predecessor and is unscored.
+    return [_logprob_row(entry, where=f"window position {index}")
+            for index, entry in enumerate(entries[1:], start=1)]
+
+
 def _cmd_dump(args: argparse.Namespace) -> int:
+    if args.top_k <= 0:
+        raise SystemExit("REFUSING: prompt logprob top-K must be positive")
     artifact_dir = Path(args.artifact_dir).resolve()
     manifest = _load_serve_manifest(artifact_dir)
     _check_manifest_describes_this_serve(
@@ -347,22 +378,17 @@ def _cmd_dump(args: argparse.Namespace) -> int:
         seqlen=args.seqlen, n_tokens_requested=args.max_tokens,
     )
 
-    positions: list[dict[str, float] | None] = []
-    for window in _windows(token_ids, args.seqlen):
+    windows = _windows(token_ids, args.seqlen)
+    if not windows:
+        raise SystemExit("REFUSING: no scorable calibration windows")
+    positions: list[dict[str, float]] = []
+    for window in windows:
         response = _post_completion(args.base_url, {
             "model": args.model, "prompt": window, "max_tokens": 1,
             "temperature": 0.0, "prompt_logprobs": args.top_k,
             "add_special_tokens": False,
         })
-        for entry in response["choices"][0].get("prompt_logprobs") or []:
-            # The first position of a window has no predecessor; vLLM returns
-            # null there and it is not a scorable next-token event.
-            if not entry:
-                continue
-            positions.append({
-                key: (value["logprob"] if isinstance(value, dict) else value)
-                for key, value in entry.items()
-            })
+        positions.extend(_scored_prompt_rows(response, window))
 
     payload = {
         "schema": SERVED_DUMP_SCHEMA,
@@ -370,7 +396,7 @@ def _cmd_dump(args: argparse.Namespace) -> int:
         "artifact_dir": str(artifact_dir),
         "prompt_top_k": args.top_k,
         "seqlen": args.seqlen,
-        "n_samples": len(_windows(token_ids, args.seqlen)),
+        "n_samples": len(windows),
         "n_positions": len(positions),
         "vocab_size": _vocab_size(artifact_dir),
         "spec_decode_detected": spec,
@@ -420,16 +446,37 @@ def _tail_logprob(row: Mapping[str, float], vocab_size: int) -> float:
     return min(math.log(residual / (vocab_size - len(row))), min(row.values()))
 
 
+def _stored_dump_population(
+    payload: Any, *, label: str,
+) -> tuple[dict[str, Any], list[dict[str, float]]]:
+    """Admit and normalize the owned JSON position list in place."""
+    if not isinstance(payload, Mapping) or payload.get("schema") != SERVED_DUMP_SCHEMA:
+        raise SystemExit(f"REFUSING: {label} dump has unsupported schema")
+    try:
+        contract = recorded_calibration_contract(payload)
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"REFUSING: {label} calibration population: {exc}") from exc
+    positions = payload.get("positions")
+    if not isinstance(positions, list) or len(positions) != payload["n_positions"]:
+        raise SystemExit(f"REFUSING: {label} position count differs from calibration")
+    for key in ("prompt_top_k", "vocab_size"):
+        if type(payload.get(key)) is not int or payload[key] <= 0:
+            raise SystemExit(f"REFUSING: {label} has invalid logprob {key}")
+    if payload.get("spec_decode_detected") is not False:
+        raise SystemExit(f"REFUSING: {label} has unverified speculative logprobs")
+    for index, row in enumerate(positions):
+        positions[index] = _logprob_row(row, where=f"{label} position {index}")
+    return contract, positions
+
+
 def _cmd_kl(args: argparse.Namespace) -> int:
     teacher_raw = Path(args.teacher).read_bytes()
     teacher_sha256 = bytes_sha256hex(teacher_raw)
     teacher_payload = json.loads(teacher_raw)
     del teacher_raw
     student_payload = json.loads(Path(args.student).read_text(encoding="utf-8"))
-    for name, payload in (("teacher", teacher_payload), ("student", student_payload)):
-        if payload.get("schema") != SERVED_DUMP_SCHEMA:
-            raise SystemExit(f"REFUSING: {name} dump has schema "
-                             f"{payload.get('schema')!r}")
+    teacher_contract, teacher = _stored_dump_population(teacher_payload, label="teacher")
+    student_contract, student = _stored_dump_population(student_payload, label="student")
     if teacher_payload["prompt_top_k"] != student_payload["prompt_top_k"]:
         raise SystemExit(
             "REFUSING: the two arms were dumped at different top-K "
@@ -437,27 +484,21 @@ def _cmd_kl(args: argparse.Namespace) -> int:
             f"{student_payload['prompt_top_k']}); their truncation floors "
             "differ and the difference would not be the quantization"
         )
-    if (teacher_payload["calibration_contract_sha256"]
-            != student_payload["calibration_contract_sha256"]):
+    if teacher_contract != student_contract:
         raise SystemExit(
             "REFUSING: the two arms scored different text/geometry; "
             "KL requires both models to see identical inputs"
         )
-    vocab_size = int(student_payload["vocab_size"])
-
-    teacher = teacher_payload["positions"]
-    student = student_payload["positions"]
-    scored = min(len(teacher), len(student))
+    if teacher_payload["vocab_size"] != student_payload["vocab_size"]:
+        raise SystemExit("REFUSING: the two logprob vocabularies differ")
+    vocab_size = student_payload["vocab_size"]
 
     all_kl: list[float] = []
     confident_kl: list[float] = []
     coverage: list[float] = []
     agree_all = 0
     agree_confident = 0
-    for index in range(scored):
-        p_row, q_row = teacher[index], student[index]
-        if not p_row or not q_row:
-            continue
+    for p_row, q_row in zip(teacher, student, strict=True):
         q_tail = _tail_logprob(q_row, vocab_size)
         divergence = sum(
             math.exp(lp) * (lp - q_row.get(token, q_tail))
@@ -472,9 +513,6 @@ def _cmd_kl(args: argparse.Namespace) -> int:
         if math.exp(p_row[p_top]) > CONFIDENT_TOP1_PROBABILITY:
             confident_kl.append(divergence)
             agree_confident += int(matched)
-    if not all_kl:
-        raise SystemExit("REFUSING: no scorable positions in common")
-
     identity = _producer_identity()
     record = {
         "schema": SERVED_KL_SCHEMA,
@@ -565,19 +603,12 @@ def _cmd_ppl(args: argparse.Namespace) -> int:
             "add_special_tokens": False,
         })
         window_nll: list[float] = []
-        for entry, token_id in zip(
-            response["choices"][0].get("prompt_logprobs") or [], window
+        for row, token_id in zip(
+            _scored_prompt_rows(response, window), window[1:], strict=True,
         ):
-            if not entry:
-                continue                # first position: nothing predicts it
-            value = entry.get(str(token_id))
-            if value is None:
-                continue
-            window_nll.append(
-                -(value["logprob"] if isinstance(value, dict) else value)
-            )
-        if not window_nll:
-            continue
+            if str(token_id) not in row:
+                raise SystemExit("REFUSING: actual token missing from prompt logprob position")
+            window_nll.append(-row[str(token_id)])
         nlls.extend(window_nll)
         per_window.append(sum(window_nll) / len(window_nll))
     if not nlls:

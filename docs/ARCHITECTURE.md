@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, complete GOLD populations.
+Served-logprob dump and PPL intake require one complete response for each
+requested window. Only each window's first token is unscored. Every later
+row must contain finite nonpositive logprobs; PPL also requires the actual
+token. The shared window geometry excludes trailing singletons consistently
+from both requests and calibration metadata.
+
+Stored-dump KL authenticates each existing calibration contract, requires
+its complete position roster, and compares matching populations, top-K and
+vocabulary sizes. It refuses empty rows and truncation instead of comparing
+a common prefix. Teacher identity still hashes the exact parsed bytes through
+the existing digest owner. Metric arithmetic and legacy comparison warnings
+remain unchanged.
+
+`gold-producer-population-green-v1` passes 113 CPU cases and compiles four
+files. Source, logs, terminal outcome and CAS receipt are verified against
+parent `f836fb21096` plus the recorded overlays. These checks use toy endpoint,
+tokenizer and provenance adapters while retaining the real CLI, population
+contracts and calculations. They establish measurement admission, with no
+live endpoint, served-quality or performance qualification.
+
 As of: 2026-10-17, architecture audit continuation, bootstrap uncertainty.
 The public `saturation_select.bootstrap_mean_ci` helper uses a local seeded
 random generator to sample with replacement. The previous generator's low
