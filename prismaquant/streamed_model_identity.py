@@ -415,6 +415,7 @@ def build_source_checkpoint_identity(
     *,
     extra_shard_paths: object = (),
     digest_cache_path: str | Path | None = None,
+    streamed_identity_cache_path: str | Path | None = None,
     source_authentication=None,
     current_bytes: bool = False,
 ) -> dict[str, object]:
@@ -452,6 +453,11 @@ def build_source_checkpoint_identity(
     It is for identities that authorize reading current cached weights, rather
     than retaining recorded source provenance after metadata drift.
 
+    ``streamed_identity_cache_path`` reuses a complete current streamed proof
+    instead of rereading shards. Missing or drifted coverage refuses; this
+    explicit handoff never falls back to bulk hashing. Raw metadata is still
+    read and hashed by this owner.
+
     An explicit qualified original ``source_authentication`` owner supplies
     independently bound expected whole-file descriptors instead. Config/index
     interpretation is authenticated by that owner; each actual tensor delivery
@@ -461,8 +467,10 @@ def build_source_checkpoint_identity(
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 
+    if streamed_identity_cache_path is not None and digest_cache_path is not None:
+        raise ValueError('source identity accepts only one digest cache input')
     if source_authentication is not None:
-        if digest_cache_path is not None or extra_shard_paths:
+        if digest_cache_path is not None or streamed_identity_cache_path is not None or extra_shard_paths:
             raise RuntimeError('original checkpoint identity accepts no stat cache or extra roster')
         from .source_generation import original_checkpoint_description
 
@@ -476,7 +484,7 @@ def build_source_checkpoint_identity(
         return {**value, 'content_sha256': canonical_json_sha256(
             value, where='source checkpoint content identity')}
     root = Path(source_model)
-    _, indexed_shards = _local_checkpoint_shards(source_model)
+    checkpoint_weight_map, indexed_shards = _local_checkpoint_shards(source_model)
     shard_paths = {Path(path).resolve() for path in (indexed_shards or ())}
     for path in extra_shard_paths or ():
         shard_paths.add(Path(path).resolve())
@@ -507,6 +515,8 @@ def build_source_checkpoint_identity(
             except (OSError, ValueError):
                 continue
 
+    if streamed_identity_cache_path is not None and extra_shard_paths:
+        raise ValueError('streamed source proof accepts no extra shard roster')
     reusable = (
         _read_source_checkpoint_digest_cache(Path(digest_cache_path))
         if digest_cache_path is not None
@@ -515,14 +525,23 @@ def build_source_checkpoint_identity(
     )
 
     fingerprints = [_streamed_identity_stat_fingerprint(path) for path in ordered]
+    if streamed_identity_cache_path is not None:
+        reusable = _strict_streamed_digest_entries(
+            Path(streamed_identity_cache_path), root=root,
+            checkpoint_weight_map=checkpoint_weight_map,
+            fingerprints=fingerprints,
+        )
     cached_entries = _digest_cache_entries(
-        reusable, fingerprints, current_bytes=current_bytes,
+        reusable, fingerprints,
+        current_bytes=current_bytes or streamed_identity_cache_path is not None,
     )
     digests = [str(entry['sha256']) if entry is not None else None for entry in cached_entries]
     recorded_fingerprints = [entry['fingerprint'] if entry is not None and
         not stat_fingerprint_reusable(live, entry['fingerprint']) else live
         for live, entry in zip(fingerprints, cached_entries, strict=True)]
     misses = [index for index, digest in enumerate(digests) if digest is None]
+    if misses and streamed_identity_cache_path is not None:
+        raise RuntimeError('streamed source proof is incomplete; regenerate the source proof before binding')
     if misses and dev_mode_enabled():
         # The digests key every cache, so a miss is hashed in both modes
         # (PQ #1147): dev mode only says so, loudly. Campaign rows declare a
@@ -728,6 +747,7 @@ def build_source_model_binding(
     *,
     dtype,
     digest_cache_path: str | Path | None = None,
+    streamed_identity_cache_path: str | Path | None = None,
     local_files_only: bool = False,
 ) -> dict[str, object]:
     """Bind checkpoint bytes and effective load dtype for cache reuse.
@@ -747,6 +767,7 @@ def build_source_model_binding(
         "schema": NATIVE_SOURCE_MODEL_BINDING_SCHEMA if decode else SOURCE_MODEL_BINDING_SCHEMA,
         "checkpoint": build_source_checkpoint_identity(
             root, digest_cache_path=digest_cache_path, current_bytes=True,
+            streamed_identity_cache_path=streamed_identity_cache_path,
         ),
         "effective_dtype": effective_dtype,
     }
@@ -826,6 +847,67 @@ def _read_streamed_model_identity_cache(
         cached.get("identity"), where="streamed model identity cache"
     )
     return cached, identity
+
+
+def _streamed_cache_shard_records(cached, identity, *, where):
+    fingerprints = cached.get('fingerprints')
+    if not isinstance(fingerprints, list) or not fingerprints:
+        raise RuntimeError(f'{where} has no fingerprints')
+    fingerprint_by_path = {}
+    for index, row in enumerate(fingerprints):
+        if not isinstance(row, dict) or not isinstance(row.get('path'), str):
+            raise RuntimeError(f'{where} fingerprint {index} is malformed')
+        path = str(Path(row['path']).resolve())
+        if path in fingerprint_by_path:
+            raise RuntimeError(f'{where} repeats shard path {path}')
+        fingerprint_by_path[path] = row
+    shard_by_path = {}
+    for index, row in enumerate(identity['shards']):
+        if not isinstance(row, dict) or not isinstance(row.get('path'), str):
+            raise RuntimeError(f'{where} shard {index} has no exact path')
+        path = str(Path(row['path']).resolve())
+        if path in shard_by_path:
+            raise RuntimeError(f'{where} repeats shard path {path}')
+        shard_by_path[path] = row
+    if set(shard_by_path) != set(fingerprint_by_path):
+        raise RuntimeError(f'{where} fingerprint coverage differs from its shard identity')
+    return fingerprint_by_path, shard_by_path
+
+
+def _strict_streamed_digest_entries(cache_path, *, root, checkpoint_weight_map,
+                                   fingerprints):
+    where = f'streamed source proof {cache_path}'
+    try:
+        cached, identity = _read_streamed_model_identity_cache(
+            cache_path, source_model=str(root))
+        if cached.get('source') != str(root):
+            raise RuntimeError('source root differs')
+        recorded, shards = _streamed_cache_shard_records(cached, identity, where=where)
+        live = {str(row['path']): row for row in fingerprints}
+        if set(live) != set(shards) or identity.get('checkpoint_weight_map') != checkpoint_weight_map:
+            raise RuntimeError('complete checkpoint roster differs')
+        entries = {}
+        for path, current in live.items():
+            old, shard = recorded[path], shards[path]
+            if (not _well_formed_fingerprint(old)
+                    or old['path'] != path
+                    or set(shard) != {'path', 'size', 'sha256'}
+                    or shard['path'] != path
+                    or type(shard['size']) is not int or shard['size'] <= 0
+                    or shard['size'] != old['size']
+                    or not isinstance(shard['sha256'], str)
+                    or re.fullmatch(r'[0-9a-f]{64}', shard['sha256']) is None
+                    or not stat_fingerprint_reusable(current, old)):
+                raise RuntimeError(f'current shard/stat correspondence differs: {path}')
+            entries[canonical_fingerprint_key(old)] = {
+                'fingerprint': old, 'sha256': shard['sha256'],
+            }
+        return entries
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f'{where} cannot bind current source bytes: {exc}; regenerate the '
+            'complete source proof before binding; refusing a bulk rehash'
+        ) from exc
 
 
 def _streamed_identity_record(*, config_dict, mapping, shards, checkpoint_weight_map,
@@ -1427,43 +1509,8 @@ def validate_cached_streamed_model_identity(
     cached, identity = _read_streamed_model_identity_cache(
         cache_path, source_model=source
     )
-    fingerprints = cached.get("fingerprints")
-    if not isinstance(fingerprints, list) or not fingerprints:
-        raise RuntimeError(
-            f"streamed model identity cache {cache_path} has no fingerprints"
-        )
-    fingerprint_by_path: dict[str, dict[str, object]] = {}
-    for index, row in enumerate(fingerprints):
-        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
-            raise RuntimeError(
-                f"streamed model identity cache fingerprint {index} is malformed"
-            )
-        path = str(Path(row["path"]).resolve())
-        if path in fingerprint_by_path:
-            raise RuntimeError(
-                f"streamed model identity cache repeats shard path {path}"
-            )
-        fingerprint_by_path[path] = row
-
-    identity_shards = identity.get("shards")
-    assert isinstance(identity_shards, list)  # validated above
-    shard_by_path: dict[str, dict[str, object]] = {}
-    for index, row in enumerate(identity_shards):
-        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
-            raise RuntimeError(
-                f"streamed model identity shard {index} has no exact path"
-            )
-        path = str(Path(row["path"]).resolve())
-        if path in shard_by_path:
-            raise RuntimeError(
-                f"streamed model identity repeats shard path {path}"
-            )
-        shard_by_path[path] = row
-    if set(shard_by_path) != set(fingerprint_by_path):
-        raise RuntimeError(
-            "streamed model identity cache fingerprint coverage differs from "
-            "its value-bearing shard identity"
-        )
+    fingerprint_by_path, shard_by_path = _streamed_cache_shard_records(
+        cached, identity, where=f"streamed model identity cache {cache_path}")
 
     checkpoint_weight_map, checkpoint_paths = _local_checkpoint_shards(source)
     if require_complete_checkpoint:

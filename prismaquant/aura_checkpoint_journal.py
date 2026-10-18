@@ -222,6 +222,30 @@ def _load_aura_checkpoint_manifest(
     from prismaquant.dev_mode import seal_check
     from prismaquant.production_weight_cache import first_identity_difference
 
+    from prismaquant.streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+    )
+
+    expected_extra = expected_identity.get("extra", {})
+    requested_binding = (expected_extra.get("source_binding")
+                         if isinstance(expected_extra, Mapping) else None)
+    if (isinstance(requested_binding, Mapping)
+            and requested_binding.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA):
+        expected_binding = validate_source_model_binding(
+            requested_binding, where="AURA requested native source binding")
+        stored_extra = (stored_identity.get("extra", {})
+                        if isinstance(stored_identity, Mapping) else {})
+        try:
+            stored_binding = validate_source_model_binding(
+                stored_extra.get("source_binding") if isinstance(stored_extra, Mapping) else None,
+                where="AURA stored native source binding")
+            if stored_binding != expected_binding:
+                raise ValueError("stored native source binding differs")
+        except ValueError as exc:
+            raise RuntimeError(
+                f"AURA checkpoint native source binding mismatch at {checkpoint_dir}: "
+                f"{exc}; use a fresh checkpoint directory and recompute before restore") from exc
+
     def attribution_surface(identity):
         if not isinstance(identity, Mapping):
             return None

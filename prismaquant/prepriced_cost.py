@@ -2,9 +2,10 @@
 
 This is an intake gate, not a new cost producer or an acceptance override.
 The existing schema, currency, research-provenance and Tessera Hessian owners
-decide their own contracts. A model reference is checked exactly as recorded;
-it is not a checkpoint-content attestation. Allocator and export gates still
-own per-unit coverage, renderer identity and serving eligibility.
+decide their own contracts. Model references match exactly. Native FP8 cells
+also require their measured source binding or a validated independent joint
+or sparse-anchor source contract. Allocator and export gates still own
+per-unit coverage, renderer identity and serving eligibility.
 """
 from __future__ import annotations
 
@@ -107,6 +108,96 @@ def _model_binding(payload: Mapping, model: str) -> dict[str, Any]:
     }
 
 
+def _native_cost_bindings(payload: Mapping, *, where: str, independent: bool):
+    from .joint_aura_rows import validate_joint_aura_entry
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+    )
+
+    anchor = None
+    provenance = payload.get("provenance") or {}
+    costs = payload.get("costs")
+    if not isinstance(costs, Mapping):
+        raise ValueError(f"{where}: native cost input has no cost map")
+    for qname, rows in costs.items():
+        if not isinstance(rows, Mapping):
+            raise ValueError(f"{where}: native cost rows for {qname} are malformed")
+        for fmt, entry in rows.items():
+            cell = f"{where} {qname}/{fmt}"
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"{cell}: native cost cell is malformed")
+            if "error" in entry:
+                continue
+            if independent and validate_joint_aura_entry(entry):
+                operator = entry["joint_operator_identity"]
+                if operator["qname"] != qname or operator["format"] != fmt:
+                    raise ValueError(f"{cell}: joint source identity names another cell")
+                continue
+            if independent and entry.get("production_anchor_measured") is True:
+                from .streaming_production_cache import validate_completed_production_anchor_identity
+
+                if anchor is None:
+                    anchor = validate_completed_production_anchor_identity(
+                        provenance.get("production_anchor_renderer"), where=cell)
+                if (fmt not in anchor["formats_by_qname"].get(qname, ())
+                        or entry.get("dw_source") != "production_render"
+                        or entry.get("cost_source") != "aura"):
+                    raise ValueError(f"{cell}: production-anchor source identity does not cover the cell")
+                continue
+            try:
+                binding = validate_source_model_binding(entry.get("source_binding"), where=cell)
+                if binding["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+                    raise ValueError("legacy decoder identity cannot qualify native costs")
+            except ValueError as exc:
+                raise ValueError(
+                    f"{cell}: native source binding is unqualified: {exc}; "
+                    "recompute/reprice this cell with the current source decoder; "
+                    "do not restamp retained costs") from exc
+            yield cell, binding
+
+
+def require_native_cost_source_binding(
+    payload: Mapping, expected_binding: object, *, where: str,
+) -> dict[str, object]:
+    """Require exact per-cell evidence against an offline producer binding."""
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+    )
+
+    try:
+        expected = validate_source_model_binding(expected_binding, where=where)
+        if expected["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+            raise ValueError("native source requires a complete v2 decoder binding")
+    except ValueError as exc:
+        raise ValueError(f"{where}: unqualified native harvest source binding: {exc}; run a fresh harvest and reprice") from exc
+    for cell, binding in _native_cost_bindings(payload, where=where, independent=False):
+        if binding != expected:
+            raise ValueError(f"{cell}: native source binding differs from the harvest; rebuild/reprice for this source")
+    return expected
+
+
+def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where: str) -> None:
+    """Observe current native source once; retain each priced cell's dtype.
+
+    Validated joint and sparse-anchor products retain their own source regime.
+    That admission is not an exact current-metadata v2 equality claim.
+    """
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    root = resolve_source_checkpoint_path(model)
+    if source_model_decode_contract(root) is None:
+        return
+    expected = None
+    for cell, binding in _native_cost_bindings(payload, where=where, independent=True):
+        if expected is None:
+            expected = build_source_model_binding(root, dtype=binding["effective_dtype"])
+        if binding != {**expected, "effective_dtype": binding["effective_dtype"]}:
+            raise ValueError(f"{cell}: native source binding differs from the current checkpoint/decoder; rebuild/reprice")
+
+
 def validate_prepriced_cost(
     path: str | os.PathLike, *, cost_mode: str, model: str,
     expected_sha256: str | None = None,
@@ -165,6 +256,7 @@ def validate_prepriced_cost(
             payload["costs"], references=lambda: hessian_references(payload)))
         hessian.pop("row_capture_sha256", None)
         binding = _model_binding(payload, model)
+        validate_native_cost_source_for_model(payload, model=model, where=str(source))
         usable = sum(
             "error" not in row
             for rows in payload["costs"].values() for row in rows.values())

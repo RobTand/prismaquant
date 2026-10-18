@@ -287,13 +287,18 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
     from transformers import AutoTokenizer
     from prismaquant.build_rtn_cache import stage_multimodal
     from prismaquant.cost_streaming import build_streamed_causal_lm
-    from prismaquant.streamed_model_identity import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, build_streamed_model_identity,
+        resolve_source_checkpoint_path, source_model_decode_contract,
+    )
     from prismaquant.measure_quant_cost import ActivationIndex
     from prismaquant.model_profiles import detect_profile
     from prismaquant.perturbed_x_cache import calibration_data_hash
     from prismaquant.calibration_data import load_calibration
 
-    staged, _cleanup = stage_multimodal(args.model)
+    source = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source) is not None
+    staged, _cleanup = stage_multimodal(str(source))
     profile = detect_profile(staged)
     if profile.name != MODEL_PROFILE:
         raise Glm53StockError(
@@ -335,9 +340,13 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
     try:
         model_identity = build_streamed_model_identity(
             runner,
-            args.model,
+            str(source),
             identity_cache_path=checkpoint_dir / "streamed_model_identity.json",
         )
+        source_binding = (build_source_model_binding(
+            source, dtype=torch.bfloat16,
+            streamed_identity_cache_path=checkpoint_dir / "streamed_model_identity.json",
+        ) if native_source else None)
         from prismaquant.aura_cost import run_streamed_production_anchor_aura
 
         payload = run_streamed_production_anchor_aura(
@@ -361,6 +370,7 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
                 "campaign_schema": HARVEST_SCHEMA,
                 "plan_scope": planned["plan_scope"],
                 "serving_profile_id": SERVING_PROFILE,
+                **({"source_binding": source_binding} if source_binding is not None else {}),
             },
         )
     finally:
@@ -379,6 +389,7 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
         "model_identity": dict(model_identity),
         "checkpoint_dir": str(checkpoint_dir),
         "aura_payload": payload,
+        **({"source_binding": source_binding} if source_binding is not None else {}),
     }
     from prismaquant.cost_stage_checkpoint import atomic_write_bytes
 

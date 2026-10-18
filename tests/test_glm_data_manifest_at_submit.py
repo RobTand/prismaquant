@@ -280,7 +280,7 @@ def test_every_submitted_row_carries_a_manifest(
     # together end to end by
     # ``tests/test_tessera_campaign_fanout.py::test_submit_hands_the_fleet_the_admissible_rows_only``.
     monkeypatch.setattr(dispatch, "_checked_manifest",
-                        lambda args, *, manifest: [])
+                        lambda args, *, manifest: rows)
     assert dispatch.cmd_submit(
         type("Args", (), {"workspace": str(workspace), "wait_s": 1})) == 0
 

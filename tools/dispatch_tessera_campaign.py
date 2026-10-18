@@ -1316,14 +1316,15 @@ def cmd_plan(args) -> int:
     return 0
 
 
-def _checked_manifest(args, *, manifest: Path) -> list:
-    """Re-derive every row's demand from its own argv, or refuse to go on.
+def _checked_manifest(args, *, manifest: Path) -> list[dict]:
+    """Return the rows whose own argv supports their demand, or refuse.
 
     A manifest is an editable file and the plan that wrote it is not
     authoritative over what it now says. So the check reads the rows as they
     stand: a hand-edited argv, a hand-edited ``mem_gb``, or a plan term that
     moved since are all the same question, asked of the bytes about to be
-    submitted.
+    submitted. Callers keep this validated snapshot instead of reopening the
+    editable path.
     """
     workspace = Path(args.workspace)
     plan_path = workspace / "plan.json"
@@ -1352,17 +1353,16 @@ def _checked_manifest(args, *, manifest: Path) -> list:
               f"(plan {record['plan_bytes']} B, baseline "
               f"{record['process_baseline_bytes']} B, margin "
               f"{record['guard_margin_bytes']} B)")
-    return records
+    return rows
 
 
 def cmd_check(args) -> int:
     """Recompute every manifest row's demand and refuse an under-declared one."""
     manifest = Path(args.manifest) if getattr(args, "manifest", None) else (
         Path(args.workspace) / "manifest.json")
-    records = _checked_manifest(args, manifest=manifest)
-    print(f"[dispatch] {len(records)} rows in {manifest} declare a demand "
+    rows = _checked_manifest(args, manifest=manifest)
+    print(f"[dispatch] {len(rows)} rows in {manifest} declare a demand "
           "their own argv supports")
-    rows = json.loads(Path(manifest).read_text())
     require_data_manifests(rows, where=manifest)
     print(f"[dispatch] {len(rows)} rows in {manifest} name a data manifest "
           "PrismaBuild can warm them from")
@@ -1543,8 +1543,8 @@ def cmd_submit(args) -> int:
     # This reads the planned rows, and re-deriving their manifests below
     # changes neither ``argv`` nor ``demand``, so what is checked is what is
     # sent.
-    _checked_manifest(args, manifest=manifest)
-    rows = attach_data_manifests(workspace, json.loads(manifest.read_text()))
+    rows = _checked_manifest(args, manifest=manifest)
+    rows = attach_data_manifests(workspace, rows)
     submitted = workspace / SUBMITTED_MANIFEST
     submitted.write_text(json.dumps(rows, indent=2) + "\n")
     plural = "" if len(rows) == 1 else "s"

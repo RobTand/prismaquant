@@ -352,6 +352,50 @@ def _render_dense_layer(
 PRODUCTION_ANCHOR_RENDERER_IDENTITY_SCHEMA = (
     "prismaquant.streaming_production_anchor_renderer.identity.v1"
 )
+
+
+def validate_completed_production_anchor_identity(value, *, where):
+    """Parse the renderer's complete sparse source contract without a model."""
+    from .cost_stage_checkpoint import canonical_json
+    from .digests import is_sha256hex
+    from .streamed_model_identity import validate_streamed_model_identity
+
+    if (not isinstance(value, Mapping)
+            or value.get("schema") != PRODUCTION_ANCHOR_RENDERER_IDENTITY_SCHEMA
+            or value.get("source_weight_binding") != "complete_streamed_model_content_identity"):
+        raise ValueError(f"{where}: missing production-anchor source identity")
+    validate_streamed_model_identity(value.get("source_model"), where=where)
+    plan = value.get("formats_by_qname")
+    if (not isinstance(plan, Mapping) or not plan
+            or any(not isinstance(name, str) or not name
+                   or not isinstance(formats, list) or not formats
+                   or any(not isinstance(fmt, str) or not fmt for fmt in formats)
+                   or len(set(formats)) != len(formats)
+                   for name, formats in plan.items())
+            or type(value.get("requested_entries")) is not int
+            or value["requested_entries"] != sum(len(formats) for formats in plan.values())):
+        raise ValueError(f"{where}: invalid production-anchor plan")
+    if any(_canon_fmt(fmt) != fmt or fmt in _ANCHOR_PASSTHROUGH_FORMATS
+           for formats in plan.values() for fmt in formats):
+        raise ValueError(f"{where}: invalid production-anchor format")
+    source = value.get("source_weights")
+    records = source.get("records") if isinstance(source, Mapping) else None
+    if (not isinstance(source, Mapping) or source.get("complete") is not True
+            or source.get("scope") != "sparse_anchor_plan"
+            or not isinstance(records, Mapping) or set(records) != set(plan)):
+        raise ValueError(f"{where}: incomplete production-anchor source roster")
+    for name, row in records.items():
+        if (not isinstance(row, Mapping) or set(row) != {"shape", "sha256"}
+                or not isinstance(row["shape"], list) or len(row["shape"]) != 2
+                or any(type(dim) is not int or dim <= 0 for dim in row["shape"])
+                or not is_sha256hex(row["sha256"])):
+            raise ValueError(f"{where}: invalid production-anchor source weight {name}")
+    if source.get("identity_sha256") != _canonical_json_sha256(
+            records, where="production anchor source-weight identity"):
+        raise ValueError(f"{where}: production-anchor source digest differs")
+    return canonical_json(value, where=where)
+
+
 _ANCHOR_PASSTHROUGH_FORMATS = frozenset({
     "BF16",
     "FP8_SOURCE",
@@ -867,8 +911,6 @@ class StreamedProductionAnchorRenderer:
         source-complete *sparse anchor* identity; it never claims that
         unrendered cells were materialized.
         """
-        from prismaquant.cost_stage_checkpoint import canonical_json
-
         if set(records) != set(self.formats_by_qname):
             raise RuntimeError(
                 "production anchor completed source identity scope differs "
@@ -904,7 +946,7 @@ class StreamedProductionAnchorRenderer:
                 where="production anchor source-weight identity",
             ),
         }
-        self.identity = canonical_json(
+        self.identity = validate_completed_production_anchor_identity(
             completed,
             where="completed production anchor renderer identity",
         )

@@ -942,6 +942,16 @@ def run_campaign_from_artifacts(
     if not isinstance(measured, Mapping):
         raise Glm53StockError("harvest AURA payload carries no cost rows")
     packed_names = _quantizable_packed_units(probe_census)
+    source_binding = None
+    if any(row.get("source_kind") == "fp8"
+           for row in (checkpoint_census.get("units") or {}).values()):
+        from .prepriced_cost import require_native_cost_source_binding
+        from .streamed_model_identity import validate_streamed_model_identity
+
+        validate_streamed_model_identity(
+            harvest.get("model_identity"), where="native stock harvest model identity")
+        source_binding = require_native_cost_source_binding(
+            expert_payload, harvest.get("source_binding"), where="native stock expert input")
     empirical = expert_empirical_rows(expert_payload)
     plugin = StockAnchoredFormatPlugin(
         arm_identity=arm_identity,
@@ -964,7 +974,7 @@ def run_campaign_from_artifacts(
         },
         "probe_census_calib_hash": probe_meta.get("calib_hash"),
     }
-    return run_stock_anchor_campaign(
+    payload = run_stock_anchor_campaign(
         declarations=dense,
         pinned=pinned,
         plugin=plugin,
@@ -978,6 +988,11 @@ def run_campaign_from_artifacts(
         require_empirical=True,
         refusals=refusals,
     )
+    if source_binding is not None:
+        for name in {declaration.qname for declaration in dense} | set(pinned):
+            for row in payload["costs"][name].values():
+                row["source_binding"] = source_binding
+    return payload
 
 
 RECIPE_REKEY_SCHEMA = "prismaquant.glm53_stock_campaign.recipe_rekey.v1"

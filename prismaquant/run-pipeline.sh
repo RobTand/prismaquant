@@ -1275,6 +1275,22 @@ COSTPROV
 cost_table_reusable() {
   local path="$1" stamped
   [[ -f "$path" ]] || return 1
+  if ! python3 - "$path" "$MODEL_PATH" <<'COSTSOURCE'
+import pickle
+import sys
+from prismaquant.prepriced_cost import validate_native_cost_source_for_model
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        payload = pickle.load(handle)
+    validate_native_cost_source_for_model(payload, model=sys.argv[2], where=sys.argv[1])
+except Exception as exc:
+    print(f"[pipeline] native source admission: {exc}; REBUILDING", file=sys.stderr)
+    sys.exit(1)
+COSTSOURCE
+  then
+    return 1
+  fi
   stamped="$(cost_table_cost_mode "$path")"
   if [[ -z "$stamped" ]]; then
     echo "[pipeline] WARNING: $path carries no provenance['cost_mode'] (predates the R2 stamp); reusing it UNVERIFIED under COST_MODE=${COST_MODE} -- its mode is unknown, this run does not stamp the current mode onto it, and no verified provenance is recorded for it"
