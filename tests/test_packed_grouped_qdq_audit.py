@@ -1,5 +1,6 @@
 """Packed QDQ must preserve row-local arithmetic and grouped dispatch."""
 from dataclasses import replace
+import json
 import os
 
 import pytest
@@ -190,6 +191,7 @@ def test_public_format_override_refreshes_packed_qdq(tmp_path, monkeypatch, fami
 def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermediate, count):
     assert torch.cuda.is_available(), "CUDA qualification cannot fall back to CPU"
     assert torch.cuda.get_device_capability() == (12, 1), "qualification requires GB10"
+    torch.manual_seed(1718)
     monkeypatch.setenv("PRISMAQUANT_EXTERNAL_WEIGHT_MANAGEMENT", "1")
     for width in (2048, intermediate):
         rows = torch.randn(13, width, device="cuda", dtype=torch.bfloat16)
@@ -216,8 +218,8 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
         {"experts.gate_up_proj": "NVFP4", "experts.down_proj": "NVFP4"},
         tmp_path, cal_hash="gb10", capture_inputs=False)
     inputs = torch.randn(32, 2048, device="cuda", dtype=torch.bfloat16)
-    indices = torch.tensor([[0, 1]] * 32, device="cuda")
-    weights = torch.full((32, 2), .5, device="cuda", dtype=torch.bfloat16)
+    indices = torch.arange(32 * 8, device="cuda").reshape(32, 8) % count
+    weights = torch.full((32, 8), 1 / 8, device="cuda", dtype=torch.bfloat16)
     with torch.no_grad():
         cache.install()
         try:
@@ -229,6 +231,17 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
             torch.cuda.current_stream().wait_stream(stream)
             uncaptured = model.experts(inputs, indices, weights)
             torch.cuda.synchronize()
+            model.experts.config._experts_implementation = "eager"
+            reference = model.experts(inputs, indices, weights)
+            model.experts.config._experts_implementation = "grouped_mm"
+            difference = (uncaptured.float() - reference.float()).abs()
+            print("GB10_FULL_OUTPUT " + json.dumps(dict(
+                family=family, hidden=2048, intermediate=intermediate, experts=count,
+                tokens=32, top_k=8, dtype=str(inputs.dtype),
+                bit_exact=torch.equal(uncaptured, reference),
+                max_abs=difference.max().item(),
+                different_elements=torch.count_nonzero(difference).item())))
+            assert torch.isfinite(reference).all()
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 captured = model.experts(inputs, indices, weights)
