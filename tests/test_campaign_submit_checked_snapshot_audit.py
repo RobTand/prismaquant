@@ -114,3 +114,16 @@ def test_check_uses_the_checked_rows_when_manifest_is_replaced(planned, monkeypa
     assert checked == [original]
     assert "data_manifest" not in json.loads(manifest.read_text())[0]
     assert calls == []
+
+
+def test_submitted_manifest_publisher_accepts_a_relative_workspace(planned, monkeypatch):
+    args, manifest, original, calls = planned
+    workspace = args.workspace
+    monkeypatch.chdir(workspace.parent)
+
+    submitted = dispatch._publish_submitted_manifest(Path(workspace.name), original)
+
+    assert submitted == workspace / dispatch.SUBMITTED_MANIFEST
+    assert json.loads(submitted.read_text()) == original
+    assert json.loads(manifest.read_text()) == original
+    assert calls == []

@@ -1533,6 +1533,27 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     return attached
 
 
+def _publish_submitted_manifest(workspace: Path, rows: list[dict]) -> Path:
+    """Publish one checked request per workspace; allow identical retries."""
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
+
+    submitted = workspace.resolve() / SUBMITTED_MANIFEST
+    payload = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
+    if not publish_new_bytes(submitted, payload, nofollow=True):
+        try:
+            existing = submitted.read_bytes()
+        except OSError as error:
+            raise RuntimeError(
+                f"submitted manifest at {submitted} is unreadable: {error}. "
+                "Use a fresh workspace.") from error
+        if existing != payload:
+            raise RuntimeError(
+                f"submitted manifest at {submitted} differs from the checked "
+                "request. Refusing to replace it. Use a fresh workspace for "
+                "a changed request.")
+    return submitted
+
+
 def cmd_submit(args) -> int:
     workspace = Path(args.workspace)
     manifest = workspace / "manifest.json"
@@ -1545,8 +1566,7 @@ def cmd_submit(args) -> int:
     # sent.
     rows = _checked_manifest(args, manifest=manifest)
     rows = attach_data_manifests(workspace, rows)
-    submitted = workspace / SUBMITTED_MANIFEST
-    submitted.write_text(json.dumps(rows, indent=2) + "\n")
+    submitted = _publish_submitted_manifest(workspace, rows)
     plural = "" if len(rows) == 1 else "s"
     print(f"[dispatch] data manifests attached to {len(rows)} row{plural} "
           f"-> {submitted}")
