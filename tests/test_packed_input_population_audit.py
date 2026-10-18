@@ -55,6 +55,10 @@ def test_incremental_main_refuses_legacy_packed_capture(probe_run, capsys):
     for meta in (payload["meta"], payload["meta"].get("incremental_shard", {})):
         meta.pop("packed_input_capture", None)
     shard.write_bytes(pickle.dumps(payload))
+    cached_input = work / "act" / "model__layers__0__mlp__experts.pt"
+    legacy = torch.load(cached_input, weights_only=True)
+    legacy["inputs"] = legacy["inputs"][:16].repeat(2, 1)
+    torch.save(legacy, cached_input)
     capsys.readouterr()
     run()
     assert "reuse shard 0:" not in capsys.readouterr().out
