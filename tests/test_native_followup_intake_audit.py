@@ -202,7 +202,7 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
     source, expected = producer_source(tmp_path)
     producer_cli_inputs(monkeypatch)
     names = sorted(name.removesuffix('.weight') for name in expected
-                   if name.endswith('.self_attn.o_proj.weight'))
+                   if name.endswith('.self_attn.o_proj.weight')) + ['lm_head']
     probe = tmp_path / 'hub-probe.pkl'
     probe.write_bytes(pickle.dumps({'stats': {
         name: {'h_trace': 1., 'n_params': expected[name + '.weight'].numel()}
@@ -228,7 +228,7 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, laye
         '--layers-per-shard', layers_per_shard,
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'FP8_E4M3',
         '--cost-mode', 'local', '--threads', '1', '--no-include-mtp', '--no-include-visual',
-        '--no-include-lm-head', '--no-watchdog'])
+        '--no-watchdog'])
     baseline.main()
     assert snapshots == [hub_id]
     payload = pickle.loads(output.read_bytes())
@@ -263,7 +263,7 @@ def test_baseline_reuse_checks_source_in_every_cost_mode(tmp_path, mode, state):
     environment = dict(os.environ, COST_MODE=mode, MODEL_PATH=str(source),
         BASE_COST_PATH=str(baseline), COST_PATH=str(baseline if mode == 'local' else tmp_path / 'cost.pkl'))
     environment['PATH'] = str(Path(sys.executable).parent) + os.pathsep + environment.get('PATH', '')
-    result = subprocess.run(['bash', '-c', functions + '\n' + decision +
+    result = subprocess.run(['bash', '-euo', 'pipefail', '-c', functions + '\n' + decision +
         '\nprintf "BASE_REUSABLE=%s\\n" "$BASE_COST_REUSABLE"'],
         env=environment, text=True, capture_output=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr

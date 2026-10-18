@@ -85,17 +85,17 @@ def _cost_payload(root, expected, case, tmp_path, monkeypatch):
     return payload
 
 
-def _pipeline_reusable(path, root):
+def _pipeline_reusable(path, root, *, cost_mode="aura"):
     # Same actual function extraction seam as the existing provenance test.
     # No outer campaign, workers, measurements or fake Python executable.
     driver = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
     block = "cost_table_cost_mode() {" + driver.split(
         "cost_table_cost_mode() {", 1)[1].split(
         "\nrequire_stage_settings() {", 1)[0]
-    environment = dict(os.environ, COST_MODE="aura", MODEL_PATH=str(root))
+    environment = dict(os.environ, COST_MODE=cost_mode, MODEL_PATH=str(root))
     environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
     return subprocess.run(
-        ["bash", "-c", block + '\ncost_table_reusable "$1"\n', "bash", str(path)],
+        ["bash", "-euo", "pipefail", "-c", block + '\ncost_table_reusable "$1"\n', "bash", str(path)],
         cwd=ROOT, env=environment, text=True, capture_output=True, timeout=120,
     )
 
