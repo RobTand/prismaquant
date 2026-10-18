@@ -563,6 +563,13 @@ def check_boundary_behavior(
     )
 
 
+def scored_echo_logprobs(value: object, *, where: str) -> list[float]:
+    scored = [item for item in value if item is not None]
+    if not scored:
+        raise ValueError(f"{where}: no token_logprobs returned")
+    return scored
+
+
 def check_perplexity(base_url: str, model_name: str,
                      max_ppl: float, max_p99_nll: float,
                      max_mean_nll: float,
@@ -643,15 +650,10 @@ def check_perplexity(base_url: str, model_name: str,
                 passed=False,
                 detail=f"prompt {i}: {type(e).__name__}: {e}",
             )
-        lp = r["choices"][0]["logprobs"]
-        token_logprobs = lp.get("token_logprobs") or []
-        valid = [x for x in token_logprobs if x is not None]
-        if not valid:
-            return CheckResult(
-                name="perplexity",
-                passed=False,
-                detail=f"prompt {i}: no token_logprobs returned",
-            )
+        valid = scored_echo_logprobs(
+            r["choices"][0]["logprobs"].get("token_logprobs"),
+            where=f"prompt {i}",
+        )
         nll = -sum(valid)
         total_nll += nll
         total_tokens += len(valid)

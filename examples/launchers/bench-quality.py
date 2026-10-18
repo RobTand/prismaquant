@@ -19,11 +19,13 @@ import time
 
 import requests
 
+from prismaquant.validate_quantized_model import scored_echo_logprobs
+
 VLLM = "http://localhost:8000/v1"
 MODEL = "minimax-m2.7-prismaquant"
 
 
-def perplexity_on_text(text: str, max_tokens: int = 1024) -> float:
+def perplexity_on_text(text: str, max_tokens: int = 1024) -> tuple[float, int]:
     """Tokenize via vLLM's echo-back loglikelihood mode."""
     r = requests.post(
         f"{VLLM}/completions",
@@ -41,14 +43,13 @@ def perplexity_on_text(text: str, max_tokens: int = 1024) -> float:
     out = r.json()
     if not out.get("choices"):
         raise RuntimeError(f"empty choices: {out}")
-    lps = out["choices"][0]["logprobs"]["token_logprobs"]
-    # First token has no logprob (None); skip.
-    nlls = [-lp for lp in lps if lp is not None]
-    if not nlls:
-        raise RuntimeError("no logprobs returned")
-    avg_nll = sum(nlls) / len(nlls)
+    scored = scored_echo_logprobs(
+        out["choices"][0]["logprobs"]["token_logprobs"],
+        where="perplexity response",
+    )
+    avg_nll = -sum(scored) / len(scored)
     import math
-    return math.exp(avg_nll), len(nlls)
+    return math.exp(avg_nll), len(scored)
 
 
 def sample_generations(prompts: list[str], max_tokens: int = 256) -> list[str]:
