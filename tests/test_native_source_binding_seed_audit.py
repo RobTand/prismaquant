@@ -20,6 +20,7 @@ from prismaquant import aura_checkpoint_journal as journal
 from prismaquant import streamed_model_identity as identity
 from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+from prismaquant.model_profiles import detect_profile
 from tests.test_resident_source_decode_audit import _source
 
 
@@ -27,6 +28,7 @@ def _proof(source, tmp_path):
     runner = build_streamed_causal_lm(
         str(source), device=torch.device('cpu'), dtype=torch.bfloat16,
         offload_folder=str(tmp_path / 'identity-offload'),
+        profile=detect_profile(str(source)),
         max_cache_slots=2, prefetch_workers=1, prefetch_min_available_gb=0,
         cache_headroom_gb=0, prefetch_lookahead=1,
         require_prefetched_residency=True, attn_implementation='eager')
