@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, staged-read reports.
+The staged-read comparison serializes the existing `MountFacts` fields and
+copies its options into a JSON object. A discovered mount no longer prevents
+report publication. `staged-mount-report-green-v1` passes two CPU cases and
+compiles both files, with verified source, terminal logs and CAS receipt
+against parent `11c4e0a8313` plus the recorded overlays. The checks exercise
+actual tiny tensor reads and report output with mount and admission adapters;
+they establish report serialization, without live staging or throughput claims.
+
 As of: 2026-10-17, architecture audit continuation, uniform assignment bpp.
 Uniform assignments sum serialized tensor payload bytes through the existing
 allocator payload owner, using each admitted member's actual shape and format.

@@ -226,8 +226,8 @@ def main():
     print(f"byte mismatches: {len(mismatches)}", flush=True)
 
     out = {"schema": "prismaquant.staged_read_stream_ab.v1",
-           "mount": {"fstype": mount[1] if mount else None,
-                     "options": mount[2] if mount else None},
+           "mount": {"fstype": mount.filesystem if mount else None,
+                     "options": dict(mount.options) if mount else None},
            "targets": targets, "records": records, "summary": summary,
            "mismatches": mismatches}
     if args.json_out:
