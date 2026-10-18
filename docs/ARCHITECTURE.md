@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit resume.
+Source commit: `2e8798f1bb7af719d1c300853ca78aa09f773217`. Documentation branch: `claude/w/docs`.
+This stamp covers the integrated resume changes and the retained-source draft.
+Sections 3.4, 4.1, 4.3, 4.6, 4.10, 7.1, 7.2 and 10 describe the affected contracts.
+Earlier dated entries below retain their historical scope and open-work state.
+For these contracts, the current sections supersede earlier open-work statements.
+These edits state no new served quality, speed or peak-memory result.
+The stage graph, serving lanes and runtime pin do not change.
+
 As of: 2026-10-18, architecture audit continuation, retention accounting.
 The telemetry retention command counts a CSV as removed only after successful
 unlink. A failed unlink reports the error and returns nonzero while preserving
@@ -22776,7 +22785,7 @@ which is what the rows touched since are keyed on.
 | **4/4 C** | Frontier point selection | `prismaquant.select_validated_frontier` (`1281-1288`) | overwrites `artifacts/layer_config.json`; `layer_config_validated_assignment.json`; `validated_frontier_selection.json` | none | validated-surrogate |
 | **4/4 D** | Production cache build / recache for the selected assignment, including exact non-BF16 `mtp.*` renders synthesized through the profile from `act/` | `production_recache` or `build_production_cache --recache-layer-config --activation-cache-dir act/`; all direct builder calls receive the remaining profile pins | `production_weight_cache_frontier_<digest>_recached.pkl`, `production_weight_cache_recached.pkl` / `…_raw.pkl` and their shard directories | settings-hash `production-cache-recached`, `frontier-recache`, `production-cache-raw`, including the resolved head policy | `PRODUCTION_CACHE=1`; explicit quantized MTP fails closed without exact source/module/activation coverage |
 | **4/4 D×N (manual)** | Exact multi-host cache striping and set union. Plan whole-layer/auxiliary qname groups, run independent allowlisted cache builds, manifest and verify each input stripe bundle, transfer the stripes to the final export filesystem, union there, then verify the published union; copied unions carrying fused NVFP4 witnesses refuse | `prismaquant.production_cache_stripes`; `build_production_cache --include-qnames-file`; `prismaquant.union_production_cache {manifest,verify-shard,union,verify}` | `stripe-plan.json`, `stripe-NN.qnames.txt`, per-worker cache bundles, final `production_weight_cache.pkl` + content-addressed `weights/` + `union_manifest.json` | campaign identity binds source, calibration, full producer code, settings, render semantics, and assignment or stripe-plan coverage | operator workflow, not a `run-pipeline.sh` default; native materialized formats only (§5.4) |
-| **3c** | AURA additivity report — `residual = measured_end_KL − Σ predicted_dloss`, stamped into `cost.pkl` `provenance["additivity"]` (§4.3) | `prismaquant.aura_additivity_gate` (+ optional `validate_assignments_kl` under `AURA_ADDITIVITY_GATE=measure`) | `artifacts/aura_additivity.json`, `aura_additivity_kl.json` (measure only); `logs/aura_additivity*.log` | none — non-blocking report, skip-if-exists on the KL half | `COST_MODE=aura`, `AURA_ADDITIVITY_GATE≠0` |
+| **3c** | AURA additivity report — `residual = measured_end_KL − Σ predicted_dloss`, stamped into `cost.pkl` `provenance["additivity"]` (§4.3) | `prismaquant.aura_additivity_gate` (+ optional `validate_assignments_kl` under `AURA_ADDITIVITY_GATE=measure`) | `artifacts/aura_additivity.json`, `aura_additivity_kl.json` (measure only); `logs/aura_additivity*.log` | `assignment-kl` binding for reusable KL; non-blocking report | `COST_MODE=aura`, `AURA_ADDITIVITY_GATE≠0` |
 | **3d** | Discovery-walker export gate (§8.8) — meta-load + one fake forward against the profile's claim rules; refuses the run before ANY export lane on an unclaimed matmul-fed node / unresolved floating multiplicand / unknown walk-failure kind / decided-but-unpriced contradiction, decided from structured fields only. Override env excuses trace incompleteness ONLY (stamped); claims have no override | `prismaquant.model_walk` (`python3 -m prismaquant.model_walk`) | `artifacts/model_walk.json`; `logs/model_walk.log` | none — always runs; it is the gate | every lane; knobs `WALK_GATE_SEQLEN=8`, `WALK_GATE_EXECUTION=fake`, `PRISMAQUANT_WALK_GATE_OVERRIDE=<reason>` |
 | **4/4 E-gguf** | GGUF skeleton + export + llama.cpp smoke | `convert_hf_to_gguf.py` (`1461-1464`), `prismaquant.export_gguf` (`1469-1493`), `llama-completion` (`1500-1516`) | `artifacts/skeleton.gguf`, `exported.gguf` | settings-hash `gguf-skeleton` (`1488`); export always runs | GGUF lane; **exits 0** |
 | ~~**4/4 E-cb**~~ (RETIRED 2026-09-02 with the lane, §9.2) | CB col-weights + codebook export | `harvest_cb_col_weights "[4/4]"`, `export_nvfp4_cb[_streaming]` | `exported_nvfp4_cb/` in **~1 GiB safetensors shards** (`EXPORT_SHARD_BYTES`, default `1073741824`) + `.pqcb` codebook sidecar | settings-hash `cb-col-weights`; export always runs | CB lane; no in-lane serving smoke; **exits 0** |
@@ -22899,7 +22908,7 @@ PRODUCTION_CACHE_LEVERS=gptq,static_act_order,joint_scale_opt
 PRODUCTION_CACHE_RENDER_SCOPE=assignment  …_CACHE_PREFETCH=require
 VALIDATED_SOURCE_PREFETCH=require   VALIDATED_FRONTIER_PICK=kneedle,
                                     or `budget` under a TARGET_DISK_GB card
-VALIDATED_FRONTIER_SKIP_CALIB=$NSAMPLES (held-out disjointness, ON)
+VALIDATED_FRONTIER_SKIP_CALIB=<derived from consumed source positions; explicit 0 is in-sample>
 CB_EXPERT_EMPIRICAL / CB_SCALE_CODING / CB_CODEBOOK_* / CB_SCALE_SWEEP*  —
                      lost their shell DEFAULTS on 2026-09-02 with the Gridbook
                      codebook lane (archive/gridbook_lane_2026-09-02/). Every
@@ -23110,6 +23119,58 @@ semantics; §4 owns the cost-mode semantics; §5 owns the lever semantics.
 
 ### 3.4 Reuse guards and the silent-reuse class
 
+The current inplace frontier guard binds the base and candidate assignment bytes.
+It also binds the probe, costs, cache index and local calibration bytes.
+A stable Pareto label cannot establish this identity.
+A point without the request binding requires a rebuild.
+Stage settings also bind the measurement and render options
+(`pipeline.frontier_request_digest`, `pipeline.STAGE_SETTINGS_KEYS`,
+`run-pipeline.sh`, `FRONTIER_REQUEST_DIGEST`).
+
+Resident AURA reuse includes `AURA_COST_PROBE_MICROBATCH`.
+The streamed projection omits that unused resident option.
+Raw and hybrid stages share the raw measurement projection.
+The hybrid stage also binds the raw cost bytes
+(`pipeline.stage_settings_projection`, `pipeline.STAGE_SETTINGS_KEYS`,
+`run-pipeline.sh`, `aura-hybrid-cost`).
+
+Native retained-cost admission remains strict in dev mode.
+For a native source, each usable ordinary cost cell requires `source_model_binding.v2`.
+The binding covers shards, config, index, root Python metadata, effective dtype
+and `prismaquant.native_fp8_source_decode.v1`.
+Intake validates the cell contracts before it hashes source shards.
+It resolves the current source locally and observes its binding once.
+Canonicalization reuses the same binding object within that intake.
+A native binding cannot qualify costs against an ordinary source
+(`prepriced_cost.validate_native_cost_source_for_model`,
+`prepriced_cost._native_cost_bindings`,
+`streamed_model_identity.build_source_model_binding`).
+
+Validated joint rows and completed sparse-anchor rows keep independent lineage
+rules and their declared cell scope.
+Those rules do not establish exact current-metadata v2 equality.
+A joint row must name the same qname and format.
+An anchor row must belong to the completed renderer's format map
+(`prepriced_cost._native_cost_cells`,
+`streaming_production_cache.validate_completed_production_anchor_identity`).
+Offline native stock intake instead requires exact per-cell harvest binding equality.
+It also compares the binding's shard digests with the harvest model identity.
+This check does not reopen the source
+(`prepriced_cost.require_native_cost_source_binding`,
+`glm53_stock_reprice.run_campaign_from_artifacts`).
+Fresh harvest binds the source before AURA measurement.
+Only new dense and pinned stock rows receive that harvest binding.
+Copied expert rows retain their own evidence
+(`glm53_stock_harvest.run_harvest`,
+`glm53_stock_reprice.run_campaign_from_artifacts`).
+
+A complete streamed proof can supply shard digests to a new source binding.
+The strict seed checks its live roster, metadata and stat fingerprints.
+An incomplete or stale explicit proof refuses without a second bulk hash.
+Native AURA journals compare source bindings before unit restoration in both modes
+(`streamed_model_identity._strict_streamed_digest_entries`,
+`aura_checkpoint_journal.AuraCheckpointJournal`).
+
 **Dev mode is the default and suspends the run-gate half of this class, never
 the integrity half (2026-09-19, #771; the default since 2026-09-24, #1147).**
 The identity guards below exist so a certified artifact is reproducible.
@@ -23201,7 +23262,7 @@ stamping. A refused mismatch files nothing, and the `tessera-plan` carve-out is 
 plan still refuses, because an allocation binding guessed after translation is a fiction rather
 than an admission.
 
-**The current guard roster has 15 call sites over 15 declared stage identifiers**:
+**The shell guard roster has 15 call sites over 15 stage identifiers**:
 `probe`, `base-cost`, `render-cost-cache`, `render-cost`, `aura-dw-cache`,
 `aura-cost`, `aura-hybrid-cost`, `cb-col-weights`, `frontier-cache`,
 `frontier-kl-point`, `frontier-recache`, `production-cache-recached`, `production-cache-raw`,
@@ -23377,6 +23438,42 @@ lane under an LDLQ scope the same run also emits a raw (no-LDLQ) render sidecar,
 allocator-consumable cost table falls out of it for free — §6.5.2.
 
 ### 4.1 Stages that always run
+
+Ordinary incremental probe reuse binds the calibration seed, checkpoint content
+identity and local dataset byte digest before model setup.
+One input record controls shard, pooled Linear and precompute reuse.
+Missing or changed evidence causes recomputation.
+A remote dataset without a local byte identity cannot use persistent reuse.
+The optional context key also binds checkpoint content.
+Tokenizer and chat-template bytes remain outside this reuse identity
+(`incremental_probe.main`, `incremental_probe._probe_reuse_inputs_mismatch`,
+`incremental_probe._compute_precompute_key`).
+
+Precompute reuse restores the saved routing maps.
+Route coverage version 3 rejects affected old routed shards.
+Packed records require `module_once.v1` because capture records each module input
+once per forward.
+Pooled reuse derives content metadata from the shard contract
+(`incremental_probe._load_precompute_cache`,
+`incremental_probe.probe_shard_is_reusable`,
+`incremental_probe._CONTENT_META_KEYS`,
+`incremental_probe._run_body_streaming_shard`).
+
+The packed activation QDQ hook uses the HF eager expert reference for the hooked call.
+Each projection applies its own activation quantizer.
+The hook restores the previous expert implementation when the call ends.
+This route has CPU contract qualification.
+GB10 capture, performance and power qualification remain open
+(`perturbed_x_cache.PerturbedActivationCache._install_packed_expert_activation_quant`).
+The per-expert AQUA reader checks each sibling's configured rows and columns
+before concatenation (`aqua_activation_cost.packed_act_dloss_per_expert`).
+
+Fresh native baseline shards bind measured cells before shard publication.
+Shard reuse checks the same binding.
+Body, MTP and visual loads use the resolved original source root
+(`incremental_measure_quant_cost.main`,
+`incremental_measure_quant_cost._expected_cost_shard_meta`,
+`incremental_measure_quant_cost.cost_shard_is_reusable`).
 
 | Stage | Module | Produces |
 |---|---|---|
@@ -23593,6 +23690,42 @@ stamp so extrapolated rows still carry production provenance. Export still quant
 expert.
 
 ### 4.3 AURA — the default cost mode (`COST_MODE=aura`)
+
+Native AURA classifies the resolved original checkpoint, including Hub snapshots.
+Its streamed proof and journal use that same root.
+Resident native AURA uses `streaming_model.load_resident_source_model`.
+The decoder multiplies on the declared block grid in BF16 arithmetic.
+An FP32 request casts that decode to FP32.
+It does not produce an exact FP32 block decode.
+Native streaming refuses FP32 before loading, including an automatic FP32 choice.
+The operator must choose BF16 streaming or the resident route.
+There is no implicit route fallback (`aura_cost.main`,
+`streaming_model.load_resident_source_model`).
+
+Fresh expert component cells receive their source binding before merge or backfill.
+Both streamed expert journals bind that source before unit restoration.
+Production-render synthesis binds new scored cells and their derived BF16 terminals
+to the qualified cache source.
+Fallback cells retain their own evidence.
+Final ordinary AURA cells retain the source binding.
+Joint and sparse-anchor final rows keep their independent evidence rules
+(`expert_empirical_cost.main`,
+`production_render_cost.synthesize_production_render_cost_payload`,
+`aura_cost.compute_aura_cost`, `aura_cost.compute_aura_cost_streamed`).
+Backfill does not attest inherited rows as new measurements
+(`expert_empirical_cost.backfill_missing_from_base`,
+`glm53_stock_reprice.run_campaign_from_artifacts`).
+
+The advisory additivity report reuses only a bound full-sequence result.
+Its binding covers the exact assignment, actual calibration draw hash, result bytes,
+cache index bytes and render settings.
+A matching frontier or single-assignment result can supply the measurement.
+On a miss, `measure` calls KL on the configured AURA draw.
+`auto` reuses a match or reports only the predicted sum.
+A failed measurement cannot supply an old scalar.
+The report remains non-blocking and does not change allocation
+(`pipeline.assignment_kl_measurement`, `pipeline.STAGE_SETTINGS_KEYS`,
+`run-pipeline.sh`, `aura_assignment_kl`).
 
 `aura_cost.py`. Cost is the KL-adjoint inner product with the production-rendered weight error
 (`:5-14`, impl `:695-725`):
@@ -24719,6 +24852,26 @@ GLM-5.3 prefix, `tests/fixtures/pact_glm53_e4m3_prefix_1584.json`) and
 
 ### 4.6 Selection
 
+The validated selector derives its default skip from consumed source positions.
+The calibration loader records original local source-document indices for each window.
+This includes packed short documents and seeded shuffles.
+The pipeline checks every active probe and cost draw with its actual count,
+sequence length and seed.
+It extends the selection prefix until every retained window lies after all consumed positions.
+The selection count includes calibration repeats.
+Different sequence lengths do not require alignment
+(`calibration_data.load_calibration`, `pipeline.held_out_calibration_skip`,
+`run-pipeline.sh`, `VALIDATED_FRONTIER_SKIP_CALIB`).
+
+This proof requires one local source-position domain.
+It supports JSONL, text and recognized extensionless corpora.
+Identical local copies share the domain.
+Different corpus bytes, nonlocal corpora and unsupported formats require another proof.
+The pipeline refuses an unprovable bound or an insufficient safe-window population.
+Explicit zero skip retains the historical in-sample override.
+That override establishes no held-out split
+(`pipeline.held_out_calibration_skip`, `calibration_data.load_calibration`).
+
 `SELECTION_MODE` defaults to `surrogate` (§3.3): `layer_config.json` straight from the DP at
 `--target-bits`, no real KL. The knee is the post-cliff log-error kneedle
 (`allocator.py:213-221`); raw-linear and global-log knees are diagnostics.
@@ -24727,8 +24880,8 @@ there is no intrinsic knee and ship bpp should come from a byte budget or measur
 
 `SELECTION_MODE=validated-surrogate` (`run-pipeline.sh:1056-1288`, requires
 `PRODUCTION_CACHE=1`) is the real-KL path: Pareto assignments → one format-menu frontier cache
-→ `validate_assignments_kl` per point (`--calib-skip-first $NSAMPLES` is the held-out
-mechanism; `--kl-scope full_sequence` since M26) → `select_validated_frontier` → optional
+→ `validate_assignments_kl` per point (the consumed-position skip below provides the held-out
+bound; `--kl-scope full_sequence` since M26) → `select_validated_frontier` → optional
 `MSE_PROMOTION` rewrite → `production_recache` re-fits activation scales for the selected
 assignment.
 
@@ -24892,11 +25045,11 @@ selected. The A/B that would justify a CB default has not been run — and is **
 Robert (2026-07-30)** behind the NVFP4-vs-CB-FP8@4.5 criteria work; CB stays `weight-recon`
 until it runs.
 
-**The trust-region readout that rides with the default objective.** `AURA_ADDITIVITY_GATE`
-defaults to **`measure`** (ruled 2026-07-30), so every `COST_MODE=aura` run performs one
-bounded end-KL eval and stamps a real `residual` into `cost.pkl`'s `provenance["additivity"]`
-— stage `[3c]`, §4.3. `auto` (report only from a measurement the run already made) and `0`
-remain selectable.
+**The trust-region report.** `AURA_ADDITIVITY_GATE` defaults to `measure`.
+It reuses a bound result or attempts one KL evaluation, as specified in §4.3.
+`auto` and `0` remain selectable.
+A failed measurement leaves the report without measured KL
+(`pipeline.assignment_kl_measurement`, `run-pipeline.sh`, `AURA_ADDITIVITY_GATE`).
 
 ### 4.8 The Sensitivity Card — probe once, price an arbitrary menu (2026-08-14)
 
@@ -25217,6 +25370,33 @@ twin of anything live — it is the only one of the two left, and §4.10 is its
 seam.
 
 ### 4.10 The Tessera continuous menu — `FORMATS=TESSERA` (2026-09-02)
+
+Campaign `check` and `submit` retain the rows from the parse that passed validation.
+`submit` derives the read sets from those rows.
+It publishes `WORKSPACE/manifest.submitted.json` once through the shared create-only writer.
+An identical retry can use the published bytes.
+A different checked request refuses before the PB client starts and requires a fresh workspace.
+The retry read refuses a leaf symlink
+(`tools/dispatch_tessera_campaign.py`, `_checked_manifest`,
+`cmd_submit`, `_publish_submitted_manifest`).
+This contract prevents ordinary submit calls from replacing each other's pending manifest.
+It does not prevent manual file replacement or establish exclusive receipt ownership.
+
+Joint dispatch reuses a submitted quantum only when its record identity matches
+the current request.
+A changed record refuses before terminal suppression or retry
+(`tools/dispatch_joint_quanta.py`, `_dispatch`).
+Selected-wire materialization admits memory from its priced activation row cap
+and resident executor options.
+Campaign streaming flags do not set this demand
+(`tessera_materialization.plan`).
+
+The GLM stock campaign preserves empirical serving-unit KL rows from an
+independent calibration draw in their own currency.
+The merge does not establish a common calibration draw for those empirical rows
+and the smooth harvested rows.
+This is an accepted limit, not a new served-quality result
+(`glm53_stock_reprice.run_campaign_from_artifacts`).
 
 For a sampled allocation that selects source wires not yet encoded, the opt-in
 completion path is:
@@ -29093,6 +29273,22 @@ parity does not establish serving, model quality or multi-host behavior.
 
 ### 7.1 What runs where
 
+Canonical ship cards use the current card parent as the artifact root.
+New external cards declare `external_artifact=true` and use their bound `model_dir`.
+Older external cards use that directory when their parent has neither artifact
+config nor weight manifest.
+Older cards without the marker remain ambiguous when their parent contains those files
+(`shipcard.open_shipcard`, `shipcard._slot_artifact_dir`).
+Slot updates lock the card parent and artifact root in canonical order.
+They reload the card and refuse a changed artifact root.
+External updates check artifact identity and the available weight stat attestation
+before publication (`shipcard.fill_slot`, `shipcard._shipcard_directory_lock`).
+Recipe intake and saved build replay require finite, positive, non-Boolean achieved rates.
+Absent and null rates retain their meaning.
+Source precedence and recipe-price cross-check thresholds do not change
+(`shipcard._claimed_bpp`, `shipcard._validate_build_bpp`,
+`shipcard._allocator_achieved_bpp_claim`).
+
 | Stage | Tool | Run by the pipeline? | Verdict? |
 |---|---|---|---|
 | PrismaSnap BF16 fold fidelity | `tools/measure_vllm_full_kl.py` → `tools/prismasnap.py attest-fold-fidelity` | no — optional pre-pipeline candidate workflow | **blocking for a marked source**: original-BF16 → snapped-BF16 all-position forward KL `≤5e-4`, with BF16/no-spec-decode launch contracts and source, teacher payload, calibration, serve-fingerprint, index, weight-map, and shard-content replay; atomically transitions `MATERIALIZED` to `VERIFIED` |
@@ -29704,7 +29900,7 @@ from a silent omission into an explicit refusal. `verify` is not yet wired into
 
 **`validate_assignments_kl.py`** — the pipeline passes `--kl-scope full_sequence`
 (`run-pipeline.sh:269`, `:1208`; option `:832`), `--n-calib-samples 32`, `--calib-seqlen 1024`,
-and `--calib-skip-first $NSAMPLES` for held-out disjointness (`:1194-1219`); the CLI's own
+and the consumed-position `--calib-skip-first` bound from §4.6; the CLI's own
 defaults (2 × 128, `:767-925`) are not what ships. `_kl_repeat_summary` emits
 `kl_mean/kl_std/kl_stderr/kl_ucb`. GPU-only via `gpu_guard.require_cuda_hot_path`.
 
@@ -29955,6 +30151,23 @@ certificate rules out an all-native comparator but never substitutes for the
 served displaced-container arm.
 
 ### 7.2 `validate_quantized_model.py` — the numeric ship gate
+
+`validate_quantized_model.scored_echo_logprobs` validates the scored population
+for this gate and `examples/launchers/bench-quality.py`.
+It permits an optional first `None`.
+Every scored entry must be numeric, finite and nonpositive.
+Booleans, later missing entries and an empty scored population fail.
+Invalid observations produce a failed numeric check.
+Token weighting uses the complete scored list.
+The validator keeps `max_tokens=1, echo=True`, including any valid generated tail.
+The example keeps `max_tokens=0, echo=True`
+(`validate_quantized_model.check_perplexity`,
+`examples/launchers/bench-quality.py`, `perplexity_on_text`).
+Standalone perplexity thresholds must be finite and non-Boolean.
+MTP acceptance thresholds must also lie between zero and one, inclusive.
+Default thresholds and the metric era do not change
+(`validate_quantized_model.check_perplexity`,
+`validate_quantized_model.check_mtp_acceptance`).
 
 Check order `:12-31`: serve → generation sanity → boundary behavior →
 perplexity/NLL → MTP acceptance. Fixed
@@ -32275,6 +32488,24 @@ that both map the `.so` in different residency modes no longer hash identically 
 only the substitution half above stays open.
 
 ## 10. Hardware & environment
+
+The shared create-only byte publisher gives each call a private stage file.
+Concurrent calls in one process cannot alter another call's stage bytes.
+The existing no-follow parent-descriptor publication rules still apply
+(`cost_stage_checkpoint.publish_new_bytes`).
+
+The census-cache tool parses authenticated config bytes for assignment and metadata.
+Its optional projection retains the path-change refusal
+(`tools/build_tessera_census_cache.py`, `main`).
+The offline calibration builder rejects nonpositive token windows at CLI and pack intake
+(`tools/build_diverse_calibration.py`, `_require_positive_target`).
+Chain-roll analysis requires the complete declared result population before reports
+(`tools/chain_roll_bench.py`, `_declared_results`).
+The staged-read histogram counts `serving_tier` values from the recorded rows.
+It is not a full workload census (`tools/staged_exact_read_bench.py`, `_residency`).
+The operating-point CLI requires finite, positive explicit KL targets.
+This check does not change the fit or production selection
+(`tools/operating_point.py`, `main`).
 
 The primary build hardware is now two NVIDIA GB10 / DGX Sparks, **Sparky** and **Sparklina**,
 each Blackwell sm_121 with **128 GB unified memory** shared physically between CPU and GPU
