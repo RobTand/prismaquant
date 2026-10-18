@@ -59,6 +59,7 @@ from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
     _scan_source_dtype_manifest,
     check_format_applicability,
+    serialized_candidate_payload,
 )
 from prismaquant.decision_units import incomplete_fused_group_members
 from prismaquant.layer_config import (
@@ -81,6 +82,7 @@ class UniformAssignment:
     """A uniform per-Linear assignment plus the reason for every exception."""
 
     assignment: dict[str, str]
+    payload_bytes: int
     excluded: dict[str, str] = field(default_factory=dict)
     demoted_units: tuple[str, ...] = ()
     unit_count: int = 0
@@ -90,7 +92,7 @@ class UniformAssignment:
     def achieved_bits(self) -> float:
         """bpp over the QUANTIZABLE parameters this assignment covers.
 
-        Core principle 12: bpp is reported over quantizable parameters only —
+        Bpp is reported over quantizable parameters only —
         omitted names (pinned head/embed, tied head, incomplete fused groups)
         are the non-quantizable floor and are excluded from both sides of the
         ratio, exactly as the allocator's body bpp is.
@@ -98,11 +100,7 @@ class UniformAssignment:
         total_params = sum(self.params_by_format.values())
         if not total_params:
             return 0.0
-        bits = sum(
-            fr.get_format(fmt).effective_bits * n
-            for fmt, n in self.params_by_format.items()
-        )
-        return bits / total_params
+        return 8 * self.payload_bytes / total_params
 
 
 def _shape_of(graph, recipe_param_name: str) -> tuple[int, ...]:
@@ -156,6 +154,7 @@ def build_uniform_assignment(
     excluded: dict[str, str] = {}
     demoted: list[str] = []
     params_by_format: dict[str, int] = {}
+    payload_bytes = 0
     unit_count = 0
 
     for unit in graph.optimization_units():
@@ -210,12 +209,17 @@ def build_uniform_assignment(
             demoted.append(unit.id)
 
         for m in members:
+            shape = _shape_of(graph, m)
             assignment[qnames[m]] = chosen
             params_by_format[chosen] = (
-                params_by_format.get(chosen, 0) + _numel(_shape_of(graph, m)))
+                params_by_format.get(chosen, 0) + _numel(shape))
+            payload_bytes += serialized_candidate_payload(
+                fr.get_format(chosen), shape, qname=qnames[m],
+            )[0]
 
     return UniformAssignment(
         assignment=assignment,
+        payload_bytes=payload_bytes,
         excluded=excluded,
         demoted_units=tuple(sorted(demoted)),
         unit_count=unit_count,

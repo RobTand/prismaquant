@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, uniform assignment bpp.
+Uniform assignments sum serialized tensor payload bytes through the existing
+allocator payload owner, using each admitted member's actual shape and format.
+Reported bpp divides those bits by the covered quantizable parameters, including
+legal fallback members and excluding pinned or structurally omitted members.
+This accounts for FP8 row scales without a shape-free nominal rate. Both CLI
+metadata outputs use the same total. `uniform-payload-green-v1` passes 19 CPU
+cases and compiles both files, with verified source, logs and CAS receipt
+against parent `11c4e0a8313` plus the overlays. This qualifies accounting and
+CLI wiring on toy graphs, without rendered-artifact or serving qualification.
+
 As of: 2026-10-17, architecture audit continuation, owned MTP cost inputs.
 `MtpCostInput` binds a parsed cost payload to the digest of its single owned
 read. Fixed reselection authenticates the expected digest before parsing;
