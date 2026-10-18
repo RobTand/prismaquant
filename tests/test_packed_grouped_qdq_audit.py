@@ -243,11 +243,25 @@ def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermed
                 different_elements=torch.count_nonzero(difference).item())))
             assert torch.isfinite(reference).all()
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                captured = model.experts(inputs, indices, weights)
+            try:
+                with torch.cuda.graph(graph):
+                    captured = model.experts(inputs, indices, weights)
+            except RuntimeError as error:
+                message = str(error)
+                assert "Cannot copy between CPU and CUDA tensors during CUDA graph capture" in message
+                cache.remove()
+                control = torch.cuda.CUDAGraph()
+                with pytest.raises(RuntimeError, match="Cannot copy between CPU and CUDA tensors during CUDA graph capture"):
+                    with torch.cuda.graph(control):
+                        model.experts(inputs, indices, weights)
+                print("GB10_GRAPH " + json.dumps(dict(
+                    family=family, capture=False, unhooked_control_capture=False,
+                    source="torch._grouped_mm", error=message)))
+                return
             graph.replay()
             torch.cuda.synchronize()
             assert captured.is_cuda and torch.isfinite(captured).all()
             assert torch.equal(captured, uncaptured)
+            print("GB10_GRAPH " + json.dumps(dict(family=family, capture=True)))
         finally:
             cache.remove()
