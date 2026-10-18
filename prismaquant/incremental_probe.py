@@ -931,6 +931,9 @@ def _expected_probe_shard_meta(args, *,
         # in a flag-on run would silently ship marginal-less entries.
         "emit_marginals": _marginals_enabled(),
     }
+    reuse_inputs = getattr(args, "probe_reuse_inputs", None)
+    if reuse_inputs is not None:
+        meta["probe_reuse_inputs"] = dict(reuse_inputs)
     sample_parallel = getattr(args, "sample_parallel_contract", None)
     if sample_parallel is not None:
         meta["sample_parallel"] = dict(sample_parallel)
@@ -1058,6 +1061,19 @@ def _validate_sample_activation_blob(
         raise ValueError(f"sample activation priority rows differ for {qname}")
 
 
+def _probe_reuse_inputs_mismatch(recorded, expected) -> str | None:
+    if expected is None:
+        return None
+    if expected["dataset_sha256"] is None:
+        return "dataset byte identity is unavailable; use a local calibration file"
+    if not isinstance(recorded, Mapping):
+        return "probe input identity is absent"
+    for key, value in expected.items():
+        if recorded.get(key) != value:
+            return f"probe input {key} differs"
+    return None
+
+
 def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     try:
         data = _read_pickle(path)
@@ -1074,6 +1090,12 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     probe_meta.update(meta.get("incremental_shard", {}))
     if any(probe_meta.get(key) != expected_meta.get(key)
            for key in SAMPLE_PARALLEL_META_FIELDS):
+        return False
+    reason = _probe_reuse_inputs_mismatch(
+        probe_meta.get("probe_reuse_inputs"), expected_meta.get("probe_reuse_inputs")
+    )
+    if reason is not None:
+        print(f"[incremental] refuse reuse {path}: {reason}", flush=True)
         return False
     for key, expected in expected_meta.items():
         if probe_meta.get(key) != expected:
@@ -1163,7 +1185,7 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
 # Swapping LAYERS_PER_SHARD between runs changes grouping but not
 # numbers, so probe_shard pickles are safe to pool on these axes.
 _CONTENT_META_KEYS: tuple[str, ...] = (
-    "model", "dataset", "nsamples", "seqlen", "dtype",
+    "model", "dataset", "nsamples", "seqlen", "dtype", "probe_reuse_inputs",
     "requested_device", "requested_device_map",
     "importance_weighting", "activation_cache_dir",
     "linear_exclude", "h_detail_dir", "activation_rows_limit",
@@ -1192,6 +1214,12 @@ def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
 def _content_meta_compatible(raw_meta: dict[str, Any],
                              anchor: dict[str, Any]) -> bool:
     probe_meta = _probe_meta_flat(raw_meta)
+    reason = _probe_reuse_inputs_mismatch(
+        probe_meta.get("probe_reuse_inputs"), anchor.get("probe_reuse_inputs")
+    )
+    if reason is not None:
+        print(f"[incremental] refuse cached Linear stats: {reason}", flush=True)
+        return False
     return all(probe_meta.get(k) == anchor.get(k) for k in _CONTENT_META_KEYS)
 
 
@@ -1605,8 +1633,8 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
 
 
 # In-process StreamingContext + tokenizer cache. Populated when
-# `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by (model_path, device,
-# dtype). Lets an in-process driver reuse a single loaded model
+# `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by model path, device,
+# dtype and source checkpoint content. Lets an in-process driver reuse a single loaded model
 # across N calibration chunks instead of paying the offload + tokenizer
 # rebuild cost N times.
 _PROBE_CTX_CACHE: dict = {}
@@ -4590,6 +4618,28 @@ def main():
     device = torch.device(args.device)
     exec_device = device  # streaming path runs on the requested device directly
 
+    from .digests import file_sha256hex
+    from .streamed_model_identity import build_source_checkpoint_identity
+
+    source_identity = build_source_checkpoint_identity(
+        args.model,
+        digest_cache_path=work_dir / "source_identity_cache.json",
+        current_bytes=True,
+    )
+    args.probe_reuse_inputs = {
+        "calib_seed": int(args.calib_seed),
+        "source_checkpoint_sha256": source_identity["content_sha256"],
+        "dataset_sha256": (
+            file_sha256hex(args.dataset) if Path(args.dataset).is_file() else None
+        ),
+    }
+    if args.probe_reuse_inputs["dataset_sha256"] is None:
+        print("[incremental] refuse persistent probe reuse: dataset byte "
+              "identity is unavailable; use a local calibration file", flush=True)
+    context_key = (
+        args.model, str(device), args.dtype, source_identity["content_sha256"]
+    )
+
     # Skip setup + calibration if every shard is reusable. Loading the
     # model+tokenizer is expensive — if the run is a no-op we want to
     # avoid paying that cost.
@@ -4625,7 +4675,7 @@ def main():
     def _ensure_ready():
         nonlocal ctx, tokenizer, calib
         if ctx is None and use_persistent:
-            cached = _PROBE_CTX_CACHE.get((args.model, str(device), args.dtype))
+            cached = _PROBE_CTX_CACHE.get(context_key)
             if cached is not None:
                 ctx, tokenizer = cached
                 # Reset accumulated state from prior chunks before reuse.
@@ -4671,7 +4721,7 @@ def main():
                 log_prefix="[incremental]",
             )
             if use_persistent:
-                _PROBE_CTX_CACHE[(args.model, str(device), args.dtype)] = (
+                _PROBE_CTX_CACHE[context_key] = (
                     ctx, tokenizer)
         # calib is always per-call (different chunks have different data)
         if calib is None:
@@ -4739,14 +4789,18 @@ def main():
         emit_marginals=_marginals_enabled(),
     )
 
+    precompute_meta["probe_reuse_inputs"] = dict(args.probe_reuse_inputs)
+
     def _ensure_precompute() -> GlobalPrecompute:
         """Load Phase-1/Phase-2 artifacts from the on-disk cache if the
         fingerprint matches; otherwise compute + persist + return."""
         nonlocal precomputed
         if precomputed is not None:
             return precomputed
-        cached = _load_precompute_cache(
-            precompute_cache_path, precompute_meta, device)
+        cached = (
+            _load_precompute_cache(precompute_cache_path, precompute_meta, device)
+            if args.probe_reuse_inputs["dataset_sha256"] is not None else None
+        )
         if cached is not None:
             print(f"[incremental/global] reused precompute cache at "
                   f"{precompute_cache_path}", flush=True)
