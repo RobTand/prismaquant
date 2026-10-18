@@ -1827,6 +1827,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     checkpoint_dir=args.checkpoint_dir,
                     resume=args.resume,
                     model_identity=streamed_model_identity,
+                    checkpoint_identity_extra=(
+                        {"source_binding": source_binding} if source_binding is not None else None
+                    ),
                 )
             else:
                 stats, costs, unit_kls = measure_expert_unit_costs_streamed(
@@ -1842,6 +1845,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     checkpoint_dir=args.checkpoint_dir,
                     resume=args.resume,
                     model_identity=streamed_model_identity,
+                    checkpoint_identity_extra=(
+                        {"source_binding": source_binding} if source_binding is not None else None
+                    ),
                 )
         finally:
             streamed_runner.shutdown()
@@ -1851,6 +1857,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             col_weights=col_weights,
             expert_sample=args.expert_sample, max_units=args.max_units,
             unit_filter=args.unit_filter)
+    if source_binding is not None:
+        for rows in costs.values():
+            for row in rows.values():
+                row["source_binding"] = source_binding
     provenance = {
         "schema": SCHEMA,
         "git_commit": _git_commit(),
