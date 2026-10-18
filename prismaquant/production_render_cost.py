@@ -267,6 +267,29 @@ def synthesize_production_render_cost_payload(
         source_binding = validate_source_model_binding(
             source_binding, where="production render score cache")
 
+    from .prepriced_cost import checkpoint_only_cost_qnames, cost_source_binding_for_region
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, resolve_source_checkpoint_path,
+    )
+
+    sidecar_qnames = frozenset()
+    if (source_binding is not None
+            and source_binding["schema"] == NATIVE_SOURCE_MODEL_BINDING_SCHEMA
+            and baseline_costs):
+        baseline_meta = baseline_cost_payload.get("meta")
+        source_metadata = [baseline_meta, baseline_cost_payload.get("provenance")]
+        if isinstance(baseline_meta, Mapping):
+            source_metadata.extend(baseline_meta.get("shards") or ())
+        models = {part["model"] for part in source_metadata
+                  if isinstance(part, Mapping) and isinstance(part.get("model"), str)
+                  and part["model"]}
+        if len(models) != 1:
+            raise ValueError(
+                "native production render baseline must name one original source "
+                "model in its metadata; rebuild the baseline cost table")
+        source_root = resolve_source_checkpoint_path(next(iter(models)), local_files_only=True)
+        sidecar_qnames = checkpoint_only_cost_qnames(source_root, baseline_costs)
+
     output_costs: dict[str, dict[str, dict]] = {}
     render_entries = 0
     fallback_entries = 0
@@ -275,6 +298,10 @@ def synthesize_production_render_cost_payload(
 
     for qname, per_name_raw in baseline_costs.items():
         per_name = dict(per_name_raw)
+        cell_source_binding = (
+            cost_source_binding_for_region(source_binding, checkpoint_only=qname in sidecar_qnames)
+            if source_binding is not None else None
+        )
         synthesized: dict[str, dict] = {}
         scored = False
         for fmt in output_formats:
@@ -313,8 +340,8 @@ def synthesize_production_render_cost_payload(
                         score_field=score_field,
                     )
                     if entry is not None:
-                        if source_binding is not None:
-                            entry["source_binding"] = source_binding
+                        if cell_source_binding is not None:
+                            entry["source_binding"] = cell_source_binding
                         scored = True
                         synthesized[fmt_c] = entry
                         render_entries += 1
@@ -337,8 +364,8 @@ def synthesize_production_render_cost_payload(
                 )
             synthesized[fmt_c] = fallback
             fallback_entries += 1
-        if scored and source_binding is not None and "BF16" in synthesized:
-            synthesized["BF16"]["source_binding"] = source_binding
+        if scored and cell_source_binding is not None and "BF16" in synthesized:
+            synthesized["BF16"]["source_binding"] = cell_source_binding
         output_costs[str(qname)] = synthesized
 
     if require_render_scores and missing:
