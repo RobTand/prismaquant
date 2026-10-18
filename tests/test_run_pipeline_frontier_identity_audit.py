@@ -55,9 +55,11 @@ python3() {
 
 
 
-@pytest.mark.parametrize("changed, rewritten_metadata", [(False, False), (True, False), (False, True)],
-                         ids=["unchanged", "changed-candidate", "rewritten-metadata"])
-def test_inplace_point_reuse_binds_current_assignment(tmp_path, changed, rewritten_metadata):
+@pytest.mark.parametrize("change", [
+    "unchanged", "changed-candidate", "rewritten-metadata", "base-solver-seconds",
+    "changed-base", "changed-corpus", "candidate-metadata",
+])
+def test_inplace_point_reuse_binds_current_assignment(tmp_path, change):
     from prismaquant.pipeline import stage_settings_document
 
     settings = stage_request()
@@ -67,9 +69,14 @@ def test_inplace_point_reuse_binds_current_assignment(tmp_path, changed, rewritt
     artifacts.mkdir()
     (tmp_path / "logs").mkdir()
     base = artifacts / "layer_config.json"
-    base.write_text(json.dumps({"base": "BF16"}))
+    base_payload = {"base": "BF16", "__prismaquant__": {
+        "solve_diagnostics": {"4.75": {"solver_seconds": 1.0}},
+    }}
+    base.write_text(json.dumps(base_payload))
     assignment = tmp_path / "assignment.json"
     assignment.write_text(json.dumps({"q": "NVFP4"}))
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_bytes(b"calibration text\n")
     point = tmp_path / "vak_row.json"
     from prismaquant.production_weight_cache import ProductionWeightCache
     probe, costs, cache = (tmp_path / name for name in ("probe.pkl", "cost.pkl", "cache.pkl"))
@@ -82,14 +89,26 @@ def test_inplace_point_reuse_binds_current_assignment(tmp_path, changed, rewritt
         f"row={assignment}") + ")\n" + loop
     values = {"VAK_PART_DIR": tmp_path, "STAGE_SETTINGS_PATH": request,
               "WORK_DIR": tmp_path, "PROBE_PATH": probe, "COST_PATH": costs,
-              "PROD_CACHE_RAW": cache, "VALIDATED_FRONTIER_DATASET": "corpus"}
+              "PROD_CACHE_RAW": cache, "VALIDATED_FRONTIER_DATASET": corpus}
     first = run_shell(tmp_path, body, values)
     assert first.returncode == 0, first.stderr
     point.write_text(json.dumps({"results": [{"label": "row"}]}))
     (tmp_path / "calls.txt").unlink()
-    if changed:
+    if change == "changed-candidate":
         assignment.write_text(json.dumps({"q": "FP8_DYNAMIC"}))
-    if rewritten_metadata:
+    if change == "base-solver-seconds":
+        base_payload["__prismaquant__"]["solve_diagnostics"]["4.75"]["solver_seconds"] = 2.0
+        base.write_text(json.dumps(base_payload))
+    if change == "changed-base":
+        base_payload["base"] = "FP8_DYNAMIC"
+        base.write_text(json.dumps(base_payload))
+    if change == "changed-corpus":
+        corpus.write_bytes(b"Calibration text\n")
+    if change == "candidate-metadata":
+        assignment.write_text(json.dumps({"q": "NVFP4", "__prismaquant__": {
+            "solve_diagnostics": {"4.75": {"solver_seconds": 2.0}},
+        }}))
+    if change == "rewritten-metadata":
         payload = pickle.loads(costs.read_bytes())
         payload["provenance"]["additivity"] = {"measured_kl": 0.125}
         costs.write_bytes(pickle.dumps(payload))
@@ -97,11 +116,10 @@ def test_inplace_point_reuse_binds_current_assignment(tmp_path, changed, rewritt
         payload.metadata["lazy_expert_renders"] = 1
         cache.write_bytes(pickle.dumps(payload))
     result = run_shell(tmp_path, body, values)
-    if changed:
-        assert result.returncode != 0 or (tmp_path / "calls.txt").exists(), (
-            "The loop reused old KL after the candidate assignment changed.",
-            result.stdout, result.stderr,
-        )
+    if change in {"changed-candidate", "changed-base", "changed-corpus"}:
+        assert result.returncode == 2, (result.stdout, result.stderr)
+        assert "DIFFERENT settings" in result.stdout + result.stderr
+        assert not (tmp_path / "calls.txt").exists()
     else:
         assert result.returncode == 0, result.stderr
         assert not (tmp_path / "calls.txt").exists()

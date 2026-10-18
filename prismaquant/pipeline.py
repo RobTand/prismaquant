@@ -582,11 +582,15 @@ def assignment_kl_measurement(
 
 
 def frontier_request_digest(base: str | Path, candidate: str | Path, corpus: str | Path) -> str:
-    """Bind assignment and corpus bytes; the stage keys own draw geometry."""
+    """Bind canonical assignments and corpus bytes; stage keys own draw geometry."""
     from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import load_assignment
 
+    assignment_digests = [assignment_serialization_sha256(load_assignment(path))
+                          for path in (base, candidate)]
     return DIRECT_UTF8_STRICT.sha256([
-        file_sha256hex(base), file_sha256hex(candidate),
+        *assignment_digests,
         file_sha256hex(corpus) if Path(corpus).is_file() else str(corpus),
     ])
 
