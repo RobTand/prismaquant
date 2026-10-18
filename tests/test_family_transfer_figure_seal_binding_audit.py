@@ -3,14 +3,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shutil
 import sys
+from types import ModuleType
 
 import pytest
 
-from experiments import plot_sparse_rate_family_transfer as figure
 
 
 FIXTURES = Path(__file__).parent / "fixture-data" / "family-transfer-figure"
@@ -20,8 +21,24 @@ class _ReachedPlotBoundary(Exception):
     pass
 
 
+@pytest.fixture
+def figure(monkeypatch):
+    pyplot = ModuleType("matplotlib.pyplot")
+    pyplot.subplots = None
+    matplotlib = ModuleType("matplotlib")
+    matplotlib.pyplot = pyplot
+    source = Path(__file__).resolve().parents[1] / "experiments" / "plot_sparse_rate_family_transfer.py"
+    spec = importlib.util.spec_from_file_location("_figure_seal_contract", source)
+    module = importlib.util.module_from_spec(spec)
+    with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, "matplotlib", matplotlib)
+        imports.setitem(sys.modules, "matplotlib.pyplot", pyplot)
+        spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("tamper", [False, True], ids=["retained-seal", "changed-prediction"])
-def test_figure_binds_exact_prediction_body_before_plotting(tmp_path, monkeypatch, tamper):
+def test_figure_binds_exact_prediction_body_before_plotting(tmp_path, monkeypatch, figure, tamper):
     artifact = tmp_path / "artifacts"
     shutil.copytree(FIXTURES, artifact)
     path = artifact / figure.FILES["e4_seal"]
