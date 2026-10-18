@@ -177,3 +177,22 @@ def test_assignment_reader_preserves_flat_assignment_module(tmp_path):
     path = tmp_path / "layer_config.json"
     path.write_text(json.dumps({"assignment": {"data_type": "nv_fp", "bits": 4}}))
     assert load_assignment(path) == {"assignment": "NVFP4"}
+
+
+@pytest.mark.parametrize("payload", [
+    {"schema": "prismaquant.allocator.pareto_assignment.v3", "assignment": {"q": "BF16"}},
+    {"schema": "prismaquant.allocator.pareto_assignment.v2"},
+    *({"schema": "prismaquant.allocator.pareto_assignment.v2", "assignment": value}
+      for value in (None, [], "BF16", 1)),
+    {"schema": "prismaquant.allocator.pareto_assignment.v2", "assignment": {"q": 0.5}},
+    {"schema": "prismaquant.allocator.pareto_assignment.v2", "assignment": {
+        "schema": "prismaquant.allocator.pareto_assignment.v2", "assignment": {"q": "BF16"},
+    }},
+])
+def test_assignment_reader_refuses_malformed_pareto_envelope(tmp_path, payload):
+    from prismaquant.layer_config import load_assignment
+
+    path = tmp_path / "candidate.json"
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError):
+        load_assignment(path)
