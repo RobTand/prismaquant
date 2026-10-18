@@ -2,13 +2,11 @@
 
 `prismaquant/cost_stage_checkpoint.py::atomic_write_bytes` is the owner of
 "stage bytes beside the target, fsync, replace, fsync the directory".
-`prismaquant/aura_cost.py` carried its own copy and now shares the owner.
-`tools/reseal_campaign_identity.py` keeps a deliberate standalone twin:
-its row rewrites are stdlib-only (the retired must_differ entry recorded
-that importing the package pulls in torch, and consumer_merge does the one
-lazy import), so its copy stays local and cross-referenced. These tests pin
-the delegation, the standalone boundary, and that the owner's durability
-ordering is exactly the recipe the copies had:
+`prismaquant/aura_cost.py` carried its own copy; the AURA checkpoint writer
+now lives in `prismaquant/aura_checkpoint_journal.py` and shares the owner.
+The reseal package owner must rewrite plain checkpoint data without numerical
+or CLI dependencies. Its actual import and payload behavior is exercised in a
+fresh child interpreter. The durable publication ordering is:
 
 write -> flush -> fsync(file) -> os.replace -> fsync(containing directory)
 
@@ -23,35 +21,60 @@ import os
 
 import pytest
 
-from prismaquant import aura_cost
 from prismaquant import cost_stage_checkpoint as csc
 
 
-def test_aura_cost_uses_the_owner_recipe() -> None:
-    assert aura_cost.atomic_write_bytes is csc.atomic_write_bytes
+def test_aura_checkpoint_journal_uses_the_owner_recipe() -> None:
+    from prismaquant import aura_checkpoint_journal
+
+    assert aura_checkpoint_journal.atomic_write_bytes is csc.atomic_write_bytes
 
 
-def test_reseal_tool_stays_stdlib_only_for_row_rewrites() -> None:
-    # The ratchet's retired must_differ entry recorded the design this slice
-    # preserves: reseal keeps its row rewrites stdlib-only (importing the
-    # package pulls in torch; consumer_merge does the one lazy import).
-    # Mechanically: every prismaquant import in the tool sits inside a
-    # function body, never at module level.
-    import ast
-    from pathlib import Path as _Path
+def test_reseal_package_rewrites_plain_data_without_numerical_or_tool_imports(tmp_path):
+    from pathlib import Path
+    import subprocess
+    import sys
 
-    source = _Path("tools/reseal_campaign_identity.py").read_text()
-    tree = ast.parse(source)
-    module_level_imports = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        and (
-            (isinstance(node, ast.Import) and any(a.name.split(".")[0] == "prismaquant" for a in node.names))
-            or (isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "prismaquant")
-        )
-    ]
-    assert module_level_imports == [], module_level_imports
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+sys.path.insert(0, ROOT)
+class ForbiddenRuntime:
+    def find_spec(self, name, path=None, target=None):
+        if name.startswith('tessera.serving') or name.split('.')[0] in {'torch', 'transformers', 'triton', 'vllm', 'tools'}:
+            raise AssertionError('reseal dependency: ' + name)
+sys.meta_path.insert(0, ForbiddenRuntime())
+import pickle
+from pathlib import Path
+from prismaquant import tessera_campaign_reseal as owner
+value = {'units': {'u': {'menu': ['TESSERA_E4M3_K1_R832']}}, 'unicode': 'héllo'}
+raw = pickle.dumps(value, protocol=4)
+assert owner.loads(raw) == value
+assert owner.dumps_like(value, raw) == raw
+assert owner.canonical_bytes(value) == b'{"unicode":"h\\xc3\\xa9llo","units":{"u":{"menu":["TESSERA_E4M3_K1_R832"]}}}'
+for unsafe in (pickle.dumps(Exception('x')), b'not-a-pickle'):
+    try:
+        owner.loads(unsafe)
+    except (owner.Refused, pickle.UnpicklingError):
+        pass
+    else:
+        raise AssertionError('non-plain checkpoint admitted')
+try:
+    owner.discover_rows()
+except owner.Refused as error:
+    assert 'no rows' in str(error)
+else:
+    raise AssertionError('empty row scope admitted')
+path = Path('metadata.json')
+owner.write_json(path, value)
+import json
+assert json.loads(path.read_bytes()) == value
+print('RESEAL-OWNER-OK')
+""".replace('ROOT', repr(str(root)), 1)
+    result = subprocess.run([sys.executable, '-c', script], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == 'RESEAL-OWNER-OK'
 
 
 def test_owner_orders_fsync_replace_dirfsync(tmp_path, monkeypatch) -> None:
@@ -84,7 +107,7 @@ def test_owner_orders_fsync_replace_dirfsync(tmp_path, monkeypatch) -> None:
     assert leftovers == [], leftovers
 
 
-def test_owner_preserves_existing_file_mode(tmp_path) -> None:
+def test_owner_replaces_file_with_fresh_staging_mode(tmp_path) -> None:
     # The copies opened the staging file with plain "wb" and never chmod'ed;
     # the owner must not either -- a replaced file keeps the staging mode.
     target = tmp_path / "mode.bin"

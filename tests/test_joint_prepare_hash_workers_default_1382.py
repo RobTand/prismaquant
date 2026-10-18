@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import aura_provenance
 import prismaquant.tessera_joint_aura as bridge
 from prismaquant.tessera_joint_aura import (
     default_file_load_workers,
@@ -41,7 +42,9 @@ def test_joint_prepare_default_equals_prepare_cache_default_for_the_environment(
 
 
 @pytest.mark.parametrize("explicit", [1, 2, 3])
-def test_explicit_plan_value_still_wins(explicit):
+def test_explicit_plan_value_still_wins(monkeypatch, explicit):
+    # Pure resolver calls: provide capacity without starting any worker pool.
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: {0, 1, 2})
     assert resolve_file_hash_workers({"file_hash_workers": explicit}) == explicit
 
 
@@ -63,8 +66,8 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
     import sys
     from types import SimpleNamespace
 
-    import prismaquant.aura_cost as aura
     import prismaquant.joint_stage_b_head as head_module
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: {0, 1})
     root = Path(__file__).resolve().parents[1]
     if str(root / "tools") not in sys.path:
         sys.path.insert(0, str(root / "tools"))
@@ -81,7 +84,7 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
     # untouched; the intake itself is intercepted on the module the tool
     # imports it from at call time.
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "0" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "0" * 64)
     monkeypatch.setattr(head_module, "build_head_slices", lambda **_kwargs: {})
 
     def build(plan):

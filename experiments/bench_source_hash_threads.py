@@ -8,7 +8,7 @@ set is visible; /proc/self/io read_bytes and wall clock are recorded per run.
 """
 import json, os, subprocess, time
 from pathlib import Path
-from prismaquant import cost_streaming as cs
+from prismaquant import streamed_model_identity as cs_identity
 
 root = Path("/mnt/shared/models/GLM-5.3-Flash-BF16")
 PER_SET = 8
@@ -31,9 +31,9 @@ for index, threads in enumerate(sweep):
     paths = [root / f"model-{first + index * PER_SET + k:05d}-of-00120.safetensors" for k in range(PER_SET)]
     os.environ["PRISMAQUANT_SOURCE_HASH_THREADS"] = str(threads)
     cached = fincore(paths)
-    work = [(p, cs._streamed_identity_stat_fingerprint(p)) for p in paths]
+    work = [(p, cs_identity._streamed_identity_stat_fingerprint(p)) for p in paths]
     before, start, t0 = io(), time.time(), time.monotonic()
-    digests = cs._hash_source_shards(work)
+    digests = cs_identity._hash_source_shards(work)
     wall, after = time.monotonic() - t0, io()
     size = sum(p.stat().st_size for p in paths)
     row = dict(threads=threads, shards=[p.name[6:11] for p in paths], bytes=size,

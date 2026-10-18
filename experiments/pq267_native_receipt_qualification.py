@@ -85,14 +85,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     from prismaquant.native_operator_panel import consume_native_receipt
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     panel = json.loads(args.panel.read_text())
     receipt_sha256 = hashlib.sha256(args.receipt.read_bytes()).hexdigest()
     observation = consume_native_receipt(args.receipt, expected_sha256=receipt_sha256,
                                          expected_panel=panel,
                                          memory_trace_path=args.memory_trace)
-    obligations = _row_obligations(observation, panel, args.joint_cost_row, identity_sha256)
+    obligations = _row_obligations(observation, panel, args.joint_cost_row, joint_identity_sha256)
     report = {"schema": "prismaquant.native_receipt_qualification.v1",
               "receipt_path": str(args.receipt), "receipt_sha256": receipt_sha256,
               "panel_path": str(args.panel),

@@ -80,7 +80,7 @@ _SHA256_LEN = 64
 
 
 class RetirementRefused(RuntimeError):
-    """The run cannot be retired; nothing was removed."""
+    """Retirement admission or completion was refused."""
 
 
 def retirement_record_path(space) -> Path:

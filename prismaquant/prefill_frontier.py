@@ -616,7 +616,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
                  if point["feasible"] else f"INFEASIBLE ({point['refusal_reason']})"),
               flush=True)
 
-    from .aura_cost import _git_commit
+    from .aura_provenance import (producer_git_commit as _git_commit)
     cost_path = Path(ctx.cost_path)
     with cost_path.open("rb") as stream:
         cost_sha256 = file_digest_sha256hex(stream)
@@ -677,7 +677,7 @@ def is_pact_argv(allocator_argv: Sequence[str]) -> bool:
 
 def _pact_provenance(ctx, allocator_argv, assignments_dir, draws, seed) -> dict:
     """The shared input/context identity of either PACT solver and its replay."""
-    from .aura_cost import _git_commit
+    from .aura_provenance import (producer_git_commit as _git_commit)
 
     return {
         "git_commit": _git_commit(), "table_identity": dict(ctx.table_identity),

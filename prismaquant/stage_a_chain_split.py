@@ -155,7 +155,7 @@ def even_ranges(n_batches: int, group_size: int, quanta: int) -> list[list[int]]
     last one stopping at the last sample. The chain split and the forward
     split (``stage_a_forward_split``) both cut their quanta here.
     """
-    from .cost_streaming import plan_boundary_partition_ranges
+    from .streamed_boundary_artifacts import plan_boundary_partition_ranges
 
     groups = -(-int(n_batches) // int(group_size))
     if not 1 <= int(quanta) <= groups:
@@ -175,7 +175,7 @@ def partition_ranges(ranges, *, n_batches: int) -> list[dict]:
     range is a partition range; the records are what
     ``cost_streaming.verify_boundary_partition_coverage`` checks.
     """
-    from .cost_streaming import BOUNDARY_PARTITION_RANGE_SCHEMA
+    from .streamed_boundary_artifacts import BOUNDARY_PARTITION_RANGE_SCHEMA
 
     ordered = sorted(tuple(int(value) for value in pair) for pair in ranges)
     return [{"schema": BOUNDARY_PARTITION_RANGE_SCHEMA, "range_index": index,
@@ -186,7 +186,7 @@ def partition_ranges(ranges, *, n_batches: int) -> list[dict]:
 
 def require_whole_plane(ranges, *, n_batches: int) -> None:
     """The ranges tile ``0 .. n_batches``: no gap, no overlap, no sample outside."""
-    from .cost_streaming import verify_boundary_partition_coverage
+    from .streamed_boundary_artifacts import verify_boundary_partition_coverage
 
     try:
         verify_boundary_partition_coverage(partition_ranges(ranges, n_batches=n_batches),

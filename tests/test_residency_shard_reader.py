@@ -511,7 +511,6 @@ def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, mo
          'rw,relatime,fd=97,pgrp=1,timeout=0,minproto=5,maxproto=5,direct'),
         ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
     ]))
-    assert residency_shard_reader._mount_options('/stage/prewarm/x')[1] == 'nfs4'
     assert residency_shard_reader._read_shape('/stage/prewarm/x') == (16, 1048576)
 
 

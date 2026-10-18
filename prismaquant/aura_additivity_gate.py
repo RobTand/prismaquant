@@ -20,10 +20,8 @@ import pickle
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from prismaquant.joint_aura import (
-    ASSIGNMENT_OBJECTIVES, PROBE_UNCERTAINTY_SCOPE, assignment_probe_summary,
-    paired_assignment_difference, validate_joint_aura_entry,
-)
+from prismaquant.joint_aura import ASSIGNMENT_OBJECTIVES, assignment_probe_summary, paired_assignment_difference
+from prismaquant.joint_aura_rows import PROBE_UNCERTAINTY_SCOPE, validate_joint_aura_entry
 
 ZERO_COST_SOURCES = {"aura_passthrough_zero"}
 

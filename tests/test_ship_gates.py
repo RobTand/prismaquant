@@ -38,8 +38,7 @@ def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     (model / "tokenizer_config.json").write_text('{"tokenizer_class":"TokenizersBackend"}')
     save_file({"model.embed_tokens.weight": torch.zeros((8, 4), dtype=torch.bfloat16)},
               str(model / "model.safetensors"))
-    card = shipcard.build_shipcard(model, build={})
-    shipcard.write_shipcard(model / "shipcard.json", card)
+    card = shipcard.open_shipcard(model, build={})
     teacher = root / "teacher.pt"
     torch.save({"calib_ids": torch.tensor([[1, 2, 3, 1]], dtype=torch.long),
                 "teacher_logprobs": torch.log_softmax(torch.zeros((1, 8)), dim=-1),
@@ -235,7 +234,7 @@ def test_preflight_preserves_actual_log_bytes(tmp_path, protected):
 
 def _task_replay_job(root):
     from test_task_quality_replay import make_task_replay_fixture
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     job_path = job_config(root / "job")
     job = json.loads(job_path.read_text())
     config, result, raw = make_task_replay_fixture(root / "quality")
@@ -331,6 +330,36 @@ def _g3_replay_job(root):
 
 
 @pytest.mark.parametrize("dev", [False, True])
+def test_valid_standalone_g3_cannot_qualify_an_unbound_artifact(tmp_path, monkeypatch, dev):
+    from prismaquant.quality_stage import verify_result
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    job, config, result, _, _, output = _g3_replay_job(tmp_path)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    before = output.read_bytes()
+    assert verify_result(result, config,
+                         config_sha256=result["configuration"]["sha256"])["status"] == "passed"
+    report, g3 = _verify_replay_stage(job, tmp_path, "offline.g3")
+    assert g3["status"] == "failed"
+    assert "no independently verifiable exported-artifact binding" in g3["error"]
+    assert report["runtime_qualification"] == "refused"
+    assert output.read_bytes() == before
+
+
+def test_g3_preflight_remains_available_without_artifact_qualification(tmp_path):
+    from prismaquant.ship_gates import _replay_quality
+    job_path, _, _, _, _, _ = _g3_replay_job(tmp_path)
+    job = json.loads(job_path.read_text())
+    stage = next(stage for stage in job["stages"] if stage["id"] == "offline.g3")
+    output = tmp_path / "g3-preflight.json"
+    process = _cli("prismaquant.g3_v2", ["--config", stage["config"],
+                    "--output", str(output), "--preflight"])
+    assert process.returncode == 0, process.stderr
+    result = _replay_quality(stage, output, preflight=True, artifact=job["artifact"])
+    assert result["measurement"]["status"] == "preflight"
+    assert result["gate"]["status"] == "not_evaluated"
+
+
+@pytest.mark.parametrize("dev", [False, True])
 @pytest.mark.parametrize("damage", ["metric_and_gate", "window_summary", "missing_kl",
                                     "missing_agreement", "corrupt_kl"])
 def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypatch, dev, damage):
@@ -357,7 +386,7 @@ def test_g3_replay_consumer_owned_arrays_and_summaries_refuse(tmp_path, monkeypa
 
 @pytest.mark.parametrize("dev", [False, True])
 def test_task_replay_consumer_refuses_declared_tessera_bytes(tmp_path, monkeypatch, dev):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     job, config, result, _, output = _task_replay_job(tmp_path)
     model = Path(config["backend"]["pretrained"])

@@ -118,6 +118,26 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
     fences as :func:`read_staged_whole_file`, never from the pool. The
     caller verifies the bytes against the digest it requires.
     """
+    raw = _read_staged_material(resolver, path, staged, label=label, sealed=sealed,
+                                delivery_receipt=delivery_receipt, max_bytes=max_bytes)
+    return raw if sealed else bytes(raw)
+
+
+def read_staged_buffer(resolver, path: Path, staged: dict, *, label: str,
+                       expected_bytes: int) -> bytearray:
+    """Read owned mutable bytes bound to the caller's independent exact size.
+
+    The descriptor closes and the exact lease releases before this buffer is
+    delivered. The caller retains its independently bound digest/decoder contract.
+    """
+    return _read_staged_material(resolver, path, staged, label=label,
+                                 expected_bytes=expected_bytes)
+
+
+def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
+                          sealed=False, delivery_receipt=None,
+                          max_bytes: int | None = None, expected_bytes: int | None = None):
+    """Own one pinned entry's read, fences, material and successful accounting."""
     from .staged_lease import LeaseRefused, acquire_entry_window
     from .staged_tier_policy import refuse_pool_bulk_read
 
@@ -144,6 +164,8 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
             resolver.record_serving_tier(
                 path, tier, pin_id=str(serving.get("pin_id") or ""),
                 range_ref=str(serving.get("range_ref") or ""))
+            if expected_bytes is not None and expected_bytes != size:
+                raise LeaseRefused(f"{label}-size-divergent", kind="integrity")
             # Sealed bounds before allocation: the held descriptor's size must
             # match the staged entry's, or no buffer is built.
             first = os.fstat(fd)
@@ -208,7 +230,7 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
             resolver.record_ram_read(path, len(raw))
         else:
             resolver.record_stage_read(path, len(raw))
-        return raw if sealed else bytes(raw)
+        return raw
     except BaseException:
         if sealed and raw is not None:
             raw.close()

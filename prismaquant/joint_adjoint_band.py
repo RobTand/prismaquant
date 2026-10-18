@@ -462,7 +462,7 @@ def stage_a_bind_identity(config: dict, prepared: dict) -> dict:
     input (loaded under its sealed digest) and probe execution.
     """
     from .calibration_data import load_calibration_input
-    from .cost_streaming import validate_streamed_model_identity
+    from .streamed_model_identity import validate_streamed_model_identity
 
     from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
     encoding_execution = config["execution"]

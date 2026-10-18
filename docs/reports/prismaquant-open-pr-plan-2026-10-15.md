@@ -1,0 +1,97 @@
+# Open PR delivery plan
+
+Read-only refresh on 2026-10-15 finds the same 36 open PrismaQuant PRs and the
+same head commits as the 2026-10-14 inventory. No merge or closure is authorized
+by this plan. Preserve existing issuegraph and merge-train owners.
+
+| Action | PRs | Reason |
+| --- | --- | --- |
+| Incorporate locally; retain open until replacement delivery lands | [#2669](https://github.com/RobTand/prismaquant/pull/2669) | `add6056aaa` adopts acquisition availability fallback using the current classifier. Before/after PB checks fail one case then pass all 16. |
+| Preserve independently | #2693, #2677, #2670, #2665, #2664, #2657, #2647, #2645, #2644, #2643, #2634, #2631, #2593 | Existing prerequisite, independent correctness, evidence or contract work. Rebase against the new owners and verify exact heads before merge. |
+| Preserve independently after source adoption audit | #2659, #2653, #2633, #2614, #2611, #2598, #2591, #2586, #2557 | The proposed behavior is absent here. Moving owners does not incorporate these patches. |
+| Keep the existing block | #2684, #2492 | D44 delivery/bundle has unresolved acceptance and composed-gate holds. No blanket merge. |
+| Preserve unrelated work | #2632, #2619, #2613, #2599, #2589, #2584, #2551 | No refactor ownership overlap justifies taking or retiring it. |
+| Conditional supersession only | #2694, #2641, #2489, #2472 | Each needs the replacement proof below. Retain them until that proof and accepted delivery exist. |
+
+The nine source-audited independent changes are concrete. #2659 adds recipe/shape
+memory telemetry. #2653 adds explicit GLM owner selection and anchor consistency.
+#2598 adds attention census/publication. #2586 adds a held-content close reread
+stronger than stat fencing. #2614 adds future pin-update workflow checks. #2611
+adds consumer growth reservation. #2591 adds pinned-buffer staging. #2557 adds
+joint body/MTP allocation, followed by #2633's solved-target output stamp. The
+current refactor does not claim those correctness or performance improvements.
+
+Choose one canonical delivery for #2693/#2694, whose document bytes are identical;
+retire the duplicate only after corrected linking and accepted delivery. Replace
+#2641's raw-hash AST locks with verified mutation/refusal/read-lifecycle coverage
+before retiring it. Preserve #2489 until canonical experiment delivery explicitly
+adopts the changed deadline/stall-supervision contract with source provenance.
+Preserve #2472 until the chosen D44 entry point proves dry-run publication false,
+real publication true and failed execution false.
+
+Delivery order starts with agreed census/profile/golden/duplication prerequisites,
+then independent correctness at its new owner. #2557 precedes #2633. Keep #2591's
+historical profiler and Netdata evidence unchanged; exact-head acceptance needs
+its own current evidence. A prior targeted receipt or missing check rollup never
+replaces the final composed gate.
+
+Detailed source citations, cached patches, exact heads, checks and dependency
+records remain at `/home/rob/tmp/pq-refactor-20261014/reports/`. This report is a
+disposition decision, not an assertion that all retained PRs are merge-ready.
+
+
+The S1 review does not yet justify retiring #2641. Existing live tests cover much
+of its intent, but a fixed sampling-seed vector and census mutation during the
+read still need equivalent behavior coverage. Retain it until those obligations
+are met; the staged-reader extraction is not a substitute for either.
+
+
+Final read-only refresh at 2026-10-15 06:42:56 UTC retains all 36 open PRs and the same
+head commits. `open-pr-refresh-20261015T064256Z.json` records the exact heads.
+The disposition remains one local incorporation, 22 independent changes, seven
+unrelated changes, two blocks and four conditional retirements. All remain open.
+No remote disposition was executed; final refactor verification does not
+automatically qualify an independent PR or discharge its replacement proof.
+
+## Read-only refresh, 2026-10-16
+
+The 12:58 UTC GitHub snapshot still contains the same 36 open PRs at the same
+heads. No original PR has merged or closed, and no new open PR appears. The
+dispositions above remain one local incorporation, 22 independent changes,
+seven unrelated changes, two D44 holds and four conditional retirements.
+Neither a changed owner nor the new producer API delivery satisfies the
+retirement proofs. Keep the original PRs open until their stated conditions hold.
+
+The existing open parent issue #1295 covers consolidation of logically duplicated
+functionality. The final refactor uses `Refs #1295`; its broader streaming and
+performance acceptance remains with that issue. No new bookkeeping issue is
+needed. Live main remains `138069b799323435fb5f0b3cec3ee339f6264a62`, the refactor's
+original base. No independent PR is established as a prerequisite for delivery.
+
+The rerunnable read-only collector and exact-head inventory are retained at
+`/home/rob/tmp/pq-refactor-resume-20261016/pr-audit/collect_inventory.py` and
+`/home/rob/tmp/pq-refactor-resume-20261016/pr-audit/inventory.json`.
+This refresh does not grant a composed pass to an independent PR, transfer an
+issuegraph or merge-train owner, or close any PR.
+
+
+## Delivery refresh, 2026-10-16 14:14 UTC
+
+The final read-only inventory retains all 36 original PRs open at unchanged
+heads. Main remains `138069b799323435fb5f0b3cec3ee339f6264a62`, and parent #1295
+remains open. No original disposition or acceptance condition changed. The new
+refactor delivery references that parent with `Refs #1295`; it does not close
+the parent's broader streaming-performance work or any independent PR.
+
+The source and check inventory, open parent evidence and rerunnable collector
+are archived under
+`/mnt/shared/prismaquant-refactor-evidence/20261016/final/pr-delivery-audit/`.
+T1/T3 consumer implementation is complete. Its explicit verification matrix and
+remaining qualification limits are in the refactor verification report and
+`docs/results/prismaquant-refactor-qualification-2026-10-16.json`.
+
+
+The new refactor PR uses `prismaquant-1295-refactor` to satisfy the trusted-base
+branch policy, while retaining `sol/refactor-simplify-20261014` as its authoring
+branch. The first publication #2695 is replaced for branch spelling alone.
+Neither the existing 36 PRs nor the parent issue is closed by that correction.

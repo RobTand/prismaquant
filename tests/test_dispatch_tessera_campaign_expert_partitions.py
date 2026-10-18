@@ -6,6 +6,9 @@ import sys
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_campaign_table as campaign_table
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]
 from test_tessera_campaign_fanout import _partition_workspace, _plan_args, _write_model, _shard, SCOPE  # pyright: ignore[reportMissingImports]
@@ -14,7 +17,7 @@ from test_tessera_campaign_expert_partitions import GROUP, roster, selection  # 
 
 @pytest.fixture
 def planned(tmp_path, monkeypatch):
-    from experiments import glm_data_manifests as manifests
+    from prismaquant import campaign_data_manifests as manifests
     from prismaquant import tessera_expert_projection as projection
     monkeypatch.setattr(manifests, "SHARED_MOUNT", str(tmp_path))
     spec_path, workspace = _partition_workspace(tmp_path, wide=False)
@@ -30,7 +33,7 @@ def planned(tmp_path, monkeypatch):
     _write_model(Path(spec["model"]), census["unit_shapes"])
     (workspace / "census.json").write_text(json.dumps(census))
     seen = []
-    monkeypatch.setattr(dispatch, "_row_memory_gb",
+    monkeypatch.setattr(campaign_rows, "row_memory_gb",
                         lambda spec, members, census, **kw: seen.append(sorted(members)) or 5)
     return spec_path, workspace, seen
 
@@ -61,7 +64,7 @@ def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned
     spec, workspace, _seen = planned
     assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
     plan = json.loads((workspace / "plan.json").read_text())
-    producer = dispatch._manifest_producer()
+    producer = dispatch.campaign_data_manifests
     # One-byte records make this tiny fixture's distinct tensor ranges visible;
     # production still rounds to the existing ZFS record size.
     monkeypatch.setattr(sys.modules[producer.Campaign.__module__], "RECORD_SIZE", 1)
@@ -84,7 +87,7 @@ def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned
             continue
         expected = set(row["members"])
         assert set(campaign.members(row["row_id"])) == expected
-        manifest = producer.build_manifest(campaign, row["row_id"], {}, argv_by_row[row["row_id"]])
+        manifest = producer.build_campaign_row_manifest(campaign, row["row_id"], {}, argv_by_row[row["row_id"]])
         capture_paths = {entry["path"] for entry in manifest["entries"] if entry["path"].endswith(".pt")}
         assert capture_paths == {str(root / entries[name]["path"]) for name in expected}
         assert manifest["annotations"]["bytes"]["weight_extents"] == len(expected) * 8 * 8 * 2
@@ -158,7 +161,7 @@ def partition_payloads(monkeypatch):
 
 def test_partition_merge_matches_whole_group_cost_union(partition_payloads):
     payloads, census, coverage = partition_payloads
-    merged = dispatch.merge_payloads(payloads, census=census,
+    merged = campaign_table.merge_payloads(payloads, census=census,
                                      capture_sha256="merged", plan_coverage=coverage)
     whole = copy.deepcopy(payloads["row0"])
     for field in ("costs", "leave_one_anchor_out", "menu_sizes", "anchor_counts"):
@@ -170,7 +173,7 @@ def test_partition_merge_matches_whole_group_cost_union(partition_payloads):
     whole["provenance"]["unit_selection"] = {
         "schema": "prismaquant.tessera_campaign_units.v1", "selected": True,
         "groups": [{"key": GROUP, "members": sorted(roster()[0])}]}
-    reference = dispatch.merge_payloads({"whole": whole}, census=census,
+    reference = campaign_table.merge_payloads({"whole": whole}, census=census,
                                         capture_sha256="merged")
     for field in ("costs", "leave_one_anchor_out", "menu_sizes", "anchor_counts", "formats"):
         assert merged[field] == reference[field]
@@ -197,8 +200,8 @@ def test_partition_merge_refuses_coverage_or_identity_gap(partition_payloads, da
         groups[GROUP] = groups[GROUP][:-1]
     elif damage == "seed":
         payloads["row1"]["provenance"]["seed_checkpoint"] = {"path": "foreign"}
-    with pytest.raises(dispatch.MergeRefused, match="partition"):
-        dispatch.merge_payloads(payloads, census=census, capture_sha256="merged", plan_coverage=coverage)
+    with pytest.raises(campaign_table.MergeRefused, match="partition"):
+        campaign_table.merge_payloads(payloads, census=census, capture_sha256="merged", plan_coverage=coverage)
 
 
 @pytest.mark.parametrize("damage", ["anchor_key", "wrong_rate", "empty_prices"])
@@ -213,6 +216,6 @@ def test_partition_merge_checks_actual_group_and_priced_rung(partition_payloads,
         row["formats"] = ["TESSERA_E4M3_K1_R1024"]
     else:
         row["costs"] = dict.fromkeys(row["costs"], {})
-    with pytest.raises(dispatch.MergeRefused, match="partition"):
-        dispatch.merge_payloads(payloads, census=census, capture_sha256="merged",
+    with pytest.raises(campaign_table.MergeRefused, match="partition"):
+        campaign_table.merge_payloads(payloads, census=census, capture_sha256="merged",
                                 plan_coverage=coverage)

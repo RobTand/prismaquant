@@ -21,14 +21,18 @@ def file_sha(path):
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     import transformers
     from safetensors.torch import load_file, save_file
     from transformers import AutoModelForCausalLM
     from prismaquant import pretrained_initialization_contract
     from prismaquant.aura_cost import compute_aura_cost_streamed
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
-    from prismaquant.joint_aura import validate_joint_aura_entry, source_execution_identity
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
+    from prismaquant.joint_aura import source_execution_identity
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     from prismaquant.kl_fisher import fisher_probe_scalar
     from prismaquant.model_profiles import detect_profile
     from prismaquant.production_weight_cache import ProductionWeightCache
@@ -174,7 +178,7 @@ def main():
                     'boundary_metadata': raw_boundary['boundary_metadata'],
                     'source_execution_identity': result['reference_source_execution_identity'],
                     'calibration_subset': result['calibration_subset'], 'tensor_comparisons': checks}
-            from prismaquant.measure_quant_cost import derive_per_expert_activations
+            from prismaquant.routed_experts import derive_per_expert_activations
             from torch.nn import functional as F
             derived = derive_per_expert_activations(experts, hidden_states, parent)
             # The shared derivation orders rows by top-k slot then token;
@@ -233,6 +237,18 @@ def main():
         gc.collect()
         torch.cuda.empty_cache()
 
+    if args.mode == 'cost':
+        if args.cache is None or not args.cache_sha256 or file_sha(args.cache) != args.cache_sha256:
+            raise ValueError('actual original-wire production cache hash is required')
+        with args.cache.open('rb') as handle:
+            cache = pickle.load(handle)
+        if not isinstance(cache, ProductionWeightCache):
+            raise TypeError('expected the existing ProductionWeightCache pickle')
+        args.model = str(cache.require_source_checkpoint(
+            args.model, where='LFM joint screen production cache attachment'))
+        result['production_cache'] = {'path': str(args.cache), 'sha256': args.cache_sha256}
+        formats = ['TESSERA_E4M3_K1_R1024', 'BF16']
+
     profile = detect_profile(args.model)
     runner = build_streamed_causal_lm(args.model, device=torch.device('cuda'), dtype=torch.bfloat16,
         offload_folder=str(args.out / 'offload'), profile=profile, attn_implementation='eager',
@@ -287,15 +303,6 @@ def main():
         runner.context.install = install
         cache = ProductionWeightCache(weights={}, levers={})
         formats = ['BF16']
-    else:
-        if args.cache is None or not args.cache_sha256 or file_sha(args.cache) != args.cache_sha256:
-            raise ValueError('actual original-wire production cache hash is required')
-        with args.cache.open('rb') as handle:
-            cache = pickle.load(handle)
-        if not isinstance(cache, ProductionWeightCache):
-            raise TypeError('expected the existing ProductionWeightCache pickle')
-        result['production_cache'] = {'path': str(args.cache), 'sha256': args.cache_sha256}
-        formats = ['TESSERA_E4M3_K1_R1024', 'BF16']
     original_capture = runner.capture_boundaries
     original_tail = runner.tail_logits
     def capture(ids):

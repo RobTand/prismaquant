@@ -1,0 +1,18 @@
+{
+  "evidence": {
+    "artifact": "/mnt/shared/tessera-measurements/ws-kdak-1199/num-05/numerics.json",
+    "artifact_receipt_sha256": "781b791c25c0ce0b406db80c37a11c8d6dac125b522523f75fd7598d94d370de",
+    "gate": "For every case, path (fp32, bf16) and tensor (o, dq, dk, dv, dg, dbeta), against a float64 run of the executed fallback source: the kernel's largest element error exceeds the FP32 fallback's by at most 2u max|ref|, and its relative Frobenius error exceeds the fallback's by at most 2u, u the unit roundoff of the path's dtype (the two implementations' final roundings); no non-finite value where the fallback has none; and two kernel runs are bit-equal.",
+    "host": "sparky",
+    "pb_action": "dd176c809520ab540fa6ed8bc4649520e488220da552b88a7041d143b09ccd8a",
+    "role": "numerics at the production shape",
+    "shape": {
+      "batch": 4,
+      "head_dim": 128,
+      "heads": 64,
+      "seqlen": 512
+    }
+  },
+  "scope": "Exact retained historical numerical artifact. Regression tests project its case roster as metadata only; no fresh GPU result or qualification is manufactured.",
+  "sha256": "781b791c25c0ce0b406db80c37a11c8d6dac125b522523f75fd7598d94d370de"
+}

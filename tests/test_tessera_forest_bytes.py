@@ -156,9 +156,8 @@ def test_the_accountant_prices_what_the_exporter_writes(family, grid, rung, shap
 def test_the_exporter_agrees_at_the_large_shapes_too(family, grid, rung, shape):
     """The same identity where the 512 B rounds to 0.001 bpp.
 
-    Worth stating once even though it cannot fail if the small shapes pass:
-    the term is per unit, so a large shape is the case where an accountant
-    that dropped it would look right.
+    Recheck the byte contract at large shapes, where dropping this per-unit
+    term makes a smaller difference to reported bpp.
     """
     rows, columns = shape
     torch.manual_seed(11)

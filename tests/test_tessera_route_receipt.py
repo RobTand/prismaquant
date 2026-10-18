@@ -238,19 +238,14 @@ def test_a_non_tessera_artifact_owes_no_route_census(tmp_path):
         load_shipcard(model_dir / "shipcard.json"), model_dir=model_dir)
 
 
-def test_a_tessera_card_without_a_lane_key_owes_no_census(tmp_path):
-    """The requirement travels with the lane declaration, not with the
-    quant_method sniff: a historical card carrying no `lane` verifies
-    against exactly the base set it was opened with.  An earlier revision
-    of this fix required the slot for every rate-axis artifact in
-    `required_slots`; that second requirement path is dropped in favour of
-    the lane union, which is the one mechanism a lane can add requirements
-    through."""
+def test_a_tessera_artifact_owes_a_census_without_a_lane_hint(tmp_path):
+    """Erasing a card's lane hint cannot erase the artifact's obligations."""
     from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
         build_shipcard,
         load_shipcard,
         required_slots,
+        verify,
         write_shipcard,
     )
 
@@ -261,10 +256,12 @@ def test_a_tessera_card_without_a_lane_key_owes_no_census(tmp_path):
          "quantization_config": {"quant_method": "tessera"}}))
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"weights")
     card = build_shipcard(model_dir)
+    card.pop('lane')
     write_shipcard(model_dir / "shipcard.json", card)
-    assert "lane" not in load_shipcard(model_dir / "shipcard.json")
-    assert ROUTE_CENSUS_SLOT not in required_slots(
-        load_shipcard(model_dir / "shipcard.json"), model_dir=model_dir)
+    loaded = load_shipcard(model_dir / "shipcard.json")
+    assert "lane" not in loaded
+    assert ROUTE_CENSUS_SLOT in required_slots(loaded, model_dir=model_dir)
+    assert f"{ROUTE_CENSUS_SLOT}: UNFILLED" in verify(loaded, model_dir=model_dir)
 
 
 def test_a_passed_flag_on_substitute_records_does_not_verify(tmp_path, monkeypatch):

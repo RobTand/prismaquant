@@ -57,7 +57,11 @@ from prismaquant.production_recache import _load_assignment
 from prismaquant.production_weight_cache import (
     fill_production_weight_cache,
 )
-from prismaquant.sensitivity_probe import load_calibration
+from prismaquant.calibration_data import load_calibration
+from prismaquant.streamed_model_identity import (
+    build_source_model_binding,
+    resolve_source_checkpoint_path,
+)
 
 
 def _load_col_weights(path, formats) -> dict | None:
@@ -108,7 +112,9 @@ def _load_col_weights(path, formats) -> dict | None:
 
 
 def _model_has_packed_experts(model: nn.Module, profile) -> bool:
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
     return any(
         _is_packed_experts_module(m, profile)
         for _, m in model.named_modules()
@@ -125,6 +131,7 @@ def render_format_menu_packed_experts(
     cache_dir=None,
     module_token_budget: int = 32768,
     render_mode: str = "batched",
+    include_qnames: Sequence[str] | None = None,
 ) -> dict:
     """Eagerly render packed-MoE experts for a format-menu frontier cache.
 
@@ -163,6 +170,7 @@ def render_format_menu_packed_experts(
         cov = fill_packed_expert_cache_entries(
             cache, model, calib_ids,
             force_format=ef,
+            include_qnames=include_qnames,
             levers=cache.levers,
             profile=profile,
             cache_dir=cache_dir,
@@ -416,6 +424,8 @@ def _run_streaming(args, formats, levers, dtype) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     p = argparse.ArgumentParser(description="Build production δw cache")
     p.add_argument("--model", required=True)
     p.add_argument("--output", required=True)
@@ -675,10 +685,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             levers[name] = False
 
     dtype = _dtype_from_name(args.dtype)
+    args.model = str(resolve_source_checkpoint_path(args.model))
 
     if args.streaming:
         return _run_streaming(args, formats, levers, dtype)
 
+    source_digest_cache = None
+    if args.cache_dir:
+        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
+        source_digest_cache = Path(args.cache_dir) / "source_identity_cache.json"
+    source_binding = build_source_model_binding(
+        args.model, dtype=dtype, digest_cache_path=source_digest_cache,
+    )
     staged, cleanup = stage_multimodal(args.model)
     device = require_cuda_hot_path("build_production_cache")
     print(f"[build-prod-cache] device={device}", flush=True)
@@ -695,16 +713,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         if device.type == "cuda":
             load_kwargs["device_map"] = "cuda"
-        try:
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-        except ValueError as exc:
-            if "requires `accelerate`" not in str(exc) and "requires accelerate" not in str(exc):
-                raise
-            load_kwargs.pop("device_map", None)
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-            model.to(device)
-        if device.type != "cuda":
-            model.to(device)
+        native_source = "source_decode" in source_binding
+        if native_source:
+            from .memory_management import CaptureMemoryGuard
+            from .streaming_model import load_resident_source_model
+
+            model = load_resident_source_model(
+                args.model, device=device, dtype=dtype,
+                offload_folder=str((Path(args.cache_dir) if args.cache_dir
+                                    else output_path.parent) / "resident-source-offload"),
+                resource_check=CaptureMemoryGuard(device).check,
+            )
+        else:
+            try:
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+            except ValueError as exc:
+                if "requires `accelerate`" not in str(exc) and "requires accelerate" not in str(exc):
+                    raise
+                load_kwargs.pop("device_map", None)
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+                model.to(device)
+            if device.type != "cuda":
+                model.to(device)
         model.eval()
         profile = detect_profile_with_warning(
             args.model,
@@ -717,7 +747,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # scale, derived from the expert weights) sees the real experts.
         # No-op when experts already loaded correctly.
         from .layer_streaming import fill_packed_experts_from_source
-        fill_packed_experts_from_source(model, args.model, profile, progress=True)
+        if not native_source:
+            fill_packed_experts_from_source(model, args.model, profile, progress=True)
         skip_tokens = list(
             args.skip_qnames
             if args.skip_qnames is not None
@@ -818,6 +849,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             recache_microbatch_size=args.recache_microbatch_size,
             h_detail_dir=args.h_detail_dir,
             col_weights=col_weights,
+            source_binding=source_binding,
         )
         # R14: stamp the calibration identity onto the cache so every artifact
         # derived from it (production_render_cost's cost table) can be checked
@@ -870,6 +902,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expert_coverage = fill_packed_expert_cache_entries(
                 cache, model, calib_ids,
                 render_assignment=expert_assignment,
+                include_qnames=include_qnames,
                 levers=cache.levers,
                 profile=profile,
                 cache_dir=args.cache_dir,
@@ -891,6 +924,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cache_dir=args.cache_dir,
                 module_token_budget=args.expert_token_budget,
                 render_mode=args.expert_render_mode,
+                include_qnames=include_qnames,
             )
         elif _model_has_packed_experts(model, profile):
             print(

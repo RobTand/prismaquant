@@ -94,7 +94,7 @@ would ship bytes whose serve substitutes or refuses.  This reader parses the
 predicate closed at Tessera's own vocabulary (:func:`parse_lane_claim`) and
 :func:`cell_lane_admits` decides it for a cell -- by handing THIS producer's
 planned wire (``tessera_render.planned_wire_facts``) to Tessera's own
-decision core (``tessera.serving.scheme.decide_lane_requirements``).  The
+decision core (``tessera.metadata.decide_lane_requirements``).  The
 rule has one home and it is not in this repository; what lives here is the
 facts and the refusal.  A lane launch is made only at a rung the lane admits:
 since contract v42 a cell can name a lane launch beside a lane-free one (the
@@ -145,10 +145,9 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from . import record_fields
-from .digests import file_sha256hex
 
 
 #: Schema of the eligibility table PrismaQuant consumes, published by Tessera's
@@ -333,6 +332,7 @@ ROUTE_ATTESTATION_SCHEMA = "prismaquant.lane_route_attestation.v3"
 # --- Principle 9's lane vocabulary, verbatim. -------------------------------
 ROUTE_STATUS_BACKED = "backed"
 ROUTE_STATUS_BACKED_WITH_SERVE_FLAG = "backed_with_serve_flag"
+NATIVE_ROUTE_STATUSES = frozenset({ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG})
 ROUTE_STATUS_UNBACKED = "unbacked"
 #: Not one of principle 9's three: the honest state when the pinned runtime
 #: publishes no claim covering this unit -- because it packages no eligibility
@@ -1030,38 +1030,28 @@ def derive_smoke_attribution(control: SmokeControl | None) -> str:
     return EVIDENCE_ATTRIBUTION_NOT_SHARED
 
 
-def _tessera_contract_module():
-    """Tessera's own contract module -- the home of the v9 smoke vocabulary.
+def _producer_metadata(where: str):
+    """Require the pinned producer's public metadata capabilities by name."""
+    from importlib import import_module
 
-    A v9 lane table is, by construction, the packaged contract of an installed
-    Tessera, so this import cannot be the thing that fails on a box that has a
-    v9 table to read. It is a hard import for the same reason
-    ``decide_lane_requirements`` is: a fallback that answers when Tessera
-    cannot is a second home for Tessera's rule.
-    """
-    from tessera.serving import contract as _contract
-
-    return _contract
-
-
-def _tessera_published(name: str, where: str) -> Any:
-    """One of Tessera's v9 names, or a refusal that says which one is missing.
-
-    A v9 table beside a runtime too old to publish the rule it is written
-    against is a mis-pin, and it has to say so by name rather than surface as
-    an ``AttributeError`` from inside a parser.
-    """
-    module = _tessera_contract_module()
     try:
-        return getattr(module, name)
-    except AttributeError as exc:
+        module = import_module("tessera.metadata")
+    except ImportError as exc:
         raise LaneEligibilityError(
-            f"{where} needs Tessera's {name} to decide, and the installed "
-            "tessera.serving.contract does not publish it: this table calls "
-            f"itself {LANE_ELIGIBILITY_SCHEMA_TESSERA_V9} but the runtime "
-            "beside it is older. Re-pin, never restate the rule here -- a "
-            "second copy is how the two halves of one contract drift."
-        ) from exc
+            f"{where} needs Tessera's public metadata API; the installed "
+            "producer does not publish tessera.metadata") from exc
+    if getattr(module, "METADATA_API_VERSION", None) != "tessera.producer-metadata.v1":
+        raise LaneEligibilityError(
+            f"{where}: incompatible Tessera metadata API version "
+            f"{getattr(module, 'METADATA_API_VERSION', None)!r}; "
+            "this reader requires tessera.producer-metadata.v1")
+    required = ("parse_smoke_record", "smoke_status_is_derived", "derive_smoke_status",
+                "derive_smoke_attribution", "decide_lane_requirements")
+    missing = [name for name in required if not callable(getattr(module, name, None))]
+    if missing:
+        raise LaneEligibilityError(
+            f"{where}: Tessera metadata API does not publish callable(s) {missing}")
+    return module
 
 
 def _parse_smoke_record(payload: Any, where: str, *,
@@ -1070,13 +1060,13 @@ def _parse_smoke_record(payload: Any, where: str, *,
 
     Validating only vocabularies before deriving a status is insufficient:
     observation identity, portable paths and nullable reference arms are also
-    producer grammar. The immutable pin binds this private metadata helper's
-    API; a runtime lacking it refuses by name through ``_tessera_published``.
+    producer grammar. The immutable pin binds this public metadata API; a runtime lacking its
+    capabilities refuses by name.
     No serving execution or kernel module is imported here.
     """
-    validate = _tessera_published("_evidence_smoke_record", where)
+    validate = _producer_metadata(where).parse_smoke_record
     try:
-        parsed = validate(payload, where, control, where.removesuffix(".record"))
+        parsed = validate(payload, control=control, where=where)
     except ValueError as exc:
         raise LaneEligibilityError(str(exc)) from exc
     if parsed is None:
@@ -1326,11 +1316,9 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
         # NAMES, so it is asked rather than inferred from the key: a reader
         # that spelled it `record is not None` would be restating the rule
         # one level up from the one it already refuses to restate.
-        status_is_derived = bool(_tessera_published(
-            "smoke_status_is_derived", f"{where}.smoke")(dict(smoke)))
+        status_is_derived = bool(_producer_metadata(f"{where}.smoke").smoke_status_is_derived(dict(smoke)))
         if status_is_derived:
-            derived_status = _tessera_published(
-                "derive_smoke_status", f"{where}.smoke")(dict(smoke))
+            derived_status = _producer_metadata(f"{where}.smoke").derive_smoke_status(dict(smoke))
             if status != derived_status:
                 raise LaneEligibilityError(
                     f"{where}.smoke.status is {status!r} but Tessera's own "
@@ -1368,8 +1356,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
         if recorded_smoke:
             # v9 derives the attribution from the RECORD, which is a
             # projection of rows this repository does not restate.
-            derived_attribution = _tessera_published(
-                "derive_smoke_attribution", f"{where}.smoke")(dict(smoke))
+            derived_attribution = _producer_metadata(f"{where}.smoke").derive_smoke_attribution(dict(smoke))
             if attribution != derived_attribution:
                 raise LaneEligibilityError(
                     f"{where}.smoke.attribution is {attribution!r} but "
@@ -1764,16 +1751,15 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
 
     The rule is not here. Tessera publishes the predicate
     (``native_extensions[].lane.requires``) and owns the decision
-    (``tessera.serving.scheme.decide_lane_requirements``, the one home its
+    (``tessera.metadata.decide_lane_requirements``, the one home its
     loader, its byte-side report and its plan-time gate all call); this
     function supplies the FACTS -- ``tessera_render.planned_wire_facts``, the
     wire this producer will encode for the cell's family at this rung, read
     off the same recipe and decoration the render encodes with -- and turns
     the refusals into a reason that names the cell, the lane and the launch.
-    Both imports are lazy: ``planned_wire_facts`` needs the encoder, and
-    ``scheme`` pulls in ``tessera.serving.contract`` for its wire spellings
-    (the module, not its validator's dispatch tables; neither imports torch or
-    vLLM). A contract is LOADED without either -- this runs at admission.
+    Numerical wire facts are computed lazily at admission. The producer's
+    public metadata module owns the requirement vocabulary and decisions,
+    without loading the serving runtime.
 
     The unit's STRUCTURE (``dense`` | ``routed_moe``) is one of those facts,
     read off the cell (a serving-profile / decision-unit fact, never inferred
@@ -1834,7 +1820,7 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
             f"{head(claims[0])} cannot be decided against: this producer "
             f"cannot plan family {family!r} at rung {rate_q256} ({exc}), and a "
             "plan that does not exist is not a plan the lane reads"), ()
-    from tessera.serving.scheme import decide_lane_requirements
+    decide_lane_requirements = _producer_metadata("cell rung launches").decide_lane_requirements
 
     refused: list[str] = []
     refused_decoders: set[str] = set()
@@ -2242,6 +2228,14 @@ class EligibilityCell:
             runtime_kernel_build=parse_kernel_build(payload.get("runtime", {}), where),
         )
 
+    @property
+    def native(self) -> bool:
+        """Whether this cell publishes a device-qualified native route."""
+        return (
+            self.qualification == QUALIFICATION_DEVICE_QUALIFIED
+            and self.route_status in NATIVE_ROUTE_STATUSES
+        )
+
     def launch_covers_rate(self, index: int, rate_q256: int) -> bool:
         """Whether the launch at ``executes[index]`` covers ``rate_q256``.
 
@@ -2494,6 +2488,10 @@ class EligibilityTable:
     #: its bytes must satisfy. Read by :func:`cell_lane_admits` at every
     #: admission leg; ``()`` for a v3 table, whose only launches are torch's.
     lanes: tuple[LaneClaim, ...] = ()
+
+    @property
+    def requires_serving_context(self) -> bool:
+        return self.schema in SCOPED_LANE_SCHEMAS
 
     def governs(self, family: str) -> bool:
         """Whether the pinned contract publishes a codec for this family."""
@@ -2991,6 +2989,156 @@ _CELL_RANK = {
 # ---------------------------------------------------------------------------
 # Loading the pinned contract
 # ---------------------------------------------------------------------------
+class NativeCellPopulation(Protocol):
+    """The parsed population and lane claims used by a scoped rung query."""
+
+    cells: tuple[EligibilityCell, ...]
+    regimes: tuple[str, ...]
+
+    @property
+    def lanes(self) -> tuple[LaneClaim, ...]: ...
+
+    @property
+    def requires_serving_context(self) -> bool: ...
+
+
+def native_rung_cells(
+    population: NativeCellPopulation, family: str, rate_q256: int, *,
+    serving_context: ServingContext | None = None,
+    ignore_evidence: bool = False,
+) -> tuple[EligibilityCell, ...]:
+    """Select native cells only when every required regime shares one target.
+
+    This is cell selection, not exact-pin or export admission. Diagnostic
+    callers can retain evidence- or lane-refused cells to name the refusal.
+    """
+    scoped = population.requires_serving_context
+    if scoped != (serving_context is not None):
+        return ()
+    matched = tuple(
+        cell for cell in population.cells
+        if cell.is_trellis
+        and cell.family == str(family)
+        and cell.covers_rate(int(rate_q256))
+        and cell.native
+        and (ignore_evidence or cell_evidence_admits(cell)[0])
+        and (ignore_evidence or cell_lane_admits(cell, int(rate_q256), population.lanes)[0])
+        and (not scoped or cell_matches_serving_context(cell, serving_context))
+    )
+    if scoped and {cell.regime for cell in matched} != set(population.regimes):
+        return ()
+    return matched
+
+
+@dataclass(frozen=True)
+class NativeRungVerdict:
+    """One rung decision and the matched cells that produced it."""
+
+    kind: Literal["native", "table_absent", "rung_unpublished", "family_unpublished",
+                  "legacy_scope", "context_missing", "evidence", "lane_requirements",
+                  "regime_population", "cell_missing", "pin"]
+    reason: str = ""
+    cells: tuple[EligibilityCell, ...] = ()
+    rate_q256: int | None = None
+
+    def __post_init__(self):
+        if self.kind == "native" and (
+            not self.cells or type(self.rate_q256) is not int or self.rate_q256 <= 0
+        ):
+            raise ValueError("native verdict requires matched cells and a positive integer rate")
+
+    @property
+    def admitted(self) -> bool:
+        return self.kind == "native"
+
+    @property
+    def route_status(self) -> str | None:
+        if not self.admitted:
+            return ROUTE_STATUS_UNATTESTED
+        statuses = {cell.route_status for cell in self.cells}
+        return next(iter(statuses)) if len(statuses) == 1 else None
+
+    @property
+    def requires_serve_flags(self) -> tuple[str, ...]:
+        if not self.admitted:
+            return ()
+        return tuple(sorted({flag for cell in self.cells for flag in cell.requires_serve_flags}))
+
+    @property
+    def requires_plugins(self) -> tuple[str, ...]:
+        if not self.admitted:
+            return ()
+        return tuple(sorted({cell.requires_plugin for cell in self.cells if cell.requires_plugin}))
+
+
+def native_rung_verdict(
+    name: str, table: EligibilityTable,
+    formats: Mapping[str, Mapping[str, Any]], *,
+    serving_context: ServingContext | None = None,
+) -> NativeRungVerdict:
+    """Decide the shape-free native rung policy before its independent pin."""
+    from .tessera_serving_runtime_pin import TESSERA_SERVING_PLUGIN_NAME
+
+    if not table.present:
+        return NativeRungVerdict('table_absent', 'no packaged Tessera serving contract is readable' + (f' ({table.absent_reason})' if table.absent_reason else ''))
+    family, _k, rate = resolve_payload_rung(name, published_formats=formats)
+    if rate is None:
+        return NativeRungVerdict('rung_unpublished', f"{name} resolves to no rung the packaged Tessera contract's formats table publishes")
+    if not table.governs(family):
+        return NativeRungVerdict('family_unpublished', f'the packaged Tessera contract does not publish {family}')
+    scoped = table.schema in SCOPED_LANE_SCHEMAS
+    if not scoped and serving_context is not None:
+        return NativeRungVerdict('legacy_scope', legacy_runtime_scope_refusal(table.schema))
+    if scoped and serving_context is None:
+        return NativeRungVerdict('context_missing', f'{name}: the packaged Tessera {table.schema} contract requires an explicit serving context (platform, structure, residency, runtime image and execution mode)')
+    matched = native_rung_cells(table, family, rate, serving_context=serving_context)
+    if not matched:
+        evidence_refused: list[str] = []
+        lane_refused: list[str] = []
+        for cell in native_rung_cells(table, family, rate, serving_context=serving_context, ignore_evidence=True):
+            admits, why = cell_evidence_admits(cell)
+            if not admits:
+                evidence_refused.append(why)
+                continue
+            admits, why = cell_lane_admits(cell, rate, table.lanes)
+            if not admits:
+                lane_refused.append(why)
+        if evidence_refused:
+            return NativeRungVerdict('evidence', f"{name}: the packaged Tessera contract's own evidence refuses this route. " + ' '.join(sorted(set(evidence_refused))))
+        if lane_refused:
+            return NativeRungVerdict('lane_requirements', f"{name}: the packaged Tessera contract's lane predicate refuses this producer's plan on this route. " + ' '.join(sorted(set(lane_refused))))
+        if scoped:
+            return NativeRungVerdict('regime_population', f'the packaged Tessera contract has no complete device-qualified native regime population for {family} R{rate} in serving context {serving_context.as_dict()}')
+        published = sorted(int(r) for r in formats.get(family, {}).get("candidate_rungs_q256", ()))
+        return NativeRungVerdict('cell_missing', f'the packaged Tessera contract publishes {family} at rungs {published} and no device-qualified native cell names R{rate}')
+    unstated = [cell.id for cell in matched if cell.requires_plugin != TESSERA_SERVING_PLUGIN_NAME]
+    if unstated:
+        raise LaneEligibilityError(f"{name}: cell(s) {unstated} claim a native Tessera route without declaring requires_plugin={TESSERA_SERVING_PLUGIN_NAME!r}. Stock vLLM has no reader for Tessera bytes, so every such route is plugin-gated; a cell that omits the requirement would let an artifact be admitted whose serve command need not install the runtime that reads it. This is a contract defect -- fix the packaged table, never this gate.")
+    return NativeRungVerdict('native', cells=matched, rate_q256=rate)
+
+
+def eligibility_table_from_contract(
+    contract: Mapping[str, Any], *, version: str, commit: str,
+    sha256: str, path: str,
+) -> EligibilityTable:
+    """Parse lane facts from the same document that supplied their identity."""
+    block = contract.get("lane_eligibility")
+    if block is None:
+        return EligibilityTable(
+            present=False, runtime_version=version, runtime_commit=commit,
+            contract_sha256=sha256,
+            absent_reason=(
+                f"{path} packages no 'lane_eligibility' table, so no "
+                "serving-lane route can be attested for this pin. This is a "
+                "REFUSAL TO CLAIM, not a clean bill: the runtime's lane "
+                "predicates exist but are not published."
+            ),
+        )
+    return _parse_table(
+        block, contract.get("formats", ()), version, commit, sha256,
+        native_extensions=contract.get("native_extensions"))
+
+
 def load_eligibility_table(
     version: str | None = None,
     *,
@@ -3031,32 +3179,15 @@ def load_eligibility_table(
             ),
         )
 
-    sha = _sha256(path)
-
+    from .tessera_runtime_contract import read_runtime_snapshot
     try:
-        contract = json.loads(path.read_text(encoding="utf-8"))
+        snapshot = read_runtime_snapshot(path)
     except (OSError, json.JSONDecodeError) as exc:
         raise LaneEligibilityError(
             f"cannot read {path}: {exc}") from exc
-
-    block = contract.get("lane_eligibility")
-    if block is None:
-        return EligibilityTable(
-            present=False,
-            runtime_version=version or "",
-            runtime_commit=commit,
-            contract_sha256=sha,
-            absent_reason=(
-                f"{path} packages no 'lane_eligibility' table, so no "
-                "serving-lane route can be attested for this pin. This is a "
-                "REFUSAL TO CLAIM, not a clean bill: the runtime's lane "
-                "predicates exist but are not published."
-            ),
-        )
-
-    return _parse_table(
-        block, contract.get("formats", ()), version or "", commit, sha,
-        native_extensions=contract.get("native_extensions"))
+    from dataclasses import replace
+    return replace(snapshot.eligibility, runtime_version=version,
+                   runtime_commit=commit)
 
 
 def load_published_formats(
@@ -3079,12 +3210,8 @@ def load_published_formats(
     path = Path(contract_path) if contract_path is not None else None
     if path is None or not path.exists():
         return {}
-    contract = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        str(entry["family"]): dict(entry)
-        for entry in contract.get("formats", ())
-        if isinstance(entry, Mapping) and entry.get("family")
-    }
+    from .tessera_runtime_contract import read_runtime_snapshot
+    return read_runtime_snapshot(path).published_formats
 
 
 def _name_prefix(entry: Mapping[str, Any]) -> str:
@@ -3477,18 +3604,14 @@ def parse_kernel_build(payload: Mapping[str, Any], where: str) -> str:
     return value
 
 
-def _cell_identifier(cell: Any) -> str:
-    return getattr(cell, "id", None) or cell.cell_id
-
-
 def cell_kernel_build(cell: Any) -> str:
     """Use the same effective build name for lookup and compatibility keys."""
-    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + _cell_identifier(cell)
+    return getattr(cell, "runtime_kernel_build", "") or "legacy:" + cell.id
 
 
 def cell_key_compatibility(cells) -> dict[str, tuple]:
     """Map historical receipt names to build and module-kind keys."""
-    return {_cell_identifier(cell): (cell_kernel_build(cell), cell.structure,
+    return {cell.id: (cell_kernel_build(cell), cell.structure,
             cell.platform, cell.family, cell.regime, cell.residency_modes,
             cell.execution_modes) for cell in cells}
 
@@ -3773,9 +3896,6 @@ def _require_keys(payload: Mapping[str, Any], where: str, *,
                                error=LaneEligibilityError)
 
 
-_sha256 = file_sha256hex
-
-
 __all__ = [
     "ATTRIBUTED_SMOKE_LANE_SCHEMAS",
     "CellEvidence",
@@ -3859,10 +3979,16 @@ __all__ = [
     "UnitStructuralFacts",
     "EligibilityCell",
     "EligibilityTable",
+    "NativeCellPopulation",
+    "NativeRungVerdict",
+    "NATIVE_ROUTE_STATUSES",
+    "native_rung_cells",
+    "native_rung_verdict",
     "RegimeRoute",
     "UnitRoute",
     "resolve_unit_route",
     "load_eligibility_table",
+    "eligibility_table_from_contract",
     "load_published_formats",
     "resolve_payload_rung",
     "unit_structural_facts",

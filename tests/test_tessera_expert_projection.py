@@ -91,9 +91,10 @@ def _declared(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
 # Vocabulary pinned to the producer
 # ---------------------------------------------------------------------------
 def test_unpacked_layout_is_the_producers_constant():
+    """The public metadata API does not publish the source layout, so the
+    spelling is cross-checked against the producer's serving scheme wherever
+    that package is installed beside the tests (never from production)."""
     scheme = pytest.importorskip("tessera.serving.scheme")
-    if not hasattr(scheme, "MOE_SOURCE_UNPACKED"):
-        pytest.skip("pinned tessera predates MOE_SOURCE_UNPACKED")
     assert tep.SOURCE_LAYOUT_UNPACKED == scheme.MOE_SOURCE_UNPACKED
 
 

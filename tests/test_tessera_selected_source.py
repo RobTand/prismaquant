@@ -1,6 +1,9 @@
 """Selected anchors reuse canonical inputs without loading the whole source."""
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
+
 
 @pytest.mark.parametrize('extra', [[], ['--calibration-cache', '/capture'],
     ['--calibration-cache-sha256', 'a'*64]])
@@ -284,7 +287,7 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     def resources(spec, census, members, *, selected_source):
         assert selected_source and members == ['layers.0.proj']
         return dict(memory_bytes=3*1024**3, selected_layers=['0'])
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan', resources)
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan', resources)
     # ``plan`` derives each row's data manifest from the capture manifest and
     # the model's shards; both are bare paths here. The phase plan is under
     # test; the read set is covered by
@@ -318,7 +321,7 @@ def test_bounded_encoder_memo_releases_evicted_factors_and_recomputes_identicall
     weights = {str(i): torch.empty(2, 4) for i in range(6)}
     results = []
     for capacity, expected_live in ((None, 12), (2, 2)):
-        memo = campaign._activation_kwargs_memo(None, weights, 'cpu', max_entries=capacity)
+        memo = cell_measurement.encoder_kwargs_memo(None, weights, 'cpu', max_entries=capacity)
         outputs = []
         for repeat in range(2):
             for plane in (1, 2):
@@ -364,7 +367,7 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
     outputs = []
     measurements = []
     for capacity in (None, 1):
-        memo = campaign._activation_kwargs_memo(source, weights, 'cuda', max_entries=capacity)
+        memo = cell_measurement.encoder_kwargs_memo(source, weights, 'cuda', max_entries=capacity)
         root = tmp_path/str(capacity)
         root.mkdir()
         cache = SimpleNamespace(weights={}, cache_dir=str(root))
@@ -372,7 +375,7 @@ def test_native_bounded_encoder_memo_keeps_wire_and_price_bytes(tmp_path, monkey
         peak_owned_bytes = 0
         for fmt in ('TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R1280'):
             for name, weight in weights.items():
-                anchor = campaign._measure_anchor(qname=name, weight=weight, activations=acts[name],
+                anchor = cell_measurement.measure_cell(qname=name, weight=weight, activations=acts[name],
                     format_name=fmt, cache=cache, wire_dir=root,
                     activation_kwargs_for=memo, hessian_required=True)
                 row = vars(anchor).copy()
@@ -543,7 +546,7 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
     # without moving the deltas.  Fold it into ``memory_bytes`` instead and the
     # predicate compares an inflated plan against an inflated cap and nets to
     # zero, which is exactly what declared headroom already does.
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan',
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan',
         lambda spec, census, members, *, selected_source: dict(
             memory_bytes=_ROUNDING_LOSER_PLAN_BYTES, selected_layers=['0'],
             baseline_policy='declared-headroom-pre-run-measured-in-row'))
@@ -573,12 +576,11 @@ def test_a_malformed_process_baseline_reservation_refuses_before_any_row(
     would silently reserve one byte.
     """
     import json
-    from tools import dispatch_tessera_campaign as dispatch
     spec = dict(model='/source', campaign_argv=['--streaming'], cwd=str(tmp_path),
                 python='python3', env={}, cpus=1, process_baseline_bytes=value)
     (tmp_path/'spec.json').write_text(json.dumps(spec))
     with pytest.raises(RuntimeError, match='process_baseline_bytes'):
-        dispatch.load_spec(tmp_path/'spec.json')
+        campaign_rows.load_spec(tmp_path/'spec.json')
 
 
 def test_an_absent_reservation_still_reports_the_pre_run_term_it_actually_has(monkeypatch):
@@ -622,21 +624,20 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
     process floor and the guard's margin -- are charged on both branches.
     """
     import math
-    from tools import dispatch_tessera_campaign as dispatch
     from prismaquant.memory_management import CaptureMemoryGuard
     gib = 1024 ** 3
     margin = CaptureMemoryGuard.MARGIN_BYTES
-    monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * gib)
+    monkeypatch.setattr(campaign_rows, '_model_bytes', lambda model: 10 * gib)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
-    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    spec = dict(model='/source', campaign_argv=['--max-act-rows', '2'], headroom_gb=3)
     hessian, rows = 8 ** 2 * 4, 8 * 2 * 4
     body = 10 * gib + hessian + rows
 
-    default = dispatch._row_memory_gb(spec, ['layers.0.proj'], census)
+    default = campaign_rows.row_memory_gb(spec, ['layers.0.proj'], census)
     assert default == math.ceil(
-        (body + dispatch.DEFAULT_PROCESS_BASELINE_BYTES + margin) / gib) + 3
+        (body + campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES + margin) / gib) + 3
 
-    reserved = dispatch._row_memory_gb(
+    reserved = campaign_rows.row_memory_gb(
         {**spec, 'process_baseline_bytes': 2147483648}, ['layers.0.proj'], census)
     # Charged inside the same ceil as the body, so the demand covers
     # body + reservation + margin rather than rounding each of them up
@@ -645,16 +646,16 @@ def test_the_resident_source_branch_charges_the_same_reservation(monkeypatch, tm
 
     # A declared zero opts out of the floor and of nothing else: the margin is
     # the guard's, not the spec's.
-    assert dispatch._row_memory_gb(
+    assert campaign_rows.row_memory_gb(
         {**spec, 'process_baseline_bytes': 0}, ['layers.0.proj'],
         census) == math.ceil((body + margin) / gib) + 3
 
     # Headroom is untouched by the reservation: they are separate terms and
     # only one of them is inside ``memory_bytes``.
-    assert dispatch._row_memory_gb(
+    assert campaign_rows.row_memory_gb(
         {**spec, 'headroom_gb': 9, 'process_baseline_bytes': 2147483648},
         ['layers.0.proj'], census) == reserved + 6
 
     with pytest.raises(RuntimeError, match='process_baseline_bytes'):
-        dispatch._row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
+        campaign_rows.row_memory_gb({**spec, 'process_baseline_bytes': '2147483648'},
                                 ['layers.0.proj'], census)

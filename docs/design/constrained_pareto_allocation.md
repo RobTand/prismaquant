@@ -1,9 +1,14 @@
 # Constrained Pareto allocation: serving SLOs as a second selection axis
 
-*Ultraplan P5c. Normative policy:
-[`docs/lanes/nvfp4-cb/format-speed-policy.md`](../lanes/nvfp4-cb/format-speed-policy.md)
+*Ultraplan P5c. Original policy, now archived:
+[`format-speed-policy.md`](../../archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/format-speed-policy.md)
 §1. Motivating audit: gridbook
 `docs/audits/ultraplan_perf_2026-08-01.md` §6, item P5c.*
+
+The serving-constraint owner remains active. Gridbook was retired on
+2026-09-02. Its measurements and examples below explain the original design;
+they do not describe a supported container or a current serving qualification.
+Sections 6–8 retain that historical example, harness and work list.
 
 ## 1. The problem, and why it needed a second axis
 
@@ -41,7 +46,10 @@ score.
 
 **No default workload mix.** Policy §1: "no default workload mix hidden in the
 allocator". A mix is a claim about what the deployment runs; the allocator does
-not get to assume one. With no mix supplied, the axis is inert.
+not get to assume one. With no serving constraints supplied, the axis is inert.
+An explicit latency or device-memory constraint requires both the dispatch
+table and mix; incomplete context refuses instead of ignoring the limit.
+The separate measured-runtime-table path keeps its own admission contract.
 
 **No change to `solve_allocation`.** The bits-DP's semantics for the
 unconstrained case are byte-identical and pinned by
@@ -193,9 +201,9 @@ Allocator flags (all optional; none supplied ⇒ pre-P5c behaviour):
 `SERVE_PEAK_SCRATCH_BYTES`, all recorded in `STAGE_SETTINGS_ENV`. Setting a
 latency SLO without a dispatch table is refused by name.
 
-## 6. The shipped example table
+## 6. The archived example table
 
-`prismaquant/serve_dispatch_tables/gridbook_gb10_2026-08-01.example.json`.
+`archive/gridbook_lane_2026-09-02/prismaquant/serve_dispatch_tables/gridbook_gb10_2026-08-01.example.json`.
 **Example / proposal data only**, populated exclusively from measurements
 already published in the Gridbook repository, each row citing its source:
 
@@ -227,10 +235,11 @@ Two absences are deliberate and stated in the table's own notes:
 * **MoE expand ≈35% of MoE layer time at Laguna scale** is a *share*, not a
   ratio against a named reference route, so it is a note rather than a row.
 
-## 7. P5d: the D0.3 exact-rate harness
+## 7. P5d: the archived D0.3 exact-rate harness
 
-`prismaquant/d03_exact_rate.py` + `scripts/run_d03_exact_rate.sh` run the two
-experiments gridbook ROADMAP D0.3 names, with the P5a pricing and these
+`prismaquant/d03_exact_rate.py` and `scripts/run_d03_exact_rate.sh`, both under
+`archive/gridbook_lane_2026-09-02/`, ran the two experiments the Gridbook
+ROADMAP D0.3 named, with the P5a pricing and these
 stamps: (i) `FP8_CB_K36` vs vanilla `NVFP4` on dense units at matched exact
 whole-artifact bytes; (ii) below 4.5 bpw, byte-neutral sweeps whose NVFP4
 promotions are funded by cheaper CB rungs elsewhere.
@@ -251,7 +260,11 @@ packed expert stacks because no stock-compressed-tensors packed-expert emit
 path exists, and building one is out of scope under the one-payload /
 no-new-packer rule. Unlocking it is gridbook **D0.2**.
 
-## 8. What remains
+## 8. Historical work list at the time of this design
+
+The retired Gridbook-specific items are retained as history. They are not a
+request to restore that lane. Current supported lanes require their own
+measured dispatch inputs and serving qualification.
 
 1. **Real measured tables.** The shipped example is a worked demonstration on
    published 27B/DSV4 numbers. A deployment needs its own table on its own

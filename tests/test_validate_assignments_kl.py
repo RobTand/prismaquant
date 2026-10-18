@@ -4,12 +4,12 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.validate_assignments_kl import (
     _assert_calibration_disjoint,
     _assignment_cost_summary,
     _calibration_provenance,
-    _load_calibration_repeats,
     _materialize_assignment_inplace,
     _production_cache_assignment_diagnostics,
     _upstream_calibration_hashes,
@@ -69,16 +69,19 @@ def test_assignment_cost_summary_reports_local_mse_and_aliases():
     summary = _assignment_cost_summary(
         costs,
         {"a": "NVFP4", "b": "MXFP8", "c": "BF16", "missing": "NVFP4"},
+        stats={"a": {"h_trace": 3.0}, "b": {"h_trace": 4.0}},
     )
 
     assert abs(summary["output_mse_sum"] - 2.25) < 1e-12
     assert abs(summary["fisher_output_mse_sum"] - 1.60) < 1e-12
     assert abs(summary["weight_mse_sum"] - 1.5) < 1e-12
     assert abs(summary["rel_output_mse_sum"] - 0.225) < 1e-12
-    assert abs(summary["predicted_dloss_sum"] - 3.0) < 1e-12
+    assert summary["predicted_dloss_sum"] is None
+    assert summary["recorded_predicted_dloss_sum"] == 3.0
+    assert summary["price_missing_count"] == 1
     assert summary["counts"]["output_mse"] == 3
     assert summary["counts"]["fisher_output_mse"] == 2
-    assert summary["counts"]["predicted_dloss"] == 1
+    assert summary["counts"]["predicted_dloss"] == 3
     assert summary["missing_count"] == 1
     assert summary["missing_sample"] == ["missing"]
 
@@ -183,7 +186,7 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         calib_repeat_seed_stride=1,
     )
     with pytest.raises(ValueError, match="only implemented for --dataset"):
-        _load_calibration_repeats(object(), args)
+        load_validation_calibration(object(), CalibrationRequest.from_namespace(args)).selection_repeats
 
     # No skip requested -> the wikitext branch is untouched.
     args.calib_skip_first = 0
@@ -193,13 +196,13 @@ def test_calib_skip_first_on_wikitext_raises_instead_of_silently_skipping():
         calls["seed"] = seed
         return torch.zeros(n, seqlen, dtype=torch.long)
 
-    import prismaquant.validate_assignments_kl as mod
-    original = mod.load_wikitext_calibration_windowed
-    mod.load_wikitext_calibration_windowed = _fake_loader
+    from prismaquant import calibration_data
+    original = calibration_data.load_wikitext_calibration_windowed
+    calibration_data.load_wikitext_calibration_windowed = _fake_loader
     try:
-        repeats = _load_calibration_repeats(object(), args)
+        repeats = load_validation_calibration(object(), CalibrationRequest.from_namespace(args)).selection_repeats
     finally:
-        mod.load_wikitext_calibration_windowed = original
+        calibration_data.load_wikitext_calibration_windowed = original
     assert len(repeats) == 1 and repeats[0].shape == (4, 128)
     assert calls["seed"] == 42
 

@@ -3,7 +3,8 @@
 Only the admitted helper tree owns map validation, pinning and release. A map
 miss reads the declared origin. A named range never uses an origin fallback.
 Each phase holds batched tier leases until all its descriptors close.
-An unavailable RAM cover can select published stage covers. Integrity failures refuse.
+Unavailable RAM covers or acquisition can select published stage covers.
+Integrity and unknown refusals never select another copy.
 """
 import json
 import os
@@ -109,6 +110,23 @@ class StagedReader:
             expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
             span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
             acquire_token=uuid.uuid4().hex, residency_root=self.root)
+        if not acq["ok"] and "ram_path" in entry and tier != mapping["tier_id"] \
+                and classify_refusal(acq["refusal"]) == "availability":
+            # PB acquire proves availability after covers did: the RAM epoch
+            # moved or the fragment dropped between the two calls (pinned SDK
+            # reader_lease.acquire: unpublished, stale-epoch, retiring). The
+            # failed acquire files no pin, so re-cover the same bytes on stage.
+            # Integrity and unknown refusals never select another copy.
+            tier, epoch = mapping["tier_id"], ""
+            covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
+                                              manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
+            if not covers["ok"]:
+                raise RuntimeError(f'{phase}: PB covering material: {covers["refusal"]}')
+            acq = self.lease.acquire_for(
+                self.ctx, tier_id=tier, epoch=epoch, covers=covers["covers"],
+                expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
+                span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
+                acquire_token=uuid.uuid4().hex, residency_root=self.root)
         if not acq["ok"]:
             raise RuntimeError(f'{phase}: PB reader lease: {acq["refusal"]}')
         window = {"acq": acq, "entries": selected, "active": 0}

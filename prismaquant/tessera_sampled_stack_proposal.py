@@ -170,11 +170,12 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     # pruned from one member drops out of the group's name intersection.
     deferred = (packed_serving_group_members(stats, profile)
                 | fused_sibling_group_members(stats, profile))
-    raw = build_candidates(stats, costs, specs,
+    build = build_candidates(stats, costs, specs,
                            source_manifest={name: 'bf16' for name in stats},
                            target_profile=target_profile, mask_records=mask,
                            tessera_menu_mode='research',
                            defer_menu_reduction=deferred)
+    raw, costs = build.candidates, build.cost_rows
     _require(set(raw) == set(stats) and all(raw.values()), 'some pilot unit has no legal measured candidate')
     grouped_stats, grouped_costs, grouped = aggregate_packed_serving_groups(
         stats, costs, specs, raw, profile)
@@ -190,9 +191,11 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
     _require(all(name not in grouped for name in unknown),
              'unobserved member escaped as an independent allocator choice')
     # The fused aggregator's licensed per-member Tessera composites remain the
-    # one existing path for dense gate/up and QKV groups.
+    # one existing path for dense gate/up and QKV groups. Like allocator.main,
+    # aggregation reads the rows the candidate builder admitted, not the raw
+    # payload: synthesized and canonical rows exist only there.
     final_stats, _, final_candidates = aggregate_fused_siblings(
-        grouped_stats, payload['costs'], specs, grouped, profile)
+        grouped_stats, costs, specs, grouped, profile)
     _require(set(final_stats) == set(final_candidates) and all(final_candidates.values()),
              'fused aggregation lost a measured decision unit')
     total_params = sum(int(s['n_params']) for s in final_stats.values())
@@ -315,6 +318,10 @@ def propose_bound_payload(payload, *, profile, mutable_budget_bytes, immutable_b
                 'fit_overlap_status': 'unverified',
                 'retained_panel_label': 'retained_validation_panel_not_heldout_until_overlap_audit',
                 'validation_helper_schema': 'prismaquant.sampled_proposal_validation.v1',
+                # Retired with the test-only prototypes on 2026-10-14; no live
+                # code performs this validation, so the proposal stays pending.
+                'validation_helper_archive':
+                    'archive/proposal_validation_2026-10-14/prismaquant/proposal_validation.py',
                 'validation_helper_required_bindings': [
                     'selected_assignment_sha256', 'incumbent_assignment_sha256',
                     'metric_schema', 'metric_support', 'metric_identity_artifact_sha256',

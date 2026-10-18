@@ -1044,7 +1044,6 @@ def test_an_allocation_contained_in_one_declared_step_is_step_scratch(tmp_path):
     verdict = consume(tmp_path, closed_report(steps=CLOSED_STEPS, rows=[row]))
     assert verdict.disagreements == ()
     assert verdict.recomputed_non_step_transient_peak_bytes == 0
-    # 400 bytes live over [9, 23) never overlap the fixed scratch peak at 14.
     assert verdict.recomputed_terms["fixed_scratch"] == CLOSED_FIXED_SCRATCH + 400
 
 

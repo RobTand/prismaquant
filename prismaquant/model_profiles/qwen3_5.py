@@ -319,6 +319,8 @@ class Qwen3_5Profile(ModelProfile):
         `Qwen3_5DenseProfile` inherits this unchanged because
         `MtpModule` picks the dense-vs-MoE decoder class from the
         config at construction time."""
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         return MtpModule(text_config)
 
     def mtp_objective_example(self) -> str:

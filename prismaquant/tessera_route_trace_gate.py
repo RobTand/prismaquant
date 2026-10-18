@@ -87,12 +87,10 @@ declares no map compares the checkpoint names verbatim, and its verdict is
 unchanged. A map is a name, never a count: an unnamed module stays NOT
 VERIFIED whatever the map says.
 
-The grade is one fact about the serve, not one per rank: a set in which some
-ranks name their modules and others do not cannot be read as either. It is
-compared as a histogram and, whatever it says, it cannot agree: the histogram
-is a diagnosis here, and a disagreement in it is still REFUSED loudly. Ranks
-that both name their modules are compared per module, so the exact grade is
-strictly stronger than the histogram it subsumes.
+The grade is one fact about the serve, not one per rank. If some ranks name
+their modules and others do not, the result is NOT_VERIFIED before any
+cross-rank histogram comparison. When every rank names its modules, comparison
+is per module, so the exact grade is stronger than a histogram comparison.
 
 What this does not see
 ======================

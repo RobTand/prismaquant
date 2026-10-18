@@ -1,6 +1,8 @@
 """Exact source boundary residency and rolling cotangent regressions."""
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance
+
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -10,9 +12,7 @@ import pytest
 import torch
 
 import prismaquant.aura_cost as aura
-from prismaquant.cost_streaming import (
-    BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts, normalize_boundary_storage,
-)
+from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts, normalize_boundary_storage
 from prismaquant.perturbed_x_cache import ExactActivationReference
 from test_joint_aura_streamed import _fixture
 from test_streamed_cost_checkpoints import _model_identity
@@ -237,7 +237,7 @@ def test_exact_storage_policy_is_closed_and_complete(tmp_path):
 
 
 def test_shared_state_mapping_keys_cannot_hide_tensor_or_opaque_owners(tmp_path):
-    from prismaquant.cost_streaming import StreamedForwardBoundaries
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
     with _bound(tmp_path, aux=64) as owner:
         key = torch.zeros(32)
         batch = StreamedForwardBoundaries(None, None, None, None, [], {key: None})
@@ -287,7 +287,7 @@ def _shared_run(path, *, aux=1 << 20, layer_major=False):
     runner = StreamedCausalLM(context, Gemma4Profile())
     storage_policy = None if path is None else _policy(path, cap=4096, aux=aux)
     if layer_major:
-        from prismaquant.cost_streaming import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+        from prismaquant.streamed_boundary_artifacts import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
         model.eval()
         runner.require_prefetched_residency = True
         runner.prefetch_lookahead = 1
@@ -323,7 +323,7 @@ def test_shared_state_and_its_probe_cotangents_are_preserved_and_budgeted(tmp_pa
 
 def test_opaque_shared_state_refuses_instead_of_hiding_tensor_ownership(tmp_path):
     from types import SimpleNamespace
-    from prismaquant.cost_streaming import StreamedForwardBoundaries
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
     batch = StreamedForwardBoundaries(torch.ones(1, 4, dtype=torch.int64), None,
         None, None, [], SimpleNamespace(hidden=torch.ones(1024)))
     with _bound(tmp_path) as owner:
@@ -332,7 +332,7 @@ def test_opaque_shared_state_refuses_instead_of_hiding_tensor_ownership(tmp_path
 
 
 def test_completed_resume_skips_generation_and_policy_change_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     first, _, _ = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints")
     actual, events, context = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints", resume=True)
     assert actual["costs"] == first["costs"]
@@ -344,19 +344,19 @@ def test_completed_resume_skips_generation_and_policy_change_refuses(tmp_path, m
 
 
 def test_interrupted_cost_resume_uses_new_generation_and_original_signed_samples(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     expected, _, _ = _run(None)
-    writer = aura._write_aura_unit_checkpoint
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     def interrupt(*args, **kwargs):
         writer(*args, **kwargs)
         raise RuntimeError("fixture interrupted cost checkpoint")
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", interrupt)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt)
     with pytest.raises(RuntimeError, match="fixture interrupted"):
         _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints")
     assert not list((tmp_path / "working").rglob("*.pt*"))
     failed = json.loads(next((tmp_path / "working").rglob("generation.json")).read_text())
     assert failed["status"] == "failed" and failed["working_artifacts_reusable"] is False
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", writer)
     actual, _, _ = _run(tmp_path / "working", checkpoint=tmp_path / "checkpoints", resume=True)
     assert actual["costs"] == expected["costs"]
     completed = actual["provenance"]["streamed_boundary_storage"]

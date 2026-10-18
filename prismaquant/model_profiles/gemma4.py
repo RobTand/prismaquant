@@ -10,12 +10,11 @@ Almost entirely vLLM-metadata-derived — Gemma 4 has a clean
 No MTP heads (not in vLLM's speculative registry at this vLLM version),
 so PrismaQuant doesn't need a custom MTP forward builder.
 
-Source passthrough prefixes cover the three modality towers (vision,
-audio, and their embedding projectors) — these pass through as BF16
-until we wire real multimodal calibration, matching the Qwen3.6 visual
-encoder policy.
+Source passthrough prefixes cover the modality towers and their embedding
+projectors. Declared visual roots admit complete measured per-Linear
+allocations and the explicit uniform control; native export applies those
+recipe formats. Unassigned visual tensors and audio remain source passthrough.
 
-Minimal size: ~30 lines. Everything else inherits from base.
 """
 from __future__ import annotations
 

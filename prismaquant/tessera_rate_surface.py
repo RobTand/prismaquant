@@ -24,8 +24,8 @@ No parametric rate law.  A global log-linear fit is wrong on this family and
 the ladder shows exactly where: E4M3 wSNR runs 11.04/16.79/22.12/27.35/29.57
 dB at rates 2-6, i.e. ~5.4 dB per bit until it saturates against the scalar
 E4M3 ceiling, where the last step delivers 2.22.  A straight line through
-those anchors overpredicts the top of the range badly.  So interpolation is
-**the generic, unqualified surface uses a monotone log-loss screen**.
+those anchors overpredicts the top of the range badly. The generic,
+unqualified surface uses a monotone log-loss screen.
 A canonical surface instead uses the producer's qualified neighbour chord.
 Both paths refuse extrapolation beyond their measured anchors.
 Derived quality remains proposal data and grants no serving qualification.
@@ -69,11 +69,6 @@ from typing import Any, Mapping, Sequence, TYPE_CHECKING
 from tessera.errors import GrammarError
 from tessera.manifest import BodyKind
 
-from .tessera_allocator import (
-    TesseraAllocatorCandidate,
-    build_tessera_allocator_candidate,
-    tessera_solver_candidate_menu,
-)
 from .tessera_formats import (
     SUPERBLOCK_WEIGHTS,
     TesseraFamily,
@@ -85,6 +80,7 @@ from .tessera_formats import (
 
 if TYPE_CHECKING:
     from tessera.export import WireRecipe
+    from .tessera_allocator import TesseraAllocatorCandidate
 
 __all__ = [
     "STACK_TRANSFER_REFERENCE_Q256",
@@ -260,7 +256,7 @@ class TesseraRateSurface:
             lower_value=self.anchor_dloss[lower], upper_value=self.anchor_dloss[upper],
             lower_scope=self.anchor_scopes[self.anchor_q256[lower]],
             upper_scope=self.anchor_scopes[self.anchor_q256[upper]])
-        from .joint_aura import JOINT_CURRENCY
+        from prismaquant.joint_aura_rows import JOINT_CURRENCY
         from .rung_allowability import CANONICAL_CHORD_SOURCE
         anchors = []
         for index in (lower, upper):
@@ -376,6 +372,8 @@ def densify_rate_surface(
         if any(tuple(scope["shape"]) != dims for scope in self_scopes.values()):
             raise TesseraFormatError("quality surface differs from the actual source shape")
     columns = dims[1]
+    from .tessera_allocator import build_tessera_allocator_candidate
+
     built: list[TesseraAllocatorCandidate] = []
     for rate in sorted(set(int(value) for value in q256_values)):
         structure = (allowability_scope or {}).get("kernel_kind")
@@ -457,6 +455,8 @@ def rate_surface_solver_menu(
         raise TesseraFormatError(
             f"units {sorted(missing)} have no declared currency"
         )
+    from .tessera_allocator import tessera_solver_candidate_menu
+
     flat: list[TesseraAllocatorCandidate] = []
     for unit_name in sorted(densified):
         flat.extend(densified[unit_name])
@@ -634,11 +634,11 @@ def allocation_regret(
 # Linear measured at three rungs, interpolated between them.  A packed routed
 # MoE stack is a different shape of problem and needs a different instrument.
 #
-# Why a second instrument.  A routed stack is ONE rate decision covering every
-# expert in the layer (``allocator_candidates.aggregate_packed_serving_groups``
-# makes the packed group a single multi-choice DP item, and the pinned Tessera
-# contract's two ``routed_moe`` cells publish no per-expert rate licence), yet
-# a census pays 3 x E x R encodes to resolve it.  The offline regret study
+# Why a second instrument. The original stack-uniform study treated a routed
+# stack as one rate decision covering every expert in the layer; the runtime
+# contract at that time did not license per-expert rates. Current per-unit
+# allocation has its own capability gate. A census pays 3 x E x R encodes to
+# resolve the stack. The offline regret study
 # ``docs/results/glm_tessera_probe_reduction_regret_2026-09-10.md`` measured
 # what happens if a stack is instead measured as a CENSUS at one reference
 # rung plus a small expert SAMPLE at the others, with the missing rungs

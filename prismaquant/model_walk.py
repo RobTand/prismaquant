@@ -707,9 +707,9 @@ def _callable_identity(fn: Callable | None) -> dict | None:
 
     Predicates are code, not data: the artifact records WHAT ran (name,
     qualname, module, owner class, and for lambdas the defining source
-    line) so an auditor can find it — never a pickle. The digest over the
-    serialized list still changes if a different predicate object is swapped
-    in, because the identity strings change with it.
+    line) so an auditor can find it. The serialized digest covers these
+    identity strings, not the predicate's implementation or object identity.
+    Different implementations can retain the same recorded strings.
     """
     if fn is None:
         return None
@@ -764,13 +764,12 @@ def _claim_rules_digest(rules: Sequence[ClaimRule]) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class WalkProvenance:
-    """Everything a reloaded walk artifact must prove about its origin.
+    """Trace-time origin metadata retained with a walk result.
 
-    Captured at trace time by :func:`walk_model`. Load-bearing, not
-    decoration: two walks of the same weights under different input contracts
-    can differ in ``trace_coverage`` when data-dependent control flow
-    executes shape-wise under fake tensors, so the example-input spec travels
-    with the result and ``load_walk`` refuses mismatches.
+    Different input contracts can change ``trace_coverage``, so the
+    example-input spec is recorded. ``load_walk`` checks execution consistency
+    and an optional expected claim-rules digest; it does not compare the
+    recorded model or input spec against a caller's current request.
     """
 
     created_utc: str                    # ISO 8601, UTC
@@ -968,7 +967,7 @@ def load_walk(
     *,
     expect_claim_rules: Sequence[ClaimRule] | None = None,
 ) -> LoadedWalk:
-    """Load a saved walk artifact, refusing anything it cannot prove.
+    """Load schema-checked walk data and compare optional rule identity.
 
     Fail-closed on: a foreign schema (parse-time refusal, same pattern as
     ``decision_units.parse_payload``); a provenance whose ``execution``
@@ -1723,15 +1722,11 @@ def find_decided_but_unpriced(
 
     Imports prismaquant lazily so the walker core stays torch-only.
     """
-    from prismaquant.incremental_probe import _BASE_LINEAR_EXCLUDE
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import build_probe_inventory
 
-    try:
-        extra = str(profile.probe_linear_exclude_extra() or "")
-    except AttributeError:
-        extra = ""
-    excludes = (_BASE_LINEAR_EXCLUDE,) if not extra else (
-        _BASE_LINEAR_EXCLUDE, extra)
+    inventory = build_probe_inventory(model, profile)
+    priced = {unit.module_name for unit in inventory.priced_units}
+    excluded = {unit.module_name: unit.reason_code for unit in inventory.excluded_linears}
 
     entries: list[dict] = []
     for node in result.nodes:
@@ -1748,17 +1743,9 @@ def find_decided_but_unpriced(
                 "reason_code": "owner_module_missing",
             })
             continue
-        if profile.should_probe_linear(node.owner_module, module):
-            # The hook gate accepts the module; the NAME regexes are the
-            # remaining way pricing can silently skip it.
-            if not any(re.search(rx, node.name) for rx in excludes):
-                continue
-            reason_code = "probe_linear_excluded"
-        elif _is_packed_experts_module(module, profile):
-            # Priced through install_packed_expert_hooks instead.
+        if node.owner_module in priced:
             continue
-        else:
-            reason_code = "owner_not_probe_priceable"
+        reason_code = excluded.get(node.owner_module, 'owner_not_probe_priceable')
         entries.append({
             "node": node.name,
             "owner_module": node.owner_module,
@@ -1855,6 +1842,8 @@ def main(argv: list[str] | None = None) -> int:
 
     Exit codes follow the repo's guard convention: 0 passed, 2 refused.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import argparse
     import json
     import os
@@ -1923,7 +1912,12 @@ def main(argv: list[str] | None = None) -> int:
         args.model, trust_remote_code=args.trust_remote_code)
     load_kwargs: dict = {"trust_remote_code": args.trust_remote_code}
     if args.materialize:
-        load_kwargs["dtype"] = getattr(torch, args.dtype)
+        from .calibration_data import _dtype_from_name
+
+        try:
+            load_kwargs["dtype"] = _dtype_from_name(args.dtype)
+        except ValueError:
+            load_kwargs["dtype"] = getattr(torch, args.dtype)
         load_kwargs["low_cpu_mem_usage"] = True
         model_class_used = ""
         if have_causal_lm:

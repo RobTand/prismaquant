@@ -102,7 +102,7 @@ def refuse_retired_ladder_cost_source(entry, where: str = "cost row") -> None:
     codebook lane's RD ladder; return for every other row.
 
     ``validate_cost_payload`` calls it on every row it admits, and
-    ``allocator_candidates.cost_entry_is_band_interpolated`` calls it on the
+    ``priced_cell.cost_entry_is_band_interpolated`` calls it on the
     rows it prices, so a table that skipped validation still refuses.
     """
     source = entry.get("cost_source") if _is_mapping(entry) else None

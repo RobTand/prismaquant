@@ -179,14 +179,24 @@ def _command(stage: dict, context: dict, output: Path, image: str,
     return command
 
 
+def _require_quality_artifact_binding(identity: str, config: dict, artifact: str,
+                                      *, preflight: bool) -> None:
+    """Own the extra proof needed to use a standalone screen for this artifact."""
+    if identity == "task_suite":
+        measured = config.get("backend", {}).get("pretrained")
+        if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
+            raise ValueError("task backend must measure the configured current artifact")
+    elif identity == "offline.g3" and not preflight:
+        raise ValueError(
+            "offline G3 cannot qualify the configured current artifact: no independently "
+            "verifiable exported-artifact binding is defined for its retained-logit or "
+            "streamed-assignment inputs; the standalone offline screen remains valid evidence")
+
+
 def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str) -> dict:
     from prismaquant.quality_stage import verify_result
     config_path = Path(stage["config"])
     config = _read_gate_document(config_path)
-    if stage["id"] == "task_suite":
-        measured = config.get("backend", {}).get("pretrained")
-        if not isinstance(measured, str) or Path(measured).resolve() != Path(artifact).resolve():
-            raise ValueError("task backend must measure the configured current artifact")
     result = _read_gate_document(output)
     gate = verify_result(result, config, config_sha256=file_sha256hex(config_path))
     if result.get("stage") != QUALITY_STAGES[stage["id"]]:
@@ -199,20 +209,25 @@ def _replay_quality(stage: dict, output: Path, *, preflight: bool, artifact: str
         raise ValueError("replayed quality criteria did not pass")
     if result["measurement"]["status"] != expected_measurement or result["gate"]["status"] != expected_gate:
         raise ValueError(f"quality measurement/gate must be {expected_measurement}/{expected_gate}")
+    _require_quality_artifact_binding(stage["id"], config, artifact, preflight=preflight)
     return result
 
 
 def _replay_slot(stage: dict, context: dict, output: Path, *, produced: bool) -> dict:
-    from prismaquant.shipcard import fill_slot
-    from prismaquant.shipcard_cli import main as card_cli
+    from prismaquant.shipcard import compute_model_sha, fill_slot
+    from prismaquant.shipcard_slots import make_gold_record
     artifact = Path(context["artifact"])
     card_path = artifact / "shipcard.json"
     identity = stage["id"]
     if produced and identity in GOLD_TOOLS:
-        rc = card_cli(["fill", str(card_path), "--slot", identity, "--record", str(output),
-                       "--model-dir", str(artifact), "--tool", GOLD_TOOLS[identity]])
-        if rc:
-            raise ValueError(f"{identity}: gold fill refused with exit {rc}")
+        payload = _read_gate_document(output)
+        draft = make_gold_record(
+            payload, slot=identity, model_sha=compute_model_sha(artifact),
+            record_path=output, model_dir=artifact, tool=GOLD_TOOLS[identity])
+        record = draft.record
+        if draft.problems:
+            record["passed"] = False
+        fill_slot(card_path, identity, record)
     card = load_shipcard(card_path)
     if produced and identity not in GOLD_TOOLS:
         record_path = stage["record"]

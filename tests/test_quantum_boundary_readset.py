@@ -2,10 +2,9 @@
 
 PQ #848, root reviews R2/R3 (post-capture bound metadata generation --
 runtime staging/phase consumption stays a concrete follow-up). Fixtures
-are built by the REAL producer at tiny CPU scale
-(`write_adjoint_checkpoint` + the exact activation owner +
-`exact_entry_record`, real `layer_quanta` records, the real regen CLI) --
-no handbuilt receipt shapes, no payloads. Proves the manifest freezes the
+use real checkpoint and activation writers with tiny CPU tensor payloads,
+`exact_entry_record`, assembled receipt metadata, and the real regen CLI.
+The tests check that the manifest freezes the
 reader's exact repeated schedule, seals byte-exact accounting, binds new
 record generations with recomputed identity through the existing binder,
 and refuses malformed input. Full-chain staging tests belong to the
@@ -32,19 +31,8 @@ import regenerate_joint_quanta as regen  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import exact_entry_record  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     write_adjoint_checkpoint, write_adjoint_receipt)
-from prismaquant.joint_layer_quanta import (
-    ADJOINT_CAPTURE_SCHEMA,
-    LAYER_QUANTUM_SCHEMA,
-    MANIFEST_SCHEMA_V1,
-    MANIFEST_SCHEMA_V2,
-    adjoint_binding_fields,
-    bind_adjoint_slice,
-    bind_quantum_boundary_readset,
-    build_quantum_boundary_readset,
-    emit_quantum_boundary_readsets,
-    quantum_boundary_read_phase_names,
-    seal_manifest_bytes,
-)
+from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA)
+from prismaquant.joint_layer_quanta import (ADJOINT_CAPTURE_SCHEMA, MANIFEST_SCHEMA_V1, MANIFEST_SCHEMA_V2, adjoint_binding_fields, bind_adjoint_slice, bind_quantum_boundary_readset, build_quantum_boundary_readset, emit_quantum_boundary_readsets, quantum_boundary_read_phase_names, seal_manifest_bytes)
 from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
 
 RECOVERY_RECORDS = (
@@ -329,8 +317,8 @@ def _reseal_like_regen(record):
 def test_emit_binds_new_record_generations(tmp_path):
     """Actual layer_quanta records through the emission path: new
     generations bound, inputs byte-identical, digests reproducing."""
-    from prismaquant.joint_layer_quanta import (
-        check_quantum_for_campaign, canonical_sha256)
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+    from prismaquant.joint_layer_quanta import (canonical_sha256)
     base3 = json.load(open(f"{RECOVERY_RECORDS}/layer-003.json"))
     base4 = json.load(open(f"{RECOVERY_RECORDS}/layer-004.json"))
     assert base3["campaign"] == base4["campaign"]
@@ -369,7 +357,7 @@ def test_emit_binds_new_record_generations(tmp_path):
             "record"]["identity_sha256"]
         campaign = dict(source["campaign"],
                         adjoint_slice_sha256=digest)
-        check_quantum_for_campaign(row["record"], campaign)
+        require_quantum_campaign(row["record"], campaign)
     assert "boundary_readset" not in rec3
     assert "boundary_readset" not in rec4
 
@@ -464,7 +452,7 @@ def test_real_campaign_metadata_phase_shape():
 
 def _real_record_receipt(tmp_path):
     """Actual layer-003 record with a campaign-bound fixture receipt."""
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
     record = json.load(open(f"{RECOVERY_RECORDS}/layer-003.json"))
     campaign = record["campaign"]
     space = tmp_path / "adjoint"
@@ -519,8 +507,8 @@ def _real_record_receipt(tmp_path):
 def test_bound_record_passes_real_campaign_validator(tmp_path):
     """RED for R3: the bound generation must recompute identity through
     the existing canonical owner, or both real validators refuse it."""
-    from prismaquant.joint_layer_quanta import (
-        check_quantum_for_campaign, canonical_sha256)
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+    from prismaquant.joint_layer_quanta import (canonical_sha256)
     record, receipt = _real_record_receipt(tmp_path)
     manifest = build_quantum_boundary_readset(
         record, receipt, strided_boundaries=[8, 16, 24, 32, 40, 45],
@@ -541,7 +529,7 @@ def test_bound_record_passes_real_campaign_validator(tmp_path):
                         "unit_roster_sha256"),
                     adjoint_slice_sha256=manifest["annotations"][
                         "slice_sha256"])
-    check_quantum_for_campaign(new, campaign)
+    require_quantum_campaign(new, campaign)
     body = {k: v for k, v in new.items() if k != "identity_sha256"}
     assert canonical_sha256(body, where="quantum record") == new[
         "identity_sha256"]
@@ -733,7 +721,7 @@ def test_cli_binds_readsets_through_real_validators(tmp_path):
     record/wire/receipt validation, including the consumer's own
     verify_quantum_identity on files."""
     from prismaquant import joint_cost_quantum as quantum
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
     campaign = _tiny_campaign(tmp_path)
     space = tmp_path / "adjoint-space"
     space.mkdir()
@@ -778,7 +766,7 @@ def test_cli_binds_readsets_through_real_validators(tmp_path):
             "campaign_scope": {"campaign": "readset-r3-fixture"},
             "adjoint_slice_sha256": canonical,
         }
-        check_quantum_for_campaign(record, campaign_binding)
+        require_quantum_campaign(record, campaign_binding)
         quantum_path = out / f"{record['quantum_id']}.json"
         quantum.verify_quantum_identity(
             quantum_path=quantum_path,

@@ -8,6 +8,9 @@ are packed and dispatched through ``F.grouped_mm``, and require the two
 paths' unit envelopes and cost rows to be byte-identical.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
+
+from prismaquant import aura_provenance
 
 import dataclasses
 import hashlib
@@ -196,7 +199,7 @@ def campaign(tmp_path_factory):
     root = tmp_path_factory.mktemp("spill-campaign")
     device = _device()
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+        patch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
         patch.setenv("PRISMAQUANT_DEV_MODE", "1")
         torch.manual_seed(715)
         state = {name: tensor.detach().clone()
@@ -222,7 +225,7 @@ def campaign(tmp_path_factory):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura._aura_source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
     records, slices = {}, {}
     for layer in (0, 1):
@@ -253,7 +256,7 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     for name in spill_mod.SPILL_ENV:
         monkeypatch.delenv(name, raising=False)
@@ -730,7 +733,7 @@ def _evidence(campaign, layer, payload):
     unit's journal file bytes; ``rows`` is the canonical-JSON SHA-256 of each
     cost row of the returned payload.
     """
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
     from tools.compare_joint_layer_gate import (
         _journal_identity, _load_unit, envelope_sha256)
 
@@ -1081,7 +1084,7 @@ def test_spill_resume_after_partial_completion_is_bitwise(campaign, monkeypatch,
     assert payload is None and "injected failure" in _chain(state.error)
     # The scratch is gone after the failure: no name, no open descriptor.
     assert os.listdir(spill_root) == [] and not _open_under(spill_root)
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
 
     layer_names = [name for window in campaign.preflight[layer]
                    for name in window.original_full_target_names]
@@ -1111,20 +1114,20 @@ def _restamp_unit_probe(path, field, value):
     """Rewrite a unit checkpoint's joint rows with ``probe_identity[field] = value``.
 
     The row digests and the envelope's payload digest are recomputed, so the
-    unit's bytes stay intact: only the identity the rows record differs.
+    rewritten checkpoint stays internally digest-consistent.
     """
     import pickle
 
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     envelope = pickle.loads(path.read_bytes())
     state = pickle.loads(envelope["payload"])
     for entry in state["joint_aura_rows"].values():
         entry["probe_identity"][field] = value
         operator = entry["joint_operator_identity"]
-        digest = identity_sha256(entry["probe_identity"])
+        digest = joint_identity_sha256(entry["probe_identity"])
         entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
-        entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+        entry["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
     envelope["payload"] = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
     envelope["payload_sha256"] = hashlib.sha256(envelope["payload"]).hexdigest()
     path.write_bytes(pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL))
@@ -1142,7 +1145,7 @@ def test_resume_splits_a_restored_row_probe_identity(campaign, monkeypatch, caps
     producer source prints a ``[DEV-MODE]`` line and the row is reused;
     certified mode refuses it as main does.
     """
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
 
     layer = 1
     _clear_output(campaign, layer)
@@ -1169,16 +1172,16 @@ def test_resume_splits_a_restored_row_probe_identity(campaign, monkeypatch, caps
     assert f"[DEV-MODE] seal joint probe identity differs at {field}" in out
 
     # Certified at this site. The fixture was captured in dev mode, so only
-    # the quantum module's seal_check runs certified here.
+    # the measured-row owner's seal_check runs certified here.
     import functools
 
-    import prismaquant.joint_cost_quantum as quantum_mod
+    import prismaquant.joint_price_step as price_mod
     from prismaquant.dev_mode import seal_check
 
     for window in campaign.preflight[layer][1:]:
         for name in window.original_full_target_names:
             _aura_unit_checkpoint_path(directory, name).unlink()
-    monkeypatch.setattr(quantum_mod, "seal_check", functools.partial(
+    monkeypatch.setattr(price_mod, "seal_check", functools.partial(
         seal_check, environ={"PRISMAQUANT_DEV_MODE": "0"}))
     payload, state = _quantum(campaign, monkeypatch, layer=layer, resume=True)
     assert payload is None
@@ -1375,7 +1378,7 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     # Partial resume in spill mode: window 0 is committed, so every probe is
     # captured in window zero's slot with no retained window open, and
     # windows 1+ then open and replay from the spill (PQ #1172).
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
     checkpoint_dir = Path(record0["output_space"]["checkpoint_dir"])
     for name in (n for window in resolved[1:] for n in window["names"]):
         _aura_unit_checkpoint_path(checkpoint_dir, name).unlink()
@@ -2030,7 +2033,7 @@ def test_spill_quantum_sidecar_is_collected_per_sequence(campaign, monkeypatch, 
     assert getattr(state, "error", None) is None
     for name, rows in payload["costs"].items():
         for fmt, row in rows.items():
-            assert joint_aura_mod.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in ("BF16",):
                 assert "sequence_attribution" not in row
                 continue

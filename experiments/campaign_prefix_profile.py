@@ -10,6 +10,8 @@ import time
 
 import torch
 
+from prismaquant import tessera_cell_measurement
+
 from experiments.glm_full_capture_profile import AnchorObserver, selected_anchor_command
 
 
@@ -30,8 +32,8 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
         raise ValueError('prefix limit must be in [1, 1024]')
     if type(expected_source_units) is not int or expected_source_units < 1:
         raise ValueError('prefix needs a positive complete source-unit count')
-    methods = ('_measure_anchor', '_measure_anchor_batch', '_prefetch_selected_capture')
-    originals = {name: getattr(campaign, name) for name in methods}
+    original_measure = tessera_cell_measurement.measure_cells
+    original_prefetch = campaign._prefetch_selected_capture
     completed = 0
     prefetch_count = 0
     calls = []
@@ -42,7 +44,7 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
 
     def prefetch(*args, **kwargs):
         nonlocal prefetch_count
-        values, capture, receipt = originals['_prefetch_selected_capture'](*args, **kwargs)
+        values, capture, receipt = original_prefetch(*args, **kwargs)
         acts, hessians, counts, maxima = values
         if (set(acts) != set(hessians) or set(acts) != set(kwargs['names']) or
                 len(acts) != expected_source_units):
@@ -80,15 +82,14 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
 
     try:
         campaign._prefetch_selected_capture = prefetch
-        for method in methods[:2]:
-            setattr(campaign, method, wrap(originals[method]))
+        tessera_cell_measurement.measure_cells = wrap(original_measure)
         try:
             campaign.main(command)
         except PrefixComplete:
             stopped = True
     finally:
-        for method, original in originals.items():
-            setattr(campaign, method, original)
+        campaign._prefetch_selected_capture = original_prefetch
+        tessera_cell_measurement.measure_cells = original_measure
         observer.result.update(completed_anchor_units=completed, prefix_boundary_reached=stopped)
     if not stopped or completed != limit or prefetch_count != 1:
         raise RuntimeError('campaign did not reach the requested measured-prefix boundary')

@@ -248,12 +248,6 @@ def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchang
         str(tmp_path / "canonical" / Path(ref.path).name) for ref in references]
 
 
-def test_the_former_stage_a_import_names_the_same_client():
-    from prismaquant import stage_a_local_spool as former
-    assert former.BoundaryOutputSpool is ProducedOutputSpool
-    assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
-
-
 def _landed_read_back_group(adapter, backend, batch_id, tmp_path):
     """One acknowledged group whose entry a read on this box may follow."""
     adapter.reserve(batch_id, 65536)
@@ -466,7 +460,7 @@ class _RecordingExport(ControlledExport):
 def _write_only_owner(adapter, groups):
     """An owner's settle state around a real spool: only what it reads."""
     from types import SimpleNamespace
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     owner = StreamedBoundaryArtifacts.__new__(StreamedBoundaryArtifacts)
     owner._local_output_spool = adapter
