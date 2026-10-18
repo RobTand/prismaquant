@@ -141,6 +141,8 @@ ALLOWLIST = {
         1, INTEGRITY, "source metadata changed while it was hashed"),
     ('prismaquant/streamed_model_identity.py', "_read_streamed_model_identity_cache"): (
         1, INTEGRITY, "an identity cache for another source is not this source's hashes"),
+    ('prismaquant/streamed_model_identity.py', "validate_source_model_binding"): (
+        2, INTEGRITY, "a binding's checkpoint schema and content digest against its own serialized body"),
     ('prismaquant/streamed_model_identity.py', "validate_streamed_model_identity"): (
         2, INTEGRITY, "the identity schema, and content_sha256 against its shard digests"),
     ('prismaquant/streamed_model_identity.py', "validate_cached_streamed_model_identity"): (
@@ -281,12 +283,8 @@ ALLOWLIST = {
         1, INTEGRITY, "slice bytes against the digest"),
     ("prismaquant/tessera_campaign_table.py", "selection_stack_samples"): (
         1, INTEGRITY, "the declared sampling-size vector digest matches the replayed draw"),
-    ("prismaquant/tessera_campaign_table.py", "_bound_json"): (
-        1, INTEGRITY, "a plan input's bytes against its bound digest"),
     ("prismaquant/tessera_campaign_table.py", "_bound_digest"): (
         1, INTEGRITY, "a file's bytes against its bound digest"),
-    ("prismaquant/tessera_campaign_table.py", "_bound_pickle"): (
-        1, INTEGRITY, "a pickle's bytes against its bound digest"),
     ("prismaquant/tessera_campaign_table.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
     ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
@@ -352,6 +350,8 @@ ALLOWLIST = {
         "declared keys; a shape check, not a seal"),
     ("prismaquant/tessera_joint_aura.py", "require_encoder_source_reuse_record"): (
         1, STRUCTURE, "a reuse record names two different encoder seals"),
+    ("tools/dispatch_joint_quanta.py", "_dispatch"): (
+        1, INTEGRITY, "a reused PB result belongs to the exact quantum request bytes recorded at its submission"),
     ("tools/dispatch_joint_quanta.py", "_container_wrap"): (
         1, RESOURCE, "the container's host and device envelope against the plan's own bound "
         "resource policy, both running values"),
