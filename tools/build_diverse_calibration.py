@@ -264,6 +264,11 @@ def _encode(tokenizer, text: str) -> list[int]:
     return [int(x) for x in tokenizer.encode(text, add_special_tokens=False)]
 
 
+def _require_positive_target(target_tokens: int) -> None:
+    if type(target_tokens) is not int or target_tokens <= 0:
+        raise ValueError("target_tokens must be a positive integer")
+
+
 def pack_token_windows(
     texts: Iterable[tuple[str, str]],
     tokenizer,
@@ -275,6 +280,7 @@ def pack_token_windows(
     min_tokens: int | None = None,
 ) -> list[dict[str, str]]:
     """Pack or window source texts into approximately target-token rows."""
+    _require_positive_target(target_tokens)
     if needed <= 0:
         return []
     min_tokens = int(min_tokens or max(32, target_tokens // 8))
@@ -364,6 +370,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-tokens", type=int, default=DEFAULT_TARGET_TOKENS)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     args = parser.parse_args(argv)
+    try:
+        _require_positive_target(args.target_tokens)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     from transformers import AutoTokenizer
 
