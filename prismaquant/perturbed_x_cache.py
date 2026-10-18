@@ -188,6 +188,22 @@ def _activation_qdq(
     return act_spec.activation_quantize_dequantize(x)
 
 
+
+def _packed_activation_qdq_is_row_local(spec) -> bool:
+    """Only proven row-local QDQ may combine expert batches.
+
+    Static served contracts use a fixed unit scale and independent row groups.
+    The listed dynamic quantizers reduce columns within each row. Unknown
+    quantizers may reduce over the batch and must use the eager reference.
+    """
+    contract = getattr(spec, "static_activation_contract", None)
+    if contract is not None and contract.measured_as_served:
+        return True
+    quantize = spec.activation_quantize_dequantize
+    return any(quantize is fr.get_format(name).activation_quantize_dequantize
+               for name in ("NVFP4", "MXFP4", "MXFP8_E4M3", "MXFP8_E5M2",
+                            "MXFP8_UE8M0_G32", "FP8_E4M3", "FP8_E5M2"))
+
 def activation_cache_filename(name: str) -> str:
     return _FNAME_SUB.sub("__", name) + ".pt"
 
@@ -3390,18 +3406,11 @@ class PerturbedActivationCache:
         return members or None
 
     def _install_packed_expert_activation_quant(self, plan: _ModulePlan) -> None:
-        """Quantize each expert-slice ``F.linear`` input with ITS OWN spec.
+        """Quantize both packed projection inputs with their own scales.
 
-        Same interception the probe uses to capture packed-expert Fisher
-        (``sensitivity_probe.install_packed_expert_hooks``): swap ``F.linear``
-        for the duration of the experts-module forward and dispatch on whether
-        the weight is a dim-0 slice of one of this plan's packed parameters.
-        Eval-time only -- no autograd Function, no gradient path.
-
-        Each projection uses its own calibrated activation scale, keyed by its
-        own param name. The module-level pre-hook's act-qdq is suppressed for
-        these plans (see ``_make_pre_hook``) so gate_up's input is quantized
-        exactly once, here, rather than once there and once again inside.
+        Row-local QDQ runs once on each sorted grouped-matmul input. A
+        batch-dependent or unknown quantizer uses the per-expert eager
+        reference. The module pre-hook skips these plans to avoid double QDQ.
         """
         members = self._packed_act_plan(plan)
         if members is None:
@@ -3411,6 +3420,8 @@ class PerturbedActivationCache:
         module = plan.module
         original_forward = module.forward
         owner = self
+        row_local = all(_packed_activation_qdq_is_row_local(member.spec)
+                        for member in members)
 
         def _forward(*args, **kwargs):
             targets: dict[int, _ParamPlan] = {}
@@ -3437,16 +3448,45 @@ class PerturbedActivationCache:
                             owner._priced_input_global_scales)
                 return orig_linear(input, weight, bias)
 
-            F.linear = _intercepting_linear
+            original_grouped = getattr(F, "grouped_mm", None)
             config = getattr(module, "config", None)
             implementation = getattr(config, "_experts_implementation", None)
+
+            def _intercepting_grouped(input, weight, *, offs=None, **kwargs):
+                base = weight._base if weight._is_view() else weight
+                member = targets.get(id(base))
+                if member is not None:
+                    if not row_local:
+                        raise RuntimeError("batch-dependent packed QDQ requires the eager reference")
+                    parameter = params[id(base)]
+                    expected = parameter.transpose(-2, -1)
+                    if (weight.shape != expected.shape or weight.stride() != expected.stride()
+                            or weight.storage_offset() != expected.storage_offset()
+                            or input.ndim != 2 or input.shape[1] != parameter.shape[2]
+                            or not isinstance(offs, torch.Tensor) or offs.ndim != 1
+                            or len(offs) != parameter.shape[0]
+                            or offs.dtype not in (torch.int32, torch.int64)):
+                        raise RuntimeError("packed activation QDQ grouped geometry differs")
+                    input = _activation_qdq(
+                        input, member.spec, owner._activation_scales,
+                        member.name, owner._priced_input_global_scales)
+                return original_grouped(input, weight, offs=offs, **kwargs)
+
             try:
-                # HF's batched dispatch bypasses the projection QDQ boundary.
+                F.linear = _intercepting_linear
+                if original_grouped is not None:
+                    F.grouped_mm = _intercepting_grouped
                 if implementation is not None:
-                    config._experts_implementation = "eager"
+                    if (row_local and original_grouped is not None
+                            and implementation in ("batched_mm", "grouped_mm")):
+                        config._experts_implementation = "grouped_mm"
+                    else:
+                        config._experts_implementation = "eager"
                 return original_forward(*args, **kwargs)
             finally:
                 F.linear = orig_linear
+                if original_grouped is not None:
+                    F.grouped_mm = original_grouped
                 if implementation is not None:
                     config._experts_implementation = implementation
 
