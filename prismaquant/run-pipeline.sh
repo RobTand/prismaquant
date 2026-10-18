@@ -1485,16 +1485,13 @@ if [[ -n "$PREPRICED_COST_REPORT" ]]; then
   echo "[pipeline] [2/4] using validated prepriced input: $COST_PATH (cost builders skipped)"
 else
 require_stage_settings "${BASE_COST_PATH}" base-cost
-# Under COST_MODE=local the baseline IS the allocator's cost table, so it is
-# also gated on the stamped cost_mode. Under the other modes cost_baseline.pkl
-# is mode-agnostic (the same measured RTN error feeds every estimator) and is
-# reused across mode changes on purpose.
+# Every baseline passes source admission. In local mode it is also the
+# allocator's table, so its stored estimator must match COST_MODE. A separate
+# baseline retains its stored estimator and can be reused across mode changes.
 BASE_COST_REUSABLE=1
 if [[ ! -f "${BASE_COST_PATH}" ]]; then
   BASE_COST_REUSABLE=0
 elif ! (
-  # A separate baseline keeps its own estimator mode. Source admission applies
-  # to every baseline, including one backfilled into an AURA or render table.
   [[ "$BASE_COST_PATH" == "$COST_PATH" ]] || COST_MODE="$(cost_table_cost_mode "$BASE_COST_PATH")"
   cost_table_reusable "$BASE_COST_PATH"
 ); then
