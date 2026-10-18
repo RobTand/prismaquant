@@ -26,7 +26,8 @@ from tests.test_resident_source_decode_audit import _cpu_guard, _load
 
 CASES = ["unmarked", "legacy-v1", "same-source-v2", "foreign-source-v2",
          "config-only-v2", "root-code-metadata-v2", "legacy-native-harvest",
-         "missing-harvest-identity", "corrupt-harvest-identity"]
+         "missing-harvest-identity", "corrupt-harvest-identity",
+         "mismatched-harvest-shards"]
 
 
 def _actual_resident_binding(source, tmp_path, monkeypatch):
@@ -110,6 +111,14 @@ def test_real_offline_stock_source_identity_admission(tmp_path, monkeypatch, cas
         del harvest["model_identity"]
     elif case == "corrupt-harvest-identity":
         harvest["model_identity"]["shards"][0]["sha256"] = "f" * 64
+    elif case == "mismatched-harvest-shards":
+        from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+
+        current = harvest["model_identity"]
+        current["shards"][0]["sha256"] = "f" * 64
+        current["content_sha256"] = canonical_json_sha256(
+            {key: current[key] for key in ("config", "weight_map", "shards", "checkpoint_weight_map")},
+            where="mismatched harvest fixture")
     if case != "unmarked":
         for rows in expert["costs"].values():
             for entry in rows.values():
@@ -119,7 +128,11 @@ def test_real_offline_stock_source_identity_admission(tmp_path, monkeypatch, cas
     for root in source_roots:
         shutil.rmtree(root)
         assert not root.exists()
-    if case == "same-source-v2":
+    if case == "mismatched-harvest-shards":
+        with pytest.raises(stock.Glm53StockError, match="source binding shard digests differ from.*model identity"):
+            stock.main(arguments)
+        assert not output.exists()
+    elif case == "same-source-v2":
         assert stock.main(arguments) == 0
         actual = pickle.loads(output.read_bytes())
         from prismaquant.prepriced_cost import require_native_cost_source_binding

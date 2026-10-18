@@ -134,3 +134,59 @@ def test_ordinary_aura_main_supplies_binding_before_journal_restore(tmp_path, mo
                    '--checkpoint-dir', str(checkpoint), '--resume'])
     assert reads == []
     assert {str(p.relative_to(checkpoint)): p.read_bytes() for p in checkpoint.rglob('*') if p.is_file() and p.name != 'streamed_model_identity.json'} == before
+
+
+def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch):
+    import huggingface_hub
+    from transformers import AutoModelForCausalLM
+    from prismaquant import model_profiles
+
+    source, expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    guard = producer_cpu_guard(tmp_path, monkeypatch)
+    monkeypatch.setattr(memory_management, 'CaptureMemoryGuard', lambda *_args: guard)
+    hub_id = 'contract-fixture/native-model'
+    monkeypatch.setattr(huggingface_hub, 'snapshot_download', lambda **_kwargs: str(source))
+    actual_profile = model_profiles.detect_profile
+    monkeypatch.setattr(model_profiles, 'detect_profile',
+                        lambda model, **kwargs: actual_profile(str(source) if model == hub_id else model, **kwargs))
+
+    def no_hf(*_args, **_kwargs):
+        pytest.fail('native Hub source must use the qualified resident decoder')
+
+    monkeypatch.setattr(AutoModelForCausalLM, 'from_pretrained', no_hf)
+    observed = []
+
+    def measurement(model, *_args, **kwargs):
+        for name, parameter in model.named_parameters():
+            assert parameter.dtype == expected[name].dtype
+            assert torch.equal(parameter, expected[name]), name
+        assert kwargs['checkpoint_identity_extra']['source_binding'] == build_source_model_binding(source, dtype=torch.bfloat16)
+        observed.append(True)
+        return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
+
+    monkeypatch.setattr(aura, 'compute_aura_cost', measurement)
+    assert aura.main(['--model', hub_id, '--output', str(tmp_path / 'hub.pkl'),
+        '--device', 'cpu', '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw']) == 0
+    assert observed == [True]
+
+
+@pytest.mark.parametrize('dtype', ['float32', 'auto'])
+def test_native_streamed_fp32_refuses_before_load(tmp_path, monkeypatch, capsys, dtype):
+    from prismaquant import cost_streaming
+
+    source, _expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    if dtype == 'auto':
+        monkeypatch.setattr(aura, '_resolve_auto_dtype', lambda *_args: 'float32')
+
+    def no_load(*_args, **_kwargs):
+        pytest.fail('unsupported native streamed FP32 must refuse before loading')
+
+    monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', no_load)
+    with pytest.raises(SystemExit) as refused:
+        aura.main(['--model', str(source), '--output', str(tmp_path / 'fp32.pkl'),
+            '--device', 'cpu', '--dtype', dtype, '--streaming', '--dataset', 'synthetic-token-draw'])
+    assert refused.value.code == 2
+    assert 'native FP8 streaming requires --dtype bfloat16' in capsys.readouterr().err
+    assert not (tmp_path / 'fp32.pkl').exists()
