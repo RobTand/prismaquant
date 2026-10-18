@@ -131,7 +131,7 @@ def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_
     state['hashed'].clear()
     assert campaign.main(_proof_argv(argv, proof, digest)) == campaign.EXIT_EMPTY_MENU
     out = capsys.readouterr().out
-    assert 'has no exact path' in out
+    assert 'streamed source identity cache shard coverage differs' in out
     assert 'payload reads use the current source-authentication policy' in out
     assert sorted(name for name, _ in state['hashed']) == [
         'head.safetensors', 'selected.safetensors']
