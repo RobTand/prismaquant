@@ -128,6 +128,37 @@ def test_plan_uses_census_quanta_and_pb_row_sizing(selection):
     assert not s.output.exists()
 
 
+@pytest.mark.parametrize('campaign_argv', [[], ['--max-act-rows', '1024'],
+                                        ['--streaming', '--max-act-rows', '1024']])
+def test_plan_sizes_resident_materialization_from_the_priced_cap(
+        selection, monkeypatch, campaign_argv):
+    s = selection
+    spec = json.loads(s.spec.read_text())
+    spec.update(campaign_argv=campaign_argv, max_act_rows=1024)
+    s.spec.write_text(json.dumps(spec))
+    observed = []
+    real_demand = campaign_rows.row_memory_demand
+
+    def demand(*args, **kwargs):
+        result = real_demand(*args, **kwargs)
+        observed.append(result)
+        return result
+
+    monkeypatch.setattr(campaign_rows, 'row_memory_demand', demand)
+    result = tm.plan(s.request, s.census, s.workspace, s.spec)
+    census = json.loads(s.census.read_text())
+    cap = s.cost['provenance']['max_act_rows']
+    assert cap != spec['max_act_rows']
+    assert len(observed) == len(result['groups']) == 1
+    columns = [census['unit_shapes'][name][1]
+               for name in result['groups'][0]['assignment']]
+    expected = (campaign_rows._model_bytes(spec['model'])
+                + sum(width ** 2 * 4 + width * cap * 4 for width in columns))
+    assert observed[0]['plan_bytes'] == expected
+    row = json.loads((s.workspace / 'manifest.json').read_text())[0]
+    assert row['demand']['mem_gb'] == observed[0]['mem_gb']
+
+
 def test_plan_refuses_different_calibration(selection, monkeypatch):
     census = json.loads(selection.census.read_text())
     census['fit_ids_sha256'] = 'different'

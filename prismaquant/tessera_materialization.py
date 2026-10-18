@@ -141,11 +141,13 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
                   census_sha256=_sha(census_path), workspace=str(workspace), groups=groups)
     plan_path = workspace / 'plan.json'
     _json(plan_path, result)
+    memory_spec = {**spec, 'max_act_rows': provenance['max_act_rows'],
+                   'campaign_argv': ['--max-act-rows', str(provenance['max_act_rows'])]}
     rows = []
     for index, group in enumerate(groups):
         row = campaign_rows.prismabuild_row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
                                      '--anchor-batch-size', str(anchor_batch_size)],
-            mem_gb=campaign_rows.row_memory_gb({**spec, 'max_act_rows':provenance['max_act_rows']},
+            mem_gb=campaign_rows.row_memory_gb(memory_spec,
                                             list(group['assignment']), census),
             timeout_s=int(spec.get('timeout_s', 86400)), module='prismaquant.tessera_materialization')
         rows.append(row)
