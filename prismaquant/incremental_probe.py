@@ -1657,7 +1657,7 @@ def _persistent_probe_context_enabled() -> bool:
 # The key contains FQN, storage pointer and shape. In-place value changes
 # do not change that key; reuse relies on immutable weights within a probe.
 _W_STATS_CACHE: dict[tuple[str, int, tuple[int, ...]], tuple[float, float]] = {}
-_ROUTER_COVERAGE_VERSION = 2
+_ROUTER_COVERAGE_VERSION = 3
 
 
 def _get_or_compute_w_stats(fqn: str, weight) -> tuple[float, float]:
@@ -2600,7 +2600,6 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
             flush=True,
         )
         return None
-    sample_contract = expected_meta.get("sample_parallel")
     return GlobalPrecompute(
         activations_cpu=data["activations_cpu"],
         grad_at_tail=data["grad_at_tail"],
@@ -2610,24 +2609,11 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
         resident_g2_per_token=data.get("resident_g2_per_token", {}),
         resident_act_snaps=data["resident_act_snaps"],
         resident_act_row_indices=data.get("resident_act_row_indices", {}),
-        expert_info=(
-            data["expert_info"] if sample_contract is not None
-            else data.get("expert_info", {})
-        ),
-        router_counts=(
-            data["router_counts"] if sample_contract is not None else {}
-        ),
-        router_totals=(
-            data["router_totals"] if sample_contract is not None else {}
-        ),
-        router_active_counts=(
-            data["router_active_counts"]
-            if sample_contract is not None else {}
-        ),
-        expert_route_stats=(
-            data["expert_route_stats"]
-            if sample_contract is not None else {}
-        ),
+        expert_info=data["expert_info"],
+        router_counts=data["router_counts"],
+        router_totals=data["router_totals"],
+        router_active_counts=data["router_active_counts"],
+        expert_route_stats=data["expert_route_stats"],
         # Restore the phase-1 cross-layer shared state (Gemma4
         # `shared_kv_states`); `None` for every architecture that declares no
         # per-pass shared kwargs, and for caches written before this key
