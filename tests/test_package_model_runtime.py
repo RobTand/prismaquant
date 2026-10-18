@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 
 def test_metadata_import_does_not_load_numerical_runtime(tmp_path):
     root = Path(__file__).resolve().parents[1]
@@ -50,33 +52,58 @@ def test_streaming_skeleton_initializes_checkpoint_policy_before_construction():
     assert next(skeleton.parameters()).dtype == torch.float32
 
 
-def test_every_hf_loader_boundary_explicitly_initializes_the_model_runtime():
-    """Keep actual dependency entry points explicit as new loaders are added."""
+def _hf_loader_runtime_gaps(source):
     import ast
 
+    tree = ast.parse(source)
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+    def scopes(node):
+        return [fn for fn in functions if fn.lineno <= node.lineno <= fn.end_lineno]
+
+    initializers = [node for node in ast.walk(tree)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == 'initialize_model_runtime']
+    missing = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        name = ast.unparse(call.func)
+        if not name.endswith(('.from_pretrained', '.from_config', '._from_config')):
+            continue
+        if any(word in name for word in ('Tokenizer', 'Processor', 'Embedding')):
+            continue
+        owners = scopes(call) or [tree]
+        initialized = any(
+            node.lineno < call.lineno
+            and min(scopes(node), key=lambda fn: fn.end_lineno - fn.lineno,
+                    default=tree) in owners
+            for node in initializers)
+        if not initialized:
+            missing.append(f'{call.lineno}:{name}')
+    return missing
+
+
+@pytest.mark.parametrize('source, expected', [
+    ("def load():\n    initialize_model_runtime()\n    Model.from_pretrained()\n", []),
+    ("def main():\n    initialize_model_runtime()\n    def load():\n        Model.from_pretrained()\n    load()\n", []),
+    ("def main():\n    def unused():\n        initialize_model_runtime()\n    def load():\n        Model.from_pretrained()\n    load()\n", ['5:Model.from_pretrained']),
+    ("def load():\n    Model.from_pretrained()\n    initialize_model_runtime()\n", ['2:Model.from_pretrained']),
+    ("def load():\n    Model.from_config()\n", ['2:Model.from_config']),
+], ids=['local', 'enclosing', 'unrelated-helper', 'too-late', 'missing'])
+def test_hf_loader_runtime_gap_scope(source, expected):
+    assert _hf_loader_runtime_gaps(source) == expected
+
+
+def test_every_hf_loader_boundary_explicitly_initializes_the_model_runtime():
+    """An initializer must precede a loader in its execution scope."""
     root = Path(__file__).resolve().parents[1]
     missing = []
     for directory in ('prismaquant', 'tools', 'experiments'):
         for path in (root / directory).rglob('*.py'):
             if 'vendored' in path.parts:
                 continue
-            tree = ast.parse(path.read_text())
-            functions = [node for node in ast.walk(tree)
-                         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-            for call in ast.walk(tree):
-                if not isinstance(call, ast.Call):
-                    continue
-                name = ast.unparse(call.func)
-                if not name.endswith(('.from_pretrained', '.from_config', '._from_config')):
-                    continue
-                if any(word in name for word in ('Tokenizer', 'Processor', 'Embedding')):
-                    continue
-                owners = [fn for fn in functions if fn.lineno <= call.lineno <= fn.end_lineno]
-                owner = min(owners, key=lambda fn: fn.end_lineno - fn.lineno) if owners else tree
-                initialized = any(
-                    isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id == 'initialize_model_runtime' and node.lineno < call.lineno
-                    for node in ast.walk(owner))
-                if not initialized:
-                    missing.append(f'{path.relative_to(root)}:{call.lineno}:{name}')
+            missing.extend(f'{path.relative_to(root)}:{gap}'
+                           for gap in _hf_loader_runtime_gaps(path.read_text()))
     assert not missing, missing
