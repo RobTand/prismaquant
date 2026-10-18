@@ -897,6 +897,11 @@ def compute_aura_cost(
                 "output_mse_measured": False,
                 "cost_source": "aura",
             }
+    source_binding = (checkpoint_identity_extra or {}).get("source_binding")
+    if source_binding is not None:
+        for rows in costs.values():
+            for row in rows.values():
+                row["source_binding"] = source_binding
     n_rendered = sum(1 for v in dw_src.values() if v == "rendered")
     n_rtn = sum(1 for v in dw_src.values() if v == "rtn")
     return {
@@ -1875,6 +1880,11 @@ def compute_aura_cost_streamed(
             col_energy=col_energy,
             weight_mse_diagnostic=weight_mse_diagnostic,
         )
+        source_binding = (checkpoint_identity_extra or {}).get("source_binding")
+        if source_binding is not None and not joint_activation and anchor_renderer is None:
+            for rows in payload["costs"].values():
+                for row in rows.values():
+                    row["source_binding"] = source_binding
         if cost_read_schedule is not None:
             payload['provenance']['cost_read_schedule'] = cost_read_schedule.identity
         if retained_budget is not None:
@@ -3207,6 +3217,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log(f"loaded production cache: {args.production_cache}")
 
     staged = _stage_aura_model(args.model)
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    native_source = source_model_decode_contract(staged) is not None
+    source_root = resolve_source_checkpoint_path(args.model) if native_source else None
     # Profile detection installs architecture-owned vendored modelling where
     # required and is also the fail-closed authority for routed-expert
     # membership.  Resolve it before model construction and reuse that exact
@@ -3221,6 +3238,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         staged, trust_remote_code=True, local_files_only=local_only)
     model = None
     streamed_runner = None
+    source_identity_extra = {}
+    if native_source and not args.streaming:
+        source_identity_extra["source_binding"] = build_source_model_binding(source_root, dtype=dt)
     if args.streaming:
         from prismaquant.cost_streaming import build_streamed_causal_lm
 
@@ -3229,13 +3249,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             anchor = Path(args.checkpoint_dir or args.output).parent
             offload_dir = str(anchor / "aura-streaming-offload")
         streamed_runner = build_streamed_causal_lm(
-            staged,
+            str(source_root) if native_source else staged,
             device=torch.device(args.device),
             dtype=dt,
             offload_folder=offload_dir,
             profile=profile,
             attn_implementation="eager",
         )
+    elif native_source:
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        device = torch.device(args.device)
+        model = load_resident_source_model(
+            str(source_root), device=device, dtype=dt, requires_grad=True,
+            offload_folder=str(Path(args.output).parent / "aura-resident-offload"),
+            resource_check=CaptureMemoryGuard(device).check,
+            attn_implementation="eager",
+        ).eval()
     else:
         load_kwargs = dict(
             dtype=dt, trust_remote_code=True, local_files_only=local_only,
@@ -3313,6 +3344,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                         / "streamed_model_identity.json"
                     ),
                 )
+            if native_source and not args.joint_activation:
+                source_identity_extra["source_binding"] = build_source_model_binding(
+                    source_root, dtype=dt,
+                    streamed_identity_cache_path=(
+                        Path(args.checkpoint_dir or Path(args.output).parent)
+                        / "streamed_model_identity.json"
+                    ) if streamed_model_identity is not None else None,
+                )
             payload = compute_aura_cost_streamed(
                 streamed_runner,
                 calib,
@@ -3336,7 +3375,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resume=args.resume,
                 unit_filter=(args.unit_filter or None),
                 model_identity=streamed_model_identity,
-                checkpoint_identity_extra={"streaming": True},
+                checkpoint_identity_extra={"streaming": True, **source_identity_extra},
                 include_routed_experts=args.include_routed_experts,
                 profile=profile,
             )
@@ -3365,6 +3404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             unit_filter=(args.unit_filter or None),
             checkpoint_identity_extra={
                 "gradient_checkpointing": bool(args.gradient_checkpointing),
+                **source_identity_extra,
             },
             profile=profile,
         )
