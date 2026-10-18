@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded fixed-teacher GPU screen; never a serving or promotion receipt.
 
-Run in the project's known GPU container. ProductionWeightCache owns renders;
+Run through PrismaBuild in the project's known GPU container. ProductionWeightCache owns renders;
 PerturbedActivationCache owns capture and candidate forwards. The only extra
 hooks are the independent direct-output-residual oracle for the production
 joint projection lease. No assignment is used to recenter the teacher.
@@ -112,7 +112,7 @@ def main():
         "model_files": {p.name: file_digest(p) for p in sorted(Path(args.model).iterdir()) if p.is_file()},
         "start_unix": start, "calibration_text": CALIBRATION, "heldout_text": HELDOUT,
         "scope": "resident numerical QDQ screen; no served latency, no promotion",
-        "execution_authority": "User explicitly prohibited PrismaBuild for this session; direct known Docker image",
+        "execution_authority": "Required: admitted PrismaBuild action; authority is recorded in its receipt",
     }
     dump(out / "identity.json", identity)
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)

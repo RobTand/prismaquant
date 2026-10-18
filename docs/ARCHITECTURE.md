@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, PQ237 execution wording.
+New numerical-screen receipts state the PrismaBuild requirement instead of
+repeating a historical one-session exception. Historical records remain
+unchanged. Because the streamed protocol binds the screen's whole source
+file, old protocols retain their original frozen source; current source
+requires a newly generated protocol. This is a prose and source-identity
+correction, with no new numerical or GPU qualification.
+
 As of: 2026-10-17, architecture audit continuation, lexical import inventory.
 The duplication inventory resolves import aliases within their lexical owner.
 A local import cannot hide or invent a digest site in an unrelated function.
