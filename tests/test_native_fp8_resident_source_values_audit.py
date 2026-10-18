@@ -12,6 +12,7 @@ from prismaquant.build_rtn_cache import stage_multimodal
 from prismaquant.layer_streaming import fill_packed_experts_from_source
 from prismaquant.model_profiles import detect_profile
 from prismaquant.model_runtime import initialize_model_runtime
+from prismaquant.streaming_model import load_resident_source_model
 from test_mtp_module_arch import _minimal_moe_text_config
 
 
@@ -75,30 +76,38 @@ def test_actual_resident_packed_values_match_serialized_decoded_source(tmp_path,
             expected[name][expert, rows] = decoded.to(torch.bfloat16)
     del template, serialized, raw
     profile = detect_profile(str(root))
-    staged, cleanup = stage_multimodal(str(root))
+    staged, cleanup = (str(root), None) if source_kind == "block_fp8" else stage_multimodal(str(root))
     try:
-        loaded, info = AutoModelForCausalLM.from_pretrained(
-            staged, torch_dtype=torch.bfloat16, trust_remote_code=True,
-            local_files_only=True, output_loading_info=True,
-        )
+        if source_kind == "block_fp8":
+            loaded = load_resident_source_model(
+                str(root), device=torch.device("cpu"), dtype=torch.bfloat16,
+                offload_folder=str(tmp_path / "offload"),
+                resource_check=lambda *_args, **_kwargs: None,
+            )
+            info = None
+        else:
+            loaded, info = AutoModelForCausalLM.from_pretrained(
+                staged, torch_dtype=torch.bfloat16, trust_remote_code=True,
+                local_files_only=True, output_loading_info=True,
+            )
         parameters = dict(loaded.named_parameters())
-        post_hf = {name: parameters[name].detach().clone() for name in expected}
+        post_load = {name: parameters[name].detach().clone() for name in expected}
         filled = fill_packed_experts_from_source(loaded, str(root), profile)
         mismatches = []
         for name, wanted in expected.items():
             actual = parameters[name].detach()
             if not torch.equal(actual, wanted):
                 mismatches.append(
-                    f"{name}: post_hf_first={post_hf[name].flatten()[0].item()} "
+                    f"{name}: post_load_first={post_load[name].flatten()[0].item()} "
                     f"post_helper_first={actual.flatten()[0].item()} "
                     f"decoded_source_first={wanted.flatten()[0].item()} "
-                    f"post_hf_max_error={(post_hf[name].float() - wanted.float()).abs().max().item()} "
+                    f"post_load_max_error={(post_load[name].float() - wanted.float()).abs().max().item()} "
                     f"post_helper_max_error={(actual.float() - wanted.float()).abs().max().item()} "
                     f"source_keys={[key for _, _, key in source_parts[name]]}"
                 )
         assert not mismatches, (
             f"{source_kind} actual resident values differ from serialized decoded source; "
-            f"filled={filled}, missing_keys={info['missing_keys']}:\n" + "\n".join(mismatches)
+            f"filled={filled}, hf_loading_info={info}:\n" + "\n".join(mismatches)
         )
     finally:
         if cleanup is not None:
