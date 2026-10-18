@@ -877,6 +877,35 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     lines = reports.read_text().splitlines() if reports.exists() else []
     outcomes, collection = _fold_own_process_reports(
         [json.loads(line) for line in lines], log=log)
+    reported_failure = any(item["outcome"] == "failed" for item in outcomes.values())
+    collection_failure = any(item["outcome"] == "failed" for item in collection)
+    collection_skip = (not outcomes and collection
+                       and all(item["outcome"] == "skipped" for item in collection))
+    expected_exit = (state["returncode"] == pytest.ExitCode.OK
+                     or (state["returncode"] == pytest.ExitCode.TESTS_FAILED
+                         and (reported_failure or collection_failure))
+                     or (state["returncode"] == pytest.ExitCode.NO_TESTS_COLLECTED
+                         and collection_skip))
+    if state.get("error") or not expected_exit:
+        # Keep ordinary failed/skip/xfail mappings. A failure after the last
+        # report still needs one proxy to carry the child's terminal failure.
+        target = next((nodeid for nodeid in nodeids
+                       if outcomes.get(nodeid, {}).get("outcome") == "failed"), None)
+        if target is None:
+            target = next((nodeid for nodeid in nodeids
+                           if outcomes.get(nodeid, {}).get("outcome") == "passed"),
+                          nodeids[0])
+        folded = outcomes.setdefault(target, {"outcome": "passed", "phases": []})
+        message = (f"the module's own pytest process exited unexpectedly "
+                   f"(exit {state['returncode']}"
+                   + (f", {state['error']}" if state.get("error") else "")
+                   + f"); see {log}")
+        if folded["outcome"] == "failed":
+            message = folded["message"] + "\n" + message
+        elif collection_failure:
+            message += "\n" + "\n".join(item["longrepr"] for item in collection
+                                           if item["outcome"] == "failed")
+        folded.update(outcome="failed", message=message)
     return {"state": state, "outcomes": outcomes, "collection": collection,
             "log": log}
 

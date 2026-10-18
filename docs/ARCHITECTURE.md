@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, isolated test exits.
+The own-process pytest runner combines reported test outcomes with the child
+process's terminal status. A crash or unexpected exit after passing reports
+fails a parent proxy. Existing failure, skip and xfail reports retain their
+diagnostics. Recorded collection skips remain distinct from an empty selection
+or missing explicit collectors.
+The admitted v1 cohort has 21 passing cases and one incorrect fixture
+expectation: missing collectors return usage error 4. The corrected v2 fixture
+and two additional collection controls pass on unchanged runner code. Both
+actions' source and logs are verified; the successful v2 CAS receipt is
+verified. Touched code and tests have admitted compile coverage. The failed
+v1 result remains recorded, and final-source broad qualification is still due.
+
 As of: 2026-10-18, architecture audit continuation, frozen quality plans.
 Quality-prefill plans publish once through the existing create-only byte
 writer. A concurrent winner, including identical bytes, refuses replacement.
