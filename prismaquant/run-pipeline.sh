@@ -1492,7 +1492,12 @@ require_stage_settings "${BASE_COST_PATH}" base-cost
 BASE_COST_REUSABLE=1
 if [[ ! -f "${BASE_COST_PATH}" ]]; then
   BASE_COST_REUSABLE=0
-elif [[ "$BASE_COST_PATH" == "$COST_PATH" ]] && ! cost_table_reusable "$BASE_COST_PATH"; then
+elif ! (
+  # A separate baseline keeps its own estimator mode. Source admission applies
+  # to every baseline, including one backfilled into an AURA or render table.
+  [[ "$BASE_COST_PATH" == "$COST_PATH" ]] || COST_MODE="$(cost_table_cost_mode "$BASE_COST_PATH")"
+  cost_table_reusable "$BASE_COST_PATH"
+); then
   BASE_COST_REUSABLE=0
 fi
 if [[ "$BASE_COST_REUSABLE" == "0" ]]; then
