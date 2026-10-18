@@ -165,6 +165,7 @@ def _validate_tokenizer_identity(
         if (
             not isinstance(name, str)
             or not name
+            or name == "."
             or PurePosixPath(name).as_posix() != name
             or PurePosixPath(name).is_absolute()
             or ".." in PurePosixPath(name).parts
