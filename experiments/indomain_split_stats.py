@@ -18,7 +18,8 @@ per-expert derivations legally produce any non-empty subset of one sample.
 Moment residency: the ``XᵀX`` gram is accumulated ON the rows' device into ONE
 owned float32 buffer per canonical ``(role, group)``, mutated in place per
 batch. Before :meth:`finish`, only the bounded prefix leaves the capture
-device when ``prefix_device="cpu"``. The device prefix stays resident.  ``resource_check`` runs BEFORE every allocation
+device when ``prefix_device="cpu"``. The device prefix stays resident.
+``resource_check`` runs BEFORE every allocation
 (moment growth, prefix growth) and BEFORE every device-to-CPU transfer, and
 its refusals propagate.  Aliases of one proven shared input map to the same
 state: exactly one H per group, materialized once and handed to every alias
