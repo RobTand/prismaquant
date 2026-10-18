@@ -185,3 +185,57 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
     assert result.returncode != 0 and 'differs from the current checkpoint/decoder' in result.stderr
     with pytest.raises(ValueError, match='differs from the harvest'):
         intake.require_native_cost_source_binding(payload, binding, where='offline stock expert input')
+
+
+def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch):
+    """Double Hub metadata intake. Keep source delivery and measurement real."""
+    import huggingface_hub
+    from prismaquant import incremental_measure_quant_cost as baseline
+
+    source, expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    names = sorted(name.removesuffix('.weight') for name in expected
+                   if name.endswith('.self_attn.o_proj.weight'))
+    probe = tmp_path / 'hub-probe.pkl'
+    probe.write_bytes(pickle.dumps({'stats': {
+        name: {'h_trace': 1., 'n_params': expected[name + '.weight'].numel()}
+        for name in names}, 'meta': {}}))
+    activations = tmp_path / 'hub-activations'
+    activations.mkdir()
+    for name in names:
+        torch.save({'inputs': torch.ones(4, expected[name + '.weight'].shape[-1]), 'name': name},
+                   activations / (baseline.ActivationIndex._FNAME_SUB.sub('__', name) + '.pt'))
+    hub_id = 'contract-fixture/native-baseline'
+    snapshots = []
+
+    def snapshot(**kwargs):
+        assert not snapshots, 'native baseline must load the bound snapshot without resolving the Hub reference again'
+        snapshots.append(kwargs['repo_id'])
+        return str(source)
+
+    monkeypatch.setattr(huggingface_hub, 'snapshot_download', snapshot)
+    actual_layers = baseline.load_num_hidden_layers
+    monkeypatch.setattr(baseline, 'load_num_hidden_layers',
+                        lambda model: actual_layers(str(source) if model == hub_id else model))
+    actual_schedule = baseline.build_shard_schedule
+
+    def schedule(**kwargs):
+        assert kwargs['model_path'] == hub_id
+        return actual_schedule(**{**kwargs, 'model_path': str(source)})
+
+    monkeypatch.setattr(baseline, 'build_shard_schedule', schedule)
+    output = tmp_path / 'hub-baseline.pkl'
+    monkeypatch.setattr(sys, 'argv', ['incremental_measure_quant_cost', '--model', hub_id,
+        '--probe', str(probe), '--activation-cache-dir', str(activations),
+        '--work-dir', str(tmp_path / 'hub-work'), '--output', str(output),
+        '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'FP8_E4M3',
+        '--cost-mode', 'local', '--threads', '1', '--no-include-mtp', '--no-include-visual',
+        '--no-include-lm-head', '--no-watchdog'])
+    baseline.main()
+    assert snapshots == [hub_id]
+    payload = pickle.loads(output.read_bytes())
+    binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
+    assert set(payload['costs']) == set(names)
+    for rows in payload['costs'].values():
+        for row in rows.values():
+            assert row['source_binding'] == binding

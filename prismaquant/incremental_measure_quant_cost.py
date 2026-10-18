@@ -1204,7 +1204,7 @@ def main():
             return
         offload_folder = str(work_dir / "streaming_offload")
         ctx_local = _build_streaming_context(
-            args.model,
+            str(source_root),
             device=torch.device(args.device),
             dtype=dtype,
             offload_folder=offload_folder,
@@ -1264,7 +1264,7 @@ def main():
             elif kind == "mtp":
                 _run_mtp_cost_shard(
                     ctx,
-                    model_path=args.model,
+                    model_path=str(source_root),
                     linear_include=linear_include,
                     probe_stats=stats,
                     act_cache=act_cache,
@@ -1289,7 +1289,7 @@ def main():
                 # in model, fall back to an empty pickle and let the
                 # allocator's --visual-format override take over.
                 mm_ctx = _run_visual_cost_shard(
-                    model_path=args.model,
+                    model_path=str(source_root),
                     linear_include=linear_include,
                     probe_stats=stats,
                     act_cache=act_cache,
