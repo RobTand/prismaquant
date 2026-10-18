@@ -169,7 +169,7 @@ def test_the_shared_exponent_is_the_smallest_that_does_not_clip(amax, expected):
     assert amax / 2.0 ** (got - 1) > E4M3_MAX
 
 
-def test_the_ceil_rule_never_lets_an_element_reach_the_e4m3_rail():
+def test_the_ceil_rule_never_lets_an_element_exceed_the_e4m3_rail():
     g = torch.Generator().manual_seed(3)
     for power in (-140, -60, -8, 0, 8, 60, 118):
         x = torch.randn(16, GROUP, generator=g) * (2.0 ** power)
@@ -298,7 +298,7 @@ def test_a_block128_fp8_source_re_encodes_with_zero_weight_error():
     Any tensor whose stored form is E4M3 codes times a shared power of two —
     the DeepSeek ``fp8_e4m3_ue8m0_block128`` body convention — is exactly
     representable here, because the ceil rule can never pick a group exponent
-    above the block's own, so every element is an E4M3 code scaled DOWN by a
+    above the block's own, so every element is an E4M3 code scaled UP by a
     power of two. 128 = 4*32, so a chunk never straddles a block boundary.
 
     Stated on the WEIGHT plane deliberately. The served lane is W8A8, so a
@@ -647,8 +647,8 @@ def test_the_batched_render_is_the_same_codec_as_the_unbatched_one():
 
     ``weight_element_dtype`` is "fp8_e4m3" here and on MXFP8_E4M3, so a
     fall-through would render this rung with MXFP8's E8M0 snap instead of its
-    own saturating-ceil rule — pricing the batched path with a different codec
-    than the exporter writes.
+    own saturating-ceil rule, pricing the batched path with a different codec
+    from the surviving unbatched research path. This rung has no live writer.
     """
     from prismaquant import measure_quant_cost as mqc
 

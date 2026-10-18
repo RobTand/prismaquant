@@ -2488,8 +2488,8 @@ def main(argv: list[str] | None = None) -> int:
     p_write.add_argument("--image", default=None,
                          help="container image tag the server runs in")
     p_write.add_argument("--pid", type=int, default=None,
-                         help="inspect only this pid (default: auto-discover "
-                              "the vLLM server + engine processes)")
+                         help="retained argument; refuses partial server attestation. "
+                              "Omit to discover all server and engine processes")
     p_write.add_argument(
         "--artifact-dir",
         default=None,

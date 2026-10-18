@@ -125,7 +125,7 @@ def test_the_scope_is_derived_from_the_bound_roster_not_a_declared_count(tmp_pat
         inputs["merged_checkpoint"]["sha256"]
 
 
-def test_an_equal_size_calibration_swap_is_a_different_campaign(tmp_path):
+def test_a_calibration_byte_swap_is_a_different_campaign(tmp_path):
     """Same roster, same window count, different bytes: a different draw."""
     campaign = campaign_identity(joint_campaign_scope(_plan(_bind(
         tmp_path / "campaign", ["a", "b", "c"], {"g0": ["a", "b"], "g1": ["c"]}))))
