@@ -123,3 +123,59 @@ def test_exception_restores_global_ops_and_real_config(tmp_path, monkeypatch, im
     assert F.linear is original_linear
     assert F.grouped_mm is original_grouped
     assert model.experts.config._experts_implementation == implementation
+
+
+@pytest.mark.parametrize("family", ["qwen3_moe", "qwen3_5_moe"])
+@pytest.mark.parametrize("initial,replacement", [
+    ("AUDIT_ROW_LOCAL", "AUDIT_BATCH_SCALE"),
+    ("AUDIT_BATCH_SCALE", "AUDIT_ROW_LOCAL"),
+    ("BF16", "AUDIT_ROW_LOCAL"),
+    ("AUDIT_ROW_LOCAL", "BF16"),
+])
+def test_public_format_override_refreshes_packed_qdq(tmp_path, monkeypatch, family, initial, replacement):
+    monkeypatch.setenv("PRISMAQUANT_EXTERNAL_WEIGHT_MANAGEMENT", "1")
+    row = replace(fr.get_format("NVFP4"), name="AUDIT_ROW_LOCAL", static_activation_contract=None,
+                  quantize_dequantize=lambda x: x.clone())
+    batch = replace(row, name="AUDIT_BATCH_SCALE", activation_quantize_dequantize=(
+        lambda x: x / x.abs().amax().clamp_min(1e-8)))
+    monkeypatch.setitem(fr.REGISTRY, row.name, row)
+    monkeypatch.setitem(fr.REGISTRY, batch.name, batch)
+    model = nn.Module()
+    model.experts = experts(family, "grouped_mm")
+    names = ["experts.gate_up_proj", "experts.down_proj"]
+    cache = owner.PerturbedActivationCache(model, dict.fromkeys(names, initial),
+                                           tmp_path, cal_hash="override", capture_inputs=False)
+    grouped, quantize = F.grouped_mm, owner._activation_qdq
+    boundaries, formats = [], []
+
+    def observe_grouped(x, weight, **kwargs):
+        boundaries.append(tuple(x.shape))
+        return grouped(x, weight, **kwargs)
+
+    def observe_quantize(x, spec, *args, **kwargs):
+        formats.append(spec.name)
+        return quantize(x, spec, *args, **kwargs)
+
+    monkeypatch.setattr(F, "grouped_mm", observe_grouped)
+    monkeypatch.setattr(owner, "_activation_qdq", observe_quantize)
+    x = torch.randn(3, 64)
+    ids = torch.tensor([[0, 1]] * 3)
+    weights = torch.full((3, 2), .5)
+
+    def run(fmt):
+        boundaries.clear()
+        formats.clear()
+        model.experts(x, ids, weights)
+        assert len(boundaries) == (0 if fmt == batch.name else 2)
+        assert formats == ([fmt] * (4 if fmt == batch.name else 2) if fmt != "BF16" else [])
+        assert model.experts.config._experts_implementation == "grouped_mm"
+
+    with torch.no_grad(), cache.frozen_weight_cache():
+        cache.install()
+        try:
+            run(initial)
+            with cache.override(dict.fromkeys(names, replacement)):
+                run(replacement)
+            run(initial)
+        finally:
+            cache.remove()

@@ -3378,8 +3378,10 @@ class PerturbedActivationCache:
             param.data.copy_(original.to(device=param.device, dtype=param.dtype))
         plan.active_originals.clear()
 
-    def _packed_act_plan(self, plan: _ModulePlan) -> list[_ParamPlan] | None:
-        """The per-projection params of a packed-experts plan, or None.
+    def _packed_act_plan(
+        self, plan: _ModulePlan, *, active_only: bool = True,
+    ) -> list[_ParamPlan] | None:
+        """The packed projection params, restricted to active QDQ by default.
 
         A packed-experts module owns several 3-D projection parameters and is
         not an ``nn.Linear``, so the module-level pre-hook can only ever see
@@ -3400,7 +3402,7 @@ class PerturbedActivationCache:
             return None
         members = [
             p for p in plan.params
-            if getattr(p.spec, "act_quant_changes_input", False)
+            if (not active_only or getattr(p.spec, "act_quant_changes_input", False))
             and getattr(getattr(plan.module, p.attr, None), "ndim", 0) == 3
         ]
         return members or None
@@ -3412,18 +3414,19 @@ class PerturbedActivationCache:
         batch-dependent or unknown quantizer uses the per-expert eager
         reference. The module pre-hook skips these plans to avoid double QDQ.
         """
-        members = self._packed_act_plan(plan)
-        if members is None:
+        if self._packed_act_plan(plan, active_only=False) is None:
             return
         from prismaquant.sensitivity_probe import _packed_expert_slice_index
 
         module = plan.module
         original_forward = module.forward
         owner = self
-        row_local = all(_packed_activation_qdq_is_row_local(member.spec)
-                        for member in members)
-
         def _forward(*args, **kwargs):
+            members = owner._packed_act_plan(plan)
+            if members is None:
+                return original_forward(*args, **kwargs)
+            row_local = all(_packed_activation_qdq_is_row_local(member.spec)
+                            for member in members)
             targets: dict[int, _ParamPlan] = {}
             params: dict[int, torch.Tensor] = {}
             for member in members:
