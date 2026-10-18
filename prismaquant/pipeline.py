@@ -620,12 +620,18 @@ def stage_settings_projection(
             "pipeline.STAGE_SETTINGS_KEYS (known: "
             f"{sorted(STAGE_SETTINGS_KEYS)})"
         ) from None
+    if stage in {"aura-cost", "aura-hybrid-cost"}:
+        streaming = settings.get("AURA_COST_STREAMING")
+        if streaming in {"1", "true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON"}:
+            settings = dict(settings, AURA_COST_STREAMING="1")
+        elif streaming in {"0", "false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF"}:
+            settings = dict(settings, AURA_COST_STREAMING="0")
     projection: dict[str, str] = {}
     unresolved: list[str] = []
     for manifest_key, source in keys:
         if (stage in {"aura-cost", "aura-hybrid-cost"}
                 and source == "AURA_COST_PROBE_MICROBATCH"
-                and settings.get("AURA_COST_STREAMING") in {"1", "true", "True", "TRUE"}):
+                and settings.get("AURA_COST_STREAMING") == "1"):
             continue
         if (stage == "tessera-plan"
                 and (source in _TESSERA_SCOPE_SETTINGS or source == "PLAN_ASSIGNMENT_DIGEST")

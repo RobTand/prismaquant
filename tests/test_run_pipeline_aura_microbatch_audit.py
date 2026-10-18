@@ -95,14 +95,17 @@ def test_resident_microbatch_keys_raw_and_final_cost(tmp_path, stage, changed):
     assert code == (2 if changed else 0), messages
 
 
-def test_streamed_cost_ignores_unused_resident_microbatch(tmp_path):
+@pytest.mark.parametrize("stage", ["aura-cost", "aura-hybrid-cost"])
+@pytest.mark.parametrize("streaming", ["1", "true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON"])
+def test_streamed_cost_ignores_unused_resident_microbatch(tmp_path, stage, streaming):
     from prismaquant.pipeline import check_stage_settings, stage_settings_document
 
-    settings = dict(stage_request(), AURA_COST_STREAMING="1", AURA_COST_PROBE_MICROBATCH="8")
+    settings = dict(stage_request(), AURA_COST_STREAMING=streaming, AURA_COST_PROBE_MICROBATCH="8")
     artifact = tmp_path / "cost.pkl"
-    old_artifact(artifact, "aura-cost", settings, {})
+    old_artifact(artifact, stage, settings, {})
     settings["AURA_COST_PROBE_MICROBATCH"] = "1"
-    code, messages = check_stage_settings(artifact, "aura-cost", stage_settings_document(settings))
+    settings["AURA_COST_STREAMING"] = "1"
+    code, messages = check_stage_settings(artifact, stage, stage_settings_document(settings))
     assert code == 0, messages
 
 
