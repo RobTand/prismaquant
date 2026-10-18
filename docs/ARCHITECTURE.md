@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, missing power observations.
+The row-head profile report leaves encode median power, envelope fraction and
+derived sustained-start fields null when the encode interval has no samples.
+Observed zero watts remains a numeric zero. Whole-window samples, byte totals
+and batch durations keep their existing meanings. `row-head-power-green-v1`
+passes four CPU cases through the real summary CLI and compiles both touched
+files, with source, terminal logs and CAS receipt verified against parent
+`456b1409403` plus the overlays. Synthetic telemetry checks report arithmetic;
+it supplies no new GPU measurement.
+
 As of: 2026-10-17, architecture audit continuation, band handoff input reads.
 The live-pair producer and consumer authenticate their checkpoint slice through
 `load_adjoint_slice` before staged work. The consumer's undeclared-input control

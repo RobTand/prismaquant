@@ -89,19 +89,21 @@ def timeline(arm: Path, start: float, batches):
     if not rows or not batches:
         return {}
     encode = [w for t, _, w in rows if batches[0] <= t <= batches[-1]]
-    median = statistics.median(encode) if encode else 0.0
+    median = statistics.median(encode) if encode else None
     sustained = None
-    for index in range(len(rows) - 9):
-        if all(w >= 0.5 * median for _, _, w in rows[index:index + 10]):
-            sustained = rows[index][0]
-            break
+    if median is not None:
+        for index in range(len(rows) - 9):
+            if all(w >= 0.5 * median for _, _, w in rows[index:index + 10]):
+                sustained = rows[index][0]
+                break
     first_read = rows[0][1]
     at = (lambda t: max((r for r in rows if r[0] <= t), key=lambda r: r[0], default=rows[0])[1])
     powers = [w for _, _, w in rows]
     return dict(
         samples=len(rows),
-        encode_median_power_w=round(median, 2),
-        encode_median_envelope_fraction=round(median / ENVELOPE_W, 3),
+        encode_median_power_w=round(median, 2) if median is not None else None,
+        encode_median_envelope_fraction=(round(median / ENVELOPE_W, 3)
+                                        if median is not None else None),
         encode_mean_power_w=round(statistics.fmean(encode), 2) if encode else None,
         whole_mean_power_w=round(statistics.fmean(powers), 2),
         peak_power_w=round(max(powers), 2),
