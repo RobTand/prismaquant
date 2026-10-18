@@ -867,7 +867,8 @@ def _residency(resolver):
     out = {key: report.get(key) for key in keep if key in report}
     tiers = {}
     for row in report.get("serving_tiers") or ():
-        tiers[row.get("tier")] = tiers.get(row.get("tier"), 0) + 1
+        tier = row["serving_tier"]
+        tiers[tier] = tiers.get(tier, 0) + 1
     out["serving_tier_rows"] = tiers
     return out
 
