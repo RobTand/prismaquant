@@ -1099,6 +1099,14 @@ def main():
              "fp32": torch.float32}[args.dtype]
     if args.threads > 0:
         torch.set_num_threads(args.threads)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(args.model)
+    source_binding = (build_source_model_binding(source_root, dtype=dtype)
+                      if source_model_decode_contract(source_root) is not None else None)
 
     # Shared probe / activation / spec context — probe pickle stays in
     # memory so each shard can just intersect its regex against the stats.
@@ -1174,6 +1182,9 @@ def main():
         )
         for i, linear_include in enumerate(shard_regexes)
     ]
+    if source_binding is not None:
+        for meta in expected_metas:
+            meta["source_binding"] = source_binding
     all_reusable = all(
         shard_paths[i].exists()
         and cost_shard_is_reusable(shard_paths[i], expected_metas[i])
@@ -1306,6 +1317,13 @@ def main():
                     model_name=args.model, probe_path=args.probe,
                 )
 
+            if source_binding is not None:
+                fresh = _read_pickle(shard_path)
+                for rows in fresh["costs"].values():
+                    for row in rows.values():
+                        row["source_binding"] = source_binding
+                with shard_path.open("wb") as handle:
+                    pickle.dump(fresh, handle)
             annotate_cost_shard(shard_path, expected_meta)
             if args.device.startswith("cuda"):
                 torch.cuda.empty_cache()
