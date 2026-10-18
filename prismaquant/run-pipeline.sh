@@ -2224,10 +2224,8 @@ fi
 #                    now performs the eval and every artifact carries a real
 #                    residual. It is still a REPORT — non-blocking, and it never
 #                    changes an allocation.
-#   auto           — the pre-ruling behaviour: report only from a measurement
-#                    the run already made; otherwise record the predicted sum
-#                    with measured_kl null and a status saying why. Zero added
-#                    GPU.
+#   auto           — record only the predicted sum. Reused frontier measurements
+#                    can use a different assignment or calibration contract.
 #   0              — off.
 # -----------------------------------------------------------------------
 : "${AURA_ADDITIVITY_GATE:=measure}"
@@ -2237,41 +2235,10 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
   AURA_MEASURED_KL=""
   AURA_MEASURED_KL_STDERR="0"
   AURA_MEASURED_SOURCE="none"
-  AURA_FRONTIER_JSON="${WORK_DIR}/artifacts/validated_frontier_kl.json"
-  if [[ -f "$AURA_FRONTIER_JSON" ]]; then
-    read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(
-      python3 - "$AURA_FRONTIER_JSON" "${WORK_DIR}/artifacts/validated_frontier_selection.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-results = json.loads(Path(sys.argv[1]).read_text()).get("results", [])
-label = None
-sel = Path(sys.argv[2])
-if sel.is_file():
-    payload = json.loads(sel.read_text())
-    label = (payload.get("selected") or {}).get("label") or payload.get("label")
-row = None
-for item in results:
-    if label is not None and item.get("label") == label:
-        row = item
-        break
-if row is None and results:
-    row = min(results, key=lambda r: float(r.get("kl_mean", r.get("kl", 1e9))))
-if row is None:
-    print("")
-else:
-    kl = row.get("kl_mean", row.get("kl"))
-    print(f"{float(kl)} {float(row.get('kl_stderr', 0.0) or 0.0)}")
-PY
-    )"
-    [[ -n "$AURA_MEASURED_KL" ]] && AURA_MEASURED_SOURCE="validated_frontier_kl.json"
-  fi
-  if [[ -z "$AURA_MEASURED_KL" && "$AURA_ADDITIVITY_GATE" == "measure" ]]; then
+  if [[ "$AURA_ADDITIVITY_GATE" == "measure" ]]; then
     AURA_ADDITIVITY_KL_JSON="${WORK_DIR}/artifacts/aura_additivity_kl.json"
-    if [[ ! -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
-      echo "[pipeline] [3c] measuring end-KL for the additivity report (AURA_ADDITIVITY_GATE=measure) ..."
-      python3 -m prismaquant.validate_assignments_kl \
+    echo "[pipeline] [3c] measuring end-KL for the additivity report (AURA_ADDITIVITY_GATE=measure) ..."
+    if python3 -m prismaquant.validate_assignments_kl \
         --model "$MODEL_PATH" \
         --probe "$PROBE_PATH" \
         --costs "$COST_PATH" \
@@ -2289,9 +2256,8 @@ PY
         --work-dir "${WORK_DIR}/work/aura_additivity" \
         --dtype bf16 --device "$DEVICE" \
         --output "$AURA_ADDITIVITY_KL_JSON" \
-        2>&1 | tee "${WORK_DIR}/logs/aura_additivity_kl.log" || true
-    fi
-    if [[ -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
+        2>&1 | tee "${WORK_DIR}/logs/aura_additivity_kl.log"; then
+      if [[ -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
       read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(
         python3 - "$AURA_ADDITIVITY_KL_JSON" <<'PY'
 import json
@@ -2308,6 +2274,7 @@ else:
 PY
       )"
       [[ -n "$AURA_MEASURED_KL" ]] && AURA_MEASURED_SOURCE="aura_additivity_kl.json"
+      fi
     fi
   fi
   if [[ -n "$AURA_MEASURED_KL" ]]; then
