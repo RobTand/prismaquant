@@ -1541,7 +1541,8 @@ def _publish_submitted_manifest(workspace: Path, rows: list[dict]) -> Path:
     payload = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
     if not publish_new_bytes(submitted, payload, nofollow=True):
         try:
-            existing = submitted.read_bytes()
+            with os.fdopen(os.open(submitted, os.O_RDONLY | os.O_NOFOLLOW), "rb") as handle:
+                existing = handle.read()
         except OSError as error:
             raise RuntimeError(
                 f"submitted manifest at {submitted} is unreadable: {error}. "

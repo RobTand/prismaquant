@@ -79,3 +79,16 @@ def test_overlapping_submit_keeps_its_checked_manifest(tmp_path, monkeypatch,
         assert len(entered) == 2
         assert consumed[1] == second
     assert json.loads(manifest.read_text()) == second
+
+
+def test_identical_submitted_symlink_is_refused(tmp_path):
+    rows = [{"name": "checked request"}]
+    target = tmp_path / "target.json"
+    payload = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
+    target.write_bytes(payload)
+    submitted = tmp_path / dispatch.SUBMITTED_MANIFEST
+    submitted.symlink_to(target)
+    with pytest.raises(RuntimeError, match="fresh workspace"):
+        dispatch._publish_submitted_manifest(tmp_path, rows)
+    assert submitted.is_symlink()
+    assert target.read_bytes() == payload
