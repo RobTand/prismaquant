@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import pickle
+import re
 import tempfile
 from typing import Any
 
@@ -146,9 +147,10 @@ def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
             yield cell, entry.get("source_binding"), True
 
 
-def _native_cost_bindings(cells):
+def _native_cost_bindings(cells, *, checkpoint_only_cells=frozenset()):
     from .streamed_model_identity import (
-        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, SOURCE_MODEL_BINDING_SCHEMA,
+        validate_source_model_binding,
     )
 
     validated = {}
@@ -157,15 +159,19 @@ def _native_cost_bindings(cells):
         if key not in validated:
             try:
                 binding = validate_source_model_binding(raw, where=cell)
-                if binding["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
-                    raise ValueError("legacy decoder identity cannot qualify native costs")
             except ValueError as exc:
                 raise ValueError(
                     f"{cell}: native source binding is unqualified: {exc}; "
                     "recompute/reprice this cell with the current source decoder; "
                     "do not restamp retained costs") from exc
             validated[key] = (raw, binding)
-        yield cell, validated[key][1]
+        binding = validated[key][1]
+        if cell in checkpoint_only_cells:
+            if binding["schema"] != SOURCE_MODEL_BINDING_SCHEMA:
+                raise ValueError(f"{cell}: sidecar binding must exclude the text decoder claim; rebuild/reprice")
+        elif binding["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+            raise ValueError(f"{cell}: native source binding is unqualified: legacy decoder identity cannot qualify native costs; rebuild/reprice")
+        yield cell, binding
 
 
 def require_native_cost_source_binding(
@@ -192,6 +198,9 @@ def require_native_cost_source_binding(
 def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where: str) -> None:
     """Observe current native source once; retain each priced cell's dtype.
 
+    Profile-declared MTP and visual cells bind checkpoint bytes and dtype only.
+    These cells do not claim native text decode. Offline stock admission remains
+    limited to exact v2 evidence.
     Validated joint and sparse-anchor products retain their own source regime.
     That admission is not an exact current-metadata v2 equality claim.
     """
@@ -211,14 +220,35 @@ def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where
             if isinstance(raw, Mapping) and raw.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
                 raise ValueError(f"{cell}: native source binding cannot qualify costs when the current source is not native; rebuild/reprice")
         return
+    from .incremental_probe import build_shard_schedule
+    from .streamed_model_identity import SOURCE_MODEL_BINDING_SCHEMA
+
+    schedule = build_shard_schedule(
+        model_path=str(root), num_body_layers=0, body_layers_per_shard=1,
+        body_layer_range=(0, 0), include_mtp=True, include_visual=True,
+        include_lm_head=False, unified_body_sweep=False,
+    )
+    sidecar_patterns = [re.compile(entry.linear_include) for entry in schedule
+                        if entry.kind in ("mtp", "visual")]
+    checkpoint_only_cells = {
+        f"{where} {qname}/{fmt}"
+        for qname, rows in payload["costs"].items()
+        if any(pattern.search(qname) for pattern in sidecar_patterns)
+        for fmt in rows
+    }
     bindings = list(_native_cost_bindings(
-        (cell, raw) for cell, raw, required in cells if required))
+        ((cell, raw) for cell, raw, required in cells if required),
+        checkpoint_only_cells=checkpoint_only_cells))
     if not bindings:
         return
     expected = build_source_model_binding(
         root, dtype=bindings[0][1]["effective_dtype"], local_files_only=True)
     for cell, binding in bindings:
-        if binding != {**expected, "effective_dtype": binding["effective_dtype"]}:
+        wanted = {**expected, "effective_dtype": binding["effective_dtype"]}
+        if cell in checkpoint_only_cells:
+            wanted.pop("source_decode")
+            wanted["schema"] = SOURCE_MODEL_BINDING_SCHEMA
+        if binding != wanted:
             raise ValueError(f"{cell}: native source binding differs from the current checkpoint/decoder; rebuild/reprice")
 
 
