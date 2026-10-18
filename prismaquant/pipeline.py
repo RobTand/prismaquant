@@ -578,14 +578,14 @@ def assignment_kl_measurement(
     return float(kl), float(stderr)
 
 
-def frontier_request_digest(paths: Iterable[str | Path]) -> str:
-    """Bind the base, candidate, probe, costs, cache and local corpus bytes."""
+def frontier_request_digest(base: str | Path, candidate: str | Path, corpus: str | Path) -> str:
+    """Bind assignment and corpus bytes; the stage keys own draw geometry."""
     from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 
-    *files, dataset = paths
-    inputs = [file_sha256hex(path) for path in files]
-    inputs.append(file_sha256hex(dataset) if Path(dataset).is_file() else str(dataset))
-    return DIRECT_UTF8_STRICT.sha256(inputs)
+    return DIRECT_UTF8_STRICT.sha256([
+        file_sha256hex(base), file_sha256hex(candidate),
+        file_sha256hex(corpus) if Path(corpus).is_file() else str(corpus),
+    ])
 
 
 def parse_settings(pairs: Iterable[str]) -> dict[str, str]:

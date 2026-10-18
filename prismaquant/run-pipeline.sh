@@ -2002,11 +2002,10 @@ PY
         VAK_PART="${VAK_PART_DIR}/vak_${VAK_LABEL_SAFE}.json"
         VAK_PART_FILES+=("$VAK_PART")
         VAK_REQUEST_DIGEST="$(python3 - "${WORK_DIR}/artifacts/layer_config.json" \
-          "${VAK_SPEC#*=}" "$PROBE_PATH" "$COST_PATH" "$PROD_CACHE_RAW" \
-          "$VALIDATED_FRONTIER_DATASET" <<'PYDIGEST'
+          "${VAK_SPEC#*=}" "$VALIDATED_FRONTIER_DATASET" <<'PYDIGEST'
 import sys
 from prismaquant.pipeline import frontier_request_digest
-print(frontier_request_digest(sys.argv[1:]))
+print(frontier_request_digest(*sys.argv[1:]))
 PYDIGEST
 )"
         require_stage_settings "$VAK_PART" frontier-kl-point \
