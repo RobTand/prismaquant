@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
-As of: 2026-10-18, architecture audit resume, documentation Revision 2.
-Source commit: `757150b4f082ed74bbf0724ad800821735512b35`. Documentation branch: `claude/w/docs`.
+As of: 2026-10-18, architecture audit resume, final documentation pass.
+Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
 Section 5.7 states the activation coverage rule. Section 12 records raw shell-identity debt.
 Section 4.1 retains the bounded GB10 module evidence and its runtime limits.
@@ -23158,7 +23158,8 @@ Profile-declared MTP and visual rows carry checkpoint-and-dtype evidence.
 Each sidecar row carries one evidence form.
 `prepriced_cost.checkpoint_only_cost_qnames` identifies these regions through the profile schedule.
 `prepriced_cost.cost_source_binding_for_region` owns the evidence projection.
-Baseline production, render synthesis and intake share those owners.
+Render synthesis and intake use both owners. Baseline production uses the projection
+with the region from its schedule entry kind.
 That evidence does not qualify native MTP or visual decoding.
 Text decoder evidence cannot attest those sidecars
 (`prepriced_cost.validate_native_cost_source_for_model`,
@@ -28009,12 +28010,6 @@ by none.
 
 ### 5.7 Tessera — a synthesized family, priced and rendered by name, admitted only by attestation (2026-09-02)
 
-Activation-quantizer attestation requires all seven E2M1 midpoint magnitudes,
-a signed input, element saturation and the scale underflow boundary.
-The reader checks numeric coverage from the published bits.
-It does not require both signs at every midpoint
-(`tessera_runtime_contract.require_activation_quantizer_attested`).
-
 **What it is.** Tessera is the trellis-coded weight format developed in its own
 repository (`/home/rob/tessera`, package `tessera`: encoder, wire, decoder,
 kernels; design record `docs/design/embedded_native_weight_coding_2026-08-31.md`).
@@ -28074,6 +28069,12 @@ fallback:
   They reach PrismaBuild only by running the published `pbcampaign.py` and
   `pbwait.py`, so they add no line to the PrismaBuild allowlist
   (`docs/operations/tessera_fleet_drivers.md`).
+
+Activation-quantizer attestation requires all seven E2M1 midpoint magnitudes,
+a signed input, element saturation and the scale underflow boundary.
+The reader checks numeric coverage from the published bits.
+It does not require both signs at every midpoint
+(`tessera_runtime_contract.require_activation_quantizer_attested`).
 
 **Exact pricing, or refusal.** `FormatSpec.bits_for_shape_fn` (added on this
 branch) is a format's own accountant. A Tessera spec has no scalar bpp:
@@ -32961,8 +32962,6 @@ the pinned commit itself — no synthetic tree needed. The re-freeze itself is s
 | D44 | **The ram half of the residency map is fenced but unmeasured, and two of the three read sites have not adopted the preference** (added 2026-09-18, RobTand/prismaquant#750, RobTand/prismabuild#640/#641). **(a) No consumer-side ram read has been measured.** The reader offers a ram copy only while the map's `ram_epoch` equals the epoch the pool's tier record announces, and the identity fence is the stage copy's own (regular file, exact byte count), both proven by `tests/test_prismabuild_ram_tier_residency.py`; but every rate this file carries is a stage-or-pool rate (D43). No joint pass has written a `bytes_from_ram` number, and the tmpfs is served over NFS like the stage is, so the ram tier's payoff to a consumer -- reads that skip the SSD and the ARC entirely -- is a design claim until one joint pass on the new generation reports its per-tier counters. The first `bytes_from_ram` numbers come from the executed band-serial handoff pair after PQ #1026 (12,918 bytes producer, 17,332 consumer, each equal to the bytes read): byte counts on a KB-scale qualification pair, not rates. **(b) Coverage.** Only the wire reader prefers the ram copy (`tessera_joint_aura._read_verified_wire_blob`: ram, then stage, then declared). `production_weight_cache` and `residency_shard_reader` take the resolver's answer and read `stage_path` unchanged -- correct, and still stage-served, so a map whose entries are all ram-promoted serves those two sites from the SSD. Adopting the preference at those two sites is the open half. **(c) One more stat per lookup.** While a map carries ram paths, every `staged_read`/`staged_range` additionally lstats the tier record (identity-cached, re-read on change) beside the map itself; not measured, expected to be noise against the read it guards. | `prismaquant/residency_map.py`; `tessera_joint_aura._read_verified_wire_blob`; `tests/test_prismabuild_ram_tier_residency.py`; `/mnt/shared/prismabuild-fleet/pb-queue/tiers/ram:dl380g10.json` | MED | Run one joint pass on the #640 generation with a ram-promoted window and read `ram_hits`/`bytes_from_ram`/`bytes_from_stage`/`bytes_from_pool` against the stage-only arm; then extend the preference to the PWC shard load and the streamed source extents if the numbers hold. |
 | D45 | **The resumable, parallel head walk is landed but its campaign speedup is unmeasured** (added 2026-09-19, RobTand/prismaquant#754). The mechanism is gated by `tests/test_joint_head_walk_754.py`: a resumed walk equals a fresh one, parallel equals serial, the affinity-derived default stays bounded while explicit I/O width may exceed the assigned core count up to 16 threads, and unverifiable journal state is discarded fail-closed. Since #1051 (2026-09-23) Stage A no longer walks the head, so this debt concerns the prepare action's walk, a Stage B quantum without a head slice, and the joint AURA run. What no test can say is what the change buys on the real campaign, because no flagship joint pass has run since: the only measured head walks are the ones that motivated the issue — `c5c88680bd86` walked 54m37s and lost it on restart, `cd2dd86bad21` re-paid it, and the #678 warm walk was 669.97 s over 36,423 units / 15.95 GB single-threaded. Three things are therefore owed as measurements on the campaign's own resubmission: (a) the parallel/serial A/B of the walk itself (`PRISMAQUANT_HEAD_WALK_WORKERS=1` against the affinity default, same reservation, head-phase wall time and `/proc/PID/io` either side — threads are the bet that the walk is I/O-latency-bound, and the unpickle half of each unit still holds the GIL, so the honest expectation is a partial not a linear speedup); (b) a restart mid-walk resumed from the journal rather than zero (`head_walk_resumed_units` in `results.json` beside the resumed wall time); (c) whether the 4-CPU reservation the withdrawn submission carried should be raised — PB's placement already prefers physical cores and demotes SMT siblings and E-cores on both boxes (`prismabuild/cpu_topology.py`: GB10 `cpu_capacity` classes X925 `5-9,15-19` / A725 `0-4,10-14`; dl380g10 `thread_siblings_list` leadership), applied with taskset before exec, so a larger reservation lands on P cores by construction and the only open question is its size. | `prismaquant/tessera_joint_aura.py` `load_measured_anchor_input`, `_drive_ordered_walk`, `_open_head_journal`; `tests/test_joint_head_walk_754.py` | MED | Run the campaign's head phase twice under the same reservation — affinity-default workers and `PRISMAQUANT_HEAD_WALK_WORKERS=1` — read the two `results.json` `head_walk_*` records and `/proc/PID/io`, restart one action mid-walk to observe the resume, and reprice the CPU reservation from the measured bottleneck. |
 | D46 | Four shell reuse identities still hash raw assignment-file bytes, as on `main`. `LC_DIGEST` and `RAW_LC_DIGEST` hash `layer_config.json`. `TESSERA_ASSIGNMENT_DIGEST` hashes the same file. `TESSERA_PLAN_ASSIGNMENT_DIGEST` hashes the derived source-unit projection, which retains raw source metadata; it is empty when the plan input is `layer_config.json` itself. A timer-only allocator rewrite changes these identities and refuses cached reuse. Two other raw-byte keys do not refuse: `SELECTED_DIGEST` names the recache, so a timer-only rewrite rebuilds the recache without a message, and `pipeline.assignment_kl_measurement` binds `ASSIGNMENT_DIGEST` to raw bytes, so reuse mode measures again. This accepted limit is separate from canonical frontier point identity (§3.4). | `prismaquant/run-pipeline.sh:2077`, `:2128`, `:2178`, `:2446`, `:2452`, `:2455`, `:2478`; `prismaquant/pipeline.py:568` | LOW | The refusal fails closed: each gate exits 2 and names the artifact. The operator deletes that artifact and runs again. These gates do not rebuild it automatically. |
-
-
 
 **Open items carried from session handovers.** Of the 41 items the handover census could not
 map to a verified closure, the prior FP4-CB fast-expander/Triton item is now closed by the

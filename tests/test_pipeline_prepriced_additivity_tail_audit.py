@@ -1,7 +1,9 @@
 """External prepriced bytes stay immutable through the real report tail.
 
 The shipped path-selection and AURA report sections execute unchanged with
-the real prepriced validator and additivity CLI. Synthetic zero-KL input
+the real prepriced validator. The shared shell helper stubs the additivity KL
+CLI, the AURA cost CLI and the tokenizer; the KL stub writes 0.75, so the
+asserted zero KL proves reuse of the bound record. Synthetic zero-KL input
 records avoid model/GPU work; they establish no measured quality claim.
 """
 from __future__ import annotations
