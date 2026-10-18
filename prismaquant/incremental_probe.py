@@ -1075,6 +1075,27 @@ def _probe_reuse_inputs_mismatch(recorded, expected) -> str | None:
     return None
 
 
+_CAPTURE_META_KEYS = frozenset(("router_coverage_version", "packed_input_capture"))
+
+
+def _has_packed_stats(stats: Mapping) -> bool:
+    return any(row.get("_packed_experts_module") is not None
+               or row.get("num_experts", 0) > 0 for row in stats.values())
+
+
+def _probe_capture_compatible(data: Mapping, expected_meta: Mapping) -> bool:
+    meta = _probe_meta_flat(data.get("meta") or {})
+    stats = data.get("stats") or {}
+    packed = _has_packed_stats(stats)
+    routed = packed or any(data.get(field) for field in _ROUTING_FIELDS)
+    routed = routed or any(row.get("router_path") is not None for row in stats.values())
+    recorded = meta.get("router_coverage_version")
+    expected = expected_meta.get("router_coverage_version")
+    if recorded != expected and not (recorded == 2 and expected == 3 and not routed):
+        return False
+    return not packed or meta.get("packed_input_capture") == expected_meta.get("packed_input_capture")
+
+
 def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     try:
         data = _read_pickle(path)
@@ -1098,8 +1119,10 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     if reason is not None:
         print(f"[incremental] refuse reuse {path}: {reason}", flush=True)
         return False
+    if not _probe_capture_compatible(data, expected_meta):
+        return False
     for key, expected in expected_meta.items():
-        if probe_meta.get(key) != expected:
+        if key not in _CAPTURE_META_KEYS and probe_meta.get(key) != expected:
             return False
     sample_partition = expected_meta.get("sample_parallel")
     sample_census = expected_meta.get("sample_parallel_qname_census")
@@ -1213,16 +1236,19 @@ def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
     return meta
 
 
-def _content_meta_compatible(raw_meta: dict[str, Any],
+def _content_meta_compatible(data: Mapping,
                              anchor: dict[str, Any]) -> bool:
-    probe_meta = _probe_meta_flat(raw_meta)
+    probe_meta = _probe_meta_flat(data.get("meta") or {})
     reason = _probe_reuse_inputs_mismatch(
         probe_meta.get("probe_reuse_inputs"), anchor.get("probe_reuse_inputs")
     )
     if reason is not None:
         print(f"[incremental] refuse cached Linear stats: {reason}", flush=True)
         return False
-    return all(probe_meta.get(k) == anchor.get(k) for k in _CONTENT_META_KEYS)
+    return _probe_capture_compatible(data, anchor) and all(
+        probe_meta.get(k) == anchor.get(k)
+        for k in _CONTENT_META_KEYS if k not in _CAPTURE_META_KEYS
+    )
 
 
 def _cached_value_exact_equal(left: object, right: object) -> bool:
@@ -1265,6 +1291,12 @@ def _cached_value_exact_equal(left: object, right: object) -> bool:
     return type(left) is type(right) and left == right
 
 
+class _CachedLinearStats(dict):
+    def __init__(self):
+        super().__init__()
+        self.routing = {field: {} for field in _ROUTING_FIELDS}
+
+
 def scan_cached_linear_stats(
     shard_dir: Path,
     content_meta_anchor: dict[str, Any],
@@ -1282,7 +1314,7 @@ def scan_cached_linear_stats(
     when every duplicate qname is bit/exactly identical, then synthesize new
     shards by filtering on regex.
     """
-    pooled: dict[str, dict[str, Any]] = {}
+    pooled = _CachedLinearStats()
     if not shard_dir.exists():
         return pooled
     for path in sorted(shard_dir.glob("probe_shard_*.pkl")):
@@ -1293,12 +1325,18 @@ def scan_cached_linear_stats(
             continue
         if not isinstance(data, dict):
             continue
-        if not _content_meta_compatible(data.get("meta") or {},
-                                        content_meta_anchor):
+        if not _content_meta_compatible(data, content_meta_anchor):
             continue
         stats = data.get("stats") or {}
         if not isinstance(stats, dict):
             continue
+        for field, target in pooled.routing.items():
+            for name, value in data.get(field, {}).items():
+                if name in target and not _cached_value_exact_equal(target[name], value):
+                    print(f"[incremental] divergent cached route {field}:{name}; "
+                          "refusing synthesized reuse", flush=True)
+                    return {}
+                target[name] = value
         for name, s in stats.items():
             if name in pooled and not _cached_value_exact_equal(pooled[name], s):
                 print(
@@ -1437,12 +1475,14 @@ def synthesize_shard_from_linear_cache(
                   flush=True)
             return False
 
+    routing = _shard_routing_payload(selected, inc, getattr(cache, "routing", {}))
+    if _has_packed_stats(selected) and not routing["router_counts"]:
+        print("[incremental] synthesize refused: packed stats have no route maps",
+              flush=True)
+        return False
     payload = {
         "stats": selected,
-        "router_counts": {},
-        "router_totals": {},
-        "router_active_counts": {},
-        "expert_info": {},
+        **routing,
         "meta": {
             **dict(expected_meta),
             "device_map": "streaming-layerwise",
@@ -2531,7 +2571,12 @@ def _validate_precompute_cache_payload(
         or set(data) != _PRECOMPUTE_CACHE_KEYS
         or data.get("schema") != _PRECOMPUTE_CACHE_SCHEMA
         or not isinstance(data.get("meta"), dict)
-        or data["meta"] != dict(expected_meta)
+        or not (
+            data["meta"] == dict(expected_meta)
+            or (data["meta"].get("router_coverage_version") == 2
+                and expected_meta.get("router_coverage_version") == 3
+                and {**data["meta"], "router_coverage_version": 3} == dict(expected_meta))
+        )
     ):
         raise ValueError("precompute cache schema/meta differs")
     ids = data.get("ids_cpu")
