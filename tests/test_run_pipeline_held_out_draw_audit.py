@@ -158,11 +158,12 @@ def test_different_corpora_have_no_shared_position_domain(tmp_path):
     corpus, tokenizer = local_draw(tmp_path)
     other = tmp_path / "other.jsonl"
     other.write_text('{"text": "different"}\n')
-    with pytest.raises(ValueError, match="source-position domain"):
+    with pytest.raises(ValueError, match="source-position domain") as error:
         held_out_calibration_skip(
             source=str(corpus), validation_source=str(other), validation_seqlen=16,
             draws=[(32, 16, 42)], requested_skip=None, enforce=True, tokenizer=tokenizer,
         )
+    assert "VALIDATED_FRONTIER_SKIP_CALIB=0" in str(error.value)
 
 
 def test_corpus_alias_keeps_complete_skip(tmp_path):

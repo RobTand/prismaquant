@@ -479,7 +479,10 @@ def held_out_calibration_skip(
         raise ValueError("held-out source positions require a local calibration corpus")
     if (Path(source).resolve() != Path(validation_source).resolve()
             and file_sha256hex(source) != file_sha256hex(validation_source)):
-        raise ValueError("held-out corpora have no shared source-position domain; use one local corpus")
+        raise ValueError(
+            "held-out corpora have no shared source-position domain. Use one local corpus, "
+            "or set VALIDATED_FRONTIER_SKIP_CALIB=0 for an independent held-out corpus."
+        )
     if tokenizer is None or validation_samples <= 0 or validation_seqlen <= 0:
         raise ValueError("held-out positions need a tokenizer and a positive selection draw")
     boundary = -1
