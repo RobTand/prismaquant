@@ -830,7 +830,7 @@ fi
 # measured end-to-end, FP8 kept in the menu (real-KL rejects it, no bans).
 : "${AURA_EXPERT_NSAMPLES:=16}"
 : "${AURA_EXPERT_SEQLEN:=512}"
-# Held-out calibration boundary. All fit producers must share the prefix.
+# Held-out calibration boundary. Measure the source positions of every fit draw.
 FRONTIER_CALIBRATION_ARGS=(--calibration-draw "$NSAMPLES" "$SEQLEN" 42)
 case "$COST_MODE" in
   aura)
@@ -846,7 +846,10 @@ case "$COST_MODE" in
 esac
 VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$(python3 -m prismaquant.pipeline \
   --held-out-calibration-skip "${FRONTIER_CALIBRATION_ARGS[@]}" \
+  --setting "MODEL_PATH=$MODEL_PATH" \
   --setting "DATASET=$DATASET" \
+  --setting "VALIDATED_FRONTIER_NSAMPLES=$VALIDATED_FRONTIER_NSAMPLES" \
+  --setting "VALIDATED_FRONTIER_CALIB_REPEATS=$VALIDATED_FRONTIER_CALIB_REPEATS" \
   --setting "VALIDATED_FRONTIER_DATASET=$VALIDATED_FRONTIER_DATASET" \
   --setting "VALIDATED_FRONTIER_SEQLEN=$VALIDATED_FRONTIER_SEQLEN" \
   --setting "VALIDATED_FRONTIER_SKIP_CALIB=${VALIDATED_FRONTIER_SKIP_CALIB:-}" \

@@ -11,6 +11,7 @@ executes them, and this module is not an executor (re-vet R23: no python port).
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import json
 import math
 import sys
@@ -461,46 +462,58 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
 def held_out_calibration_skip(
     *, source: str, validation_source: str, validation_seqlen: int,
     draws: Iterable[tuple[int, int, int]], requested_skip: int | None,
-    enforce: bool,
+    enforce: bool, tokenizer: Any = None, validation_samples: int = 32,
 ) -> int:
-    """Skip every fit draw when the local loader has one shared prefix."""
+    """Extend the original selection prefix beyond every consumed source position."""
     draws = tuple(draws)
     if not draws or any(min(count, length) <= 0 for count, length, _seed in draws):
         raise ValueError("calibration draw sizes must be positive")
-    minimum = max(count for count, _length, _seed in draws)
-    skip = minimum if requested_skip is None else requested_skip
-    if skip < 0:
+    if requested_skip is not None and requested_skip < 0:
         raise ValueError("held-out skip must be nonnegative")
-    if not enforce or skip == 0:
-        return skip
-    if skip < minimum:
-        raise ValueError(f"held-out skip {skip} does not cover the cost draw of {minimum} windows")
-    if any(length != validation_seqlen or seed != 42 for _count, length, seed in draws):
-        raise ValueError(
-            "held-out prefix needs the same sequence length and seed 42 for every "
-            "probe, cost and selection draw; align these inputs before selection"
-        )
+    if not enforce or requested_skip == 0:
+        return max(count for count, _length, _seed in draws) if requested_skip is None else requested_skip
     from prismaquant.digests import file_sha256hex
+    from prismaquant.calibration_data import load_calibration
 
     if not Path(source).is_file() or not Path(validation_source).is_file():
-        raise ValueError("held-out prefix needs a local calibration corpus with a stable prefix")
+        raise ValueError("held-out source positions require a local calibration corpus")
     if (Path(source).resolve() != Path(validation_source).resolve()
             and file_sha256hex(source) != file_sha256hex(validation_source)):
-        raise ValueError(
-            "different corpus paths do not prove held-out disjointness; "
-            "use one local corpus and skip its complete cost prefix"
-        )
-    return skip
+        raise ValueError("held-out corpora have no shared source-position domain; use one local corpus")
+    if tokenizer is None or validation_samples <= 0 or validation_seqlen <= 0:
+        raise ValueError("held-out positions need a tokenizer and a positive selection draw")
+    boundary = -1
+    for count, length, seed in draws:
+        documents = []
+        load_calibration(tokenizer, source, count, length, calib_seed=seed,
+                         source_documents=documents)
+        boundary = max(boundary, max(document for row in documents for document in row))
+    skip = requested_skip or 0
+    while True:
+        documents = []
+        count = skip + validation_samples
+        ids = load_calibration(tokenizer, validation_source, count, validation_seqlen,
+                               calib_seed=42, source_documents=documents)
+        if ids.shape[0] != count or len(documents) != count:
+            raise ValueError(f"held-out corpus cannot supply {count} windows with source positions")
+        consumed_prefix = max((index + 1 for index, row in enumerate(documents)
+                               if min(row) <= boundary), default=0)
+        if consumed_prefix <= skip:
+            return skip
+        skip = consumed_prefix
+
+
+def _calibration_tokenizer(model: str):
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(
+        model, trust_remote_code=True, local_files_only=Path(model).exists())
 
 
 def calibration_draw_digest(model: str, source: str, samples: int, seqlen: int, seed: int) -> str:
-    from contextlib import redirect_stdout
-    from transformers import AutoTokenizer
     from prismaquant.calibration_data import load_calibration
     from prismaquant.perturbed_x_cache import calibration_data_hash
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model, trust_remote_code=True, local_files_only=Path(model).exists())
+    tokenizer = _calibration_tokenizer(model)
     with redirect_stdout(sys.stderr):
         ids = load_calibration(tokenizer, source, samples, seqlen, calib_seed=seed)
     return calibration_data_hash(ids)
@@ -1882,16 +1895,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.held_out_calibration_skip:
         settings = parse_settings(args.setting)
         try:
-            skip = held_out_calibration_skip(
-                source=settings["DATASET"],
-                validation_source=settings["VALIDATED_FRONTIER_DATASET"],
-                validation_seqlen=int(settings["VALIDATED_FRONTIER_SEQLEN"]),
-                draws=args.calibration_draw,
-                requested_skip=(int(settings["VALIDATED_FRONTIER_SKIP_CALIB"])
-                                if settings.get("VALIDATED_FRONTIER_SKIP_CALIB") else None),
-                enforce=settings["SELECTION_MODE"] == "validated-surrogate",
-            )
-        except (KeyError, ValueError) as exc:
+            with redirect_stdout(sys.stderr):
+                skip = held_out_calibration_skip(
+                    source=settings["DATASET"],
+                    validation_source=settings["VALIDATED_FRONTIER_DATASET"],
+                    validation_seqlen=int(settings["VALIDATED_FRONTIER_SEQLEN"]),
+                    draws=args.calibration_draw,
+                    requested_skip=(int(settings["VALIDATED_FRONTIER_SKIP_CALIB"])
+                                    if settings.get("VALIDATED_FRONTIER_SKIP_CALIB") else None),
+                    enforce=settings["SELECTION_MODE"] == "validated-surrogate",
+                    tokenizer=(_calibration_tokenizer(settings["MODEL_PATH"])
+                               if (settings["SELECTION_MODE"] == "validated-surrogate"
+                                   and settings.get("VALIDATED_FRONTIER_SKIP_CALIB") != "0") else None),
+                    validation_samples=(int(settings["VALIDATED_FRONTIER_NSAMPLES"])
+                                        * int(settings["VALIDATED_FRONTIER_CALIB_REPEATS"])),
+                )
+        except (KeyError, ValueError, OSError, RuntimeError) as exc:
             print(f"[pipeline] ERROR: {exc}", file=sys.stderr)
             return 2
         print(skip)

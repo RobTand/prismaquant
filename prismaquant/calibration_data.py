@@ -262,12 +262,15 @@ def _dtype_from_name(name: str) -> torch.dtype:
 
 
 def load_calibration(tokenizer, source: str, n_samples: int,
-                     seqlen: int, *, calib_seed: int = 42) -> torch.Tensor:
+                     seqlen: int, *, calib_seed: int = 42,
+                     source_documents: list[frozenset[int]] | None = None) -> torch.Tensor:
     """Load calibration from a HuggingFace dataset id, a local .jsonl, or
     a local .txt file. Extensionless regular files are content-sniffed so a
     bind-mounted JSONL at a canonical container path such as ``/dataset``
     remains local. JSONL rows can have either {"text": ...} or
     {"messages": [...]} for chat-style data.
+    If source_documents is supplied, append the original local line indices
+    for each returned window. Include packed tokens and EOS separators.
     """
     import os
 
@@ -324,10 +327,13 @@ def load_calibration(tokenizer, source: str, n_samples: int,
             else "txt"
         )
 
+    if source_documents is not None and local_kind is None:
+        raise ValueError("held-out positions require a local JSONL or text corpus")
     texts: list[str] = []
+    text_positions: list[int] = []
     if local_kind == "jsonl":
         with open(source) as f:
-            for line in f:
+            for position, line in enumerate(f):
                 if not line.strip():
                     continue
                 obj = json.loads(line)
@@ -335,6 +341,7 @@ def load_calibration(tokenizer, source: str, n_samples: int,
                     try:
                         texts.append(tokenizer.apply_chat_template(
                             obj["messages"], tokenize=False))
+                        text_positions.append(position)
                     except Exception:
                         # Tokenizer has no chat template (base / pt models
                         # like DSv4-Flash-Base). Fall back to concatenating
@@ -348,11 +355,16 @@ def load_calibration(tokenizer, source: str, n_samples: int,
                                     parts.append(c)
                         if parts:
                             texts.append("\n\n".join(parts))
+                            text_positions.append(position)
                 elif "text" in obj:
                     texts.append(obj["text"])
+                    text_positions.append(position)
     elif local_kind == "txt":
         with open(source) as f:
-            texts = [ln.strip() for ln in f if ln.strip()]
+            for position, line in enumerate(f):
+                if line.strip():
+                    texts.append(line.strip())
+                    text_positions.append(position)
     elif source == "ultrachat_200k":
         from datasets import load_dataset
 
@@ -461,18 +473,22 @@ def load_calibration(tokenizer, source: str, n_samples: int,
     # and (b) where within each text the seqlen window starts. Default 42
     # preserves historical long-document selection and window offsets.
     # Packing excludes those documents, so a mixed-corpus draw can differ.
+    document_order = list(range(len(texts)))
     if calib_seed != 42:
-        rng_shuffle = random.Random(calib_seed)
-        rng_shuffle.shuffle(texts)
+        random.Random(calib_seed).shuffle(document_order)
     rng = random.Random(calib_seed)
     samples = []
+    window_documents = []
     used_documents = set()
-    for document, t in enumerate(texts):
+    for document in document_order:
+        t = texts[document]
         ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
         if ids.size(1) < seqlen:
             continue
         start = rng.randint(0, ids.size(1) - seqlen)
         samples.append(ids[0, start:start + seqlen])
+        if source_documents is not None:
+            window_documents.append(frozenset({text_positions[document]}))
         used_documents.add(document)
         if len(samples) >= n_samples:
             break
@@ -481,14 +497,21 @@ def load_calibration(tokenizer, source: str, n_samples: int,
         eos = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
         # Pack short samples by concatenating with EOS separator
         buf: list[int] = []
-        for document, t in enumerate(texts):
+        buf_documents: list[int] = []
+        for document in document_order:
+            t = texts[document]
             if document in used_documents:
                 continue
             ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids[0].tolist()
             buf.extend(ids)
             buf.append(eos)
+            if source_documents is not None:
+                buf_documents.extend([text_positions[document]] * (len(ids) + 1))
             while len(buf) >= seqlen and len(samples) < n_samples:
                 samples.append(torch.tensor(buf[:seqlen], dtype=torch.long))
+                if source_documents is not None:
+                    window_documents.append(frozenset(buf_documents[:seqlen]))
+                    buf_documents = buf_documents[seqlen:]
                 buf = buf[seqlen:]
             if len(samples) >= n_samples:
                 break
@@ -497,6 +520,8 @@ def load_calibration(tokenizer, source: str, n_samples: int,
         print(f"[probe] warning: only got {len(samples)}/{n_samples} samples "
               f"(even with packing). Consider wider corpus.",
               flush=True)
+    if source_documents is not None:
+        source_documents.extend(window_documents[:n_samples])
     return torch.stack(samples[:n_samples], dim=0)
 
 

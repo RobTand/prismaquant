@@ -102,6 +102,21 @@ def test_pipeline_held_out_skip_covers_aura_cost_draw(tmp_path, cost_samples):
     _assert_calibration_disjoint(selection, upstream)
 
 
+def local_draw(tmp_path):
+    import torch
+
+    class Tokenizer:
+        eos_token_id = 0
+
+        def __call__(self, text, **kwargs):
+            return SimpleNamespace(input_ids=torch.tensor([[int(token) for token in text.split()]]))
+
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text("".join(json.dumps({"text": " ".join(str(row * 100 + i)
+        for i in range(32))}) + "\n" for row in range(300)))
+    return corpus, Tokenizer()
+
+
 @pytest.mark.parametrize("draws, expected", [
     ([(32, 16, 42), (64, 16, 42), (16, 16, 42)], 64),
     ([(32, 16, 42), (8, 16, 42), (96, 16, 42)], 96),
@@ -110,41 +125,64 @@ def test_pipeline_held_out_skip_covers_aura_cost_draw(tmp_path, cost_samples):
 def test_skip_covers_each_active_draw(tmp_path, draws, expected):
     from prismaquant.pipeline import held_out_calibration_skip
 
-    corpus = tmp_path / "corpus.jsonl"
-    corpus.write_text("{}\n")
+    corpus, tokenizer = local_draw(tmp_path)
     assert held_out_calibration_skip(
         source=str(corpus), validation_source=str(corpus), validation_seqlen=16,
-        draws=draws, requested_skip=None, enforce=True,
+        draws=draws, requested_skip=None, enforce=True, tokenizer=tokenizer,
     ) == expected
 
 
-@pytest.mark.parametrize("change", ["length", "seed", "small_skip", "other_corpus"])
-def test_prefix_refuses_inputs_that_cannot_prove_disjointness(tmp_path, change):
+@pytest.mark.parametrize("change", ["length", "seed", "small_skip"])
+def test_measured_positions_extend_the_prefix(tmp_path, change):
+    from prismaquant.calibration_data import load_calibration
     from prismaquant.pipeline import held_out_calibration_skip
 
-    corpus = tmp_path / "corpus.jsonl"
-    corpus.write_text("{}\n")
+    corpus, tokenizer = local_draw(tmp_path)
+    draws = [(32, 8 if change == "length" else 16, 1 if change == "seed" else 42)]
+    skip = held_out_calibration_skip(
+        source=str(corpus), validation_source=str(corpus), validation_seqlen=16,
+        draws=draws, requested_skip=16 if change == "small_skip" else None,
+        enforce=True, tokenizer=tokenizer, validation_samples=1,
+    )
+    consumed, selected = [], []
+    count, length, seed = draws[0]
+    load_calibration(tokenizer, str(corpus), count, length, calib_seed=seed,
+                     source_documents=consumed)
+    load_calibration(tokenizer, str(corpus), skip + 1, 16, source_documents=selected)
+    assert min(selected[skip]) > max(document for row in consumed for document in row)
+
+
+def test_different_corpora_have_no_shared_position_domain(tmp_path):
+    from prismaquant.pipeline import held_out_calibration_skip
+
+    corpus, tokenizer = local_draw(tmp_path)
     other = tmp_path / "other.jsonl"
-    other.write_text('{"different": true}\n')
-    with pytest.raises(ValueError, match="held-out"):
+    other.write_text('{"text": "different"}\n')
+    with pytest.raises(ValueError, match="source-position domain"):
         held_out_calibration_skip(
-            source=str(corpus),
-            validation_source=str(other if change == "other_corpus" else corpus),
-            validation_seqlen=16,
-            draws=[(32, 8 if change == "length" else 16, 1 if change == "seed" else 42)],
-            requested_skip=16 if change == "small_skip" else None,
-            enforce=True,
+            source=str(corpus), validation_source=str(other), validation_seqlen=16,
+            draws=[(32, 16, 42)], requested_skip=None, enforce=True, tokenizer=tokenizer,
         )
 
 
 def test_corpus_alias_keeps_complete_skip(tmp_path):
     from prismaquant.pipeline import held_out_calibration_skip
 
-    corpus = tmp_path / "corpus.jsonl"
-    corpus.write_text("{}\n")
+    corpus, tokenizer = local_draw(tmp_path)
     alias = tmp_path / "alias.jsonl"
     alias.write_bytes(corpus.read_bytes())
     assert held_out_calibration_skip(
         source=str(corpus), validation_source=str(alias), validation_seqlen=16,
-        draws=[(64, 16, 42)], requested_skip=None, enforce=True,
+        draws=[(64, 16, 42)], requested_skip=None, enforce=True, tokenizer=tokenizer,
     ) == 64
+
+
+def test_insufficient_safe_windows_refuse(tmp_path):
+    from prismaquant.pipeline import held_out_calibration_skip
+
+    corpus, tokenizer = local_draw(tmp_path)
+    with pytest.raises(ValueError, match="cannot supply"):
+        held_out_calibration_skip(
+            source=str(corpus), validation_source=str(corpus), validation_seqlen=16,
+            draws=[(300, 16, 42)], requested_skip=None, enforce=True, tokenizer=tokenizer,
+        )
