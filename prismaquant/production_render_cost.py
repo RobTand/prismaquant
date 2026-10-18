@@ -259,6 +259,13 @@ def synthesize_production_render_cost_payload(
         fr.get_format(fmt)
 
     records = _cache_render_score_records(production_cache)
+    metadata = getattr(production_cache, "metadata", None)
+    source_binding = metadata.get("source_binding") if isinstance(metadata, Mapping) else None
+    if source_binding is not None:
+        from .streamed_model_identity import validate_source_model_binding
+
+        source_binding = validate_source_model_binding(
+            source_binding, where="production render score cache")
 
     output_costs: dict[str, dict[str, dict]] = {}
     render_entries = 0
@@ -269,6 +276,7 @@ def synthesize_production_render_cost_payload(
     for qname, per_name_raw in baseline_costs.items():
         per_name = dict(per_name_raw)
         synthesized: dict[str, dict] = {}
+        scored = False
         for fmt in output_formats:
             fmt_c = fr.canonical_format_name(fmt)
             if fmt_c == "BF16":
@@ -280,6 +288,9 @@ def synthesize_production_render_cost_payload(
                     "output_mse_measured": False,
                     "cost_source": "bf16_zero",
                 }
+                baseline_terminal = per_name.get(fmt_c)
+                if isinstance(baseline_terminal, Mapping) and "source_binding" in baseline_terminal:
+                    synthesized[fmt_c]["source_binding"] = baseline_terminal["source_binding"]
                 continue
 
             record = _lookup_record(records, qname, fmt_c)
@@ -302,6 +313,9 @@ def synthesize_production_render_cost_payload(
                         score_field=score_field,
                     )
                     if entry is not None:
+                        if source_binding is not None:
+                            entry["source_binding"] = source_binding
+                        scored = True
                         synthesized[fmt_c] = entry
                         render_entries += 1
                         continue
@@ -323,6 +337,8 @@ def synthesize_production_render_cost_payload(
                 )
             synthesized[fmt_c] = fallback
             fallback_entries += 1
+        if scored and source_binding is not None and "BF16" in synthesized:
+            synthesized["BF16"]["source_binding"] = source_binding
         output_costs[str(qname)] = synthesized
 
     if require_render_scores and missing:
