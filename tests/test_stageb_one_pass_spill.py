@@ -1114,7 +1114,7 @@ def _restamp_unit_probe(path, field, value):
     """Rewrite a unit checkpoint's joint rows with ``probe_identity[field] = value``.
 
     The row digests and the envelope's payload digest are recomputed, so the
-    unit's bytes stay intact: only the identity the rows record differs.
+    rewritten checkpoint stays internally digest-consistent.
     """
     import pickle
 
