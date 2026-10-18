@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, surface replay publication.
+Surface replay publishes through the existing create-only byte writer with an
+owned temporary file. A concurrent winner keeps its bytes; identical replay
+bytes remain an idempotent success and different bytes refuse. Parent aliases
+and relative output paths retain their existing meaning. The admitted
+`surface-create-only-green-v1` action passes 32 CPU cases and compiles both
+touched files, with source, terminal logs and CAS receipt verified against
+parent `78ce9041a47` plus the frozen overlays. These checks exercise local
+publication and replay contracts, without serving or performance claims.
+
 As of: 2026-10-17, architecture audit continuation, missing power observations.
 The row-head profile report leaves encode median power, envelope fraction and
 derived sustained-start fields null when the encode interval has no samples.
