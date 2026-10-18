@@ -3216,14 +3216,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         ))
         _log(f"loaded production cache: {args.production_cache}")
 
-    staged = _stage_aura_model(args.model)
     from prismaquant.streamed_model_identity import (
         build_source_model_binding, resolve_source_checkpoint_path,
         source_model_decode_contract,
     )
 
-    native_source = source_model_decode_contract(staged) is not None
-    source_root = resolve_source_checkpoint_path(args.model) if native_source else None
+    source_root = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source_root) is not None
+    staged = _stage_aura_model(str(source_root))
     # Profile detection installs architecture-owned vendored modelling where
     # required and is also the fail-closed authority for routed-expert
     # membership.  Resolve it before model construction and reuse that exact
@@ -3232,6 +3232,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dtype == "auto":
         args.dtype = _resolve_auto_dtype(staged, args.min_free_gib)
     dt = torch.float32 if args.dtype == "float32" else torch.bfloat16
+    if native_source and args.streaming and dt == torch.float32:
+        p.error("native FP8 streaming requires --dtype bfloat16; float32 source delivery "
+                "is unsupported, including when --dtype auto selects float32. "
+                "Use --dtype bfloat16 or the resident route.")
     local_only = Path(staged).exists()
     _log(f"loading {args.model} (staged={staged}) dtype={args.dtype}")
     tok = AutoTokenizer.from_pretrained(
