@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, lexical import inventory.
+The duplication inventory resolves import aliases within their lexical owner.
+A local import cannot hide or invent a digest site in an unrelated function.
+Definition headers keep their existing site labels. Dynamic rebinding,
+parameter shadowing and other documented data-flow limits remain outside
+this static check. `alias-lexical-green-v1` passes 32 CPU cases and compiles
+both files with verified source, logs and CAS receipt. Full before/after
+inventories on the same `f836fb21096` population are identical across all
+three scan components and digest sites; the tracked baseline is unchanged.
+
 As of: 2026-10-17, architecture audit continuation, power sample percentiles.
 `GpuPowerSampler` reports both p50 and p95 using nearest-rank empirical
 quantiles. Short windows cannot report p95 below p50; even-sized windows use

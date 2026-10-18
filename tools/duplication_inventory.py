@@ -38,7 +38,7 @@ import ast
 import hashlib
 import json
 import random
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,16 +91,24 @@ def _shingles(tokens: list[str]) -> frozenset[int]:
         for i in range(max(0, len(tokens) - SHINGLE + 1)))
 
 
-def _import_aliases(tree: ast.Module) -> dict[str, str]:
-    """Map every bound name to the dotted name it resolves to, module-wide.
+def _import_aliases(tree: ast.AST) -> dict[str, str]:
+    """Collect imports belonging to one lexical owner, not its children.
 
     ``import hashlib as h`` yields ``h -> hashlib``; ``from hashlib import
-    sha256`` yields ``sha256 -> hashlib.sha256``. Module-wide is the method
-    the round-2 count snapshots used. Function-local imports overwrite the
-    same dictionary, so shadowed aliases can produce missed or extra sites.
+    sha256`` yields ``sha256 -> hashlib.sha256``. Same-owner conditional or
+    repeated imports keep the syntactic last-import convention. This is not
+    data-flow resolution: assignments, parameter/comprehension-target
+    shadowing, star imports and global/nonlocal declarations are unresolved.
     """
     aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
+    pending = deque(ast.iter_child_nodes(tree))
+    while pending:
+        node = pending.popleft()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                             ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                             ast.GeneratorExp)):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
         if isinstance(node, ast.Import):
             for alias in node.names:
                 aliases[alias.asname or alias.name] = alias.name
@@ -120,42 +128,78 @@ def _resolved_callee(func: ast.expr, aliases: dict[str, str]) -> str | None:
 
 
 def _iter_scoped_calls(tree: ast.Module):
-    """Yield ``(call, scope)`` with the innermost enclosing scope's name.
+    """Yield ``(call, scope, aliases)`` from the existing scope traversal.
 
     The scope is the dotted chain of function/class names, or ``<module>``
     at module level. A site is identified by scope, not line number, so the
     baseline does not churn when unrelated lines shift; several calls of
     one family inside the same scope count as one ratcheted site.
+    Definition headers use the enclosing environment while retaining their
+    historical function/class site label. Class imports apply to the class
+    body, but methods and nested expression scopes do not close over them.
+    The alias collector's documented static limits still apply here.
     """
-    stack: list[tuple[ast.AST, list[str]]] = [(tree, [])]
-    while stack:
-        node, scope = stack.pop()
+    def walk(node, scope, aliases, enclosing):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope = scope + [node.name]
+            for field, value in ast.iter_fields(node):
+                if field == "body":
+                    continue
+                values = value if isinstance(value, list) else [value]
+                for child in values:
+                    if isinstance(child, ast.AST):
+                        yield from walk(child, scope, aliases, enclosing)
+            local = {**enclosing, **_import_aliases(node)}
+            closure = enclosing if isinstance(node, ast.ClassDef) else local
+            for child in node.body:
+                yield from walk(child, scope, local, closure)
+            return
+        if isinstance(node, ast.Lambda):
+            yield from walk(node.args, scope, aliases, enclosing)
+            yield from walk(node.body, scope, enclosing, enclosing)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            # Only the first iterator is evaluated in the enclosing class
+            # body; the rest runs in the comprehension's implicit scope.
+            for index, generator in enumerate(node.generators):
+                yield from walk(generator.iter, scope,
+                                aliases if index == 0 else enclosing, enclosing)
+                yield from walk(generator.target, scope, enclosing, enclosing)
+                for condition in generator.ifs:
+                    yield from walk(condition, scope, enclosing, enclosing)
+            values = (node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,)
+            for child in values:
+                yield from walk(child, scope, enclosing, enclosing)
+            return
+        if isinstance(node, ast.Call):
+            yield node, ".".join(scope) or "<module>", aliases
         for child in ast.iter_child_nodes(node):
-            child_scope = scope
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                child_scope = scope + [child.name]
-            if isinstance(child, ast.Call):
-                yield child, ".".join(child_scope) or "<module>"
-            stack.append((child, child_scope))
+            yield from walk(child, scope, aliases, enclosing)
+
+    aliases = _import_aliases(tree)
+    yield from walk(tree, [], aliases, aliases)
 
 
 def digest_sites(root: Path = ROOT) -> list[str]:
     """Every primitive digest site, as ``family:file::scope`` strings.
 
-    Families, with the round-2 count snapshots' method: a call whose
+    Families retain the round-2 count snapshots' rules: a call whose
     alias-resolved callee starts with ``hashlib.`` is a ``hashlib`` site; a
     ``json.dumps``/``json.JSONEncoder`` call with literal ``sort_keys=True``
     is a ``sorted-json`` site (``json.dump`` and dynamic ``sort_keys`` values
     are outside this static method). Both families are returned for every
     scanned file; the ratchet gates only the sites outside
     :data:`DIGEST_OWNERS`.
+
+    Import aliases belong to their lexical owners. This static inventory
+    does not resolve dynamic rebinding, parameter or comprehension-target
+    shadowing, star imports, or global/nonlocal declarations.
     """
     sites: set[str] = set()
     for path in _files(root):
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        aliases = _import_aliases(tree)
-        for call, scope in _iter_scoped_calls(tree):
+        for call, scope, aliases in _iter_scoped_calls(tree):
             callee = _resolved_callee(call.func, aliases)
             if callee is None:
                 continue
