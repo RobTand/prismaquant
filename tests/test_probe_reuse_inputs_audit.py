@@ -57,7 +57,12 @@ def _mutate_source(path):
     save_file(values, str(path), metadata={"format": "pt"})
 
 
-@pytest.mark.parametrize("change", ["unchanged", "calib_seed", "source_bytes", "dataset_bytes"])
+@pytest.mark.parametrize("change", [
+    "unchanged", "calib_seed", "source_bytes", "dataset_bytes",
+    "tokenizer_bytes", "chat_template_file", "chat_template_directory",
+    "persistent_tokenizer_bytes", "persistent_chat_template_file",
+    "persistent_chat_template_directory",
+])
 def test_real_probe_main_reuses_only_matching_inputs(tmp_path, monkeypatch, capsys, change):
     source = tmp_path / "source"
     source.mkdir()
@@ -66,7 +71,18 @@ def test_real_probe_main_reuses_only_matching_inputs(tmp_path, monkeypatch, caps
     _dataset(data, 109)
     monkeypatch.setenv("CACHE_HEADROOM_GB", "0")
     monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "1")
-    monkeypatch.setenv("PRISMAQUANT_PROBE_CTX_CACHE", "0")
+    monkeypatch.setenv("PRISMAQUANT_PROBE_CTX_CACHE", "1" if change.startswith("persistent_") else "0")
+    monkeypatch.setattr(owner, "_PROBE_CTX_CACHE", {})
+    input_change = change.removeprefix("persistent_")
+    template = None
+    if input_change.startswith("chat_template_"):
+        template = source / ("chat_template.jinja" if input_change == "chat_template_file"
+                             else "additional_chat_templates/default.jinja")
+        template.parent.mkdir(exist_ok=True)
+        template.write_text("{{ messages[0]['content'] }}")
+        records = [json.loads(line) for line in data.read_text().splitlines()]
+        data.write_text("".join(json.dumps({"messages": [
+            {"role": "user", "content": row["text"]}]}) + "\n" for row in records))
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *args, **kwargs: torch.device("cpu"))
 
@@ -106,6 +122,15 @@ def test_real_probe_main_reuses_only_matching_inputs(tmp_path, monkeypatch, caps
     elif change == "dataset_bytes":
         _dataset(data, 211)
         assert _sha(data) != original_data
+    elif input_change == "tokenizer_bytes":
+        path = source / "tokenizer.json"
+        value = json.loads(path.read_text())
+        vocab = value["model"]["vocab"]
+        for index in range(32):
+            vocab[f"w{index}"] = 34 - index
+        path.write_text(json.dumps(value))
+    elif template is not None:
+        template.write_text("{{ 'w1 ' * 128 }}")
     seed = 43 if change == "calib_seed" else 42
     resumed, resumed_draw = run(tmp_path / "shared", seed)
     resumed_log = capsys.readouterr().out
@@ -113,14 +138,22 @@ def test_real_probe_main_reuses_only_matching_inputs(tmp_path, monkeypatch, caps
         assert "reuse shard 0:" in resumed_log
         assert (shard.stat().st_mtime_ns, precompute.stat().st_mtime_ns) == original_times
     else:
+        assert resumed != initial, f"{change}: stale probe statistics were reused"
+        assert "reuse shard 0:" not in resumed_log
+        assert "reused precompute cache" not in resumed_log
         reason_field = {
             "calib_seed": "calib_seed",
             "source_bytes": "source_checkpoint_sha256",
             "dataset_bytes": "dataset_sha256",
-        }[change]
+            "tokenizer_bytes": "tokenizer_sha256",
+            "chat_template_file": "tokenizer_sha256",
+            "chat_template_directory": "tokenizer_sha256",
+        }[input_change]
         assert f"probe input {reason_field} differs" in resumed_log
+    owner._PROBE_CTX_CACHE.clear()
     fresh, fresh_draw = run(tmp_path / "fresh", seed)
-    if change in ("calib_seed", "dataset_bytes"):
+    if input_change in ("calib_seed", "dataset_bytes", "tokenizer_bytes",
+                        "chat_template_file", "chat_template_directory"):
         assert fresh_draw != initial_draw, "fixture did not change the actual token draw"
     else:
         assert fresh_draw == initial_draw
@@ -132,18 +165,21 @@ def test_real_probe_main_reuses_only_matching_inputs(tmp_path, monkeypatch, caps
 
 @pytest.mark.parametrize("change", [
     "unchanged", "calib_seed", "source_checkpoint_sha256", "dataset_sha256",
-    "missing_identity", "unidentified_dataset",
+    "tokenizer_sha256", "missing_identity", "missing_tokenizer", "unidentified_dataset",
 ])
 def test_shard_and_linear_pool_require_matching_input_identity(tmp_path, change):
     inputs = {
         "calib_seed": 42,
         "source_checkpoint_sha256": "a" * 64,
         "dataset_sha256": "b" * 64,
+        "tokenizer_sha256": "d" * 64,
     }
     anchor = {"probe_reuse_inputs": dict(inputs)}
     recorded = dict(inputs)
     if change in inputs:
         recorded[change] = 43 if change == "calib_seed" else "c" * 64
+    elif change == "missing_tokenizer":
+        del recorded["tokenizer_sha256"]
     elif change == "unidentified_dataset":
         recorded["dataset_sha256"] = None
         anchor["probe_reuse_inputs"]["dataset_sha256"] = None

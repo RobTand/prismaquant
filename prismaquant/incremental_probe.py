@@ -1636,9 +1636,8 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
 
 # In-process StreamingContext + tokenizer cache. Populated when
 # `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by model path, device,
-# dtype and source checkpoint content. Lets an in-process driver reuse a single loaded model
-# across N calibration chunks instead of paying the offload + tokenizer
-# rebuild cost N times.
+# dtype, source checkpoint content and tokenizer content. A driver can reuse
+# one loaded model across calibration chunks.
 _PROBE_CTX_CACHE: dict = {}
 
 
@@ -4611,6 +4610,7 @@ def main():
 
     from .digests import file_sha256hex
     from .streamed_model_identity import build_source_checkpoint_identity
+    from .tokenizer_identity import build_tokenizer_identity
 
     source_identity = build_source_checkpoint_identity(
         args.model,
@@ -4620,6 +4620,7 @@ def main():
     args.probe_reuse_inputs = {
         "calib_seed": int(args.calib_seed),
         "source_checkpoint_sha256": source_identity["content_sha256"],
+        "tokenizer_sha256": build_tokenizer_identity(args.model)["content_sha256"],
         "dataset_sha256": (
             file_sha256hex(args.dataset) if Path(args.dataset).is_file() else None
         ),
@@ -4628,7 +4629,8 @@ def main():
         print("[incremental] refuse persistent probe reuse: dataset byte "
               "identity is unavailable; use a local calibration file", flush=True)
     context_key = (
-        args.model, str(device), args.dtype, source_identity["content_sha256"]
+        args.model, str(device), args.dtype, source_identity["content_sha256"],
+        args.probe_reuse_inputs["tokenizer_sha256"],
     )
 
     # Skip setup + calibration if every shard is reusable. Loading the

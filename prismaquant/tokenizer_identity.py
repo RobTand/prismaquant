@@ -11,6 +11,8 @@ TOKENIZER_IDENTITY_SCHEMA = "prismaquant.tokenizer_identity/1"
 
 _TOKENIZER_FILENAMES = (
     "added_tokens.json",
+    "chat_template.json",
+    "chat_template.jinja",
     "merges.txt",
     "sentencepiece.bpe.model",
     "special_tokens_map.json",
@@ -23,13 +25,15 @@ _TOKENIZER_FILENAMES = (
 
 
 def build_tokenizer_identity(model_dir: str | os.PathLike) -> dict[str, object]:
-    """Bind the exact local files that define tokenization for this lane."""
+    """Bind local tokenizer files and separate chat-template bytes."""
     root = Path(model_dir).resolve(strict=True)
     files: dict[str, dict[str, object]] = {}
-    for name in _TOKENIZER_FILENAMES:
-        path = root / name
+    paths = [root / name for name in _TOKENIZER_FILENAMES]
+    for directory in ("chat_templates", "additional_chat_templates"):
+        paths.extend(sorted((root / directory).rglob("*")))
+    for path in paths:
         if path.is_file():
-            files[name] = {
+            files[path.relative_to(root).as_posix()] = {
                 "bytes": int(path.stat().st_size),
                 "sha256": file_sha256hex(path),
             }
