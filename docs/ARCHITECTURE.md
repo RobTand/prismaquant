@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, band handoff input reads.
+The live-pair producer and consumer authenticate their checkpoint slice through
+`load_adjoint_slice` before staged work. The consumer's undeclared-input control
+uses the original checkpoint entry's bound digest and lets the strict reader
+refuse before any canonical payload read. It no longer opens a generation file
+to compute a digest outside that reader. `band-authenticated-negative-green-v1`
+passes 28 CPU cases and compiles both touched files, with source, terminal logs
+and CAS receipt verified against parent `456b1409403` plus the overlays.
+Real slice binding and reader refusal are exercised; handoff planes, staging
+lookup and final read summaries use test adapters. No live fleet, served-artifact
+or performance qualification follows.
+
 As of: 2026-10-17, architecture audit continuation, native source callers.
 Resident RTN, production-cache, expert-cost, Fisher and validation callers use
 the shared resident source owner for actual mapped block-scaled FP8 text

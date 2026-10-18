@@ -206,7 +206,13 @@ def _load(root: Path):
 
 
 def _slice(record):
-    return json.loads(Path(record["adjoint"]["slice_path"]).read_text())
+    from prismaquant.joint_adjoint_slices import load_adjoint_slice
+
+    adjoint = record["adjoint"]
+    return load_adjoint_slice(
+        adjoint["slice_path"], adjoint["slice_sha256"],
+        layer=record["layer"], checkpoint_boundary=adjoint["checkpoint_boundary"],
+    )
 
 
 class _Owner:
@@ -403,12 +409,12 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
     checks["head_read"] = _sha(head) == pair["head"]["sha256"]
     progress(HANDOFF_LOAD_PHASE, 1, unit="entries")
 
-    # Negative control: an undeclared file of the same handoff generation
-    # is refused, so a pass below cannot be a silent pool read.
-    undeclared = Path(handoff).parent / "generation.json"
+    # Band-serial replaces the original checkpoint plane with the handoff.
+    # Its bound entry must be refused without a canonical payload read.
+    undeclared = checkpoint["activation_entries"][0]
     try:
-        _read_calibration_payload(undeclared,
-                                  expected_sha256=_sha(undeclared.read_bytes()))
+        _read_calibration_payload(Path(undeclared["path"]),
+                                  expected_sha256=undeclared["sha256"])
     except TierPolicyRefused as refusal:
         out["undeclared_refusal"] = str(refusal)
         checks["undeclared_refused"] = "readset-not-staged" in str(refusal)
