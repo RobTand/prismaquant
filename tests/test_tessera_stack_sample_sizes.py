@@ -63,9 +63,7 @@ def _probe_rows(h):
     }}
 
 
-#: Deliberately anti-correlated with the counts below, so a draw that followed
-#: the wrong vector cannot accidentally agree with one that followed the right
-#: one.
+#: These opposing vectors produce different draws for the fixture's fixed seed.
 H = [1.0, 9.0, 2.0, 8.0, 3.0, 7.0, 4.0, 6.0]
 COUNTS_PER_EXPERT = [900, 100, 800, 200, 700, 300, 600, 400]
 
@@ -150,8 +148,7 @@ def test_a_counts_draw_follows_the_counts_and_declares_them():
     assert sizes["sha256"] == record["draw"]["size_sha256"]
     assert sizes["values"] == {str(e): float(COUNTS_PER_EXPERT[e])
                                for e in range(EXPERTS)}
-    # The draw followed the counts, not the Fisher vector: with H and
-    # COUNTS_PER_EXPERT anti-correlated, the two draws cannot coincide.
+    # This fixture and seed distinguish a counts draw from a Fisher draw.
     probe_draw = _sample(dispatch)[f"s:{MODULE}"]["stack_samples"][PACKED]
     assert record["sampled_experts"] != probe_draw["sampled_experts"]
     # The Fisher currency is untouched: the stack row still multiplies by the

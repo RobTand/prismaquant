@@ -14,9 +14,8 @@ move and the shape must not:
   (`lane_eligibility`), whose three widenings are additive;
 * every Tessera cell carries ``requires_plugin: "tessera"``, and a cell that
   claims a route without one is refused rather than admitted;
-* the answer is False today BY THE PIN, and True under a released-pin fixture
-  on the REAL packaged contract -- which is what makes "False" a fact about the
-  release boundary rather than about an absent table;
+* the exact commit and packaged-contract digest must match the installed
+  runtime; an admitted rung also needs its published serving context;
 * the lane spec's ``served_activation_quantization.executes`` is DERIVED from
   that table, not typed, so principle 14 holds in the field that asserts what
   the runtime executes.
@@ -311,13 +310,7 @@ def test_a_plugin_requirement_on_a_fallback_cell_is_refused(tmp_path):
 # ---------------------------------------------------------------------------
 def test_admission_is_true_under_a_released_pin_on_the_real_packaged_contract(
         released_pin):
-    """The other half of "False by the pin".
-
-    With ONLY the release boundary satisfied -- the real packaged contract,
-    the real parser, the real cell logic -- both receipted rungs are admitted
-    and a rate the contract does not publish is not. That is what proves the
-    refusal above is the pin's and not an artefact of an unreadable table.
-    """
+    """Matching pin and explicit contexts admit published cells and rates."""
     context = _dense_context()
     e2m1_routed = _routed_context("TESSERA_E2M1_K2")
     e4m3_routed = _routed_context("TESSERA_E4M3_K1")

@@ -474,7 +474,7 @@ def test_evaluation_formats_refuse_malformed_or_unknown_targets(field):
 
 
 @pytest.mark.parametrize("probes", [5, 8, 16])
-def test_source_generation_executes_the_real_128_by_2048_fisher_basis(tmp_path, probes):
+def test_source_generation_normalizes_the_loaded_128_by_2048_fisher_basis(tmp_path, probes):
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant import source_generation as generation
     path, digest, expected_ids, _provenance = _calibration_artifact(

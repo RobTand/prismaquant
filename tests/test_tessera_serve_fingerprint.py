@@ -25,9 +25,8 @@ exists (``native_extensions``), and the chain is:
    another runtime with nothing here to refuse it -- and it was already wrong
    by one character (``"tessera_nvfp4"`` where the load path's constant is
    ``"tessera_nvfp4_"``).
-2. pin -> tool: the tool is stdlib-only and cannot read either file from
-   inside a serving container, so it carries the rows and any disagreement
-   fails here.
+2. pin -> tool: the stdlib-only tool reads the pin JSON transported beside
+   its source in the serving container. These tests compare those rows.
 3. the tool's PREDICATE -> the contract's ``match`` rule: the old pattern was
    a bare substring search over the whole mapped path, and the contract says
    the runtime is matched by ``basename_fnmatch`` against
@@ -60,11 +59,7 @@ from prismaquant.tessera_serving_runtime_pin import (
 
 
 def _serve_fingerprint():
-    """Load the tool by path, the way the container bootstrap does.
-
-    It is stdlib-only by construction and must not import torch or vllm, so it
-    is not a package member and cannot be imported by name.
-    """
+    """Load the stdlib-only tool by path, as the container bootstrap does."""
     path = (Path(__file__).resolve().parents[1]
             / "tools" / "serve_fingerprint.py")
     spec = importlib.util.spec_from_file_location("serve_fingerprint", path)

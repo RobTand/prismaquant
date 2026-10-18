@@ -23,17 +23,10 @@ every admission leg reads it: the menu (``tessera_attesting_cells``), the
 development contract (``TesseraContract.native_cells``) and the per-unit
 export gate (``resolve_unit_route``).
 
-Consequence on the pinned table, stated because it is what a reviewer needs:
-since the v31 withdrawals NO pinned cell launches through an extension -- the
-streamed E4M3 cells that executed the ``window_gemv`` lane are withdrawn, and
-the dense E2M1 pair's span-2 provider retired with the CUDA decoder -- so the
-pinned table's every cell reads the gate as admitted and the lane-gated shapes
-these tests decide are synthesised (see ``_claiming_lane``/``_gated_carrier``
-below).  Nothing is refused today.  The BF16 rung the lane's ``routes`` also
-names would NOT pass -- rung 1792 plans rate 7 -- and no BF16 cell exists to
-claim that launch at all; the test below pins that a cell which did would be
-refused by name at all three legs, on the E2M1 dense pair, whose rung 896
-plans rate 7 for the same reason.
+The pinned table carries fused routed extension lanes. These tests check
+their exact cell roster and admitted plans. Synthetic lane-only carriers
+also exercise refusal without a compact fallback, including a plan whose
+rate is outside the claimed lane's requirements.
 """
 import copy
 import dataclasses
@@ -222,9 +215,7 @@ def test_a_table_is_not_readable_without_the_extension_table(payload):
     block, formats = payload["lane_eligibility"], payload["formats"]
     with pytest.raises(TypeError):
         lane._parse_table(block, formats, "", "", "x")
-    # The refusal is about launches the reader cannot DECIDE, and no pinned
-    # cell names one since the v31 withdrawals -- so the gated shape is
-    # synthesised on a copy before the table is withheld.
+    # The synthetic lane-only carrier isolates a launch with no fallback.
     gated = _gated_carrier(payload)
     with pytest.raises(lane.LaneEligibilityError, match="native_extensions"):
         lane._parse_table(gated["lane_eligibility"], gated["formats"],
@@ -245,9 +236,7 @@ def test_a_table_whose_cells_launch_only_through_torch_needs_no_extension_table(
     block, formats = moved["lane_eligibility"], moved["formats"]
     table = lane._parse_table(block, formats, "", "", "x", native_extensions=None)
     assert table.present and table.lanes == ()
-    # ... and the refusal, when it fires, says WHICH launch it cannot decide.
-    # The pinned table no longer carries an extension-qualified launch, so
-    # the claiming copy supplies one.
+    # The claiming copy isolates the exact extension launch in the refusal.
     gated = _claiming_lane(payload)
     with pytest.raises(lane.LaneEligibilityError, match="tessera_window_gemv::gemv"):
         lane._parse_table(gated["lane_eligibility"], gated["formats"],
