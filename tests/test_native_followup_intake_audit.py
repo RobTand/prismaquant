@@ -3,7 +3,11 @@
 CUDA admission, tokenizer and calibration sampling use the shared CPU doubles.
 These checks make no served quality, full-model or performance claim.
 """
+import json
+import os
 import pickle
+import subprocess
+from pathlib import Path
 import re
 import sys
 
@@ -170,6 +174,8 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         '--streaming', '--checkpoint-dir', str(tmp_path / 'expert-journal'),
         '--merge-base', str(dense_path), '--backfill-base', str(base_path), '--cost-mode', 'aura']) == 0
     payload = pickle.loads(output.read_bytes())
+    assert payload['costs'][names[0]] == aura_payload['costs'][names[0]]
+    assert payload['costs'][names[1]] == rendered['costs'][names[1]]
     assert payload['costs'][backfill_name] == base['costs'][backfill_name]
     assert len(payload['costs']) > len(probe_names), 'include real empirical expert rows'
     result = _pipeline_reusable(output, source)
@@ -187,8 +193,9 @@ def test_real_producer_rows_pass_pipeline_and_offline_stock_intake(tmp_path, mon
         intake.require_native_cost_source_binding(payload, binding, where='offline stock expert input')
 
 
-def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch):
-    """Double Hub metadata intake. Keep source delivery and measurement real."""
+@pytest.mark.parametrize("layers_per_shard", ["1", "auto"])
+def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch, layers_per_shard):
+    """Use real metadata, source delivery and measurement after Hub resolution."""
     import huggingface_hub
     from prismaquant import incremental_measure_quant_cost as baseline
 
@@ -214,20 +221,11 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch):
         return str(source)
 
     monkeypatch.setattr(huggingface_hub, 'snapshot_download', snapshot)
-    actual_layers = baseline.load_num_hidden_layers
-    monkeypatch.setattr(baseline, 'load_num_hidden_layers',
-                        lambda model: actual_layers(str(source) if model == hub_id else model))
-    actual_schedule = baseline.build_shard_schedule
-
-    def schedule(**kwargs):
-        assert kwargs['model_path'] == hub_id
-        return actual_schedule(**{**kwargs, 'model_path': str(source)})
-
-    monkeypatch.setattr(baseline, 'build_shard_schedule', schedule)
     output = tmp_path / 'hub-baseline.pkl'
     monkeypatch.setattr(sys, 'argv', ['incremental_measure_quant_cost', '--model', hub_id,
         '--probe', str(probe), '--activation-cache-dir', str(activations),
         '--work-dir', str(tmp_path / 'hub-work'), '--output', str(output),
+        '--layers-per-shard', layers_per_shard,
         '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'FP8_E4M3',
         '--cost-mode', 'local', '--threads', '1', '--no-include-mtp', '--no-include-visual',
         '--no-include-lm-head', '--no-watchdog'])
@@ -239,3 +237,114 @@ def test_native_baseline_loads_the_snapshot_it_bound(tmp_path, monkeypatch):
     for rows in payload['costs'].values():
         for row in rows.values():
             assert row['source_binding'] == binding
+
+
+@pytest.mark.parametrize("mode", ["local", "aura", "production-render-score"])
+@pytest.mark.parametrize("state", ["unbound", "current", "foreign", "bf16-unbound"])
+def test_baseline_reuse_checks_source_in_every_cost_mode(tmp_path, mode, state):
+    source, _ = producer_source(tmp_path, native=state != "bf16-unbound")
+    binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
+    if state == "foreign":
+        (source / "foreign.py").write_text("REVISION = 1\n")
+        binding = identity.build_source_model_binding(source, dtype=torch.bfloat16)
+        (source / "foreign.py").unlink()
+    payload = _payload(binding)
+    payload['provenance'] = {'cost_mode': 'local'}
+    if state in {"unbound", "bf16-unbound"}:
+        for row in payload['costs']['unit'].values():
+            row.pop('source_binding')
+    baseline = tmp_path / 'cost_baseline.pkl'
+    baseline.write_bytes(pickle.dumps(payload))
+    driver = (Path(__file__).resolve().parents[1] / 'prismaquant/run-pipeline.sh').read_text()
+    functions = 'cost_table_cost_mode() {' + driver.split('cost_table_cost_mode() {', 1)[1].split(
+        '\nrequire_stage_settings() {', 1)[0]
+    decision = 'BASE_COST_REUSABLE=1' + driver.split('BASE_COST_REUSABLE=1', 1)[1].split(
+        '\nif [[ "$BASE_COST_REUSABLE" == "0" ]]', 1)[0]
+    environment = dict(os.environ, COST_MODE=mode, MODEL_PATH=str(source),
+        BASE_COST_PATH=str(baseline), COST_PATH=str(baseline if mode == 'local' else tmp_path / 'cost.pkl'))
+    environment['PATH'] = str(Path(sys.executable).parent) + os.pathsep + environment.get('PATH', '')
+    result = subprocess.run(['bash', '-c', functions + '\n' + decision +
+        '\nprintf "BASE_REUSABLE=%s\\n" "$BASE_COST_REUSABLE"'],
+        env=environment, text=True, capture_output=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = int(state in {'current', 'bf16-unbound'})
+    assert f'BASE_REUSABLE={expected}' in result.stdout, result.stdout + result.stderr
+
+
+def test_native_baseline_sidecars_carry_only_checkpoint_evidence(tmp_path, monkeypatch):
+    """Sidecar measurements are doubled. Schedule and evidence publication are real."""
+    from safetensors.torch import load_file, save_file
+    from prismaquant import incremental_measure_quant_cost as baseline
+
+    source, expected = producer_source(tmp_path)
+    producer_cli_inputs(monkeypatch)
+    names = [next(name.removesuffix('.weight') for name in expected
+                  if name.endswith('.self_attn.o_proj.weight')),
+             'mtp.layers.0.proj', 'model.visual.blocks.0.proj']
+    raw = load_file(source / 'model.safetensors')
+    raw.update({name + '.weight': torch.ones(4, 4, dtype=torch.bfloat16) for name in names[1:]})
+    save_file(raw, source / 'model.safetensors')
+    (source / 'model.safetensors.index.json').write_text(json.dumps({
+        'weight_map': {name: 'model.safetensors' for name in raw}}))
+    config = json.loads((source / 'config.json').read_text())
+    config.update(num_nextn_predict_layers=1, vision_config={'depth': 1})
+    (source / 'config.json').write_text(json.dumps(config))
+    probe = tmp_path / 'sidecar-probe.pkl'
+    probe.write_bytes(pickle.dumps({'stats': {name: {'h_trace': 1., 'n_params': 16}
+        for name in names}, 'meta': {}}))
+    activations = tmp_path / 'sidecar-act'
+    activations.mkdir()
+    for name in names:
+        width = raw[name + '.weight'].shape[-1]
+        torch.save({'inputs': torch.ones(4, width), 'name': name},
+                   activations / (baseline.ActivationIndex._FNAME_SUB.sub('__', name) + '.pt'))
+
+    def sidecar(*_args, **kwargs):
+        selected = {name: {'BF16': {'weight_mse': 0.}}
+                    for name in names if re.search(kwargs['linear_include'], name)}
+        Path(kwargs['output_path']).write_bytes(pickle.dumps({'costs': selected,
+            'formats': ['BF16'], 'meta': {}, 'provenance': {'cost_mode': 'local'}}))
+        return None
+
+    monkeypatch.setattr(baseline, '_run_mtp_cost_shard', sidecar)
+    monkeypatch.setattr(baseline, '_run_visual_cost_shard', sidecar)
+    output = tmp_path / 'sidecar-cost.pkl'
+    monkeypatch.setattr(sys, 'argv', ['incremental_measure_quant_cost', '--model', str(source),
+        '--probe', str(probe), '--activation-cache-dir', str(activations),
+        '--work-dir', str(tmp_path / 'sidecar-work'), '--output', str(output),
+        '--device', 'cpu', '--dtype', 'bf16', '--mode', 'unbatched', '--formats', 'BF16',
+        '--cost-mode', 'local', '--threads', '1', '--no-include-lm-head', '--no-watchdog'])
+    baseline.main()
+    payload = pickle.loads(output.read_bytes())
+    assert set(payload['costs']) == set(names)
+    full = identity.build_source_model_binding(source, dtype=torch.bfloat16)
+    checkpoint_only = {key: value for key, value in full.items() if key != 'source_decode'}
+    checkpoint_only['schema'] = identity.SOURCE_MODEL_BINDING_SCHEMA
+    assert payload['costs'][names[0]]['BF16']['source_binding'] == full
+    for name in names[1:]:
+        assert payload['costs'][name]['BF16']['source_binding'] == checkpoint_only
+    intake.validate_native_cost_source_for_model(payload, model=str(source), where='current sidecars')
+    for name in names[1:]:
+        row = payload['costs'][name]['BF16']
+        row['source_binding'] = {**checkpoint_only, 'checkpoint': {**checkpoint_only['checkpoint'],
+            'content_sha256': '0' * 64}}
+        with pytest.raises(ValueError, match='checkpoint content identity does not match'):
+            intake.validate_native_cost_source_for_model(payload, model=str(source), where='invalid sidecars')
+        row['source_binding'] = checkpoint_only
+    (source / 'foreign.py').write_text('REVISION = 2\n')
+    foreign = identity.build_source_model_binding(source, dtype=torch.bfloat16)
+    (source / 'foreign.py').unlink()
+    foreign = {key: value for key, value in foreign.items() if key != 'source_decode'}
+    foreign['schema'] = identity.SOURCE_MODEL_BINDING_SCHEMA
+    for name in names[1:]:
+        row = payload['costs'][name]['BF16']
+        row['source_binding'] = foreign
+        with pytest.raises(ValueError, match='differs from the current checkpoint/decoder'):
+            intake.validate_native_cost_source_for_model(payload, model=str(source), where='foreign sidecars')
+        row['source_binding'] = full
+        with pytest.raises(ValueError, match='sidecar binding must exclude the text decoder claim'):
+            intake.validate_native_cost_source_for_model(payload, model=str(source), where='false decode claim')
+        row['source_binding'] = checkpoint_only
+    payload['costs'][names[0]]['BF16']['source_binding'] = checkpoint_only
+    with pytest.raises(ValueError, match='legacy decoder identity cannot qualify native costs'):
+        intake.validate_native_cost_source_for_model(payload, model=str(source), where='text control')

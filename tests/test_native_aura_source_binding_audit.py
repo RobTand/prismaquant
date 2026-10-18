@@ -195,7 +195,9 @@ def test_native_streamed_fp32_refuses_before_load(tmp_path, monkeypatch, capsys,
         aura.main(['--model', str(source), '--output', str(tmp_path / 'fp32.pkl'),
             '--device', 'cpu', '--dtype', dtype, '--streaming', '--dataset', 'synthetic-token-draw'])
     assert refused.value.code == 2
-    assert 'native FP8 streaming requires --dtype bfloat16' in capsys.readouterr().err
+    message = capsys.readouterr().err
+    assert 'native FP8 streaming requires --dtype bfloat16' in message
+    assert 'AURA_COST_DTYPE' in message
     assert not (tmp_path / 'fp32.pkl').exists()
 
 
