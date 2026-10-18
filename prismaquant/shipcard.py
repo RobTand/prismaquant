@@ -1619,6 +1619,8 @@ def open_shipcard(model_dir, *, build=None, lane=None, shipcard_path=None, overw
             if expected is None:
                 _write_weight_content_manifest(root, observed)
         card = _assemble_shipcard(root, build_payload, resolved_lane, attestation)
+        if path.parent.resolve() != root.resolve():
+            card["external_artifact"] = True
         _publish_shipcard(path, card)
         return card
 
@@ -1710,16 +1712,32 @@ def load_shipcard(path: str | os.PathLike) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _slot_artifact_dir(path: Path, card: Mapping[str, Any]) -> Path:
+    parent = path.resolve().parent
+    if card.get("external_artifact") is True or (
+        card.get("model_dir") and not (parent / "config.json").is_file()
+        and not (parent / WEIGHT_CONTENT_MANIFEST_FILENAME).is_file()
+    ):
+        return Path(card["model_dir"]).resolve()
+    return parent
+
+
 def fill_slot(
     path: str | os.PathLike,
     slot: str,
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Append a verdict block to `slot` in the shipcard at `path` (in place)."""
+    """Append a verdict under the card and bound artifact directory locks."""
+    target = Path(path)
+    root = _slot_artifact_dir(target, load_shipcard(target))
+
     def fill(card):
-        card_model_dir = Path(path).resolve().parent
+        if _slot_artifact_dir(target, card) != root:
+            raise ValueError("shipcard artifact location changed during slot update")
         if card.get("weight_stat_attestation") is not None:
-            assert_weight_stat_attestation(card, card_model_dir)
+            assert_weight_stat_attestation(card, root)
+        if root != target.resolve().parent and card.get("model_sha") not in accepted_model_shas(root):
+            raise ValueError("external artifact model_sha differs from the shipcard")
         if slot not in card["slots"]:
             raise KeyError(
                 f"shipcard {path} has no slot {slot!r}; known: "
@@ -1727,7 +1745,7 @@ def fill_slot(
         card["slots"][slot] = dict(record)
         card["updated"] = _now()
 
-    return update_shipcard(path, fill)
+    return update_shipcard(target, fill, artifact_dir=root)
 
 
 def ensure_optional_slot(
