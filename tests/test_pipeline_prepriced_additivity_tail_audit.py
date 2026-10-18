@@ -8,15 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
-import shlex
 import shutil
-import subprocess
-import sys
 
 import pytest
 
 from test_run_pipeline_prepriced_override import SCRIPT, _input, _sections
+from test_run_pipeline_additivity_identity_audit import measurement_environment, run_shell
 
 
 def _run_tail(tmp_path, *, external, gate="measure"):
@@ -24,13 +21,27 @@ def _run_tail(tmp_path, *, external, gate="measure"):
     before = supplied.read_bytes()
     work = tmp_path / "work"
     artifacts = work / "artifacts"
-    artifacts.mkdir(parents=True)
-    (work / "logs").mkdir()
+    work.mkdir()
+    values, settings = measurement_environment(work)
+    cache = artifacts / "production_render_score_cache.pkl"
+    shutil.copyfile(values["PRODUCTION_RENDER_COST_CACHE_PATH"], cache)
+    values["PRODUCTION_RENDER_COST_CACHE_PATH"] = cache
     assignment = {"model.layers.0.self_attn.o_proj": "BF16"}
     (artifacts / "layer_config.json").write_text(json.dumps(assignment))
-    (artifacts / "validated_frontier_kl.json").write_text(json.dumps({
-        "results": [{"label": "selected", "kl_mean": 0.0, "kl_stderr": 0.0}],
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.pipeline import assignment_kl_measurement, stage_settings_document
+
+    record = artifacts / "validated_frontier_kl.json"
+    record.write_text(json.dumps({
+        "calibration": {"calib_hash": values["AUDIT_DRAW_HASH"], "kl_scope": "full_sequence"},
+        "results": [{"label": "selected", "kl_mean": 0.0, "kl_stderr": 0.0,
+                     "assignment_sha256": assignment_serialization_sha256(assignment)}],
     }))
+    assert assignment_kl_measurement(
+        record, artifacts / "layer_config.json", stage_settings_document(settings),
+        draw_digest=values["AUDIT_DRAW_HASH"],
+        cache_path=values["PRODUCTION_RENDER_COST_CACHE_PATH"], record=True,
+    ) == (0.0, 0.0)
     (artifacts / "validated_frontier_selection.json").write_text(json.dumps({
         "selected": {"label": "selected"},
     }))
@@ -41,11 +52,8 @@ def _run_tail(tmp_path, *, external, gate="measure"):
     text = SCRIPT.read_text()
     start = text.index("# [3c] AURA additivity report")
     tail = text[start:text.index("# [3d] Discovery-walker export gate", start)]
-    python = shlex.quote(sys.executable)
-    preamble = f"""set -euo pipefail
-python3() {{ command {python} "$@"; }}
-"""
     env = os.environ.copy()
+    env.update({key: str(value) for key, value in values.items()})
     env.update({
         "WORK_DIR": str(work), "MODEL_PATH": str(model), "COST_MODE": "aura",
         "COST_PATH_OVERRIDE": str(supplied) if external else "",
@@ -53,10 +61,7 @@ python3() {{ command {python} "$@"; }}
         "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1", "CUDA_VISIBLE_DEVICES": "",
     })
-    result = subprocess.run(
-        ["bash", "-c", preamble + paths + tail], cwd=SCRIPT.parents[1],
-        env=env, text=True, capture_output=True, timeout=180, check=False,
-    )
+    result = run_shell(tmp_path, paths + tail, env)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert json.loads((artifacts / "layer_config.json").read_text()) == assignment
     return supplied, before, owned, artifacts
