@@ -564,9 +564,20 @@ def check_boundary_behavior(
 
 
 def scored_echo_logprobs(value: object, *, where: str) -> list[float]:
-    scored = [item for item in value if item is not None]
+    if not isinstance(value, list):
+        raise ValueError(f"{where}: token_logprobs must be a list")
+    scored: list[float] = []
+    for index, item in enumerate(value):
+        if index == 0 and item is None:
+            continue
+        if type(item) not in (int, float):
+            raise ValueError(f"{where}: invalid token_logprobs at position {index}")
+        logprob = float(item)
+        if not math.isfinite(logprob) or logprob > 0:
+            raise ValueError(f"{where}: invalid token_logprobs at position {index}")
+        scored.append(logprob)
     if not scored:
-        raise ValueError(f"{where}: no token_logprobs returned")
+        raise ValueError(f"{where}: no scored token_logprobs returned")
     return scored
 
 
@@ -644,16 +655,16 @@ def check_perplexity(base_url: str, model_name: str,
                     "add_special_tokens": False if bos_token else add_special_tokens,
                 },
             )
+            valid = scored_echo_logprobs(
+                r["choices"][0]["logprobs"].get("token_logprobs"),
+                where=f"prompt {i}",
+            )
         except Exception as e:
             return CheckResult(
                 name="perplexity",
                 passed=False,
                 detail=f"prompt {i}: {type(e).__name__}: {e}",
             )
-        valid = scored_echo_logprobs(
-            r["choices"][0]["logprobs"].get("token_logprobs"),
-            where=f"prompt {i}",
-        )
         nll = -sum(valid)
         total_nll += nll
         total_tokens += len(valid)
