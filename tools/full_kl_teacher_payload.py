@@ -21,6 +21,11 @@ from typing import Any
 
 import torch
 
+from prismaquant.tokenizer_identity import (
+    TOKENIZER_IDENTITY_SCHEMA,
+    build_tokenizer_identity,
+)
+
 
 TEACHER_PAYLOAD_SCHEMA = "prismaquant.full_kl_teacher_payload/1"
 TEACHER_META_SCHEMA = "prismaquant.full_kl_teacher_meta/1"
@@ -29,7 +34,6 @@ TEACHER_PAYLOAD_V2_SCHEMA = "prismaquant.full_kl_teacher_payload/2"
 TEACHER_META_V2_SCHEMA = "prismaquant.full_kl_teacher_meta/2"
 TEACHER_EVIDENCE_V2_SCHEMA = "prismaquant.full_kl_teacher_evidence/2"
 CALIBRATION_SCHEMA = "prismaquant.wikitext_gold_calibration/1"
-TOKENIZER_IDENTITY_SCHEMA = "prismaquant.tokenizer_identity/1"
 
 WIKITEXT_DATASET = "wikitext"
 WIKITEXT_CONFIG = "wikitext-2-raw-v1"
@@ -86,17 +90,6 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _TENSOR_KEYS = ("calib_ids", "topk_ids", "topk_lps")
 _V2_FIELDS = {"final_logprobs", "source_execution", "producer_identity", "fit_overlap_status",
               "wikitext_inputs_sha256", "model_identity"}
-_TOKENIZER_FILENAMES = (
-    "added_tokens.json",
-    "merges.txt",
-    "sentencepiece.bpe.model",
-    "special_tokens_map.json",
-    "spiece.model",
-    "tokenizer.json",
-    "tokenizer.model",
-    "tokenizer_config.json",
-    "vocab.json",
-)
 
 
 class TeacherPayloadError(ValueError):
@@ -692,24 +685,11 @@ def compact_source_model_identity(identity: Mapping[str, Any]) -> dict[str, obje
 
 
 def tokenizer_identity(model_dir: str | os.PathLike) -> dict[str, object]:
-    """Bind the exact local files that define tokenization for this lane."""
-    root = Path(model_dir).resolve(strict=True)
-    files: dict[str, dict[str, object]] = {}
-    for name in _TOKENIZER_FILENAMES:
-        path = root / name
-        if path.is_file():
-            files[name] = {
-                "bytes": int(path.stat().st_size),
-                "sha256": file_sha256(path),
-            }
-    if not files:
-        raise TeacherPayloadError(f"no tokenizer files found under {root}")
-    value_bearing = {"files": files}
-    return {
-        "schema": TOKENIZER_IDENTITY_SCHEMA,
-        "content_sha256": canonical_sha256(value_bearing),
-        **value_bearing,
-    }
+    """Keep the teacher API and its error type at the tools boundary."""
+    try:
+        return build_tokenizer_identity(model_dir)
+    except ValueError as exc:
+        raise TeacherPayloadError(str(exc)) from exc
 
 
 def tensor_semantic_projection(payload: Mapping[str, Any]) -> dict[str, object]:
