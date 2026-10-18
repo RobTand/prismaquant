@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, frozen quality plans.
+Quality-prefill plans publish once through the existing create-only byte
+writer. A concurrent winner, including identical bytes, refuses replacement.
+Each writer owns its temporary file; parent aliases remain usable and occupied
+leaf aliases remain occupied. The admitted
+`quality-prefill-create-only-green-v1` action passes 65 CPU cases and compiles
+both touched files, with source, terminal logs and CAS receipt verified against
+parent `78ce9041a47` plus the frozen overlays. These checks qualify frozen-plan
+publication and contract handling, without a new quality or performance result.
+
 As of: 2026-10-18, architecture audit continuation, MTP projection publication.
 The initial MTP projection uses the existing create-only byte writer with its
 own temporary file. A concurrent publication refuses, including an identical
