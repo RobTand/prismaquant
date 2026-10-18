@@ -1,5 +1,6 @@
 """Packed QDQ must preserve row-local arithmetic and grouped dispatch."""
 from dataclasses import replace
+import os
 
 import pytest
 import torch
@@ -177,5 +178,63 @@ def test_public_format_override_refreshes_packed_qdq(tmp_path, monkeypatch, fami
             with cache.override(dict.fromkeys(names, replacement)):
                 run(replacement)
             run(initial)
+        finally:
+            cache.remove()
+
+
+@pytest.mark.skipif(os.environ.get("PRISMAQUANT_PACKED_QDQ_CUDA") != "1",
+                    reason="GB10 qualification needs an admitted CUDA action")
+@pytest.mark.parametrize("family,intermediate,count", [
+    ("qwen3_moe", 768, 128), ("qwen3_5_moe", 512, 256),
+])
+def test_gb10_qdq_rows_and_grouped_graph(tmp_path, monkeypatch, family, intermediate, count):
+    assert torch.cuda.is_available(), "CUDA qualification cannot fall back to CPU"
+    assert torch.cuda.get_device_capability() == (12, 1), "qualification requires GB10"
+    monkeypatch.setenv("PRISMAQUANT_EXTERNAL_WEIGHT_MANAGEMENT", "1")
+    for width in (2048, intermediate):
+        rows = torch.randn(13, width, device="cuda", dtype=torch.bfloat16)
+        rows[0].zero_()
+        rows[1].mul_(100)
+        for name in FORMATS:
+            spec = fr.get_format(name)
+            actual = owner._activation_qdq(rows, spec, {}, "projection")
+            reference = torch.cat([
+                owner._activation_qdq(part, spec, {}, "projection")
+                for part in rows.split([3, 1, 9])])
+            assert actual.is_cuda and reference.is_cuda
+            assert torch.equal(actual, reference), (family, width, name)
+
+    dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.bfloat16)
+        model = nn.Module()
+        model.experts = experts(family, "grouped_mm", device="cuda", hidden=2048,
+                                intermediate=intermediate, count=count)
+    finally:
+        torch.set_default_dtype(dtype)
+    cache = owner.PerturbedActivationCache(model,
+        {"experts.gate_up_proj": "NVFP4", "experts.down_proj": "NVFP4"},
+        tmp_path, cal_hash="gb10", capture_inputs=False)
+    inputs = torch.randn(32, 2048, device="cuda", dtype=torch.bfloat16)
+    indices = torch.tensor([[0, 1]] * 32, device="cuda")
+    weights = torch.full((32, 2), .5, device="cuda", dtype=torch.bfloat16)
+    with torch.no_grad():
+        cache.install()
+        try:
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    model.experts(inputs, indices, weights)
+            torch.cuda.current_stream().wait_stream(stream)
+            uncaptured = model.experts(inputs, indices, weights)
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = model.experts(inputs, indices, weights)
+            graph.replay()
+            torch.cuda.synchronize()
+            assert captured.is_cuda and torch.isfinite(captured).all()
+            assert torch.equal(captured, uncaptured)
         finally:
             cache.remove()
