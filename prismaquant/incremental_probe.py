@@ -1312,6 +1312,30 @@ def scan_cached_linear_stats(
     return pooled
 
 
+_ROUTING_FIELDS = (
+    "router_counts", "router_totals", "router_active_counts",
+    "expert_route_stats", "expert_info",
+)
+
+
+def _shard_routing_payload(stats, include: re.Pattern, source: Mapping) -> dict:
+    expert_info = {
+        name: value for name, value in source.get("expert_info", {}).items()
+        if name in stats
+    }
+    routers = {router for router, _expert in expert_info.values()}
+    # Packed experts have no per-expert Linear leaves. Their sibling router
+    # belongs to the same layer selector.
+    routers.update(router for router in source.get("router_counts", {})
+                   if include.search(router))
+    return {
+        **{field: {router: value for router, value in source.get(field, {}).items()
+                   if router in routers}
+           for field in _ROUTING_FIELDS if field != "expert_info"},
+        "expert_info": expert_info,
+    }
+
+
 def synthesize_shard_from_linear_cache(
     linear_include: str,
     linear_exclude: str,
@@ -3914,51 +3938,18 @@ def _run_body_streaming_shard(
         # cost step sees a fully-flushed activation cache directory.
         drain_activation_writes()
 
-    # Filter precomputed expert_info to the subset of routers whose experts are
-    # within this shard's include-regex scope.
-    shard_expert_info = {
-        k: v for k, v in precomputed.expert_info.items() if k in all_tracked
-    }
-    shard_routers_in_scope: set[str] = {
-        rq for (rq, _eid) in shard_expert_info.values()
-    }
-    # Packed Qwen3.5/3.6 experts have no per-expert nn.Linear leaves, so
-    # ``expert_info`` is empty even though Phase 1 records their sibling
-    # routers. Select those routers directly by this shard's layer regex.
-    shard_routers_in_scope.update(
-        rq for rq in precomputed.router_counts if inc.search(rq)
-    )
-    shard_router_counts = {
-        rq: per_expert_map
-        for rq, per_expert_map in precomputed.router_counts.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_router_totals = {
-        rq: total
-        for rq, total in precomputed.router_totals.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_router_active_counts = {
-        rq: per_expert_map
-        for rq, per_expert_map in precomputed.router_active_counts.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_expert_route_stats = {
-        rq: stats
-        for rq, stats in precomputed.expert_route_stats.items()
-        if rq in shard_routers_in_scope
-    }
+    routing = _shard_routing_payload(all_tracked, inc, vars(precomputed))
 
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
         pickle.dump({
             "stats": merged_stats,
-            "router_counts": shard_router_counts,
-            "router_totals": shard_router_totals,
-            "router_active_counts": shard_router_active_counts,
-            "expert_route_stats": shard_expert_route_stats,
-            "expert_info": shard_expert_info,
+            "router_counts": routing["router_counts"],
+            "router_totals": routing["router_totals"],
+            "router_active_counts": routing["router_active_counts"],
+            "expert_route_stats": routing["expert_route_stats"],
+            "expert_info": routing["expert_info"],
             "meta": {
                 "model": model_path,
                 "dataset": dataset_name,
