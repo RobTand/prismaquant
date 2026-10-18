@@ -1925,9 +1925,9 @@ def require_activation_quantizer_attested(
       block-scale format is a different quantiser, not a thing to read with
       this one's arithmetic.
     * a coverage gap -- a table that omits the ties attests nothing about the
-      disagreement it is here to settle, so all seven E2M1 midpoints, both
-      signs, element saturation and the block-scale underflow boundary are
-      required.  The check is NUMERIC, computed from the published bits, so a
+      disagreement it is here to settle. The reader requires all seven E2M1
+      midpoint magnitudes, a signed input, element saturation and the
+      block-scale underflow boundary.  The check is NUMERIC, computed from the published bits, so a
       mislabelled ``boundary`` cannot buy coverage it does not reach.
     * a stored-scale or code disagreement -- named vector by vector.
 
