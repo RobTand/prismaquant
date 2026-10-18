@@ -134,7 +134,8 @@ def test_ordinary_aura_main_supplies_binding_before_journal_restore(tmp_path, mo
     assert {str(p.relative_to(checkpoint)): p.read_bytes() for p in checkpoint.rglob('*') if p.is_file() and p.name != 'streamed_model_identity.json'} == before
 
 
-def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch):
+@pytest.mark.parametrize('streaming', [False, True], ids=['resident', 'streamed-journal'])
+def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch, streaming):
     import huggingface_hub
     from transformers import AutoModelForCausalLM
     from prismaquant import model_profiles
@@ -155,7 +156,12 @@ def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch):
     monkeypatch.setattr(AutoModelForCausalLM, 'from_pretrained', no_hf)
     observed = []
 
-    def measurement(model, *_args, **kwargs):
+    def measurement(delivery, *_args, **kwargs):
+        model = delivery.model if streaming else delivery
+        if streaming:
+            for layer in range(delivery.num_layers):
+                delivery.context.schedule_prefetch(layer)
+                delivery.context.install(layer, require_prefetched=True, prefetch_following=False)
         for name, parameter in model.named_parameters():
             assert parameter.dtype == expected[name].dtype
             assert torch.equal(parameter, expected[name]), name
@@ -163,9 +169,12 @@ def test_hub_native_aura_uses_resolved_original_source(tmp_path, monkeypatch):
         observed.append(True)
         return {'costs': {}, 'provenance': {'dw_rendered_rows': 0, 'dw_rtn_fallback_rows': 0, 'seed_base': 7000}}
 
-    monkeypatch.setattr(aura, 'compute_aura_cost', measurement)
-    assert aura.main(['--model', hub_id, '--output', str(tmp_path / 'hub.pkl'),
-        '--device', 'cpu', '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw']) == 0
+    monkeypatch.setattr(aura, 'compute_aura_cost_streamed' if streaming else 'compute_aura_cost', measurement)
+    arguments = ['--model', hub_id, '--output', str(tmp_path / 'hub.pkl'),
+        '--device', 'cpu', '--dtype', 'bfloat16', '--dataset', 'synthetic-token-draw']
+    if streaming:
+        arguments += ['--streaming', '--checkpoint-dir', str(tmp_path / 'hub-journal')]
+    assert aura.main(arguments) == 0
     assert observed == [True]
 
 

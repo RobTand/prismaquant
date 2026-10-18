@@ -3342,7 +3342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 streamed_model_identity = build_streamed_model_identity(
                     streamed_runner,
-                    args.model,
+                    str(source_root) if native_source else args.model,
                     identity_cache_path=(
                         Path(args.checkpoint_dir or Path(args.output).parent)
                         / "streamed_model_identity.json"
