@@ -87,9 +87,8 @@ def _scope():
 def dev_pin(monkeypatch):
     """Turn on the Tessera development pin for one test.
 
-    Never module-scoped and never autouse: the default-menu test asserts the
-    menu is EMPTY without it, and a leaked pin would silently invert exactly
-    the assertion that says production is still fail-closed.
+    Function scope keeps pin provenance local to the requesting test.
+    Context-free admission remains empty even when this pin is selected.
     """
     monkeypatch.setenv(trc.TESSERA_DEV_PIN_ENV, trc.TESSERA_DEV_PIN_COMMIT)
     return trc.TESSERA_DEV_PIN_COMMIT
@@ -1660,11 +1659,9 @@ def test_the_packaged_reader_range_is_read_from_its_own_field():
 def test_readable_menu_sits_between_attested_and_research(monkeypatch):
     """The ordering the issue asked for, on a synthetic reader range.
 
-    The range is narrower than the family's realisable axis and wider than the
-    one attested rung on purpose, so both containments are strict here. On the
-    real table only the outer one is (there the attested set is one rung per
-    family), which is why this is asserted on a fixture and the real table
-    asserts the containment itself.
+    The synthetic reader range lies strictly between one attested rung and
+    the family's realisable axis. Real-table tests derive admitted rates from
+    scoped cells; this fixture proves strict containment independently.
     """
     _synthetic_contract(monkeypatch, reader=(1024, 1200), attested=(1024,))
     families = tuple(
