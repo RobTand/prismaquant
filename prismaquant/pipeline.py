@@ -317,6 +317,22 @@ def _key_pairs(*specs: str) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+_AURA_COST_SETTINGS = _key_pairs(
+        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
+        "NPROBES<-AURA_COST_NPROBES",
+        "NS<-AURA_COST_NSAMPLES",
+        "SL<-AURA_COST_SEQLEN",
+        "SEED<-AURA_COST_CALIB_SEED",
+        "DTYPE<-AURA_COST_DTYPE",
+        "AURA_COST_PROBE_MICROBATCH",
+        "AURA_COST_STREAMING",
+        "AURA_COST_CHECKPOINT_DIR",
+        *_HEAD_SETTINGS,
+        *_RENDER_SETTINGS,
+        *_CB_SERIALIZATION_SETTINGS,
+    )
+
+
 STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     # --- probe / cost ------------------------------------------------------
     # The Fisher trace is a function of (model, calibration corpus, window
@@ -363,30 +379,11 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         *_RENDER_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),
-    "aura-cost": _key_pairs(
-        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
-        "NPROBES<-AURA_COST_NPROBES",
-        "NS<-AURA_COST_NSAMPLES",
-        "SL<-AURA_COST_SEQLEN",
-        "SEED<-AURA_COST_CALIB_SEED",
-        "DTYPE<-AURA_COST_DTYPE",
-        "AURA_COST_STREAMING",
-        "AURA_COST_CHECKPOINT_DIR",
-        *_HEAD_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
-    ),
-    "aura-hybrid-cost": _key_pairs(
-        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
+    "aura-cost": _AURA_COST_SETTINGS,
+    "aura-hybrid-cost": _AURA_COST_SETTINGS + _key_pairs(
         "EXPERT_NS<-AURA_EXPERT_NSAMPLES",
         "EXPERT_SL<-AURA_EXPERT_SEQLEN",
-        # When streamed AURA is enabled, the empirical routed-expert tail is
-        # streamed and resumed too.  Its checkpoint path is the deterministic
-        # ``expert-empirical-cost`` child of AURA_COST_CHECKPOINT_DIR, so these
-        # two inputs fully bind that resume identity without a second knob.
-        "AURA_COST_STREAMING",
-        "AURA_COST_CHECKPOINT_DIR",
-        *_HEAD_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
+        "AURA_RAW_DIGEST",
     ),
     # --- CB lane -----------------------------------------------------------
     # The imatrix harvest reads the probe's activation cache; key it on what
@@ -498,6 +495,10 @@ def stage_settings_projection(
     projection: dict[str, str] = {}
     unresolved: list[str] = []
     for manifest_key, source in keys:
+        if (stage in {"aura-cost", "aura-hybrid-cost"}
+                and source == "AURA_COST_PROBE_MICROBATCH"
+                and settings.get("AURA_COST_STREAMING") in {"1", "true", "True", "TRUE"}):
+            continue
         if (stage == "tessera-plan"
                 and (source in _TESSERA_SCOPE_SETTINGS or source == "PLAN_ASSIGNMENT_DIGEST")
                 and not settings.get(source)):

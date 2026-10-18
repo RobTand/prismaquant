@@ -1170,6 +1170,7 @@ STAGE_SETTINGS_ENV=(
   "AURA_COST_SEQLEN=$AURA_COST_SEQLEN"
   "AURA_COST_CALIB_SEED=$AURA_COST_CALIB_SEED"
   "AURA_COST_DTYPE=$AURA_COST_DTYPE"
+  "AURA_COST_PROBE_MICROBATCH=$AURA_COST_PROBE_MICROBATCH"
   "AURA_COST_STREAMING=$AURA_COST_STREAMING"
   "AURA_COST_CHECKPOINT_DIR=$AURA_COST_CHECKPOINT_DIR"
   "AURA_EXPERT_NSAMPLES=$AURA_EXPERT_NSAMPLES"
@@ -1696,7 +1697,14 @@ PY
   # real-KL rejects it, no bans),
   # plus sidecar (MTP/visual) row backfill from the baseline cost. Backfilled
   # rows carry the baseline estimator and are recorded in provenance.
-  require_stage_settings "$COST_PATH" aura-hybrid-cost
+  AURA_RAW_DIGEST="$(python3 - "$AURA_COST_RAW" <<'PYDIGEST'
+import sys
+from prismaquant.digests import file_sha256hex
+print(file_sha256hex(sys.argv[1]))
+PYDIGEST
+)"
+  require_stage_settings "$COST_PATH" aura-hybrid-cost \
+    "AURA_RAW_DIGEST=$AURA_RAW_DIGEST"
   if ! cost_table_reusable "$COST_PATH"; then
     OMITTED_EXPERTS="$(python3 - "$AURA_COST_RAW" <<'PY'
 import pickle
