@@ -1041,7 +1041,7 @@ def main():
     _PIPELINE_COST_MODE = str(getattr(args, "cost_mode", "") or "")
 
     from .streamed_model_identity import (
-        SOURCE_MODEL_BINDING_SCHEMA, build_source_model_binding,
+        build_source_model_binding,
         resolve_source_checkpoint_path, source_model_decode_contract,
     )
 
@@ -1108,13 +1108,7 @@ def main():
     source_binding = (build_source_model_binding(source_root, dtype=dtype)
                       if source_model_decode_contract(source_root) is not None else None)
 
-    checkpoint_binding = None
-    if source_binding is not None:
-        checkpoint_binding = {
-            "schema": SOURCE_MODEL_BINDING_SCHEMA,
-            "checkpoint": source_binding["checkpoint"],
-            "effective_dtype": source_binding["effective_dtype"],
-        }
+    from .prepriced_cost import cost_source_binding_for_region
 
     # Shared probe / activation / spec context — probe pickle stays in
     # memory so each shard can just intersect its regex against the stats.
@@ -1192,8 +1186,9 @@ def main():
     ]
     if source_binding is not None:
         for entry, meta in zip(schedule, expected_metas):
-            meta["source_binding"] = (source_binding if entry.kind in ("body", "lm_head")
-                                      else checkpoint_binding)
+            meta["source_binding"] = cost_source_binding_for_region(
+                source_binding, checkpoint_only=entry.kind in ("mtp", "visual"),
+            )
     all_reusable = all(
         shard_paths[i].exists()
         and cost_shard_is_reusable(shard_paths[i], expected_metas[i])

@@ -10,7 +10,7 @@ per-unit coverage, renderer identity and serving eligibility.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import json
 import os
 from pathlib import Path
@@ -108,6 +108,38 @@ def _model_binding(payload: Mapping, model: str) -> dict[str, Any]:
         "checkpoint_content_attested": False,
     }
 
+
+
+def checkpoint_only_cost_qnames(model_root: str | Path, qnames: Iterable[str]) -> frozenset[str]:
+    """Find MTP and visual cells through the producer's profile schedule."""
+    from .incremental_probe import build_shard_schedule
+
+    schedule = build_shard_schedule(
+        model_path=str(model_root), num_body_layers=0, body_layers_per_shard=1,
+        body_layer_range=(0, 0), include_mtp=True, include_visual=True,
+        include_lm_head=False, unified_body_sweep=False,
+    )
+    patterns = [re.compile(entry.linear_include) for entry in schedule
+                if entry.kind in ("mtp", "visual")]
+    return frozenset(qname for qname in qnames
+                     if any(pattern.search(qname) for pattern in patterns))
+
+
+def cost_source_binding_for_region(binding: Mapping, *, checkpoint_only: bool) -> Mapping:
+    """Keep text decode evidence; project sidecars to checkpoint and dtype only.
+
+    Callers supply producer evidence or the current observation after boundary
+    validation. This projection never replaces a producer's checkpoint bytes.
+    """
+    from .streamed_model_identity import SOURCE_MODEL_BINDING_SCHEMA
+
+    if not checkpoint_only:
+        return binding
+    return {
+        "schema": SOURCE_MODEL_BINDING_SCHEMA,
+        "checkpoint": binding["checkpoint"],
+        "effective_dtype": binding["effective_dtype"],
+    }
 
 def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
     from .joint_aura_rows import validate_joint_aura_entry
@@ -220,20 +252,11 @@ def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where
             if isinstance(raw, Mapping) and raw.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
                 raise ValueError(f"{cell}: native source binding cannot qualify costs when the current source is not native; rebuild/reprice")
         return
-    from .incremental_probe import build_shard_schedule
-    from .streamed_model_identity import SOURCE_MODEL_BINDING_SCHEMA
-
-    schedule = build_shard_schedule(
-        model_path=str(root), num_body_layers=0, body_layers_per_shard=1,
-        body_layer_range=(0, 0), include_mtp=True, include_visual=True,
-        include_lm_head=False, unified_body_sweep=False,
-    )
-    sidecar_patterns = [re.compile(entry.linear_include) for entry in schedule
-                        if entry.kind in ("mtp", "visual")]
+    sidecar_qnames = checkpoint_only_cost_qnames(root, payload["costs"])
     checkpoint_only_cells = {
         f"{where} {qname}/{fmt}"
         for qname, rows in payload["costs"].items()
-        if any(pattern.search(qname) for pattern in sidecar_patterns)
+        if qname in sidecar_qnames
         for fmt in rows
     }
     bindings = list(_native_cost_bindings(
@@ -244,10 +267,10 @@ def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where
     expected = build_source_model_binding(
         root, dtype=bindings[0][1]["effective_dtype"], local_files_only=True)
     for cell, binding in bindings:
-        wanted = {**expected, "effective_dtype": binding["effective_dtype"]}
-        if cell in checkpoint_only_cells:
-            wanted.pop("source_decode")
-            wanted["schema"] = SOURCE_MODEL_BINDING_SCHEMA
+        wanted = cost_source_binding_for_region(
+            {**expected, "effective_dtype": binding["effective_dtype"]},
+            checkpoint_only=cell in checkpoint_only_cells,
+        )
         if binding != wanted:
             raise ValueError(f"{cell}: native source binding differs from the current checkpoint/decoder; rebuild/reprice")
 
