@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-18, architecture audit continuation, health response intake.
+The Netdata health boundary requires a JSON object and validates supplied
+mirrored-host metadata. Invalid local observations produce a defect row;
+invalid remote observations remain unverified. Later checks and the complete
+health report still run. Missing optional metadata retains its existing
+defaults. The admitted `telemetry-boundaries-green-v1` action passes 17 CPU
+cases across health and retention, with four compiled files and verified
+source, terminal logs and CAS receipt against parent `34c30827d0c` plus the
+overlays. HTTP and host observations are test adapters; no live-host health
+or performance conclusion follows.
+
 As of: 2026-10-18, architecture audit continuation, isolated test exits.
 The own-process pytest runner combines reported test outcomes with the child
 process's terminal status. A crash or unexpected exit after passing reports

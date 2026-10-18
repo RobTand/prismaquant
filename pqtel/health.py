@@ -362,17 +362,27 @@ def check_netdata_unit(report, entry):
 
 
 def check_netdata_reachable(report, entry, url, label):
+    failure_status = DEFECT if url == NETDATA_LOCAL else UNVERIFIED
     status, body = _http_ok(url + "/api/v1/info")
     if status != 200:
-        report.add(entry, label, DEFECT if url == NETDATA_LOCAL else UNVERIFIED,
+        report.add(entry, label, failure_status,
                    "%s unreachable: %s" % (url, body))
         return None
     try:
         info = json.loads(body)
+        if not isinstance(info, dict):
+            raise ValueError("expected a JSON object")
+        hosts = info.get("mirrored_hosts")
+        if hosts is not None and (
+                not isinstance(hosts, list)
+                or any(not isinstance(host, str) for host in hosts)):
+            raise ValueError("mirrored_hosts must be a list of strings or null")
         version = info.get("version", "?")
-        hostname = (info.get("mirrored_hosts") or ["?"])[0]
-    except (ValueError, TypeError, IndexError):
-        version, hostname = "?", "?"
+        hostname = (hosts or ["?"])[0]
+    except (ValueError, TypeError, IndexError) as exc:
+        report.add(entry, label, failure_status,
+                   "%s -> HTTP 200, invalid Netdata info: %s" % (url, exc))
+        return None
     report.add(entry, label, OK,
                "%s -> HTTP 200, netdata %s, host %s" % (url, version, hostname))
     return info
