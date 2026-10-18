@@ -100,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--r2-gate", type=float, default=0.99,
                     help="below this R^2 the fit is not a valid interpolator")
     args = ap.parse_args(argv)
+    if any(not math.isfinite(target) or target <= 0 for target in args.kl_target):
+        ap.error("--kl-target must be finite and positive")
 
     pts = (_collect_selection(args.selection) if args.selection
            else _collect_csv(args.csv))
