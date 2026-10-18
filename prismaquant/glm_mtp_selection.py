@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import pickle
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -37,13 +38,32 @@ _BF16 = "BF16"
 _STORAGE = Contract(ValueError, "MTP storage: ")
 
 
-def load_mtp_cost(path) -> dict:
-    """The MTP cost payload at ``path`` (pickle or JSON)."""
-    raw = Path(path).read_bytes()
-    payload = json.loads(raw) if str(path).endswith(".json") else pickle.loads(raw)
-    if not isinstance(payload, Mapping) or payload.get("schema") != SCHEMA:
-        raise ValueError(f"MTP cost payload must be {SCHEMA}")
-    return dict(payload)
+@dataclass(frozen=True, init=False)
+class MtpCostInput:
+    """One owned cost read and its receipt; consumers treat the payload as read-only."""
+
+    path: str
+    sha256: str
+    payload: dict = field(repr=False, compare=False)
+
+    def __init__(self, path, raw: bytes, *, expected_sha256=None):
+        if not isinstance(raw, bytes):
+            raise TypeError("MTP cost input requires owned immutable bytes")
+        path = str(path)
+        digest = bytes_sha256hex(raw)
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise ValueError("MTP cost differs from expected bytes")
+        payload = json.loads(raw) if path.endswith(".json") else pickle.loads(raw)
+        if not isinstance(payload, Mapping) or payload.get("schema") != SCHEMA:
+            raise ValueError(f"MTP cost payload must be {SCHEMA}")
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "sha256", digest)
+        object.__setattr__(self, "payload", dict(payload))
+
+
+def load_mtp_cost(path, *, expected_sha256=None) -> MtpCostInput:
+    """Read, optionally authenticate, and parse one MTP cost (pickle or JSON)."""
+    return MtpCostInput(path, Path(path).read_bytes(), expected_sha256=expected_sha256)
 
 
 MERGE_SCHEMA = "prismaquant.glm_mtp_cost.merge.v1"
@@ -596,23 +616,24 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     }
 
 
-def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
+def backfill_mtp_selection_wires(
+    layer_config: Mapping, cost_path: MtpCostInput | str | Path,
+) -> dict:
     """Return a new allocation config with bound wires for its existing MTP choice.
 
     This checks the recorded choice against the measured cost and every unit's
     config. It does not invoke an allocator or change a body/MTP assignment.
+    A path starts a fresh intake; an owned input retains the original read.
     """
     from . import format_registry as fr
     from . import mtp_rung_selection as canon
 
-    cost_raw = Path(cost_path).read_bytes()
-    cost_sha256 = bytes_sha256hex(cost_raw)
-    cost = pickle.loads(cost_raw) if not str(cost_path).endswith(".json") else json.loads(cost_raw)
-    payload = enrich_mtp_cost_wires(cost)
+    cost = cost_path if isinstance(cost_path, MtpCostInput) else load_mtp_cost(cost_path)
+    payload = enrich_mtp_cost_wires(cost.payload)
     meta = layer_config.get("__prismaquant__", {})
     record = meta.get("mtp_selection", {})
     if (record.get("schema") != RECORD_SCHEMA or
-            record.get("cost_path") != str(cost_path) or
+            record.get("cost_path") != cost.path or
             record.get("mtp_layer") != payload["mtp_layer"] or
             record.get("units") != len(payload["costs"])):
         raise ValueError("MTP selection does not name the bound cost and unit roster")
@@ -657,7 +678,7 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
                 selected[key][name] = payload[key][name][fmt]
             except KeyError as exc:
                 raise ValueError(f"MTP {name}@{fmt} has no bound {key}") from exc
-    enriched_record = {**record, "mtp_joint_cost_sha256": cost_sha256,
+    enriched_record = {**record, "mtp_joint_cost_sha256": cost.sha256,
                        "mtp_expert_projection": payload["mtp_expert_projection"],
                        **selected, "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}
     return {**layer_config, "__prismaquant__": {**meta, "mtp_selection": enriched_record}}
@@ -690,5 +711,5 @@ if __name__ == "__main__":
 
 
 __all__ = ["SCHEMA", "RECORD_SCHEMA", "MERGE_SCHEMA", "WIRE_BINDING_SCHEMA",
-           "load_mtp_cost", "merge_mtp_costs", "enrich_mtp_cost_wires", "select_mtp_rungs",
+           "MtpCostInput", "load_mtp_cost", "merge_mtp_costs", "enrich_mtp_cost_wires", "select_mtp_rungs",
            "backfill_mtp_selection_wires"]

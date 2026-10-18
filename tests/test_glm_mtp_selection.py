@@ -372,7 +372,7 @@ def test_the_merged_payload_loads_as_a_cost_file(tmp_path):
     whole = _payload()
     path = tmp_path / "merged.pkl"
     path.write_bytes(pickle.dumps(merge_mtp_costs([_part(whole, {R1024}), _part(whole, {R832})])))
-    assert load_mtp_cost(path)["costs"] == whole["costs"]
+    assert load_mtp_cost(path).payload["costs"] == whole["costs"]
 
 
 @pytest.mark.parametrize("field", ["mtp_layer", "groups", "params", "source_dtype"])

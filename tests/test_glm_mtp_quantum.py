@@ -237,7 +237,7 @@ def test_payload_is_what_the_allocator_mtp_path_reads(env, tmp_path):
     path.write_bytes(pickle.dumps(payload))
     loaded = glm_mtp_selection.load_mtp_cost(path)
     record = glm_mtp_selection.select_mtp_rungs(
-        loaded, byte_budget=10 ** 9,
+        loaded.payload, byte_budget=10 ** 9,
         constants={"t_ms": 20.0, "d0_ms": 1.0, "c_ms_per_bit": 0.2, "source": "fixture"})
     assert set(record["assignment"]) == set(env.modules)
     assert set(record["rung_by_group"]) == set(env.census["anchor_groups"])

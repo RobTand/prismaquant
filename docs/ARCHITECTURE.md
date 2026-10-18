@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-17, architecture audit continuation, owned MTP cost inputs.
+`MtpCostInput` binds a parsed cost payload to the digest of its single owned
+read. Fixed reselection authenticates the expected digest before parsing;
+selection, wire backfill and allocator stamping retain that same input.
+Replacing the pathname cannot change the recorded receipt after selection.
+Independent exporter and builder path inputs still start a fresh checked
+read. Existing price, probe, scope and wire checks remain in their owners.
+`mtp-owned-input-green-v1` passes 171 CPU cases and compiles seven files,
+with source, logs, terminal outcome and CAS receipt verified against parent
+`da2ba5fc75b` plus the recorded overlays. Synthetic metadata and byte-replacement
+controls establish input ownership, without serving or quality qualification.
+
 As of: 2026-10-17, architecture audit continuation, PQ237 execution wording.
 New numerical-screen receipts state the PrismaBuild requirement instead of
 repeating a historical one-session exception. Historical records remain

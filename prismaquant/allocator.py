@@ -96,6 +96,10 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .glm_mtp_selection import MtpCostInput
 
 from . import format_registry as fr
 from .assignment_space import AggregationPolicy, AssignmentSpace
@@ -142,7 +146,6 @@ from .digests import (
     DIRECT_UTF8_STRICT,
     bytes_sha256hex,
     file_digest_sha256hex,
-    file_sha256hex,
 )
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
@@ -907,8 +910,8 @@ def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowabi
 
 
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
-                target_profile=None) -> tuple[dict, dict]:
-    """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
+                target_profile=None) -> tuple[MtpCostInput, dict]:
+    """The owned MTP cost and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
     Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
     charge the selected MTP rungs, not the layer's source bytes, and the
@@ -926,7 +929,8 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
                          "and --mtp-serve-constants")
     declared = getattr(args, "mtp_formats", None)
     try:
-        payload = load_mtp_cost(args.mtp_joint_cost)
+        cost = load_mtp_cost(args.mtp_joint_cost)
+        payload = cost.payload
         constants = json.loads(Path(args.mtp_serve_constants).read_text())
         points = (json.loads(Path(args.mtp_acceptance_points).read_text())
                   if args.mtp_acceptance_points else [])
@@ -949,10 +953,10 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
         raise SystemExit(2) from exc
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
-    return payload, record
+    return cost, record
 
 
-def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
+def _stamp_mtp_selection(cost: MtpCostInput, layer_cfg: dict, body_assignment: Mapping,
                          record: Mapping) -> None:
     """Add the MTP layer's selected rungs (``_select_mtp``) to ``layer_cfg``.
 
@@ -973,11 +977,9 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
     # The preflight binds every selected MTP receipt back to the measured cost
     # (PQ #1665): the stamper names the bound file, so it seals the file's
     # digest beside the path instead of leaving the sha to a later backfill.
-    # Owner read (digests.file_sha256hex): no new raw hashlib site (#1667).
-    cost_sha256 = file_sha256hex(args.mtp_joint_cost)
     layer_cfg[LAYER_CONFIG_META_KEY]["mtp_selection"] = {
-        **record, "cost_path": str(args.mtp_joint_cost),
-        "mtp_joint_cost_sha256": cost_sha256, "units": len(assignment)}
+        **record, "cost_path": cost.path,
+        "mtp_joint_cost_sha256": cost.sha256, "units": len(assignment)}
     print(f"[alloc] MTP selection: {record['rung']} "
           f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
           f"({record['selection']['regime']})", flush=True)
@@ -2771,7 +2773,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     _mtp_selection_memo: list = []
 
     def _mtp_selection():
-        """``(payload, record)``, selected once: the card and the stamp read one choice."""
+        """``(cost input, record)``, selected once: the card and stamp read one choice."""
         if not _mtp_selection_memo:
             _mtp_selection_memo.append(_select_mtp(
                 args, serving_target=tessera_serving_target, profile=model_profile,
@@ -4607,7 +4609,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # no keys, and a table carrying a population but no projection carries
         # only the population.
         if args.mtp_joint_cost:
-            _stamp_mtp_selection(args, layer_cfg, assignment_expanded, _mtp_selection()[1])
+            cost, record = _mtp_selection()
+            _stamp_mtp_selection(cost, layer_cfg, assignment_expanded, record)
         selection_request = lane.allocation_selection_request_path(args)
         if selection_request:
             lane.write_allocation_selection_request(selection_request,
@@ -4683,7 +4686,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return total, part
         # PQ #1610: the MTP layer ships its selected rungs, not its source
         # bytes; the floor must hold what ships.
-        payload, record = _mtp_selection()
+        cost, record = _mtp_selection()
+        payload = cost.payload
         excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
         overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
             if excluded else []
