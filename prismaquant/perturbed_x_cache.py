@@ -3415,6 +3415,7 @@ class PerturbedActivationCache:
         reference. The module pre-hook skips these plans to avoid double QDQ.
         A hooked batched_mm call uses grouped_mm. Its unhooked reference
         keeps batched_mm.
+        Grouped dispatch refuses unless QDQ runs exactly once per active projection.
         """
         if self._packed_act_plan(plan, active_only=False) is None:
             return
