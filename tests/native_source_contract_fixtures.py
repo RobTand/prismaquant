@@ -219,3 +219,29 @@ def coherent_glm_campaign(tmp_path):
         for row in rows.values():
             row["source_binding"] = binding
     return probe, census, harvest, expert
+
+
+def producer_source(tmp_path, *, native=True):
+    """Use the retained decoder fixture for small producer checks."""
+    from tests.test_resident_source_decode_audit import _source
+
+    return _source(tmp_path, native=native)
+
+
+def producer_cpu_guard(tmp_path, monkeypatch):
+    """Supply a fixed CPU envelope for the actual resident loader."""
+    from tests.test_resident_source_decode_audit import _cpu_guard
+
+    return _cpu_guard(tmp_path, monkeypatch)
+
+
+def producer_cli_inputs(monkeypatch):
+    """Double CUDA admission, tokenizer and calibration sampling only."""
+    from prismaquant import calibration_data, gpu_guard
+    from transformers import AutoTokenizer
+
+    tokens = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_args: torch.device('cpu'))
+    monkeypatch.setattr(AutoTokenizer, 'from_pretrained', lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(calibration_data, 'load_calibration', lambda *_args, **_kwargs: tokens)
+    return tokens
