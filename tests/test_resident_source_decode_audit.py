@@ -13,20 +13,6 @@ from tests.native_source_contract_fixtures import (
 )
 
 
-def _cpu_guard(tmp_path, monkeypatch, *, capacity=4 << 30):
-    root = tmp_path / "cgroup"
-    scope = root / "task"
-    scope.mkdir(parents=True)
-    (scope / "memory.max").write_text(str(capacity))
-    (scope / "memory.current").write_text("0")
-    (scope / "memory.stat").write_text("anon 0\nfile 0\nshmem 0\nfile_dirty 0\nfile_writeback 0\n")
-    membership = tmp_path / "membership"
-    membership.write_text("0::/task\n")
-    monkeypatch.setattr(memory, "_host_memory_info", lambda: (64 << 30, 128 << 30))
-    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *args: 0)
-    return memory.CaptureMemoryGuard(torch.device("cpu"), cgroup_root=root, membership=membership)
-
-
 def _load(root, tmp_path, guard, *, dtype=torch.bfloat16, requires_grad=False, device="cpu"):
     return owner.load_resident_source_model(
         str(root), device=torch.device(device), dtype=dtype,

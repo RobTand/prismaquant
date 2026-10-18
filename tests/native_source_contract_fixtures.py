@@ -285,7 +285,6 @@ def producer_source(tmp_path, *, native=True, tied=False, omit_projection=False)
     return root, expected
 
 
-
 def producer_cpu_guard(tmp_path, monkeypatch, *, capacity=4 << 30):
     from prismaquant import memory_management as memory
 
