@@ -54,7 +54,8 @@ The source hash and the evidence commits accompany the reconstruction; no
 cost value or campaign artifact is changed, and the production gate still
 refuses an unstamped table.
 
-The allocation fixture uses only the probe units that the campaign priced.
+The allocation fixture uses the five units with a real E4M3 R1024 price.
+The historical table has no R1024 price for layer 0's query and key units.
 The campaign covers one layer. The source probe covers the full model.
 The allocator requires costs for every mutable unit in its input population.
 """
@@ -258,7 +259,11 @@ def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
     costs = _historical_cost_fixture(tmp_path)
     probe_bytes = PROBE.read_bytes()
     original_probe = pickle.loads(probe_bytes)
-    priced_units = set(pickle.loads(costs.read_bytes())["costs"])
+    cost_rows = pickle.loads(costs.read_bytes())["costs"]
+    priced_units = {name for name, rows in cost_rows.items()
+                    if "TESSERA_E4M3_K1_R1024" in rows}
+    assert set(cost_rows) - priced_units == {
+        "model.layers.0.self_attn.q_proj", "model.layers.0.self_attn.k_proj"}
     assert priced_units and priced_units < set(original_probe["stats"])
     probe = {**original_probe, "stats": {
         name: entry for name, entry in original_probe["stats"].items()
@@ -280,7 +285,9 @@ def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
         *_scope_flags(),
     ])
     allocator.main()
-    return json.loads(layer_config.read_text())
+    config = json.loads(layer_config.read_text())
+    assert set(_assignment(config)) == priced_units
+    return config
 
 
 def _assignment(config) -> dict[str, str]:
