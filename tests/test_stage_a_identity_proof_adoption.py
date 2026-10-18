@@ -96,7 +96,8 @@ def test_a_shard_restamped_after_the_proof_refuses_adoption_and_hashes_fresh(
     assert torch.equal(state['copied'][0], state['selected'])
     out = capsys.readouterr().out
     if predicate == 'production':
-        assert 'names another object' in out and 'hashes its shard fresh' in out
+        assert 'names another object' in out
+        assert 'payload reads use the current source-authentication policy' in out
         assert sorted(name for name, _ in state['hashed']) == [
             'head.safetensors', 'selected.safetensors']
     else:
@@ -129,7 +130,9 @@ def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_
     digest = hashlib.sha256(proof.read_bytes()).hexdigest()
     state['hashed'].clear()
     assert campaign.main(_proof_argv(argv, proof, digest)) == campaign.EXIT_EMPTY_MENU
-    assert 'hashes its shard fresh' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "refused ('path')" in out
+    assert 'payload reads use the current source-authentication policy' in out
     assert sorted(name for name, _ in state['hashed']) == [
         'head.safetensors', 'selected.safetensors']
 
