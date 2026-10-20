@@ -227,6 +227,41 @@ def test_a_body_probe_identity_is_refused():
                          constants=CONSTANTS)
 
 
+@pytest.mark.parametrize("payload_schema", ["prismaquant.glm_mtp_cost.v1", None],
+                         ids=["mtp-envelope", "generic-envelope"])
+def test_body_admission_refuses_mtp_objective_with_body_provenance(payload_schema):
+    """A homogeneous MTP table cannot become body pricing by relabelling it."""
+    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
+    from prismaquant.glm_mtp import MTP_OBJECTIVE_SCHEMA
+    from prismaquant.joint_aura_rows import JOINT_AURA_COST_CURRENCY
+
+    provenance = {"cost_mode": "aura", "joint_activation": True,
+                  "cost_currency": JOINT_AURA_COST_CURRENCY}
+    payload = _payload()
+    body = _payload(probe=_probe(objective=False))
+    for table in (payload, body):
+        table["provenance"] = dict(provenance)
+        if payload_schema is None:
+            table.pop("schema")
+        else:
+            table["schema"] = payload_schema
+
+    # Same envelope, layer, formats and provenance: only the probe objective
+    # differs. Rejecting an MTP envelope or layer number is not the rule.
+    assert require_run_currency(body)["joint_aura_rows"] == sum(
+        map(len, body["costs"].values()))
+    identities = set()
+    for rows in payload["costs"].values():
+        for row in rows.values():
+            assert joint_aura_rows.validate_joint_aura_entry(row)
+            assert row["probe_identity"]["objective"]["schema"] == MTP_OBJECTIVE_SCHEMA
+            identities.add(row["probe_identity_sha256"])
+    assert len(identities) == 1  # No mixed-identity wall can satisfy this refusal.
+
+    with pytest.raises(CostCurrencyError):
+        require_run_currency(payload)
+
+
 def test_mixed_probe_identities_are_refused():
     from prismaquant.glm_mtp_selection import select_mtp_rungs
 
