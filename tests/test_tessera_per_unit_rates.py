@@ -106,6 +106,24 @@ def _fixture_costs() -> dict:
     return costs
 
 
+def _small_priced_world() -> tuple[dict, int, int]:
+    """Six healthy units; the cap buys a subset with a sub-unit remainder.
+
+    Equal-price pairs also exercise deterministic tie-breaking. Keep the real
+    CSV derivation exclusively in the dedicated fill test.
+    """
+    delta = 100
+    costs = {
+        f"s.{i}.w1": {
+            BASE_FMT: {"predicted_dloss": 10.0, "wire_bytes": 1000},
+            UP_FMT: {"predicted_dloss": 10.0 - (i // 2 + 1),
+                     "wire_bytes": 1000 + delta},
+        }
+        for i in range(6)
+    }
+    return costs, 3 * delta + delta // 2, delta
+
+
 # ---------------------------------------------------------------------------
 # The priced per-unit upgrade allocator
 # ---------------------------------------------------------------------------
@@ -150,7 +168,7 @@ def test_allocator_fills_188331767_headroom_with_718_priced_upgrades():
 
 
 def test_allocator_is_deterministic_across_row_insertion_order():
-    costs = _fixture_costs()
+    costs, budget, _delta = _small_priced_world()
     shuffled = {}
     keys = list(costs)
     random.Random(2319).shuffle(keys)
@@ -160,37 +178,41 @@ def test_allocator_is_deterministic_across_row_insertion_order():
         shuffled[key] = dict(menus)
     assignment = {unit: BASE_FMT for unit in costs}
     picks, record = tep.select_priced_unit_upgrades(
-        costs, assignment, byte_budget=HEADROOM_BYTES)
+        costs, assignment, byte_budget=budget)
     shuffled_picks, shuffled_record = tep.select_priced_unit_upgrades(
-        shuffled, assignment, byte_budget=HEADROOM_BYTES)
+        shuffled, assignment, byte_budget=budget)
     assert shuffled_picks == picks
     assert shuffled_record == record
 
 
 def test_allocator_honors_an_explicit_reserve_off_the_hard_cap():
-    costs = _fixture_costs()
+    costs, budget, delta = _small_priced_world()
+    expected_picks, remainder = divmod(budget, delta)
+    expected_spent = expected_picks * delta
     assignment = {unit: BASE_FMT for unit in costs}
     picks, record = tep.select_priced_unit_upgrades(
-        costs, assignment, byte_budget=HEADROOM_BYTES, reserve_bytes=EXPECTED_LEFT)
-    assert len(picks) == EXPECTED_PICKS
-    assert record["spend_cap_bytes"] == EXPECTED_SPENT
+        costs, assignment, byte_budget=budget, reserve_bytes=remainder)
+    assert len(picks) == expected_picks
+    assert record["spend_cap_bytes"] == expected_spent
+    assert record["spent_wire_delta_bytes"] == expected_spent
     assert record["remaining_wire_delta_bytes"] == 0
     tight, tight_record = tep.select_priced_unit_upgrades(
-        costs, assignment, byte_budget=HEADROOM_BYTES, reserve_bytes=EXPECTED_LEFT + 1)
-    assert len(tight) == EXPECTED_PICKS - 1
-    assert tight_record["spent_wire_delta_bytes"] == (EXPECTED_PICKS - 1) * UNIT_DELTA_BYTES
+        costs, assignment, byte_budget=budget, reserve_bytes=remainder + 1)
+    assert len(tight) == expected_picks - 1
+    assert tight_record["spent_wire_delta_bytes"] == (expected_picks - 1) * delta
+    assert tight_record["remaining_wire_delta_bytes"] == delta - 1
     with pytest.raises(ExpertProjectionError, match="reserve"):
-        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=HEADROOM_BYTES,
-                                        reserve_bytes=HEADROOM_BYTES + 1)
+        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=budget,
+                                        reserve_bytes=budget + 1)
     with pytest.raises(ExpertProjectionError, match="reserve"):
-        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=HEADROOM_BYTES,
+        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=budget,
                                         reserve_bytes=-1)
 
 
 def test_allocator_stops_at_the_infeasible_floor_without_inventing_a_pick():
-    costs = _fixture_costs()
+    costs, _budget, delta = _small_priced_world()
     assignment = {unit: BASE_FMT for unit in costs}
-    for budget in (0, UNIT_DELTA_BYTES - 1):
+    for budget in (0, delta - 1):
         picks, record = tep.select_priced_unit_upgrades(costs, assignment,
                                                         byte_budget=budget)
         assert picks == {}
@@ -202,7 +224,8 @@ def test_allocator_stops_at_the_infeasible_floor_without_inventing_a_pick():
 
 
 def test_allocator_refuses_rows_without_exact_price_or_wire_bytes():
-    costs = _fixture_costs()
+    costs, budget, delta = _small_priced_world()
+    expected_picks = budget // delta
     unit = next(iter(costs))
     assignment = {u: BASE_FMT for u in costs}
     # Present-but-corrupt prices refuse: a row that claims a field this
@@ -228,19 +251,19 @@ def test_allocator_refuses_rows_without_exact_price_or_wire_bytes():
         damaged = json.loads(json.dumps(costs))
         damage(damaged)
         picks, _record = tep.select_priced_unit_upgrades(
-            damaged, assignment, byte_budget=HEADROOM_BYTES)
+            damaged, assignment, byte_budget=budget)
         assert unit not in picks
-        assert len(picks) == EXPECTED_PICKS
+        assert len(picks) == expected_picks
 
 
 def test_allocator_refuses_non_integer_budget_or_reserve():
-    costs = _fixture_costs()
+    costs, cap, _delta = _small_priced_world()
     assignment = {unit: BASE_FMT for unit in costs}
-    for budget in (-1, float(HEADROOM_BYTES), True, "188331767"):
+    for budget in (-1, float(cap), True, str(cap)):
         with pytest.raises(ExpertProjectionError, match="byte_budget"):
             tep.select_priced_unit_upgrades(costs, assignment, byte_budget=budget)
     with pytest.raises(ExpertProjectionError, match="reserve_bytes"):
-        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=HEADROOM_BYTES,
+        tep.select_priced_unit_upgrades(costs, assignment, byte_budget=cap,
                                         reserve_bytes=1.5)
 
 
@@ -904,13 +927,17 @@ def test_routed_unit_rate_final_footprint_overflow_refuses_before_emission(tmp_p
 # The allocator record is the export accounting's price-row leg, honestly
 # ---------------------------------------------------------------------------
 def test_allocator_record_does_not_claim_whole_artifact_compliance():
-    costs = _fixture_costs()
+    costs, budget, delta = _small_priced_world()
     assignment = {unit: BASE_FMT for unit in costs}
-    _picks, record = tep.select_priced_unit_upgrades(costs, assignment,
-                                                     byte_budget=HEADROOM_BYTES)
+    picks, record = tep.select_priced_unit_upgrades(costs, assignment,
+                                                   byte_budget=budget)
+    expected_picks, remainder = divmod(budget, delta)
+    assert len(picks) == expected_picks
+    assert record["spent_wire_delta_bytes"] == expected_picks * delta
+    assert record["remaining_wire_delta_bytes"] == remainder
     assert record["whole_artifact_bytes_claimed"] is False
     assert "price_row_wire_delta_bytes" == record["currency"]
-    assert record["spend_cap_bytes"] == HEADROOM_BYTES
+    assert record["spend_cap_bytes"] == budget
     assert record["rule"].startswith("ascending predicted_dloss delta per wire-delta byte")
 
 
