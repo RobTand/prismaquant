@@ -98,7 +98,7 @@ def test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path
     if not fleet_src.is_dir():
         pytest.skip("PrismaBuild runtime source is not mounted on this box")
     sys.path.insert(0, str(fleet_src))
-    from prismabuild.core import validate_data_manifest
+    from prismabuild.data_manifest import validate_data_manifest
     assert validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
 
 
