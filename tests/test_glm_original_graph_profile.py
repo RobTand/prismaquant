@@ -86,7 +86,13 @@ def test_source_mutation_and_digest_refuse_and_close(tmp_path, mutation):
                 alternate.write_bytes(b'payload')
                 alternate.replace(path)
             elif mutation == 'modify':
+                baseline = path.stat()
                 path.write_bytes(b'changed')
+                # Immediate same-size writes can share automatic timestamps.
+                # Make stat freshness drift explicit without changing the inode.
+                os.utime(path, ns=(baseline.st_atime_ns,
+                                   baseline.st_mtime_ns + 1_000_000_000))
+                assert path.stat().st_mtime_ns != baseline.st_mtime_ns
             source.require_unchanged()
     assert not source.fds
 
