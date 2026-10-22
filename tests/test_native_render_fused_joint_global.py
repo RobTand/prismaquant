@@ -660,7 +660,9 @@ def test_export_witness_refusal_distinguishes_view_and_metadata_changes(
         # Only permissions/ctime change. The payload and its inode stay put.
         mode = shard.stat().st_mode & 0o777
         shard.chmod(0o600 if mode != 0o600 else 0o644)
-        assert shard.stat().st_ctime_ns != published[4]
+        # Arrange ctime-only drift even when timestamp observations collide.
+        published = list(file_stat_signature(shard.lstat()))
+        published[4] -= 1
     key = ("entry", "NVFP4")
     cache = ProductionWeightCache(
         weights={key: shard.name}, levers={}, cache_dir=str(tmp_path),
