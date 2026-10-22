@@ -129,10 +129,10 @@ def _published_pb():
         pytest.skip(f"published PrismaBuild not visible at {PUBLISHED_PB_SRC}")
     if str(PUBLISHED_PB_SRC) not in sys.path:
         sys.path.insert(0, str(PUBLISHED_PB_SRC))
-    import prismabuild.core as core
-    import prismabuild.storage_tiers as tiers
+    import prismabuild.data_manifest as data_manifest
+    import prismabuild.manifest_layout as manifest_layout
     import prismabuild.residency_plan as plans
-    for module in (core, tiers, plans):
+    for module in (data_manifest, manifest_layout, plans):
         if not Path(module.__file__).resolve().is_relative_to(
                 PUBLISHED_PB_SRC.resolve()):
             # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
@@ -141,7 +141,7 @@ def _published_pb():
                 f"a different prismabuild is already imported: {module} -- it shadows the "
                 "published generation under test; the interpreter carries a stale "
                 "prismabuild (PQ #1109)")
-    return core, tiers, plans
+    return data_manifest, manifest_layout, plans
 
 
 # -- the v2 table (fails on base: v1 shape, ascending order) --------------
@@ -228,10 +228,10 @@ def test_generated_plan_is_interoperable_with_published_pb():
     the sealed residency ranges (a dropped phase is a phase the window
     never stages), and driving the phases in order keeps `accepted` true
     with `remaining` shrinking from the reported phase -- never a reset."""
-    core, tiers, plans = _published_pb()
+    data_manifest, manifest_layout, plans = _published_pb()
     manifest = _manifest()
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
+    normalized = data_manifest.validate_data_manifest(manifest)
+    ranges = manifest_layout.manifest_phase_ranges(normalized)
     plan_names = [entry["name"] for entry in ranges]
     read_names = [phase["name"] for phase in normalized["read_plan"]["phases"]]
     assert plan_names == read_names
