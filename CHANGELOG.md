@@ -136,6 +136,7 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- Record the six guarded-read, serializer write-sink, consumed-size and BLAKE2b scientific-seed digest sites as evidenced retentions in the #2540 census. Remove their eligible cohorts and require matching caller/owner source identities before relying on the manifest; hashing, read guards, seeds and wire formats remain unchanged (#2637).
 - **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
   `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
   `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
