@@ -14201,7 +14201,7 @@
     },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24",
@@ -14322,7 +14322,7 @@
     },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
@@ -133407,22 +133407,6 @@
     ]
    },
    {
-    "id": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/shipcard.py",
-    "calls": [
-     "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18"
-    ]
-   },
-   {
-    "id": "dual-span-stream:hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/shipcard.py",
-    "calls": [
-     "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24"
-    ]
-   },
-   {
     "id": "json-publication:supplemental-json:prismaquant/shipcard.py::_verify_route_sweep_record@3147:27",
     "epic": "prismaquant#2542",
     "module": "prismaquant/shipcard.py",
@@ -138255,7 +138239,7 @@
    },
    "supplemental_calls": 275,
    "mutable_modules": 203,
-   "eligible_cohorts": 652,
+   "eligible_cohorts": 650,
    "calls_by_disposition": {
     "migrate-exact-route": 270,
     "retain": 27,

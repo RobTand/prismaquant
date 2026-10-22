@@ -115,6 +115,27 @@ def test_primitive_digest_sites_only_shrink(root_inventory):
         "with tools/duplication_inventory.py --write-baseline")
 
 
+def test_digest_census_cohorts_match_eligible_calls():
+    """Retained calls must not remain in the eligible migration inventory."""
+    census = ROOT / "docs/audits/digest_site_census_pq1301_2026-10-04.json"
+    fresh = json.loads(census.read_text(encoding="utf-8"))["refresh_2540"]
+    rows = fresh["calls"] + fresh["supplemental_calls"]
+    cohorts = fresh["contract_cohorts"]
+    members = [call_id for cohort in cohorts for call_id in cohort["calls"]]
+    eligible = {row["id"] for row in rows if row["eligible"]}
+    assert len(members) == len(set(members)), "duplicate cohort member"
+    assert set(members) == eligible, {
+        "ineligible_members": sorted(set(members) - eligible),
+        "missing_members": sorted(eligible - set(members)),
+    }
+    assert fresh["summary"]["eligible_cohorts"] == len(cohorts)
+    cohort_by_call = {
+        call_id: cohort["id"] for cohort in cohorts for call_id in cohort["calls"]
+    }
+    for row in rows:
+        assert row["cohort"] == cohort_by_call.get(row["id"]), row["id"]
+
+
 def test_the_digest_site_ratchet_fails_on_a_new_raw_site_and_passes_the_owner(tmp_path):
     """RED/GREEN for the gate itself: one raw site outside the owners fails.
 
