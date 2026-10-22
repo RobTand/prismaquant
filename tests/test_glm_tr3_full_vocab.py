@@ -890,12 +890,19 @@ def test_teacher_window_single_read_holds_one_window_on_the_host(tmp_path):
     size = descriptor["bytes"]
 
     def peak(load):
-        tracemalloc.start()
+        started_tracing = not tracemalloc.is_tracing()
+        if started_tracing:
+            tracemalloc.start()
         try:
+            # Exclude both historical peaks and live allocations (including
+            # arrays retained from the previous measurement) from this load.
+            tracemalloc.reset_peak()
+            baseline = tracemalloc.get_traced_memory()[0]
             value = load()
-            return tracemalloc.get_traced_memory()[1], value
+            return tracemalloc.get_traced_memory()[1] - baseline, value
         finally:
-            tracemalloc.stop()
+            if started_tracing:
+                tracemalloc.stop()
 
     single, _ = peak(lambda: served.load_teacher_window(path, descriptor))
     double, _ = peak(lambda: np.load(io.BytesIO(path.read_bytes()), allow_pickle=False))
