@@ -498,7 +498,11 @@ def attention_census(*, base_census, base_census_ref, units, counts, max_abs, gr
     census = calibration_census(
         counts, max_abs, args=args, groups=groups, dense_targets=sorted(units),
         expert_targets=[], shapes=units,
-        identity={key: base_census[key] for key in ("text_sha256", "fit_ids_sha256")},
+        identity={
+            **{key: base_census[key] for key in ("text_sha256", "fit_ids_sha256")},
+            **({"calibration_input": base_census["calibration_input"]}
+               if "calibration_input" in base_census else {}),
+        },
         expert_projection=expert_projection,
         model_load_contract=model_load_contract,
         attention_implementation=attention_implementation, capture_runtime=capture_runtime,

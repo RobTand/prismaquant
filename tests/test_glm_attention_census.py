@@ -72,8 +72,10 @@ def _base_census(model):
             "counts": {"body_a": 262144, "body_b": 13}}
 
 
-def _write_base(tmp_path, model):
+def _write_base(tmp_path, model, calibration_input=None):
     base = _base_census(model)
+    if calibration_input is not None:
+        base["calibration_input"] = calibration_input
     path = tmp_path / "body-census.json"
     path.write_text(json.dumps(base, indent=2, sort_keys=True) + "\n")
     ref = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -90,12 +92,26 @@ def _attention_census(base, ref, units):
         capture_runtime=_runtime(), expert_projection=None), counts
 
 
-def test_derived_census_names_base_draw_and_full_attention_scope(tmp_path):
+@pytest.mark.parametrize("calibration_input", [None, {
+    "schema": "prismaquant.calibration_input.v1",
+    "artifact_sha256": "a" * 64,
+    "provenance": {"source": "attention-fixture", "nsamples": 512, "seqlen": 512,
+                   "seed": 0, "text_sha256": "corpus", "fit_ids_sha256": "ids"},
+}], ids=["sampled", "immutable-input"])
+def test_derived_census_names_base_draw_and_full_attention_scope(tmp_path, calibration_input):
     """The derived census links the base draw by digest and covers exactly the
     attention units, while its row pair stays the base draw's."""
     units = _attention_units()
-    base, ref = _write_base(tmp_path, tmp_path / "source")
+    base, ref = _write_base(tmp_path, tmp_path / "source", calibration_input)
     census, counts = _attention_census(base, ref, units)
+    tc.require_census_draw(census, base, where="same attention draw")
+    if calibration_input is None:
+        assert "calibration_input" not in census
+    else:
+        assert census["calibration_input"] == calibration_input
+        other_draw = dict(base, calibration_input=dict(calibration_input, artifact_sha256="b" * 64))
+        with pytest.raises(RuntimeError, match="calibration input receipt differs"):
+            tc.require_census_draw(census, other_draw, where="different attention draw")
     assert census["attention_extension"]["base_census"] == ref
     assert census["attention_extension"]["base_census"]["sha256"] == ref["sha256"]
     assert set(census["counts"]) == set(units)
@@ -128,8 +144,8 @@ def test_body_census_without_flags_stays_byte_identical():
 
 
 def test_attention_capture_holds_one_h_row_per_unit(tmp_path):
-    """The published capture seals one H table per listed attention unit, each
-    measured over the base draw the census names."""
+    """Publication round-trip for supplied H tables; measurement over the full
+    draw is covered separately in test_glm_attention_measurement.py."""
     torch.manual_seed(0)
     units = _attention_units()
     source = tmp_path / "source"
