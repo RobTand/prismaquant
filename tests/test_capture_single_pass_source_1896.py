@@ -278,11 +278,12 @@ def test_retained_pages_go_after_the_last_consumer(tmp_path, monkeypatch):
         assert owner.release_retained_pages(keep=[second]) == ()
         assert owner.release_retained_pages() == (second.name,)
         owner.authenticate_complete_source()  # config.json: nobody reads it
-        config_fd = owner._files['config.json']['fd']
+        held = [state['fd'] for state in owner._files.values()]
         assert owner.receipt()['released_files'] == [first.name, second.name]
         advised.clear()
-    # Nothing the owner retained outlives it.
-    assert advised == [(config_fd, 0, 0, os.POSIX_FADV_DONTNEED)]
+    # Close rereads even previously released files. Nothing it pages back in
+    # outlives it; these small fixtures need only the final tail advice.
+    assert advised == [(fd, 0, 0, os.POSIX_FADV_DONTNEED) for fd in held]
     # A capture without the bounded page policy leaves page cache alone.
     advised.clear()
     with cc.record_capture_source(census, model=source) as owner:

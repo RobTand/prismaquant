@@ -428,9 +428,9 @@ class CaptureSourceAuthentication:
         to (the chain prep's seal), carried on its receipt.
 
         ``release_read_pages`` is the bounded capture's page policy: retained
-        pages are dropped after a file's last consumer and at close. A payload
-        hash never drops them block by block, because the tensor reads that
-        follow it are the ones that need them.
+        pages are dropped after a file's last consumer and at close. An admission
+        hash keeps them for the tensor reads that follow it. The final close
+        reread instead releases its pages block by block.
         """
         self = cls.__new__(cls)
         self._setup(root, producer_source, manifest_sha256=binding_sha256,
@@ -898,8 +898,10 @@ class CaptureSourceAuthentication:
     def _verify_held_content(self, name, state):
         """Reread held bytes once and refuse on digest mismatch (PQ #2010).
 
-        Only the owner close calls this, once per file, so the extra read
-        cost is bounded by the admission cost whatever the lease count.
+        Only the owner close calls this, once per file, so the extra I/O is
+        one pass over fresh authenticated bytes whatever the lease count.
+        Completion callers must close successfully before publishing. The
+        reread honors page release even for files the traversal released.
         Lease exits and JSON reads keep the cheap stat fence only. The
         admission digest comes from the read that consumes the file
         (:meth:`_authenticate`), so no separate read happens at admission.
@@ -918,7 +920,7 @@ class CaptureSourceAuthentication:
             return
         with state['lock']:
             observed = sha256(self.root/name, file_descriptor=state['fd'],
-                resource_check=self.resource_check, release_read_pages=False)
+                resource_check=self.resource_check, release_read_pages=self.release_read_pages)
             if observed != state['sha256']:
                 raise RuntimeError(f'authenticated source changed during consumption: {name}')
 
@@ -1346,11 +1348,11 @@ class CaptureSourceAuthentication:
         finally:
             self._closed = True
             for name, state in self._files.items():
-                if (self.is_recording and self.release_read_pages
-                        and name not in self._released):
-                    # The bounded page policy's last word: nothing this
-                    # owner retained outlives it. Advice only, so a
-                    # failure to advise never leaks a descriptor.
+                if self._original is None and self.release_read_pages:
+                    # Cover the tail/exceptional reread for selected and
+                    # recording owners alike. Even a previously released file
+                    # may have been paged back in by close. Advice only: an
+                    # advice failure must never leak a descriptor.
                     try:
                         os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
                     except OSError:

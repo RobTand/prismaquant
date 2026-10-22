@@ -6631,8 +6631,12 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         # The files the forward never read (MTP sidecars, tokenizer assets)
         # are hashed now; every other digest was recorded by its read.
         source_receipt = source.authenticate_complete_source()
+        source_files = source.recorded_source_files()
+        # Snapshot evidence while open, then verify held bytes and release the
+        # owner before publishing a durable, reusable manifest (#2010).
+        source.close()
         receipt = writer.finish(model_load_contract=contract,
-                                source_files=source.recorded_source_files())
+                                source_files=source_files)
         _write_capture_load_execution(args, writer, guard=guard,
                                       resources=resources if guard is not None else None)
         from .cost_stage_checkpoint import atomic_write_bytes

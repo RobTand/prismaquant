@@ -539,6 +539,10 @@ class ChainQuantum:
                    "source_authentication": self.source_authentication.receipt()}
         if capture_binding is not None:
             payload["capture_binding"] = capture_binding
+        # A receipt is a snapshot, not the held-byte verification. A complete
+        # fragment is reusable by successors/join, so close must succeed before
+        # it becomes durable. Scope cleanup stays idempotent on every exit.
+        self.source_authentication.close()
         document = _seal(payload, where="capture chain fragment", field="fragment_sha256")
         path = fragment_path(self.root, self.start, self.stop)
         atomic_write_bytes(path, canonical_json_bytes(document, where="capture chain fragment") + b"\n")
