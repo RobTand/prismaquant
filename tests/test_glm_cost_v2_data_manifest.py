@@ -4,6 +4,8 @@ import copy
 from dataclasses import replace
 import hashlib
 import json
+import subprocess
+import sys
 
 import pytest
 import torch
@@ -124,16 +126,26 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
 
 
 def test_cost_v2_manifest_passes_published_prismabuild_validator(cost_fixture, monkeypatch):
-    """The published PB V2 validator is the final schema authority.
+    """The reviewed installed PB V2 validator is the final schema authority."""
+    from fleet_sdk import require_prismabuild_sdk
 
-    PrismaBuild is importable only where the fleet mount is present (PB
-    workers); hosted CI keeps every producer assertion above and skips here.
-    """
-    monkeypatch.syspath_prepend("/mnt/shared/prismabuild-fleet/repo/src")
-    core = pytest.importorskip("prismabuild.core")
+    require_prismabuild_sdk()
     fixture, prepared, budget = cost_fixture
     manifest = _build(fixture, prepared, budget)
-    assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+    # Isolated mode uses the installed SDK, not PYTHONPATH or a fleet source
+    # checkout. A child also keeps other tests' PB imports out of this gate
+    # and leaves the parent's public plugin import graph untouched.
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", '''
+import json, sys
+import prismabuild.core as core
+manifest = json.load(sys.stdin)
+assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+'''],
+        input=json.dumps(manifest), text=True, capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
