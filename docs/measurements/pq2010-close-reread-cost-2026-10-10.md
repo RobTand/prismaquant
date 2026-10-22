@@ -76,12 +76,13 @@ Observed: **124 passed, 2 failed, 2 CUDA skips**. Both failures are the CPU
 capture assertions: the installed Tessera lacks `_evidence_smoke_record`.
 This reproduces the review's dependency incompatibility, not a page-policy
 regression. No serving gate, test skip, or dependency pin was changed to
-conceal it. Their claimed end-to-end pass remains unverified in this arm.
+conceal it. At that stage their claimed end-to-end pass remained unverified
+in this arm; the fixture isolation and complete rerun below resolve that gap.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"83e7eb6cf518289713dfafc030569634adc59259c5b266f31035e0f63f5434d4","size":16124}},"operation":"ffc4ae8ff59b492fd34450e0c66eaa08ee3210df9d837771f12543a8ea2ba426","receipt":"36efac858c6419443022307a8aafda38af8b4a22625d9e7a540dcaad2d039931"}]
 
-Repaired targeted suite, excluding only those two known-incompatible CPU
-cases (CUDA cases still discover and skip normally):
+Earlier repaired targeted suite, excluding only those two known-incompatible
+CPU cases (CUDA cases still discover and skip normally):
 
 ```sh
 python -m pytest tests/test_capture_source_close_2010.py tests/test_capture_completion_2010.py tests/test_capture_single_pass_source_1896.py tests/test_selected_source_authentication.py tests/test_capture_layer_chain.py tests/test_automatic_capture_source_qualification.py tests/test_tessera_calibration_cache.py tests/test_docs_staleness.py tests/test_architecture_doc.py -q -k 'not (test_a_streamed_capture_reads_each_source_file_once and not cuda)' --basetemp="$TMPDIR/pytest"
@@ -92,10 +93,40 @@ Python 3.14 / CPU Torch arm. This is correctness evidence, not GPU
 qualification or a real-capture before/after cost measurement. #2606 already
 tracks the latter; no duplicate measurement issue is needed.
 
-Final focused/documentation check after the documentation edits:
+Earlier focused/documentation check after the completion/page-policy edits:
 `python -m pytest tests/test_capture_source_close_2010.py tests/test_capture_completion_2010.py tests/test_docs_staleness.py tests/test_architecture_doc.py -q --basetemp="$TMPDIR/pytest"`
 — **29 passed**.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"8f446e016fd118c5d1058a88faf5ebf91fff956d8fc757f1d68e29c60355f9bc","size":822}},"operation":"56d5db25ec568f915cf697d0e7c370318478c3f7a45d2e2dddb9ece6944259b2","receipt":"936680ea89debbed3d7d6bb8de7b1e66295b38436c080288a263f1da275274de"}]
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"399a8a1e0b79cb76490df4e0ae376f74fd089ed41dcd5d2432f7cf7bfa41e129","size":1306}},"operation":"d90e92f31c65f037ea01c4bc7efef94e2383c4369dd1c4d79b648a120de3fe31","receipt":"166cd01de93d6f70da88073a1182b7376c0601c20ccb991e1d7274e8e123f622"}]
+
+## Capture-fixture isolation and complete CPU verification
+
+The two CPU policy failures were reproduced again before changing the fixture:
+`python -m pytest tests/test_capture_single_pass_source_1896.py -q --basetemp="$TMPDIR/pytest"`
+returned **26 passed, 2 failed, 2 CUDA skips**, both failures naming the absent
+`_evidence_smoke_record` during the census, before capture assertions.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"b6823d751f015795eed32eb3fe0914a1042dc432ad2c28db5827e75dbf781942","size":15746}},"operation":"971f6a1b8ce6b3b914012deaa7bf827dc9895c99f4d90aefd2e408dd3db37fc0","receipt":"8a5b150ee837cb1451dd0725ce57fd8b1665c4ff3e0ada91567818b262efb7ce"}]
+
+The shared streamed-capture test helper now supplies a nominal E4M3 menu rung
+for census and capture instead of consulting unrelated serving admission.
+Only `campaign.expand_menus_for_targets` is replaced, scoped to those tests.
+The real expert-projection producer, traversal, source authentication, close
+reread, writer and receipt/hash-count assertions remain exercised. This is
+capture-integrity coverage, not a serving-route qualification. Production
+admission, the immutable-source refusal, dependency pins and skips are unchanged.
+
+Complete regression command, with no deselections:
+
+```sh
+python -m pytest tests/test_capture_single_pass_source_1896.py tests/test_selected_source_authentication.py tests/test_capture_layer_chain.py tests/test_automatic_capture_source_qualification.py tests/test_tessera_calibration_cache.py tests/test_capture_source_close_2010.py tests/test_capture_completion_2010.py tests/test_docs_staleness.py tests/test_architecture_doc.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **204 passed, 2 CUDA skips** on Python 3.14 / CPU Torch. Both CPU
+streaming policies reach their descriptor-backed two-hash, receipt and manifest
+assertions. This does not qualify GPU behavior or measure real-capture overhead;
+that before/after profile and the conditional ZFS snapshot path remain #2606.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"0228660d67b1f05243966bd9d1c729e8269947c23a8e12b11e663940c75c64b0","size":1292}},"operation":"b6597b0a3517881b920e9b02d9e3c6d336df181bd238a7a6ca0d81eaa65bef90","receipt":"eb31de4bf35c7017727b93c5d35f5ea53a0027005a544db906a9b2d1d94adedd"}]

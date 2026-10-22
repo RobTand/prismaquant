@@ -26,6 +26,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -590,6 +591,13 @@ def _reads_each_source_file_once(tmp_path, monkeypatch, policy, *, device):
     count stays two per file whatever the lease count.
     """
     from prismaquant import tessera_campaign as campaign
+    # Capture integrity is independent of serving-menu admission. Supply only
+    # the nominal rung needed by the real expert-projection producer, for both
+    # census and capture; this fixture does not qualify a serving route.
+    monkeypatch.setattr(campaign, 'expand_menus_for_targets',
+        lambda weights, targets, **kwargs: {
+            name: [SimpleNamespace(format_name='TESSERA_E4M3_K1_R1024')]
+            for name in targets})
     # Controlled legacy-mechanism fixture, not a qualified immutable provider.
     # The independent automatic-admission matrix exercises the real refusal.
     monkeypatch.setattr(cc, 'require_automatic_capture_source_recording', lambda: None)
