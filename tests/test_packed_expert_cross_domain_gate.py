@@ -190,12 +190,16 @@ def test_cross_domain_gate_reverts_to_rtn_when_gate_prefers_it(monkeypatch):
     import prismaquant.production_weight_cache as pwc
     monkeypatch.setattr(pwc, "score_render_error", rigged_score)
 
-    from prismaquant.export_native_compressed import (
-        _rtn_dequant_nvfp4,
+    from prismaquant.native_render_codec import (
+        rtn_dequant_nvfp4,
         compute_nvfp4_global_real,
+    )
+    from prismaquant.export_native_compressed import (
         _split_packed_expert_tensor,
     )
+    from prismaquant.native_render_levers import NativeRenderLevers
 
+    recipe = NativeRenderLevers.resolve({"gptq": True})
     cache, cov = _fill(model, calib, gate_calib_ids=gate)
 
     for full, entry in cov.items():
@@ -210,12 +214,13 @@ def test_cross_domain_gate_reverts_to_rtn_when_gate_prefers_it(monkeypatch):
         got = cache.get(full, fmt).float()
         for e in range(src.shape[0]):
             cands = [
-                compute_nvfp4_global_real(sp[e].float(), group_size=16)
+                compute_nvfp4_global_real(
+                    sp[e].float(), group_size=16, levers=recipe)
                 for _, sp in _split_packed_expert_tensor(src, pn, None)
             ]
             g = torch.stack(cands).max() if len(cands) > 1 else cands[0]
-            expected = _rtn_dequant_nvfp4(
-                src[e], group_size=16, global_real_override=g)
+            expected = rtn_dequant_nvfp4(
+                src[e], group_size=16, global_real_override=g, levers=recipe)
             assert torch.allclose(
                 got[e], expected.to(got.dtype), atol=2e-2, rtol=2e-2), (
                 f"{full} expert {e}: cached render is not the RTN dequant "

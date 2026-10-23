@@ -34,7 +34,7 @@ from safetensors.torch import load_file, save_file
 import torch
 
 from .cost_stage_checkpoint import canonical_json_sha256
-from .cost_streaming import (
+from .streamed_model_identity import (
     canonical_streamed_model_semantic_config,
     portable_streamed_model_content_identity,
     validate_streamed_model_identity,
@@ -856,6 +856,8 @@ def _validate_config_semantics(
     identity: Mapping[str, object],
 ) -> None:
     """Bind the live HF config semantics carried by the source identity."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     config_path = model_root / "config.json"
     before = (config_path.stat().st_size, _sha256_file(config_path))
     try:

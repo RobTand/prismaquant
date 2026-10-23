@@ -15,7 +15,8 @@ import torch
 
 from experiments.qdq_constant_residency import NAME, ROOT, sha, tensor_sha
 from prismaquant.calibration_data import load_calibration_input
-from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+from prismaquant.cost_streaming import build_streamed_causal_lm
+from prismaquant.streamed_model_identity import build_streamed_model_identity
 from prismaquant.joint_aura import SignedJointProjectionLease, source_execution_identity
 from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.model_profiles import detect_profile

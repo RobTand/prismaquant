@@ -46,7 +46,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant.joint_layer_quanta import adjoint_chain_phase_name  # noqa: E402
+from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)  # noqa: E402
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.joint_adjoint_slices import checkpoint_manifest_entry  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402

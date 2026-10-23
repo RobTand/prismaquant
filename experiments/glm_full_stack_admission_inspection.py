@@ -6,7 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from tools.dispatch_tessera_campaign import _streamed_resource_plan, partition_rows_by_fit
+from prismaquant.tessera_campaign_rows import streamed_resource_plan
+from tools.dispatch_tessera_campaign import partition_rows_by_fit
 
 
 def bound(path, expected):
@@ -25,7 +26,7 @@ def main():
     spec = bound(args.spec, args.spec_sha256)
     rows, selected = {}, []
     for index, (group, members) in enumerate(sorted(census['anchor_groups'].items())):
-        plan = _streamed_resource_plan(spec, census, members, selected_source=True)
+        plan = streamed_resource_plan(spec, census, members, selected_source=True)
         row = f'row-{index:04d}'
         rows[row] = dict(group=group, members=sorted(members), resources=plan,
             mem_gib_ceil=(plan['memory_bytes']+1024**3-1)//1024**3,

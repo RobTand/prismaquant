@@ -11,9 +11,9 @@ incremental_probe.resolve_linear_exclude.
 import re
 
 from prismaquant.incremental_probe import (
-    _BASE_LINEAR_EXCLUDE,
     resolve_linear_exclude,
 )
+from prismaquant.probe_inventory import BASE_LINEAR_EXCLUDE
 from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
 from prismaquant.model_profiles.default import DefaultProfile
 
@@ -21,8 +21,8 @@ from prismaquant.model_profiles.default import DefaultProfile
 def _composed(profile) -> str:
     extra = profile.probe_linear_exclude_extra()
     if extra:
-        return f"(?:{_BASE_LINEAR_EXCLUDE}|{extra})"
-    return _BASE_LINEAR_EXCLUDE
+        return f"(?:{BASE_LINEAR_EXCLUDE}|{extra})"
+    return BASE_LINEAR_EXCLUDE
 
 
 def test_default_profile_extra_is_empty():
@@ -71,4 +71,4 @@ def test_resolver_tolerates_profiles_without_hook(monkeypatch):
         pass
 
     monkeypatch.setattr(ip, "_detect_profile_for_shards", lambda _p: _Legacy())
-    assert resolve_linear_exclude("/nonexistent") == _BASE_LINEAR_EXCLUDE
+    assert resolve_linear_exclude("/nonexistent") == BASE_LINEAR_EXCLUDE

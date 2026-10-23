@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_wire as campaign_wire
 from test_tessera_hessian_reference_handoff import POLICY, handoff  # noqa: F401  (fixture)
 
 
@@ -39,11 +40,11 @@ def multi_unit_fixture():
 def run_level_identity(tc, names, weights, hessians, source, kwargs, bound):
     common = dict(weights=weights, acts={name: torch.ones(2, 2) for name in names},
                   hessians=hessians, menus=kwargs["menus"],
-                  args=SimpleNamespace(family_restriction=None),
+                  settings=dict(family_restriction=None),
                   calibration_identity=source.provenance, serving_scope=None,
                   static_scales=kwargs["static_scales"], static_scale_policy="fixture",
                   expert_projection=None)
-    return tc._campaign_checkpoint_identity(**common, bound_units=bound)
+    return tc.campaign_checkpoint_identity(**common, bound_units=bound)
 
 
 def anchor_templates(tc, names, weights, source, kwargs, bound):
@@ -316,7 +317,7 @@ def test_resumed_wire_receipts_verify_on_threads_in_adopt_order(monkeypatch):
             raise RuntimeError(f"refused {anchor.qname}")
         return dict(existing, verified=identity["i"], on=threading.current_thread().name)
 
-    monkeypatch.setattr(tc, "_checkpoint_wire_record", fake)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', fake)
     accepted = [row for row in pending if row[0].qname not in {"u2", "u4"}]
     records = tc._verify_wire_records_on_threads(accepted, "/wire", threads=3)
     assert [record["verified"] for record in records] == [0, 1, 3, 5]

@@ -15,7 +15,7 @@ from safetensors.torch import save_file
 
 from prismaquant import source_generation as sg, tessera_calibration_cache as cc
 from prismaquant.calibration_data import load_calibration_input
-from prismaquant.cost_streaming import build_streamed_model_identity
+from prismaquant.streamed_model_identity import build_streamed_model_identity
 from prismaquant.digests import canonical_json_sha256
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.staged_lease import LeaseRefused, resolve_context

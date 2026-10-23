@@ -97,9 +97,32 @@ def test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path
     fleet_src = Path("/mnt/shared/prismabuild-fleet/repo/src")
     if not fleet_src.is_dir():
         pytest.skip("PrismaBuild runtime source is not mounted on this box")
-    sys.path.insert(0, str(fleet_src))
-    from prismabuild.core import validate_data_manifest
-    assert validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+    from fleet_sdk import prismabuild_imports_restored
+
+    # Own the source graph even when a caller has already imported the installed
+    # SDK, and return that caller's modules and import path before leaving.
+    with prismabuild_imports_restored(detach=True):
+        sys.path.insert(0, str(fleet_src))
+        from prismabuild.data_manifest import validate_data_manifest
+        assert validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+
+
+def test_manifest_validator_restores_caller_imports(tmp_path):
+    """A caller's PB graph must neither select nor retain the source validator."""
+    from fleet_sdk import prismabuild_entries, require_prismabuild_sdk
+
+    require_prismabuild_sdk()
+    import prismabuild.core as core
+
+    package = sys.modules["prismabuild"]
+    before = prismabuild_entries()
+    path_before = list(sys.path)
+    test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path)
+    assert sys.path == path_before
+    after = prismabuild_entries()
+    assert after.keys() == before.keys()
+    assert all(after[name] is before[name] for name in before)
+    assert package.core is core
 
 
 def test_one_arm_omission_is_bitwise_equal_in_logits_and_fp64_kl(tmp_path):
@@ -118,15 +141,19 @@ def test_one_arm_omission_is_bitwise_equal_in_logits_and_fp64_kl(tmp_path):
         weight.copy_(replacement)
         outputs.append(torch.arange(12, dtype=torch.bfloat16).reshape(3, 4).float() @ weight.float().T)
     teacher = torch.tensor([[0.3, -0.1], [0.9, 0.4], [-0.5, 0.7]], dtype=torch.float32)
-    import ast
-    source = (G.PQ / "experiments/glm_tr3_full_vocab.py").read_text()
-    function = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "token_kl")
-    namespace = {"torch": torch}
-    exec(compile(ast.Module(body=[function], type_ignores=[]), "glm_tr3_full_vocab.py", "exec"), namespace)
-    token_kl = namespace["token_kl"]  # exactly the unchanged pinned KL, no second recipe
+    # Exercise the actual compatibility entry point, including its imports and
+    # delegation. Extracting only its AST body loses module import bindings.
+    from experiments.glm_tr3_full_vocab import token_kl
+    import runpy
+    old_token_kl = runpy.run_path(str(Path(__file__).resolve().parents[1] /
+                                    "fixtures" / "token_kl_old_2778.py"))["token_kl"]
     assert torch.equal(outputs[0].view(torch.uint8), outputs[1].view(torch.uint8))
-    assert torch.equal(token_kl(teacher, outputs[0], require_cuda=False).view(torch.uint8),
-                       token_kl(teacher, outputs[1], require_cuda=False).view(torch.uint8))
+    scores = [token_kl(teacher, output, require_cuda=False) for output in outputs]
+    assert torch.equal(scores[0].view(torch.uint8), scores[1].view(torch.uint8))
+    for output, score in zip(outputs, scores):
+        assert score.dtype == torch.float64
+        assert torch.equal(score.view(torch.uint8),
+                           old_token_kl(teacher, output, require_cuda=False).view(torch.uint8))
     print('BITWISE one-arm tiny BF16 forward + FP64 KL old-source-read/new-omission: equal')
 
 

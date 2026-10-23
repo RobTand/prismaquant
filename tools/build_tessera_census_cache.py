@@ -28,8 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.layer_config import (
-    LAYER_CONFIG_META_KEY, load_assignment, read_layer_config_metadata,
+    LAYER_CONFIG_META_KEY, canonicalize_assignment, layer_config_metadata, load_assignment,
 )
+from prismaquant.schemas import validate_layer_config_payload
 from prismaquant.tessera_census_cache import (
     census_layer_config, census_selected_cached_units_manifest,
     load_selected_wire_records, plan_layer_config_projection, selected_census_assignment,
@@ -103,10 +104,12 @@ def main(argv=None) -> int:
         if not args.layer_config_sha256:
             raise SystemExit("--layer-config needs --layer-config-sha256")
         layer_config = Path(args.layer_config)
-        _bound(args.layer_config, args.layer_config_sha256, "layer config")
+        config = json.loads(_bound(
+            args.layer_config, args.layer_config_sha256, "layer config"))
         shas["layer_config"] = args.layer_config_sha256
-    assignment = load_assignment(layer_config)
-    metadata = read_layer_config_metadata(layer_config)
+    validate_layer_config_payload(config, str(layer_config))
+    assignment = canonicalize_assignment(config)
+    metadata = layer_config_metadata(config)
 
     # Raises on any unit outside the census roster that is not BF16 passthrough;
     # the planner projection below is written only once that check has passed.
@@ -117,7 +120,7 @@ def main(argv=None) -> int:
         config_raw = Path(layer_config).read_bytes()
         if bytes_sha256hex(config_raw) != shas["layer_config"]:
             raise SystemExit(f"layer config {layer_config} changed after it was bound")
-        projected, plan_dropped = plan_layer_config_projection(json.loads(config_raw), cost)
+        projected, plan_dropped = plan_layer_config_projection(config, cost)
         if plan_dropped != outside:
             raise SystemExit(
                 f"plan layer config would drop {len(plan_dropped)} name(s), but "

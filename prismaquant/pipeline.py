@@ -11,8 +11,10 @@ executes them, and this module is not an executor (re-vet R23: no python port).
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import json
 import math
+import sys
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -317,6 +319,22 @@ def _key_pairs(*specs: str) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+_AURA_COST_SETTINGS = _key_pairs(
+        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
+        "NPROBES<-AURA_COST_NPROBES",
+        "NS<-AURA_COST_NSAMPLES",
+        "SL<-AURA_COST_SEQLEN",
+        "SEED<-AURA_COST_CALIB_SEED",
+        "DTYPE<-AURA_COST_DTYPE",
+        "AURA_COST_PROBE_MICROBATCH",
+        "AURA_COST_STREAMING",
+        "AURA_COST_CHECKPOINT_DIR",
+        *_HEAD_SETTINGS,
+        *_RENDER_SETTINGS,
+        *_CB_SERIALIZATION_SETTINGS,
+    )
+
+
 STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
     # --- probe / cost ------------------------------------------------------
     # The Fisher trace is a function of (model, calibration corpus, window
@@ -363,30 +381,11 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         *_RENDER_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
     ),
-    "aura-cost": _key_pairs(
-        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
-        "NPROBES<-AURA_COST_NPROBES",
-        "NS<-AURA_COST_NSAMPLES",
-        "SL<-AURA_COST_SEQLEN",
-        "SEED<-AURA_COST_CALIB_SEED",
-        "DTYPE<-AURA_COST_DTYPE",
-        "AURA_COST_STREAMING",
-        "AURA_COST_CHECKPOINT_DIR",
-        *_HEAD_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
-    ),
-    "aura-hybrid-cost": _key_pairs(
-        "MODEL_PATH", "DATASET", "FORMATS<-COST_FORMATS", "COST_MODE",
+    "aura-cost": _AURA_COST_SETTINGS,
+    "aura-hybrid-cost": _AURA_COST_SETTINGS + _key_pairs(
         "EXPERT_NS<-AURA_EXPERT_NSAMPLES",
         "EXPERT_SL<-AURA_EXPERT_SEQLEN",
-        # When streamed AURA is enabled, the empirical routed-expert tail is
-        # streamed and resumed too.  Its checkpoint path is the deterministic
-        # ``expert-empirical-cost`` child of AURA_COST_CHECKPOINT_DIR, so these
-        # two inputs fully bind that resume identity without a second knob.
-        "AURA_COST_STREAMING",
-        "AURA_COST_CHECKPOINT_DIR",
-        *_HEAD_SETTINGS,
-        *_CB_SERIALIZATION_SETTINGS,
+        "AURA_RAW_DIGEST",
     ),
     # --- CB lane -----------------------------------------------------------
     # The imatrix harvest reads the probe's activation cache; key it on what
@@ -425,11 +424,9 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         *_CB_SERIALIZATION_SETTINGS,
     ),
     # --- validated frontier ------------------------------------------------
-    # One JSON per Pareto point; the point's identity is in the filename, so
-    # the manifest keys the measurement conditions and the render env behind
-    # the weights being measured.
+    # Pareto labels can survive a changed allocation. Bind the request bytes.
     "frontier-kl-point": _key_pairs(
-        "MODEL_PATH", "FORMATS",
+        "MODEL_PATH", "FORMATS", "FRONTIER_REQUEST_DIGEST",
         "DATASET<-VALIDATED_FRONTIER_DATASET",
         "NS<-VALIDATED_FRONTIER_NSAMPLES",
         "SL<-VALIDATED_FRONTIER_SEQLEN",
@@ -438,6 +435,10 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
         "KL_SCOPE<-VALIDATED_FRONTIER_KL_SCOPE",
         *_RENDER_SETTINGS,
         *_CB_SERIALIZATION_SETTINGS,
+    ),
+    "assignment-kl": _key_pairs(
+        "MODEL_PATH", "FORMATS", "ASSIGNMENT_DIGEST", "DRAW_DIGEST", "MEASUREMENT_DIGEST", "MEASUREMENT_CACHE_DIGEST",
+        *_HEAD_SETTINGS, *_RENDER_SETTINGS, *_CB_SERIALIZATION_SETTINGS,
     ),
     # --- GGUF lane ---------------------------------------------------------
     # llama.cpp's converter reads only the checkpoint.
@@ -456,6 +457,142 @@ STAGE_SETTINGS_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
                                "PLAN_ASSIGNMENT_DIGEST",
                                *_TESSERA_SCOPE_SETTINGS),
 }
+
+
+def held_out_calibration_skip(
+    *, source: str, validation_source: str, validation_seqlen: int,
+    draws: Iterable[tuple[int, int, int]], requested_skip: int | None,
+    enforce: bool, tokenizer: Any = None, validation_samples: int = 32,
+) -> int:
+    """Extend the original selection prefix beyond every consumed source position."""
+    draws = tuple(draws)
+    if not draws or any(min(count, length) <= 0 for count, length, _seed in draws):
+        raise ValueError("calibration draw sizes must be positive")
+    if requested_skip is not None and requested_skip < 0:
+        raise ValueError("held-out skip must be nonnegative")
+    if not enforce or requested_skip == 0:
+        return max(count for count, _length, _seed in draws) if requested_skip is None else requested_skip
+    from prismaquant.digests import file_sha256hex
+    from prismaquant.calibration_data import load_calibration
+
+    if not Path(source).is_file() or not Path(validation_source).is_file():
+        raise ValueError("held-out source positions require a local calibration corpus")
+    if (Path(source).resolve() != Path(validation_source).resolve()
+            and file_sha256hex(source) != file_sha256hex(validation_source)):
+        raise ValueError(
+            "held-out corpora have no shared source-position domain. Use one local corpus, "
+            "or set VALIDATED_FRONTIER_SKIP_CALIB=0 for an independent held-out corpus."
+        )
+    if tokenizer is None or validation_samples <= 0 or validation_seqlen <= 0:
+        raise ValueError("held-out positions need a tokenizer and a positive selection draw")
+    boundary = -1
+    for count, length, seed in draws:
+        documents = []
+        load_calibration(tokenizer, source, count, length, calib_seed=seed,
+                         source_documents=documents)
+        boundary = max(boundary, max(document for row in documents for document in row))
+    skip = requested_skip or 0
+    while True:
+        documents = []
+        count = skip + validation_samples
+        ids = load_calibration(tokenizer, validation_source, count, validation_seqlen,
+                               calib_seed=42, source_documents=documents)
+        if ids.shape[0] != count or len(documents) != count:
+            raise ValueError(f"held-out corpus cannot supply {count} windows with source positions")
+        consumed_prefix = max((index + 1 for index, row in enumerate(documents)
+                               if min(row) <= boundary), default=0)
+        if consumed_prefix <= skip:
+            return skip
+        skip = consumed_prefix
+
+
+def _calibration_tokenizer(model: str):
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(
+        model, trust_remote_code=True, local_files_only=Path(model).exists())
+
+
+def calibration_draw_digest(model: str, source: str, samples: int, seqlen: int, seed: int) -> str:
+    from prismaquant.calibration_data import load_calibration
+    from prismaquant.perturbed_x_cache import calibration_data_hash
+
+    tokenizer = _calibration_tokenizer(model)
+    with redirect_stdout(sys.stderr):
+        ids = load_calibration(tokenizer, source, samples, seqlen, calib_seed=seed)
+    return calibration_data_hash(ids)
+
+
+def assignment_kl_measurement(
+    record_path: str | Path, assignment_path: str | Path, document: Mapping[str, Any],
+    *, draw_digest: str | None, cache_path: str | Path, record: bool = False,
+) -> tuple[float, float] | None:
+    """Read only a measurement bound to these assignment, draw and result bytes."""
+    from prismaquant.digests import bytes_sha256hex, file_sha256hex
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import canonicalize_assignment
+    from prismaquant.schemas import validate_layer_config_payload
+
+    path = Path(record_path)
+    if not path.is_file():
+        return None
+    record_bytes = path.read_bytes()
+    payload = json.loads(record_bytes)
+    if not isinstance(payload, Mapping):
+        return None
+    calibration = payload.get("calibration", {})
+    if not isinstance(calibration, Mapping):
+        return None
+    measured_draw = calibration.get("calib_hash")
+    if calibration.get("kl_scope") != "full_sequence" or not measured_draw:
+        return None
+    if record and draw_digest is None:
+        draw_digest = measured_draw
+    if measured_draw != draw_digest:
+        return None
+    assignment_bytes = Path(assignment_path).read_bytes()
+    assignment_payload = json.loads(assignment_bytes)
+    validate_layer_config_payload(assignment_payload, str(assignment_path))
+    assignment_digest = assignment_serialization_sha256(canonicalize_assignment(assignment_payload))
+    results = payload.get("results", [])
+    if not isinstance(results, list):
+        return None
+    rows = [row for row in results if isinstance(row, Mapping)
+            and row.get("assignment_sha256") == assignment_digest]
+    if not rows:
+        return None
+    kl, stderr = rows[0].get("kl_mean"), rows[0].get("kl_stderr", 0.0)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value < 0 for value in (kl, stderr)):
+        return None
+    projection, missing = _stage_request_projection("assignment-kl", document, overrides={
+        "ASSIGNMENT_DIGEST": bytes_sha256hex(assignment_bytes),
+        "DRAW_DIGEST": draw_digest,
+        "MEASUREMENT_DIGEST": bytes_sha256hex(record_bytes),
+        "MEASUREMENT_CACHE_DIGEST": file_sha256hex(cache_path),
+    })
+    if missing:
+        raise ValueError(f"assignment KL binding lacks settings: {missing}")
+    manifest = Path(str(path) + ".settings.json")
+    if record:
+        _record_stage_settings(manifest, "assignment-kl", projection)
+    elif (not manifest.is_file()
+          or _load_stage_manifest(manifest).get("stages", {}).get("assignment-kl") != projection):
+        return None
+    return float(kl), float(stderr)
+
+
+def frontier_request_digest(base: str | Path, candidate: str | Path, corpus: str | Path) -> str:
+    """Bind canonical assignments and corpus bytes; stage keys own draw geometry."""
+    from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import load_assignment
+
+    assignment_digests = [assignment_serialization_sha256(load_assignment(path))
+                          for path in (base, candidate)]
+    return DIRECT_UTF8_STRICT.sha256([
+        *assignment_digests,
+        file_sha256hex(corpus) if Path(corpus).is_file() else str(corpus),
+    ])
 
 
 def parse_settings(pairs: Iterable[str]) -> dict[str, str]:
@@ -487,9 +624,19 @@ def stage_settings_projection(
             "pipeline.STAGE_SETTINGS_KEYS (known: "
             f"{sorted(STAGE_SETTINGS_KEYS)})"
         ) from None
+    if stage in {"aura-cost", "aura-hybrid-cost"}:
+        streaming = settings.get("AURA_COST_STREAMING")
+        if streaming in {"1", "true", "True", "TRUE", "yes", "Yes", "YES", "on", "On", "ON"}:
+            settings = dict(settings, AURA_COST_STREAMING="1")
+        elif streaming in {"0", "false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF"}:
+            settings = dict(settings, AURA_COST_STREAMING="0")
     projection: dict[str, str] = {}
     unresolved: list[str] = []
     for manifest_key, source in keys:
+        if (stage in {"aura-cost", "aura-hybrid-cost"}
+                and source == "AURA_COST_PROBE_MICROBATCH"
+                and settings.get("AURA_COST_STREAMING") == "1"):
+            continue
         if (stage == "tessera-plan"
                 and (source in _TESSERA_SCOPE_SETTINGS or source == "PLAN_ASSIGNMENT_DIGEST")
                 and not settings.get(source)):
@@ -515,6 +662,38 @@ def stage_settings_document(settings: Mapping[str, str]) -> dict[str, Any]:
         "artifacts": artifacts,
         "unresolved": unresolved,
     }
+
+
+def _stage_request_projection(stage, document, *, overrides):
+    """Decode a current request and resolve it through the shared key owner."""
+    keys = STAGE_SETTINGS_KEYS.get(stage)
+    if keys is None:
+        raise ValueError(f"unknown settings-hash stage {stage!r}")
+    if not isinstance(document, Mapping) or document.get("schema") != STAGE_SETTINGS_SCHEMA:
+        raise ValueError(f"current settings request must use schema {STAGE_SETTINGS_SCHEMA}")
+    artifacts, pending = document.get("artifacts"), document.get("unresolved")
+    if not isinstance(artifacts, Mapping) or not isinstance(pending, Mapping):
+        raise ValueError("current settings request needs artifacts and unresolved mappings")
+    projection = artifacts.get(stage)
+    if not isinstance(projection, Mapping):
+        raise ValueError(f"current settings request has no {stage!r} projection mapping")
+    source_for_key = dict(keys)
+    if any(key not in source_for_key or not isinstance(value, str)
+           for key, value in projection.items()):
+        raise ValueError(f"current {stage!r} projection has unknown keys or non-string values")
+    unresolved = pending.get(stage, [])
+    if (not isinstance(unresolved, list)
+            or any(not isinstance(name, str) or name not in source_for_key.values()
+                   for name in unresolved)):
+        raise ValueError(f"current {stage!r} unresolved settings must name declared sources")
+    declared = dict(projection)
+    if overrides:
+        extra, _ = stage_settings_projection(stage, overrides)
+        declared.update(extra)
+    supplied = {source: declared[key] for key, source in keys if key in declared}
+    declared, missing = stage_settings_projection(stage, supplied)
+    unresolved = [name for name in unresolved if name not in (overrides or {})]
+    return declared, [*unresolved, *missing]
 
 
 def _load_stage_manifest(path: Path) -> dict[str, Any]:
@@ -619,12 +798,10 @@ def check_stage_settings(
       Tessera plans are the exception: an old plan cannot be bound to a new
       allocation by recording today's hash after translation already happened.
     """
-    declared = dict((document.get("artifacts") or {}).get(stage) or {})
-    unresolved = list((document.get("unresolved") or {}).get(stage) or [])
-    if overrides:
-        extra, still_missing = stage_settings_projection(stage, overrides)
-        declared.update(extra)
-        unresolved = [name for name in unresolved if name not in overrides]
+    try:
+        declared, unresolved = _stage_request_projection(stage, document, overrides=overrides)
+    except ValueError as exc:
+        return 2, [f"[pipeline] ERROR: {stage}: {exc}"]
     if unresolved:
         return 2, [
             f"[pipeline] ERROR: {stage}: settings-hash key(s) "
@@ -644,6 +821,13 @@ def check_stage_settings(
             legacy = stored.get("legacy")
             if isinstance(legacy, Mapping) and set(legacy) == set(declared):
                 prev = dict(legacy)
+        if stage == "frontier-kl-point" and (
+            prev is None or _unverified_reuse_record(prev) is not None
+        ):
+            return 2, [
+                f"[pipeline] ERROR: {stage}: {artifact_path} has no recorded "
+                "measurement input binding; rebuild this point before reuse."
+            ]
         if stage == "tessera-plan":
             # Tessera's gate is an allocation-content BINDING, never an
             # admission. A plan has already been translated, so nothing
@@ -1688,11 +1872,62 @@ def main(argv: list[str] | None = None) -> int:
         help="Guard one skip-if-exists artifact against its recorded "
              "settings. Requires --stage-settings/--artifact/--stage.",
     )
+    ap.add_argument("--calibration-hash", nargs=5, metavar=("MODEL", "DATASET", "N", "SL", "SEED"))
+    ap.add_argument("--assignment-kl")
+    ap.add_argument("--assignment-path")
+    ap.add_argument("--measurement-cache")
+    ap.add_argument("--assignment-kl-mode", choices=("bind", "reuse"), default="reuse")
+    ap.add_argument("--draw-digest")
+    ap.add_argument("--held-out-calibration-skip", action="store_true")
+    ap.add_argument("--calibration-draw", nargs=3, type=int, action="append", default=[])
     ap.add_argument("--stage-settings", metavar="PATH", default=None,
                     help="Path written by --write-stage-settings.")
     ap.add_argument("--artifact", metavar="PATH", default=None)
     ap.add_argument("--stage", metavar="ID", default=None)
     args = ap.parse_args(argv)
+
+    if args.calibration_hash:
+        model, source, samples, seqlen, seed = args.calibration_hash
+        print(calibration_draw_digest(model, source, int(samples), int(seqlen), int(seed)))
+        return 0
+
+    if args.assignment_kl:
+        try:
+            document = json.loads(Path(args.stage_settings).read_text())
+            measured = assignment_kl_measurement(
+                args.assignment_kl, args.assignment_path, document,
+                draw_digest=args.draw_digest, cache_path=args.measurement_cache,
+                record=args.assignment_kl_mode == "bind")
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print(f"[pipeline] additivity measurement has no matching binding: {exc}", file=sys.stderr)
+            return 0
+        if measured is not None:
+            print(*measured)
+        return 0
+
+    if args.held_out_calibration_skip:
+        settings = parse_settings(args.setting)
+        try:
+            with redirect_stdout(sys.stderr):
+                skip = held_out_calibration_skip(
+                    source=settings["DATASET"],
+                    validation_source=settings["VALIDATED_FRONTIER_DATASET"],
+                    validation_seqlen=int(settings["VALIDATED_FRONTIER_SEQLEN"]),
+                    draws=args.calibration_draw,
+                    requested_skip=(int(settings["VALIDATED_FRONTIER_SKIP_CALIB"])
+                                    if settings.get("VALIDATED_FRONTIER_SKIP_CALIB") else None),
+                    enforce=settings["SELECTION_MODE"] == "validated-surrogate",
+                    tokenizer=(_calibration_tokenizer(settings["MODEL_PATH"])
+                               if (settings["SELECTION_MODE"] == "validated-surrogate"
+                                   and settings.get("VALIDATED_FRONTIER_SKIP_CALIB") != "0") else None),
+                    validation_samples=(int(settings["VALIDATED_FRONTIER_NSAMPLES"])
+                                        * int(settings["VALIDATED_FRONTIER_CALIB_REPEATS"])),
+                )
+        except (KeyError, ValueError, OSError, RuntimeError) as exc:
+            print(f"[pipeline] ERROR: {exc}", file=sys.stderr)
+            return 2
+        print(skip)
+        return 0
 
     if args.check_frontier_materialization:
         if args.frontier_materialization is None:

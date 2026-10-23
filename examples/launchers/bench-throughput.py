@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Throughput benchmark for the v22/v23 MiniMax-M2.7 artifact.
 
-Drives a few representative prompt sizes through vLLM's
-/v1/completions endpoint and reports decode tok/s + prefill latency.
-Compare against the prior low-bit custom-kernel baseline noted in
-session_2026_04_24_3stream_win.md.
+Drives a few prompt sizes through vLLM's nonstreaming /v1/completions endpoint.
+Reports whole-request latency and completion tokens per elapsed second,
+including prefill and HTTP overhead. It does not isolate decode throughput.
 
 Run after `launch-minimax-v21-vllm-serve.sh`.
 """
@@ -43,7 +42,7 @@ def time_one(prompt: str, max_tokens: int) -> dict:
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "wall_s": elapsed,
-        "decode_tok_s": completion_tokens / elapsed if elapsed > 0 else 0.0,
+        "request_completion_tok_s": completion_tokens / elapsed if elapsed > 0 else 0.0,
     }
 
 
@@ -75,13 +74,12 @@ def main() -> int:
             f"prompt={m['prompt_tokens']:4d} "
             f"completion={m['completion_tokens']:4d} "
             f"wall={m['wall_s']:6.2f}s "
-            f"decode={m['decode_tok_s']:5.2f} tok/s"
+            f"request completion={m['request_completion_tok_s']:5.2f} tok/s"
         )
 
     print("\n[bench] reference: old custom low-bit baseline = 3.78 tok/s "
           "(session_2026_04_24_3stream_win memory)")
-    print("[bench] expectation: native NVFP4 + FP8_SOURCE should "
-          "be in similar ballpark or better")
+    print("[bench] compare that reference only if its timing includes the same request work")
     return 0
 
 

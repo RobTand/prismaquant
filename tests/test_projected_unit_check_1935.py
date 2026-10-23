@@ -1,15 +1,17 @@
-"""The projected-unit byte check compares on the device, one sync per pass (PQ #1935).
+"""The projected-unit tensor check compares on the device, one sync per pass (PQ #1935).
 
 ``_checked_projected_units`` read each unit's source tensor and copied the
 live view to the host (``.cpu()``) to compare it there: one device sync and
 one pageable allocation per unit, thousands per GLM-5.3 layer, with the GPU
 idle at ~15 W. It now stages the source bytes to the live tensor's device and
-reads every unit's verdict with one sync. The refusal is unchanged: a byte
-mismatch anywhere refuses with ``PROJECTED_BYTES_REFUSAL``, naming each unit.
+reads every unit's verdict with one sync. Shape, dtype and tensor-value
+mismatches refuse with ``PROJECTED_BYTES_REFUSAL``, naming each unit.
+The retained host equality semantics accept opposite signed zeros and
+reject matching NaNs; this is not bitwise equality.
 
-``_reference_check_unit`` and ``_reference_checked_units`` are the old
-pair verbatim, from ``prismaquant/tessera_campaign.py`` at f5869e0c; only
-their names (and the one call between them) changed.
+``_reference_check_unit`` and ``_reference_checked_units`` retain the old
+comparison logic from ``prismaquant/tessera_campaign.py`` at f5869e0c, with
+renamed local calls and updated documentation.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from prismaquant.tessera_campaign import (
 
 def _reference_check_unit(name, unit, *, live, model_path, source,
                           release_source_pages=False, source_authentication=None):
-    """Read one unit's source tensor and compare it byte-for-byte with ``live``.
+    """Read one unit's source tensor and compare its shape, dtype and values.
 
     Returns ``None`` when the two are equal, else the mismatch description the
     refusal names. The bytes read are the shard the producer hashed, through

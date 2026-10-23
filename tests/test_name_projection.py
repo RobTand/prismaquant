@@ -24,6 +24,66 @@ from prismaquant.model_profiles.qwen3 import Qwen3Profile
 from prismaquant.model_walk import WalkResult, walk_model
 
 
+def test_complete_serving_components_preserve_overlap_and_licence_kinds():
+    units = (
+        npx.ServingUnit("fused", "gate_up", ("gate", "up")),
+        npx.ServingUnit("packed", "experts", ("up", "down")),
+        npx.ServingUnit("fused", "absent_sibling", ("alone", "absent")),
+    )
+    components = npx.connected_serving_components(
+        ("gate", "up", "down", "alone"), units)
+    assert components[0].members == ("gate", "up", "down")
+    assert {unit.kind for unit in components[0].units} == {"fused", "packed"}
+    assert components[1].members == ("alone",)
+    assert components[1].units == ()
+
+
+def test_serving_components_keep_equal_rank_selection_order():
+    units = (npx.ServingUnit("fused", "pair", ("a", "b")),)
+    component, = npx.connected_serving_components(("b", "a"), units)
+    assert component.members == ("b", "a")
+
+
+def test_complete_roster_keeps_both_groups_for_an_overlapping_projection():
+    class Profile:
+        def fused_sibling_group(self, name):
+            return "gate_up" if name in {"gate", "up"} else None
+        def packed_expert_format_group(self, name):
+            return "experts" if name in {"up", "down"} else None
+    projection = npx.NameProjection(Profile())
+    roster = projection.serving_units(("gate", "up", "down"))
+    assert {(unit.kind, unit.members) for unit in roster} == {
+        (npx.GROUP_FUSED_SIBLINGS, ("gate", "up")),
+        (npx.UNIT_PACKED_MOE_EXPERTS, ("up", "down")),
+    }
+    assert projection.serving_components(("gate", "up", "down"))[0].members == (
+        "gate", "up", "down")
+    assert [unit.members for unit in projection.serving_units(
+        ("gate", "up", "down"), include_packed=False)] == [("gate", "up")]
+
+
+def test_native_leaf_metadata_fallback_does_not_add_allocator_couplings():
+    class Profile:
+        def fused_sibling_group(self, name):
+            return None
+        def fused_sibling_leaf_mapping(self):
+            return {"gate_up_proj": ("gate_proj", "up_proj")}
+        def packed_expert_format_group(self, name):
+            return "experts"
+    names = ("x.gate_proj", "x.up_proj", "x.down_proj")
+    projection = npx.NameProjection(Profile())
+    assert {unit.kind for unit in projection.serving_units(names)} == {
+        npx.UNIT_PACKED_MOE_EXPERTS}
+    native = projection.serving_components(names, fused_metadata_fallback=True)
+    assert {unit.kind for unit in native[0].units} == {
+        npx.GROUP_FUSED_SIBLINGS, npx.UNIT_PACKED_MOE_EXPERTS}
+    leaf_only_profile = Profile()
+    leaf_only_profile.fused_sibling_group = None
+    leaf_only = npx.NameProjection(leaf_only_profile).serving_components(
+        names, fused_metadata_fallback=True)
+    assert leaf_only == native
+
+
 # ---------------------------------------------------------------- fixtures
 
 

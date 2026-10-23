@@ -299,7 +299,8 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
         for _, _, entry in rows)
     if not claimed:
         return None
-    from .joint_aura import JOINT_AURA_COST_CURRENCY, validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import JOINT_AURA_COST_CURRENCY, validate_joint_aura_entry
+    from .glm_mtp import MTP_OBJECTIVE_SCHEMA
     from . import format_registry as fr
 
     if (provenance.get("cost_mode") != "aura"
@@ -318,6 +319,11 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
             operator = entry["joint_operator_identity"]
             if operator["qname"] != unit or operator["format"] != fmt:
                 raise ValueError("operator identity differs from its cost-table key")
+            # Body provenance cannot turn a separately measured MTP objective
+            # into a body price, even when every row shares that objective.
+            objective = entry["probe_identity"].get("objective")
+            if isinstance(objective, Mapping) and objective.get("schema") == MTP_OBJECTIVE_SCHEMA:
+                raise ValueError("MTP objective cannot be admitted as a body joint AURA price")
             current = entry["probe_identity_sha256"]
             if probe_identity is not None and current != probe_identity:
                 # Each row already validates its own bytes and sample moments.

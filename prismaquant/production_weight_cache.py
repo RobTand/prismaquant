@@ -15,8 +15,8 @@ quantization path:
     * joint NVFP4 fused-sibling globals (q/k/v share a per-tensor scale,
       gate/up share theirs)
     * calibrated `input_global_scale` per fused-sibling group
-      (max_abs(activations) / 6.0; the same value the export persists
-      to the artifact)
+      (448 * 6 / max_abs(activations), or legacy 6 / max_abs under the
+      explicit scale policy; export persists this reciprocal scale)
     * progressive local render gates using the shared mechanism order
       baseline -> format scale rule -> GPTQ -> optional scale_sweep;
       individual formats explicitly opt out of unsupported mechanisms,
@@ -34,12 +34,12 @@ quantization path:
     * retired input-axis rotation experiments are not part of the production
       cache path.
 
-  KNOWN GAPS (v2 work, NOT implemented):
-    * batched NVFP4 GPTQ + scale-sweep across same-shape Linears
-      (defaults-on in the export when activations are cached;
-      mathematically equivalent to scalar but ~3-8× faster on MoE)
-    * block-output match (post-GPTQ refinement against BF16 block output)
-    * any export-only refinements added after this docstring is written
+  PACKED EXPERTS:
+    * the default NVFP4 path batches fixed-damp GPTQ across a layer's experts;
+      it does not apply the dense JSO, act-order or damp-sweep passes
+    * per-expert rendering is an explicit alternative with its own recorded
+      mechanism metadata
+    * block-output match is archived and refused by native export
 
   FP8_DYNAMIC / BF16:
     * FP8_DYNAMIC is represented by the canonical FP8_E4M3 format name:
@@ -51,7 +51,7 @@ quantization path:
 PerturbedActivationCache installs `W_tilde` (and applies the calibrated
 `input_global_scale` on activations) instead of RTN-quantizing on the
 fly, so per-Linear probes, frontier validation, and polish gates use the
-same δw the export will deliver, modulo the v2 gaps above.
+stored candidate weights that export consumes.
 
 Usage:
 
@@ -67,7 +67,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from itertools import chain
 import hashlib
@@ -85,9 +85,16 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 
+import prismaquant.native_render_codec as _native_render_codec
+from .native_render_levers import NativeRenderLevers
+from .render_cache_paths import (
+    cache_weight_filename, require_injective_cache_filenames,
+)
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
-from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
+from prismaquant.cost_stage_checkpoint import (
+    atomic_write_bytes, publish_new_bytes, unique_temp_suffix,
+)
 from prismaquant.digests import (
     DIRECT_ASCII_INDENT2_LAX,
     DIRECT_UTF8_STRICT,
@@ -96,6 +103,7 @@ from prismaquant.digests import (
     canonical_json,
     text_sha256hex,
 )
+from prismaquant.file_identity import file_stat_signature
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -104,6 +112,7 @@ from prismaquant.render_score import (
     score_render_error,
 )
 from prismaquant.source_prefetch import prefetch_files_to_page_cache
+from prismaquant.name_projection import fused_sibling_group_key
 
 
 ACTIVATION_HOOK_SCOPE_SCHEMA = (
@@ -135,6 +144,31 @@ MTP_APPEND_SIDECAR_KEY = "mtp_append"
 PACKED_APPEND_SIDECAR_KEY = "packed_expert_append"
 PACKED_STREAMING_APPEND_SIDECAR_KEY = "packed_expert_streaming_append"
 PRE_GUARD_ADMISSION_SIDECAR_KEY = "pre_guard_admission"
+#: The streamed fill's claim on its directory (``claim_streamed_cache_directory``).
+STREAMED_FILL_SIDECAR_KEY = "streamed_fill"
+STREAMED_FILL_IDENTITY_SCHEMA = (
+    "prismaquant.production_weight_cache.streamed_fill_identity.v1"
+)
+#: Per-entry witness of the fused-sibling NVFP4 joint global.  Export
+#: re-derives a fused sibling's codes and FP8 block scales from the cached
+#: dequant under the joint global it recomputes, which reproduces the validated
+#: render only if the render used that same global.  The producer that renders
+#: an entry on a joint global records the exact float32 value here, keyed
+#: ``qname|FMT``, with the shard it published for the entry (its manifest name
+#: and file identity), or no shard for a render it held in memory.  A witness
+#: certifies only the bytes the cache serves while they are that shard
+#: (``nvfp4_joint_global_witness_problem``).  Streamed fills before 2026-10-16
+#: used the builder's ambient recipe for that global and recorded no witness
+#: (NATIVE-LEGACY-01); v1 witnesses named no shard, so a resume could attach
+#: one to bytes another producer wrote over its shard (N3-01).  Both refuse.
+NVFP4_JOINT_GLOBAL_WITNESS_KEY = "nvfp4_joint_global_witness"
+NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA = (
+    "prismaquant.production_weight_cache.nvfp4_joint_global_witness.v2"
+)
+_NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA_V1 = (
+    "prismaquant.production_weight_cache.nvfp4_joint_global_witness.v1"
+)
+NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME = "nvfp4_joint_global_witness.json"
 
 
 # Formats whose WEIGHT PLANE is the same artifact and must therefore get the
@@ -178,59 +212,6 @@ def _render_base_format(fmt: str) -> str:
     case-insensitively as its last probe (#218).  Do not paper over it here.
     """
     return str(fmt).strip().upper()
-
-
-def _cache_weight_leaf(qname: str) -> str:
-    """The mangled, filesystem-safe leaf body of a qualified name.
-
-    One home for the mangling (#2219): ``_cache_weight_filename`` spells the
-    shard leaf with it and ``require_injective_cache_filenames`` tests
-    injectivity against it, so the two can never disagree.
-    """
-    return str(qname).replace("/", "__").replace(".", "_")
-
-
-def _cache_weight_filename(qname: str, fmt: str) -> str:
-    return f"{_cache_weight_leaf(qname)}__{fmt}.pt"
-
-
-def require_injective_cache_filenames(
-    coordinates: Iterable[tuple[str, str]],
-    *,
-    where: str,
-) -> None:
-    """Refuse two render coordinates that share one cache filename (#2219).
-
-    The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
-    filesystem-safe, so distinct qualified names can share one shard leaf
-    (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
-    the bare tensor -- nothing in the file names the Linear it belongs to --
-    so two coordinates that land on one file would silently read and
-    overwrite each other's shard. The mangled spelling itself is load-bearing
-    (archive names, existing caches), so instead of changing it this fails
-    closed on the whole SET: call it where a cache directory is opened for a
-    model's rendered coordinate set, before any shard is written or read --
-    that is what covers resumes, pre-existing caches and concurrent
-    producers. Injectivity is filename-level over ``(qname, canonical
-    format)`` coordinates: ``layer.a`` and ``layer_a`` at two different
-    formats name two different files and are admitted -- the layout #1859
-    deliberately admits -- while the same pair at one format refuses.
-    Callers pass canonical formats; ``_check_rendered_cache_destinations``
-    canonicalizes the identity's ``"qname|FMT"`` pairs before delegating.
-    """
-    owners: dict[str, tuple[str, str]] = {}
-    for coordinate in sorted(
-        {(str(qname), str(fmt)) for qname, fmt in coordinates}
-    ):
-        filename = _cache_weight_filename(*coordinate)
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"{where}: coordinates {previous!r} and {coordinate!r} map "
-                f"to one rendered cache destination {filename!r}; the "
-                f"mangled leaf is not injective and the rendered shards "
-                f"would silently overwrite each other"
-            )
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -372,10 +353,10 @@ class ProductionWeightCache:
     PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE=0).  We store ``max_abs``
     directly here because that's the value the act-clip path needs;
     consumers convert via
-    ``export_native_compressed._nvfp4_input_global_scale_from_max_abs``.
+    ``native_render_codec.nvfp4_input_global_scale_from_max_abs``.
     """
     weights: dict[tuple[str, str], object]  # tensor OR str(path)
-    levers: dict[str, bool]
+    levers: dict[str, object]
     activation_max_abs: dict[str, float] | None = None
     failed: dict[tuple[str, str], str] | None = None
     cache_dir: str | None = None  # set when disk-streaming was used at fill time
@@ -406,6 +387,81 @@ class ProductionWeightCache:
             self.activation_max_abs = self.activation_scales
         elif self.activation_scales is None and self.activation_max_abs is not None:
             self.activation_scales = self.activation_max_abs
+
+    def require_source_checkpoint(
+        self, source_model: str | Path, *, where: str,
+        local_files_only: bool = False,
+    ) -> Path:
+        """Admit a checkpoint using this cache's declared producer render dtype.
+
+        Measurement dtype is independent. Return the resolved source root for
+        the caller's model load so a remote source is resolved only once.
+        """
+        from .streamed_model_identity import (
+            build_source_model_binding,
+            resolve_source_checkpoint_path,
+            validate_source_model_binding,
+        )
+
+        try:
+            producer = validate_source_model_binding(
+                (self.metadata or {}).get("source_binding"),
+                where=f"{where} production cache",
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc}; rebuild the production cache into a fresh --cache-dir"
+            ) from exc
+        root = resolve_source_checkpoint_path(
+            source_model, local_files_only=local_files_only,
+        )
+        self.require_source_binding(
+            build_source_model_binding(root, dtype=producer["effective_dtype"]),
+            where=where,
+        )
+        return root
+
+    def require_source_binding(self, expected_binding, *, where: str) -> None:
+        """Require this pickle's producer source before independent attachment."""
+        from .streamed_model_identity import validate_source_model_binding
+
+        expected = validate_source_model_binding(expected_binding, where=where)
+        metadata = self.metadata or {}
+        if "source_binding" not in metadata:
+            raise ValueError(
+                f"{where}: production cache has no source binding; rebuild "
+                "the production cache from the current source into a fresh --cache-dir"
+            )
+        try:
+            stored = validate_source_model_binding(
+                metadata["source_binding"], where=f"{where} production cache",
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc}; rebuild the production cache into a fresh --cache-dir"
+            ) from exc
+        difference = first_identity_difference(stored, expected)
+        if difference is not None:
+            field, cached, current = difference
+            raise ValueError(
+                f"{where}: production cache source binding differs at {field!r}: "
+                f"cached={identity_value_for_error(cached)} "
+                f"current={identity_value_for_error(current)}; rebuild the "
+                "production cache into a fresh --cache-dir"
+            )
+        if PRE_GUARD_ADMISSION_SIDECAR_KEY in metadata:
+            validate_pre_guard_admission(metadata[PRE_GUARD_ADMISSION_SIDECAR_KEY])
+            if "source_decode" in expected:
+                raise ValueError(
+                    f"{where}: native decode binding cannot verify pre_guard_admission "
+                    "shards admitted on trust; rebuild the production cache into "
+                    "a fresh --cache-dir"
+                )
+            print(
+                f"[prod-cache] WARNING: {where} uses pre_guard_admission "
+                "shards admitted on trust; their original source is unverified.",
+                flush=True,
+            )
 
     def enable_lru(self, max_bytes: int) -> None:
         """Bound the in-memory tensor footprint to ``max_bytes`` via LRU
@@ -451,7 +507,7 @@ class ProductionWeightCache:
             for key, value in list(self.weights.items()):
                 if not isinstance(value, torch.Tensor):
                     continue
-                fname = _cache_weight_filename(key[0], key[1])
+                fname = cache_weight_filename(key[0], key[1])
                 if (cache_dir / fname).is_file():
                     self.weights[key] = fname
                     compacted += 1
@@ -1204,9 +1260,9 @@ class ProductionWeightCache:
     ) -> dict[str, object]:
         """Prefetch rendered weights required by a concrete assignment.
 
-        ``require`` converts missing entries or resident-budget overflow into
-        a hard failure.  That is the production-safe mode for GPU-bound
-        recache/export runs because it prevents accidental NVMe streaming.
+        ``require`` admits the assignment against both the caller's budget
+        and the cache's LRU cap, and succeeds only with every selected entry
+        resident. Missing entries or insufficient capacity are hard failures.
         """
         keys, missing = self.assignment_keys(assignment)
         nbytes = self.estimate_nbytes(keys)
@@ -1215,6 +1271,11 @@ class ProductionWeightCache:
             if max_resident_bytes is not None and int(max_resident_bytes) > 0
             else None
         )
+        if require and self._lru_order is not None and self._lru_max_bytes > 0:
+            budget = (
+                min(budget, self._lru_max_bytes)
+                if budget is not None else self._lru_max_bytes
+            )
         stats: dict[str, object] = {
             "keys": len(keys),
             "missing": len(missing),
@@ -1252,7 +1313,16 @@ class ProductionWeightCache:
                 f"{len(keys)} entries, {nbytes / 1024**3:.2f} GiB",
                 flush=True,
             )
+        if require:
+            # Selected residents must outlive unrelated entries when the
+            # missing selected tensors are admitted through the same LRU.
+            for key in keys:
+                if isinstance(self.weights.get(key), torch.Tensor):
+                    self.get_resident(*key)
         loaded = self.prefetch(keys, max_workers=max_workers)
+        if require:
+            for key in keys:
+                self.get_resident(*key)
         stats["loaded"] = int(loaded)
         if progress:
             print(
@@ -1332,7 +1402,6 @@ class ProductionWeightCache:
 
     @staticmethod
     def _file_signature(value):
-        from .file_identity import file_stat_signature
         return file_stat_signature(value)
 
     @staticmethod
@@ -1797,6 +1866,90 @@ class ProductionWeightCache:
                 f"sample={samples}"
             )
 
+    def witness_nvfp4_joint_global(
+        self,
+        qname: str,
+        fmt: str,
+        joint_global: torch.Tensor,
+        shard: PublishedShard | None,
+    ) -> None:
+        """Record the joint global this producer just rendered an entry on.
+
+        Only the code that rendered ``(qname, fmt)`` may call this, with the
+        shard ``_store_rendered_weight_entry`` returned for that render; see
+        ``NVFP4_JOINT_GLOBAL_WITNESS_KEY``.
+        """
+        from prismaquant import format_registry as fr
+
+        key = (str(qname), fr.canonical_format_name(str(fmt).strip().upper()))
+        if self.metadata is None:
+            self.metadata = {}
+        witnesses = nvfp4_joint_global_witnesses(
+            self.metadata, where="ProductionWeightCache")
+        witnesses[key] = NVFP4JointGlobalWitness(
+            _nvfp4_joint_global_value(joint_global, where=f"{key[0]}@{key[1]}"),
+            shard,
+        )
+        self.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+            nvfp4_joint_global_witness_section(witnesses)
+        )
+
+    def witnessed_nvfp4_joint_global(
+        self, name: str, fmt: str, *, where: str,
+    ) -> float:
+        """The joint global the producer of the bytes this cache serves witnessed.
+
+        Call it after reading the entry: a witness that still binds the entry
+        then shows the bytes read are its producer's render
+        (``nvfp4_joint_global_witness_problem``). Refuses an entry with no
+        witness, or with a witness those bytes do not satisfy.
+        """
+        key = self.resolve_key(name, fmt)
+        entry = f"{name}@{fmt}" if key is None else f"{key[0]}@{key[1]}"
+        witness = (
+            None if key is None
+            else nvfp4_joint_global_witnesses(self.metadata, where=where).get(key)
+        )
+        if witness is None:
+            raise RuntimeError(
+                f"{where} entry {entry} carries no fused-sibling joint-global "
+                "witness: no producer recorded the joint global its cached "
+                "dequant was rendered on for the shard this cache holds. That "
+                "covers caches built before shard-bound witnesses, shards "
+                "resumed or appended without one, and witnesses a resume "
+                "could not bind to the shard on disk. Re-render the production "
+                "cache into a fresh --cache-dir. If a current resident fill was "
+                "interrupted after publishing this shard, remove only that "
+                "unwitnessed shard and resume with the matching "
+                "render_identity.json. Resuming without removing it keeps "
+                "the unwitnessed shard and refuses again."
+            )
+        value = self.weights[key]
+        served = (
+            (self._lru_paths or {}).get(key)
+            if isinstance(value, torch.Tensor) else str(value)
+        )
+        problem = nvfp4_joint_global_witness_problem(
+            witness,
+            served=served,
+            path=None if served is None else Path(self._path_for_value(served)),
+        )
+        if problem is not None:
+            raise RuntimeError(
+                f"{where} entry {entry}: {problem}. The cache cannot show "
+                "these bytes are the render its producer witnessed. For a "
+                "device-only mismatch, read through the writer's view or an "
+                "NFS client mount; otherwise re-render the production cache "
+                "into a fresh --cache-dir. Only resident-fill directories "
+                "support removing the affected shard and resuming with the "
+                "matching render_identity.json. Streamed fills cannot resume. "
+                "Rebuild an exact union from its verified input stripes at "
+                "the final export location. For a copied cache, export from "
+                "the original directory; copies do not retain fused witnesses."
+            )
+        return witness.joint_global
+
+
 class _LinearActivationCollector:
     """Hook every quantizable nn.Linear's input on a forward pass.
 
@@ -1949,52 +2102,10 @@ class _LinearActivationCollector:
         return out
 
 
-@contextmanager
-def _temporarily_install_act_aware(
-    activations: Mapping[str, torch.Tensor],
-    levers: Mapping[str, object],
-):
-    """Install module-level state expected by ``_quantize_2d``.
-
-    The export module reads ``_CACHED_ACTIVATIONS`` and ``_ACT_AWARE_FLAGS``
-    from its own globals to decide what passes to run.  We mutate these
-    inside a try/finally so concurrent export work isn't disturbed.
-    """
-    from prismaquant import export_native_compressed as enc
-
-    prev_cache = enc._CACHED_ACTIVATIONS
-    prev_flags = dict(enc._ACT_AWARE_FLAGS)
-    prev_scale_rule = enc._NVFP4_SCALE_RULE
-    enc._CACHED_ACTIVATIONS = _DictActivations(activations)
-    enc._ACT_AWARE_FLAGS = {
-        "gptq": bool(levers.get("gptq", True)),
-        "scale_sweep": bool(levers.get("scale_sweep", False)),
-        "static_act_order": bool(levers.get("static_act_order", False)),
-        "joint_scale_opt": bool(levers.get("joint_scale_opt", False)),
-    }
-    enc._NVFP4_SCALE_RULE = enc.resolve_nvfp4_scale_rule(
-        str(levers.get("nvfp4_scale_rule", "static_6"))
-    )
-    try:
-        yield
-    finally:
-        enc._CACHED_ACTIVATIONS = prev_cache
-        enc._ACT_AWARE_FLAGS.clear()
-        enc._ACT_AWARE_FLAGS.update(prev_flags)
-        enc._NVFP4_SCALE_RULE = prev_scale_rule
 
 
-class _DictActivations:
-    """`.get(name)` shim matching `_LazyActivationCache`'s interface."""
 
-    def __init__(self, mapping: Mapping[str, torch.Tensor]):
-        self._mapping = mapping
 
-    def get(self, name: str) -> torch.Tensor | None:
-        a = self._mapping.get(name)
-        if a is None and name.endswith(".weight"):
-            a = self._mapping.get(name[:-7])
-        return a
 
 
 class _FisherRowWeightCache:
@@ -2094,21 +2205,14 @@ def _fused_sibling_leaf_mapping_from_profile(profile) -> dict[str, tuple[str, ..
     getter = getattr(profile, "fused_sibling_leaf_mapping", None)
     if not callable(getter):
         return {}
-    try:
-        mapping = getter()
-    except Exception:
-        return {}
+    mapping = getter()
     return {
         str(fused): tuple(str(member) for member in members)
         for fused, members in (mapping or {}).items()
     }
 
 
-def _damp_sweep_enabled() -> bool:
-    # lazy import: production_weight_cache <-> export_native_compressed
-    # are mutually lazy to avoid import cycles
-    from prismaquant.export_native_compressed import gptq_damp_sweep_enabled
-    return gptq_damp_sweep_enabled()
+
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -2134,16 +2238,21 @@ def _env_float(name: str, default: float, *, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
-@contextmanager
-def _temporary_nvfp4_scale_rule(rule: str):
-    from prismaquant import export_native_compressed as enc
 
-    previous = enc._NVFP4_SCALE_RULE
-    enc._NVFP4_SCALE_RULE = enc.resolve_nvfp4_scale_rule(rule)
-    try:
-        yield
-    finally:
-        enc._NVFP4_SCALE_RULE = previous
+
+class PublishedShard(NamedTuple):
+    """One rendered shard as its producer published it in a cache directory.
+
+    ``name`` is the value the cache manifest stores for the entry (resolved
+    against ``cache_dir``). ``stat`` is ``file_identity.file_stat_signature``
+    of the published file object, read through the descriptor the publisher
+    holds across its rename, so it names the inode that producer wrote even
+    when another writer replaces the path immediately afterwards.
+    """
+
+    name: str
+    stat: tuple[int, int, int, int, int]
+
 
 def _store_rendered_weight_entry(
     *,
@@ -2155,7 +2264,8 @@ def _store_rendered_weight_entry(
     weight_dtype: torch.dtype,
     durable: bool = False,
     preserve_fp32: bool = False,
-) -> None:
+) -> PublishedShard | None:
+    """Store one rendered entry; return the shard published, or ``None`` in memory."""
     from prismaquant import format_registry as fr
 
     fmt = fr.canonical_format_name(str(fmt).strip().upper())
@@ -2164,32 +2274,42 @@ def _store_rendered_weight_entry(
         weight_dtype=weight_dtype,
         preserve_fp32=preserve_fp32,
     )
-    if cache_dir_path is not None:
-        fname = _cache_weight_filename(qname, fmt)
-        final_path = cache_dir_path / fname
-        # Per-process staging: a fan-out that re-renders a cell another writer
-        # is publishing must not share its inode. The suffix adds exactly one
-        # dot so torch's archive name -- and the published bytes -- are the
-        # same as the legacy ``<fname>.tmp`` save (``unique_temp_suffix``).
-        tmp_path = cache_dir_path / (fname + unique_temp_suffix())
-        torch.save(stored, tmp_path)
-        if durable:
-            fd = os.open(tmp_path, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        os.replace(tmp_path, final_path)
-        if durable:
-            directory_fd = os.open(cache_dir_path, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        weights[(qname, fmt)] = fname
-        del stored
-    else:
+    if cache_dir_path is None:
         weights[(qname, fmt)] = stored
+        return None
+    fname = cache_weight_filename(qname, fmt)
+    final_path = cache_dir_path / fname
+    # Per-process staging: a fan-out that re-renders a cell another writer
+    # is publishing must not share its inode. The suffix adds exactly one
+    # dot so torch's archive name -- and the published bytes -- are the
+    # same as the legacy ``<fname>.tmp`` save (``unique_temp_suffix``).
+    tmp_path = cache_dir_path / (fname + unique_temp_suffix())
+    torch.save(stored, tmp_path)
+    fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        if durable:
+            os.fsync(fd)
+        os.replace(tmp_path, final_path)
+        published = PublishedShard(fname, file_stat_signature(os.fstat(fd)))
+    finally:
+        os.close(fd)
+    if durable:
+        directory_fd = os.open(cache_dir_path, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    weights[(qname, fmt)] = fname
+    del stored
+    return published
+
+
+def _rendered_weight_storage_dtype(
+    weight_dtype: torch.dtype, *, preserve_fp32: bool = False,
+) -> torch.dtype:
+    return (
+        weight_dtype if preserve_fp32 or weight_dtype != torch.float32 else torch.bfloat16
+    )
 
 
 def _canonical_rendered_weight_tensor(
@@ -2197,6 +2317,7 @@ def _canonical_rendered_weight_tensor(
     *,
     weight_dtype: torch.dtype,
     preserve_fp32: bool = False,
+    device: torch.device | str = "cpu",
 ) -> torch.Tensor:
     """Return the exact tensor representation a cache shard would contain.
 
@@ -2205,12 +2326,11 @@ def _canonical_rendered_weight_tensor(
     the wider temporary, so its scalar describes the bytes later installed by
     validation/export.
     """
-    target_dtype = (
-        weight_dtype if preserve_fp32 or weight_dtype != torch.float32 else torch.bfloat16
-    )
+    target_dtype = _rendered_weight_storage_dtype(
+        weight_dtype, preserve_fp32=preserve_fp32)
     return tensor.detach().to(
         dtype=target_dtype,
-        device="cpu",
+        device=device,
     ).contiguous()
 
 @dataclass
@@ -2240,7 +2360,7 @@ def _render_score_for_gate(
     capture: mixing clipped optimization with unclipped gates biases
     accept-vs-RTN decisions near ties by the outlier rows — the exact
     mismatch export's shared-matrix contract
-    (``_activation_matrix_for_gptq``) exists to prevent.
+    (``activation_matrix_for_gptq``) exists to prevent.
     """
     if (
         activations is not None
@@ -2267,6 +2387,7 @@ def _render_score_for_gate(
 
 
 def _gate_activation_matrix(
+    levers: NativeRenderLevers,
     acts_for_render: torch.Tensor | None,
     cols: int,
     *,
@@ -2278,7 +2399,7 @@ def _gate_activation_matrix(
     """Return the clip-consistent activation matrix for progressive gates.
 
     Gates must score candidates under the objective GPTQ optimized: export's
-    ``_activation_matrix_for_gptq`` applies the quantile/threshold clip and
+    ``activation_matrix_for_gptq`` applies the quantile/threshold clip and
     the Fisher row weighting before the Hessian build ("intentionally shared
     by the Hessian build, damping sweep evaluator, and do-no-harm gate"), so
     the cache-fill gate reuses it with identical settings instead of scoring
@@ -2286,20 +2407,60 @@ def _gate_activation_matrix(
     """
     if acts_for_render is None:
         return None
-    from prismaquant import export_native_compressed as enc
 
-    return enc._activation_matrix_for_gptq(
+    return _native_render_codec.activation_matrix_for_gptq(
         acts_for_render,
         int(cols),
         device=device,
         clip_threshold=act_clip_threshold,
         clip_rescale=act_clip_rescale,
         row_weights=fisher_row_weights,
+        levers=levers,
     )
 
 
 def _render_score_record_key(qname: str, fmt: str) -> str:
     return f"{qname}|{fmt.upper()}"
+
+
+STORED_CANDIDATE_RENDER_SCORE_CONTRACT = (
+    "prismaquant.production_render_score.stored_candidate.v1"
+)
+_STORED_CANDIDATE_SCORE_DTYPES = {
+    str(dtype): dtype for dtype in (torch.bfloat16, torch.float16, torch.float32)
+}
+
+
+def _stored_candidate_render_score_dtype(record: object) -> torch.dtype | None:
+    if (not isinstance(record, Mapping)
+            or record.get("scoring_contract") != STORED_CANDIDATE_RENDER_SCORE_CONTRACT):
+        return None
+    dtype = record.get("rendered_weight_dtype")
+    return _STORED_CANDIDATE_SCORE_DTYPES.get(dtype) if isinstance(dtype, str) else None
+
+
+def _qualify_stored_candidate_render_score(
+    record: Mapping[str, object], *, scored_dtype: torch.dtype,
+) -> dict[str, object]:
+    """Stamp a score only after its producer scores the stored representation."""
+    return {
+        **record,
+        "scoring_contract": STORED_CANDIDATE_RENDER_SCORE_CONTRACT,
+        "rendered_weight_dtype": str(scored_dtype),
+    }
+
+
+def require_stored_candidate_render_score(
+    record: Mapping[str, object], *, where: str,
+) -> None:
+    """Refuse retained scalars that do not identify the candidate they priced."""
+    if _stored_candidate_render_score_dtype(record) is None:
+        raise ValueError(
+            f"{where}: render score lacks the supported stored-candidate scoring "
+            "contract and scored dtype; resume the production-cache producer "
+            "with the original source and calibration to rescore stored shards, "
+            "or rebuild the cache before synthesizing costs"
+        )
 
 
 def _render_score_normalizer(
@@ -2329,6 +2490,7 @@ def _render_score_record(
     activations: torch.Tensor | None,
     activation_max_abs: float | None,
     input_global_scale_policy: str | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, object]:
     raw_score, raw_metric = _render_score_for_gate(
         reference_weight.detach().to(torch.float32),
@@ -2390,6 +2552,7 @@ def _render_score_record(
                     activations=activations,
                     activation_quantize=activation_quantize,
                     activation_max_abs=activation_clip_max,
+                    apply_calibrated_clip=levers.production_activation_scales,
                 )
             )
         except Exception as exc:
@@ -2557,6 +2720,7 @@ def _local_forward_render_score(
     activation_quantize,
     activation_max_abs: float | None,
     row_chunk: int = 128,
+    apply_calibrated_clip: bool = True,
 ) -> tuple[float, str, bool, bool]:
     rows, cols = reference_weight.shape
     if rendered_weight.shape != reference_weight.shape:
@@ -2571,7 +2735,7 @@ def _local_forward_render_score(
     if (
         activation_max_abs is not None
         and float(activation_max_abs) > 0
-        and _env_flag("PRISMAQUANT_PROD_ACT_SCALES", True)
+        and apply_calibrated_clip
     ):
         x_quant_input = x.clamp(-float(activation_max_abs), float(activation_max_abs))
         clipped = True
@@ -2642,6 +2806,225 @@ def _write_render_score_sidecar(
     os.replace(tmp, path)
 
 
+class NVFP4JointGlobalWitness(NamedTuple):
+    """The joint global one producer rendered a fused NVFP4 entry on.
+
+    ``shard`` is the shard that producer published for the entry, or ``None``
+    for a render it stored in memory.
+    """
+
+    joint_global: float
+    shard: PublishedShard | None
+
+
+def nvfp4_joint_global_witnesses(
+    metadata: Mapping[str, object] | None,
+    *,
+    where: str,
+) -> dict[tuple[str, str], NVFP4JointGlobalWitness]:
+    """``(qname, fmt)`` -> the witness of the joint global that entry rendered on.
+
+    Metadata without the section witnesses nothing. A present section is read
+    exactly: an unknown schema, a malformed key, a joint global that is not a
+    positive finite number or a malformed shard refuses instead of witnessing
+    nothing. A v1 section, which named no shard, refuses by name.
+    """
+    section = (
+        None if metadata is None
+        else metadata.get(NVFP4_JOINT_GLOBAL_WITNESS_KEY)
+    )
+    if section is None:
+        return {}
+    if (
+        isinstance(section, Mapping)
+        and section.get("schema") == _NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA_V1
+    ):
+        raise ValueError(
+            f"{where}: {NVFP4_JOINT_GLOBAL_WITNESS_KEY} is schema v1, which "
+            "binds no witness to the shard its producer published; re-render "
+            "the production cache into a fresh --cache-dir"
+        )
+    records = section.get("records") if isinstance(section, Mapping) else None
+    if (
+        not isinstance(records, Mapping)
+        or set(section) != {"schema", "records"}
+        or section["schema"] != NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA
+    ):
+        raise ValueError(f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY}")
+    witnesses: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
+    for raw_key, value in records.items():
+        qname, separator, fmt = str(raw_key).rpartition("|")
+        record = value if isinstance(value, Mapping) else {}
+        joint_global = record.get("joint_global")
+        shard = record.get("shard")
+        shard_fields = shard if isinstance(shard, Mapping) else {}
+        name = shard_fields.get("name")
+        signature = shard_fields.get("stat")
+        if (
+            not isinstance(raw_key, str) or not separator or not qname
+            or not fmt or fmt != fmt.upper()
+            or not isinstance(value, Mapping)
+            or set(value) != {"joint_global", "shard"}
+            or isinstance(joint_global, bool)
+            or not isinstance(joint_global, (int, float))
+            or not math.isfinite(joint_global) or joint_global <= 0.0
+            or (shard is not None and (
+                not isinstance(shard, Mapping)
+                or set(shard) != {"name", "stat"}
+                or not isinstance(name, str) or not name
+                or not isinstance(signature, list) or len(signature) != 5
+                or any(type(part) is not int for part in signature)
+            ))
+        ):
+            raise ValueError(
+                f"{where}: malformed {NVFP4_JOINT_GLOBAL_WITNESS_KEY} record "
+                f"{raw_key!r}: {value!r}"
+            )
+        witnesses[(qname, fmt)] = NVFP4JointGlobalWitness(
+            float(joint_global),
+            None if shard is None else PublishedShard(name, tuple(signature)),
+        )
+    return witnesses
+
+
+def nvfp4_joint_global_witness_section(
+    witnesses: Mapping[tuple[str, str], NVFP4JointGlobalWitness],
+) -> dict[str, object]:
+    """The metadata and sidecar form of ``witnesses``."""
+    return {
+        "schema": NVFP4_JOINT_GLOBAL_WITNESS_SCHEMA,
+        "records": {
+            _render_score_record_key(qname, fmt): {
+                "joint_global": float(witness.joint_global),
+                "shard": (
+                    None if witness.shard is None
+                    else {
+                        "name": str(witness.shard.name),
+                        "stat": [int(part) for part in witness.shard.stat],
+                    }
+                ),
+            }
+            for (qname, fmt), witness in sorted(witnesses.items())
+        },
+    }
+
+
+def nvfp4_joint_global_witness_problem(
+    witness: NVFP4JointGlobalWitness,
+    *,
+    served: str | None,
+    path: Path | None,
+) -> str | None:
+    """Why ``witness`` does not certify the bytes served for its entry, or None.
+
+    ``served`` is the manifest value the cache serves the entry from (``None``
+    for an entry held in memory) and ``path`` its resolved file. A shard
+    witness holds while ``served`` names the shard its producer published and
+    that file still has the identity it was published with
+    (``file_identity.file_stat_signature``: device, inode, size, mtime and
+    ctime). The shared stat-fingerprint predicate admits a device-only
+    difference on NFS, whose device number identifies the client's mount.
+    Its dev-mode relaxation does not admit a different local device here.
+    Renaming, linking, unlinking, writing, truncating or changing the
+    attributes of a file updates its ctime on a local Linux filesystem, so an
+    unchanged identity means the published file has held the path, unmodified,
+    since its producer witnessed it: whatever read that path in between read
+    those bytes. It is not a content digest. A byte-identical copy is another
+    file and fails. Not seen: a change that bypasses the kernel's timestamp
+    update, a same-size rewrite or an inode reuse within one timestamp tick
+    of the publish, and a stale network-filesystem attribute cache.
+    """
+    from prismaquant.streamed_model_identity import (
+        stat_fingerprint, stat_fingerprint_reuse,
+    )
+
+    shard = witness.shard
+    if shard is None:
+        if served is None:
+            return None
+        return (
+            "its witness names an in-memory render, but the cache serves it "
+            f"from {served}"
+        )
+    if served is None:
+        return (
+            f"its witness names shard {shard.name}, but the cache holds the "
+            "entry in memory"
+        )
+    if str(served) != shard.name:
+        return (
+            f"its witness names shard {shard.name}, but the cache serves it "
+            f"from {served}"
+        )
+    try:
+        observed = path.lstat()
+    except OSError as exc:
+        return f"its shard {path} cannot be checked ({exc.strerror})"
+    recorded = dict(zip(
+        ("device", "inode", "size", "mtime_ns", "ctime_ns"), shard.stat,
+    ), path=str(path))
+    live = stat_fingerprint(path, observed)
+    reuse = stat_fingerprint_reuse(live, recorded)
+    if not stat.S_ISREG(observed.st_mode) or reuse not in {"exact", "mount"}:
+        changed = [field for field in recorded if live[field] != recorded[field]]
+        if stat.S_ISREG(observed.st_mode) and changed == ["device"]:
+            return (
+                f"its shard {path} does not match its published file identity: "
+                f"device-only mismatch ({live['device']} != {recorded['device']}). "
+                "A server-local filesystem view can cause this; check through "
+                "the writer's view or an NFS client mount"
+            )
+        return (
+            f"its shard {path} does not match its published file identity "
+            f"(changed fields: {', '.join(changed) or 'file type'}). "
+            "Replacement, content changes, hard links, permissions, ownership "
+            "or extended-attribute changes can invalidate a witness"
+        )
+    return None
+
+
+def _nvfp4_joint_global_value(joint_global: torch.Tensor, *, where: str) -> float:
+    """The exact float32 joint global a fused NVFP4 render was given."""
+    value = float(joint_global.detach().to(torch.float32).reshape(()).item())
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError(
+            f"{where}: fused NVFP4 joint global {value!r} is not positive and "
+            "finite"
+        )
+    return value
+
+
+def _load_nvfp4_joint_global_witness_sidecar(
+    path: Path | None,
+) -> dict[tuple[str, str], NVFP4JointGlobalWitness]:
+    """Witnesses an earlier run of the resident fill wrote for its own shards."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        section = json.loads(path.read_bytes().decode("utf-8"))
+        return nvfp4_joint_global_witnesses(
+            {NVFP4_JOINT_GLOBAL_WITNESS_KEY: section}, where=str(path),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"unreadable fused NVFP4 joint-global witness sidecar {path}: "
+            f"{exc}; refusing resume"
+        ) from exc
+
+
+def _write_nvfp4_joint_global_witness_sidecar(
+    path: Path | None,
+    witnesses: Mapping[tuple[str, str], NVFP4JointGlobalWitness],
+) -> None:
+    if path is not None:
+        atomic_write_bytes(
+            path,
+            DIRECT_UTF8_STRICT.encoded(
+                nvfp4_joint_global_witness_section(witnesses)
+            ),
+        )
+
+
 def _render_score_record_priced_scale(
     record: Mapping[str, object],
     *,
@@ -2703,9 +3086,10 @@ def _render_score_read_contract(record: Mapping[str, object]):
     the one owner of which contract that format carries, so the read resolves
     the same object the write priced through rather than a second expectation.
 
-    ``None`` (unknown format, no contract, or a registry that cannot answer) is
-    not an error here: the caller falls back to the process binding, which is
-    what a row with no contract-bound arithmetic was priced under.
+    ``None`` covers a legacy static-G record with no format name or a resolved
+    format with no static contract. A named format that cannot resolve, or a
+    contract that cannot be read, refuses rather than falling back to the
+    process binding.
     """
     fmt = record.get("format")
     if not isinstance(fmt, str) or not fmt:
@@ -3242,62 +3626,65 @@ def _render_nvfp4_progressive_candidate(
     include_gptq: bool,
     include_scale_sweep: bool,
 ) -> torch.Tensor:
-    from prismaquant import export_native_compressed as enc
 
-    with _temporary_nvfp4_scale_rule(scale_rule):
-        current = enc._rtn_dequant_nvfp4(
-            weight_scaled,
-            group_size=16,
-            global_real_override=joint_global_real,
-        )
-        if activations_scaled is None or activations_scaled.numel() == 0:
-            return current
-        if include_gptq:
-            if _damp_sweep_enabled():
-                current = enc._gptq_obs_rounding_nvfp4_swept(
-                    weight_scaled,
-                    activations_scaled,
-                    group_size=16,
-                    global_real_override=joint_global_real,
-                    clip_threshold=act_clip_threshold,
-                    clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
-                    static_act_order=bool(
-                        levers.get("static_act_order", False)
-                    ),
-                    joint_scale_opt=bool(
-                        levers.get("joint_scale_opt", False)
-                    ),
-                )
-            else:
-                current = enc._gptq_obs_rounding_nvfp4(
-                    weight_scaled,
-                    activations_scaled,
-                    group_size=16,
-                    damp=enc._resolve_gptq_damp_for_role(qname),
-                    global_real_override=joint_global_real,
-                    clip_threshold=act_clip_threshold,
-                    clip_rescale=act_clip_rescale,
-                    fisher_row_weights=fisher_row_weights,
-                    static_act_order=bool(
-                        levers.get("static_act_order", False)
-                    ),
-                    joint_scale_opt=bool(
-                        levers.get("joint_scale_opt", False)
-                    ),
-                )
-        if include_scale_sweep:
-            current = enc._scale_sweep_nvfp4(
-                current,
+    render_options = replace(NativeRenderLevers.resolve(levers, gptq_default=True), nvfp4_scale_rule=scale_rule)
+    current = _native_render_codec.rtn_dequant_nvfp4(
+        weight_scaled,
+        group_size=16,
+        global_real_override=joint_global_real,
+        levers=render_options,
+    )
+    if activations_scaled is None or activations_scaled.numel() == 0:
+        return current
+    if include_gptq:
+        if render_options.gptq_damp_sweep:
+            current = _native_render_codec.gptq_obs_rounding_nvfp4_swept(
+                weight_scaled,
                 activations_scaled,
                 group_size=16,
                 global_real_override=joint_global_real,
-                reference_weight=weight_scaled,
                 clip_threshold=act_clip_threshold,
                 clip_rescale=act_clip_rescale,
                 fisher_row_weights=fisher_row_weights,
+                static_act_order=bool(
+                    levers.get("static_act_order", False)
+                ),
+                joint_scale_opt=bool(
+                    levers.get("joint_scale_opt", False)
+                ),
+                levers=render_options,
             )
-        return current
+        else:
+            current = _native_render_codec.gptq_obs_rounding_nvfp4(
+                weight_scaled,
+                activations_scaled,
+                group_size=16,
+                damp=_native_render_codec.resolve_gptq_damp_for_role(qname, levers=render_options),
+                global_real_override=joint_global_real,
+                clip_threshold=act_clip_threshold,
+                clip_rescale=act_clip_rescale,
+                fisher_row_weights=fisher_row_weights,
+                static_act_order=bool(
+                    levers.get("static_act_order", False)
+                ),
+                joint_scale_opt=bool(
+                    levers.get("joint_scale_opt", False)
+                ),
+                levers=render_options,
+            )
+    if include_scale_sweep:
+        current = _native_render_codec.scale_sweep_nvfp4(
+            current,
+            activations_scaled,
+            group_size=16,
+            global_real_override=joint_global_real,
+            reference_weight=weight_scaled,
+            clip_threshold=act_clip_threshold,
+            clip_rescale=act_clip_rescale,
+            fisher_row_weights=fisher_row_weights,
+            levers=render_options,
+        )
+    return current
 
 
 def _render_nvfp4_progressively(
@@ -3312,12 +3699,12 @@ def _render_nvfp4_progressively(
     fisher_row_weights: torch.Tensor | None,
     gate_trace: list[dict[str, object]] | None,
 ) -> torch.Tensor:
-    from prismaquant import export_native_compressed as enc
 
-    requested_rule = enc.resolve_nvfp4_scale_rule(
+    render_options = NativeRenderLevers.resolve(levers, gptq_default=True)
+    requested_rule = _native_render_codec.resolve_nvfp4_scale_rule(
         str(levers.get("nvfp4_scale_rule", "static_6"))
     )
-    f6_enabled = requested_rule == enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+    f6_enabled = requested_rule == _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
     gptq_enabled = bool(levers.get("gptq", True))
     scale_sweep_enabled = bool(levers.get("scale_sweep", False))
     static_act_order_enabled = bool(
@@ -3334,16 +3721,11 @@ def _render_nvfp4_progressively(
         if enabled
     )
     gptq_scale_rule = (
-        enc.NVFP4_SCALE_RULE_JOINT_MSE
+        _native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE
         if joint_scale_opt_enabled
         else None
     )
-    min_gain = _env_float(
-        "PRISMAQUANT_RENDER_GATE_MIN_GAIN",
-        0.0,
-        lo=-1.0,
-        hi=1.0,
-    )
+    min_gain = render_options.render_gate_min_gain
 
     reference = weight.detach().to(device=weight.device, dtype=torch.float32)
     acts = activations.get(qname)
@@ -3355,9 +3737,9 @@ def _render_nvfp4_progressively(
     # Score gate candidates on the same clipped/weighted matrix the GPTQ
     # loop optimizes under (audit 2026-07-02 §3.9): the loop passes
     # act_clip_threshold/act_clip_rescale/fisher_row_weights into
-    # _activation_matrix_for_gptq, so the gate must too.
+    # activation_matrix_for_gptq, so the gate must too.
     acts_for_gate = _gate_activation_matrix(
-        acts_for_render,
+        render_options, acts_for_render,
         int(weight.shape[1]),
         device=weight.device,
         act_clip_threshold=act_clip_threshold,
@@ -3403,7 +3785,7 @@ def _render_nvfp4_progressively(
             has_gptq=bool(include_gptq),
         )
 
-    static_rule = enc.NVFP4_SCALE_RULE_STATIC_6
+    static_rule = _native_render_codec.NVFP4_SCALE_RULE_STATIC_6
     current = candidate(
         label="rtn_static_6",
         scale_rule=static_rule,
@@ -3476,7 +3858,7 @@ def _render_nvfp4_progressively(
             candidates=[
                 candidate(
                     label="four_over_six",
-                    scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                    scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                     package=("four_over_six",),
                     include_gptq=False,
                     include_scale_sweep=False,
@@ -3503,11 +3885,11 @@ def _render_nvfp4_progressively(
         if (
             f6_enabled
             and not joint_scale_opt_enabled
-            and current.scale_rule != enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+            and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
             packages.append(candidate(
                 label=f"four_over_six+{gptq_name}",
-                scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                 package=(
                     (*gptq_modifiers, "four_over_six", gptq_name, "gptq")
                     if gptq_name != "gptq" else
@@ -3547,7 +3929,7 @@ def _render_nvfp4_progressively(
         if (
             f6_enabled
             and not joint_scale_opt_enabled
-            and current.scale_rule != enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
+            and current.scale_rule != _native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE
         ):
             gptq_name = "fisher_gptq" if fisher_row_weights is not None else "gptq"
             include_gptq = bool(gptq_enabled)
@@ -3560,7 +3942,7 @@ def _render_nvfp4_progressively(
             pkg.append("scale_sweep")
             scale_candidates.append(candidate(
                 label="+".join(pkg),
-                scale_rule=enc.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
+                scale_rule=_native_render_codec.NVFP4_SCALE_RULE_FOUR_OVER_SIX_MSE,
                 package=tuple(pkg),
                 include_gptq=include_gptq,
                 include_scale_sweep=True,
@@ -3720,7 +4102,8 @@ def render_production_weight(
         "none",
     }:
         raise ValueError("activation clip rescaling is not supported")
-    progressive_gates = _env_flag("PRISMAQUANT_RENDER_PROGRESSIVE_GATES", True)
+    render_options = NativeRenderLevers.resolve(levers, gptq_default=True)
+    progressive_gates = render_options.render_progressive_gates
     if fmt in NVFP4_RENDER_EQUIVALENT and progressive_gates:
         return _render_nvfp4_progressively(
             weight,
@@ -3758,7 +4141,7 @@ def render_production_weight(
         # progressive path (audit 2026-07-02 §3.9): score under the matrix
         # the GPTQ/scale-sweep passes optimize on.
         acts_for_gate = _gate_activation_matrix(
-            acts_for_render,
+            render_options, acts_for_render,
             int(weight.shape[1]),
             device=weight.device,
             act_clip_threshold=act_clip_threshold,
@@ -3802,12 +4185,7 @@ def render_production_weight(
                 baseline_score=current.score,
                 candidate_score=best.score,
                 metric=best.metric,
-                min_relative_gain=_env_float(
-                    "PRISMAQUANT_RENDER_GATE_MIN_GAIN",
-                    0.0,
-                    lo=-1.0,
-                    hi=1.0,
-                ),
+                min_relative_gain=render_options.render_gate_min_gain,
             )
             if gate_trace is not None:
                 gate_trace.append({
@@ -3868,7 +4246,6 @@ def render_production_weight(
             and bool(levers.get("gptq", True))
             and acts_for_render is not None
         ):
-            from prismaquant import export_native_compressed as enc
 
             joint_scale_opt = bool(
                 levers.get("joint_scale_opt", False)
@@ -3884,7 +4261,7 @@ def render_production_weight(
                 ("gptq",)
             )
             use_damp_sweep = (
-                _damp_sweep_enabled()
+                render_options.gptq_damp_sweep
             )
 
             def _gptq_candidate(use_static_act_order: bool) -> _RenderedCandidate:
@@ -3898,7 +4275,7 @@ def render_production_weight(
                 )))
                 if fmt == "MXFP4":
                     if use_damp_sweep:
-                        _q, _s, candidate = enc._gptq_obs_rounding_mxfp4_swept(
+                        _q, _s, candidate = _native_render_codec.gptq_obs_rounding_mxfp4_swept(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3906,9 +4283,10 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
+                            levers=render_options,
                         )
                     else:
-                        _q, _s, candidate = enc._gptq_obs_rounding_mxfp4(
+                        _q, _s, candidate = _native_render_codec.gptq_obs_rounding_mxfp4(
                             reference,
                             acts_for_render,
                             group_size=32,
@@ -3916,9 +4294,10 @@ def render_production_weight(
                             clip_rescale=clip_rescale,
                             fisher_row_weights=fisher_row_weights,
                             static_act_order=use_static_act_order,
+                            levers=render_options,
                         )
                 elif use_damp_sweep:
-                    _q, _s, candidate = enc._gptq_obs_rounding_fp8_like_swept(
+                    _q, _s, candidate = _native_render_codec.gptq_obs_rounding_fp8_like_swept(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3928,9 +4307,10 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
+                        levers=render_options,
                     )
                 else:
-                    _q, _s, candidate = enc._gptq_obs_rounding_fp8_like(
+                    _q, _s, candidate = _native_render_codec.gptq_obs_rounding_fp8_like(
                         reference,
                         acts_for_render,
                         fmt=fmt,
@@ -3940,6 +4320,7 @@ def render_production_weight(
                         fisher_row_weights=fisher_row_weights,
                         joint_scale_opt=joint_scale_opt,
                         static_act_order=use_static_act_order,
+                        levers=render_options,
                     )
                 return _non_nv_candidate(
                     label=f"{fmt.lower()}+{'+'.join(package)}",
@@ -3962,29 +4343,31 @@ def render_production_weight(
             and acts_for_render is not None
         ):
             if fmt == "MXFP8_E4M3":
-                from prismaquant.export_native_compressed import (
-                    _mxfp8_scale_sweep_quantize,
+                from prismaquant.native_render_codec import (
+                    mxfp8_scale_sweep_quantize,
                 )
 
-                _, _, w_dq = _mxfp8_scale_sweep_quantize(
+                _, _, w_dq = mxfp8_scale_sweep_quantize(
                     current.weight.detach().to(torch.float32),
                     acts_for_render,
                     group_size=32,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
+                    levers=render_options,
                 )
             else:
-                from prismaquant.export_native_compressed import (
-                    _fp8_dynamic_scale_sweep_quantize,
+                from prismaquant.native_render_codec import (
+                    fp8_dynamic_scale_sweep_quantize,
                 )
 
-                _, _, w_dq = _fp8_dynamic_scale_sweep_quantize(
+                _, _, w_dq = fp8_dynamic_scale_sweep_quantize(
                     current.weight.detach().to(torch.float32),
                     acts_for_render,
                     clip_threshold=act_clip_threshold,
                     clip_rescale=clip_rescale,
                     fisher_row_weights=fisher_row_weights,
+                    levers=render_options,
                 )
             candidate = _non_nv_candidate(
                 label=f"{current.label}+scale_sweep",
@@ -4001,101 +4384,38 @@ def render_production_weight(
             return candidate.weight.contiguous()
         return current.weight.contiguous()
 
-    from prismaquant.export_native_compressed import _quantize_2d
+    from prismaquant.native_render_codec import (
+        quantize_2d,
+    )
 
-    with _temporarily_install_act_aware(activations, levers):
-        result = _quantize_2d(
-            weight.detach().clone(),
-            fmt="NVFP4",
-            linear_name=qname,
-            nvfp4_global_real_override=joint_global_real,
-            input_global_scale_override=input_global_scale,
-            act_clip_threshold=act_clip_threshold,
-            act_clip_rescale=clip_rescale,
-            fisher_row_weights=fisher_row_weights,
-            compute_only=True,
-        )
+    render_activations = activations.get(qname)
+    if render_activations is None and qname.endswith(".weight"):
+        render_activations = activations.get(qname[:-7])
+    result = quantize_2d(
+        weight.detach().clone(),
+        cached_activations=render_activations,
+        fmt="NVFP4",
+        linear_name=qname,
+        nvfp4_global_real_override=joint_global_real,
+        input_global_scale_override=input_global_scale,
+        act_clip_threshold=act_clip_threshold,
+        act_clip_rescale=clip_rescale,
+        fisher_row_weights=fisher_row_weights,
+        compute_only=True,
+        levers=render_options,
+    )
     w_dq = result["_w_dq"]
     return w_dq.to(device=weight.device, dtype=weight.dtype).contiguous()
 
 
-def _resolve_production_render_levers(
-    levers: Mapping[str, object] | None,
-) -> dict:
-    """Normalize a caller lever dict to the production render contract.
+def _resolve_production_render_levers(levers: Mapping[str, object] | None) -> dict:
+    """Resolve the shared resident/streamed native options once and record all."""
+    record = dict(levers or {})
+    record.pop("none", None)
+    record.update(NativeRenderLevers.resolve(
+        levers, gptq_default=True, optional_flags_from_env=True).record())
+    return record
 
-    Shared by ``fill_production_weight_cache`` (resident) and the streaming
-    driver so both apply IDENTICAL damp/JSO/act-order/scale-rule defaulting —
-    the rendered weights must be byte-identical between the two paths.
-    """
-    levers = dict(levers) if levers is not None else {}
-    default_optional_levers = not bool(levers.pop("none", False))
-    if not default_optional_levers:
-        for name in (
-            "gptq",
-            "scale_sweep",
-            "fisher_gptq",
-            "static_act_order",
-            "joint_scale_opt",
-        ):
-            levers.setdefault(name, False)
-    levers.setdefault("gptq", True)
-    levers.setdefault(
-        "gptq_damp_sweep",
-        bool(levers.get("gptq", True))
-        and _damp_sweep_enabled(),
-    )
-    if not levers["gptq_damp_sweep"]:
-        # Provenance: which fixed damp the no-sweep renders used
-        # (PRISMAQUANT_GPTQ_DAMP, default 0.01) — without this, two
-        # fixed-damp caches are metadata-indistinguishable.
-        from prismaquant.export_native_compressed import (
-            _resolve_gptq_fixed_damp,
-        )
-        levers.setdefault("gptq_fixed_damp", _resolve_gptq_fixed_damp())
-    levers.setdefault("scale_sweep", False)
-    levers.setdefault(
-        "static_act_order",
-        _env_flag("PRISMAQUANT_GPTQ_STATIC_ACT_ORDER", False),
-    )
-    levers.setdefault(
-        "joint_scale_opt",
-        _env_flag("PRISMAQUANT_NVFP4_JOINT_SCALE_OPT", False),
-    )
-    if not bool(levers.get("gptq", True)):
-        levers["static_act_order"] = False
-        levers["joint_scale_opt"] = False
-    levers.setdefault(
-        "fisher_gptq",
-        _env_flag("PRISMAQUANT_FISHER_WEIGHTED_GPTQ", False),
-    )
-    from prismaquant.export_native_compressed import (
-        NVFP4_SCALE_RULE_ENV,
-        NVFP4_SCALE_RULE_JOINT_MSE,
-        resolve_nvfp4_scale_rule,
-    )
-    if (
-        bool(levers.get("joint_scale_opt", False))
-        and "nvfp4_scale_rule" not in levers
-        and NVFP4_SCALE_RULE_ENV not in os.environ
-    ):
-        levers["nvfp4_scale_rule"] = NVFP4_SCALE_RULE_JOINT_MSE
-    levers.setdefault("nvfp4_scale_rule", resolve_nvfp4_scale_rule())
-    # The A-side scale policy is a render input like the W-side scale rule
-    # beside it: it already reaches ``render_production_weight`` as this
-    # fill's ``input_global_scale``, and it decides what every
-    # activation-aware render SCORE means.  Resolve it here, once, and let it
-    # travel with the levers -- into the directory render identity, the
-    # union per-shard identity and each score record --
-    # so a cache priced under one policy cannot be silently resumed, rescored
-    # or KL-validated under another (#227).  An explicit caller value wins and
-    # is canonicalized; a bad one refuses here rather than mid-fill.
-    levers[RENDER_LEVER_INPUT_GLOBAL_SCALE_POLICY] = (
-        _resolve_render_input_global_scale_policy(
-            levers.get(RENDER_LEVER_INPUT_GLOBAL_SCALE_POLICY)
-        )
-    )
-    return levers
 
 
 def _resolve_render_input_global_scale_policy(
@@ -4370,7 +4690,7 @@ def _check_rendered_cache_destinations(
 
     The render-identity sidecars spell coordinates as ``"qname|FMT"`` pair
     strings; this is the pair-shaped entry into the one shared check next to
-    ``_cache_weight_filename``, which owns the rule.
+    ``cache_weight_filename``, which owns the rule.
     """
     from prismaquant import format_registry as fr
 
@@ -4392,6 +4712,7 @@ def build_production_cache_render_identity(
     eligible_qnames: Iterable[str],
     render_formats_by_qname: Mapping[str, Sequence[str]],
     max_act_rows: int,
+    source_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the render identity a cache directory's shards were rendered under.
 
@@ -4472,6 +4793,8 @@ def build_production_cache_render_identity(
         "hooked_qnames": len(hooked),
         "rendered_pairs": rendered_pairs,
         "max_act_rows": rows,
+        **({"source_binding": dict(source_binding)}
+           if source_binding is not None else {}),
     }
 
 
@@ -4508,6 +4831,7 @@ def validate_production_cache_render_identity(
         PACKED_STREAMING_APPEND_SIDECAR_KEY,
     }
     admission_fields = {PRE_GUARD_ADMISSION_SIDECAR_KEY}
+    source_fields = {"source_binding"}
     # Not `set(raw) < base_fields`: that is a PROPER-subset test, so a
     # sidecar missing a base field but carrying an append section is
     # neither a subset nor an unknown-field case and would fall through
@@ -4515,7 +4839,7 @@ def validate_production_cache_render_identity(
     # got past this in practice -- but a field check should refuse for
     # the reason it names.
     if (
-        set(raw) - base_fields - append_fields - admission_fields
+        set(raw) - base_fields - append_fields - admission_fields - source_fields
         or not base_fields <= set(raw)
     ):
         raise ValueError(f"{where} has unsupported fields")
@@ -4556,13 +4880,13 @@ def validate_production_cache_render_identity(
     pairs = raw.get("rendered_pairs")
     if (
         not isinstance(pairs, list)
-        or not pairs
+        or (not pairs and "source_binding" not in raw)
         or any(not isinstance(pair, str) or "|" not in pair for pair in pairs)
         or list(pairs) != sorted(pairs)
     ):
         raise ValueError(
-            f"{where}.rendered_pairs must be a sorted nonempty "
-            '"qname|FMT" string list'
+            f"{where}.rendered_pairs must be a sorted "
+            '"qname|FMT" string list; empty requires source_binding'
         )
     _check_rendered_cache_destinations(pairs, where=where)
     rows = raw.get("max_act_rows")
@@ -4585,6 +4909,12 @@ def validate_production_cache_render_identity(
         "rendered_pairs": list(pairs),
         "max_act_rows": int(rows),
     }
+    if "source_binding" in raw:
+        from .streamed_model_identity import validate_source_model_binding
+
+        identity["source_binding"] = validate_source_model_binding(
+            raw["source_binding"], where=f"{where}.source_binding",
+        )
     # Append sections (#170) ride in the same sidecar but are owned by their
     # append writers, not by the base fill. The base fill neither writes nor
     # compares them; each append compare-or-writes its own section through
@@ -4633,10 +4963,9 @@ def build_mtp_append_identity(
     here: the activation-source content hash (what the probe rows contain,
     not the directory path that held them), the per-module row counts, the
     reservoir size, and the profile/source binding the synthesized module
-    came from. Deliberately NOT bound: the render narrowing (which
-    ``mtp.*`` subset this call appends) — the append replaces its scope, so
-    consecutive stripes stay legal exactly as
-    ``test_mtp_append_replaces_prior_scope_without_double_counting`` pins.
+    came from. The selected MTP population is bound by its activation hash
+    and per-module row counts. Disk-backed repeats require that same
+    population; in-memory appends can replace their scope.
     """
     rows = int(max_act_rows)
     if rows < 1:
@@ -5412,7 +5741,9 @@ def _check_and_record_append_identity(
     A ``pre_guard_admission`` record (#146), when present, is carried
     forward untouched by the section merge and by that later adoption; an
     append running first in a pre-guard directory records it the same way
-    the base fill does.
+    the base fill does. A streamed fill's ``streamed_fill`` claim is carried
+    forward the same way, so the appends of a streamed build join its
+    directory.
     """
     if section_key == MTP_APPEND_SIDECAR_KEY:
         current = validate_mtp_append_identity(
@@ -5492,6 +5823,7 @@ def _check_and_record_append_identity(
         and MTP_APPEND_SIDECAR_KEY not in stored_raw
         and PACKED_APPEND_SIDECAR_KEY not in stored_raw
         and PACKED_STREAMING_APPEND_SIDECAR_KEY not in stored_raw
+        and STREAMED_FILL_SIDECAR_KEY not in stored_raw
     ):
         raise ValueError(
             f"production cache directory {cache_dir} has an unrecognized "
@@ -5574,7 +5906,7 @@ def _check_production_cache_render_identity(
     current: Mapping[str, object],
     *,
     progress: bool = True,
-) -> None:
+) -> dict[str, object]:
     """Enforce one rendering per cache directory (#146, extended by #170).
 
     The resume loop admits a unit as done by file presence alone, so without
@@ -5583,12 +5915,14 @@ def _check_production_cache_render_identity(
     conditions. The first fill writes its render identity into
     ``render_identity.json``; every later fill compares and refuses on the
     first differing field. A missing sidecar means a pre-guard directory:
-    warn and admit its shards on trust (refusing would strand existing work),
+    warn and admit ordinary-source shards on trust,
     then write the current identity so later mismatches refuse. The admission
     itself is recorded in the sidecar as ``pre_guard_admission`` — the
     trusted shard count plus their sorted shard names — so a downstream
     artifact can read that part of the directory rests on unverified shards.
     A fresh directory (no shards) carries no such record.
+    Native decoded-source bindings require verified history: unbound or
+    previously trusted shards refuse with a fresh-directory rebuild remedy.
 
     Append sections (#170, #172) are compared by their own writers, never
     here: the stored base projection is compared against the current base
@@ -5600,6 +5934,9 @@ def _check_production_cache_render_identity(
     than render input, so it is carried forward by the adoption instead of
     compared: a guarded directory carrying it still resumes cleanly against
     a caller identity computed without it.
+
+    A directory a streamed fill claimed (``claim_streamed_cache_directory``)
+    refuses: its shards were never this fill's to resume.
     """
     current_identity = validate_production_cache_render_identity(
         _canonical_json_value(dict(current), where="production cache render identity"),
@@ -5616,10 +5953,18 @@ def _check_production_cache_render_identity(
             PACKED_STREAMING_APPEND_SIDECAR_KEY,
         )
     }
+    native_decode = "source_decode" in current_identity.get("source_binding", {})
     sidecar_path = cache_dir_path / RENDER_IDENTITY_SIDECAR_FILENAME
     if not sidecar_path.is_file():
+        publication_identity = current_identity
         trusted_shards = _pre_guard_trusted_shards(cache_dir_path)
         if trusted_shards:
+            if native_decode:
+                raise ValueError(
+                    f"production cache directory {cache_dir_path} has unbound "
+                    "pre-guard shards; native decode cannot admit them on trust — "
+                    "rebuild into a fresh --cache-dir"
+                )
             print(
                 "[prod-cache] WARNING: cache directory "
                 f"{cache_dir_path} holds rendered shards but no "
@@ -5631,17 +5976,19 @@ def _check_production_cache_render_identity(
                 "the trusted shards; future mismatches refuse.",
                 flush=True,
             )
-            current_identity = {
+            publication_identity = {
                 **current_identity,
                 PRE_GUARD_ADMISSION_SIDECAR_KEY: build_pre_guard_admission(
                     trusted_shards
                 ),
             }
-        atomic_write_bytes(
+        if publish_new_bytes(
             sidecar_path,
-            DIRECT_ASCII_INDENT2_LAX.encoded(current_identity),
-        )
-        return
+            DIRECT_ASCII_INDENT2_LAX.encoded(publication_identity),
+        ):
+            return publication_identity
+        # Another fill published first. Read and compare that complete
+        # identity below; never replace its claim with this fill's identity.
     try:
         stored_raw = json.loads(sidecar_path.read_bytes().decode("utf-8"))
     except Exception as exc:
@@ -5659,6 +6006,26 @@ def _check_production_cache_render_identity(
             "instead of mixing renders"
         )
     stored_raw = dict(stored_raw)
+    if native_decode and PRE_GUARD_ADMISSION_SIDECAR_KEY in stored_raw:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} has pre_guard_admission "
+            "history; native decode cannot verify trusted shards — rebuild "
+            "into a fresh --cache-dir"
+        )
+    if STREAMED_FILL_SIDECAR_KEY in stored_raw:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} holds a streamed "
+            f"fill's renders ({RENDER_IDENTITY_SIDECAR_FILENAME} section "
+            f"{STREAMED_FILL_SIDECAR_KEY!r}); the resident fill neither resumes "
+            "nor adopts them — rebuild this directory (fresh --cache-dir) "
+            "instead of mixing renders"
+        )
+    if "source_binding" in stored_raw and "source_binding" not in current_identity:
+        raise ValueError(
+            f"production cache directory {cache_dir_path} has a source binding "
+            "but this fill supplied none; refusing source identity downgrade; "
+            "supply the original source binding or rebuild into a fresh --cache-dir"
+        )
     base_fields = set(current_identity)
     stored_base_raw = {
         key: stored_raw[key] for key in base_fields if key in stored_raw
@@ -5689,6 +6056,24 @@ def _check_production_cache_render_identity(
             - {PRE_GUARD_ADMISSION_SIDECAR_KEY}
         )
         if not stored_base_raw and stored_sections and not unknown:
+            if ("source_binding" in current_identity
+                    and PRE_GUARD_ADMISSION_SIDECAR_KEY not in stored_raw):
+                trusted = _pre_guard_trusted_shards(cache_dir_path)
+                if trusted:
+                    if native_decode:
+                        raise ValueError(
+                            f"production cache directory {cache_dir_path} holds "
+                            "unbound append shards; native decode cannot admit "
+                            "them on trust — rebuild into a fresh --cache-dir"
+                        )
+                    stored_raw[PRE_GUARD_ADMISSION_SIDECAR_KEY] = (
+                        build_pre_guard_admission(trusted)
+                    )
+                    print(
+                        "[prod-cache] WARNING: append-only source history is "
+                        "unverified; admitting existing shards on trust and "
+                        "recording pre_guard_admission.", flush=True,
+                    )
             try:
                 adopted = validate_production_cache_render_identity(
                     {**stored_raw, **current_identity},
@@ -5715,7 +6100,7 @@ def _check_production_cache_render_identity(
                 sidecar_path,
                 DIRECT_ASCII_INDENT2_LAX.encoded(adopted),
             )
-            return
+            return adopted
         raise ValueError(
             f"production cache directory {cache_dir_path} has an invalid "
             f"{RENDER_IDENTITY_SIDECAR_FILENAME}: missing base render "
@@ -5754,6 +6139,75 @@ def _check_production_cache_render_identity(
             "reusing on-disk shards",
             flush=True,
         )
+    return stored
+
+
+def claim_streamed_cache_directory(
+    cache_dir_path: Path,
+    *,
+    render_scope: str,
+    requested_formats: Sequence[str],
+    levers: Mapping[str, object],
+    calib_hash: str | None,
+    render_formats_by_qname: Mapping[str, Sequence[str]],
+    max_act_rows: int,
+) -> None:
+    """Claim a directory for one streamed fill, or refuse (#146).
+
+    The streamed fill never resumes: it renders every pair in its scope and
+    writes each shard over whatever has that name. So it renders only into a
+    directory no rendering has claimed -- no ``render_identity.json``, no
+    fused-witness sidecar and no rendered shard -- and claims it by
+    publishing a ``streamed_fill`` section there without replacing a sidecar
+    another writer published first. The resident fill refuses a directory
+    carrying that section (``_check_production_cache_render_identity``), so
+    neither fill adopts the other's shards, and the same build's MTP and
+    packed appends add their own sections beside it. Re-running a streamed
+    build, after a crash too, needs a fresh ``--cache-dir``. The section
+    records what was rendered; nothing compares it.
+    """
+    cache_dir_path.mkdir(parents=True, exist_ok=True)
+    held = [
+        name
+        for name in (
+            RENDER_IDENTITY_SIDECAR_FILENAME,
+            NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME,
+        )
+        if (cache_dir_path / name).exists()
+    ]
+    shards = _pre_guard_trusted_shards(cache_dir_path)
+    if shards:
+        held.append(f"{len(shards)} rendered shards, e.g. {shards[0]}")
+    claim = {
+        STREAMED_FILL_SIDECAR_KEY: {
+            "schema": STREAMED_FILL_IDENTITY_SCHEMA,
+            "render_scope": str(render_scope),
+            "requested_formats": sorted({
+                str(fmt).strip().upper()
+                for fmt in requested_formats
+                if str(fmt).strip()
+            }),
+            "levers": _canonical_json_value(
+                dict(levers), where="streamed fill render levers"),
+            "calib_hash": None if calib_hash is None else str(calib_hash),
+            "rendered_pairs": sorted({
+                f"{qname}|{str(fmt).strip().upper()}"
+                for qname, fmts in render_formats_by_qname.items()
+                for fmt in fmts
+            }),
+            "max_act_rows": int(max_act_rows),
+        },
+    }
+    if held or not publish_new_bytes(
+        cache_dir_path / RENDER_IDENTITY_SIDECAR_FILENAME,
+        DIRECT_ASCII_INDENT2_LAX.encoded(claim),
+    ):
+        raise ValueError(
+            f"production cache directory {cache_dir_path} already holds a "
+            f"rendering ({'; '.join(held) or RENDER_IDENTITY_SIDECAR_FILENAME}); "
+            "the streamed fill never resumes and would write its shards over "
+            "it — render into a fresh --cache-dir"
+        )
 
 
 def fill_production_weight_cache(
@@ -5775,6 +6229,7 @@ def fill_production_weight_cache(
     recache_microbatch_size: int = 1,
     h_detail_dir: str | Path | None = None,
     col_weights: Mapping[str, torch.Tensor] | None = None,
+    source_binding: Mapping[str, object] | None = None,
 ) -> ProductionWeightCache:
     """End-to-end fill: collect activations, render production δw per
     (qname, fmt), return a `ProductionWeightCache`.
@@ -5797,6 +6252,10 @@ def fill_production_weight_cache(
         `render_assignment`. Render just these qnames (a stripe, a shard) while
         still hooking all of `qnames`, so the shard's bytes are the whole
         run's bytes. `None` renders everything in scope.
+      source_binding: optional original checkpoint/effective-dtype identity.
+        Source-aware producers supply it for directory reuse and independent
+        consumers require it before attachment. Source-less live-model callers
+        remain internal; mutations after checkpoint loading are not identified.
       levers: which production levers to enable (default: GPTQ with optional
         joint NVFP4 scale optimization when requested by the caller).
       recache_pass: when True, run a second calibration forward with the
@@ -5821,6 +6280,7 @@ def fill_production_weight_cache(
             "production assignment"
         )
     levers = _resolve_production_render_levers(levers)
+    render_options = NativeRenderLevers.from_record(levers)
     mechanism_plan = _resolve_render_mechanism_plan(levers)
     if progress and mechanism_plan.ordered:
         print(
@@ -5883,11 +6343,46 @@ def fill_production_weight_cache(
         }
         render_scope = "format-menu"
 
+    cache_dir_path: Path | None = None
+    directory_identity: dict[str, object] = {}
+    if cache_dir is not None and (qname_set or source_binding is not None):
+        cache_dir_path = Path(cache_dir)
+        cache_dir_path.mkdir(parents=True, exist_ok=True)
+        from prismaquant.perturbed_x_cache import calibration_data_hash
+
+        # #146: resume admits a unit as done by file presence alone, so a
+        # directory resumed under a different scope, include-file, lever
+        # string or calibration would silently mix units rendered under
+        # different conditions. Compare this call's render identity against
+        # the sidecar before any shard is read or written; refuse on mismatch.
+        directory_identity = _check_production_cache_render_identity(
+            cache_dir_path,
+            build_production_cache_render_identity(
+                render_scope=render_scope,
+                requested_formats=requested_formats,
+                levers=levers,
+                mechanism_plan=mechanism_plan,
+                calib_hash=calibration_data_hash(calib_ids),
+                eligible_qnames=eligible_qnames,
+                render_formats_by_qname=render_formats_by_qname,
+                max_act_rows=max_act_rows,
+                source_binding=source_binding,
+            ),
+            progress=progress,
+        )
+    source_metadata: dict[str, object] = (
+        {"source_binding": dict(source_binding)} if source_binding is not None else {}
+    )
+    if PRE_GUARD_ADMISSION_SIDECAR_KEY in directory_identity:
+        source_metadata[PRE_GUARD_ADMISSION_SIDECAR_KEY] = (
+            directory_identity[PRE_GUARD_ADMISSION_SIDECAR_KEY]
+        )
     if not qname_set:
         return ProductionWeightCache(
             weights={},
             levers=dict(levers),
             metadata={
+                **source_metadata,
                 "render_scope": render_scope,
                 "requested_formats": list(requested_formats),
                 "requested_entries": 0,
@@ -5927,31 +6422,6 @@ def fill_production_weight_cache(
     # render.  On a job that's 99%+ complete this drops activation
     # collection memory + compute by 99% — and lets a borderline-OOM
     # job finish on the same hardware.
-    cache_dir_path: Path | None = None
-    if cache_dir is not None:
-        cache_dir_path = Path(cache_dir)
-        cache_dir_path.mkdir(parents=True, exist_ok=True)
-        from prismaquant.perturbed_x_cache import calibration_data_hash
-
-        # #146: resume admits a unit as done by file presence alone, so a
-        # directory resumed under a different scope, include-file, lever
-        # string or calibration would silently mix units rendered under
-        # different conditions. Compare this call's render identity against
-        # the sidecar before any shard is read or written; refuse on mismatch.
-        _check_production_cache_render_identity(
-            cache_dir_path,
-            build_production_cache_render_identity(
-                render_scope=render_scope,
-                requested_formats=requested_formats,
-                levers=levers,
-                mechanism_plan=mechanism_plan,
-                calib_hash=calibration_data_hash(calib_ids),
-                eligible_qnames=eligible_qnames,
-                render_formats_by_qname=render_formats_by_qname,
-                max_act_rows=max_act_rows,
-            ),
-            progress=progress,
-        )
     render_score_sidecar_path: Path | None = (
         cache_dir_path / "render_scores.json"
         if cache_dir_path is not None else None
@@ -5983,6 +6453,37 @@ def fill_production_weight_cache(
             "render-score entries from sidecar",
             flush=True,
         )
+    # Witnesses earlier runs of this fill published beside their fused NVFP4
+    # shards. A resumed shard keeps one only if its producer wrote it AND the
+    # shard on disk is still the file that producer published; any other
+    # resumed shard stays unwitnessed and export refuses to re-pack it.
+    joint_global_witness_sidecar_path: Path | None = (
+        cache_dir_path / NVFP4_JOINT_GLOBAL_WITNESS_SIDECAR_FILENAME
+        if cache_dir_path is not None else None
+    )
+    resumed_joint_global_witnesses: dict[
+        tuple[str, str], NVFP4JointGlobalWitness] = {}
+    resumed_witness_problems: dict[tuple[str, str], str] = {}
+    rendered_keys = {
+        (qname, str(fmt).upper())
+        for qname, fmts in render_formats_by_qname.items()
+        for fmt in fmts
+    }
+    for key, witness in _load_nvfp4_joint_global_witness_sidecar(
+        joint_global_witness_sidecar_path
+    ).items():
+        fname = cache_weight_filename(*key)
+        if key not in rendered_keys or not (cache_dir_path / fname).is_file():
+            # Out of this render's scope, or missing: a missing shard is
+            # re-rendered below and witnessed by that render.
+            continue
+        problem = nvfp4_joint_global_witness_problem(
+            witness, served=fname, path=cache_dir_path / fname)
+        if problem is None:
+            resumed_joint_global_witnesses[key] = witness
+        else:
+            resumed_witness_problems[key] = problem
+    joint_global_witnesses: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
 
     fmt_set = {
         fmt
@@ -6013,7 +6514,7 @@ def fill_production_weight_cache(
         for q in list(qname_set):
             missing = {
                 f for f in render_formats_by_qname.get(q, ())
-                if not (cache_dir_path / _cache_weight_filename(q, f)).is_file()
+                if not (cache_dir_path / cache_weight_filename(q, f)).is_file()
             }
             missing_formats_by_qname[q] = missing
             if not missing:
@@ -6033,7 +6534,9 @@ def fill_production_weight_cache(
         )
         missing_activation_score = any(
             f in activation_aware_formats
-            and _render_score_record_key(q, f) not in render_score_records
+            and _stored_candidate_render_score_dtype(
+                render_score_records.get(_render_score_record_key(q, f), {})
+            ) is None
             for f in requested
         )
         if missing_activation_render or missing_activation_score:
@@ -6196,6 +6699,7 @@ def fill_production_weight_cache(
             model,
             synthetic_assignment,
             profile=model_profile,
+            levers=render_options,
         )
         if progress:
             print(
@@ -6253,6 +6757,7 @@ def fill_production_weight_cache(
                 if a is None:
                     continue
                 mx = float(a.abs().max().item())
+                del a
             if mx <= 0:
                 continue
             per_qname_max_abs[qname] = mx
@@ -6284,16 +6789,13 @@ def fill_production_weight_cache(
                 json.dumps(activation_max_abs, indent=2).encode("utf-8"),
             )
 
-    # MEM: free per-Linear activation tensors after each render so peak
-    # memory stays bounded.  On 27B, 497 Linears × ~10K in_features × 512
-    # rows × fp32 = ~10 GB just for activations.  Freeing in-loop drops
-    # this to ~20 MB resident.
+    collector = None
     import gc as _gc
-    activations_local = dict(activations)  # shallow copy; we'll pop entries
     n = sum(len(render_formats_by_qname.get(q, ())) for q in qname_to_module)
     done = 0
     skipped_resumed = 0
     skipped_prewritten = 0
+    unwitnessed_resumed_shards: list[str] = []
     render_gate_records: list[dict[str, object]] = []
     for qname, mod in qname_to_module.items():
         weight = mod.weight.data
@@ -6305,18 +6807,18 @@ def fill_production_weight_cache(
             and fisher_rows is not None
             else None
         )
-        # _quantize_2d's input_global_scale_override expects the export
+        # quantize_2d's input_global_scale_override expects the export
         # convention.  It only affects emitted metadata in compute_only
         # mode (not the dequantized weight values), but we pass the
         # correct convention so the metadata is honest in case future
         # code consumes it.  Routed through the export helper so it
         # tracks PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE (audit C1).
-        from prismaquant.export_native_compressed import (
-            _nvfp4_input_global_scale_from_max_abs,
+        from prismaquant.native_render_codec import (
+            nvfp4_input_global_scale_from_max_abs,
         )
         export_scale = (
-            _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=render_score_policy)
+            nvfp4_input_global_scale_from_max_abs(
+                float(max_abs), policy=render_score_policy, levers=render_options)
             if (max_abs is not None and max_abs > 0)
             else None
         )
@@ -6336,33 +6838,60 @@ def fill_production_weight_cache(
             # resume without re-doing the work — just rebuild the manifest
             # from the surviving .pt files.
             if cache_dir_path is not None:
-                fname = _cache_weight_filename(qname, fmt_key)
+                fname = cache_weight_filename(qname, fmt_key)
                 disk_path = cache_dir_path / fname
                 if disk_path.is_file():
                     weights[(qname, fmt_key)] = fname
                     skipped_resumed += 1
+                    if key in resumed_joint_global_witnesses:
+                        joint_global_witnesses[key] = (
+                            resumed_joint_global_witnesses[key]
+                        )
+                    elif render_fmt == "NVFP4" and fused_sibling_group_key(
+                        qname, profile=model_profile,
+                    ) is not None:
+                        problem = resumed_witness_problems.get(key, "no published witness")
+                        unwitnessed_resumed_shards.append(
+                            f"{qname}@{fmt_key}: {disk_path}: {problem}")
                     score_key = _render_score_record_key(qname, fmt_key)
-                    if score_key not in render_score_records:
+                    if _stored_candidate_render_score_dtype(
+                        render_score_records.get(score_key, {})
+                    ) is None:
                         try:
                             cached = torch.load(
                                 disk_path,
                                 map_location=weight.device,
                                 weights_only=True,
-                            ).to(device=weight.device, dtype=weight.dtype)
-                            render_score_records[score_key] = _render_score_record(
+                            )
+                            record = _render_score_record(
                                 qname=qname,
                                 fmt=fmt_key,
                                 render_format=render_fmt,
                                 reference_weight=weight,
                                 rendered_weight=cached,
-                                activations=activations_local.get(qname),
+                                activations=activations.get(qname),
                                 activation_max_abs=max_abs,
                                 input_global_scale_policy=render_score_policy,
+                                levers=render_options,
                             )
+                            render_score_records[score_key] = _qualify_stored_candidate_render_score(
+                                record, scored_dtype=cached.dtype)
                             del cached
-                        except Exception:
-                            pass
-                    # Do NOT pop activations_local[qname] here: this
+                        except Exception as exc:
+                            if score_key in render_score_records:
+                                raise RuntimeError(
+                                    f"cannot rescore stored candidate {qname}@{fmt_key}; "
+                                    "refusing to reuse its unqualified retained score"
+                                ) from exc
+                    render_gate_records.append({
+                        "qname": qname,
+                        "format": fmt_key,
+                        "render_format": render_fmt,
+                        "trace": [],
+                        "progressive_gate": "not-run",
+                        "mechanism": "resumed_shard",
+                    })
+                    # Do NOT pop activations[qname] here: this
                     # loop iterates through every format for this
                     # Linear, and a later format in the same outer
                     # iteration may still need the activation tensor
@@ -6374,7 +6903,7 @@ def fill_production_weight_cache(
                 w_dq = render_production_weight(
                     weight, render_fmt,
                     qname=qname,
-                    activations=activations_local,
+                    activations=activations,
                     levers=levers,
                     joint_global_real=joint,
                     input_global_scale=export_scale,
@@ -6385,18 +6914,21 @@ def fill_production_weight_cache(
                     ),
                     gate_trace=gate_trace,
                 )
-                render_score_records[_render_score_record_key(qname, fmt_key)] = (
-                    _render_score_record(
-                        qname=qname,
-                        fmt=fmt_key,
-                        render_format=render_fmt,
-                        reference_weight=weight,
-                        rendered_weight=w_dq,
-                        activations=activations_local.get(qname),
-                        activation_max_abs=max_abs,
-                        input_global_scale_policy=render_score_policy,
-                    )
+                w_dq = _canonical_rendered_weight_tensor(
+                    w_dq, weight_dtype=weight.dtype, device=weight.device)
+                record = _render_score_record(
+                    qname=qname,
+                    fmt=fmt_key,
+                    render_format=render_fmt,
+                    reference_weight=weight,
+                    rendered_weight=w_dq,
+                    activations=activations.get(qname),
+                    activation_max_abs=max_abs,
+                    input_global_scale_policy=render_score_policy,
+                    levers=render_options,
                 )
+                render_score_records[_render_score_record_key(qname, fmt_key)] = (
+                    _qualify_stored_candidate_render_score(record, scored_dtype=w_dq.dtype))
                 if gate_trace:
                     render_gate_records.append({
                         "qname": qname,
@@ -6412,12 +6944,8 @@ def fill_production_weight_cache(
                         flush=True,
                     )
                 continue
-            # MEM: store as the model's native dtype (bf16 by default)
-            # rather than fp32 — _quantize_2d's compute_only path returns
-            # fp32 but we always re-cast at install time, so storing fp32
-            # is wasteful (2× memory).  On 27B this drops the cache from
-            # ~25 GB to ~12 GB.
-            _store_rendered_weight_entry(
+            # Store the canonical representation already used by its score.
+            shard = _store_rendered_weight_entry(
                 weights=weights,
                 cache_dir_path=cache_dir_path,
                 qname=qname,
@@ -6425,6 +6953,17 @@ def fill_production_weight_cache(
                 tensor=w_dq,
                 weight_dtype=weight.dtype,
             )
+            if joint is not None and render_fmt == "NVFP4":
+                joint_global_witnesses[key] = NVFP4JointGlobalWitness(
+                    _nvfp4_joint_global_value(joint, where=f"{qname}@{fmt_key}"),
+                    shard,
+                )
+                # Published after its shard, so no witness names a shard
+                # this run did not publish.
+                _write_nvfp4_joint_global_witness_sidecar(
+                    joint_global_witness_sidecar_path,
+                    {**resumed_joint_global_witnesses, **joint_global_witnesses},
+                )
             done += 1
             del w_dq
             if progress and done % 25 == 0:
@@ -6435,7 +6974,7 @@ def fill_production_weight_cache(
                 )
         # Free this Linear's activation tensor — won't render this qname
         # again, and the activation can be tens of MB on big models.
-        activations_local.pop(qname, None)
+        activations.pop(qname, None)
         if done % 50 == 0:
             _gc.collect()
             try:
@@ -6444,6 +6983,21 @@ def fill_production_weight_cache(
                     _torch.cuda.empty_cache()
             except Exception:
                 pass
+    if unwitnessed_resumed_shards:
+        print(
+            "[prod-cache] WARNING: resume adopts no fused NVFP4 joint-global "
+            f"witness for {len(unwitnessed_resumed_shards)} resumed shards "
+            "with missing or unbound witnesses; export refuses unverified "
+            "fused renders. If this resume rendered no fused NVFP4 entries, rerun "
+            "it through the writer's view or an NFS client mount to recover "
+            "device-only mismatches. Otherwise its sidecar rewrites dropped "
+            "those records; re-render those shards. Other causes also require "
+            "re-rendering. "
+            "Remove only the affected shards and resume "
+            "with the matching render identity, or use a fresh --cache-dir. "
+            f"sample={unwitnessed_resumed_shards[:3]}",
+            flush=True,
+        )
     if progress:
         print(
             f"[prod-cache] rendered {len(weights)} (qname, fmt) entries "
@@ -6461,6 +7015,7 @@ def fill_production_weight_cache(
         failed=failed,
         cache_dir=str(cache_dir_path) if cache_dir_path is not None else None,
         metadata={
+            **source_metadata,
             "render_mechanism_order": [
                 {
                     "name": spec.name,
@@ -6487,9 +7042,9 @@ def fill_production_weight_cache(
                     "mean after the format activation quantizer; score_sum "
                     "is score multiplied by activation_rows * out_features "
                     "for output metrics, or by parameter count for weight_mse "
-                    "fallback. raw_render_score records the post-render "
-                    "weight-only reconstruction objective used by local "
-                    "render gates."
+                    "fallback. raw_render_score records the stored "
+                    "candidate's reconstruction objective before activation "
+                    "quantization."
                 ),
             },
             "four_over_six": (
@@ -6539,6 +7094,12 @@ def fill_production_weight_cache(
             },
             "requested_formats": list(requested_formats),
             "requested_entries": int(n),
+            **(
+                {NVFP4_JOINT_GLOBAL_WITNESS_KEY: (
+                    nvfp4_joint_global_witness_section(joint_global_witnesses)
+                )}
+                if joint_global_witnesses else {}
+            ),
         },
     )
     if recache_pass:
@@ -6640,7 +7201,9 @@ class _PackedExpertActivationCollector:
         self._gen.manual_seed(1234)
         self._handles: list = []
         self._modules_by_qname: dict[str, nn.Module] = {}
-        from prismaquant.sensitivity_probe import _is_packed_experts_module
+        from prismaquant.probe_inventory import (
+            is_packed_experts_module as _is_packed_experts_module,
+        )
         for qname, mod in model.named_modules():
             if not _is_packed_experts_module(mod, self.profile):
                 continue
@@ -6881,6 +7444,8 @@ def _packed_expert_render_score_record(
     device: torch.device,
     score_rows_source: str,
     input_global_scale_policy: str | None = None,
+    stored_dtype: torch.dtype | None = None,
+    levers: NativeRenderLevers,
 ) -> dict[str, object]:
     """Score one packed 3-D expert cache entry honestly.
 
@@ -6895,6 +7460,8 @@ def _packed_expert_render_score_record(
     excluded from the output metric (averaging an undefined error in would
     be a fabrication) and counted in ``experts_without_activations``;
     ``weight_mse`` is activation-independent and always covers every expert.
+    Producers pass ``stored_dtype`` to score the stored representation one
+    expert at a time. Omitted, this remains a pure score of ``rendered``.
     """
     if reference.dim() != 3:
         raise RuntimeError(
@@ -6913,6 +7480,11 @@ def _packed_expert_render_score_record(
         acts_e = _packed_expert_score_rows(
             per_expert_acts, expert, eval_rows=eval_rows, device=device,
         )
+        rendered_e = rendered[expert].detach().to(device=device)
+        if stored_dtype is not None:
+            rendered_e = _canonical_rendered_weight_tensor(
+                rendered_e, weight_dtype=stored_dtype, preserve_fp32=True,
+                device=device)
         per_expert.append(
             _render_score_record(
                 qname=f"{qname}.e{expert}",
@@ -6921,13 +7493,14 @@ def _packed_expert_render_score_record(
                 reference_weight=reference[expert].detach().to(
                     device=device, dtype=torch.float32,
                 ),
-                rendered_weight=rendered[expert].detach().to(device=device),
+                rendered_weight=rendered_e,
                 activations=acts_e,
                 activation_max_abs=activation_max_abs,
                 input_global_scale_policy=input_global_scale_policy,
+                levers=levers,
             )
         )
-        del acts_e
+        del acts_e, rendered_e
     if not per_expert:
         raise RuntimeError(
             f"packed expert render score for {qname}@{fmt} has zero experts"
@@ -6980,7 +7553,7 @@ def _packed_expert_render_score_record(
         for record in scored
         if record.get("input_global_scale_policy") is not None
     }
-    return {
+    record = {
         "qname": str(qname),
         "format": str(fmt).upper(),
         "render_format": str(render_format).upper(),
@@ -7025,6 +7598,10 @@ def _packed_expert_render_score_record(
         "score_rows_source": str(score_rows_source),
         "score_rows_per_expert_cap": int(eval_rows),
     }
+    return (
+        _qualify_stored_candidate_render_score(record, scored_dtype=stored_dtype)
+        if stored_dtype is not None else record
+    )
 
 
 def _packed_expert_render_gate_record(
@@ -7233,6 +7810,7 @@ def fill_packed_expert_cache_entries(
     *,
     render_assignment: Mapping[str, str] | None = None,
     force_format: str | None = None,
+    include_qnames: Sequence[str] | None = None,
     levers: Mapping[str, object],
     profile,
     module_token_budget: int = 32768,
@@ -7281,9 +7859,9 @@ def fill_packed_expert_cache_entries(
 
     Hook invariant (#145, mirrors the dense #130/#135 one): the activation
     collector hooks EVERY packed-experts module this call can see
-    (``eligible_experts_qnames``), and ``render_assignment``/``force_format`` narrow
-    only which tensors get rendered. The bytes of a packed (tensor, fmt)
-    pair are therefore a function of the visible modules and the
+    (``eligible_experts_qnames``), and the assignment, forced format and include
+    list narrow only which tensors get rendered. The bytes of a packed
+    (tensor, fmt) pair are therefore a function of the visible modules and the
     calibration, never of which subset a call renders — a ``force_format``
     frontier build and an assignment-scoped export build that BF16s one
     layer's experts render identical bytes for the rest.
@@ -7295,6 +7873,8 @@ def fill_packed_expert_cache_entries(
         disk-streaming is on).
       render_assignment: the concrete export assignment (recipe_key -> fmt).
         Only non-BF16 packed-expert tensors are rendered (BF16 = passthrough).
+      include_qnames: optional live or profile recipe names to render.
+        ``None`` leaves the scope unrestricted; an empty sequence renders none.
       levers: the resolved production lever dict. It is consumed by
         ``render_mode="per_expert"``; the production ``"batched"`` path uses
         its fixed fast recipe regardless of dense-linears JSO/damp-sweep
@@ -7321,17 +7901,19 @@ def fill_packed_expert_cache_entries(
       "rendered", "had_activations"}}``.
     """
     import time as _time
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
-    from prismaquant.measure_quant_cost import (
+    from prismaquant.routed_experts import (
         derive_per_expert_activations,
-        _packed_experts_parent_module,
+        packed_experts_parent_module,
+    )
+    from prismaquant.native_render_codec import (
+        compute_nvfp4_global_real,
     )
     from prismaquant.export_native_compressed import (
         _split_packed_expert_tensor,
-        compute_nvfp4_global_real,
     )
     from prismaquant import format_registry as fr
 
@@ -7391,6 +7973,10 @@ def fill_packed_expert_cache_entries(
     #    subset of them this call happens to render. That is what makes a
     #    force_format frontier build and an assignment-scoped export build
     #    reproduce each other's bytes.
+    include_qname_set = (
+        set(include_qnames)
+        if include_qnames is not None else None
+    )
     in_scope: list[tuple[str, nn.Module, nn.Module, str, str, str]] = []
     experts_qnames: set[str] = set()
     eligible_experts_qnames: set[str] = set()
@@ -7419,20 +8005,26 @@ def fill_packed_expert_cache_entries(
         # the visible enumeration, and the render assignment narrows only
         # the render (#145).
         eligible_experts_qnames.add(experts_qname)
-        parent = _packed_experts_parent_module(model, experts_qname)
+        parent = packed_experts_parent_module(model, experts_qname)
         for pn in _packed_experts_param_names(mod, profile):
             full = f"{experts_qname}.{pn}" if experts_qname else pn
             all_packed_fullnames.add(full)
+            try:
+                recipe_key = profile.live_to_recipe_name(full)
+            except Exception:
+                recipe_key = full
+            if (
+                include_qname_set is not None
+                and full not in include_qname_set
+                and recipe_key not in include_qname_set
+            ):
+                continue
             if force_format is not None:
-                # Force-format mode: render every packed expert at one format,
+                # Force-format mode: render the selected experts at one format,
                 # ignoring render_assignment. Used by the format-menu frontier
                 # build (eager NVFP4) and by per-Pareto-point lazy FP8 gap-fill.
                 fmt = _canon(force_format)
             else:
-                try:
-                    recipe_key = profile.live_to_recipe_name(full)
-                except Exception:
-                    recipe_key = full
                 fmt = render_assignment.get(recipe_key)
                 if fmt is None and recipe_key != full:
                     fmt = render_assignment.get(full)
@@ -7550,12 +8142,12 @@ def fill_packed_expert_cache_entries(
 
     def _has_render_score(qname: str, fmt: str) -> bool:
         score_key = _render_score_record_key(qname, fmt)
-        return (
-            score_key in packed_score_records
-            or score_key in existing_score_records
-        )
+        return _stored_candidate_render_score_dtype(
+            packed_score_records.get(score_key, existing_score_records.get(score_key, {}))
+        ) is not None
 
     resolved_packed_levers = _resolve_production_render_levers(levers)
+    render_options = NativeRenderLevers.from_record(resolved_packed_levers)
     packed_score_policy = _render_levers_input_global_scale_policy(
         resolved_packed_levers
     )
@@ -7634,7 +8226,7 @@ def fill_packed_expert_cache_entries(
                 or not _has_render_score(full, fmt)
             )
         if cache_dir_path is not None:
-            shard = cache_dir_path / _cache_weight_filename(full, fmt)
+            shard = cache_dir_path / cache_weight_filename(full, fmt)
             if shard.is_file():
                 return (
                     cache.activation_max_abs.get(full) is None
@@ -7758,12 +8350,24 @@ def fill_packed_expert_cache_entries(
     last_idx_by_module: dict[str, int] = {}
     for _i, (_q, _m, _p, _pn, _full, _fmt) in enumerate(in_scope):
         last_idx_by_module[_q] = _i
+    derived = gate_derived = None
+
+    def release_completed_module(index: int, qname: str) -> None:
+        nonlocal derived, gate_derived
+        if index != last_idx_by_module[qname]:
+            return
+        derived = gate_derived = None
+        derived_by_module.pop(qname, None)
+        module_acts.pop(qname, None)
+        gate_derived_by_module.pop(qname, None)
+        gate_module_acts.pop(qname, None)
+
     weights = cache.weights
     t0 = _time.monotonic()
     for idx, (experts_qname, mod, parent, pn, full, fmt) in enumerate(in_scope):
         key = (full, fmt)
         fname = (
-            _cache_weight_filename(full, fmt)
+            cache_weight_filename(full, fmt)
             if cache_dir_path is not None else None
         )
         shard_exists = (key in weights) or (
@@ -7790,6 +8394,7 @@ def fill_packed_expert_cache_entries(
                     coverage.get(full) or existing_coverage_records.get(full)
                 ),
             )
+            release_completed_module(idx, experts_qname)
             continue
 
         X = module_acts.get(experts_qname)
@@ -7887,6 +8492,8 @@ def fill_packed_expert_cache_entries(
                         device=device,
                         score_rows_source="fit_corpus_tail",
                         input_global_scale_policy=packed_score_policy,
+                        stored_dtype=resumed_render.dtype,
+                        levers=render_options,
                     )
                 )
                 del resumed_render
@@ -7901,6 +8508,7 @@ def fill_packed_expert_cache_entries(
                     coverage.get(full) or existing_coverage_records.get(full)
                 ),
             )
+            release_completed_module(idx, experts_qname)
             continue
 
         # Per-expert global: for split gate/up the joint is max over slices so
@@ -7909,7 +8517,7 @@ def fill_packed_expert_cache_entries(
         per_expert_global: list[torch.Tensor | None] = [None] * E
         for e in range(E):
             cands = [
-                compute_nvfp4_global_real(sp[e].float(), group_size=16)
+                compute_nvfp4_global_real(sp[e].float(), group_size=16, levers=render_options)
                 for _, sp in proj_split
             ]
             per_expert_global[e] = (
@@ -7931,7 +8539,9 @@ def fill_packed_expert_cache_entries(
             from prismaquant.export_batched_gptq import (
                 gptq_obs_rounding_nvfp4_batched,
             )
-            from prismaquant.export_native_compressed import _rtn_dequant_nvfp4
+            from prismaquant.native_render_codec import (
+                rtn_dequant_nvfp4,
+            )
             src = packed_param.to(device=device, dtype=torch.float32)
             hidden_in = packed_param.shape[2]
             # Split each expert's routed rows into a RENDER set (fit GPTQ) and a
@@ -8018,10 +8628,12 @@ def fill_packed_expert_cache_entries(
                 global_real_overrides=overrides,
                 static_act_order=False,
                 joint_scale_opt=False,
+                levers=render_options,
             )  # fp32 [E,out,in]; held-out do-no-harm below, store casts to bf16
             for e in range(E):
-                w_rtn = _rtn_dequant_nvfp4(
+                w_rtn = rtn_dequant_nvfp4(
                     src[e], group_size=16, global_real_override=overrides[e],
+                    levers=render_options,
                 )
                 src_a = (
                     per_expert_acts[e] if e < len(per_expert_acts) else None
@@ -8113,6 +8725,8 @@ def fill_packed_expert_cache_entries(
             device=device,
             score_rows_source="fit_corpus_tail",
             input_global_scale_policy=packed_score_policy,
+            stored_dtype=_rendered_weight_storage_dtype(mod_dtype),
+            levers=render_options,
         )
         packed_gate_records[gate_key] = _packed_expert_render_gate_record(
             qname=full,
@@ -8133,15 +8747,7 @@ def fill_packed_expert_cache_entries(
         )
         coverage[full] = coverage_record
         del rendered, packed_param, proj_split
-        # Free this module's GPU-resident derived activations + captured X once
-        # its last param is rendered (bounds peak to ~one module's working set).
-        if idx == last_idx_by_module.get(experts_qname):
-            derived = None
-            gate_derived = None
-            derived_by_module.pop(experts_qname, None)
-            module_acts.pop(experts_qname, None)
-            gate_derived_by_module.pop(experts_qname, None)
-            gate_module_acts.pop(experts_qname, None)
+        release_completed_module(idx, experts_qname)
         if device.type == "cuda":
             torch.cuda.empty_cache()
         if progress:

@@ -5,7 +5,7 @@ from functools import partial
 
 from prismaquant import tessera_joint_aura as bridge
 from prismaquant.cost_stage_checkpoint import unit_path
-from prismaquant.production_weight_cache import _cache_weight_filename
+from prismaquant.render_cache_paths import cache_weight_filename
 from tests.test_tessera_joint_aura import fixture
 
 
@@ -41,7 +41,7 @@ def test_full_resume_publishes_one_actual_cumulative_record(tmp_path, monkeypatc
 
 def test_drifted_suffix_is_not_reported_as_replayed(tmp_path, monkeypatch):
     config, names, fmt, journal, writes = _case(tmp_path, monkeypatch)
-    render = tmp_path / 'campaign/rows/row-0000/cache' / _cache_weight_filename(names[1], fmt)
+    render = tmp_path / 'campaign/rows/row-0000/cache' / cache_weight_filename(names[1], fmt)
     render.write_bytes(render.read_bytes() + b'drift')
     real_load = bridge._load_unit
 

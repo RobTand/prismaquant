@@ -162,6 +162,54 @@ def test_a_refused_window_lease_reads_each_render_under_its_own_lease(
         assert file_receipt["serving_tier"] == "stage"
 
 
+@pytest.mark.parametrize("failure_point", ["allocation", "serving_record"])
+def test_failed_read_closes_its_descriptor_without_releasing_group_pin(
+        tmp_path, monkeypatch, failure_point):
+    from prismaquant.staged_lease import LeaseWindow
+
+    _cache, paths, _expected, resolver, consumer, _total = _strict_window(
+        tmp_path, monkeypatch, count=2)
+    calls = _sdk_calls(monkeypatch, "acquire_for", "release")
+    members = [(path, hashlib.sha256(path.read_bytes()).hexdigest())
+               for path in paths.values()]
+    live_leases = []
+    descriptors = []
+    original_open = LeaseWindow.open
+
+    def record_open(self, key):
+        fd, serving = original_open(self, key)
+        descriptors.append(fd)
+        return fd, serving
+
+    def refuse_setup(*args, **kwargs):
+        assert strict._pins_live(tmp_path, consumer)
+        raise MemoryError("read setup failed")
+
+    monkeypatch.setattr(LeaseWindow, "open", record_open)
+    if failure_point == "allocation":
+        monkeypatch.setattr(io_engine.SealedBuffer, "__init__", refuse_setup)
+    else:
+        monkeypatch.setattr(resolver, "record_serving_tier", refuse_setup)
+    try:
+        leases = io_engine.pin_group(members, live_leases)
+        assert leases is not None
+        path = members[0][0]
+        with pytest.raises(MemoryError, match="read setup failed"):
+            io_engine.read_file(
+                path, path.stat().st_size, staged=leases[path][2],
+                lease=leases[path], sealed=True)
+        assert len(descriptors) == 1
+        with pytest.raises(OSError):
+            os.fstat(descriptors[0])
+        assert strict._pins_live(tmp_path, consumer)
+        assert calls["release"] == []
+    finally:
+        io_engine.unpin(live_leases)
+    assert strict._pins_live(tmp_path, consumer) == []
+    assert len(calls["acquire_for"]) == len(calls["release"]) == 1
+    assert resolver.report()["bytes_from_pool"] == 0
+
+
 def test_a_bad_staged_copy_fails_its_window_by_name_and_releases_the_pin(
         tmp_path, monkeypatch, workers):
     """A copy that no longer matches its pin refuses; nothing falls back."""

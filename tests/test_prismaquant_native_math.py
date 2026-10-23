@@ -7,11 +7,9 @@ import torch
 import torch.nn as nn
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
-    SOURCE_BPP_EXCEEDED_REASON,
-    _scan_source_dtype_manifest,
-    cost_entry_source,
-)
+from prismaquant.source_format_contracts import SOURCE_BPP_EXCEEDED_REASON
+from prismaquant.allocator_candidates import _scan_source_dtype_manifest
+from prismaquant.priced_cell import cost_entry_source
 from prismaquant.allocator import (
     Candidate,
     build_candidates,
@@ -101,7 +99,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
                 "BF16": {"weight_mse": 0.0, "output_mse": 0.0},
             }
         }
-        cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3"), fr.get_format("BF16")])
+        cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3"), fr.get_format("BF16")]).candidates
         by_fmt = {cand.fmt: cand for cand in cands["layer.weight"]}
         self.assertAlmostEqual(
             by_fmt["FP8_E4M3"].bits_per_param,
@@ -134,7 +132,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
         }
 
         with mock.patch.dict("os.environ", {}, clear=True):
-            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")])
+            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")]).candidates
         self.assertAlmostEqual(cands["layer.weight"][0].predicted_dloss, 0.25)
 
         with mock.patch.dict(
@@ -142,7 +140,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             {"PRISMAQUANT_FISHER_OUTPUT_MSE_ALLOCATOR": "1"},
             clear=True,
         ):
-            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")])
+            cands = build_candidates(stats, costs, [fr.get_format("FP8_E4M3")]).candidates
             self.assertAlmostEqual(cands["layer.weight"][0].predicted_dloss, 0.05)
 
     def test_cost_entry_source_reports_authoritative_fallback(self):
@@ -193,7 +191,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             [fr.get_format("FP8_SOURCE"), fr.get_format("MXFP8")],
             source_manifest={"layer.weight": "fp8"},
             mask_records=masks,
-        )
+        ).candidates
         by_fmt = {cand.fmt: cand for cand in cands["layer.weight"]}
 
         self.assertNotIn("MXFP8_E4M3", by_fmt)
@@ -269,7 +267,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
                 costs,
                 [fr.get_format("BF16"), fr.get_format("NVFP4")],
                 source_manifest={},
-            )
+            ).candidates
 
     def test_source_dtype_manifest_uses_profile_fp8_scale_pairs(self):
         class _ScaleProfile:
@@ -312,7 +310,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             stats, costs,
             [fr.get_format("NVFP4"), fr.get_format("MXFP8")],
             calibrated_gains={"NVFP4": 2.0, "MXFP8": 1.0},
-        )
+        ).candidates
         by_fmt = {c.fmt: c for c in cands["layer.weight"]}
         self.assertAlmostEqual(by_fmt["NVFP4"].predicted_dloss, 0.5 * 2.0 * 0.10 * 2.0)
         self.assertAlmostEqual(
@@ -358,7 +356,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
             stats,
             costs,
             [fr.get_format("NVFP4"), fr.get_format("MXFP4"), fr.get_format("BF16")],
-        )
+        ).candidates
         by_fmt = {
             c.fmt: c
             for c in cands["model.layers.0.mlp.experts.gate_up_proj"]
@@ -393,7 +391,7 @@ class TestPrismaQuantAllocatorMath(unittest.TestCase):
 
         cands = build_candidates(
             stats, costs, [fr.get_format("NVFP4"), fr.get_format("BF16")]
-        )
+        ).candidates
         by_fmt = {c.fmt: c for c in cands[name]}
 
         self.assertEqual(

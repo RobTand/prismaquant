@@ -12,12 +12,14 @@ stride 2. The claims:
   fresh run opens nothing under the walk's input roots.
 * A fresh root run with and without the walk seals the same roster digest
   and the same checkpoint bytes; the receipts differ only in ``head.walked``.
-* A completion under another digest, a completion prepared under another
-  plan (dev mode included), and a capsule whose campaign record changed all
-  refuse.
+* A completion under another digest and a capsule whose campaign record
+  changed refuse. Another prepared plan refuses in certified mode and
+  stamps the mismatch in dev mode.
 * The adjoint data manifest's head declares none of the walk's reads.
 """
 from __future__ import annotations
+
+from prismaquant import aura_provenance
 
 import hashlib
 import json
@@ -182,6 +184,7 @@ def _entry(monkeypatch, *, implementation, walk, generation):
         model_profiles,
         tessera_joint_aura,
     )
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant.joint_cost_stage_a import KernelTimeProfiler
 
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
@@ -197,11 +200,11 @@ def _entry(monkeypatch, *, implementation, walk, generation):
     monkeypatch.setattr(joint_projection_backend, "executing_image", lambda: IMAGE)
     monkeypatch.setattr(joint_projection_backend, "prewarm_projection_backend",
                         lambda *a, **k: SimpleNamespace(identity=PROJECTION))
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: implementation)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: implementation)
     monkeypatch.setattr(model_profiles, "detect_profile", lambda *a, **k: None)
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm",
                         lambda *a, **k: _dense_runner())
-    monkeypatch.setattr(cost_streaming, "build_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "build_streamed_model_identity",
                         lambda *a, **k: _model_identity("joint-source"))
     monkeypatch.setattr(glm_capture_compatibility, "require_capture_compatibility",
                         lambda *a, **k: None)
@@ -422,8 +425,8 @@ def test_a_completion_with_another_calibration_refuses(tmp_path, monkeypatch):
 def _published(campaign, tmp_path):
     """The campaign a capsule publishes for this roster, and its sealed record."""
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-    from prismaquant.joint_layer_quanta import (
-        LAYER_QUANTUM_SCHEMA, canonical_sha256, roster_digest)
+    from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA, roster_digest)
+    from prismaquant.joint_layer_quanta import (canonical_sha256)
 
     names = campaign.names
     scope = {"kind": "complete_campaign", "source_unit_count": len(names),

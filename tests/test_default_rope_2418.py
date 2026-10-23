@@ -2,10 +2,15 @@
 from types import SimpleNamespace
 import pytest
 import torch
-import prismaquant
 from transformers import LlamaConfig
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
+
+
+@pytest.fixture(autouse=True)
+def initialized_model_runtime():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
 
 
 def test_actual_llama_config_uses_the_upstream_representation():

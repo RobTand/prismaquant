@@ -221,6 +221,28 @@ def test_perturbed_cache_strict_miss_escape_allows_rtn(tmp_path, monkeypatch):
     assert out.shape == (1, 64)
 
 
+@pytest.mark.parametrize("has_cache", [False, True])
+def test_frozen_tessera_weights_require_production_render_with_rtn_escape(
+    tmp_path, monkeypatch, has_cache,
+):
+    monkeypatch.setenv("PRISMAQUANT_STRICT_PRODUCTION_CACHE", "0")
+    model = nn.Sequential(nn.Linear(256, 256, bias=False)).eval()
+    cache = PerturbedActivationCache(
+        model,
+        {"0": "TESSERA_E4M3_K1_R1024"},
+        tmp_path,
+        input_rows=0,
+        cal_hash="test",
+        include_activation_quant=False,
+        production_weight_cache=(
+            ProductionWeightCache({}, levers={}) if has_cache else None
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Tessera.*weights-only"):
+        cache.build_frozen_weight_cache()
+
+
 def test_perturbed_cache_refuses_a_retired_codebook_rung(
     tmp_path, monkeypatch,
 ):

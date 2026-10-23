@@ -177,7 +177,7 @@ def require_layer_tiling(ranges, *, num_layers=None) -> list[tuple[int, int]]:
 
 def source_fingerprints(source_root) -> dict:
     """The stat fingerprint of every file a capture identity hashes."""
-    from .cost_streaming import _streamed_identity_stat_fingerprint
+    from .streamed_model_identity import _streamed_identity_stat_fingerprint
     from .tessera_calibration_cache import capture_source_files
     return {path.name: _streamed_identity_stat_fingerprint(path)
             for path in capture_source_files(source_root)}
@@ -190,7 +190,7 @@ def require_source_fingerprints(recorded, source_root, *, where) -> None:
     integrity checks. D32 prep-vs-running stat or roster drift stamps and
     continues; certified mode retains the original refusal.
     """
-    from .cost_streaming import stat_fingerprint_reusable
+    from .streamed_model_identity import stat_fingerprint_reusable
     from .dev_mode import seal_check
     live = source_fingerprints(source_root)
     seal_check('capture prep source roster', set(recorded), set(live), where=where,
@@ -269,7 +269,7 @@ def prepare_capture_chain(capture_root, *, census_path, ranges, n_batches, bound
     and the join binds them (PQ #1896), so the prep reads no payload. Refuses
     when the chain is already prepped.
     """
-    from .cost_streaming import StreamedBoundaryArtifacts
+    from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
     ranges = require_layer_tiling(ranges)
     if type(n_batches) is not int or n_batches < 1:
         raise CaptureChainRefused("a capture chain needs at least one calibration batch")
@@ -484,7 +484,7 @@ class ChainQuantum:
     @contextmanager
     def owner(self):
         """Own the generation for this range; the status is ``complete`` on a clean exit."""
-        from .cost_streaming import StreamedBoundaryArtifacts
+        from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
         storage = StreamedBoundaryArtifacts(self.prep["boundary_storage"])
         with storage:
             storage.rebind(self.prep["session"], identity=self.prep["bind_identity"],

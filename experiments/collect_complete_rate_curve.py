@@ -21,7 +21,7 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json_sha256,
     unit_path,
 )
-from prismaquant.tessera_campaign import CampaignAnchor, CURRENCY as CAMPAIGN_CURRENCY
+from prismaquant.tessera_campaign_table import (CampaignAnchor, CURRENCY as CAMPAIGN_CURRENCY)
 
 
 SCHEMA = "prismaquant.complete_rate_curve.v1"
@@ -282,7 +282,7 @@ def _validate_campaign_menu(
     unique member of the planned family; only its intersection with the
     recorded band is the curve roster.
     """
-    from prismaquant.tessera_campaign import parse_rate_band
+    from prismaquant.tessera_campaign_table import parse_rate_band
     from prismaquant.tessera_formats import TesseraFormatError, parse_tessera_format_name
 
     legal_rates = plan["legal_rates"]

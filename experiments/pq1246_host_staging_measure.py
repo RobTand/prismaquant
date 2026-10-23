@@ -37,6 +37,8 @@ checkout.
 """
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import argparse
 import bisect
 import contextlib
@@ -162,7 +164,7 @@ def build_campaign(root, device, scale, execution, calibration):
     from prismaquant.joint_statistics_replay import preflight_joint_operator_admission
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+        patch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
         patch.setenv("PRISMAQUANT_DEV_MODE", "1")
         torch.manual_seed(715)
         state = {key: tensor.detach().clone()
@@ -190,7 +192,7 @@ def build_campaign(root, device, scale, execution, calibration):
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=rt._hex("a"), plan_sha256=rt._hex("d"),
             prepared_sha256=rt._hex("e"), read_manifest_sha256=rt._hex("f"),
-            implementation_sha256=aura._aura_source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
         stage_a_s = time.time() - started
     if [c["boundary"] for c in receipt["checkpoints"]] != [2]:
         raise RuntimeError(f"unexpected Stage A checkpoints {receipt['checkpoints']}")
@@ -265,7 +267,7 @@ PINNED_SOURCE_SHA256 = hashlib.sha256(b"pq1246 pinned producer source").hexdiges
 def pin_producer_source():
     """Pin the package digest the records bind; return the checkout's real one.
 
-    Rebinds ``_production_cache_source_sha256`` and ``_aura_source_sha256``
+    Rebinds ``_production_cache_source_sha256`` and ``aura_provenance.producer_package_sha256``
     on their home modules and on every loaded ``prismaquant`` module that
     imported them by name. A module imported later reads the pinned
     attribute from its home module.
@@ -274,9 +276,9 @@ def pin_producer_source():
 
     real = pwc._production_cache_source_sha256()
     originals = {"_production_cache_source_sha256": pwc._production_cache_source_sha256,
-                 "_aura_source_sha256": aura._aura_source_sha256}
+                 "producer_package_sha256": aura_provenance.producer_package_sha256}
     pinned = {"_production_cache_source_sha256": lambda package_root=None: PINNED_SOURCE_SHA256,
-              "_aura_source_sha256": lambda: PINNED_SOURCE_SHA256}
+              "producer_package_sha256": lambda: PINNED_SOURCE_SHA256}
     rebound = []
     for name, module in sorted(sys.modules.items()):
         if not name.startswith("prismaquant") or module is None:
@@ -285,7 +287,7 @@ def pin_producer_source():
             if getattr(module, attribute, None) is original:
                 setattr(module, attribute, pinned[attribute])
                 rebound.append(f"{name}.{attribute}")
-    if aura._aura_source_sha256() != PINNED_SOURCE_SHA256:
+    if aura_provenance.producer_package_sha256() != PINNED_SOURCE_SHA256:
         raise RuntimeError("the producer source digest is not pinned")
     return {"real": real, "pinned": PINNED_SOURCE_SHA256, "rebound": rebound}
 

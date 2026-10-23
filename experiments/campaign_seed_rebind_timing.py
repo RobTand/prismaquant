@@ -9,8 +9,10 @@ checkpoint and wire directory as the seed, and the rollout configuration's
 publication/identity flags -- and records where the time goes: the resident
 prefetch, the identity bind, the adoption (per-anchor identity and wire
 receipt re-verification, wire re-read bytes), and the final journal and cost
-write.  Nothing is encoded when every anchor is adopted, so the elapsed time
-is the rebind cost a rollout pays per row.
+write. Nothing is encoded when every requested anchor is adopted, but this
+driver counts final unit shards rather than proving complete anchor adoption
+or counting encoder calls. Its elapsed time can include recovery of missing
+anchors and does not independently establish pure rebind cost.
 
 ``prepare`` sizes the action through the dispatcher's own plan for the row
 with the extra flags; ``run`` executes it inside the admitted action.
@@ -33,7 +35,7 @@ SCHEMA = 'prismaquant.campaign_seed_rebind_timing.v1'
 
 
 def prepare(spec_path, workspace, row_id, out, *, overlap_bytes, identity_bytes):
-    from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
+    from prismaquant.tessera_campaign_rows import load_spec, streamed_resource_plan
     spec = load_spec(spec_path)
     workspace, out = Path(workspace), Path(out)
     plan = json.loads((workspace/'plan.json').read_text())
@@ -50,7 +52,7 @@ def prepare(spec_path, workspace, row_id, out, *, overlap_bytes, identity_bytes)
     cache_dir = Path(command[command.index('--cache-dir')+1])
     selected = json.loads(json.dumps(spec))
     selected['campaign_argv'] += arm_flags(overlap_bytes, identity_bytes)
-    resources = _streamed_resource_plan(selected, census, row['members'], selected_source=True)
+    resources = streamed_resource_plan(selected, census, row['members'], selected_source=True)
     memory = math.ceil((resources['memory_bytes']+plan['process_baseline_bytes'])/1024**3)
     if memory > spec['box_memory_gb']:
         raise ValueError(f'rebind workload needs {memory} GiB, above the recipe budget')
@@ -104,7 +106,14 @@ def run(path, expected):
     command += ['--seed-checkpoint', p['seed_checkpoint'], '--seed-wire-dir', p['seed_wire_dir']]
     command += arm_flags(p['overlap_bytes'], p['identity_bytes'])
     recorder = PhaseRecorder(limit=200000)
-    targets = [(campaign, name) for name in (
+    from prismaquant import tessera_campaign_wire as campaign_wire
+    moved_operations = {
+        '_checkpoint_wire_record': (campaign_wire, 'checkpoint_wire_record'),
+        '_link_seed_wire': (campaign_wire, 'link_seed_wire'),
+        '_campaign_checkpoint_identity': (campaign, 'campaign_checkpoint_identity'),
+    }
+    targets = [moved_operations.get(name, (campaign, name))
+        for name in (
         '_prefetch_selected_capture', '_campaign_bound_identities', '_adopt_seed_checkpoint',
         '_checkpoint_anchor_identity', '_checkpoint_wire_record', '_link_seed_wire',
         '_campaign_checkpoint_identity', 'campaign_cost_payload')] + [
@@ -116,7 +125,11 @@ def run(path, expected):
     returncode = None
     try:
         for owner, name, original in originals:
-            setattr(owner, name, recorder.wrap(original, owner.__name__+'.'+name))
+            logical_name = next((old for old, target in moved_operations.items()
+                                 if target == (owner, name)), None)
+            phase = (campaign.__name__+'.'+logical_name if logical_name is not None
+                     else owner.__name__+'.'+name)
+            setattr(owner, name, recorder.wrap(original, phase))
         returncode = campaign.main(command)
     finally:
         for owner, name, original in originals:
@@ -158,7 +171,7 @@ def run(path, expected):
         raise RuntimeError(f'rebind journalled {adopted} units of {p["seed_unit_shards"]} seeded')
     write(out/'result.json', dict(schema=SCHEMA, plan_sha256=expected, adopted_units=adopted,
         identity_sha256=manifest['identity_sha256'], wall_seconds=elapsed,
-        scope='One completed row re-verified through --seed-checkpoint under a new package source; no anchor encoded.'))
+        scope='Seeded campaign recovery under a new package source; adopted_units is the final journal unit count, not proof of anchor adoption. Encoder calls are not counted; missing-anchor work may be included.'))
 
 
 def main():

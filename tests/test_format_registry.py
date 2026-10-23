@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant.export_native_compressed import (
+from prismaquant.native_render_codec import (
     _mxfp8_dequantize_2d,
-    _rtn_dequant_nvfp4,
+    rtn_dequant_nvfp4,
     quantize_dequantize_fp8_dynamic,
     quantize_dequantize_mxfp8,
 )
@@ -104,9 +105,7 @@ def test_plain_fp8_weight_matches_compressed_tensors_fp8_dynamic():
 def test_plain_fp8_rank3_activation_matches_compressed_tensors_fp8_dynamic():
     from compressed_tensors.quantization.lifecycle.forward import fake_quantize
     from compressed_tensors.quantization.quant_scheme import FP8_DYNAMIC
-    from compressed_tensors.quantization.utils.helpers import (
-        compute_dynamic_scales_and_zp,
-    )
+    from compressed_tensors.quantization.utils.helpers import compute_dynamic_scales_and_zp
 
     torch.manual_seed(19)
     x = torch.randn(2, 5, 32, dtype=torch.float32) * 3.0
@@ -186,46 +185,32 @@ def test_mx_e8m0_rtn_matches_export_scale_rounding():
         assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
 
 
-def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch):
-    import prismaquant.export_native_compressed as enc
-
-    previous = enc._NVFP4_SCALE_RULE
-    monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", enc.NVFP4_SCALE_RULE_STATIC_6)
-    try:
-        cases = [
-            torch.linspace(-3.7, 3.7, steps=64, dtype=torch.float32).reshape(4, 16)
-        ]
-        for seed in range(5):
-            torch.manual_seed(seed)
-            cases.append(torch.randn(16, 64, dtype=torch.float32) * 10 ** (seed - 2))
-
-        for w in cases:
-            registry = fr.get_format("NVFP4").quantize_dequantize(w)
-            export = _rtn_dequant_nvfp4(w, group_size=16)
-
-            assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
-    finally:
-        monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", previous)
+@pytest.mark.parametrize("rule", ["static_6", "four_over_six_mse", "joint_mse"])
+def test_nvfp4_registry_rtn_matches_export_scale_convention(monkeypatch, rule):
+    monkeypatch.setenv("PRISMAQUANT_NVFP4_SCALE_RULE", rule)
+    options = fr.registry_rtn_levers()
+    assert options.nvfp4_scale_rule == rule
+    cases = [torch.linspace(-3.7, 3.7, steps=64, dtype=torch.float32).reshape(4, 16)]
+    for seed in range(5):
+        generator = torch.Generator().manual_seed(seed)
+        cases.append(torch.randn(16, 64, generator=generator) * 10 ** (seed - 2))
+    for weight in cases:
+        registry = fr.get_format("NVFP4").quantize_dequantize(weight)
+        export = rtn_dequant_nvfp4(weight, group_size=16, levers=options)
+        assert torch.equal(registry, export)
 
 
-def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch):
-    # WEIGHTS follow the export codec (one rendering everywhere).
-    import prismaquant.export_native_compressed as enc
-
-    previous = enc._NVFP4_SCALE_RULE
-    monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", enc.NVFP4_SCALE_RULE_STATIC_6)
-    try:
-        torch.manual_seed(23)
-        x = torch.randn(2, 5, 32, dtype=torch.float32) * 2.0
-        registry = fr.get_format("NVFP4").quantize_dequantize(x)
-        export = _rtn_dequant_nvfp4(
-            x.reshape(-1, x.shape[-1]),
-            group_size=16,
-        ).reshape_as(x)
-
-        assert torch.allclose(registry, export, atol=0.0, rtol=0.0)
-    finally:
-        monkeypatch.setattr(enc, "_NVFP4_SCALE_RULE", previous)
+@pytest.mark.parametrize("rule", ["static_6", "four_over_six_mse", "joint_mse"])
+def test_nvfp4_rank3_weight_matches_export_scale_convention(monkeypatch, rule):
+    monkeypatch.setenv("PRISMAQUANT_NVFP4_SCALE_RULE", rule)
+    options = fr.registry_rtn_levers()
+    generator = torch.Generator().manual_seed(23)
+    weight = torch.randn(2, 5, 32, generator=generator) * 2.0
+    registry = fr.get_format("NVFP4").quantize_dequantize(weight)
+    export = rtn_dequant_nvfp4(
+        weight.reshape(-1, weight.shape[-1]), group_size=16, levers=options,
+    ).reshape_as(weight)
+    assert torch.equal(registry, export)
 
 
 def test_nvfp4_activation_emulation_is_batch_independent():

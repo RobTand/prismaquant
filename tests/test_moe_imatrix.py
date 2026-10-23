@@ -1,7 +1,8 @@
-"""Checkpoint-based packed-expert imatrix synthesis (moe_imatrix):
-gate_up = module-input pool, down_proj = routed per-expert replay — the
-entries the raw act-cache harvest can never contain, required by the CB
-exporter (no silent RTN) and the local packed-expert cost (lockstep)."""
+"""Checkpoint-based packed-expert imatrix synthesis for local expert costs.
+
+gate_up uses the module-input pool; down_proj uses routed per-expert replay.
+The former CB exporter also used these synthesized entries before retirement.
+"""
 from __future__ import annotations
 
 import json

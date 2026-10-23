@@ -35,7 +35,7 @@ def _input(case):
 
 def _identity(monkeypatch, calib):
     from prismaquant import production_weight_cache as pwc
-    from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 
     monkeypatch.setattr(ec, "_git_commit", lambda: "test-commit")
     monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "a" * 64)

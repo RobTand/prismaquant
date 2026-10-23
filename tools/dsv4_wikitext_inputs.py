@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import random
 import re
 from typing import Any
@@ -165,7 +165,10 @@ def _validate_tokenizer_identity(
         if (
             not isinstance(name, str)
             or not name
-            or Path(name).name != name
+            or name == "."
+            or PurePosixPath(name).as_posix() != name
+            or PurePosixPath(name).is_absolute()
+            or ".." in PurePosixPath(name).parts
             or not isinstance(descriptor, Mapping)
             or set(descriptor) != {"bytes", "sha256"}
             or isinstance(descriptor.get("bytes"), bool)

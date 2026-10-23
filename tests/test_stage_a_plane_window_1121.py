@@ -107,7 +107,7 @@ def _capture(root: Path, runner, *, n_probes, probe_microbatch,
 def _written_planes(root: Path, monkeypatch, *, n_probes, probe_microbatch):
     """Every cotangent plane the capture writes: its entries and their bytes."""
 
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     planes: dict = {}
     sizes: list = []
@@ -135,7 +135,7 @@ def _capture_bind_arguments(root: Path, monkeypatch, *, n_probes,
                             probe_microbatch) -> dict:
     """The arguments the real capture passes to its produced-output bind."""
 
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     seen: dict = {}
 
@@ -165,7 +165,7 @@ def _bind_need(root: Path, monkeypatch, arguments: dict, *, n_probes,
     """
 
     from prismaquant import produced_output_spool
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.stage_a_produced_output import boundary_group_ceiling_bytes
     from test_streamed_boundary_artifacts import _policy
 

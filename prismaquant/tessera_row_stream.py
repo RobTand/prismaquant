@@ -43,7 +43,7 @@ the run identity binds every priced unit's W, X and H receipts, so they cannot
 exist before the last entry is verified. They are written at finalize, after
 the loop, from the per-entry receipts (``IDENTITY_BOUND_WRITES``). The wire
 blobs and render entries the loop publishes are keyed by unit and format name
-only (``_wire_path``), carry no run identity, and are not cited by anything
+only (``tessera_campaign_wire.wire_path``), carry no run identity, and are not cited by anything
 until the journal shards are written, so they land during the loop as they
 always did. A row that fails before finalize leaves wires and render entries
 and none of the six.
