@@ -157,6 +157,13 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- Record the six guarded-read, serializer write-sink, consumed-size and BLAKE2b
+  scientific-seed digest sites as evidenced retentions in the #2540 census.
+  Remove their eligible cohorts and require matching caller/owner source identities
+  before relying on the manifest; hashing, read guards, seeds and wire formats
+  remain unchanged (#2637). Revalidate the unchanged retained scopes against
+  current main without relabeling the historical snapshot; live calibration-hash
+  compatibility coverage supports the archived sample-parallel retention reference.
 - **Bound-publication digest sites route to the digest owners** (Refs #1301, part of #2542).
   `stage_b_prep_io._hash_range` delegates to the one new exact recipe,
   `prismaquant.digests.file_range_sha256hex`: open once, seek to the offset,
