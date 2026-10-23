@@ -1,0 +1,113 @@
+{
+  "schema": "digest-1301-consumer-ledger-v1",
+  "piece": "census-campaign",
+  "status": "blocked-on-owner-recipes",
+  "inspected_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "research_base": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "boundary": "Prerequisite audit only. No consumer replacement, compatibility fixture, baseline removal or parent-closure claim. The frozen research registry is provenance, not an oracle. Pending calls below are not retention decisions.",
+  "source_blobs": {
+    "prismaquant/digests.py": "65c98d3bdeb16035ef4b104dc159e986e2279897",
+    "prismaquant/tessera_campaign.py": "b8f9fca7b62f35b1e03d324b961b5fbb79759fd5",
+    "prismaquant/tessera_campaign_reseal.py": "0c62424972a0001cbf1860e7c9de22c1c41e76ec",
+    "prismaquant/tessera_census_union.py": "bb7a129e997f0ef5dcb380600838c3e96358a5aa",
+    "prismaquant/tessera_census_cache.py": "b8158910df6d22720611dd9b8588bf51777170c4",
+    "prismaquant/tessera_expert_projection.py": "5557d36ed382c54f59d4d2afc9177eced82ac4f4",
+    "prismaquant/tessera_joint_allocation.py": "5953449b099c94eff9f5a73dc7e6f1b5e861e329"
+  },
+  "completed_calls": [],
+  "owner_gaps": [
+    {
+      "id": "sorted-repr-json",
+      "consumer": "prismaquant/tessera_census_union.py::_json_key@60:11",
+      "recipe": "Direct sorted compact ASCII JSON, allow_nan=True, default=repr; returns str. Used for NaN-aware equality and text SHA-256 identities.",
+      "missing": "No settled named profile has default=repr. default=str is not compatible. JsonProfile can encode this recipe but defining a consumer-local profile would evade shared recipe ownership."
+    },
+    {
+      "id": "unsorted-default-json",
+      "consumers": [
+        "prismaquant/tessera_campaign_reseal.py::plan_row@598:30",
+        "prismaquant/tessera_joint_allocation.py::main@346:10",
+        "prismaquant/tessera_campaign.py::run_streamed_calibration@3653:18",
+        "prismaquant/tessera_campaign.py::run_streamed_calibration.visit@3739:14"
+      ],
+      "recipe": "Direct unsorted default-spaced ASCII JSON, allow_nan=True, no fallback. Reseal loads that text for a JSON clone; the other consumers publish stdout via print.",
+      "missing": "JsonProfile._encoder hard-codes sort_keys=True. Existing sorted profiles change nested insertion order in the clone and publication text. Preserve print's own newline."
+    },
+    {
+      "id": "incremental-unframed-sha256",
+      "consumers": [
+        "prismaquant/tessera_census_union.py::identity_sha256@206:13",
+        "prismaquant/tessera_census_union.py::read_manifest@271:13",
+        "prismaquant/tessera_census_union.py::_write_stream_atomic@361:13",
+        "prismaquant/tessera_census_union.py::write_plan@1122:18"
+      ],
+      "recipe": "SHA-256 of concatenated raw byte chunks, no prefix or lengths, full 64-character hex str. Consumer retains structural chunking, memo sharing, same-read parse/hash/consumed-size coupling, durable atomic publication and resume comparison.",
+      "missing": "No settled owner accepts incremental raw bytes or unframed byte chunks. Whole-value canonical hashing drops shared menu memo behavior; joining or rereading changes resource/read contracts. Framed owners add bytes and are not substitutes."
+    },
+    {
+      "id": "indent1-no-fallback-json",
+      "consumer": "prismaquant/tessera_expert_projection.py::request_expert_projection@256:23",
+      "recipe": "Direct sorted indent-1 ASCII lax JSON, no fallback, no trailing LF; write_text before producer subprocess transport.",
+      "missing": "Existing indent-1 owner adds default=str. The ordinary stack_plan_request output is constrained JSON data, but an exact no-fallback profile avoids silently broadening serializer acceptance. Request this recipe from the owner rather than declare two profiles interchangeable."
+    }
+  ],
+  "pending_existing_routes": [
+    {
+      "original_ids": [
+        "sorted-json:prismaquant/tessera_campaign.py::_main@4419:64",
+        "sorted-json:prismaquant/tessera_campaign.py::_main@4659:21"
+      ],
+      "candidate_owner_route": "digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "contract": "Sorted indent-2 ASCII lax no-fallback memory-refusal publications; preserve selected guard snapshot, refusal ordering and stdout.",
+      "status": "pending-owner-prerequisite-and-independent-consumer-tests"
+    },
+    {
+      "original_ids": ["sorted-json:prismaquant/tessera_campaign.py::_main@4664:37"],
+      "candidate_owner_route": "digests.DIRECT_ASCII_SPACED_LAX.text",
+      "contract": "Sorted default-spaced ASCII lax no-fallback detail publication.",
+      "status": "pending-owner-prerequisite-and-independent-consumer-tests"
+    },
+    {
+      "original_ids": ["supplemental-json:prismaquant/tessera_campaign.py::_campaign_identity_metadata_plan@1243:26"],
+      "candidate_owner_route": "digests.DIRECT_ASCII_LAX.text",
+      "contract": "Compact ASCII lax shape-list encoding, UTF-8 byte length charged to planning; sorting does not affect this list of dimensions.",
+      "status": "pending-owner-prerequisite-and-independent-consumer-tests"
+    },
+    {
+      "original_ids": ["sorted-json:prismaquant/tessera_census_union.py::<module>@160:9"],
+      "candidate_owner_route": "digests.DIRECT_UTF8_STRICT.text",
+      "contract": "Direct strict sorted compact Unicode JSON encoder; no round-trip normalization; preserve caller's stream partitions and memo.",
+      "status": "pending-owner-prerequisite-and-independent-consumer-tests"
+    },
+    {
+      "original_ids": ["supplemental-json:prismaquant/tessera_census_union.py::manifest_chunks.walk@245:25"],
+      "candidate_owner_route": "digests.DIRECT_UTF8_LAX.text",
+      "contract": "Scalar key encoding only: ensure_ascii=False, lax; sorting/separators do not affect scalar values. Keep surrounding streamed layout unchanged.",
+      "status": "pending-owner-prerequisite-and-independent-consumer-tests"
+    }
+  ],
+  "retentions": [
+    {
+      "original_id": "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b8158910df6d22720611dd9b8588bf51777170c4",
+      "classification": "load-bearing",
+      "reason": "Sixth authoritative #2637 retention. Containment and symlink refusal precede access. hash_blob=False is stat-size-only. hash_blob=True counts exactly the same 16-MiB-read bytes fed to SHA-256, then checks consumed size and full hex against measured receipt. Scope left intact.",
+      "witnesses": [
+        "prismaquant/tessera_census_cache.py::_verify_dense_blob",
+        "tests/test_guarded_read_digest_retention_2637.py::test_retained_sites_keep_raw_hashlib",
+        "tests/test_guarded_read_digest_retention_2637.py::test_manifest_records_no_exact_owner"
+      ]
+    }
+  ],
+  "supplementary_audit": {
+    "population": "Only direct json/hashlib attribute calls in the six assigned source modules were enumerated with AST traversal; source review distinguished serialization from parsing and inspected adjacent stream/read/write behavior.",
+    "counts": {"primary_calls": 11, "supplemental_json_encoders": 6},
+    "limits": "This is not the shared census and does not change scanner exclusions. Counts include the protected dense verifier and pending calls, not completed scopes. No assertion of exhaustive validators, alias/dynamic options, generated code, shell or deployment populations. Those populations need separate serial-integration review."
+  },
+  "verification": {
+    "command": "python -m pytest tests/test_digest_profiles_1301.py tests/test_digest_profiles_1301_files.py tests/test_guarded_read_digest_retention_2637.py tests/test_stdlib_tools_no_package_1605.py tests/test_duplication_baseline.py -q --basetemp=\"$TMPDIR/pytest\"",
+    "result": "202 passed; 14 torch deprecation warnings; CPU only. Existing compatibility, not completed migration evidence.",
+    "evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"2a7c5ca26298eedee5fcf44456de74fa9cc9bce856d0c3978d41931d898c7d00\",\"size\":983}},\"operation\":\"4905d2882bce1a11b4b33ab24ea94af8c8ac1558f0e3acf29fcfecee008ded56\",\"receipt\":\"f082eebe261069186909f44f7eb3d24bf016db3a7622e879c5af26b3de868a27\"}]"
+  }
+}
