@@ -65,6 +65,9 @@
   PB `b77df200bfdb` passes 7 host-capability tests, `b63327b84bed` passes 3 isolation
   orders, `fbe76d599bc4` passes 3 walk tests standalone, and the remaining DSv4 shards
   pass 36 tests on x86. The unprovisioned spill ceiling case skips with the new reason.
+- The calibration-read fallback hashes through `digests.file_digest_sha256hex` (#2636).
+  The guarded loop keeps its resource checks, page release, descriptor alias, and stat fence.
+  Digests, read boundaries, and refusals stay identical. No owner recipe is added.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

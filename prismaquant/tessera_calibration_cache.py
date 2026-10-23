@@ -25,6 +25,7 @@ from .digests import (
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
+    file_digest_sha256hex,
     git_blob_sha1hex,
     hex_chain_sha256hex,
     indent2_json_file_bytes,
@@ -91,7 +92,7 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
                         advised = end
                 if resource_check is not None:
                     resource_check(f'after_capture_hash:{Path(path).name}')
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+        return file_digest_sha256hex(handle)
 
 
 @contextmanager
