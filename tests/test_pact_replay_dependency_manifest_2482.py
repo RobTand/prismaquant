@@ -3,7 +3,6 @@
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 
 REPLAY_ROOT = Path(__file__).resolve().parents[1] / "experiments" / "pact_replay"
 MANIFEST = REPLAY_ROOT / "DEPENDENCY_MANIFEST.json"
@@ -38,9 +37,18 @@ def test_provenance_references_manifest_digest():
 def test_imported_baseline_bytes_match_provenance():
     provenance = json.loads(PROVENANCE.read_bytes())
     root = REPLAY_ROOT.parents[1]
-    baseline = "fc518e4897f88982b6ff49bf9293eea5d76ecd46"
+    fixture = json.loads((Path(__file__).parent / "fixtures" /
+                          "pact_replay_2520_baseline_edits.json").read_bytes())
+    assert fixture["baseline_commit"] == "fc518e4897f88982b6ff49bf9293eea5d76ecd46"
+    assert set(fixture["files"]) == {
+        provenance["entry"], "experiments/pact_replay/bounded_profile.py",
+    }
     for path, expected in provenance["imported_files"].items():
-        raw = subprocess.check_output(["git", "show", baseline + ":" + path], cwd=root)
+        raw = (root / path).read_bytes()
+        # Retain only the small reviewed reverse edits, not a copy of the
+        # imported closure. Exact anchors reject any unrecorded source drift.
+        for edit in fixture["files"].get(path, []):
+            current, baseline = edit["current"].encode(), edit["baseline"].encode()
+            assert current and raw.count(current) == 1, path
+            raw = raw.replace(current, baseline, 1)
         assert hashlib.sha256(raw).hexdigest() == expected, path
-        if path != provenance["entry"]:
-            assert hashlib.sha256((root / path).read_bytes()).hexdigest() == expected, path

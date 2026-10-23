@@ -7,6 +7,10 @@ The parent starts one numerical process before Torch imports and waits on its pr
 A completed step resets the monotonic silence clock. A memory check or a repeated record does not reset it.
 The parent stops the isolated process group after a proven stall, even when a native operation blocks.
 The error names the last completed layer, sequence, and stream. The D30 memory guard remains active.
+The bounded profiler also defers Torch initialization until the first science item in the numerical worker.
+On successful completion the existing pipe returns its item count, capture timestamps, and trace path.
+The parent restores that metadata before publishing `profile-summary.json`; it does not run another profiler.
+The one-item cap, trace scope, and full-entry wall time remain unchanged.
 
 Each completed sequence and layer-stream step writes a cumulative progress-v1 record through `prismabuild_progress.report`.
 The phase names retain the declared layer and stream. The unit names the layer, sequence, and stream.
@@ -43,6 +47,8 @@ The cohort, roster, windows, teacher contracts, scientific refusals, and product
 The diagnostic closure stays in `experiments/pact_replay`, outside the production package.
 The frozen source is `073646c7293685869b3ad18b261c49b49c4c481a`.
 `IMPORT_PROVENANCE.json` retains the historical import hashes and records the later supervision change separately.
+The provenance test reconstructs the two modified imported files from reviewed reverse-edit fixtures under `tests/fixtures`.
+It checks every historical hash without requiring pre-base Git objects or copying the imported source closure.
 `D38_IMPORTS.json` retains the historical public CLI capture from PB `a46b541d3e84`; it is not a capture of this change.
 All identity records remain advisory. No runtime identity gate reads them.
 The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.

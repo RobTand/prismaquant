@@ -9,20 +9,40 @@ import sys
 import time
 
 _CAPTURE = None
+_METADATA_FIELDS = ("capture_items", "started_unix", "ended_unix", "trace")
+
+
+def capture_metadata():
+    """Return only the active capture's small, serializable summary fields."""
+    if _CAPTURE is not None:
+        return {field: getattr(_CAPTURE, field) for field in _METADATA_FIELDS}
+
+
+def accept_capture_metadata(metadata):
+    """Restore a successful numerical worker's capture before publishing."""
+    if _CAPTURE is not None and metadata is not None:
+        for field in _METADATA_FIELDS:
+            setattr(_CAPTURE, field, metadata[field])
 
 
 class _Capture:
-    def __init__(self, output, activities):
-        self.output, self.activities = output, activities
+    def __init__(self, output, expected_device):
+        self.output, self.expected_device = output, expected_device
         self.capture_items = 0
         self.started_unix = self.ended_unix = None
         self.trace = None
 
     @contextmanager
     def first_item(self):
+        # The supervisor must fork before Torch initializes CPU/CUDA workers.
         import torch
+        if self.expected_device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("The GPU profile requires a live CUDA device")
+        activities = [torch.profiler.ProfilerActivity.CPU]
+        if self.expected_device == "cuda":
+            activities.append(torch.profiler.ProfilerActivity.CUDA)
         self.capture_items = 1
-        profiler = torch.profiler.profile(activities=self.activities, record_shapes=True,
+        profiler = torch.profiler.profile(activities=activities, record_shapes=True,
             profile_memory=False, with_stack=False)
         try:
             self.started_unix = time.time()
@@ -47,15 +67,9 @@ def capture_item():
 
 def profile_run(output, entry, entry_args, expected_device):
     """Run an unchanged entry with one bounded diagnostic trace and no tables."""
-    import torch
-    if expected_device == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("The GPU profile requires a live CUDA device")
-    activities = [torch.profiler.ProfilerActivity.CPU]
-    if expected_device == "cuda":
-        activities.append(torch.profiler.ProfilerActivity.CUDA)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    capture = _Capture(output, activities)
+    capture = _Capture(output, expected_device)
     global _CAPTURE
     previous, previous_argv = _CAPTURE, sys.argv
     _CAPTURE = capture

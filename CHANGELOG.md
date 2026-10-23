@@ -49,6 +49,8 @@
   The parent supervisor stops a blocked native call and names the last layer, sequence, and stream.
   Each completed step appends timestamped history and writes a PrismaBuild progress-v1 record through the shared writer.
   The D30 memory guard and all scientific contracts remain unchanged.
+  Supervised bounded profiling returns the worker's capture metadata before the parent publishes its summary.
+  Historical byte verification uses small reverse-edit fixtures, not unavailable Git history.
   PB `f6d4d182bfd7` proves byte-identical science JSON, score journals, and checkpoint state payloads against the accepted import.
   The CPU fixture completes through 5400 fake-clock seconds.
   Historical logs do not establish the longest gap; the first band history supplies that measurement for a follow-up default change.

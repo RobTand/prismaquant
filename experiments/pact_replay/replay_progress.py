@@ -11,6 +11,8 @@ import re
 import signal
 import time
 
+from bounded_profile import accept_capture_metadata, capture_metadata
+
 DEFAULT_STALL_SECONDS = 1800
 
 
@@ -100,7 +102,8 @@ def _worker(work, sender, receiver):
     os.setsid()
     try:
         work(sender.send)
-        sender.send({"event": "complete", "monotonic_seconds": time.monotonic()})
+        sender.send({"event": "complete", "monotonic_seconds": time.monotonic(),
+                     "profile_capture": capture_metadata()})
     finally:
         sender.close()
 
@@ -127,6 +130,7 @@ def supervise(work, allowance):
     try:
         pipe_open = True
         completed = False
+        profile_capture = None
         while True:
             remaining = max(0.0, watch.allowance - (watch.clock() - watch.last_time))
             ready = wait([receiver, process.sentinel] if pipe_open else [process.sentinel],
@@ -137,6 +141,7 @@ def supervise(work, allowance):
                     if record.get("event") == "complete":
                         watch.check(record["monotonic_seconds"])
                         completed = True
+                        profile_capture = record["profile_capture"]
                     else:
                         watch.advance(record)
                 except EOFError:
@@ -148,6 +153,7 @@ def supervise(work, allowance):
                     raise SystemExit(process.exitcode if process.exitcode > 0 else 128 - process.exitcode)
                 if not completed:
                     raise RuntimeError("The replay worker exited without a completion record")
+                accept_capture_metadata(profile_capture)
                 return
             # Drain queued progress before a silence verdict. Parent delay
             # cannot erase work that the numerical process completed.
