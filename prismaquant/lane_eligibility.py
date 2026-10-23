@@ -1070,13 +1070,32 @@ def _parse_smoke_record(payload: Any, where: str, *,
 
     Validating only vocabularies before deriving a status is insufficient:
     observation identity, portable paths and nullable reference arms are also
-    producer grammar. The immutable pin binds this private metadata helper's
-    API; a runtime lacking it refuses by name through ``_tessera_published``.
-    No serving execution or kernel module is imported here.
+    producer grammar. Legacy pins publish a private validator; newer producers
+    expose it through the versioned public metadata API. Dispatch only on API
+    capability, never fall back after a validation failure or restate the rule.
     """
-    validate = _tessera_published("_evidence_smoke_record", where)
+    validate = getattr(_tessera_contract_module(), "_evidence_smoke_record", None)
+    legacy_api = callable(validate)
+    if not legacy_api:
+        try:
+            from tessera import metadata
+        except ImportError as exc:
+            raise LaneEligibilityError(
+                f"{where} needs Tessera's smoke-record validator; the installed "
+                "producer publishes neither the legacy validator nor "
+                "tessera.metadata") from exc
+        if (getattr(metadata, "METADATA_API_VERSION", None)
+                != "tessera.producer-metadata.v1"
+                or not callable(getattr(metadata, "parse_smoke_record", None))):
+            raise LaneEligibilityError(
+                f"{where} needs tessera.producer-metadata.v1 "
+                "with a callable parse_smoke_record")
+        validate = metadata.parse_smoke_record
     try:
-        parsed = validate(payload, where, control, where.removesuffix(".record"))
+        if legacy_api:
+            parsed = validate(payload, where, control, where.removesuffix(".record"))
+        else:
+            parsed = validate(payload, control=control, where=where)
     except ValueError as exc:
         raise LaneEligibilityError(str(exc)) from exc
     if parsed is None:

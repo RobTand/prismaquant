@@ -23,9 +23,10 @@ file (a malformed pin is refused by its own reader) and then runs the
 four classes and refuses when any is missing or fails. ``run_v12_scope_proof``
 keeps the failure reason per class, so the refusal names the cause.
 ``check_producer_schema_pr`` is the producer-side rule: a Tessera schema PR
-is refused unless it links consumer compatibility work and names fixture
-results for all four classes. The check is mechanical string matching, not
-a heuristic.
+is refused unless it links consumer compatibility work and reports exactly
+one ``fixture-result: <class> PASS <https-result-url>`` line per class.
+Prose mentions are not fixture results; this validates reported evidence's
+syntax, not the remote run.
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
+from urllib.parse import urlsplit
 
 from . import lane_eligibility as lane
 from . import tessera_runtime_contract as runtime
@@ -92,7 +94,7 @@ class ScopeClassProof:
     reason: str = ""
 
 
-def _fail(message: str) -> None:
+def _refuse_scope_fixture(message: str) -> None:
     """Refuse the fixture class with an explicit reason (never ``assert``)."""
     raise TesseraPinScopeGateError(message)
 
@@ -120,37 +122,37 @@ def _parsed(payload=None):
     return runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
 
 
-def _check_census() -> None:
+def _check_scope_census() -> None:
     payload = _payload()
     if payload["lane_eligibility"]["schema"] != "tessera.lane-eligibility.v12":
-        _fail("census: lane schema is not v12")
+        _refuse_scope_fixture("census: lane schema is not v12")
     if payload["contract_version"] != 66:
-        _fail("census: contract version is not 66")
+        _refuse_scope_fixture("census: contract version is not 66")
     cells = payload["lane_eligibility"]["cells"]
     if {c["id"] for c in cells} != {
         "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
         "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
     }:
-        _fail("census: fixture cell pair is not the v66 pair")
+        _refuse_scope_fixture("census: fixture cell pair is not the v66 pair")
     for cell in cells:
         if cell["rungs_q256"] != [768] + list(HISTORICAL_RUNGS):
-            _fail(f"census: cell rung census moved for {cell['id']}")
+            _refuse_scope_fixture(f"census: cell rung census moved for {cell['id']}")
         scopes = {e["decoder"]: e.get("rungs_q256") for e in cell["executes"]}
         if scopes[CLASS_DECODER] != [768]:
-            _fail("census: class decoder scope is not [768]")
+            _refuse_scope_fixture("census: class decoder scope is not [768]")
         for decoder in HISTORICAL:
             if scopes[decoder] != list(HISTORICAL_RUNGS):
-                _fail(f"census: historical scope moved for {decoder}")
+                _refuse_scope_fixture(f"census: historical scope moved for {decoder}")
     table = _table(payload)
     if table.schema != "tessera.lane-eligibility.v12":
-        _fail("census: parsed table schema is not v12")
+        _refuse_scope_fixture("census: parsed table schema is not v12")
     for cell in table.cells:
         scopes = dict(zip([d for _, d in cell.executes], cell.launch_rungs_q256))
         if scopes[CLASS_DECODER] != (768,):
-            _fail("census: reader drops the class decoder scope")
+            _refuse_scope_fixture("census: reader drops the class decoder scope")
         for decoder in HISTORICAL:
             if scopes[decoder] != HISTORICAL_RUNGS:
-                _fail(f"census: reader drops a historical scope for {decoder}")
+                _refuse_scope_fixture(f"census: reader drops a historical scope for {decoder}")
 
 
 def _check_derived() -> None:
@@ -159,22 +161,22 @@ def _check_derived() -> None:
     route = next(c for c in parsed.cells if c.cell_id == _CELL_ID)
     cell = next(c for c in table.cells if c.id == route.cell_id)
     if tuple(route.launch_covered_rungs_q256) != tuple(cell.launch_covered_rungs_q256):
-        _fail("derived: route cell loses the derived launch coverage")
+        _refuse_scope_fixture("derived: route cell loses the derived launch coverage")
     index = next(
         i for i, (_, decoder) in enumerate(route.executes) if decoder in HISTORICAL
     )
     if 800 not in route.launch_covered_rungs_q256[index]:
-        _fail("derived: covered rungs miss the derived rate 800")
+        _refuse_scope_fixture("derived: covered rungs miss the derived rate 800")
     if not route.launch_covers_rate(index, 800):
-        _fail("derived: launch_covers_rate misses the derived rate 800")
+        _refuse_scope_fixture("derived: launch_covers_rate misses the derived rate 800")
     if not route.launch_covers_rate(index, 832):
-        _fail("derived: launch_covers_rate misses the census rate 832")
+        _refuse_scope_fixture("derived: launch_covers_rate misses the census rate 832")
     class_index = next(
         i for i, (_, decoder) in enumerate(route.executes)
         if decoder == CLASS_DECODER
     )
     if route.launch_covers_rate(class_index, 800):
-        _fail("derived: class launch wrongly covers rate 800")
+        _refuse_scope_fixture("derived: class launch wrongly covers rate 800")
 
 
 def _check_absent() -> None:
@@ -186,11 +188,11 @@ def _check_absent() -> None:
     table = _table(payload)
     parsed_cell = next(c for c in table.cells if c.id == cell["id"])
     if parsed_cell.launch_rungs_q256[0] is not None:
-        _fail("absent: launch without scope key keeps no cell scope")
+        _refuse_scope_fixture("absent: launch without scope key keeps no cell scope")
     if not parsed_cell.launch_covers_rate(0, 768):
-        _fail("absent: scopeless launch misses its cell rate 768")
+        _refuse_scope_fixture("absent: scopeless launch misses its cell rate 768")
     if not parsed_cell.launch_covers_rate(0, 832):
-        _fail("absent: scopeless launch misses its cell rate 832")
+        _refuse_scope_fixture("absent: scopeless launch misses its cell rate 832")
     v11 = _payload()
     v11["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
     for v11_cell in v11["lane_eligibility"]["cells"]:
@@ -202,27 +204,29 @@ def _check_absent() -> None:
         isinstance(entry, dict) and "launch_scopes" in entry
         for entry in before_row
     ):
-        _fail("absent: v12 answer row carries no launch scopes")
+        _refuse_scope_fixture("absent: v12 answer row carries no launch scopes")
     answer = runtime.contract_answer(
         runtime._parse(v11, commit="fixture", sha="fixture", path="fixture")
     )
     if runtime._answer_drift(before, before) != []:
-        _fail("absent: answer drift baseline is not empty")
+        _refuse_scope_fixture("absent: answer drift baseline is not empty")
     row = next(r for r in answer["cells"] if r[0] == _CELL_ID)
     if len(row) != 18:
-        _fail(f"absent: v11 answer row shape moved: len {len(row)}")
+        _refuse_scope_fixture(f"absent: v11 answer row shape moved: len {len(row)}")
     if not (
         isinstance(row[13], dict)
         and set(row[13]) >= {"image", "execution_modes"}
     ):
-        _fail("absent: v11 answer row entry 13 is not the image entry")
+        _refuse_scope_fixture("absent: v11 answer row entry 13 is not the image entry")
     if any(
         isinstance(entry, dict) and "launch_scopes" in entry for entry in row
     ):
-        _fail("absent: v11 answer row carries launch scopes")
+        _refuse_scope_fixture("absent: v11 answer row carries launch scopes")
 
 
 def _check_malformed() -> None:
+    # A broken parser is not proof that malformed scope alone is refused.
+    _table()
     bad: list[dict] = [
         {"rungs_q256": []},
         {"rungs_q256": [832, 768]},
@@ -242,18 +246,18 @@ def _check_malformed() -> None:
             _table(payload)
         except lane.LaneEligibilityError:
             continue
-        _fail(f"malformed scope admitted: {mutation!r}")
+        _refuse_scope_fixture(f"malformed scope admitted: {mutation!r}")
     payload = _payload()
     payload["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
     try:
         _table(payload)
     except lane.LaneEligibilityError:
         return
-    _fail("v12 key admitted under v11")
+    _refuse_scope_fixture("v12 key admitted under v11")
 
 
 _CHECKS = {
-    "census": _check_census,
+    "census": _check_scope_census,
     "derived": _check_derived,
     "absent": _check_absent,
     "malformed": _check_malformed,
@@ -317,24 +321,51 @@ def check_pin_update(pin_path: Path | str | None = None):
 
 
 def check_producer_schema_pr(body: str, linked: Sequence[str]) -> None:
-    """Refuse a producer schema PR without consumer work or fixture results.
+    """Require consumer work and explicit, passing fixture-result records.
 
-    ``linked`` holds the linked consumer compatibility issues or PRs. The
-    PR ``body`` must name fixture results for all four scope classes. Both
-    checks are literal string matches.
+    ``linked`` holds the linked consumer compatibility issues or PRs. Each
+    class needs exactly one body line of the form
+    ``fixture-result: <class> PASS <https-result-url>``. ``FAIL`` is a
+    result but refuses the PR; prose mentions are not results. This is a
+    syntax check of reported evidence, not verification of the remote run.
     """
-    if not linked:
+    if not any(link.strip() for link in linked):
         raise ProducerSchemaPRError(
             "producer schema PR refused: no linked consumer compatibility work"
         )
-    lowered = body.lower()
-    if "fixture" not in lowered:
-        raise ProducerSchemaPRError(
-            "producer schema PR refused: body names no fixture results"
-        )
-    unnamed = [name for name in REQUIRED_SCOPE_CLASSES if name not in lowered]
-    if unnamed:
+    results: set[str] = set()
+    for line in body.splitlines():
+        fields = line.strip().split()
+        if not fields or fields[0] != "fixture-result:":
+            continue
+        if len(fields) != 4 or fields[1] not in REQUIRED_SCOPE_CLASSES:
+            raise ProducerSchemaPRError(
+                "producer schema PR refused: invalid fixture-result record; "
+                "expected fixture-result: <class> PASS <https-result-url>"
+            )
+        _, name, status, evidence = fields
+        if name in results:
+            raise ProducerSchemaPRError(
+                f"producer schema PR refused: duplicate fixture results for {name}"
+            )
+        if status != "PASS":
+            raise ProducerSchemaPRError(
+                f"producer schema PR refused: fixture result for {name} is not PASS"
+            )
+        try:
+            url = urlsplit(evidence)
+            valid_url = url.scheme == "https" and bool(url.hostname)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise ProducerSchemaPRError(
+                f"producer schema PR refused: fixture result for {name} "
+                "needs an HTTPS result URL"
+            )
+        results.add(name)
+    missing = [name for name in REQUIRED_SCOPE_CLASSES if name not in results]
+    if missing:
         raise ProducerSchemaPRError(
             "producer schema PR refused: body names no fixture results for "
-            + ", ".join(unnamed)
+            + ", ".join(missing)
         )

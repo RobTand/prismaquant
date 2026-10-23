@@ -1,6 +1,7 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-10 (PQ #2600, revision 3): a pin update is refused
+Re-stamped 2026-10-23 (PQ #2600 repair; base `72b4ffdd5f`,
+branch `tl/prismaquant-3628d6c31713-wp1`): a pin update is refused
 unless the four named v12 scope fixture classes pass.
 `check_pin_update` reads the tracked pin file and runs the census,
 derived, absent and malformed classes against the reader.
@@ -9,9 +10,17 @@ A missing or failing class refuses exactly as a broken reader does.
 The absent class holds the v11 row shape: 18 entries, the image
 entry at index 13, and no entry carries launch scopes.
 The producer side ships as a rule plus unit tests only:
-`check_producer_schema_pr` refuses a schema PR body without linked
-consumer compatibility work and without fixture results for all four
-classes, and `tests/test_tessera_pin_v12_scope_gate.py` guards it.
+`check_producer_schema_pr` requires linked consumer compatibility work
+and one `fixture-result: <class> PASS <https-result-url>` body line per
+class; a vocabulary-only TODO, missing result, non-PASS result or duplicate
+record is refused. `tests/test_tessera_pin_v12_scope_gate.py` guards it.
+The scope regression tests require healthy baselines and specific refusal
+reasons. The malformed class also checks a healthy baseline before its
+negative cases, so an unrelated parser failure is not passing proof.
+Smoke-record validation remains producer-owned: `lane_eligibility.py`
+uses the legacy validator when present or the versioned
+`tessera.producer-metadata.v1` public validator otherwise, without retrying
+rejected records. Per-launch scope parsing and the tracked pin are unchanged.
 No caller wires that rule into a PR check in this repository.
 Tessera-side adoption of the producer rule is a child issue of PQ #2600.
 The pin stays at lane schema v11; no pin moves in this change.
@@ -26163,14 +26172,34 @@ tracked pin file and runs the census, derived, absent and malformed
 fixture classes against the reader. A missing or failing class refuses
 the update, and the refusal carries the failure reason. No check uses
 `assert`, so `python -O` changes no verdict. The producer side ships as
-a rule plus unit tests only: a Tessera schema PR body without linked
-consumer compatibility work and without fixture results for all four
-classes is refused by `check_producer_schema_pr`
-(`prismaquant/tessera_pin_scope_gate.py`), and
-`tests/test_tessera_pin_v12_scope_gate.py` guards that rule with one
-real-check regression test per scope class. No caller wires the rule
-into a PR check in this repository; the Tessera-side adoption of the
-producer rule is a child issue of PQ #2600.
+a rule plus unit tests only: `check_producer_schema_pr`
+(`prismaquant/tessera_pin_scope_gate.py`) requires both linked consumer
+compatibility work and exactly one passing fixture-result record per class.
+Each record is a separate line (also permitted inside a fenced text block):
+
+```text
+fixture-result: census PASS https://ci.example/results/v12#census
+fixture-result: derived PASS https://ci.example/results/v12#derived
+fixture-result: absent PASS https://ci.example/results/v12#absent
+fixture-result: malformed PASS https://ci.example/results/v12#malformed
+```
+
+Class names and `PASS` are exact tokens. Each URL must be an absolute HTTPS
+result link. Missing, duplicate, malformed or non-PASS records refuse the
+PR; prose mentions and TODO lists do not substitute for results. The rule
+validates the reported evidence's syntax, not the contents of remote runs.
+`tests/test_tessera_pin_v12_scope_gate.py` guards that rule and requires a
+healthy baseline plus the regression-specific refusal reason for each real
+scope mutation. The malformed fixture class itself parses the healthy
+baseline first; unrelated parser failures cannot count as passing proof.
+Smoke validation still delegates to Tessera: the legacy private validator
+is used when available; otherwise `lane_eligibility.py::_parse_smoke_record`
+requires the public `tessera.producer-metadata.v1` validator and uses its
+keyword-only interface. Missing APIs and rejected records remain refusals;
+validation errors never trigger a retry through a different API. This does
+not change launch-scope parsing or exact-pin serving admission.
+No caller wires the producer rule into a PR check in this repository; the
+Tessera-side adoption of that rule remains deferred under PQ #2600.
 
 `tests/test_tessera_lane_v6.py` is the guard on the v6 grammar and the evidence
 gate, including that a cell whose published smoke status is refused is

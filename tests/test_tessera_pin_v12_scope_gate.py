@@ -8,18 +8,25 @@ fixture in ``tests/test_tessera_lane_v12.py``, not a new copy.
 against the real pin, not a caller-built dict.
 
 A producer schema change is refused unless its PR links consumer
-compatibility work and names fixture results. That rule lives in
+compatibility work and reports explicit passing fixture-result records.
+That rule lives in
 ``prismaquant/tessera_pin_scope_gate.py`` beside the pin gate, as a rule
 plus unit tests: no caller wires it into a PR check in this repository.
 One test per scope class breaks the real check (not a ``_CHECKS`` stub)
 and asserts the refusal reason.
 """
-import pytest
 import dataclasses
 import json
 
+import pytest
 
 from prismaquant import tessera_pin_scope_gate as gate
+
+
+PRODUCER_RESULTS = "\n".join(
+    f"fixture-result: {name} PASS https://ci.example/results/v12#{name}"
+    for name in gate.REQUIRED_SCOPE_CLASSES
+)
 
 
 def test_pin_update_passes_with_tracked_pin_and_passing_fixtures():
@@ -70,12 +77,20 @@ def test_pin_gate_refuses_an_empty_proof():
         gate.require_v12_scope_proof({})
 
 
-def test_producer_schema_pr_refuses_without_linked_consumer_work():
+def test_malformed_class_does_not_count_a_broken_baseline_as_scope_refusal(monkeypatch):
+    def broken_parser(*args, **kwargs):
+        raise gate.lane.LaneEligibilityError("unrelated parser failure")
+
+    monkeypatch.setattr(gate.lane, "_parse_table", broken_parser)
+    proof = gate.run_v12_scope_proof()["malformed"]
+    assert not proof.passed
+    assert "unrelated parser failure" in proof.reason
+
+
+@pytest.mark.parametrize("linked", [[], ["", "  "]])
+def test_producer_schema_pr_refuses_without_linked_consumer_work(linked):
     with pytest.raises(gate.ProducerSchemaPRError, match="consumer"):
-        gate.check_producer_schema_pr(
-            body="fixtures: census pass, derived pass, absent pass, malformed pass",
-            linked=[],
-        )
+        gate.check_producer_schema_pr(body=PRODUCER_RESULTS, linked=linked)
 
 
 def test_producer_schema_pr_refuses_without_fixture_results():
@@ -86,22 +101,56 @@ def test_producer_schema_pr_refuses_without_fixture_results():
         )
 
 
-def test_producer_schema_pr_refuses_when_one_scope_class_is_unnamed():
-    with pytest.raises(gate.ProducerSchemaPRError, match="derived"):
-        gate.check_producer_schema_pr(
-            body="fixtures: census pass, absent pass, malformed pass",
-            linked=["prismaquant#2600"],
-        )
+@pytest.mark.parametrize("missing", gate.REQUIRED_SCOPE_CLASSES)
+def test_producer_schema_pr_refuses_when_one_scope_result_is_missing(missing):
+    body = "\n".join(
+        line for line in PRODUCER_RESULTS.splitlines()
+        if not line.startswith(f"fixture-result: {missing} ")
+    )
+    with pytest.raises(gate.ProducerSchemaPRError, match=missing):
+        gate.check_producer_schema_pr(body=body, linked=["prismaquant#2600"])
+
+
+@pytest.mark.parametrize("body", [
+    "No fixture results exist yet. TODO: census, derived, absent, malformed.",
+    "fixtures: census pass, derived pass, absent pass, malformed pass",
+    "fixture-result: census PASS\nTODO: derived, absent, malformed",
+])
+def test_producer_schema_pr_refuses_mentions_without_result_records(body):
+    with pytest.raises(gate.ProducerSchemaPRError, match="fixture"):
+        gate.check_producer_schema_pr(body=body, linked=["prismaquant#2600"])
+
+
+@pytest.mark.parametrize("name", gate.REQUIRED_SCOPE_CLASSES)
+@pytest.mark.parametrize("replacement", ["FAIL", "TODO", "SKIP"])
+def test_producer_schema_pr_refuses_nonpassing_results(name, replacement):
+    body = PRODUCER_RESULTS.replace(f"{name} PASS", f"{name} {replacement}")
+    with pytest.raises(gate.ProducerSchemaPRError, match=f"{name} is not PASS"):
+        gate.check_producer_schema_pr(body=body, linked=["prismaquant#2600"])
+
+
+@pytest.mark.parametrize("evidence", ["TODO", "https:///missing-host", "http://ci.example/run"])
+def test_producer_schema_pr_refuses_results_without_evidence_links(evidence):
+    body = PRODUCER_RESULTS.replace("https://ci.example/results/v12#derived", evidence)
+    with pytest.raises(gate.ProducerSchemaPRError, match="derived.*HTTPS"):
+        gate.check_producer_schema_pr(body=body, linked=["prismaquant#2600"])
+
+
+def test_producer_schema_pr_refuses_duplicate_results():
+    body = PRODUCER_RESULTS + "\n" + PRODUCER_RESULTS.splitlines()[0]
+    with pytest.raises(gate.ProducerSchemaPRError, match="duplicate.*census"):
+        gate.check_producer_schema_pr(body=body, linked=["prismaquant#2600"])
 
 
 def test_producer_schema_pr_admits_with_linked_work_and_all_fixture_results():
     gate.check_producer_schema_pr(
-        body="fixtures: census pass, derived pass, absent pass, malformed pass",
+        body=f"## Scope proof\n```text\n{PRODUCER_RESULTS}\n```",
         linked=["prismaquant#2600"],
     )
 
 
 def test_pin_gate_refuses_a_real_census_regression(monkeypatch):
+    assert gate.check_pin_update().commit
     real_payload = gate._payload
 
     def bad_payload():
@@ -116,6 +165,7 @@ def test_pin_gate_refuses_a_real_census_regression(monkeypatch):
 
 
 def test_pin_gate_refuses_a_real_derived_regression(monkeypatch):
+    assert gate.check_pin_update().commit
     real_parsed = gate._parsed
 
     def bad_parsed(payload=None):
@@ -134,12 +184,15 @@ def test_pin_gate_refuses_a_real_derived_regression(monkeypatch):
         return dataclasses.replace(parsed, cells=tuple(cells))
 
     monkeypatch.setattr(gate, "_parsed", bad_parsed)
-    with pytest.raises(gate.TesseraPinScopeGateError, match="derived") as refused:
+    with pytest.raises(
+        gate.TesseraPinScopeGateError,
+        match="derived: route cell loses the derived launch coverage",
+    ):
         gate.check_pin_update()
-    assert "derived" in str(refused.value)
 
 
 def test_pin_gate_refuses_a_real_absent_leak(monkeypatch):
+    assert gate.check_pin_update().commit
     real_answer = gate.runtime.contract_answer
 
     def leaking_answer(contract):
@@ -164,6 +217,7 @@ def test_pin_gate_refuses_a_real_absent_leak(monkeypatch):
 
 
 def test_pin_gate_refuses_a_real_malformed_regression(monkeypatch):
+    assert gate.check_pin_update().commit
     real_parse_table = gate.lane._parse_table
     good = json.loads(gate.V12_FIXTURE.read_bytes())
 
