@@ -1411,8 +1411,8 @@ class BoundaryProducedPublication:
         raise BoundaryProducedBindingError(
             f"tier {self.tier!r} announces no stage mountpoint")
 
-    def _egress_wakeup(self, batch_id: str, outcome: Mapping) -> bool:
-        """Consume one usable key-level ending, not a retirement receipt.
+    def _egress_wakeup(self, batch_id: str, outcome: Mapping) -> tuple | None:
+        """Observe one usable key-level ending, not a retirement receipt.
 
         retire_batch does not expose the egress publication generation. A
         current ending therefore only permits one authoritative re-evaluation;
@@ -1426,7 +1426,7 @@ class BoundaryProducedPublication:
                     or ending.get("unreadable") or ending.get("ambiguous")
                     or ending.get("state") not in {"done", "failed", "withdrawn"}
                     or not isinstance(ending.get("record"), Mapping)):
-                return False
+                return None
             generation = ending.get("generation")
             # A lone legacy ending may have no generation (PB's public
             # current_ending contract). It still grants at most one wakeup.
@@ -1434,25 +1434,26 @@ class BoundaryProducedPublication:
                 import math
                 if (type(generation) not in (int, float)
                         or not math.isfinite(generation)):
-                    return False
+                    return None
             identity = (outcome["egress_action_key"], generation)
-            consumed = self._consumed_egress_endings.setdefault(batch_id, set())
-            if identity in consumed:
-                return False
-            consumed.add(identity)
-            return True
+            if identity in self._consumed_egress_endings.get(batch_id, ()):
+                return None
+            return identity
         except Exception:
             # Queue read failures are not retirement failures or refunds.
             # The existing bounded owner loop can observe recovery later.
-            return False
+            return None
 
     def retire(self, batch_id: str, *, stage_root: str | Path | None = None,
                residency_root: str | Path | None = None) -> dict:
         """Release the group's stage copy; the origin stays durable."""
 
         pending = self._pending_egress.get(batch_id)
-        if pending is not None and not self._egress_wakeup(batch_id, pending):
-            return dict(pending)
+        wakeup = None
+        if pending is not None:
+            wakeup = self._egress_wakeup(batch_id, pending)
+            if wakeup is None:
+                return dict(pending)
         root = (self.fragment_root() if residency_root is None
                 else Path(residency_root))
         result = dict(self._po.retire_batch(
@@ -1460,6 +1461,13 @@ class BoundaryProducedPublication:
             stage_root=(self.stage_root() if stage_root is None
                         else str(stage_root)),
             residency_root=root))
+        # A raised call has no authoritative outcome (e.g. PB can fail taking
+        # its ownership lock before mutating anything). Leave its ending
+        # retryable through the owner's existing bounded failure handling.
+        # Once a response returns, consume the wakeup even for another keyed
+        # deferral: the old ending must not repeatedly wake that successor.
+        if wakeup is not None:
+            self._consumed_egress_endings.setdefault(batch_id, set()).add(wakeup)
         self._pending_egress.pop(batch_id, None)
         if (not result.get("ok")
                 and classify_egress_outcome(result) == "own-copy-deferral"

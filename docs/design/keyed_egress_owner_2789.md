@@ -33,8 +33,14 @@ republish the same content-addressed key. The adapter therefore remembers each
 consumed `(key, ending generation)` per batch. A lone public legacy ending with
 no generation also gets at most one wakeup. If validation returns another keyed
 deferral, the old ending cannot repeatedly wake its successor; a new usable
-ending can. The identity is consumed before the retirement call, conservatively
-including calls that raise after potentially mutating PB state. This bookkeeping
+ending can. The identity is consumed only after an authoritative retirement
+response returns, including a response that defers again. If the call raises
+(for example, PB cannot acquire its ownership lock before mutation), the pending
+outcome and ending remain retryable through the existing owner failure handling:
+nonblocking releases retain their attempt cap and pacing, and funding retains
+the read's original deadline and refusal handling. A later returned keyed
+deferral consumes the ending and gates its republished successor, rather than
+turning exception recovery into repeated retirement polling. This bookkeeping
 is process-local wakeup suppression, not durable retirement state. Recovery
 continues to derive ownership and materialization from PB's records.
 
@@ -46,14 +52,17 @@ retain their existing distinct handling, even if a stale action key is present.
 
 No acceptance files were changed; the existing fake-SDK/virtual-clock tests
 exercise the production adapter and owner, including the post-binding SDK-loader
-trap. No GPU or fleet latency claim is made.
+trap. The added validation-retry tests reuse that lane to check transient lock
+failure recovery, successor gating after recovery, the existing attempt cap,
+and funding recovery within the original read deadline. No GPU or fleet latency
+claim is made.
 
-- `python -m pytest tests/test_keyed_egress_owner_2789.py -q --basetemp="$TMPDIR/pytest"`
-  — **18 passed**.
+- `python -m pytest tests/test_keyed_egress_validation_retry_2789.py tests/test_keyed_egress_owner_2789.py tests/test_docs_staleness.py tests/test_architecture_doc.py tests/test_docs_entrypoints.py tests/test_duplication_alias_scope_audit.py tests/test_duplication_baseline.py -q --basetemp="$TMPDIR/pytest"`
+  — **75 passed**, with 14 existing Torch JIT/Python 3.14 deprecation warnings.
 - `python -m pytest tests/test_stage_a_produced_boundary_chain.py tests/test_stage_a_produced_ownership.py tests/test_stage_a_produced_failfast.py -q --basetemp="$TMPDIR/pytest"`
-  — **52 passed** in this run. This is fresh observed evidence, not a claim
-  that the separately supplied earlier fixture-admission failures were passes.
+  — **52 passed** in this repair run. This is fresh observed evidence, not a
+  claim that the separately supplied fixture-admission failures were passes.
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"b53bc1d4271eeddfb4757f57eb06a1ea0bb86dca3f9adedea2a844187f6f32e3","size":269}},"operation":"177dbc9fe8d37e87760e13dcc202187e6e0f6819c614c1e8dea4c7c53d8957be","receipt":"53829ebfdbdee3eddc5425ee8a5364fe40d75c653e27ef0dccf4a7f25788e6e4"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"33150a941df029c5a328d49472dc77020925d10e621664703611d1a897c3bf45","size":830}},"operation":"03da1486ad16091810a16e10f04687b0b5829e3efaae0182d271cd4395103b40","receipt":"075823d4c02569d4255d5166519b8941d05bcb577b40f9090b8d61223d5639dd"}]
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"929d67ed471cb081dd963c4c186e667cb3818f499597e14b3151e1be5cc8466a","size":281}},"operation":"49a0c0203f65cbbd739acad510a3e348338ae29e729a15f173def2f833e3d1b4","receipt":"540245ec1a191edd011449cc710378df263de65147aea08eab987dfdd9415ed7"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"3af062a64d5bbf35b7e0670e05e2d63436cbc9254248d78bcf3b4d839af50c36","size":281}},"operation":"c6bb6627a7dcaf1c0149467b760bcbcb168fd7d6cc5a3f67d921d88741f07841","receipt":"8015e77ccd5ec11b1ba24c8ac61aa57ea1579b539c6f1e79cc29be2b10467108"}]
